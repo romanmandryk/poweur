@@ -1,0 +1,14 @@
+{
+  "name": "eurything",
+  "private": true,
+  "scripts": {
+    "mobile": "pnpm --filter mobile start",
+    "mobile:ios": "pnpm --filter mobile ios",
+    "mobile:android": "pnpm --filter mobile android"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  }
+}
