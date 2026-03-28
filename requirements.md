@@ -20,6 +20,17 @@ Humans authenticate using passkeys on their mobile device. The passkey is tied t
 
 A signed message carries the sender's identity subdomain and a signature verifiable against the public key associated with that subdomain. Recipients and relays can verify authenticity without a central authority.
 
+### DNS as Persistent Storage
+
+DNS is not only the routing layer — it is the only durable store in the system. All state that must survive a relay restart lives in DNS records:
+
+- An `A` or `CNAME` record on the identity subdomain points to the relay that handles that identity.
+- A `TXT` record on the identity subdomain (e.g., `_eurything.alice.example.com`) stores the identity's public key.
+
+Because DNS is the authoritative store, the relay itself holds no database and performs no disk writes for identity or routing data. Any relay that can resolve DNS can verify messages and route to any identity, without coordination with any central registry.
+
+For the MVP, the relay writes DNS records on behalf of identities via the Cloudflare DNS API. The Cloudflare API token required to do so is supplied by the client at registration time and used ephemerally — the relay does not store it.
+
 ---
 
 ## DNS Routing
@@ -80,7 +91,7 @@ The sender signs this canonical string with their private key (Ed25519 in the MV
 When a relay receives a message, it verifies the signature as follows:
 
 1. Extract the `sender` field from the message.
-2. Fetch the sender's public key. For the MVP, the relay first checks whether the sender is a locally registered identity (via its own identity store). If not, it calls `GET /identities/:identity` on the relay resolved from the sender's subdomain DNS record. A later iteration may use DNS `TXT` records to publish public keys directly in DNS.
+2. Fetch the sender's public key. Public keys are stored in DNS `TXT` records at `_eurything.<sender-subdomain>`. The relay queries DNS for this record to retrieve the public key. As a fallback (e.g., if the TXT record is not yet propagated), the relay may call `GET /identities/:identity` on the peer relay resolved from the sender's subdomain DNS record.
 3. Reconstruct the canonical string from `sender`, `recipient`, `timestamp`, and `payload` in the same order used during signing.
 4. Verify the signature against the canonical string using the sender's public key.
 5. If verification fails, reject the message with `401 Unauthorized`.
@@ -111,9 +122,27 @@ The relay is the core server component, implemented in Go (`apps/api`). Its resp
 - **Signature verification**: Verify that each inbound message is correctly signed by the claimed sender identity.
 - **Message routing**: Resolve the recipient's subdomain via DNS to locate their relay, then forward the message to that relay over HTTPS.
 - **Message delivery**: Accept inbound forwarded messages and deliver them to local identity inboxes.
-- **Identity hosting**: Associate one or more identity subdomains with the relay instance, making those identities reachable.
+- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the Cloudflare API.
 
-The relay exposes an HTTP/JSON API consumed by the mobile app, the CLI, and peer relays. In the MVP, persistence can be minimal (in-memory or simple file-based storage); durability and scalability are post-MVP concerns.
+The relay exposes an HTTP/JSON API consumed by the mobile app, the CLI, and peer relays.
+
+### Stateless Design
+
+The relay is intentionally almost stateless. The only in-memory state it maintains is:
+
+- **Rate limit counters** — per-sender sliding windows or token buckets (see Rate Limiting). These are ephemeral; losing them on restart is acceptable.
+- **DNS routing cache** — resolved peer relay addresses, cached for the duration of the DNS TTL to avoid redundant lookups on every forwarded message.
+
+There is no database and no disk I/O. All durable state (identities, public keys, routing) lives in DNS. This means the relay process can be restarted, replaced, or horizontally scaled without any data migration or coordination.
+
+### DNS Management
+
+When a client registers an identity, it supplies a Cloudflare API token scoped to the relevant DNS zone. The relay uses this token to create the required DNS records on the client's behalf:
+
+- A `TXT` record at `_eurything.<subdomain>` containing the identity's base64-encoded public key.
+- An `A` or `CNAME` record at `<subdomain>` pointing to the relay's own address, making the identity reachable.
+
+The Cloudflare API token is used in-process for the duration of the registration request and then discarded. The relay stores no write credentials at rest. Cloudflare is the only supported DNS provider for the MVP; support for additional providers (Route 53, Porkbun, etc.) is a post-MVP concern.
 
 ### Rate Limiting
 
@@ -148,12 +177,22 @@ The mobile app (`apps/mobile`) is a React Native application targeting iOS and A
 
 The mobile app does not perform DNS routing itself; it delegates sending to its configured relay.
 
+### The App as a Vault
+
+The mobile app is the secure store for all user secrets. Nothing sensitive is held by the relay or any server. Specifically, the app stores and manages:
+
+- **Private key** — held in the device's secure enclave, accessed only via the passkey (WebAuthn). The private key never leaves the device in plaintext.
+- **Cloudflare API token** — stored in the app (e.g., iOS Keychain / Android Keystore) and passed to the relay only when a DNS write is required (e.g., during identity registration or relay migration). The relay receives the token for the duration of that request only.
+- **Relay configuration** — the endpoint URL of the relay the user has chosen.
+
+This design means a compromised relay cannot expose user secrets: it never holds any. Trust is rooted in the device's secure enclave, not in any server.
+
 ### MVP Feature Set
 
 The following features constitute the mobile app MVP:
 
 - **Passkey registration and login**: Account creation and subsequent logins are handled entirely via WebAuthn / device biometrics (Face ID, Touch ID, fingerprint). No passwords are stored or transmitted.
-- **Identity creation**: On first launch the user chooses a subdomain handle and associates it with their chosen relay. The relay registers the identity and the user's public key.
+- **Identity creation**: On first launch the user chooses a subdomain handle, provides their Cloudflare API token (scoped to their DNS zone), and associates the identity with their chosen relay. The app passes the token to the relay, which writes the DNS records; the token is then discarded by the relay.
 - **Send a message**: Compose and send a signed message to any valid identity address (e.g., `bob.example.org`).
 - **Receive and read messages**: Fetch messages delivered to the user's inbox, either by polling the relay on a configurable interval or via a persistent WebSocket connection for lower latency.
 - **Conversation threads**: Messages are grouped by correspondent identity into conversation threads, displayed in chronological order.
@@ -268,20 +307,22 @@ Challenges expire after a short window (e.g., 60 seconds). The relay stores issu
 
 ### `POST /identities`
 
-Register a new identity on this relay.
+Register a new identity on this relay. The client supplies its public key and a Cloudflare API token scoped to the DNS zone of the identity subdomain. The relay uses the token to write the required DNS records (public key `TXT` and routing `A`/`CNAME`), then discards the token. The relay stores no write credentials.
 
 **Request body:**
 ```json
 {
-  "identity":   "alice.example.com",
-  "public_key": "<base64-encoded public key>"
+  "identity":          "alice.example.com",
+  "public_key":        "<base64-encoded public key>",
+  "cloudflare_token":  "<scoped Cloudflare API token>"
 }
 ```
 
 **Responses:**
-- `201 Created` — identity registered.
-- `409 Conflict` — identity already registered on this relay.
+- `201 Created` — identity registered and DNS records written.
 - `400 Bad Request` — malformed request.
+- `409 Conflict` — identity already registered on this relay.
+- `502 Bad Gateway` — Cloudflare DNS write failed (token invalid, zone not found, etc.).
 
 ---
 
@@ -318,6 +359,45 @@ Liveness check. Returns a minimal response indicating the relay is running and r
 ---
 
 The API is consumed by the mobile app, the CLI, and peer relays performing message forwarding.
+
+---
+
+## Security Model
+
+The key principle of the Eurything security model is: **trust is rooted in the device's secure enclave; the relay is an untrusted forwarder**.
+
+### Trust Hierarchy
+
+The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted component. Everything else — including the relay — is treated as untrusted infrastructure that can be observed, replaced, or compromised without exposing user secrets or allowing message forgery.
+
+**What the relay can and cannot do:**
+
+| Can | Cannot |
+|-----|--------|
+| Forward messages between identities | Read encrypted message content (post-MVP; plaintext in MVP) |
+| Verify message authenticity (via public key from DNS) | Forge a message from any identity |
+| Rate-limit and reject spam | Impersonate a user (no private keys held) |
+| Write DNS records (ephemerally, with client-supplied token) | Retain DNS write credentials after a registration request |
+| Drop or delay messages | Prove that it delivered a message (no receipts in MVP) |
+
+### What Lives Where
+
+| Secret / Data | Stored in | Notes |
+|---------------|-----------|-------|
+| Private key | Device secure enclave | Never leaves the device in plaintext |
+| Cloudflare API token | App (iOS Keychain / Android Keystore) | Passed to relay ephemerally for DNS writes only |
+| Public key | DNS TXT record | Publicly readable; used for signature verification |
+| Relay endpoint | App config | Not a secret; user-configurable |
+| Rate limit counters | Relay in-memory | Ephemeral; lost on restart |
+| DNS routing cache | Relay in-memory | Ephemeral; rebuilt from DNS on miss |
+| Inbox messages | Relay in-memory | Ephemeral in MVP; durability is a post-MVP concern |
+
+### Threat Model Notes
+
+- A compromised relay can read plaintext message payloads (MVP limitation; end-to-end encryption is a post-MVP goal) and can drop or delay messages, but cannot forge signatures or impersonate identities.
+- A compromised relay cannot exfiltrate private keys or DNS write credentials because it never holds them at rest.
+- DNS records are the ground truth for public keys and routing. An attacker who can manipulate DNS records for an identity subdomain can redirect messages and substitute a public key. DNS zone security (DNSSEC, restricted API token scopes) is therefore important and should be documented in operator guidance.
+- The MVP uses plaintext payloads. Until end-to-end encryption is implemented, relay operators and network observers can read message content. This should be clearly disclosed to users.
 
 ---
 
