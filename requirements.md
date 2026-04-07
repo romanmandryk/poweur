@@ -7,7 +7,8 @@ The goal of the MVP is to implement a decentralized, DNS-based identity and mess
 The system is composed of three applications within a pnpm monorepo:
 
 - `apps/api` — a Go relay server
-- `apps/mobile` — a React Native mobile app for human users
+- `apps/ios` — native iOS app (Swift)
+- `apps/android` — native Android app (Kotlin)
 - `apps/cli` — a command-line interface for bots, scripts, and developers
 - `apps/infra` — Hetzner Cloud infrastructure definition (Terraform)
 
@@ -176,37 +177,99 @@ The maximum message payload size is **512 KB**. This limit is enforced at ingres
 
 ---
 
-## Mobile App
+## Mobile Apps (`apps/ios` and `apps/android`)
 
-The mobile app (`apps/mobile`) is a React Native application targeting iOS and Android. It is the primary interface for human users. Key requirements:
+### Why Native (Not React Native)
 
-- **Passkey-based authentication**: Users create and manage their identity using a device passkey. The passkey is bound to the user's key pair and is used to sign messages locally before they are sent to the relay.
-- **Identity registration**: On first launch the user claims a subdomain (subject to availability on their chosen relay) and provisions their passkey.
-- **Messaging**: Users can compose and send signed messages to other identities and view messages delivered to their own inbox.
-- **Relay configuration**: The app must be configured with, or allow the user to select, a relay endpoint to connect to.
+The mobile apps are built as two separate native applications — iOS (`apps/ios`, Swift) and Android (`apps/android`, Kotlin) — rather than a single React Native app.
 
-The mobile app does not perform DNS routing itself; it delegates sending to its configured relay.
+The core functionality of these apps is security-sensitive and deeply platform-native: passkey registration and assertion (WebAuthn/FIDO2), private key storage in the hardware-backed secure enclave (iOS Secure Enclave / Android StrongBox or TEE), cryptographic signing operations, and biometric authentication. These are areas where native platform APIs are more reliable, more directly auditable, and less abstraction-layered than React Native bridge equivalents. The UI surface is relatively small and does not justify the cross-platform tradeoff when the security-critical paths would require native modules regardless.
+
+The requirements below apply to both platforms unless noted otherwise.
 
 ### The App as a Vault
 
-The mobile app is the secure store for all user secrets. Nothing sensitive is held by the relay or any server. Specifically, the app stores and manages:
+The app is the authoritative secure store for all user secrets. Nothing sensitive is held by the relay or any server. Specifically, the app stores and manages:
 
-- **Private key** — held in the device's secure enclave, accessed only via the passkey (WebAuthn). The private key never leaves the device in plaintext.
-- **DNS provider API token** — stored in the app (e.g., iOS Keychain / Android Keystore) and passed to the relay only when a DNS write is required (e.g., during identity registration or relay migration). The relay receives the token for the duration of that request only. Cloudflare and Hetzner DNS are both supported; the app stores whichever token corresponds to the user's DNS provider.
-- **Relay configuration** — the endpoint URL of the relay the user has chosen.
+- **Private keys** — held in the platform's hardware-backed secure enclave (iOS Secure Enclave / Android StrongBox or TEE), accessed only via the passkey APIs (WebAuthn/FIDO2). Private keys never leave the device in plaintext.
+- **DNS provider API token** — stored in the platform's credential store (iOS Keychain / Android Keystore) and passed to the relay only when a DNS write is required (e.g., during identity registration or relay migration). The relay receives the token for the duration of that request only.
+- **Relay configuration** — relay URL and any associated auth tokens, stored in Keychain/Keystore.
 
-This design means a compromised relay cannot expose user secrets: it never holds any. Trust is rooted in the device's secure enclave, not in any server.
+This means a compromised relay cannot expose user secrets: it never holds any. Trust is rooted in the device's secure hardware, not in any server.
 
-### MVP Feature Set
+The app does not perform DNS routing itself; it delegates all relay-protocol network operations to its configured relay.
 
-The following features constitute the mobile app MVP:
+### Welcome Screen
 
-- **Passkey registration and login**: Account creation and subsequent logins are handled entirely via WebAuthn / device biometrics (Face ID, Touch ID, fingerprint). No passwords are stored or transmitted.
-- **Identity creation**: On first launch the user chooses a subdomain handle, selects their DNS provider (Cloudflare or Hetzner), provides a DNS API token scoped to their zone, and associates the identity with their chosen relay. The app passes the provider type and token to the relay, which writes the DNS records; the token is then discarded by the relay.
-- **Send a message**: Compose and send a signed message to any valid identity address (e.g., `bob.example.org`).
-- **Receive and read messages**: Fetch messages delivered to the user's inbox, either by polling the relay on a configurable interval or via a persistent WebSocket connection for lower latency.
-- **Conversation threads**: Messages are grouped by correspondent identity into conversation threads, displayed in chronological order.
-- **Relay configuration**: The user can view and change which relay their identity is associated with, and the app endpoint used for API calls.
+Shown on first launch, before any identity has been created:
+
+- Short explainer of what Eurything is: *"Create your DNS Identity. Use it for everything: messaging, receiving payments, signing up to services, sharing data securely."*
+- Explain that IDs can belong to humans, agents, or bots.
+- Emphasise spam and bot resistance as a core property of the system.
+- Single CTA: **"Create your ID"** button.
+
+### Identity Creation (Sign-Up)
+
+- User chooses a unique handle — minimum 8 characters, DNS subdomain-safe characters only (`a–z`, `0–9`, hyphens; no leading or trailing hyphens).
+- The resulting identity is `<handle>.poweur.net` (the parent domain is configurable in app settings).
+- Optional profile fields at creation time: Display Name, Profile Picture URL, short bio (1–2 sentences), long bio (paragraph).
+- On submission: generate a new passkey (WebAuthn/FIDO2) scoped to the identity's domain. The app extracts the public key and uploads it as a DNS `TXT` record at `_eurything.<handle>.poweur.net` via the relay, supplying the DNS provider token for the duration of the write.
+- The app supports **multiple identities** — the user can create more than one handle. Each identity has its own passkey.
+
+### Pending Registrations Screen
+
+Shown when at least one identity has been submitted but DNS propagation has not yet been confirmed:
+
+- Lists pending identities with their current status.
+- **"Check DNS"** button per identity — triggers a live DNS `TXT` lookup for `_eurything.<handle>.poweur.net` and confirms whether the record is visible.
+- Once verified, the identity moves into the active identity pool and the user is taken to the Dashboard.
+
+### Active Identity Selector
+
+Once at least one identity is verified, a persistent header appears at the top of the app showing the currently active identity (avatar, display name or handle):
+
+- Tapping the header opens an identity picker listing all verified identities.
+- Switching the active identity switches context across the entire app (messaging threads, contacts, settings).
+
+### Dashboard (Home Screen)
+
+The primary screen after an identity is verified. Shows the service modules available under the active identity:
+
+- **Messaging** — active, MVP feature.
+- **Publishing** — listed, not yet active.
+- **Receiving Payments** — listed; shows a placeholder with supported providers and currencies, not yet active.
+- Footer: *"More capabilities coming soon."*
+- Each module is displayed as a card indicating its status (active / coming soon).
+
+### Contacts
+
+- Contact list stored locally on-device (no server-side contact sync).
+- Add a contact by entering their DNS identity (e.g., `alice.poweur.net`).
+- Tapping a contact opens a detail sheet showing:
+  - Parsed Eurything DNS records for that identity: handle, display name, profile picture (if set), short bio.
+  - All advertised capabilities from DNS: messaging relay address, payment methods, ID verification proofs, and any future capability records.
+  - This is a **live DNS lookup** on each open — not a cached read.
+
+### Messaging
+
+Classic messenger interface:
+
+- Start a conversation by entering any valid DNS identity.
+- Conversation list shows all threads, stored locally on the device.
+- Thread view: chat bubbles, newest at bottom.
+- Messages are signed with the sender's passkey-backed private key before dispatch.
+- Messages are sent via the Eurything relay protocol (`POST /messages`).
+- Received messages are fetched from the user's relay (polling for MVP; WebSocket is a stretch goal).
+- **All message storage is local** — the relay is a forwarder only and holds no persistent message history.
+
+### Vault (Architecture Requirement, Not a Screen)
+
+The vault is not a visible screen but an architectural constraint enforced throughout both apps:
+
+- Private keys: stored in iOS Secure Enclave / Android StrongBox via passkey APIs. Never extractable in plaintext.
+- DNS provider token (Cloudflare or Hetzner): stored in iOS Keychain / Android Keystore.
+- Relay URL and any relay auth tokens: stored in Keychain/Keystore.
+- No secrets leave the device except when explicitly passed to the relay for an active operation, and only for its duration.
 
 ---
 
@@ -396,7 +459,7 @@ The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted
 | Secret / Data | Stored in | Notes |
 |---------------|-----------|-------|
 | Private key | Device secure enclave | Never leaves the device in plaintext |
-| DNS provider API token (Cloudflare or Hetzner) | App (iOS Keychain / Android Keystore) | Passed to relay ephemerally for DNS writes only |
+| DNS provider API token (Cloudflare or Hetzner) | iOS Keychain / Android Keystore | Passed to relay ephemerally for DNS writes only |
 | Public key | DNS TXT record | Publicly readable; used for signature verification |
 | Relay endpoint | App config | Not a secret; user-configurable |
 | Rate limit counters | Relay in-memory | Ephemeral; lost on restart |

@@ -1,0 +1,9 @@
+{
+  "name": "@eurything/ios",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "xcodebuild -scheme Eurything -configuration Release",
+    "dev": "xcodebuild -scheme Eurything -configuration Debug"
+  }
+}
