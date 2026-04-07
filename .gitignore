@@ -5,17 +5,19 @@ dist/
 build/
 .cache/
 
-# Expo / React Native
+# Native build artifacts
 .expo/
 *.jks
 *.p8
 *.p12
-*.key
 *.mobileprovision
 *.orig.*
 web-build/
-android/
-ios/
+# Ignore native build output dirs inside app packages, not the packages themselves
+apps/ios/ios/
+apps/ios/android/
+apps/android/build/
+apps/android/.gradle/
 
 # Go
 *.exe
@@ -42,3 +44,5 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+apps/docs/build/
+apps/docs/.docusaurus/
