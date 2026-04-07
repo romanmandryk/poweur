@@ -9,6 +9,7 @@ The system is composed of three applications within a pnpm monorepo:
 - `apps/api` — a Go relay server
 - `apps/mobile` — a React Native mobile app for human users
 - `apps/cli` — a command-line interface for bots, scripts, and developers
+- `apps/infra` — Hetzner Cloud infrastructure definition (Terraform)
 
 ---
 
@@ -29,7 +30,7 @@ DNS is not only the routing layer — it is the only durable store in the system
 
 Because DNS is the authoritative store, the relay itself holds no database and performs no disk writes for identity or routing data. Any relay that can resolve DNS can verify messages and route to any identity, without coordination with any central registry.
 
-For the MVP, the relay writes DNS records on behalf of identities via the Cloudflare DNS API. The Cloudflare API token required to do so is supplied by the client at registration time and used ephemerally — the relay does not store it.
+For the MVP, the relay writes DNS records on behalf of identities via a configurable DNS provider. Cloudflare and Hetzner DNS are both supported. The API token required to do so is supplied by the client at registration time and used ephemerally — the relay does not store it.
 
 ---
 
@@ -122,7 +123,7 @@ The relay is the core server component, implemented in Go (`apps/api`). Its resp
 - **Signature verification**: Verify that each inbound message is correctly signed by the claimed sender identity.
 - **Message routing**: Resolve the recipient's subdomain via DNS to locate their relay, then forward the message to that relay over HTTPS.
 - **Message delivery**: Accept inbound forwarded messages and deliver them to local identity inboxes.
-- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the Cloudflare API.
+- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the configured DNS provider (Cloudflare or Hetzner).
 
 The relay exposes an HTTP/JSON API consumed by the mobile app, the CLI, and peer relays.
 
@@ -137,12 +138,21 @@ There is no database and no disk I/O. All durable state (identities, public keys
 
 ### DNS Management
 
-When a client registers an identity, it supplies a Cloudflare API token scoped to the relevant DNS zone. The relay uses this token to create the required DNS records on the client's behalf:
+When a client registers an identity, it supplies a DNS provider API token scoped to the relevant DNS zone. The relay uses this token to create the required DNS records on the client's behalf:
 
 - A `TXT` record at `_eurything.<subdomain>` containing the identity's base64-encoded public key.
 - An `A` or `CNAME` record at `<subdomain>` pointing to the relay's own address, making the identity reachable.
 
-The Cloudflare API token is used in-process for the duration of the registration request and then discarded. The relay stores no write credentials at rest. Cloudflare is the only supported DNS provider for the MVP; support for additional providers (Route 53, Porkbun, etc.) is a post-MVP concern.
+The API token is used in-process for the duration of the registration request and then discarded. The relay stores no write credentials at rest.
+
+#### Supported DNS Providers
+
+The relay's DNS management logic is abstracted behind a provider interface, making it straightforward to add new providers without touching core relay logic. The MVP supports two providers, selected via a relay config value or environment variable (`EURYTHING_DNS_PROVIDER`):
+
+- **Cloudflare** — uses the [Cloudflare DNS API](https://developers.cloudflare.com/api/). The client supplies a Cloudflare API token scoped to the target zone. Supports `TXT`, `A`, and `CNAME` record creation and updates.
+- **Hetzner DNS** — uses the [Hetzner DNS API](https://dns.hetzner.com/api-docs). The client supplies a Hetzner DNS API token. Supports `TXT`, `A`, and `CNAME` record creation and updates with equivalent capability to the Cloudflare integration.
+
+Support for additional providers (Route 53, Porkbun, etc.) is a post-MVP concern but requires only a new implementation of the provider interface.
 
 ### Rate Limiting
 
@@ -182,7 +192,7 @@ The mobile app does not perform DNS routing itself; it delegates sending to its 
 The mobile app is the secure store for all user secrets. Nothing sensitive is held by the relay or any server. Specifically, the app stores and manages:
 
 - **Private key** — held in the device's secure enclave, accessed only via the passkey (WebAuthn). The private key never leaves the device in plaintext.
-- **Cloudflare API token** — stored in the app (e.g., iOS Keychain / Android Keystore) and passed to the relay only when a DNS write is required (e.g., during identity registration or relay migration). The relay receives the token for the duration of that request only.
+- **DNS provider API token** — stored in the app (e.g., iOS Keychain / Android Keystore) and passed to the relay only when a DNS write is required (e.g., during identity registration or relay migration). The relay receives the token for the duration of that request only. Cloudflare and Hetzner DNS are both supported; the app stores whichever token corresponds to the user's DNS provider.
 - **Relay configuration** — the endpoint URL of the relay the user has chosen.
 
 This design means a compromised relay cannot expose user secrets: it never holds any. Trust is rooted in the device's secure enclave, not in any server.
@@ -192,7 +202,7 @@ This design means a compromised relay cannot expose user secrets: it never holds
 The following features constitute the mobile app MVP:
 
 - **Passkey registration and login**: Account creation and subsequent logins are handled entirely via WebAuthn / device biometrics (Face ID, Touch ID, fingerprint). No passwords are stored or transmitted.
-- **Identity creation**: On first launch the user chooses a subdomain handle, provides their Cloudflare API token (scoped to their DNS zone), and associates the identity with their chosen relay. The app passes the token to the relay, which writes the DNS records; the token is then discarded by the relay.
+- **Identity creation**: On first launch the user chooses a subdomain handle, selects their DNS provider (Cloudflare or Hetzner), provides a DNS API token scoped to their zone, and associates the identity with their chosen relay. The app passes the provider type and token to the relay, which writes the DNS records; the token is then discarded by the relay.
 - **Send a message**: Compose and send a signed message to any valid identity address (e.g., `bob.example.org`).
 - **Receive and read messages**: Fetch messages delivered to the user's inbox, either by polling the relay on a configurable interval or via a persistent WebSocket connection for lower latency.
 - **Conversation threads**: Messages are grouped by correspondent identity into conversation threads, displayed in chronological order.
@@ -307,22 +317,23 @@ Challenges expire after a short window (e.g., 60 seconds). The relay stores issu
 
 ### `POST /identities`
 
-Register a new identity on this relay. The client supplies its public key and a Cloudflare API token scoped to the DNS zone of the identity subdomain. The relay uses the token to write the required DNS records (public key `TXT` and routing `A`/`CNAME`), then discards the token. The relay stores no write credentials.
+Register a new identity on this relay. The client supplies its public key, the DNS provider to use (`cloudflare` or `hetzner`), and an API token scoped to the DNS zone of the identity subdomain. The relay uses the token to write the required DNS records (public key `TXT` and routing `A`/`CNAME`), then discards the token. The relay stores no write credentials.
 
 **Request body:**
 ```json
 {
-  "identity":          "alice.example.com",
-  "public_key":        "<base64-encoded public key>",
-  "cloudflare_token":  "<scoped Cloudflare API token>"
+  "identity":      "alice.example.com",
+  "public_key":    "<base64-encoded public key>",
+  "dns_provider":  "cloudflare",
+  "dns_token":     "<scoped DNS provider API token>"
 }
 ```
 
 **Responses:**
 - `201 Created` — identity registered and DNS records written.
-- `400 Bad Request` — malformed request.
+- `400 Bad Request` — malformed request or unsupported `dns_provider` value.
 - `409 Conflict` — identity already registered on this relay.
-- `502 Bad Gateway` — Cloudflare DNS write failed (token invalid, zone not found, etc.).
+- `502 Bad Gateway` — DNS provider write failed (token invalid, zone not found, etc.).
 
 ---
 
@@ -385,7 +396,7 @@ The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted
 | Secret / Data | Stored in | Notes |
 |---------------|-----------|-------|
 | Private key | Device secure enclave | Never leaves the device in plaintext |
-| Cloudflare API token | App (iOS Keychain / Android Keystore) | Passed to relay ephemerally for DNS writes only |
+| DNS provider API token (Cloudflare or Hetzner) | App (iOS Keychain / Android Keystore) | Passed to relay ephemerally for DNS writes only |
 | Public key | DNS TXT record | Publicly readable; used for signature verification |
 | Relay endpoint | App config | Not a secret; user-configurable |
 | Rate limit counters | Relay in-memory | Ephemeral; lost on restart |
@@ -398,6 +409,52 @@ The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted
 - A compromised relay cannot exfiltrate private keys or DNS write credentials because it never holds them at rest.
 - DNS records are the ground truth for public keys and routing. An attacker who can manipulate DNS records for an identity subdomain can redirect messages and substitute a public key. DNS zone security (DNSSEC, restricted API token scopes) is therefore important and should be documented in operator guidance.
 - The MVP uses plaintext payloads. Until end-to-end encryption is implemented, relay operators and network observers can read message content. This should be clearly disclosed to users.
+
+---
+
+## Infrastructure (`apps/infra`)
+
+The `apps/infra` directory contains the infrastructure definition for deploying a relay on Hetzner Cloud. The goal is a reproducible, version-controlled setup that a single operator can apply with minimal manual steps.
+
+### Tooling
+
+Both Terraform and Pulumi are viable options for this kind of infrastructure. **Terraform is recommended for the MVP** due to its larger ecosystem of Hetzner and ACME providers, broader community familiarity, and simpler state management for a small deployment. Pulumi is noted as an alternative if the team has a strong preference for writing infrastructure in a general-purpose language.
+
+### Hetzner Cloud Resources
+
+The Terraform configuration provisions the following resources:
+
+- **Hetzner Cloud server(s)** — one or more VMs running the Go relay binary. The relay is stateless, so horizontal scaling requires no coordination; adding servers behind the load balancer is sufficient.
+- **Hetzner Load Balancer** — sits in front of the relay server(s) and terminates incoming traffic. Handles health checks and distributes load across relay instances. TLS termination occurs here using the provisioned wildcard certificate.
+- **DNS records** — `A`/`CNAME` records for the relay's own hostname (e.g., `relay.example.com`) pointing to the load balancer IP, provisioned via the Hetzner DNS Terraform provider.
+- **Firewall rules** — restrict direct access to relay VMs; only the load balancer and operator IPs can reach them on non-public ports.
+
+### TLS Certificate Provisioning
+
+TLS certificate provisioning is automated using the **Terraform ACME provider** against **Let's Encrypt**. This keeps all infrastructure state in one place and avoids manual certificate management.
+
+**Challenge type: DNS-01 is required.** HTTP-01 challenge is not used. DNS-01 is the only challenge type that supports wildcard certificates, and wildcard certificates are the correct strategy for this deployment (see below).
+
+**Wildcard certificate strategy:** A single `*.example.com` wildcard certificate covers every first-level identity subdomain (`alice.example.com`, `bob.example.com`, etc.) hosted on the relay. This is appropriate because the operator controls the parent domain as a prerequisite for running a relay, and all identity subdomains are first-level. There is no need to provision or renew a certificate per identity — one cert covers all of them. The one-level wildcard limitation (i.e., `*.example.com` does not cover `deep.alice.example.com`) is a non-issue since the protocol does not use deeper subdomains.
+
+DNS-01 challenge is automated via the Hetzner DNS API, using an API token held in Terraform (or passed via environment variable during `terraform apply`). This is the same Hetzner DNS API used for identity record management, so no additional provider account is needed.
+
+**Certificate storage:** The provisioned certificate and private key are stored accessibly to the relay — either written to the server filesystem during provisioning or stored in Hetzner Object Storage and fetched at relay startup. The specific approach is left to the operator; both are documented in `apps/infra/README.md`.
+
+**Renewal:** Two options are documented; Terraform ACME is recommended for the MVP:
+
+- **Terraform ACME (recommended):** Re-running `terraform apply` (e.g., via a scheduled CI job) checks the certificate expiry and renews automatically when it falls within the renewal window. All state stays in Terraform.
+- **On-server renewal (fallback):** `certbot` or `acme.sh` running on the relay server via a cron job. More self-contained but splits infrastructure state between Terraform and the server.
+
+### Deployment
+
+A minimal deployment script or CI hook should:
+
+1. Build the Go relay binary.
+2. Copy it to the Hetzner server(s) (e.g., via `scp` or a Hetzner snapshot).
+3. Restart the relay service (e.g., `systemctl restart eurything-relay`).
+
+A full CI/CD pipeline is a post-MVP concern; the MVP deployment process can be a documented manual script.
 
 ---
 
