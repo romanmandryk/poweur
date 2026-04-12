@@ -42,6 +42,8 @@ _eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64-en
 
 Because the public key is published in DNS and the private key never leaves the device, there is no central authority that can forge or revoke an identity's signatures. The owner of the DNS zone is the owner of the identity.
 
+The same key pair is also intended to back third-party sign-up and sign-in flows. A relying party can challenge `alice.poweur.net`, and Alice's device can prove control of that identity by signing the challenge and letting the relying party verify it against the public key in DNS.
+
 ## Passkeys (Mobile)
 
 On mobile, key pairs are managed through the **WebAuthn/FIDO2 passkey API**. When a user creates an identity:
@@ -52,6 +54,8 @@ On mobile, key pairs are managed through the **WebAuthn/FIDO2 passkey API**. Whe
 4. The relay writes the public key to DNS as a `TXT` record using the client-supplied DNS provider token.
 
 Signing a message uses the passkey assertion API, which triggers biometric authentication (Face ID, fingerprint) before the secure enclave performs the signing operation. The private key never materialises in app memory.
+
+The mobile app must also use the same passkey-backed signing path for external authentication approvals, so the user gets a consistent consent model for both messaging and third-party login.
 
 ## CLI Key Management
 
@@ -66,6 +70,18 @@ A single user can hold multiple Eurything identities. Each identity has its own 
 - Testing or staging identities
 
 The mobile app provides an **Active Identity Selector** — a persistent header that shows the currently selected identity and allows switching context across all app screens.
+
+## Third-Party Authentication
+
+An Eurything identity should be usable as a portable login identity for websites and apps. The recommended flow is:
+
+1. The verifier creates a challenge containing `domain`, `audience`, `nonce`, `issued_at`, `expires_at`, `request_id`, and the requested action such as `signup` or `signin`.
+2. The request is handed to the mobile app via QR, universal link, or deep link.
+3. The app shows the verifier identity and requested action to the user.
+4. After approval, the app signs the challenge with the identity's private key.
+5. The verifier resolves the public key from DNS, or via a compatible DID document, and verifies the signature.
+
+This keeps the Eurything DNS name as the canonical identifier while making it usable in login ecosystems that expect signed challenge-response proofs.
 
 ## Bots and Automated Agents
 
@@ -102,5 +118,6 @@ Because routing is DNS-driven, migrating an identity to a new relay requires upd
 ## Related
 
 - [DNS Records](/protocol/dns-records)
+- [Interoperability](/protocol/interoperability)
 - [Message Format](/protocol/message-format)
 - [Security Model](/security/model)

@@ -148,8 +148,21 @@ Because DNS records are the ground truth for public keys and routing, DNS zone s
 - **Enable DNSSEC where possible.** DNSSEC prevents cache poisoning attacks that could redirect routing or substitute a public key. Cloudflare and Hetzner both support DNSSEC for managed zones.
 - **Rotate tokens regularly.** The relay never stores DNS write credentials at rest; the risk window for a compromised relay is limited to the duration of an active registration request.
 
+## HTTP Discovery and DID Interop
+
+Some interoperability features are better expressed over HTTPS than in DNS records. Identities and relays may additionally expose:
+
+- `https://<identity>/.well-known/eurything.json` — Eurything metadata, supported protocol versions, auth capabilities, and app-link information.
+- `https://<identity>/.well-known/did.json` — a `did:web`-style DID document for DID-aware tooling.
+- `https://<identity>/.well-known/did-configuration.json` — optional domain-to-DID binding metadata.
+
+Eurything keeps DNS as the ground truth for public keys and routing. These HTTP documents are compatibility layers for ecosystems that already expect well-known endpoints and DID documents.
+
+`did:dns` is the closest conceptual DID mapping to Eurything, but because that method is not yet broadly established, `did:web` is the more practical interop bridge for early implementations.
+
 ## Related
 
 - [Identity Model](/protocol/identity-model)
+- [Interoperability](/protocol/interoperability)
 - [DNS Management](/relay/dns-management)
 - [Future Capabilities](/future/capabilities)

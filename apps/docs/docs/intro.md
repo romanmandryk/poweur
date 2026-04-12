@@ -53,4 +53,5 @@ The Eurything system is composed of:
 - [Protocol Overview](/protocol/overview) — design principles and architecture
 - [Identity Model](/protocol/identity-model) — how identities work
 - [DNS Records](/protocol/dns-records) — the full DNS record format specification
+- [Interoperability](/protocol/interoperability) — DID, well-known, and third-party auth alignment
 - [Relay API Reference](/relay/api-reference) — HTTP API endpoints

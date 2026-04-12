@@ -20,6 +20,8 @@ An Eurything message is a JSON object that carries the sender identity, recipien
 
 All fields are required. No field may be null or omitted.
 
+To keep the format extensible and easier to bridge into other signed-message ecosystems, future protocol revisions should reserve optional envelope fields such as `id`, `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. MVP relays and clients should ignore unknown top-level fields unless a newer protocol version marks them as mandatory.
+
 ## Wire Format Example
 
 ```json
@@ -57,6 +59,8 @@ Hey Bob, are you around?
 
 Note: there is no trailing newline. The fields are joined with `\n` separators, not terminated.
 
+This newline-based canonical string is sufficient for the MVP, but once richer envelope metadata is added the protocol should migrate to a canonical JSON representation (for example RFC 8785 JSON Canonicalization Scheme) so bridge implementations do not depend on ad hoc field ordering rules.
+
 ## Signing Procedure
 
 1. Construct the canonical string as above.
@@ -79,6 +83,8 @@ When a relay receives a message, it verifies the signature as follows:
 7. If verification fails, reject the message with `401 Unauthorized`.
 
 Relays forwarding messages on behalf of another relay do **not** re-sign. The original signed envelope is forwarded as-is. The receiving relay always verifies against the original sender's public key.
+
+Conceptually, this positions Eurything closer to a DIDComm or Nostr-style signed object than to transport-level signatures. The signed application envelope, not the relay hop, is what carries end-to-end authenticity.
 
 ## Inbox Message Format
 
@@ -108,5 +114,6 @@ In the MVP, payloads are plaintext. A relay operator (or network observer) can r
 ## Related
 
 - [Identity Model](/protocol/identity-model)
+- [Interoperability](/protocol/interoperability)
 - [Routing](/protocol/routing)
 - [API Reference](/relay/api-reference)

@@ -6,7 +6,7 @@ title: Protocol Overview
 
 # Protocol Overview
 
-The Eurything Protocol defines the message format, signing scheme, verification procedure, and end-to-end routing model used across all system components. Every client, relay, and automated agent that participates in the Eurything network must conform to this protocol.
+The Eurything Protocol defines the message format, signing scheme, verification procedure, authentication flow, and end-to-end routing model used across all system components. Every client, relay, and automated agent that participates in the Eurything network must conform to this protocol.
 
 ## Design Principles
 
@@ -17,6 +17,8 @@ The Eurything Protocol defines the message format, signing scheme, verification 
 **Trust is rooted in device hardware.** Private keys live in the hardware secure enclave of the user's mobile device (iOS Secure Enclave / Android StrongBox). The relay and all server-side infrastructure are treated as untrusted.
 
 **Signatures prevent forgery; DNS prevents impersonation.** A message cannot be forged because it must be signed by the identity's private key. An identity cannot be impersonated because the authoritative public key is in DNS — which only the domain owner controls.
+
+**The same identity must work outside messaging.** An Eurything DNS identity is not only a messaging address. The same key material should be usable for third-party sign-up and sign-in flows, with the mobile app acting as the user's signer and approval surface.
 
 **Wire format is JSON for MVP.** All messages are UTF-8 encoded JSON. A future iteration may adopt a compact binary format (Protocol Buffers, MessagePack) while preserving the field schema and signing semantics.
 
@@ -69,7 +71,8 @@ Clients (mobile apps, CLI) are responsible for:
 
 1. Generating and storing identity key pairs (in secure hardware)
 2. Signing messages before dispatch
-3. Communicating with their configured relay for send and receive
+3. Approving third-party authentication challenges
+4. Communicating with their configured relay for send and receive
 
 Clients never communicate directly with other clients. All message exchange passes through relays.
 
@@ -77,9 +80,19 @@ Clients never communicate directly with other clients. All message exchange pass
 
 The current protocol version is **0.1** (MVP). The `version` field is included in relay health responses to allow clients to detect incompatible relays. Breaking changes will increment the major version.
 
+## Interoperability Direction
+
+Eurything keeps the DNS name as the canonical identifier, but it should map cleanly into existing ecosystems:
+
+- `did:dns:<fqdn>` is the closest conceptual DID mapping, but that method is still emerging.
+- `did:web:<fqdn>` via `https://<identity>/.well-known/did.json` is the most practical bridge for existing DID-aware tooling.
+- `/.well-known/eurything.json` should be the protocol's own discovery endpoint for relay metadata, supported capabilities, and mobile app auth handoff details.
+- Signed message envelopes should evolve toward a more explicit structure, conceptually similar to DIDComm basic messages or Nostr-style events, while preserving DNS-native verification and routing.
+
 ## Related
 
 - [Identity Model](/protocol/identity-model)
 - [DNS Records](/protocol/dns-records)
 - [Message Format](/protocol/message-format)
+- [Interoperability](/protocol/interoperability)
 - [Routing](/protocol/routing)
