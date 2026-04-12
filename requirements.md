@@ -2,9 +2,9 @@
 
 ## Overview
 
-The goal of the MVP is to implement a decentralized, DNS-based identity and messaging system. Every participant in the system — whether a human, a bot, or an autonomous agent — is identified by a subdomain of a domain they control (e.g., `myname.example.com`). This subdomain serves as the participant's globally unique, human-readable identity. In the MVP, identities are used primarily for messaging; the architecture is designed to accommodate additional capabilities over time.
+The goal of the MVP is to implement a decentralized, DNS-based identity and messaging system. Every participant in the system — whether a human, a bot, or an autonomous agent — is identified by a subdomain of a domain they control (e.g., `myname.example.com`). This subdomain serves as the participant's globally unique, human-readable identity. In the MVP, identities are used primarily for messaging, but the protocol and mobile app must already reserve a stable path for using the same DNS identity to sign up to and sign in to third-party websites and apps.
 
-The system is composed of three applications within a pnpm monorepo:
+The system is composed of several applications and supporting packages within a pnpm monorepo:
 
 - `apps/api` — a Go relay server
 - `apps/ios` — native iOS app (Swift)
@@ -22,6 +22,8 @@ Humans authenticate using passkeys on their mobile device. The passkey is tied t
 
 A signed message carries the sender's identity subdomain and a signature verifiable against the public key associated with that subdomain. Recipients and relays can verify authenticity without a central authority.
 
+The same identity key pair must also be usable outside messaging. A third-party website or app must be able to issue a challenge to `alice.example.com`, have Alice approve that request in the mobile app, and verify the resulting signature against Alice's published public key. This makes the DNS identity a general-purpose authentication primitive rather than a messaging-only handle.
+
 ### DNS as Persistent Storage
 
 DNS is not only the routing layer — it is the only durable store in the system. All state that must survive a relay restart lives in DNS records:
@@ -32,6 +34,33 @@ DNS is not only the routing layer — it is the only durable store in the system
 Because DNS is the authoritative store, the relay itself holds no database and performs no disk writes for identity or routing data. Any relay that can resolve DNS can verify messages and route to any identity, without coordination with any central registry.
 
 For the MVP, the relay writes DNS records on behalf of identities via a configurable DNS provider. Cloudflare and Hetzner DNS are both supported. The API token required to do so is supplied by the client at registration time and used ephemerally — the relay does not store it.
+
+---
+
+## Identity Beyond Messaging
+
+The protocol must support using the same DNS identity for third-party sign-up and sign-in flows, not only for Eurything relay access. The mobile app is the primary signer and consent surface for human users. A relying party (website or app) can ask the user to prove control of `alice.example.com`, and the user confirms that request in the mobile app using the identity's passkey-backed private key.
+
+### Third-Party Authentication Flow
+
+The baseline flow is:
+
+1. A website or app creates an authentication request containing at minimum: `domain`, `audience`, `nonce`, `issued_at`, `expires_at`, `request_id`, requested action (`signup` or `signin`), and an optional human-readable statement.
+2. The relying party presents this request to the user via QR code, universal link, deep link, or an app-to-app handoff.
+3. The mobile app resolves the relying party metadata, shows the request details to the user, and asks for explicit approval.
+4. On approval, the mobile app signs the challenge payload with the identity's private key and returns the signed response to the relying party.
+5. The relying party verifies the signature using the public key published in DNS for the claimed identity, or through a compatible DID document derived from that DNS identity.
+
+This flow must be designed so that websites and apps can adopt it without running an Eurything relay themselves. The relay remains important for messaging and DNS management, but third-party authentication must work as a standalone verifier pattern.
+
+### Mobile App as Signer
+
+The mobile app must support a dedicated approval flow for external authentication requests:
+
+- Display the relying party domain or app identifier clearly before approval.
+- Show whether the action is sign-up, sign-in, account linking, or another future auth action.
+- Require biometric or platform passkey confirmation before producing a signature.
+- Keep the private key entirely on-device; only the signed response leaves the device.
 
 ---
 
@@ -63,6 +92,8 @@ A message is a JSON object with the following fields:
 | `timestamp` | string | ISO 8601 UTC timestamp of when the message was created |
 | `payload`   | string | Message content — plaintext for MVP; encryption is a post-MVP concern |
 | `signature` | string | Base64-encoded signature over the canonical fields (see below) |
+
+To keep the envelope evolvable and easier to map to established signed-message formats, the protocol should reserve optional forward-compatible fields such as `id`, `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. These are not required for the first messaging milestone, but the protocol must treat unknown fields as ignorable unless they are explicitly defined as signed mandatory fields in a later version.
 
 **Minimal example:**
 ```json
@@ -113,6 +144,42 @@ The full delivery path for a message from Alice (`alice.example.com`) to Bob (`b
 ### Wire Format
 
 The wire format is JSON for the MVP. All messages and API responses are UTF-8 encoded JSON. A future iteration may replace JSON with a compact binary format such as Protocol Buffers or MessagePack to reduce payload size and parsing overhead, but the field schema and signing semantics will remain the same.
+
+---
+
+## Protocol Interoperability Requirements
+
+The Eurything identifier remains the DNS name itself (for example `alice.example.com`). Protocol interop should be additive: Eurything must not require a DID or an external identity provider, but it should map cleanly to existing standards where that improves adoption.
+
+### DID Mapping
+
+- The canonical Eurything identifier is the FQDN.
+- The protocol should support a deterministic DID projection for interoperability. `did:dns:<fqdn>` is the closest conceptual fit, but because the broader ecosystem around `did:dns` is still emerging, Eurything should also support publishing a compatible DID document through `did:web`-style hosting.
+- Where HTTP hosting is available, an identity should be able to expose `https://<identity>/.well-known/did.json` so that external systems can consume the same key material and service metadata through a familiar DID resolution path.
+
+### Messaging Interoperability
+
+- The current signed JSON envelope is intentionally simple, but future revisions should move toward a more explicit envelope shape similar in spirit to DIDComm basic messages or Nostr-style signed events: message identifier, message type, creation time, expiry, optional threading metadata, and canonicalized signing input.
+- Once optional fields become common, the signature base should evolve from newline concatenation toward a canonical JSON representation to reduce ambiguity and make bridge implementations easier.
+- Relay-to-relay delivery remains HTTPS JSON, but the protocol should use explicit content types and version markers so bridges can translate Eurything messages into other signed-message ecosystems when needed.
+
+### Well-Known HTTP Discovery
+
+To integrate cleanly with browsers, mobile apps, and third-party services, the protocol should define well-known HTTP metadata endpoints:
+
+- `/.well-known/eurything.json` — identity or relay metadata, supported protocol versions, relay endpoints, authentication capabilities, and mobile app handoff information.
+- `/.well-known/did.json` — optional DID document representation for interoperability with DID-aware systems.
+- `/.well-known/did-configuration.json` — optional domain-to-DID binding for ecosystems that already use DID configuration files.
+
+The relay or identity host should be able to serve these endpoints using the identity hostname so that discovery works with standard web tooling.
+
+### Third-Party Authentication Object
+
+Authentication requests and responses should follow a structure close to established challenge-response login schemes:
+
+- Verifier request fields: `request_id`, `domain`, `audience`, `nonce`, `issued_at`, `expires_at`, `action`, `statement`, and `redirect_uri` or `response_uri`.
+- Signed response fields: `request_id`, `identity`, `public_key_hint` or `kid`, `issued_at`, `signature`, and optional disclosed profile attributes.
+- The verifier must bind the response to the original `nonce`, intended audience, and expiry to prevent replay across sites or sessions.
 
 ---
 
@@ -236,6 +303,7 @@ Once at least one identity is verified, a persistent header appears at the top o
 The primary screen after an identity is verified. Shows the service modules available under the active identity:
 
 - **Messaging** — active, MVP feature.
+- **Authentication approvals** — active as soon as third-party auth is implemented; used to approve sign-up/sign-in requests from websites and apps.
 - **Publishing** — listed, not yet active.
 - **Receiving Payments** — listed; shows a placeholder with supported providers and currencies, not yet active.
 - Footer: *"More capabilities coming soon."*
@@ -271,6 +339,16 @@ The vault is not a visible screen but an architectural constraint enforced throu
 - Relay URL and any relay auth tokens: stored in Keychain/Keystore.
 - No secrets leave the device except when explicitly passed to the relay for an active operation, and only for its duration.
 
+### External Authentication Approvals
+
+The mobile apps must support external authentication approval flows for websites and apps:
+
+- Accept inbound auth requests via QR scan, universal link, deep link, or clipboard import.
+- Display verifier metadata from `/.well-known/eurything.json` or equivalent discovery metadata before asking for consent.
+- Require biometric/passkey confirmation before signing any third-party auth challenge.
+- Return the signed response using the verifier's requested callback mechanism (browser redirect, deep link, HTTPS callback, or QR handoff continuation).
+- Keep a local approval history for the user, at least for the current device, so the user can review recent sign-in/sign-up approvals.
+
 ---
 
 ## CLI
@@ -280,6 +358,7 @@ The CLI (`apps/cli`) is the third application in the monorepo. It provides a scr
 - **Identity management**: Create and manage identity key pairs stored locally (e.g., in a config file or OS keychain).
 - **Send messages**: Sign and send messages from a CLI-managed identity to any recipient identity.
 - **Read inbox**: Retrieve and display messages delivered to a CLI-managed identity from the relay.
+- **Sign verifier challenges**: Support signing third-party authentication requests for automated agents and headless environments.
 - **Relay interaction**: All network operations go through a configured relay endpoint (set via config file or environment variable).
 - **Scriptability**: The CLI should support machine-readable output (e.g., JSON) to facilitate use in scripts and automated pipelines.
 
@@ -296,6 +375,13 @@ eurything relay status             # Check relay connectivity, show configured e
 ```
 
 All commands accept a `--json` flag that produces machine-readable JSON output, suitable for use in scripts and automated pipelines.
+
+The CLI should also reserve a future-compatible authentication command surface such as:
+
+```
+eurything auth sign <request-file-or-url>    # Sign a third-party auth request for bots and automated agents
+eurything auth inspect <request-file-or-url> # Display verifier request metadata before signing
+```
 
 Configuration is stored at `~/.eurything/config.toml`. The config file holds the relay endpoint, the identity subdomain, and the path to (or reference for) the private key. Individual settings can be overridden via environment variables (e.g., `EURYTHING_RELAY_URL`) or command-line flags.
 
@@ -526,7 +612,8 @@ A full CI/CD pipeline is a post-MVP concern; the MVP deployment process can be a
 The following are explicitly out of scope for the MVP but should be kept in mind as the architecture evolves:
 
 - **Capability advertisement via DNS**: Additional DNS record types (e.g., `TXT` records) can be used to advertise capabilities associated with an identity, such as supported protocols, service endpoints, or metadata. This allows the DNS layer to evolve from pure routing into a richer discovery mechanism.
-- **Additional identity use cases**: Beyond messaging, identities could be used for authentication, authorization, payments, or social graph discovery.
+- **Additional identity use cases**: Beyond messaging, identities could be used for richer authentication, authorization, payments, or social graph discovery. The core protocol should be designed so these additions reuse the same DNS identity and key material rather than introducing parallel identity systems.
+- **OIDC / wallet bridge**: A bridge to OpenID-based wallet flows (such as SIOPv2 / OID4VP-style verifier requests) may be added later so Eurything identities can participate in ecosystems that already expect OpenID-style metadata and request objects.
 - **Federation and relay peering**: Relays may eventually maintain persistent connections or trust relationships with known peer relays to improve reliability and reduce per-message DNS lookups.
 - **Key rotation and revocation**: A mechanism for rotating or revoking the key pair associated with an identity without losing the subdomain will be necessary for production use.
 - **Scalability and persistence**: The relay's storage and delivery model will need to be hardened for production workloads.

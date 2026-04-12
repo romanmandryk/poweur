@@ -38,6 +38,8 @@ A compromised relay cannot expose user secrets because the relay never holds the
 
 **Messaging.** Messages are signed with the sender's passkey before dispatch and sent via the relay protocol. Received messages are fetched from the user's relay (polling for MVP; WebSocket is a stretch goal). All message storage is local — the relay is a forwarder only.
 
+**Authentication approvals.** The same identity must also be usable to sign up to and sign in to third-party websites and apps. The mobile app acts as the signer: it receives an auth request via QR or deep link, shows the relying party details, asks the user to approve, and signs the challenge with the identity's passkey-backed private key.
+
 ### App Screens
 
 | Screen | Shown when |
@@ -46,6 +48,7 @@ A compromised relay cannot expose user secrets because the relay never holds the
 | Identity Creation | User initiates sign-up or adds a new identity |
 | Pending Registrations | At least one identity submitted, awaiting DNS propagation |
 | Dashboard | At least one identity verified |
+| Authentication Approval | User opens an external sign-up/sign-in request |
 | Contacts | User navigates to contact list |
 | Messaging | User opens a conversation thread |
 
@@ -55,6 +58,8 @@ The Dashboard shows module cards for upcoming capabilities:
 
 - **Publishing** — signed content under your identity
 - **Receiving Payments** — payment address advertisement via DNS capability records
+
+Authentication is not treated as a separate identity system. It reuses the same DNS identity, key material, and approval surface.
 
 ## CLI
 
@@ -71,4 +76,5 @@ Advanced users and automated systems can interact directly with the [Relay HTTP 
 - [CLI Reference](/clients/cli-reference)
 - [API Reference](/relay/api-reference)
 - [Identity Model](/protocol/identity-model)
+- [Interoperability](/protocol/interoperability)
 - [Security Model](/security/model)

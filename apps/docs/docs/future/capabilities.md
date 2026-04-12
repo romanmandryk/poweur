@@ -84,12 +84,86 @@ Multiple payment records can be combined in a single `TXT` value or across multi
 
 Allow Eurything identities to authenticate to third-party services without passwords. A service can issue a challenge, the user signs it with their Eurything private key, and the service verifies the signature against the public key in DNS.
 
-This is essentially the same challenge–response flow used in the relay API (`GET /auth/challenge`), generalized to any service.
+This is essentially the same challenge-response flow used in the relay API (`GET /auth/challenge`), generalized to any service and wrapped in a mobile-friendly approval UX.
 
 **DNS capability record:**
 ```
 _eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=auth"
 ```
+
+**Recommended verifier discovery:**
+```
+https://service.example/.well-known/eurything.json
+```
+
+The verifier metadata should describe its domain, supported protocol versions, callback mechanism, and whether it supports QR-based or deep-link based handoff to the mobile signer.
+
+**Recommended request object fields:**
+
+- `request_id`
+- `domain`
+- `audience`
+- `nonce`
+- `issued_at`
+- `expires_at`
+- `action` (`signup`, `signin`, `link`, ...)
+- `statement`
+- `response_uri`
+
+**Interoperability direction:**
+
+- Keep the DNS name as the canonical identity.
+- Support `did:web` as the pragmatic DID bridge today.
+- Leave room for `did:dns` if that method stabilizes and gains broad support.
+- Keep the signed response shape close to wallet and signed-message ecosystems so an OIDC / SIOP bridge can be layered on later.
+
+### File Sharing
+
+Allow an Eurything identity to act as a portable file-sharing address for systems similar to Google Drive, Dropbox, or Nextcloud.
+
+There are two distinct levels of support:
+
+1. **Native Eurything file-sharing capability.** A future Eurything-compatible storage provider could let users share files and folders directly to a DNS identity, with verification and discovery handled through Eurything records and signatures.
+2. **Mapping to existing provider identities.** Existing platforms can often be integrated only indirectly by publishing a mapping from the Eurything DNS identity to the provider's native account identifier.
+
+**Important interoperability note:**
+
+- **Google Drive** sharing is tied to Google-native identities such as Google account email addresses, Google groups, Workspace domains, or public links. A DNS record can advertise which Google account corresponds to an Eurything identity, but Google Drive does not natively resolve DNS identities in its ACL model.
+- **Dropbox** sharing similarly relies on Dropbox account email addresses or Dropbox account IDs. A DNS record can publish that mapping, but Dropbox does not support granting access directly to a DNS identity.
+- **Nextcloud** is the closest fit because it already has a federated identity model (`<user>@<instance>`). An Eurything identity could advertise a mapping to a Nextcloud Federated Cloud ID, making lookup and client-side translation more natural. Even here, the native share target remains the Nextcloud federated ID, not the Eurything DNS name itself.
+
+This means the practical first step is not "replace Google Drive or Dropbox identity models with DNS." The practical first step is "let a DNS identity advertise where it can receive file shares on existing systems."
+
+**DNS capability record:**
+```
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=files"
+```
+
+**Provider mapping record (proposed):**
+```
+_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=nextcloud:alice@cloud.example.com"
+_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=dropbox:alice@example.com"
+_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=gdrive:alice@example.com"
+```
+
+The intent of this record is discovery and interoperability:
+
+- a client can look up where an identity accepts file shares
+- a bridge service can translate the DNS identity into a provider-specific target account
+- a sender can choose the best supported platform before initiating the share
+
+It does **not** imply that the third-party provider will verify Eurything signatures or treat the DNS identity itself as a first-class ACL subject.
+
+**Native Eurything file-sharing direction:**
+
+A future Eurything-native file-sharing capability could define:
+
+- a signed file manifest format
+- capability records that advertise storage endpoints or sync providers
+- optional encrypted file transfer or envelope keys
+- recipient-based sharing to DNS identities rather than platform-specific accounts
+
+That would make the Eurything identity itself the true share target, with Google Drive / Dropbox / Nextcloud mappings treated as compatibility bridges rather than the primary model.
 
 ### Key Rotation and Revocation
 
@@ -129,4 +203,5 @@ Core protocol changes (message format, signing scheme, API endpoints) will be ve
 
 - [DNS Records](/protocol/dns-records)
 - [Identity Model](/protocol/identity-model)
+- [Interoperability](/protocol/interoperability)
 - [Protocol Overview](/protocol/overview)
