@@ -33,7 +33,7 @@ _eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64url
 alice.poweur.net.             300  IN  A    <this-relay-ip>
 ```
 
-The `A` record IP is the relay's own public IP address, as configured in `EURYTHING_RELAY_URL`. If the relay is behind a load balancer, the IP is the load balancer's IP.
+The `A` record IP is the relay's own public IP address, as configured in `RELAY_ADDRESS`. If the relay is behind a load balancer, the IP is the load balancer's IP.
 
 Alternatively, if the relay operator prefers `CNAME` routing, this can be configured at the operator level; the default write for new identities uses an `A` record.
 

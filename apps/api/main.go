@@ -1,40 +1,32 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+
+	"github.com/eurything/api/internal/config"
+	"github.com/eurything/api/internal/dns"
+	"github.com/eurything/api/internal/relay"
 )
 
 func main() {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("GET /", handleRoot)
-
-	addr := ":8080"
-	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("server error: %v", err)
+	if err := config.LoadDotEnv(".env"); err != nil {
+		log.Printf("failed to load .env: %v", err)
 	}
-}
+	cfg := config.FromEnv()
+	if err := cfg.Validate(); err != nil {
+		log.Printf("config error: %v", err)
+		log.Printf("set required values in .env or environment")
+		os.Exit(1)
+	}
+	resolver := dns.NewNetResolver()
+	providers := dns.NewProviderFactory(cfg)
 
-func handleRoot(w http.ResponseWriter, r *http.Request) {
-	respond(w, http.StatusOK, map[string]string{
-		"service": "eurything-api",
-	})
-}
+	server := relay.NewServer(cfg, resolver, providers)
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	respond(w, http.StatusOK, map[string]string{
-		"status": "ok",
-	})
-}
-
-func respond(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body); err != nil {
-		log.Printf("encode error: %v", err)
+	log.Printf("relay listening on %s", cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, server.Router()); err != nil {
+		log.Fatalf("server error: %v", err)
 	}
 }

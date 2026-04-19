@@ -42,9 +42,9 @@ Individual settings can be overridden via environment variables:
 
 | Setting | Env var |
 |---------|---------|
-| Relay URL | `EURYTHING_RELAY_URL` |
-| Identity subdomain | `EURYTHING_IDENTITY` |
-| Private key path | `EURYTHING_KEY_PATH` |
+| Relay URL | `RELAY_URL` |
+| Identity subdomain | `IDENTITY` |
+| Private key path | `KEY_PATH` |
 
 ## Global Flags
 

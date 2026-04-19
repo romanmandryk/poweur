@@ -111,7 +111,7 @@ For production deployments, TLS is terminated at the **Hetzner Load Balancer** i
 
 1. The provisioned wildcard certificate is uploaded to the Hetzner Load Balancer.
 2. The load balancer handles TLS termination and forwards plaintext HTTP to relay instances.
-3. Relay instances bind to port 8080 (or as configured) with `EURYTHING_TLS_ENABLE=false`.
+3. Relay instances bind to port 8080 (or as configured) with `TLS_ENABLE=false`.
 4. Communication between the load balancer and relay instances is over a private Hetzner network (not exposed to the internet).
 
 This offloads TLS from the relay process and allows the certificate to be updated at the load balancer without touching relay instances.

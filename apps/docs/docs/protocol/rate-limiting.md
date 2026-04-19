@@ -75,18 +75,18 @@ All rate limit defaults are configurable via environment variables or the relay 
 
 | Setting | Env var | Default |
 |---------|---------|---------|
-| Per-minute limit | `EURYTHING_RATE_LIMIT_MINUTE` | `20` |
-| Per-hour limit | `EURYTHING_RATE_LIMIT_HOUR` | `200` |
-| Per-day limit | `EURYTHING_RATE_LIMIT_DAY` | `1000` |
+| Per-minute limit | `RATE_LIMIT_MINUTE` | `20` |
+| Per-hour limit | `RATE_LIMIT_HOUR` | `200` |
+| Per-day limit | `RATE_LIMIT_DAY` | `1000` |
 
 Setting any limit to `0` disables that window's check. Setting a limit to `-1` blocks all messages from all senders (useful for maintenance mode).
 
 Example `.env` to raise the hourly limit for a high-volume deployment:
 
 ```bash
-EURYTHING_RATE_LIMIT_MINUTE=50
-EURYTHING_RATE_LIMIT_HOUR=500
-EURYTHING_RATE_LIMIT_DAY=5000
+RATE_LIMIT_MINUTE=50
+RATE_LIMIT_HOUR=500
+RATE_LIMIT_DAY=5000
 ```
 
 ## Related
