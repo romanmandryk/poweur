@@ -27,7 +27,7 @@ func NewCloudflareProvider(cfg config.Config) *CloudflareProvider {
 	}
 }
 
-func (p *CloudflareProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, relayAddress string) error {
+func (p *CloudflareProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error {
 	if token == "" {
 		return errors.New("missing cloudflare api token")
 	}
@@ -44,6 +44,14 @@ func (p *CloudflareProvider) WriteIdentityRecords(ctx context.Context, token, id
 		return err
 	}
 
+	if encryptionPublicKey != "" {
+		encName := fmt.Sprintf("_eurything-enc.%s", identity)
+		encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+		if err := p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl, false); err != nil {
+			return err
+		}
+	}
+
 	recordType, relayHost := relayRecord(relayAddress)
 	proxied := p.shouldProxyRelay(ctx, relayHost, token, zoneID)
 	if err := p.upsertRecord(ctx, token, zoneID, recordType, identity, relayHost, ttl, proxied); err != nil {
@@ -51,6 +59,23 @@ func (p *CloudflareProvider) WriteIdentityRecords(ctx context.Context, token, id
 	}
 
 	return nil
+}
+
+func (p *CloudflareProvider) WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error {
+	if token == "" {
+		return errors.New("missing cloudflare api token")
+	}
+	if encryptionPublicKey == "" {
+		return errors.New("missing encryption public key")
+	}
+	zoneID, err := p.findZoneID(ctx, token, identity)
+	if err != nil {
+		return err
+	}
+	ttl := int(defaultTTL(p.cfg).Seconds())
+	encName := fmt.Sprintf("_eurything-enc.%s", identity)
+	encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+	return p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl, false)
 }
 
 func (p *CloudflareProvider) findZoneID(ctx context.Context, token, identity string) (string, error) {

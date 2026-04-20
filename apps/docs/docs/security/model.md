@@ -43,23 +43,28 @@ Every design decision in the protocol follows from this principle. The relay can
 | The relay can... | The relay cannot... |
 |-----------------|---------------------|
 | Forward messages between identities | Forge a message from any identity |
-| Verify message authenticity using public keys from DNS | Read encrypted message content *(post-MVP; plaintext in MVP)* |
+| Verify message authenticity using public keys from DNS | Read encrypted message payloads (E2E encrypted in the MVP) |
 | Rate-limit and reject suspected spam | Impersonate a user (no private keys held) |
 | Write DNS records ephemerally, with a client-supplied token | Retain DNS write credentials after a registration request |
 | Drop or delay messages | Prove that it delivered a message (no delivery receipts in MVP) |
-| Read plaintext message payloads *(MVP limitation)* | Rotate or revoke an identity's key pair |
+| Cache short-lived session public keys in memory | Derive the session private key or the long-lived identity private key |
+| See routing metadata (sender, recipient, timestamp) | Rotate or revoke an identity's key pair |
 
 ## Where Secrets Live
 
 | Secret / Data | Stored in | Can leave? |
 |---------------|-----------|:----------:|
-| Private key | Device secure enclave (iOS / Android) | Never |
+| Long-lived identity private key (Ed25519) | Device secure enclave (iOS / Android); key file on CLI | Never |
+| Long-lived encryption private key (X25519) | Device secure storage; key file on CLI | Never |
+| Session private key (Ed25519, ≤24h) | Device local storage (mobile app / CLI `~/.eurything/sessions/`) | Never; discarded on revoke or expiry |
 | DNS provider API token | iOS Keychain / Android Keystore | Only during DNS writes |
-| Public key | DNS TXT record | Public — visible to all |
+| Identity public key | DNS `_eurything.<identity>` TXT record | Public — visible to all |
+| Encryption public key | DNS `_eurything-enc.<identity>` TXT record | Public — visible to all |
+| Session public key | Relay in-memory session cache | Lost on relay restart |
 | Relay endpoint | App config | Not a secret |
 | Rate limit counters | Relay in-memory | Lost on restart |
 | DNS routing cache | Relay in-memory | Lost on restart |
-| Inbox messages | Relay in-memory | Lost on restart |
+| Inbox messages (ciphertext only) | Relay in-memory | Lost on restart |
 
 ## Threat Model
 
@@ -67,10 +72,12 @@ Every design decision in the protocol follows from this principle. The relay can
 
 A relay that is fully compromised by an attacker:
 
-- **Can** read plaintext message payloads (MVP limitation — encryption is post-MVP).
 - **Can** drop, delay, or selectively deliver messages.
-- **Cannot** forge a message from any identity — signatures require the sender's private key.
-- **Cannot** impersonate a user — no private keys are held.
+- **Can** observe routing metadata: sender, recipient, timestamp, approximate message size.
+- **Can** extract the cached session public keys and observed envelopes, but not the session private keys (never transmitted).
+- **Cannot** read message payloads — they are encrypted end-to-end with ChaCha20-Poly1305 using a key derived from X25519 ECDH between an ephemeral sender key and the recipient's long-lived encryption key.
+- **Cannot** forge a message from any identity — signatures require the sender's session or identity private key.
+- **Cannot** impersonate a user — no private keys are held, and session registration requires a fresh identity-key signature.
 - **Cannot** exfiltrate DNS write credentials — tokens are discarded after use.
 - **Cannot** register fraudulent identities without a valid, scoped DNS provider token from a legitimate user.
 
@@ -88,11 +95,11 @@ This makes DNS zone security a first-class concern. See [mitigations](#dns-zone-
 
 An observer who can read network traffic:
 
-- **Can** read plaintext message payloads in the MVP (TLS protects transport, but relay operators can read plaintext).
-- **Can** observe message metadata: sender, recipient, timestamp, relay addresses.
+- **Can** observe message metadata: sender, recipient, timestamp, relay addresses, approximate message size.
+- **Cannot** read message payloads — they are encrypted end-to-end (X25519 + HKDF-SHA256 + ChaCha20-Poly1305). TLS provides an additional transport-layer confidentiality boundary, but the protocol does not rely on it for payload confidentiality.
 - **Cannot** forge messages or impersonate identities.
 
-End-to-end encryption is a planned post-MVP feature that would prevent relay operators and network observers from reading message content.
+Metadata protection (who-talks-to-whom, when) is **not** in scope for the MVP. That would require mixnet-style routing or onion layers and is a future concern.
 
 ### Replay attacks
 
@@ -111,11 +118,12 @@ Because DNS zone integrity is critical:
 3. **Monitor DNS records.** Operators and users should monitor their DNS records for unexpected changes.
 4. **Rotate tokens regularly.** The relay never stores tokens, so the risk from a compromised relay is bounded to the duration of an active registration request.
 
-## MVP Disclosure
+## MVP Scope Notes
 
-The MVP has one important security limitation that users should understand:
-
-**Message payloads are plaintext.** Until end-to-end encryption is implemented, relay operators and network observers (including ISPs, VPN providers, and anyone with access to relay infrastructure) can read message content. Signatures guarantee authenticity and integrity — they do not provide confidentiality. Users should be made aware of this limitation before sending sensitive content.
+- **Metadata is visible to the relay.** Sender, recipient, timestamp, and message size are not hidden from the relay. Hiding routing metadata (who talks to whom) is out of scope for the MVP.
+- **Forward secrecy is partial.** Each message uses a fresh ephemeral X25519 key, so compromising a recipient's long-lived encryption key does not reveal past messages once the ephemeral key is deleted. A dedicated double-ratchet session scheme (Signal-style) is a future improvement.
+- **Plaintext fallback.** If a recipient does not publish an encryption public key, the sender may opt in to sending plaintext. CLI warns on this path; mobile refuses. Operators should treat missing encryption keys as a hard error in production deployments.
+- **Session keys are relay-local.** A relay seeing only an unfamiliar `session_id` cannot verify a forwarded message unless the envelope also carries `session_proof` (which the sending relay attaches automatically when forwarding).
 
 ## Related
 

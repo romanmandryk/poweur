@@ -11,15 +11,16 @@ import (
 type Config struct {
 	RelayURL       string `toml:"relay_url"`
 	Identity       string `toml:"identity"`
-	PrivateKeyPath string `toml:"private_key_path"`
+	KeysDir        string `toml:"keys_dir"`
 	ParentDomain   string `toml:"parent_domain"`
 }
 
 func DefaultConfig() Config {
+	keysDir, _ := KeysDir()
 	return Config{
 		RelayURL:       os.Getenv("RELAY_URL"),
 		Identity:       os.Getenv("IDENTITY"),
-		PrivateKeyPath: os.Getenv("KEY_PATH"),
+		KeysDir:        getenvWithFallback("KEYS_DIR", keysDir),
 		ParentDomain:   os.Getenv("PARENT_DOMAIN"),
 	}
 }
@@ -46,11 +47,16 @@ func Load() (Config, error) {
 	if cfg.Identity == "" {
 		cfg.Identity = os.Getenv("IDENTITY")
 	}
-	if cfg.PrivateKeyPath == "" {
-		cfg.PrivateKeyPath = os.Getenv("KEY_PATH")
+	if cfg.KeysDir == "" {
+		cfg.KeysDir = getenvWithFallback("KEYS_DIR", "")
 	}
 	if cfg.ParentDomain == "" {
 		cfg.ParentDomain = os.Getenv("PARENT_DOMAIN")
+	}
+	if cfg.KeysDir == "" {
+		if keysDir, err := KeysDir(); err == nil {
+			cfg.KeysDir = keysDir
+		}
 	}
 	return cfg, nil
 }
@@ -84,4 +90,11 @@ func KeysDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".eurything", "keys"), nil
+}
+
+func getenvWithFallback(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }

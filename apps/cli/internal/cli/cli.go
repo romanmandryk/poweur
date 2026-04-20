@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,10 +17,20 @@ import (
 	"time"
 
 	"github.com/eurything/cli/internal/config"
+	cryptoe2e "github.com/eurything/cli/internal/crypto"
 	"github.com/eurything/cli/internal/identity"
+	"github.com/eurything/cli/internal/session"
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
+	// Optional override: if DNS_SERVER is set (e.g. "1.1.1.1" or
+	// "8.8.8.8:53") route every DNS lookup this CLI performs through that
+	// resolver using Go's pure-Go DNS client. Defeats broken LAN resolvers
+	// and cached NXDOMAINs without touching system DNS. Empty env = use the
+	// system resolver (default).
+	if server := strings.TrimSpace(os.Getenv("DNS_SERVER")); server != "" {
+		identity.SetResolver(identity.CustomNetResolver(server))
+	}
 	if len(args) == 0 {
 		printHelp(stdout)
 		return 0
@@ -33,6 +45,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInbox(args[1:], stdout, stderr)
 	case "relay":
 		return runRelay(args[1:], stdout, stderr)
+	case "session":
+		return runSession(args[1:], stdout, stderr)
 	case "auth":
 		return runAuth(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
@@ -57,6 +71,12 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityShow(args[1:], stdout, stderr)
 	case "dns":
 		return runIdentityDNS(args[1:], stdout, stderr)
+	case "use":
+		return runIdentityUse(args[1:], stdout, stderr)
+	case "list":
+		return runIdentityList(args[1:], stdout, stderr)
+	case "add-encryption-key":
+		return runIdentityAddEncryptionKey(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "unknown identity subcommand")
 		return 1
@@ -75,10 +95,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	dnsToken := fs.String("dns-token", "", "dns provider api token")
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
+	_ = useIdentity
 	if fs.NArg() < 1 {
 		fmt.Fprintln(stderr, "identity handle is required")
 		return 1
@@ -104,10 +126,22 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	encPub, encPriv, err := identity.GenerateEncryptionKeypair()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encKeyPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
 	provider := resolveDNSProvider(*dnsProvider)
 	token := resolveDNSToken(provider, *dnsToken)
 
 	publicKey := identity.PublicKeyString(pub)
+	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
 	registered := false
 	if *relayURL != "" {
 		if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
@@ -115,10 +149,10 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if token == "" {
-			fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFFLARE_API_TOKEN/HETZNER_API_TOKEN)")
+			fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
 			return 1
 		}
-		_, err := RegisterIdentity(context.Background(), *relayURL, identityValue, publicKey, provider, token)
+		_, err := RegisterIdentity(context.Background(), *relayURL, identityValue, publicKey, encPublicKey, provider, token)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -127,7 +161,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	cfg.Identity = identityValue
-	cfg.PrivateKeyPath = keyPath
+	cfg.KeysDir = filepath.Dir(keyPath)
 	cfg.RelayURL = *relayURL
 	cfg.ParentDomain = *parentDomain
 	if err := config.Save(cfg); err != nil {
@@ -136,14 +170,16 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	output := map[string]any{
-		"identity":   identityValue,
-		"public_key": publicKey,
-		"key_path":   keyPath,
-		"relay":      *relayURL,
-		"registered": registered,
+		"identity":              identityValue,
+		"public_key":            publicKey,
+		"encryption_public_key": encPublicKey,
+		"key_path":              keyPath,
+		"encryption_key_path":   encKeyPath,
+		"relay":                 *relayURL,
+		"registered":            registered,
 	}
 	if registered {
-		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s and registered with relay\n", identityValue))
+		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (registered with relay, e2e encryption enabled)\n", identityValue))
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (local only; relay not configured)\n", identityValue))
 }
@@ -156,40 +192,51 @@ func runIdentityShow(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("identity show", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "no identity configured")
 		return 1
 	}
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	publicKey := identity.PublicKeyString(privateKey.Public().(ed25519.PublicKey))
 	output := map[string]string{
-		"identity":   cfg.Identity,
+		"identity":   identityValue,
 		"public_key": publicKey,
-		"key_path":   cfg.PrivateKeyPath,
+		"key_path":   identity.KeyPath(cfg.KeysDir, identityValue),
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s\n", cfg.Identity))
+	encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	if err == nil {
+		encPub, err := publicFromPrivateX25519(encPriv)
+		if err == nil {
+			output["encryption_public_key"] = cryptoe2e.EncodePublicKey(encPub)
+			output["encryption_key_path"] = identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
+		}
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s\n", identityValue))
 }
 
 func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("identity dns", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 1 {
+	identityValue := resolveIdentity(fs.Arg(0), *useIdentity)
+	if identityValue == "" {
 		fmt.Fprintln(stderr, "usage: eurything identity dns <identity>")
 		return 1
 	}
-	identityValue := fs.Arg(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -208,6 +255,11 @@ func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintln(stdout, "public key TXT: not found")
 	}
+	if result.EncryptionKeyTXT != "" {
+		fmt.Fprintf(stdout, "encryption key TXT: %s\n", result.EncryptionKeyTXT)
+	} else {
+		fmt.Fprintln(stdout, "encryption key TXT: not found")
+	}
 	if len(result.RelayHosts) > 0 {
 		fmt.Fprintf(stdout, "relay A/CNAME: %s\n", strings.Join(result.RelayHosts, ", "))
 	} else {
@@ -219,6 +271,194 @@ func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runIdentityUse(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity use", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: eurything identity use <identity>")
+		return 1
+	}
+	identityValue := fs.Arg(0)
+	if cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "keys directory not configured")
+		return 1
+	}
+	keyPath := identity.KeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(keyPath); err != nil {
+		fmt.Fprintf(stderr, "key not found for %s at %s\n", identityValue, keyPath)
+		return 1
+	}
+	cfg.Identity = identityValue
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	output := map[string]string{
+		"identity": identityValue,
+		"key_path": keyPath,
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("active identity set to %s\n", identityValue))
+}
+
+func runIdentityList(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "keys directory not configured")
+		return 1
+	}
+	entries, err := os.ReadDir(cfg.KeysDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var identities []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".key") {
+			identities = append(identities, strings.TrimSuffix(name, ".key"))
+		}
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, map[string]any{
+			"identities": identities,
+			"active":     cfg.Identity,
+		}, "")
+	}
+	if len(identities) == 0 {
+		fmt.Fprintln(stdout, "no identities found")
+		return 0
+	}
+	for _, identityValue := range identities {
+		if identityValue == cfg.Identity {
+			fmt.Fprintf(stdout, "* %s\n", identityValue)
+		} else {
+			fmt.Fprintf(stdout, "  %s\n", identityValue)
+		}
+	}
+	return 0
+}
+
+// runIdentityAddEncryptionKey generates a fresh X25519 keypair for an
+// already-registered identity, saves the private half locally, and asks the
+// relay to publish the public half to DNS under `_eurything-enc.<identity>`.
+//
+// Modes:
+//   - no existing .enc file: a new keypair is minted (the normal "retro-fit"
+//     path for identities created before E2E support landed).
+//   - existing .enc file and --rotate: the local file is overwritten and the
+//     DNS record is rewritten (useful after suspected compromise).
+//   - existing .enc file without --rotate: command aborts to avoid silently
+//     invalidating ciphertext that was encrypted to the old key.
+func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity add-encryption-key", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dnsProvider := fs.String("dns-provider", "", "dns provider (cloudflare, hetzner)")
+	dnsToken := fs.String("dns-token", "", "dns provider api token")
+	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	rotate := fs.Bool("rotate", false, "overwrite an existing encryption key")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--rotate": true})); err != nil {
+		return 1
+	}
+
+	identityValue := fs.Arg(0)
+	if identityValue == "" {
+		identityValue = resolveIdentity(*useIdentity, cfg.Identity)
+	}
+	if identityValue == "" || cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "identity not configured (pass <identity> or run `eurything identity use <identity>` first)")
+		return 1
+	}
+	if *relayURL == "" {
+		fmt.Fprintln(stderr, "relay url not configured")
+		return 1
+	}
+
+	signingKeyPath := identity.KeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(signingKeyPath); err != nil {
+		fmt.Fprintf(stderr, "signing key not found for %s at %s\n", identityValue, signingKeyPath)
+		return 1
+	}
+
+	encKeyPath := identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(encKeyPath); err == nil && !*rotate {
+		fmt.Fprintf(stderr, "encryption key already exists at %s; pass --rotate to overwrite\n", encKeyPath)
+		return 1
+	}
+
+	provider := resolveDNSProvider(*dnsProvider)
+	token := resolveDNSToken(provider, *dnsToken)
+	if token == "" {
+		fmt.Fprintln(stderr, "dns token is required (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
+		return 1
+	}
+
+	if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	encPub, encPriv, err := identity.GenerateEncryptionKeypair()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	savedPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
+	resp, err := PublishEncryptionKey(context.Background(), *relayURL, identityValue, encPublicKey, provider, token)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	output := map[string]any{
+		"identity":              identityValue,
+		"encryption_public_key": resp.EncryptionPublicKey,
+		"encryption_key_path":   savedPath,
+		"relay":                 *relayURL,
+		"updated_at":            resp.UpdatedAt,
+		"rotated":               *rotate,
+	}
+	verb := "added encryption key"
+	if *rotate {
+		verb = "rotated encryption key"
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s for %s (published to DNS)\n", verb, identityValue))
+}
+
 func runSend(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -227,6 +467,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
@@ -235,7 +476,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: eurything send <to> <message>")
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
@@ -244,33 +486,109 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	identityPriv, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	sess, err := ensureSession(context.Background(), cfg.RelayURL, identityValue, identityPriv)
+	if err != nil {
+		fmt.Fprintln(stderr, "session error:", err)
+		return 1
+	}
+
+	recipient := fs.Arg(0)
+	plaintext := fs.Arg(1)
+
+	// Encryption is mandatory. If the recipient has no published X25519 key
+	// at `_eurything-enc.<recipient>` we refuse to send rather than silently
+	// fall back to plaintext. This preserves the guarantee that the relay
+	// (and any network observer) never sees a message body in cleartext.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
+	cancel()
+	if err != nil {
+		fmt.Fprintf(stderr, "cannot look up recipient encryption key for %s: %v\n", recipient, err)
+		return 1
+	}
+	if len(recipientEncPub) != 32 {
+		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n"+
+			"Ask them to run `eurything identity add-encryption-key %s` to publish one.\n",
+			recipient, recipient)
+		return 1
+	}
+	sealed, err := cryptoe2e.Encrypt(recipientEncPub, []byte(plaintext))
+	if err != nil {
+		fmt.Fprintln(stderr, "encrypt:", err)
+		return 1
+	}
+	payloadString := sealed.Ciphertext
+	encMeta := &EncryptionMeta{
+		Alg:                cryptoe2e.AlgName,
+		EphemeralPublicKey: sealed.EphemeralPublicKey,
+		Nonce:              sealed.Nonce,
+	}
+
+	sessionPriv, err := sess.PrivateKey()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 
 	msg := Message{
-		Sender:    cfg.Identity,
-		Recipient: fs.Arg(0),
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Payload:   fs.Arg(1),
+		Sender:       identityValue,
+		Recipient:    recipient,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		Payload:      payloadString,
+		SessionID:    sess.SessionID,
+		SessionProof: sessionProofFrom(sess),
+		Encryption:   encMeta,
 	}
-	canonical := fmt.Sprintf("%s\n%s\n%s\n%s", msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload)
-	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(canonical)))
+	msg.Signature = signMessage(sessionPriv, msg)
 
 	resp, err := SendMessage(context.Background(), cfg.RelayURL, msg)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		resp.Body.Close()
+		if _, err := session.Load(identityValue); err == nil {
+			_ = session.Delete(identityValue)
+		}
+		sess, err = ensureSession(context.Background(), cfg.RelayURL, identityValue, identityPriv)
+		if err != nil {
+			fmt.Fprintln(stderr, "session error (after retry):", err)
+			return 1
+		}
+		sessionPriv, err = sess.PrivateKey()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		msg.SessionID = sess.SessionID
+		msg.SessionProof = sessionProofFrom(sess)
+		msg.Signature = signMessage(sessionPriv, msg)
+		resp, err = SendMessage(context.Background(), cfg.RelayURL, msg)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		return 1
+	}
 
 	output := map[string]any{
-		"status":  resp.StatusCode,
-		"message": msg,
+		"status":    resp.StatusCode,
+		"message":   msg,
+		"encrypted": true,
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent message to %s\n", msg.Recipient))
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s\n", msg.Recipient))
 }
 
 func runInbox(args []string, stdout, stderr io.Writer) int {
@@ -281,11 +599,13 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
@@ -294,22 +614,24 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	identityPriv, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	challenge, err := FetchChallenge(context.Background(), cfg.RelayURL, cfg.Identity)
+
+	sess, err := ensureSession(context.Background(), cfg.RelayURL, identityValue, identityPriv)
+	if err != nil {
+		fmt.Fprintln(stderr, "session error:", err)
+		return 1
+	}
+
+	payload, err := fetchInboxWithSessionRetry(context.Background(), cfg.RelayURL, identityValue, identityPriv, sess)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	challengeSig := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(challenge.Challenge)))
-	payload, err := FetchInbox(context.Background(), cfg.RelayURL, cfg.Identity, challengeSig)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
+
 	if *jsonOut {
 		fmt.Fprintln(stdout, string(payload))
 		return 0
@@ -317,10 +639,13 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 
 	var inbox struct {
 		Messages []struct {
-			ID        string `json:"id"`
-			Sender    string `json:"sender"`
-			Timestamp string `json:"timestamp"`
-			Payload   string `json:"payload"`
+			ID         string          `json:"id"`
+			Sender     string          `json:"sender"`
+			Timestamp  string          `json:"timestamp"`
+			Payload    string          `json:"payload"`
+			Signature  string          `json:"signature"`
+			SessionID  string          `json:"session_id,omitempty"`
+			Encryption *EncryptionMeta `json:"encryption,omitempty"`
 		} `json:"messages"`
 	}
 	if err := json.Unmarshal(payload, &inbox); err != nil {
@@ -331,8 +656,34 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "no messages")
 		return 0
 	}
+
+	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+
 	for _, msg := range inbox.Messages {
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", msg.Timestamp, msg.Sender, msg.Payload)
+		display := msg.Payload
+		decrypted := false
+		if msg.Encryption != nil && msg.Encryption.Alg != "" {
+			if encPriv == nil {
+				display = "[encrypted: no local encryption key]"
+			} else {
+				plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
+					Ciphertext:         msg.Payload,
+					EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+					Nonce:              msg.Encryption.Nonce,
+				})
+				if err != nil {
+					display = fmt.Sprintf("[decrypt failed: %v]", err)
+				} else {
+					display = string(plaintext)
+					decrypted = true
+				}
+			}
+		}
+		prefix := "  "
+		if decrypted {
+			prefix = "🔒"
+		}
+		fmt.Fprintf(stdout, "%s [%s] %s: %s\n", prefix, msg.Timestamp, msg.Sender, display)
 	}
 	return 0
 }
@@ -349,9 +700,13 @@ func runRelay(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("relay status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})); err != nil {
 		return 1
+	}
+	if *useIdentity != "" {
+		cfg.Identity = *useIdentity
 	}
 	if cfg.RelayURL == "" {
 		fmt.Fprintln(stderr, "relay url not configured")
@@ -367,6 +722,124 @@ func runRelay(args []string, stdout, stderr io.Writer) int {
 		"version": health.Version,
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version))
+}
+
+func runSession(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "session subcommand required: status|refresh|revoke")
+		return 1
+	}
+	switch args[0] {
+	case "status":
+		return runSessionStatus(args[1:], stdout, stderr)
+	case "refresh":
+		return runSessionRefresh(args[1:], stdout, stderr)
+	case "revoke":
+		return runSessionRevoke(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "unknown session subcommand")
+		return 1
+	}
+}
+
+func runSessionStatus(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("session status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" {
+		fmt.Fprintln(stderr, "identity not configured")
+		return 1
+	}
+	sess, err := session.Load(identityValue)
+	if err != nil {
+		fmt.Fprintf(stdout, "no session for %s\n", identityValue)
+		return 0
+	}
+	output := map[string]any{
+		"identity":   sess.Identity,
+		"session_id": sess.SessionID,
+		"issued_at":  sess.IssuedAt.Format(time.RFC3339),
+		"expires_at": sess.ExpiresAt.Format(time.RFC3339),
+		"relay_url":  sess.RelayURL,
+		"valid":      sess.IsValid(),
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("session %s for %s (valid=%t, expires %s)\n",
+		sess.SessionID, sess.Identity, sess.IsValid(), sess.ExpiresAt.Format(time.RFC3339)))
+}
+
+func runSessionRefresh(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("session refresh", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "identity not configured")
+		return 1
+	}
+	if cfg.RelayURL == "" {
+		fmt.Fprintln(stderr, "relay url not configured")
+		return 1
+	}
+	_ = session.Delete(identityValue)
+	priv, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	sess, err := ensureSession(context.Background(), cfg.RelayURL, identityValue, priv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	output := map[string]any{
+		"session_id": sess.SessionID,
+		"expires_at": sess.ExpiresAt.Format(time.RFC3339),
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("session refreshed: %s (expires %s)\n", sess.SessionID, sess.ExpiresAt.Format(time.RFC3339)))
+}
+
+func runSessionRevoke(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("session revoke", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" {
+		fmt.Fprintln(stderr, "identity not configured")
+		return 1
+	}
+	if err := session.Delete(identityValue); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return writeOutput(stdout, *jsonOut, map[string]string{"identity": identityValue}, fmt.Sprintf("session revoked for %s\n", identityValue))
 }
 
 func runAuth(args []string, stdout, stderr io.Writer) int {
@@ -388,10 +861,12 @@ func runAuth(args []string, stdout, stderr io.Writer) int {
 func runAuthInspect(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("auth inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
+	_ = useIdentity
 	if fs.NArg() < 1 {
 		fmt.Fprintln(stderr, "request file or url is required")
 		return 1
@@ -417,6 +892,7 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("auth sign", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
@@ -425,11 +901,12 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "request file or url is required")
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -441,12 +918,146 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 	}
 	signature := ed25519.Sign(privateKey, payload)
 	response := map[string]any{
-		"identity":   cfg.Identity,
+		"identity":   identityValue,
 		"issued_at":  time.Now().UTC().Format(time.RFC3339),
 		"signature":  base64.StdEncoding.EncodeToString(signature),
 		"request_id": extractRequestID(payload),
 	}
 	return writeOutput(stdout, *jsonOut, response, "auth request signed\n")
+}
+
+// ensureSession returns a valid session for the given identity on the given relay.
+// It loads the cached session if present and still valid; otherwise it generates
+// a new short-lived Ed25519 keypair, signs the registration with the long-lived
+// identity key, registers it with the relay, and persists it locally.
+//
+// On mobile the long-lived identity private key would live in the secure
+// enclave; the passkey/biometric unlock step happens here and nowhere else
+// under normal operation (i.e. at most once per session lifetime, typically 24h).
+func ensureSession(ctx context.Context, relayURL, identityValue string, identityPriv ed25519.PrivateKey) (session.Session, error) {
+	if existing, err := session.Load(identityValue); err == nil {
+		if existing.IsValid() && existing.RelayURL == relayURL {
+			return existing, nil
+		}
+	}
+	sessionPub, sessionPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return session.Session{}, err
+	}
+	sessionPubB64 := base64.RawURLEncoding.EncodeToString(sessionPub)
+
+	issuedAt := time.Now().UTC()
+	expiresAt := issuedAt.Add(24 * time.Hour)
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return session.Session{}, err
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+
+	issuedAtStr := issuedAt.Format(time.RFC3339)
+	expiresAtStr := expiresAt.Format(time.RFC3339)
+	canonical := fmt.Sprintf("session-registration\n%s\n%s\n%s\n%s\n%s",
+		identityValue, sessionPubB64, issuedAtStr, expiresAtStr, nonce)
+	identitySig := base64.StdEncoding.EncodeToString(ed25519.Sign(identityPriv, []byte(canonical)))
+
+	resp, err := RegisterSession(ctx, relayURL, SessionCreateRequest{
+		Identity:          identityValue,
+		SessionPublicKey:  sessionPubB64,
+		IssuedAt:          issuedAtStr,
+		ExpiresAt:         expiresAtStr,
+		Nonce:             nonce,
+		IdentitySignature: identitySig,
+	})
+	if err != nil {
+		return session.Session{}, err
+	}
+
+	sess := session.Session{
+		Identity:          identityValue,
+		SessionID:         resp.SessionID,
+		SessionPrivateKey: base64.RawStdEncoding.EncodeToString(sessionPriv),
+		SessionPublicKey:  sessionPubB64,
+		IssuedAt:          issuedAt,
+		ExpiresAt:         expiresAt,
+		RelayURL:          relayURL,
+		IssuedAtRaw:       issuedAtStr,
+		ExpiresAtRaw:      expiresAtStr,
+		Nonce:             nonce,
+		IdentitySignature: identitySig,
+	}
+	if err := session.Save(sess); err != nil {
+		return session.Session{}, err
+	}
+	return sess, nil
+}
+
+func fetchInboxWithSessionRetry(ctx context.Context, relayURL, identityValue string, identityPriv ed25519.PrivateKey, sess session.Session) ([]byte, error) {
+	challenge, err := FetchChallenge(ctx, relayURL, identityValue)
+	if err != nil {
+		return nil, err
+	}
+	sessionPriv, err := sess.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(sessionPriv, []byte(challenge.Challenge)))
+	payload, err := FetchInbox(ctx, relayURL, identityValue, signature, sess.SessionID)
+	if err == nil {
+		return payload, nil
+	}
+	if !errors.Is(err, ErrSessionExpired) {
+		return nil, err
+	}
+	_ = session.Delete(identityValue)
+	sess, err = ensureSession(ctx, relayURL, identityValue, identityPriv)
+	if err != nil {
+		return nil, err
+	}
+	challenge, err = FetchChallenge(ctx, relayURL, identityValue)
+	if err != nil {
+		return nil, err
+	}
+	sessionPriv, err = sess.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	signature = base64.StdEncoding.EncodeToString(ed25519.Sign(sessionPriv, []byte(challenge.Challenge)))
+	return FetchInbox(ctx, relayURL, identityValue, signature, sess.SessionID)
+}
+
+// sessionProofFrom builds a SessionProof from the locally stored session. If
+// the session lacks the raw fields (e.g. created before proof support was
+// added) the sender falls back to a nil proof; the home relay will still
+// verify via its cache, and cross-relay delivery would need a `session
+// refresh` to regenerate the proof.
+func sessionProofFrom(sess session.Session) *SessionProof {
+	if sess.IssuedAtRaw == "" || sess.ExpiresAtRaw == "" ||
+		sess.Nonce == "" || sess.IdentitySignature == "" ||
+		sess.SessionPublicKey == "" {
+		return nil
+	}
+	return &SessionProof{
+		SessionPublicKey:  sess.SessionPublicKey,
+		IssuedAt:          sess.IssuedAtRaw,
+		ExpiresAt:         sess.ExpiresAtRaw,
+		Nonce:             sess.Nonce,
+		IdentitySignature: sess.IdentitySignature,
+	}
+}
+
+// signMessage produces a signature over the canonical representation of the
+// message, including session id and encryption metadata when present.
+func signMessage(sessionPriv ed25519.PrivateKey, msg Message) string {
+	parts := []string{msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload}
+	if msg.SessionID != "" {
+		parts = append(parts, "session:"+msg.SessionID)
+	}
+	if msg.Encryption != nil && msg.Encryption.Alg != "" {
+		parts = append(parts, "enc:"+msg.Encryption.Alg+":"+msg.Encryption.EphemeralPublicKey+":"+msg.Encryption.Nonce)
+	}
+	canonical := strings.Join(parts, "\n")
+	sig := ed25519.Sign(sessionPriv, []byte(canonical))
+	return base64.StdEncoding.EncodeToString(sig)
 }
 
 func readRequestPayload(source string) ([]byte, error) {
@@ -496,14 +1107,27 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   eurything identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--json]
-  eurything identity show [--json]
-  eurything identity dns <identity> [--json]
-  eurything send <to> <message> [--json]
-  eurything inbox [--json]
+  eurything identity show [--use-identity=...] [--json]
+  eurything identity dns <identity> [--use-identity=...] [--json]
+  eurything identity use <identity> [--json]
+  eurything identity list [--json]
+  eurything identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
+  eurything send <to> <message> [--use-identity=...] [--json]
+  eurything inbox [--use-identity=...] [--json]
+  eurything session status [--use-identity=...] [--json]
+  eurything session refresh [--use-identity=...] [--json]
+  eurything session revoke [--use-identity=...] [--json]
   eurything relay status [--json]
   eurything auth inspect <request-file-or-url> [--json]
-  eurything auth sign <request-file-or-url> [--json]
+  eurything auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)
+}
+
+func resolveIdentity(flagValue string, fallback string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return fallback
 }
 
 func normalizeArgs(args []string, boolFlags map[string]bool) []string {
@@ -557,4 +1181,9 @@ func resolveDNSToken(provider, flagValue string) string {
 		return value
 	}
 	return ""
+}
+
+// publicFromPrivateX25519 derives the X25519 public key for an identity's stored encryption private key.
+func publicFromPrivateX25519(privateKey []byte) ([]byte, error) {
+	return cryptoe2e.PublicFromPrivate(privateKey)
 }

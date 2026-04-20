@@ -12,9 +12,12 @@ DNS is the authoritative data store for the Eurything Protocol. Every identity i
 
 | Record | Purpose | Required |
 |--------|---------|----------|
-| `TXT` at `_eurything.<identity>` | Public key for the identity | Yes |
+| `TXT` at `_eurything.<identity>` | Long-lived Ed25519 identity public key | Yes |
+| `TXT` at `_eurything-enc.<identity>` | Long-lived X25519 encryption public key | Yes |
 | `A` or `CNAME` at `<identity>` | Relay routing — points to the relay server | Yes |
 | `TXT` at `_eurything-caps.<identity>` | Capability advertisement (future) | No |
+
+Short-lived **session keys** are **not** published in DNS. They live only in the client's local storage and the issuing relay's in-memory cache. Their authorization is carried in the message envelope as `session_proof` when needed (see [Message Format](/protocol/message-format#session-proof)).
 
 ---
 
@@ -52,7 +55,30 @@ When verifying a message signature, the relay resolves `_eurything.<sender-subdo
 
 ---
 
-## 2. Relay Routing Record (`A` / `CNAME`)
+## 2. Encryption Public Key Record (`TXT`)
+
+The identity's long-lived X25519 encryption public key is stored in a `TXT` record at the `_eurything-enc` subdomain prefix. Senders use it to derive a shared secret via X25519 ECDH and end-to-end encrypt the message payload (see [End-to-End Encryption](/protocol/message-format#end-to-end-encryption)).
+
+```
+_eurything-enc.alice.poweur.net.  300  IN  TXT  "eurything-enckey=x25519:<base64url-public-key>"
+```
+
+### Format
+
+```
+eurything-enckey=<algorithm>:<base64url-public-key>
+```
+
+- **algorithm** — `x25519` in the MVP.
+- **base64url-public-key** — the raw 32-byte X25519 public key, base64url-encoded (RFC 4648 §5, no padding).
+
+### Presence
+
+In the MVP the encryption record is written at the same time as the identity public key. Clients that cannot find an encryption record for the recipient will warn the user and, at the user's option, fall back to sending in plaintext.
+
+---
+
+## 3. Relay Routing Record (`A` / `CNAME`)
 
 The identity subdomain itself must have either an `A` record pointing directly to the relay's IPv4 address, or a `CNAME` record pointing to the relay's hostname.
 
@@ -83,26 +109,29 @@ The relay caches resolved addresses for the duration of the DNS record's TTL to 
 
 ---
 
-## 3. Full Example — New Identity
+## 4. Full Example — New Identity
 
 The following DNS records would be written by the relay upon successful registration of the identity `alice.poweur.net`:
 
 ```
 ; ── Identity: alice.poweur.net ──────────────────────────────────────
 
-; Public key (Ed25519, base64url-encoded, no padding)
-_eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:MCowBQYDK2VwAyEAn3a7Lr2Y5mFk8vX1Pm9D4tN6oQ2WqRhZ3cBsKjUdYeI"
+; Identity public key (Ed25519, base64url-encoded, no padding)
+_eurything.alice.poweur.net.       300  IN  TXT  "eurything-pubkey=ed25519:MCowBQYDK2VwAyEAn3a7Lr2Y5mFk8vX1Pm9D4tN6oQ2WqRhZ3cBsKjUdYeI"
+
+; Encryption public key (X25519, base64url-encoded, no padding)
+_eurything-enc.alice.poweur.net.   300  IN  TXT  "eurything-enckey=x25519:2qsV0x9Ru9v3o_VzH7mHsH-yjwI5sOqO6sRpCVoqXxA"
 
 ; Relay routing — option A: direct IP
-alice.poweur.net.             300  IN  A     95.217.142.10
+alice.poweur.net.                  300  IN  A     95.217.142.10
 
 ; Relay routing — option B: CNAME (alternative to A record above)
-; alice.poweur.net.           300  IN  CNAME relay.poweur.net.
+; alice.poweur.net.                300  IN  CNAME relay.poweur.net.
 ```
 
 ---
 
-## 4. Capability Advertisement Record (`TXT`) — Future
+## 5. Capability Advertisement Record (`TXT`) — Future
 
 A reserved `TXT` record format allows identities to advertise supported capabilities via DNS, enabling clients to discover what services an identity supports without contacting any relay.
 

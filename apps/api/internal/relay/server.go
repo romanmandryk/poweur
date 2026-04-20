@@ -33,10 +33,11 @@ type Server struct {
 	identities *storage.IdentityStore
 	inbox      *storage.InboxStore
 	challenges *storage.ChallengeStore
+	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
 	client     *http.Client
 
-	cacheMu   sync.Mutex
+	cacheMu    sync.Mutex
 	relayCache map[string]cachedRelay
 }
 
@@ -53,6 +54,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		identities: storage.NewIdentityStore(),
 		inbox:      storage.NewInboxStore(),
 		challenges: storage.NewChallengeStore(),
+		sessions:   storage.NewSessionStore(),
 		rateLimit:  ratelimit.NewLimiter(cfg.RateLimits),
 		client:     &http.Client{Timeout: 10 * time.Second},
 		relayCache: make(map[string]cachedRelay),
@@ -68,6 +70,9 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
+	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
+	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
+	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	return mux
 }
 
@@ -103,13 +108,23 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	encryptionPublicKey := ""
+	if strings.TrimSpace(req.EncryptionPublicKey) != "" {
+		normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
+			return
+		}
+		encryptionPublicKey = normalizedEnc
+	}
+
 	provider, err := s.providers.Provider(req.DNSProvider)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
 		return
 	}
 
-	if err := provider.WriteIdentityRecords(r.Context(), req.DNSToken, req.Identity, normalized, s.cfg.RelayAddress); err != nil {
+	if err := provider.WriteIdentityRecords(r.Context(), req.DNSToken, req.Identity, normalized, encryptionPublicKey, s.cfg.RelayAddress); err != nil {
 		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
 		return
 	}
@@ -123,12 +138,65 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 	s.identities.Add(identity)
 
 	resp := IdentityResponse{
-		Identity:  identity.Identity,
-		PublicKey: identity.PublicKey,
-		Relay:     s.cfg.RelayAddress,
-		CreatedAt: identity.CreatedAt.Format(time.RFC3339),
+		Identity:            identity.Identity,
+		PublicKey:           identity.PublicKey,
+		EncryptionPublicKey: encryptionPublicKey,
+		Relay:               s.cfg.RelayAddress,
+		CreatedAt:           identity.CreatedAt.Format(time.RFC3339),
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
+// `_eurything-enc.<identity>` TXT record for an already-registered identity.
+//
+// This endpoint exists because early identities were minted before E2E
+// encryption landed, so they have a signing record in DNS but no encryption
+// record. A separate endpoint (instead of POST /identities with upsert
+// semantics) keeps the primary registration flow strict — "create once" —
+// and makes the "retro-fit an existing identity" flow explicit and auditable.
+//
+// Authority is proven by possession of the DNS token: whoever can write to the
+// zone owns the identity. The relay does not require the identity to exist in
+// its in-memory IdentityStore (which resets on restart), only that the caller
+// can name it and write to its DNS zone.
+func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.Request) {
+	identityValue := r.PathValue("identity")
+	if identityValue == "" {
+		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
+		return
+	}
+	var req EncryptionKeyRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		return
+	}
+	if req.EncryptionPublicKey == "" || req.DNSProvider == "" || req.DNSToken == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
+		return
+	}
+
+	normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
+		return
+	}
+
+	provider, err := s.providers.Provider(req.DNSProvider)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
+		return
+	}
+
+	if err := provider.WriteEncryptionKey(r.Context(), req.DNSToken, identityValue, normalizedEnc); err != nil {
+		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, EncryptionKeyResponse{
+		Identity:            identityValue,
+		EncryptionPublicKey: normalizedEnc,
+		UpdatedAt:           time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +249,16 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_message", "timestamp must be RFC3339")
 		return
 	}
+	// Encrypt-only policy: every message MUST carry encryption metadata
+	// (alg + ephemeral pub + nonce). This is belt-and-suspenders on top of
+	// the CLI's client-side refusal and makes it impossible for any past or
+	// future client to deliver plaintext through this relay.
+	if msg.Encryption == nil || msg.Encryption.Alg == "" ||
+		msg.Encryption.EphemeralPublicKey == "" || msg.Encryption.Nonce == "" {
+		writeError(w, http.StatusBadRequest, "encryption_required",
+			"messages must be end-to-end encrypted (alg, ephemeral_public_key, nonce required)")
+		return
+	}
 
 	decision := s.rateLimit.Allow(msg.Sender)
 	if !decision.Allowed {
@@ -193,15 +271,23 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	publicKey, err := s.resolvePublicKey(r.Context(), msg.Sender)
+	publicKey, source, err := s.resolveSigningKey(r.Context(), msg.Sender, msg.SessionID, msg.SessionProof)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 		return
 	}
 
-	canonical := crypto.CanonicalMessage(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload)
+	var encMeta *crypto.EncryptionMeta
+	if msg.Encryption != nil {
+		encMeta = &crypto.EncryptionMeta{
+			Alg:                msg.Encryption.Alg,
+			EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+			Nonce:              msg.Encryption.Nonce,
+		}
+	}
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
+		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
 
@@ -213,6 +299,14 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			Timestamp: msg.Timestamp,
 			Payload:   msg.Payload,
 			Signature: msg.Signature,
+			SessionID: msg.SessionID,
+		}
+		if msg.Encryption != nil {
+			stored.Encryption = &storage.StoredEncryptionMeta{
+				Alg:                msg.Encryption.Alg,
+				EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+				Nonce:              msg.Encryption.Nonce,
+			}
 		}
 		s.inbox.Add(msg.Recipient, stored)
 		w.WriteHeader(http.StatusAccepted)
@@ -242,6 +336,7 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
 		return
 	}
+	sessionID := r.Header.Get("X-Eurything-Session-Id")
 
 	challenge, ok := s.challenges.Consume(identity)
 	if !ok {
@@ -249,13 +344,28 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry, ok := s.identities.Get(identity)
-	if !ok {
-		writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
-		return
+	var publicKey ed25519.PublicKey
+	if sessionID != "" {
+		session, ok := s.sessions.Get(sessionID)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "session_expired", "session expired or not found")
+			return
+		}
+		if session.Identity != identity {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
+			return
+		}
+		publicKey = session.PublicKeyBytes
+	} else {
+		entry, ok := s.identities.Get(identity)
+		if !ok {
+			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
+			return
+		}
+		publicKey = entry.PublicKeyBytes
 	}
 
-	if err := crypto.VerifySignature(entry.PublicKeyBytes, challenge.Value, signature); err != nil {
+	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
 		return
 	}
@@ -264,7 +374,99 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
-func (s *Server) resolvePublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
+// resolveSigningKey returns the public key the relay should verify a message
+// signature against. Priority order:
+//
+//  1. Local session cache (when sessionID is present and known). This is the
+//     fast path for messages posted to the same relay that issued the session.
+//  2. Embedded SessionProof (when sessionID is present but unknown, e.g. the
+//     message was forwarded from another relay). The relay verifies the proof
+//     against the sender's long-lived identity key, caches the session, and
+//     uses the proof's session public key to verify the message.
+//  3. Long-lived identity key (when sessionID is empty). Used by headless
+//     clients that opt out of sessions.
+//
+// The returned source string is "session", "session-proof", or "identity" for
+// diagnostic headers.
+func (s *Server) resolveSigningKey(ctx context.Context, sender, sessionID string, proof *SessionProof) (ed25519.PublicKey, string, error) {
+	if sessionID != "" {
+		if session, ok := s.sessions.Get(sessionID); ok {
+			if session.Identity != sender {
+				return nil, "session", errors.New("session does not belong to sender")
+			}
+			return session.PublicKeyBytes, "session", nil
+		}
+		if proof != nil {
+			sess, err := s.acceptSessionProof(ctx, sender, sessionID, proof)
+			if err != nil {
+				return nil, "session-proof", err
+			}
+			return sess.PublicKeyBytes, "session-proof", nil
+		}
+		return nil, "session", errors.New("session expired or not found")
+	}
+	pub, err := s.resolveIdentityPublicKey(ctx, sender)
+	if err != nil {
+		return nil, "identity", err
+	}
+	return pub, "identity", nil
+}
+
+// acceptSessionProof verifies a SessionProof against the sender's long-lived
+// identity key and, on success, caches the resulting session so subsequent
+// messages on the same relay take the fast path.
+func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID string, proof *SessionProof) (storage.Session, error) {
+	if proof.SessionPublicKey == "" || proof.IssuedAt == "" || proof.ExpiresAt == "" ||
+		proof.Nonce == "" || proof.IdentitySignature == "" {
+		return storage.Session{}, errors.New("session proof incomplete")
+	}
+	issuedAt, err := time.Parse(time.RFC3339, proof.IssuedAt)
+	if err != nil {
+		return storage.Session{}, errors.New("session proof issued_at invalid")
+	}
+	expiresAt, err := time.Parse(time.RFC3339, proof.ExpiresAt)
+	if err != nil {
+		return storage.Session{}, errors.New("session proof expires_at invalid")
+	}
+	now := time.Now().UTC()
+	if now.After(expiresAt) {
+		return storage.Session{}, errors.New("session proof expired")
+	}
+	if expiresAt.Sub(issuedAt) > maxSessionTTL {
+		return storage.Session{}, errors.New("session proof exceeds max TTL")
+	}
+
+	normalizedPub, pubBytes, err := crypto.NormalizePublicKey(proof.SessionPublicKey)
+	if err != nil {
+		return storage.Session{}, errors.New("session proof public key invalid: " + err.Error())
+	}
+
+	identityPub, err := s.resolveIdentityPublicKey(ctx, sender)
+	if err != nil {
+		return storage.Session{}, errors.New("cannot resolve identity key: " + err.Error())
+	}
+	canonical := crypto.CanonicalSessionRegistration(sender, normalizedPub, proof.IssuedAt, proof.ExpiresAt, proof.Nonce)
+	if err := crypto.VerifySignature(identityPub, canonical, proof.IdentitySignature); err != nil {
+		return storage.Session{}, errors.New("session proof signature invalid")
+	}
+
+	sess := storage.Session{
+		ID:                sessionID,
+		Identity:          sender,
+		PublicKey:         normalizedPub,
+		PublicKeyBytes:    pubBytes,
+		IssuedAt:          issuedAt.UTC(),
+		ExpiresAt:         expiresAt.UTC(),
+		IssuedAtRaw:       proof.IssuedAt,
+		ExpiresAtRaw:      proof.ExpiresAt,
+		Nonce:             proof.Nonce,
+		IdentitySignature: proof.IdentitySignature,
+	}
+	s.sessions.Put(sess)
+	return sess, nil
+}
+
+func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
 	if entry, ok := s.identities.Get(identity); ok {
 		return entry.PublicKeyBytes, nil
 	}
@@ -309,11 +511,38 @@ func (s *Server) isLocalRecipient(ctx context.Context, identity string) bool {
 	if s.cfg.RelayAddress == "" {
 		return false
 	}
-	host, err := s.resolveRelayHost(ctx, identity)
-	if err != nil {
+	identityHosts, err := s.resolver.LookupHost(ctx, identity)
+	if err != nil || len(identityHosts) == 0 {
 		return false
 	}
-	return strings.EqualFold(host, s.cfg.RelayAddress)
+	// Fast path — DNS returned the relay's configured hostname directly.
+	// Covers test environments that mock DNS with hostname targets.
+	for _, h := range identityHosts {
+		if strings.EqualFold(h, s.cfg.RelayAddress) {
+			return true
+		}
+	}
+	// Production path — behind Cloudflare (or any reverse-proxy) both
+	// `<identity>` and `<RelayAddress>` resolve to the same edge IPs, so
+	// the hostname compare above never matches. Resolve the relay's own
+	// hostname and treat the recipient as local when the IP sets overlap.
+	// Without this, the relay tries to forward the message to one of CF's
+	// edge IPs and fails the TLS handshake (502 forward_failed), even
+	// though the recipient lives on this very relay.
+	selfHosts, err := s.resolver.LookupHost(ctx, s.cfg.RelayAddress)
+	if err != nil || len(selfHosts) == 0 {
+		return false
+	}
+	selfSet := make(map[string]struct{}, len(selfHosts))
+	for _, h := range selfHosts {
+		selfSet[strings.ToLower(h)] = struct{}{}
+	}
+	for _, h := range identityHosts {
+		if _, ok := selfSet[strings.ToLower(h)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) resolveRelayHost(ctx context.Context, identity string) (string, error) {
@@ -347,6 +576,22 @@ func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
 	if err != nil {
 		return err
 	}
+
+	// If the message is session-signed and we have the session cached, attach
+	// a self-contained SessionProof so the peer relay can verify the message
+	// without sharing session state with us.
+	if msg.SessionID != "" && msg.SessionProof == nil {
+		if sess, ok := s.sessions.Get(msg.SessionID); ok && sess.IdentitySignature != "" {
+			msg.SessionProof = &SessionProof{
+				SessionPublicKey:  sess.PublicKey,
+				IssuedAt:          sess.IssuedAtRaw,
+				ExpiresAt:         sess.ExpiresAtRaw,
+				Nonce:             sess.Nonce,
+				IdentitySignature: sess.IdentitySignature,
+			}
+		}
+	}
+
 	url := fmt.Sprintf("%s://%s/messages", s.cfg.RelayScheme, relayHost)
 	payload, err := json.Marshal(msg)
 	if err != nil {

@@ -12,18 +12,46 @@ import (
 )
 
 type Provider interface {
-	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, relayAddress string) error
+	// WriteIdentityRecords publishes the full set of DNS records for a new
+	// identity: its signing TXT, its optional encryption TXT, and its
+	// relay host record.
+	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error
+
+	// WriteEncryptionKey publishes (or overwrites) just the
+	// `_eurything-enc.<identity>` TXT record. It exists so that an identity
+	// created before the encryption-key support landed can be retro-fitted
+	// with an X25519 key, and so existing identities can rotate their
+	// encryption key without touching the signing key or the relay host
+	// record.
+	WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error
 }
 
 type ProviderFactory struct {
-	cfg config.Config
+	cfg       config.Config
+	overrides map[string]Provider
 }
 
 func NewProviderFactory(cfg config.Config) *ProviderFactory {
-	return &ProviderFactory{cfg: cfg}
+	return &ProviderFactory{cfg: cfg, overrides: map[string]Provider{}}
+}
+
+// Register installs a Provider under the given name, shadowing the built-in
+// implementation. Primarily used by integration tests that want a specific
+// in-memory provider instance (e.g. backed by a shared DNS zone) to be
+// returned when the relay handles POST /identities.
+func (f *ProviderFactory) Register(name string, provider Provider) {
+	if f.overrides == nil {
+		f.overrides = map[string]Provider{}
+	}
+	f.overrides[strings.ToLower(name)] = provider
 }
 
 func (f *ProviderFactory) Provider(name string) (Provider, error) {
+	if f.overrides != nil {
+		if p, ok := f.overrides[strings.ToLower(name)]; ok {
+			return p, nil
+		}
+	}
 	switch strings.ToLower(name) {
 	case "cloudflare":
 		return NewCloudflareProvider(f.cfg), nil

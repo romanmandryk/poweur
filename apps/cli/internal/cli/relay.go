@@ -8,16 +8,69 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"os"
 	"strings"
 	"time"
 )
 
+// debugHTTP is flipped on when DEBUG_HTTP=1 is set. It causes the relay
+// client to dump every request (and truncated response) to stderr — handy
+// when CF returns a mystery 502 and we need to know exactly what hit the
+// origin.
+var debugHTTP = os.Getenv("DEBUG_HTTP") == "1"
+
+func dumpRequest(req *http.Request) {
+	if !debugHTTP {
+		return
+	}
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[debug-http] dump request: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[debug-http] --- request ---\n%s\n[debug-http] --- end request ---\n", dump)
+}
+
+func dumpResponse(resp *http.Response) {
+	if !debugHTTP || resp == nil {
+		return
+	}
+	dump, err := httputil.DumpResponse(resp, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[debug-http] dump response: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[debug-http] --- response ---\n%s\n[debug-http] --- end response ---\n", dump)
+}
+
+type EncryptionMeta struct {
+	Alg                string `json:"alg"`
+	EphemeralPublicKey string `json:"ephemeral_public_key"`
+	Nonce              string `json:"nonce"`
+}
+
+// SessionProof lets any relay verify a session-signed message without
+// consulting the session cache of the relay that originally issued the
+// session. It is produced once at session registration and re-used on every
+// message sent from that session.
+type SessionProof struct {
+	SessionPublicKey  string `json:"session_public_key"`
+	IssuedAt          string `json:"issued_at"`
+	ExpiresAt         string `json:"expires_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+}
+
 type Message struct {
-	Sender    string `json:"sender"`
-	Recipient string `json:"recipient"`
-	Timestamp string `json:"timestamp"`
-	Payload   string `json:"payload"`
-	Signature string `json:"signature"`
+	Sender       string          `json:"sender"`
+	Recipient    string          `json:"recipient"`
+	Timestamp    string          `json:"timestamp"`
+	Payload      string          `json:"payload"`
+	Signature    string          `json:"signature"`
+	SessionID    string          `json:"session_id,omitempty"`
+	SessionProof *SessionProof   `json:"session_proof,omitempty"`
+	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
 }
 
 type ChallengeResponse struct {
@@ -26,10 +79,11 @@ type ChallengeResponse struct {
 }
 
 type IdentityResponse struct {
-	Identity  string `json:"identity"`
-	PublicKey string `json:"public_key"`
-	Relay     string `json:"relay"`
-	CreatedAt string `json:"created_at"`
+	Identity            string `json:"identity"`
+	PublicKey           string `json:"public_key"`
+	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
+	Relay               string `json:"relay"`
+	CreatedAt           string `json:"created_at"`
 }
 
 type HealthResponse struct {
@@ -42,23 +96,43 @@ type ErrorResponse struct {
 	Detail string `json:"detail"`
 }
 
-func CheckRelayHealth(ctx context.Context, relayURL string) error {
-	_, err := FetchHealth(ctx, relayURL)
-	if err != nil {
-		return err
-	}
-	return nil
+type SessionCreateRequest struct {
+	Identity          string `json:"identity"`
+	SessionPublicKey  string `json:"session_public_key"`
+	IssuedAt          string `json:"issued_at"`
+	ExpiresAt         string `json:"expires_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+	DeviceFingerprint string `json:"device_fingerprint,omitempty"`
 }
 
-func RegisterIdentity(ctx context.Context, relayURL, identity, publicKey, dnsProvider, dnsToken string) (IdentityResponse, error) {
+type SessionResponse struct {
+	SessionID        string `json:"session_id"`
+	Identity         string `json:"identity"`
+	SessionPublicKey string `json:"session_public_key"`
+	IssuedAt         string `json:"issued_at"`
+	ExpiresAt        string `json:"expires_at"`
+}
+
+// ErrSessionExpired is returned when a relay call rejects the current session.
+// Callers can use this sentinel to trigger an automatic session re-registration.
+var ErrSessionExpired = errors.New("session expired")
+
+func CheckRelayHealth(ctx context.Context, relayURL string) error {
+	_, err := FetchHealth(ctx, relayURL)
+	return err
+}
+
+func RegisterIdentity(ctx context.Context, relayURL, identity, publicKey, encryptionPublicKey, dnsProvider, dnsToken string) (IdentityResponse, error) {
 	if relayURL == "" {
 		return IdentityResponse{}, errors.New("relay url is required")
 	}
 	payload, err := json.Marshal(map[string]string{
-		"identity":     identity,
-		"public_key":   publicKey,
-		"dns_provider": dnsProvider,
-		"dns_token":    dnsToken,
+		"identity":              identity,
+		"public_key":            publicKey,
+		"encryption_public_key": encryptionPublicKey,
+		"dns_provider":          dnsProvider,
+		"dns_token":             dnsToken,
 	})
 	if err != nil {
 		return IdentityResponse{}, err
@@ -84,6 +158,85 @@ func RegisterIdentity(ctx context.Context, relayURL, identity, publicKey, dnsPro
 	return response, nil
 }
 
+// EncryptionKeyResponse matches the relay's reply when publishing or rotating
+// an identity's X25519 encryption key via POST /identities/{identity}/encryption-key.
+type EncryptionKeyResponse struct {
+	Identity            string `json:"identity"`
+	EncryptionPublicKey string `json:"encryption_public_key"`
+	UpdatedAt           string `json:"updated_at"`
+}
+
+// PublishEncryptionKey calls POST /identities/{identity}/encryption-key on the
+// relay. The relay uses the caller's DNS token to upsert the
+// `_eurything-enc.<identity>` TXT record. This is the path used by
+// `eurything identity add-encryption-key` and will happily overwrite an
+// existing record (rotation).
+func PublishEncryptionKey(ctx context.Context, relayURL, identity, encryptionPublicKey, dnsProvider, dnsToken string) (EncryptionKeyResponse, error) {
+	if relayURL == "" {
+		return EncryptionKeyResponse{}, errors.New("relay url is required")
+	}
+	if identity == "" {
+		return EncryptionKeyResponse{}, errors.New("identity is required")
+	}
+	payload, err := json.Marshal(map[string]string{
+		"encryption_public_key": encryptionPublicKey,
+		"dns_provider":          dnsProvider,
+		"dns_token":             dnsToken,
+	})
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	url := fmt.Sprintf("%s/identities/%s/encryption-key", relayURL, identity)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return EncryptionKeyResponse{}, parseErrorResponse("encryption key publish failed", resp)
+	}
+	var response EncryptionKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	return response, nil
+}
+
+func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequest) (SessionResponse, error) {
+	if relayURL == "" {
+		return SessionResponse{}, errors.New("relay url is required")
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return SessionResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/sessions", bytes.NewReader(payload))
+	if err != nil {
+		return SessionResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return SessionResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return SessionResponse{}, parseErrorResponse("session registration failed", resp)
+	}
+	var response SessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return SessionResponse{}, err
+	}
+	return response, nil
+}
+
 func SendMessage(ctx context.Context, relayURL string, msg Message) (*http.Response, error) {
 	payload, err := json.Marshal(msg)
 	if err != nil {
@@ -94,8 +247,13 @@ func SendMessage(ctx context.Context, relayURL string, msg Message) (*http.Respo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	dumpRequest(req)
 	client := &http.Client{Timeout: 10 * time.Second}
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err == nil {
+		dumpResponse(resp)
+	}
+	return resp, err
 }
 
 func FetchChallenge(ctx context.Context, relayURL, identity string) (ChallengeResponse, error) {
@@ -119,13 +277,19 @@ func FetchChallenge(ctx context.Context, relayURL, identity string) (ChallengeRe
 	return challenge, nil
 }
 
-func FetchInbox(ctx context.Context, relayURL, identity, signature string) ([]byte, error) {
+// FetchInbox retrieves messages. When sessionID is non-empty, the relay verifies
+// the signature using the session public key. If the relay reports the session
+// has expired, ErrSessionExpired is returned so the CLI can re-register.
+func FetchInbox(ctx context.Context, relayURL, identity, signature, sessionID string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, relayURL+"/messages/"+identity, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-Eurything-Identity", identity)
 	req.Header.Set("X-Eurything-Signature", signature)
+	if sessionID != "" {
+		req.Header.Set("X-Eurything-Session-Id", sessionID)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -133,6 +297,9 @@ func FetchInbox(ctx context.Context, relayURL, identity, signature string) ([]by
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if err := detectSessionExpired(resp); err != nil {
+			return nil, err
+		}
 		return nil, parseErrorResponse("inbox request failed", resp)
 	}
 	return io.ReadAll(resp.Body)
@@ -157,6 +324,27 @@ func FetchHealth(ctx context.Context, relayURL string) (HealthResponse, error) {
 		return HealthResponse{}, err
 	}
 	return response, nil
+}
+
+func detectSessionExpired(resp *http.Response) error {
+	if resp.StatusCode != http.StatusUnauthorized {
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	var payload ErrorResponse
+	if err := json.Unmarshal(body, &payload); err == nil {
+		if payload.Error == "session_expired" {
+			return ErrSessionExpired
+		}
+		if strings.Contains(strings.ToLower(payload.Detail), "session expired") {
+			return ErrSessionExpired
+		}
+	}
+	return nil
 }
 
 func parseErrorResponse(prefix string, resp *http.Response) error {

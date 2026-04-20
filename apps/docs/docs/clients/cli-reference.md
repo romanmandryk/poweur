@@ -25,17 +25,13 @@ cp dist/eurything /usr/local/bin/
 
 ## Configuration
 
-Configuration is stored at `~/.eurything/config.toml`. On first run, an interactive setup wizard creates this file.
+Configuration is stored at `~/.eurything/config.toml`. The CLI stores a default identity plus a root keys directory; you can override the identity per command.
 
 ```toml
 # ~/.eurything/config.toml
-
-[relay]
-url = "https://relay.poweur.net"
-
-[identity]
-subdomain = "mybot.poweur.net"
-key_path  = "~/.eurything/keys/mybot.poweur.net.key"
+relay_url = "https://relay.poweur.net"
+identity  = "mybot.poweur.net"
+keys_dir  = "~/.eurything/keys"
 ```
 
 Individual settings can be overridden via environment variables:
@@ -44,7 +40,7 @@ Individual settings can be overridden via environment variables:
 |---------|---------|
 | Relay URL | `RELAY_URL` |
 | Identity subdomain | `IDENTITY` |
-| Private key path | `KEY_PATH` |
+| Keys directory | `KEYS_DIR` |
 
 ## Global Flags
 
@@ -53,10 +49,7 @@ All commands accept these global flags:
 | Flag | Description |
 |------|-------------|
 | `--json` | Output machine-readable JSON instead of human-friendly text |
-| `--identity <subdomain>` | Override the active identity for this command |
-| `--relay <url>` | Override the relay URL for this command |
-| `--config <path>` | Use a non-default config file |
-| `--debug` | Enable verbose debug logging |
+| `--use-identity <subdomain>` | Override the active identity for this command |
 
 ---
 
@@ -64,40 +57,44 @@ All commands accept these global flags:
 
 ### `eurything identity create <name>`
 
-Generate a new Ed25519 key pair and register the identity `<name>.<parent-domain>` with the configured relay.
+Generate a new long-lived Ed25519 signing keypair **and** an X25519 encryption keypair, then register both public keys (and the relay routing record) with the configured relay.
 
 ```bash
 eurything identity create alice
 ```
 
-The CLI prompts for:
-- DNS provider (`cloudflare` or `hetzner`)
-- DNS API token for the target zone
-- Optional display name, profile picture URL, and bio
+The relay writes three DNS records:
 
-The relay writes the DNS records and registers the identity. The CLI waits for DNS propagation before confirming success.
+- `_eurything.<identity>` — identity public key
+- `_eurything-enc.<identity>` — encryption public key
+- `<identity>` — `A`/`CNAME` routing record
+
+Private keys are written to `~/.eurything/keys/` (`<identity>.key` and `<identity>.enc`).
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--provider <name>` | DNS provider (`cloudflare` \| `hetzner`) — skips prompt |
-| `--token <value>` | DNS API token — skips prompt (use with care in scripts; prefer env var) |
-| `--dns-token-env <VAR>` | Read DNS API token from the named environment variable |
-| `--no-wait` | Submit registration and exit without waiting for DNS propagation |
+| `--dns-provider <name>` | DNS provider (`cloudflare` \| `hetzner`) |
+| `--dns-token <value>` | DNS API token (prefer `CLOUDFLARE_API_TOKEN` / `HETZNER_API_TOKEN`) |
+| `--parent-domain <domain>` | Parent domain used when a handle is provided |
+| `--relay <url>` | Relay URL override |
+| `--use-identity <subdomain>` | Override identity for this command |
 
 **Example (JSON output):**
 ```bash
-eurything identity create alice --provider cloudflare --dns-token-env CF_TOKEN --json
+eurything identity create alice --dns-provider cloudflare --json
 ```
 
 ```json
 {
-  "identity":   "alice.poweur.net",
-  "public_key": "MCowBQYDK2VwAyEAn3a7...",
-  "relay":      "relay.poweur.net",
-  "status":     "pending_dns",
-  "dns_check":  "Run `eurything identity check alice.poweur.net` to verify propagation"
+  "identity":              "alice.poweur.net",
+  "public_key":            "MCowBQYDK2VwAyEAn3a7...",
+  "encryption_public_key": "2qsV0x9Ru9v3o_VzH7mHsH-yjwI5sOqO6sRpCVoqXxA",
+  "key_path":              "~/.eurything/keys/alice.poweur.net.key",
+  "encryption_key_path":   "~/.eurything/keys/alice.poweur.net.enc",
+  "relay":                 "https://relay.poweur.net",
+  "registered":            true
 }
 ```
 
@@ -105,53 +102,53 @@ eurything identity create alice --provider cloudflare --dns-token-env CF_TOKEN -
 
 ### `eurything identity show`
 
-Display the current identity's subdomain, public key, and relay configuration.
+Display the current identity's subdomain, identity public key, and (if available) encryption public key.
 
 ```bash
 eurything identity show
 ```
 
-**Output:**
-```
-Identity:   alice.poweur.net
-Public key: MCowBQYDK2VwAyEAn3a7...
-Relay:      https://relay.poweur.net
-Key file:   ~/.eurything/keys/alice.poweur.net.key
-```
+---
 
-**JSON output (`--json`):**
-```json
-{
-  "identity":   "alice.poweur.net",
-  "public_key": "MCowBQYDK2VwAyEAn3a7...",
-  "relay":      "https://relay.poweur.net",
-  "key_path":   "~/.eurything/keys/alice.poweur.net.key"
-}
+### `eurything identity dns <identity>`
+
+Perform a live DNS lookup to verify that the identity's `TXT` (public key), `TXT` (encryption key), and `A`/`CNAME` records are propagated.
+
+```bash
+eurything identity dns alice.poweur.net
 ```
 
 ---
 
-### `eurything identity check <subdomain>`
+### `eurything identity use <identity>`
 
-Perform a live DNS lookup to verify that the identity's `TXT` and `A` records are propagated.
+Update the default identity stored in `~/.eurything/config.toml`.
 
 ```bash
-eurything identity check alice.poweur.net
+eurything identity use id2.poweur.net
 ```
 
-**Output:**
-```
-Checking DNS for alice.poweur.net...
-  TXT _eurything.alice.poweur.net → eurything-pubkey=ed25519:MCowBQYDK2Vw... ✓
-  A   alice.poweur.net            → 95.217.142.10 ✓
-DNS propagation confirmed.
+---
+
+### `eurything identity list`
+
+List all identities discovered in the keys directory. The current default is marked with `*`.
+
+```bash
+eurything identity list
 ```
 
 ---
 
 ### `eurything send <to> <message>`
 
-Sign and send a message to the given identity address. The message is signed with the active identity's private key and submitted to the configured relay.
+Sign and send a message. By default the CLI:
+
+1. Loads (or creates) a session for the active identity via `ensure session`.
+2. Looks up the recipient's encryption public key from DNS.
+3. Encrypts the payload with ChaCha20-Poly1305 if the recipient has a published encryption key. If not, it prints a warning and sends plaintext.
+4. Signs the message with the **session private key**.
+5. Attaches `session_id` and `session_proof` so the recipient's relay can verify without contacting the sender's relay.
 
 ```bash
 eurything send bob.example.org "Hey Bob, are you there?"
@@ -161,76 +158,58 @@ eurything send bob.example.org "Hey Bob, are you there?"
 
 | Flag | Description |
 |------|-------------|
-| `--from <identity>` | Send from a specific identity (overrides active identity) |
+| `--use-identity <identity>` | Send from a specific identity (overrides active identity) |
+| `--no-encrypt` | Skip encryption and send plaintext (not recommended) |
+| `--json` | Machine-readable output |
 
-**Output:**
-```
-Message sent to bob.example.org
-  Relay:     relay.poweur.net
-  Message ID: msg_01j9xk7q2f000000000000000
-  Timestamp: 2026-03-28T12:00:00Z
-```
-
-**JSON output (`--json`):**
-```json
-{
-  "status":     "accepted",
-  "message_id": "msg_01j9xk7q2f000000000000000",
-  "sender":     "alice.poweur.net",
-  "recipient":  "bob.example.org",
-  "timestamp":  "2026-03-28T12:00:00Z"
-}
-```
+If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing.
 
 ---
 
 ### `eurything inbox`
 
-Fetch and display messages from the relay inbox for the active identity. The CLI performs the challenge–response authentication flow automatically.
+Fetch and display messages from the relay inbox for the active identity. The CLI:
+
+1. Ensures a valid session.
+2. Fetches a challenge from the relay, signs it with the session key, and calls `GET /messages/:identity`.
+3. Decrypts any envelope with `encryption` metadata using the local X25519 private key. Decrypted messages are prefixed with `🔒` in human output.
+4. Silently re-registers and retries if the relay reports the session expired.
 
 ```bash
 eurything inbox
-```
-
-**Output:**
-```
-Inbox for alice.poweur.net (3 messages)
-
-  [1] From: bob.example.org  |  2026-03-28T12:00:00Z
-      Hey Alice!
-
-  [2] From: carol.poweur.net  |  2026-03-28T11:55:00Z
-      Are you joining the call?
-
-  [3] From: r2d2-bot.poweur.net  |  2026-03-28T11:50:00Z
-      Status report: all systems nominal.
 ```
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--limit <n>` | Show only the most recent `n` messages |
-| `--from <identity>` | Filter messages from a specific sender |
-| `--since <timestamp>` | Show only messages after this ISO 8601 timestamp |
-| `--verify` | Verify each message signature before displaying (default: true) |
+| `--use-identity <identity>` | Fetch inbox for a specific identity |
+| `--json` | Raw JSON output (including undecrypted envelope) |
 
-**JSON output (`--json`):**
-```json
-{
-  "identity": "alice.poweur.net",
-  "messages": [
-    {
-      "id":        "msg_01j9xk7q2f000000000000000",
-      "sender":    "bob.example.org",
-      "recipient": "alice.poweur.net",
-      "timestamp": "2026-03-28T12:00:00Z",
-      "payload":   "Hey Alice!",
-      "signature": "<base64-encoded signature>",
-      "verified":  true
-    }
-  ]
-}
+---
+
+### `eurything session status`
+
+Show the locally cached session for the active identity.
+
+```bash
+eurything session status
+```
+
+### `eurything session refresh`
+
+Force-delete the cached session and register a new one. Useful when debugging or rotating keys without waiting for the 24h TTL.
+
+```bash
+eurything session refresh
+```
+
+### `eurything session revoke`
+
+Delete the local session file only (does not call `DELETE /sessions/:id` on the relay). The next send or inbox call will transparently re-register.
+
+```bash
+eurything session revoke
 ```
 
 ---

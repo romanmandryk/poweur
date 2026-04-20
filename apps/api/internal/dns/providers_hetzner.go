@@ -27,7 +27,7 @@ func NewHetznerProvider(cfg config.Config) *HetznerProvider {
 	}
 }
 
-func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, relayAddress string) error {
+func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error {
 	if token == "" {
 		return errors.New("missing hetzner api token")
 	}
@@ -44,11 +44,36 @@ func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, ident
 		return err
 	}
 
+	if encryptionPublicKey != "" {
+		encName := fmt.Sprintf("_eurything-enc.%s", identity)
+		encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+		if err := p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl); err != nil {
+			return err
+		}
+	}
+
 	recordType, relayHost := relayRecord(relayAddress)
 	if err := p.upsertRecord(ctx, token, zoneID, recordType, identity, relayHost, ttl); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (p *HetznerProvider) WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error {
+	if token == "" {
+		return errors.New("missing hetzner api token")
+	}
+	if encryptionPublicKey == "" {
+		return errors.New("missing encryption public key")
+	}
+	zoneID, err := p.findZoneID(ctx, token, identity)
+	if err != nil {
+		return err
+	}
+	ttl := int(defaultTTL(p.cfg).Seconds())
+	encName := fmt.Sprintf("_eurything-enc.%s", identity)
+	encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+	return p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl)
 }
 
 func (p *HetznerProvider) findZoneID(ctx context.Context, token, identity string) (string, error) {

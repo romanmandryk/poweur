@@ -29,37 +29,83 @@ agent-007.example.com
 
 ## Key Pairs
 
-Each identity is associated with an **Ed25519 key pair**:
+Each identity owns **three** cryptographic keys. The first two are long-lived; the third is short-lived and rotates on a 24-hour cadence.
 
-- **Private key** — never leaves the device. Stored in hardware-backed secure storage (iOS Secure Enclave / Android StrongBox on mobile; OS keychain or local key file for the CLI).
-- **Public key** — published in DNS. Any party can retrieve it by resolving `_eurything.<identity>` as a `TXT` record.
+### Long-lived identity key (Ed25519)
 
-The public key is base64-encoded and stored in DNS as:
+The authoritative signing key for the identity. Used to authorize sessions, sign auth challenges for third-party login, and (for clients that opt out of sessions) sign messages directly.
+
+- **Private key** — never leaves the device. Stored in hardware-backed secure storage (iOS Secure Enclave / Android StrongBox on mobile; OS keychain or a key file under `~/.eurything/keys/` for the CLI).
+- **Public key** — published in DNS at `_eurything.<identity>` as a `TXT` record:
 
 ```
-_eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64-encoded-public-key>"
+_eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64url-public-key>"
 ```
 
 Because the public key is published in DNS and the private key never leaves the device, there is no central authority that can forge or revoke an identity's signatures. The owner of the DNS zone is the owner of the identity.
 
-The same key pair is also intended to back third-party sign-up and sign-in flows. A relying party can challenge `alice.poweur.net`, and Alice's device can prove control of that identity by signing the challenge and letting the relying party verify it against the public key in DNS.
+### Long-lived encryption key (X25519)
+
+Enables senders to end-to-end encrypt messages to this identity. Generated alongside the identity key at registration time and stored on the same device with the same storage rules.
+
+- **Public key** — published in DNS at `_eurything-enc.<identity>`:
+
+```
+_eurything-enc.alice.poweur.net.  300  IN  TXT  "eurything-enckey=x25519:<base64url-public-key>"
+```
+
+- **Private key** — stored locally and used only for decrypting incoming messages. The identity key and encryption key are separate so the cryptographic signing role and the cryptographic encryption role have independent lifetimes and threat models.
+
+### Short-lived session key (Ed25519) {#sessions}
+
+A per-device, per-relay ephemeral signing key with a **maximum lifetime of 24 hours**. All routine operations (sending messages, fetching the inbox) are signed by the session key; the long-lived identity key is only invoked once per session refresh. On mobile this means a passkey unlock happens at most once per session — typically once a day — rather than on every message.
+
+Session flow:
+
+1. **Generate.** The client generates a fresh Ed25519 keypair locally.
+2. **Authorize.** The client signs a canonical session-registration string (`session-registration\n<identity>\n<session_public_key>\n<issued_at>\n<expires_at>\n<nonce>`) with the long-lived identity key. On mobile this is the passkey unlock step.
+3. **Register.** The client POSTs the authorized registration to `POST /sessions` on its relay. The relay verifies the identity signature against the long-lived public key (resolved from DNS), enforces the 24h TTL, issues a `session_id`, and caches the session in memory.
+4. **Sign & send.** Subsequent `POST /messages` and `GET /messages/:identity` calls send `session_id` (plus an optional self-contained `session_proof` for cross-relay verification) and sign with the session key.
+5. **Rotate or expire.** When the session nears expiry or the relay returns `401 session_expired`, the client silently re-runs the flow. Relay restarts also invalidate all sessions; clients re-register transparently.
+
+Because sessions live in relay memory only, losing a session private key or losing a relay-side cache is not a protocol-level failure — the client just registers a fresh session.
+
+A session can be revoked at any time with `DELETE /sessions/:id`.
+
+### Third-party authentication
+
+The long-lived identity key also backs third-party sign-up and sign-in flows. A relying party can challenge `alice.poweur.net`, and Alice's device proves control by signing the challenge and letting the relying party verify it against the public key in DNS. These flows always use the long-lived key (not a session key) because relying parties do not have access to the relay's session cache.
 
 ## Passkeys (Mobile)
 
-On mobile, key pairs are managed through the **WebAuthn/FIDO2 passkey API**. When a user creates an identity:
+On mobile, the **long-lived identity key** is managed through the **WebAuthn/FIDO2 passkey API**. When a user creates an identity:
 
 1. The app calls the platform's passkey registration API, specifying the identity's domain as the relying party.
 2. The platform generates an Ed25519 key pair in the hardware secure enclave.
-3. The app extracts the public key and submits it to the relay via `POST /identities`.
-4. The relay writes the public key to DNS as a `TXT` record using the client-supplied DNS provider token.
+3. The app also generates an X25519 encryption key pair in secure storage.
+4. The app submits both public keys to the relay via `POST /identities`.
+5. The relay writes two `TXT` records (`_eurything.<identity>` and `_eurything-enc.<identity>`) and the `A`/`CNAME` routing record using the client-supplied DNS provider token.
 
-Signing a message uses the passkey assertion API, which triggers biometric authentication (Face ID, fingerprint) before the secure enclave performs the signing operation. The private key never materialises in app memory.
+During normal operation the passkey is used **only** to authorize new sessions — at most once per 24 hours. Every routine action (sending a message, reading the inbox, replying to a conversation) is signed by the short-lived session key stored locally in the app, which does **not** trigger a biometric prompt. The session key never leaves the device but does not require hardware-backed storage: losing it only invalidates an in-memory relay entry, not the identity.
 
-The mobile app must also use the same passkey-backed signing path for external authentication approvals, so the user gets a consistent consent model for both messaging and third-party login.
+Passkey-protected operations on mobile:
+
+- Creating a new identity.
+- Refreshing an expired or soon-to-expire session.
+- Approving a third-party authentication challenge (signup/signin with an Eurything identity on an external site).
+- Key rotation (post-MVP).
+
+Everything else — sending, receiving, session check — proceeds without user friction.
 
 ## CLI Key Management
 
-The CLI stores keys locally, either in the OS keychain or as a key file at `~/.eurything/keys/<identity>/`. The private key is never transmitted over the network. Key generation uses the same Ed25519 algorithm as the mobile path, ensuring protocol compatibility.
+The CLI stores keys as files under `~/.eurything/keys/` (configurable via `keys_dir` in `~/.eurything/config.toml`):
+
+- `<identity>.key` — the long-lived Ed25519 identity private key.
+- `<identity>.enc` — the long-lived X25519 encryption private key.
+- `~/.eurything/sessions/<identity>.toml` — the current short-lived session (session id, session private key, the raw `session_proof` inputs, and expiry).
+
+The CLI runs the same session flow as the mobile app, but the "authorize a new session" step is not gated by biometrics — it just uses the identity key on disk. Headless agents that want to opt out of sessions entirely can do so (messages signed directly with the identity key are still accepted by relays), but the default CLI path uses sessions so CLI and mobile behave identically.
 
 ## Multiple Identities
 
@@ -97,11 +143,12 @@ Bot identities are indistinguishable from human identities at the protocol level
 
 ### Registration
 
-1. Client generates a key pair.
-2. Client calls `POST /identities` with the identity, public key, DNS provider type, and a scoped DNS provider API token.
-3. Relay uses the token to write two DNS records: the `TXT` public key record and the `A`/`CNAME` routing record.
+1. Client generates the long-lived identity (Ed25519) and encryption (X25519) key pairs.
+2. Client calls `POST /identities` with the identity, both public keys, DNS provider type, and a scoped DNS provider API token.
+3. Relay uses the token to write three DNS records: `_eurything.<identity>` (identity public key), `_eurything-enc.<identity>` (encryption public key), and the `A`/`CNAME` routing record.
 4. Relay discards the token immediately after the DNS writes succeed.
 5. The identity is now resolvable from any relay or client that can reach public DNS.
+6. On first use, the client registers a session via `POST /sessions` so subsequent operations can skip the identity key.
 
 ### DNS Propagation
 

@@ -76,13 +76,26 @@ func TestMessageInboxFlow(t *testing.T) {
 	ts := httptest.NewServer(server.Router())
 	defer ts.Close()
 
+	// The relay now enforces encrypt-only, so every message must carry
+	// encryption metadata. The payload itself is opaque from the relay's
+	// perspective — the values below are placeholders that only need to
+	// round-trip through the canonical signing input.
 	msg := Message{
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "Hello Bob",
+		Encryption: &EncryptionMeta{
+			Alg:                "x25519-chacha20-poly1305",
+			EphemeralPublicKey: "ephemeral-pub",
+			Nonce:              "nonce",
+		},
 	}
-	canonical := crypto.CanonicalMessage(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload)
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+		Alg:                msg.Encryption.Alg,
+		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+		Nonce:              msg.Encryption.Nonce,
+	})
 	signature := ed25519.Sign(senderPriv, []byte(canonical))
 	msg.Signature = base64.StdEncoding.EncodeToString(signature)
 
@@ -173,8 +186,17 @@ func TestRateLimit(t *testing.T) {
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "Hello Bob",
+		Encryption: &EncryptionMeta{
+			Alg:                "x25519-chacha20-poly1305",
+			EphemeralPublicKey: "ephemeral-pub",
+			Nonce:              "nonce",
+		},
 	}
-	canonical := crypto.CanonicalMessage(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload)
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+		Alg:                msg.Encryption.Alg,
+		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+		Nonce:              msg.Encryption.Nonce,
+	})
 	signature := ed25519.Sign(senderPriv, []byte(canonical))
 	msg.Signature = base64.StdEncoding.EncodeToString(signature)
 
@@ -186,5 +208,51 @@ func TestRateLimit(t *testing.T) {
 	second, _ := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body))
 	if second.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", second.StatusCode)
+	}
+}
+
+// TestPlaintextMessageRejected verifies the relay's encrypt-only policy: any
+// POST /messages that lacks encryption metadata is rejected at the edge
+// before we spend cycles on signature verification.
+func TestPlaintextMessageRejected(t *testing.T) {
+	cfg := config.Config{
+		ListenAddr:   ":0",
+		RelayAddress: "relay.test",
+		RelayScheme:  "http",
+		DNSTTL:       time.Minute,
+		ChallengeTTL: time.Minute,
+		Version:      "test",
+		RateLimits: config.RateLimits{
+			PerMinute: 100,
+			PerHour:   1000,
+			PerDay:    10000,
+		},
+	}
+	server := NewServer(cfg, &fakeResolver{txt: map[string][]string{}, hosts: map[string][]string{}}, dns.NewProviderFactory(cfg))
+	ts := httptest.NewServer(server.Router())
+	defer ts.Close()
+
+	msg := Message{
+		Sender:    "alice.example.com",
+		Recipient: "bob.example.org",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Payload:   "plain text",
+		Signature: "not-verified-before-encryption-check",
+	}
+	body, _ := json.Marshal(msg)
+	resp, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	var payload ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Error != "encryption_required" {
+		t.Fatalf("expected encryption_required, got %s / %s", payload.Error, payload.Detail)
 	}
 }
