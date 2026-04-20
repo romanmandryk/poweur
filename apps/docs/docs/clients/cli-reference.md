@@ -25,17 +25,13 @@ cp dist/eurything /usr/local/bin/
 
 ## Configuration
 
-Configuration is stored at `~/.eurything/config.toml`. On first run, an interactive setup wizard creates this file.
+Configuration is stored at `~/.eurything/config.toml`. The CLI stores a default identity plus a root keys directory; you can override the identity per command.
 
 ```toml
 # ~/.eurything/config.toml
-
-[relay]
-url = "https://relay.poweur.net"
-
-[identity]
-subdomain = "mybot.poweur.net"
-key_path  = "~/.eurything/keys/mybot.poweur.net.key"
+relay_url = "https://relay.poweur.net"
+identity  = "mybot.poweur.net"
+keys_dir  = "~/.eurything/keys"
 ```
 
 Individual settings can be overridden via environment variables:
@@ -44,7 +40,7 @@ Individual settings can be overridden via environment variables:
 |---------|---------|
 | Relay URL | `RELAY_URL` |
 | Identity subdomain | `IDENTITY` |
-| Private key path | `KEY_PATH` |
+| Keys directory | `KEYS_DIR` |
 
 ## Global Flags
 
@@ -53,10 +49,7 @@ All commands accept these global flags:
 | Flag | Description |
 |------|-------------|
 | `--json` | Output machine-readable JSON instead of human-friendly text |
-| `--identity <subdomain>` | Override the active identity for this command |
-| `--relay <url>` | Override the relay URL for this command |
-| `--config <path>` | Use a non-default config file |
-| `--debug` | Enable verbose debug logging |
+| `--use-identity <subdomain>` | Override the active identity for this command |
 
 ---
 
@@ -70,25 +63,21 @@ Generate a new Ed25519 key pair and register the identity `<name>.<parent-domain
 eurything identity create alice
 ```
 
-The CLI prompts for:
-- DNS provider (`cloudflare` or `hetzner`)
-- DNS API token for the target zone
-- Optional display name, profile picture URL, and bio
-
-The relay writes the DNS records and registers the identity. The CLI waits for DNS propagation before confirming success.
+The relay writes the DNS records and registers the identity.
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--provider <name>` | DNS provider (`cloudflare` \| `hetzner`) — skips prompt |
-| `--token <value>` | DNS API token — skips prompt (use with care in scripts; prefer env var) |
-| `--dns-token-env <VAR>` | Read DNS API token from the named environment variable |
-| `--no-wait` | Submit registration and exit without waiting for DNS propagation |
+| `--dns-provider <name>` | DNS provider (`cloudflare` \| `hetzner`) |
+| `--dns-token <value>` | DNS API token (prefer `CLOUDFLARE_API_TOKEN` / `HETZNER_API_TOKEN`) |
+| `--parent-domain <domain>` | Parent domain used when a handle is provided |
+| `--relay <url>` | Relay URL override |
+| `--use-identity <subdomain>` | Override identity for this command |
 
 **Example (JSON output):**
 ```bash
-eurything identity create alice --provider cloudflare --dns-token-env CF_TOKEN --json
+eurything identity create alice --dns-provider cloudflare --json
 ```
 
 ```json
@@ -96,8 +85,7 @@ eurything identity create alice --provider cloudflare --dns-token-env CF_TOKEN -
   "identity":   "alice.poweur.net",
   "public_key": "MCowBQYDK2VwAyEAn3a7...",
   "relay":      "relay.poweur.net",
-  "status":     "pending_dns",
-  "dns_check":  "Run `eurything identity check alice.poweur.net` to verify propagation"
+  "registered": true
 }
 ```
 
@@ -105,7 +93,7 @@ eurything identity create alice --provider cloudflare --dns-token-env CF_TOKEN -
 
 ### `eurything identity show`
 
-Display the current identity's subdomain, public key, and relay configuration.
+Display the current identity's subdomain and public key.
 
 ```bash
 eurything identity show
@@ -115,8 +103,22 @@ eurything identity show
 ```
 Identity:   alice.poweur.net
 Public key: MCowBQYDK2VwAyEAn3a7...
-Relay:      https://relay.poweur.net
 Key file:   ~/.eurything/keys/alice.poweur.net.key
+### `eurything identity use <identity>`
+
+Update the default identity stored in `~/.eurything/config.toml`.
+
+```bash
+eurything identity use id2.poweur.net
+```
+
+### `eurything identity list`
+
+List all identities discovered in the keys directory. The current default is marked with `*`.
+
+```bash
+eurything identity list
+```
 ```
 
 **JSON output (`--json`):**

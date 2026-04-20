@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/eurything/cli/internal/config"
@@ -29,10 +30,11 @@ func TestIdentityCreateWritesConfig(t *testing.T) {
 	if cfg.Identity != "alice.example.com" {
 		t.Fatalf("unexpected identity: %s", cfg.Identity)
 	}
-	if cfg.PrivateKeyPath == "" {
-		t.Fatal("expected private key path")
+	if cfg.KeysDir == "" {
+		t.Fatal("expected keys dir")
 	}
-	if _, err := os.Stat(cfg.PrivateKeyPath); err != nil {
+	keyPath := identity.KeyPath(cfg.KeysDir, "alice.example.com")
+	if _, err := os.Stat(keyPath); err != nil {
 		t.Fatalf("missing key file: %v", err)
 	}
 }
@@ -64,7 +66,7 @@ func TestSendMessagePostsToRelay(t *testing.T) {
 	cfg := config.Config{
 		RelayURL:       server.URL,
 		Identity:       "alice.example.com",
-		PrivateKeyPath: keyPath,
+		KeysDir:        filepath.Dir(keyPath),
 	}
 	if err := config.Save(cfg); err != nil {
 		t.Fatalf("save config: %v", err)

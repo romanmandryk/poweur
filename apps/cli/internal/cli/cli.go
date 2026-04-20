@@ -57,6 +57,10 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityShow(args[1:], stdout, stderr)
 	case "dns":
 		return runIdentityDNS(args[1:], stdout, stderr)
+	case "use":
+		return runIdentityUse(args[1:], stdout, stderr)
+	case "list":
+		return runIdentityList(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "unknown identity subcommand")
 		return 1
@@ -75,10 +79,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	dnsToken := fs.String("dns-token", "", "dns provider api token")
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
+	_ = useIdentity
 	if fs.NArg() < 1 {
 		fmt.Fprintln(stderr, "identity handle is required")
 		return 1
@@ -127,7 +133,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	cfg.Identity = identityValue
-	cfg.PrivateKeyPath = keyPath
+	cfg.KeysDir = filepath.Dir(keyPath)
 	cfg.RelayURL = *relayURL
 	cfg.ParentDomain = *parentDomain
 	if err := config.Save(cfg); err != nil {
@@ -156,40 +162,43 @@ func runIdentityShow(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("identity show", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "no identity configured")
 		return 1
 	}
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	publicKey := identity.PublicKeyString(privateKey.Public().(ed25519.PublicKey))
 	output := map[string]string{
-		"identity":   cfg.Identity,
+		"identity":   identityValue,
 		"public_key": publicKey,
-		"key_path":   cfg.PrivateKeyPath,
+		"key_path":   identity.KeyPath(cfg.KeysDir, identityValue),
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s\n", cfg.Identity))
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s\n", identityValue))
 }
 
 func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("identity dns", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 1 {
+	identityValue := resolveIdentity(fs.Arg(0), *useIdentity)
+	if identityValue == "" {
 		fmt.Fprintln(stderr, "usage: eurything identity dns <identity>")
 		return 1
 	}
-	identityValue := fs.Arg(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -219,6 +228,95 @@ func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func runIdentityUse(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity use", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: eurything identity use <identity>")
+		return 1
+	}
+	identityValue := fs.Arg(0)
+	if cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "keys directory not configured")
+		return 1
+	}
+	keyPath := identity.KeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(keyPath); err != nil {
+		fmt.Fprintf(stderr, "key not found for %s at %s\n", identityValue, keyPath)
+		return 1
+	}
+	cfg.Identity = identityValue
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	output := map[string]string{
+		"identity": identityValue,
+		"key_path": keyPath,
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("active identity set to %s\n", identityValue))
+}
+
+func runIdentityList(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "keys directory not configured")
+		return 1
+	}
+	entries, err := os.ReadDir(cfg.KeysDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var identities []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".key") {
+			identities = append(identities, strings.TrimSuffix(name, ".key"))
+		}
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, map[string]any{
+			"identities": identities,
+			"active":     cfg.Identity,
+		}, "")
+	}
+	if len(identities) == 0 {
+		fmt.Fprintln(stdout, "no identities found")
+		return 0
+	}
+	for _, identityValue := range identities {
+		if identityValue == cfg.Identity {
+			fmt.Fprintf(stdout, "* %s\n", identityValue)
+		} else {
+			fmt.Fprintf(stdout, "  %s\n", identityValue)
+		}
+	}
+	return 0
+}
+
 func runSend(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -227,6 +325,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
@@ -235,7 +334,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: eurything send <to> <message>")
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
@@ -244,14 +344,14 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 
 	msg := Message{
-		Sender:    cfg.Identity,
+		Sender:    identityValue,
 		Recipient: fs.Arg(0),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   fs.Arg(1),
@@ -281,11 +381,13 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
@@ -294,18 +396,18 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	challenge, err := FetchChallenge(context.Background(), cfg.RelayURL, cfg.Identity)
+	challenge, err := FetchChallenge(context.Background(), cfg.RelayURL, identityValue)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	challengeSig := base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, []byte(challenge.Challenge)))
-	payload, err := FetchInbox(context.Background(), cfg.RelayURL, cfg.Identity, challengeSig)
+	payload, err := FetchInbox(context.Background(), cfg.RelayURL, identityValue, challengeSig)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -349,9 +451,13 @@ func runRelay(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("relay status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})); err != nil {
 		return 1
+	}
+	if *useIdentity != "" {
+		cfg.Identity = *useIdentity
 	}
 	if cfg.RelayURL == "" {
 		fmt.Fprintln(stderr, "relay url not configured")
@@ -388,10 +494,12 @@ func runAuth(args []string, stdout, stderr io.Writer) int {
 func runAuthInspect(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("auth inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
+	_ = useIdentity
 	if fs.NArg() < 1 {
 		fmt.Fprintln(stderr, "request file or url is required")
 		return 1
@@ -417,6 +525,7 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("auth sign", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
@@ -425,11 +534,12 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "request file or url is required")
 		return 1
 	}
-	if cfg.Identity == "" || cfg.PrivateKeyPath == "" {
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.KeysDir == "" {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
-	privateKey, err := identity.LoadPrivateKey(cfg.PrivateKeyPath)
+	privateKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -441,7 +551,7 @@ func runAuthSign(args []string, stdout, stderr io.Writer) int {
 	}
 	signature := ed25519.Sign(privateKey, payload)
 	response := map[string]any{
-		"identity":   cfg.Identity,
+		"identity":   identityValue,
 		"issued_at":  time.Now().UTC().Format(time.RFC3339),
 		"signature":  base64.StdEncoding.EncodeToString(signature),
 		"request_id": extractRequestID(payload),
@@ -495,15 +605,24 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  eurything identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--json]
-  eurything identity show [--json]
-  eurything identity dns <identity> [--json]
-  eurything send <to> <message> [--json]
-  eurything inbox [--json]
-  eurything relay status [--json]
-  eurything auth inspect <request-file-or-url> [--json]
-  eurything auth sign <request-file-or-url> [--json]
+  eurything identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--use-identity=...] [--json]
+  eurything identity show [--use-identity=...] [--json]
+  eurything identity dns <identity> [--use-identity=...] [--json]
+  eurything identity use <identity> [--json]
+  eurything identity list [--json]
+  eurything send <to> <message> [--use-identity=...] [--json]
+  eurything inbox [--use-identity=...] [--json]
+  eurything relay status [--use-identity=...] [--json]
+  eurything auth inspect <request-file-or-url> [--use-identity=...] [--json]
+  eurything auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)
+}
+
+func resolveIdentity(flagValue string, fallback string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return fallback
 }
 
 func normalizeArgs(args []string, boolFlags map[string]bool) []string {

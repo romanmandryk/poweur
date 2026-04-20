@@ -48,6 +48,10 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	return ed25519.PrivateKey(decoded), nil
 }
 
+func KeyPath(keysDir, identity string) string {
+	return filepath.Join(keysDir, identity+".key")
+}
+
 func PublicKeyString(publicKey ed25519.PublicKey) string {
 	return base64.RawURLEncoding.EncodeToString(publicKey)
 }

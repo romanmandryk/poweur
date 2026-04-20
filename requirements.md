@@ -362,13 +362,15 @@ The CLI (`apps/cli`) is the third application in the monorepo. It provides a scr
 - **Relay interaction**: All network operations go through a configured relay endpoint (set via config file or environment variable).
 - **Scriptability**: The CLI should support machine-readable output (e.g., JSON) to facilitate use in scripts and automated pipelines.
 
-The CLI package is named `@eurything/cli` and lives at `apps/cli` within the monorepo.
+The CLI package is named `@eurything/cli` and lives at `apps/cli` within the monorepo. The CLI must support multiple identities per device by storing keys under a single `keys_dir` and allowing per-command overrides.
 
 ### MVP Commands
 
 ```
 eurything identity create <name>   # Generate a key pair and register the identity with the configured relay
 eurything identity show            # Display the current identity's subdomain and public key
+eurything identity use <identity>  # Set the default identity in config
+eurything identity list            # List known identities in the local keys directory
 eurything send <to> <message>      # Sign and send a message to the given identity address
 eurything inbox                    # Fetch and display messages from the relay inbox
 eurything relay status             # Check relay connectivity, show configured endpoint and relay version
@@ -383,7 +385,7 @@ eurything auth sign <request-file-or-url>    # Sign a third-party auth request f
 eurything auth inspect <request-file-or-url> # Display verifier request metadata before signing
 ```
 
-Configuration is stored at `~/.eurything/config.toml`. The config file holds the relay endpoint, the identity subdomain, and the path to (or reference for) the private key. Individual settings can be overridden via environment variables (e.g., `RELAY_URL`) or command-line flags.
+Configuration is stored at `~/.eurything/config.toml`. The config file holds the relay endpoint, the default identity subdomain, and a root `keys_dir`. Individual settings can be overridden via environment variables (e.g., `RELAY_URL`, `KEYS_DIR`) or command-line flags such as `--use-identity`.
 
 ---
 
