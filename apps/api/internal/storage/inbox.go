@@ -3,12 +3,23 @@ package storage
 import "sync"
 
 type StoredMessage struct {
-	ID        string `json:"id"`
-	Sender    string `json:"sender"`
-	Recipient string `json:"recipient"`
-	Timestamp string `json:"timestamp"`
-	Payload   string `json:"payload"`
-	Signature string `json:"signature"`
+	ID         string               `json:"id"`
+	Sender     string               `json:"sender"`
+	Recipient  string               `json:"recipient"`
+	Timestamp  string               `json:"timestamp"`
+	Payload    string               `json:"payload"`
+	Signature  string               `json:"signature"`
+	SessionID  string               `json:"session_id,omitempty"`
+	Encryption *StoredEncryptionMeta `json:"encryption,omitempty"`
+}
+
+// StoredEncryptionMeta mirrors the encryption envelope carried on the wire.
+// Preserving these fields is what lets the recipient decrypt the payload
+// later when draining the inbox.
+type StoredEncryptionMeta struct {
+	Alg                string `json:"alg"`
+	EphemeralPublicKey string `json:"ephemeral_public_key"`
+	Nonce              string `json:"nonce"`
 }
 
 type InboxStore struct {

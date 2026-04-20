@@ -16,14 +16,31 @@ type Provider interface {
 }
 
 type ProviderFactory struct {
-	cfg config.Config
+	cfg       config.Config
+	overrides map[string]Provider
 }
 
 func NewProviderFactory(cfg config.Config) *ProviderFactory {
-	return &ProviderFactory{cfg: cfg}
+	return &ProviderFactory{cfg: cfg, overrides: map[string]Provider{}}
+}
+
+// Register installs a Provider under the given name, shadowing the built-in
+// implementation. Primarily used by integration tests that want a specific
+// in-memory provider instance (e.g. backed by a shared DNS zone) to be
+// returned when the relay handles POST /identities.
+func (f *ProviderFactory) Register(name string, provider Provider) {
+	if f.overrides == nil {
+		f.overrides = map[string]Provider{}
+	}
+	f.overrides[strings.ToLower(name)] = provider
 }
 
 func (f *ProviderFactory) Provider(name string) (Provider, error) {
+	if f.overrides != nil {
+		if p, ok := f.overrides[strings.ToLower(name)]; ok {
+			return p, nil
+		}
+	}
 	switch strings.ToLower(name) {
 	case "cloudflare":
 		return NewCloudflareProvider(f.cfg), nil

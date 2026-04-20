@@ -236,6 +236,14 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			Timestamp: msg.Timestamp,
 			Payload:   msg.Payload,
 			Signature: msg.Signature,
+			SessionID: msg.SessionID,
+		}
+		if msg.Encryption != nil {
+			stored.Encryption = &storage.StoredEncryptionMeta{
+				Alg:                msg.Encryption.Alg,
+				EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+				Nonce:              msg.Encryption.Nonce,
+			}
 		}
 		s.inbox.Add(msg.Recipient, stored)
 		w.WriteHeader(http.StatusAccepted)

@@ -20,17 +20,64 @@ func decodeBase64(value string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(value)
 }
 
+// Resolver abstracts the DNS lookups the CLI performs to discover an
+// identity's public key, encryption key, relay routing, and canonical name.
+//
+// The default implementation wraps net.DefaultResolver; integration tests
+// swap in an in-memory fake via SetResolver so the CLI, relay, and DNS can
+// all share one test zone inside a single process.
+type Resolver interface {
+	LookupTXT(ctx context.Context, name string) ([]string, error)
+	LookupHost(ctx context.Context, name string) ([]string, error)
+	LookupCNAME(ctx context.Context, name string) (string, error)
+}
+
+type netResolverAdapter struct {
+	inner *net.Resolver
+}
+
+func (n netResolverAdapter) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	return n.inner.LookupTXT(ctx, name)
+}
+
+func (n netResolverAdapter) LookupHost(ctx context.Context, name string) ([]string, error) {
+	return n.inner.LookupHost(ctx, name)
+}
+
+func (n netResolverAdapter) LookupCNAME(ctx context.Context, name string) (string, error) {
+	return n.inner.LookupCNAME(ctx, name)
+}
+
+var defaultResolver Resolver = netResolverAdapter{inner: net.DefaultResolver}
+
+// SetResolver replaces the package-level DNS resolver used by LookupDNS and
+// LookupEncryptionKey. Intended for integration tests. Production code should
+// never call this.
+func SetResolver(r Resolver) {
+	if r == nil {
+		defaultResolver = netResolverAdapter{inner: net.DefaultResolver}
+		return
+	}
+	defaultResolver = r
+}
+
+// ResetResolver restores the net.DefaultResolver-backed resolver. Tests should
+// defer this after SetResolver to avoid leaking state into other tests.
+func ResetResolver() {
+	defaultResolver = netResolverAdapter{inner: net.DefaultResolver}
+}
+
 type DNSStatus struct {
-	Identity        string   `json:"identity"`
-	PublicKeyTXT    string   `json:"public_key_txt"`
-	EncryptionKeyTXT string  `json:"encryption_key_txt,omitempty"`
-	RelayHosts      []string `json:"relay_hosts"`
-	CNAME           string   `json:"cname"`
+	Identity         string   `json:"identity"`
+	PublicKeyTXT     string   `json:"public_key_txt"`
+	EncryptionKeyTXT string   `json:"encryption_key_txt,omitempty"`
+	RelayHosts       []string `json:"relay_hosts"`
+	CNAME            string   `json:"cname"`
 }
 
 func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 	status := DNSStatus{Identity: identity}
-	txtRecords, _ := net.DefaultResolver.LookupTXT(ctx, "_eurything."+identity)
+	txtRecords, _ := defaultResolver.LookupTXT(ctx, "_eurything."+identity)
 	for _, record := range txtRecords {
 		record = strings.TrimSpace(record)
 		if strings.HasPrefix(record, "eurything-pubkey=") {
@@ -39,7 +86,7 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 		}
 	}
 
-	encRecords, _ := net.DefaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
+	encRecords, _ := defaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
 	for _, record := range encRecords {
 		record = strings.TrimSpace(record)
 		if strings.HasPrefix(record, "eurything-enckey=") {
@@ -48,10 +95,10 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 		}
 	}
 
-	if cname, err := net.DefaultResolver.LookupCNAME(ctx, identity); err == nil {
+	if cname, err := defaultResolver.LookupCNAME(ctx, identity); err == nil {
 		status.CNAME = strings.TrimSuffix(cname, ".")
 	}
-	if hosts, err := net.DefaultResolver.LookupHost(ctx, identity); err == nil {
+	if hosts, err := defaultResolver.LookupHost(ctx, identity); err == nil {
 		status.RelayHosts = hosts
 	}
 	return status, nil
@@ -60,7 +107,7 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 // LookupEncryptionKey returns the raw X25519 public key bytes for the given identity,
 // or nil if the identity has no published encryption key.
 func LookupEncryptionKey(ctx context.Context, identity string) ([]byte, error) {
-	records, err := net.DefaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
+	records, err := defaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
 	if err != nil {
 		return nil, err
 	}
