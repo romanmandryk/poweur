@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,27 @@ import (
 	"github.com/eurything/cli/internal/identity"
 	"github.com/eurything/cli/internal/session"
 )
+
+// stubResolver is a minimal identity.Resolver that the send-path tests use to
+// stand in for real DNS so they can publish a recipient encryption key.
+type stubResolver struct {
+	txt map[string][]string
+}
+
+func (s stubResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
+	if v, ok := s.txt[name]; ok {
+		return v, nil
+	}
+	return nil, errors.New("no TXT for " + name)
+}
+
+func (s stubResolver) LookupHost(_ context.Context, name string) ([]string, error) {
+	return nil, errors.New("no host for " + name)
+}
+
+func (s stubResolver) LookupCNAME(_ context.Context, name string) (string, error) {
+	return "", errors.New("no cname for " + name)
+}
 
 func TestIdentityCreateWritesConfig(t *testing.T) {
 	tmp := t.TempDir()
@@ -115,6 +138,20 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 		t.Fatalf("save key: %v", err)
 	}
 
+	// Publish an encryption key for Bob via a fake DNS resolver so the CLI's
+	// strict encrypt-only policy is satisfied. Without this the CLI would
+	// (correctly) refuse to send.
+	bobEncPub, _, err := cryptoe2e.GenerateX25519Keypair()
+	if err != nil {
+		t.Fatalf("bob keygen: %v", err)
+	}
+	identity.SetResolver(stubResolver{txt: map[string][]string{
+		"_eurything-enc.bob.example.org": {
+			"eurything-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
+		},
+	}})
+	defer identity.ResetResolver()
+
 	mr := newMockRelay(t)
 	defer mr.server.Close()
 
@@ -127,8 +164,9 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
+	plaintext := "Hello"
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"send", "bob.example.org", "Hello", "--no-encrypt"}, &stdout, &stderr)
+	code := Run([]string{"send", "bob.example.org", plaintext}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
@@ -138,8 +176,11 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	if mr.received.Signature == "" {
 		t.Fatal("missing signature")
 	}
-	if mr.received.Payload != "Hello" {
-		t.Fatalf("unexpected payload (expected plaintext): %s", mr.received.Payload)
+	if mr.received.Encryption == nil || mr.received.Encryption.Alg == "" {
+		t.Fatalf("expected encryption metadata on outgoing message: %#v", mr.received)
+	}
+	if mr.received.Payload == plaintext {
+		t.Fatalf("payload must not equal plaintext (relay should only see ciphertext): %q", mr.received.Payload)
 	}
 	if mr.received.SessionID == "" {
 		t.Fatal("expected session id on message")
@@ -148,8 +189,13 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 		t.Fatalf("session id mismatch: got %s want %s", mr.received.SessionID, mr.sessionID)
 	}
 
-	// Verify signature under the session public key.
-	parts := []string{mr.received.Sender, mr.received.Recipient, mr.received.Timestamp, mr.received.Payload, "session:" + mr.received.SessionID}
+	// Verify signature under the session public key (canonical form now
+	// includes the encryption line).
+	parts := []string{
+		mr.received.Sender, mr.received.Recipient, mr.received.Timestamp, mr.received.Payload,
+		"session:" + mr.received.SessionID,
+		"enc:" + mr.received.Encryption.Alg + ":" + mr.received.Encryption.EphemeralPublicKey + ":" + mr.received.Encryption.Nonce,
+	}
 	canonical := []byte(joinNewlines(parts))
 	sig, err := base64.StdEncoding.DecodeString(mr.received.Signature)
 	if err != nil {

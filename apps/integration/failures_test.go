@@ -210,6 +210,16 @@ func TestINT07_TamperedSignatureRejected(t *testing.T) {
 		"payload":    "impersonation attempt",
 		"session_id": sess.SessionID,
 		"signature":  base64.StdEncoding.EncodeToString(ed25519.Sign(forgedPriv, []byte("not-the-canonical-message"))),
+		// The relay enforces encrypt-only at the edge, so a forged plaintext
+		// envelope now gets rejected with encryption_required before
+		// signature check ever runs. Supply plausible encryption metadata
+		// so this test actually exercises the signature-verification path
+		// we care about.
+		"encryption": map[string]string{
+			"alg":                  "x25519-chacha20-poly1305",
+			"ephemeral_public_key": "ephemeral-pub",
+			"nonce":                "nonce",
+		},
 	}
 	body, _ := json.Marshal(forged)
 	resp, err := http.Post(relayURL+"/messages", "application/json", bytes.NewReader(body))

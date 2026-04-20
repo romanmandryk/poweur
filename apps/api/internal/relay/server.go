@@ -70,6 +70,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
+	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	return mux
@@ -146,6 +147,58 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
+// `_eurything-enc.<identity>` TXT record for an already-registered identity.
+//
+// This endpoint exists because early identities were minted before E2E
+// encryption landed, so they have a signing record in DNS but no encryption
+// record. A separate endpoint (instead of POST /identities with upsert
+// semantics) keeps the primary registration flow strict — "create once" —
+// and makes the "retro-fit an existing identity" flow explicit and auditable.
+//
+// Authority is proven by possession of the DNS token: whoever can write to the
+// zone owns the identity. The relay does not require the identity to exist in
+// its in-memory IdentityStore (which resets on restart), only that the caller
+// can name it and write to its DNS zone.
+func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.Request) {
+	identityValue := r.PathValue("identity")
+	if identityValue == "" {
+		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
+		return
+	}
+	var req EncryptionKeyRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		return
+	}
+	if req.EncryptionPublicKey == "" || req.DNSProvider == "" || req.DNSToken == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
+		return
+	}
+
+	normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
+		return
+	}
+
+	provider, err := s.providers.Provider(req.DNSProvider)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
+		return
+	}
+
+	if err := provider.WriteEncryptionKey(r.Context(), req.DNSToken, identityValue, normalizedEnc); err != nil {
+		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, EncryptionKeyResponse{
+		Identity:            identityValue,
+		EncryptionPublicKey: normalizedEnc,
+		UpdatedAt:           time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
 	identity := r.PathValue("identity")
 	if identity == "" {
@@ -194,6 +247,16 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := time.Parse(time.RFC3339, msg.Timestamp); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_message", "timestamp must be RFC3339")
+		return
+	}
+	// Encrypt-only policy: every message MUST carry encryption metadata
+	// (alg + ephemeral pub + nonce). This is belt-and-suspenders on top of
+	// the CLI's client-side refusal and makes it impossible for any past or
+	// future client to deliver plaintext through this relay.
+	if msg.Encryption == nil || msg.Encryption.Alg == "" ||
+		msg.Encryption.EphemeralPublicKey == "" || msg.Encryption.Nonce == "" {
+		writeError(w, http.StatusBadRequest, "encryption_required",
+			"messages must be end-to-end encrypted (alg, ephemeral_public_key, nonce required)")
 		return
 	}
 
@@ -448,11 +511,38 @@ func (s *Server) isLocalRecipient(ctx context.Context, identity string) bool {
 	if s.cfg.RelayAddress == "" {
 		return false
 	}
-	host, err := s.resolveRelayHost(ctx, identity)
-	if err != nil {
+	identityHosts, err := s.resolver.LookupHost(ctx, identity)
+	if err != nil || len(identityHosts) == 0 {
 		return false
 	}
-	return strings.EqualFold(host, s.cfg.RelayAddress)
+	// Fast path — DNS returned the relay's configured hostname directly.
+	// Covers test environments that mock DNS with hostname targets.
+	for _, h := range identityHosts {
+		if strings.EqualFold(h, s.cfg.RelayAddress) {
+			return true
+		}
+	}
+	// Production path — behind Cloudflare (or any reverse-proxy) both
+	// `<identity>` and `<RelayAddress>` resolve to the same edge IPs, so
+	// the hostname compare above never matches. Resolve the relay's own
+	// hostname and treat the recipient as local when the IP sets overlap.
+	// Without this, the relay tries to forward the message to one of CF's
+	// edge IPs and fails the TLS handshake (502 forward_failed), even
+	// though the recipient lives on this very relay.
+	selfHosts, err := s.resolver.LookupHost(ctx, s.cfg.RelayAddress)
+	if err != nil || len(selfHosts) == 0 {
+		return false
+	}
+	selfSet := make(map[string]struct{}, len(selfHosts))
+	for _, h := range selfHosts {
+		selfSet[strings.ToLower(h)] = struct{}{}
+	}
+	for _, h := range identityHosts {
+		if _, ok := selfSet[strings.ToLower(h)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) resolveRelayHost(ctx context.Context, identity string) (string, error) {

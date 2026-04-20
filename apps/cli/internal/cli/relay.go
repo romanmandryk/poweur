@@ -8,9 +8,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"os"
 	"strings"
 	"time"
 )
+
+// debugHTTP is flipped on when DEBUG_HTTP=1 is set. It causes the relay
+// client to dump every request (and truncated response) to stderr — handy
+// when CF returns a mystery 502 and we need to know exactly what hit the
+// origin.
+var debugHTTP = os.Getenv("DEBUG_HTTP") == "1"
+
+func dumpRequest(req *http.Request) {
+	if !debugHTTP {
+		return
+	}
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[debug-http] dump request: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[debug-http] --- request ---\n%s\n[debug-http] --- end request ---\n", dump)
+}
+
+func dumpResponse(resp *http.Response) {
+	if !debugHTTP || resp == nil {
+		return
+	}
+	dump, err := httputil.DumpResponse(resp, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[debug-http] dump response: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[debug-http] --- response ---\n%s\n[debug-http] --- end response ---\n", dump)
+}
 
 type EncryptionMeta struct {
 	Alg                string `json:"alg"`
@@ -126,6 +158,56 @@ func RegisterIdentity(ctx context.Context, relayURL, identity, publicKey, encryp
 	return response, nil
 }
 
+// EncryptionKeyResponse matches the relay's reply when publishing or rotating
+// an identity's X25519 encryption key via POST /identities/{identity}/encryption-key.
+type EncryptionKeyResponse struct {
+	Identity            string `json:"identity"`
+	EncryptionPublicKey string `json:"encryption_public_key"`
+	UpdatedAt           string `json:"updated_at"`
+}
+
+// PublishEncryptionKey calls POST /identities/{identity}/encryption-key on the
+// relay. The relay uses the caller's DNS token to upsert the
+// `_eurything-enc.<identity>` TXT record. This is the path used by
+// `eurything identity add-encryption-key` and will happily overwrite an
+// existing record (rotation).
+func PublishEncryptionKey(ctx context.Context, relayURL, identity, encryptionPublicKey, dnsProvider, dnsToken string) (EncryptionKeyResponse, error) {
+	if relayURL == "" {
+		return EncryptionKeyResponse{}, errors.New("relay url is required")
+	}
+	if identity == "" {
+		return EncryptionKeyResponse{}, errors.New("identity is required")
+	}
+	payload, err := json.Marshal(map[string]string{
+		"encryption_public_key": encryptionPublicKey,
+		"dns_provider":          dnsProvider,
+		"dns_token":             dnsToken,
+	})
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	url := fmt.Sprintf("%s/identities/%s/encryption-key", relayURL, identity)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return EncryptionKeyResponse{}, parseErrorResponse("encryption key publish failed", resp)
+	}
+	var response EncryptionKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return EncryptionKeyResponse{}, err
+	}
+	return response, nil
+}
+
 func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequest) (SessionResponse, error) {
 	if relayURL == "" {
 		return SessionResponse{}, errors.New("relay url is required")
@@ -165,8 +247,13 @@ func SendMessage(ctx context.Context, relayURL string, msg Message) (*http.Respo
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	dumpRequest(req)
 	client := &http.Client{Timeout: 10 * time.Second}
-	return client.Do(req)
+	resp, err := client.Do(req)
+	if err == nil {
+		dumpResponse(resp)
+	}
+	return resp, err
 }
 
 func FetchChallenge(ctx context.Context, relayURL, identity string) (ChallengeResponse, error) {

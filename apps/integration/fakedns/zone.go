@@ -156,3 +156,11 @@ func (p zoneProvider) WriteIdentityRecords(_ context.Context, _, identity, publi
 	p.zone.SetHost(identity, relayAddress)
 	return nil
 }
+
+func (p zoneProvider) WriteEncryptionKey(_ context.Context, _, identity, encryptionPublicKey string) error {
+	if encryptionPublicKey == "" {
+		return errors.New("fakedns: missing encryption public key")
+	}
+	p.zone.SetTXT("_eurything-enc."+identity, "eurything-enckey=x25519:"+encryptionPublicKey)
+	return nil
+}

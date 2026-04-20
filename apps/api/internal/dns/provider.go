@@ -12,7 +12,18 @@ import (
 )
 
 type Provider interface {
+	// WriteIdentityRecords publishes the full set of DNS records for a new
+	// identity: its signing TXT, its optional encryption TXT, and its
+	// relay host record.
 	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error
+
+	// WriteEncryptionKey publishes (or overwrites) just the
+	// `_eurything-enc.<identity>` TXT record. It exists so that an identity
+	// created before the encryption-key support landed can be retro-fitted
+	// with an X25519 key, and so existing identities can rotate their
+	// encryption key without touching the signing key or the relay host
+	// record.
+	WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error
 }
 
 type ProviderFactory struct {

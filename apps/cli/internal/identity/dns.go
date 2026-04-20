@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"strings"
+	"time"
 )
 
 func decodeBase64(value string) ([]byte, error) {
@@ -65,6 +66,34 @@ func SetResolver(r Resolver) {
 // defer this after SetResolver to avoid leaking state into other tests.
 func ResetResolver() {
 	defaultResolver = netResolverAdapter{inner: net.DefaultResolver}
+}
+
+// CustomNetResolver returns a Resolver that routes all DNS queries through the
+// given server (host[:port], defaulting to port 53) using Go's pure-Go DNS
+// client. Useful when the local/system resolver drops TXT records, caches
+// stale NXDOMAIN responses, or otherwise cannot see the authoritative answer.
+// Wired up from the CLI entry point when DNS_SERVER is set.
+func CustomNetResolver(server string) Resolver {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return netResolverAdapter{inner: net.DefaultResolver}
+	}
+	if _, _, err := net.SplitHostPort(server); err != nil {
+		server = net.JoinHostPort(server, "53")
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return netResolverAdapter{inner: &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			switch network {
+			case "udp", "udp4", "udp6":
+				network = "udp"
+			default:
+				network = "tcp"
+			}
+			return dialer.DialContext(ctx, network, server)
+		},
+	}}
 }
 
 type DNSStatus struct {

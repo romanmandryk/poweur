@@ -51,6 +51,18 @@ type IdentityRequest struct {
 	DNSToken            string `json:"dns_token"`
 }
 
+type EncryptionKeyRequest struct {
+	EncryptionPublicKey string `json:"encryption_public_key"`
+	DNSProvider         string `json:"dns_provider"`
+	DNSToken            string `json:"dns_token"`
+}
+
+type EncryptionKeyResponse struct {
+	Identity            string `json:"identity"`
+	EncryptionPublicKey string `json:"encryption_public_key"`
+	UpdatedAt           string `json:"updated_at"`
+}
+
 type IdentityResponse struct {
 	Identity            string `json:"identity"`
 	PublicKey           string `json:"public_key"`

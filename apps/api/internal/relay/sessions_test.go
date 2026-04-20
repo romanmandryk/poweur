@@ -250,8 +250,17 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 			Nonce:             nonce,
 			IdentitySignature: identitySig,
 		},
+		Encryption: &EncryptionMeta{
+			Alg:                "x25519-chacha20-poly1305",
+			EphemeralPublicKey: "ephemeral-pub",
+			Nonce:              "nonce",
+		},
 	}
-	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, nil)
+	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+		Alg:                msg.Encryption.Alg,
+		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+		Nonce:              msg.Encryption.Nonce,
+	})
 	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(sessionPriv, []byte(canonicalMsg)))
 
 	body, _ := json.Marshal(msg)

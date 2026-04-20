@@ -59,6 +59,23 @@ func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, ident
 	return nil
 }
 
+func (p *HetznerProvider) WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error {
+	if token == "" {
+		return errors.New("missing hetzner api token")
+	}
+	if encryptionPublicKey == "" {
+		return errors.New("missing encryption public key")
+	}
+	zoneID, err := p.findZoneID(ctx, token, identity)
+	if err != nil {
+		return err
+	}
+	ttl := int(defaultTTL(p.cfg).Seconds())
+	encName := fmt.Sprintf("_eurything-enc.%s", identity)
+	encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+	return p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl)
+}
+
 func (p *HetznerProvider) findZoneID(ctx context.Context, token, identity string) (string, error) {
 	labels := strings.Split(identity, ".")
 	for i := 0; i < len(labels)-1; i++ {

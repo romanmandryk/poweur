@@ -23,6 +23,14 @@ import (
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
+	// Optional override: if DNS_SERVER is set (e.g. "1.1.1.1" or
+	// "8.8.8.8:53") route every DNS lookup this CLI performs through that
+	// resolver using Go's pure-Go DNS client. Defeats broken LAN resolvers
+	// and cached NXDOMAINs without touching system DNS. Empty env = use the
+	// system resolver (default).
+	if server := strings.TrimSpace(os.Getenv("DNS_SERVER")); server != "" {
+		identity.SetResolver(identity.CustomNetResolver(server))
+	}
 	if len(args) == 0 {
 		printHelp(stdout)
 		return 0
@@ -67,6 +75,8 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityUse(args[1:], stdout, stderr)
 	case "list":
 		return runIdentityList(args[1:], stdout, stderr)
+	case "add-encryption-key":
+		return runIdentityAddEncryptionKey(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "unknown identity subcommand")
 		return 1
@@ -350,6 +360,105 @@ func runIdentityList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runIdentityAddEncryptionKey generates a fresh X25519 keypair for an
+// already-registered identity, saves the private half locally, and asks the
+// relay to publish the public half to DNS under `_eurything-enc.<identity>`.
+//
+// Modes:
+//   - no existing .enc file: a new keypair is minted (the normal "retro-fit"
+//     path for identities created before E2E support landed).
+//   - existing .enc file and --rotate: the local file is overwritten and the
+//     DNS record is rewritten (useful after suspected compromise).
+//   - existing .enc file without --rotate: command aborts to avoid silently
+//     invalidating ciphertext that was encrypted to the old key.
+func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity add-encryption-key", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dnsProvider := fs.String("dns-provider", "", "dns provider (cloudflare, hetzner)")
+	dnsToken := fs.String("dns-token", "", "dns provider api token")
+	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	rotate := fs.Bool("rotate", false, "overwrite an existing encryption key")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--rotate": true})); err != nil {
+		return 1
+	}
+
+	identityValue := fs.Arg(0)
+	if identityValue == "" {
+		identityValue = resolveIdentity(*useIdentity, cfg.Identity)
+	}
+	if identityValue == "" || cfg.KeysDir == "" {
+		fmt.Fprintln(stderr, "identity not configured (pass <identity> or run `eurything identity use <identity>` first)")
+		return 1
+	}
+	if *relayURL == "" {
+		fmt.Fprintln(stderr, "relay url not configured")
+		return 1
+	}
+
+	signingKeyPath := identity.KeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(signingKeyPath); err != nil {
+		fmt.Fprintf(stderr, "signing key not found for %s at %s\n", identityValue, signingKeyPath)
+		return 1
+	}
+
+	encKeyPath := identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
+	if _, err := os.Stat(encKeyPath); err == nil && !*rotate {
+		fmt.Fprintf(stderr, "encryption key already exists at %s; pass --rotate to overwrite\n", encKeyPath)
+		return 1
+	}
+
+	provider := resolveDNSProvider(*dnsProvider)
+	token := resolveDNSToken(provider, *dnsToken)
+	if token == "" {
+		fmt.Fprintln(stderr, "dns token is required (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
+		return 1
+	}
+
+	if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	encPub, encPriv, err := identity.GenerateEncryptionKeypair()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	savedPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
+	resp, err := PublishEncryptionKey(context.Background(), *relayURL, identityValue, encPublicKey, provider, token)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	output := map[string]any{
+		"identity":              identityValue,
+		"encryption_public_key": resp.EncryptionPublicKey,
+		"encryption_key_path":   savedPath,
+		"relay":                 *relayURL,
+		"updated_at":            resp.UpdatedAt,
+		"rotated":               *rotate,
+	}
+	verb := "added encryption key"
+	if *rotate {
+		verb = "rotated encryption key"
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s for %s (published to DNS)\n", verb, identityValue))
+}
+
 func runSend(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -359,9 +468,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
-	noEncrypt := fs.Bool("no-encrypt", false, "send the payload in plaintext (not recommended)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--no-encrypt": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
@@ -393,30 +501,33 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	recipient := fs.Arg(0)
 	plaintext := fs.Arg(1)
 
-	var payloadString string
-	var encMeta *EncryptionMeta
-	if !*noEncrypt {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
-		cancel()
-		if err == nil && len(recipientEncPub) == 32 {
-			sealed, err := cryptoe2e.Encrypt(recipientEncPub, []byte(plaintext))
-			if err != nil {
-				fmt.Fprintln(stderr, "encrypt:", err)
-				return 1
-			}
-			payloadString = sealed.Ciphertext
-			encMeta = &EncryptionMeta{
-				Alg:                cryptoe2e.AlgName,
-				EphemeralPublicKey: sealed.EphemeralPublicKey,
-				Nonce:              sealed.Nonce,
-			}
-		} else {
-			fmt.Fprintln(stderr, "warning: recipient has no published encryption key, sending plaintext")
-			payloadString = plaintext
-		}
-	} else {
-		payloadString = plaintext
+	// Encryption is mandatory. If the recipient has no published X25519 key
+	// at `_eurything-enc.<recipient>` we refuse to send rather than silently
+	// fall back to plaintext. This preserves the guarantee that the relay
+	// (and any network observer) never sees a message body in cleartext.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
+	cancel()
+	if err != nil {
+		fmt.Fprintf(stderr, "cannot look up recipient encryption key for %s: %v\n", recipient, err)
+		return 1
+	}
+	if len(recipientEncPub) != 32 {
+		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n"+
+			"Ask them to run `eurything identity add-encryption-key %s` to publish one.\n",
+			recipient, recipient)
+		return 1
+	}
+	sealed, err := cryptoe2e.Encrypt(recipientEncPub, []byte(plaintext))
+	if err != nil {
+		fmt.Fprintln(stderr, "encrypt:", err)
+		return 1
+	}
+	payloadString := sealed.Ciphertext
+	encMeta := &EncryptionMeta{
+		Alg:                cryptoe2e.AlgName,
+		EphemeralPublicKey: sealed.EphemeralPublicKey,
+		Nonce:              sealed.Nonce,
 	}
 
 	sessionPriv, err := sess.PrivateKey()
@@ -475,12 +586,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	output := map[string]any{
 		"status":    resp.StatusCode,
 		"message":   msg,
-		"encrypted": encMeta != nil,
+		"encrypted": true,
 	}
-	if encMeta != nil {
-		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s\n", msg.Recipient))
-	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent message to %s\n", msg.Recipient))
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s\n", msg.Recipient))
 }
 
 func runInbox(args []string, stdout, stderr io.Writer) int {
@@ -1003,7 +1111,8 @@ func printHelp(w io.Writer) {
   eurything identity dns <identity> [--use-identity=...] [--json]
   eurything identity use <identity> [--json]
   eurything identity list [--json]
-  eurything send <to> <message> [--use-identity=...] [--no-encrypt] [--json]
+  eurything identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
+  eurything send <to> <message> [--use-identity=...] [--json]
   eurything inbox [--use-identity=...] [--json]
   eurything session status [--use-identity=...] [--json]
   eurything session refresh [--use-identity=...] [--json]
