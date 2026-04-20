@@ -27,12 +27,25 @@ Rate limit checks run **before** signature verification. Requests that exceed pe
   "sender":    "alice.poweur.net",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
-  "payload":   "Hello, Bob.",
-  "signature": "<base64-encoded Ed25519 signature over canonical fields>"
+  "payload":   "<base64url ciphertext OR UTF-8 plaintext>",
+  "signature": "<base64 Ed25519 signature over canonical fields>",
+  "session_id": "sess_01j...",
+  "session_proof": {
+    "session_public_key":  "<base64url>",
+    "issued_at":           "...",
+    "expires_at":          "...",
+    "nonce":               "...",
+    "identity_signature":  "<base64>"
+  },
+  "encryption": {
+    "alg":                  "x25519-chacha20-poly1305",
+    "ephemeral_public_key": "<base64url>",
+    "nonce":                "<base64url>"
+  }
 }
 ```
 
-All fields are required.
+`sender`, `recipient`, `timestamp`, `payload`, and `signature` are always required. `session_id`, `session_proof`, and `encryption` are optional; MVP clients include `session_id` on every send and `encryption` whenever the recipient has a published X25519 key. See [Message Format](/protocol/message-format) for the canonical signing string and the signature verification rules.
 
 ### Responses
 
@@ -40,9 +53,11 @@ All fields are required.
 |--------|---------|
 | `202 Accepted` | Message accepted for delivery or forwarding |
 | `400 Bad Request` | Malformed message envelope (missing field, invalid JSON, invalid timestamp format) |
-| `401 Unauthorized` | Signature verification failed |
+| `401 Unauthorized` | Signature verification failed, or `session_expired` when `session_id` is unknown and no valid `session_proof` is attached |
 | `413 Content Too Large` | Request body exceeds 512 KB |
 | `429 Too Many Requests` | Sender has exceeded rate limits |
+
+When the relay returns `401 session_expired`, the client should silently register a new session via `POST /sessions` and retry the send.
 
 **429 response body:**
 ```json
@@ -62,12 +77,15 @@ Retrieve pending messages for a locally hosted identity. The requester must prov
 
 ### Authentication
 
-Before calling this endpoint, obtain a challenge from `GET /auth/challenge?identity=<identity>`. Sign the challenge with the identity's private key and include the signature and identity in request headers.
+Before calling this endpoint, obtain a challenge from `GET /auth/challenge?identity=<identity>`. Sign the challenge and include the signature and identity in request headers.
 
-| Header | Value |
-|--------|-------|
-| `X-Eurything-Identity` | The identity subdomain (e.g. `alice.poweur.net`) |
-| `X-Eurything-Signature` | Base64-encoded signature of the challenge string |
+| Header | Required | Value |
+|--------|:--------:|-------|
+| `X-Eurything-Identity`   | Yes | The identity subdomain (e.g. `alice.poweur.net`) |
+| `X-Eurything-Signature`  | Yes | Base64-encoded signature of the challenge string |
+| `X-Eurything-Session-Id` | No  | Session identifier when the challenge is signed with the session key. If omitted, the relay verifies with the long-lived identity key. |
+
+When `X-Eurything-Session-Id` is present but the session is unknown or expired, the relay responds with `401 session_expired` so the client can re-register and retry.
 
 ### Path parameters
 
@@ -85,12 +103,20 @@ Before calling this endpoint, obtain a challenge from `GET /auth/challenge?ident
       "sender":    "bob.example.org",
       "recipient": "alice.poweur.net",
       "timestamp": "2026-03-28T12:00:00Z",
-      "payload":   "Hey Alice!",
-      "signature": "<base64-encoded signature>"
+      "payload":   "<base64url ciphertext or plaintext>",
+      "signature": "<base64-encoded signature>",
+      "session_id": "sess_01j...",
+      "encryption": {
+        "alg":                  "x25519-chacha20-poly1305",
+        "ephemeral_public_key": "<base64url>",
+        "nonce":                "<base64url>"
+      }
     }
   ]
 }
 ```
+
+The relay forwards the envelope as it was signed. Clients should verify the signature and, when `encryption` is set, decrypt with the recipient's local X25519 private key before displaying the payload.
 
 If there are no pending messages, `messages` is an empty array `[]`.
 
@@ -150,26 +176,29 @@ The DNS provider token is used during this request only and **discarded immediat
 
 ```json
 {
-  "identity":     "alice.poweur.net",
-  "public_key":   "<base64url-encoded Ed25519 public key>",
-  "dns_provider": "cloudflare",
-  "dns_token":    "<scoped DNS provider API token>"
+  "identity":              "alice.poweur.net",
+  "public_key":            "<base64url-encoded Ed25519 public key>",
+  "encryption_public_key": "<base64url-encoded X25519 public key>",
+  "dns_provider":          "cloudflare",
+  "dns_token":             "<scoped DNS provider API token>"
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `identity` | string | Fully qualified identity subdomain to register |
-| `public_key` | string | Base64url-encoded Ed25519 public key (no padding) |
+| `public_key` | string | Base64url-encoded Ed25519 identity public key (no padding) |
+| `encryption_public_key` | string | Base64url-encoded X25519 encryption public key (no padding). Optional in the API but written for every identity by CLI and mobile clients in the MVP. |
 | `dns_provider` | string | DNS provider to use — `cloudflare` or `hetzner` |
 | `dns_token` | string | Scoped API token for the target DNS zone |
 
 ### DNS records written
 
-On success, the relay creates (or updates) two DNS records:
+On success, the relay creates (or updates) up to three DNS records:
 
 1. `TXT` at `_eurything.<identity>` — `eurything-pubkey=ed25519:<public_key>`
-2. `A` (or `CNAME`) at `<identity>` — pointing to the relay's own address
+2. `TXT` at `_eurything-enc.<identity>` — `eurything-enckey=x25519:<encryption_public_key>` (only when `encryption_public_key` is supplied)
+3. `A` (or `CNAME`) at `<identity>` — pointing to the relay's own address
 
 ### Responses
 
@@ -183,10 +212,11 @@ On success, the relay creates (or updates) two DNS records:
 **201 response body:**
 ```json
 {
-  "identity":    "alice.poweur.net",
-  "public_key":  "<base64url-encoded public key>",
-  "relay":       "relay.poweur.net",
-  "created_at":  "2026-03-28T12:00:00Z"
+  "identity":              "alice.poweur.net",
+  "public_key":            "<base64url-encoded identity public key>",
+  "encryption_public_key": "<base64url-encoded encryption public key>",
+  "relay":                 "relay.poweur.net",
+  "created_at":            "2026-03-28T12:00:00Z"
 }
 ```
 
@@ -225,6 +255,79 @@ Look up the public key registered for an identity on this relay. Used by peer re
 |--------|---------|
 | `200 OK` | Identity found, public key returned |
 | `404 Not Found` | Identity is not hosted on this relay |
+
+---
+
+## POST /sessions
+
+Register a short-lived session key with the relay. The client generates a fresh Ed25519 keypair, signs a canonical session-registration string with the long-lived identity key, and submits it. The relay verifies the identity signature against the identity's DNS-published public key, enforces the 24-hour maximum TTL, issues a `session_id`, and caches the session in memory.
+
+### Request body
+
+```json
+{
+  "identity":            "alice.poweur.net",
+  "session_public_key":  "<base64url Ed25519 session public key>",
+  "issued_at":           "2026-03-28T08:00:00Z",
+  "expires_at":          "2026-03-29T08:00:00Z",
+  "nonce":               "<base64url random nonce>",
+  "identity_signature":  "<base64 signature of canonical session-registration string>",
+  "device_fingerprint":  "optional opaque device id"
+}
+```
+
+The canonical session-registration string is:
+
+```
+session-registration
+<identity>
+<session_public_key>
+<issued_at>
+<expires_at>
+<nonce>
+```
+
+signed with the long-lived identity key (Ed25519). See [Identity Model → Session & Passkey Flow](/protocol/identity-model#sessions).
+
+### Responses
+
+| Status | Meaning |
+|--------|---------|
+| `201 Created` | Session registered |
+| `400 Bad Request` | Missing/invalid fields, TTL over 24h, `issued_at` too far in the future, malformed timestamps |
+| `401 Unauthorized` | `identity_signature` failed to verify against the identity's long-lived public key |
+
+**201 response body:**
+```json
+{
+  "session_id":         "sess_01j9xk7q...",
+  "identity":           "alice.poweur.net",
+  "session_public_key": "<base64url session public key>",
+  "issued_at":          "2026-03-28T08:00:00Z",
+  "expires_at":         "2026-03-29T08:00:00Z"
+}
+```
+
+Relay restarts invalidate all sessions. Clients should treat `401 session_expired` on subsequent calls as a signal to re-register.
+
+---
+
+## DELETE /sessions/:id
+
+Revoke a session. Idempotent — deleting a session that does not exist also returns `204`.
+
+### Path parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `:id` | The session id returned by `POST /sessions` |
+
+### Responses
+
+| Status | Meaning |
+|--------|---------|
+| `204 No Content` | Session removed from the cache |
+| `400 Bad Request` | Missing id |
 
 ---
 

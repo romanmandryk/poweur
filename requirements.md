@@ -24,6 +24,21 @@ A signed message carries the sender's identity subdomain and a signature verifia
 
 The same identity key pair must also be usable outside messaging. A third-party website or app must be able to issue a challenge to `alice.example.com`, have Alice approve that request in the mobile app, and verify the resulting signature against Alice's published public key. This makes the DNS identity a general-purpose authentication primitive rather than a messaging-only handle.
 
+### Long-Lived vs. Short-Lived Keys
+
+Every identity uses two tiers of keys:
+
+- **Long-lived identity key pair (Ed25519)** — the authoritative signing key. Its public half is published in DNS at `_eurything.<identity>`. On mobile devices the private half is bound to a passkey (WebAuthn/FIDO2) and only unlocked via biometric or platform authenticator interaction. On headless hosts (CLI, bots) it lives as a file under `keys_dir`.
+- **Short-lived session key pair (Ed25519)** — generated on the device and registered with a relay for a bounded window (max 24 hours in the MVP). Sessions are signed into existence by the long-lived identity key, but day-to-day messages and inbox reads are signed by the session key. This ensures the long-lived key is used as rarely as possible — typically once per session — and that a passkey prompt is only required at session refresh time.
+
+Sessions are cached in relay memory. Relay restarts invalidate all sessions; clients must re-register transparently. Clients must delete or rotate session keys when the user signs out.
+
+### Encryption Key Pair
+
+Alongside the signing identity, every identity also owns a **long-lived X25519 encryption key pair**. The public key is published in DNS at `_eurything-enc.<identity>`. Senders use it to perform X25519 ECDH with an ephemeral key pair, derive a symmetric key, and encrypt the message body with an AEAD cipher (ChaCha20-Poly1305 in the MVP). The relay never sees plaintext payloads. See **Eurything Protocol → End-to-End Encryption** for the concrete envelope.
+
+The encryption private key is stored next to the signing private key on the same device, with the same storage rules (secure enclave on mobile, file on CLI/bots).
+
 ### DNS as Persistent Storage
 
 DNS is not only the routing layer — it is the only durable store in the system. All state that must survive a relay restart lives in DNS records:
@@ -85,51 +100,114 @@ The Eurything Protocol defines the message format, signing scheme, verification 
 
 A message is a JSON object with the following fields:
 
-| Field       | Type   | Description |
-|-------------|--------|-------------|
-| `sender`    | string | Fully qualified identity subdomain of the sender (e.g., `alice.example.com`) |
-| `recipient` | string | Fully qualified identity subdomain of the recipient (e.g., `bob.example.org`) |
-| `timestamp` | string | ISO 8601 UTC timestamp of when the message was created |
-| `payload`   | string | Message content — plaintext for MVP; encryption is a post-MVP concern |
-| `signature` | string | Base64-encoded signature over the canonical fields (see below) |
+| Field        | Type    | Description |
+|--------------|---------|-------------|
+| `sender`     | string  | Fully qualified identity subdomain of the sender (e.g., `alice.example.com`) |
+| `recipient`  | string  | Fully qualified identity subdomain of the recipient (e.g., `bob.example.org`) |
+| `timestamp`  | string  | ISO 8601 UTC timestamp of when the message was created |
+| `payload`    | string  | When `encryption` is present, base64url of the AEAD ciphertext. Otherwise UTF-8 plaintext. |
+| `signature`  | string  | Base64-encoded signature over the canonical fields (see below) |
+| `session_id` | string  | Optional. Identifies the short-lived session whose key signed this message. Required in the MVP for all clients that register a session. |
+| `encryption` | object  | Optional. Present when the payload is end-to-end encrypted. Omitted for unencrypted messages. See **End-to-End Encryption** below. |
 
 To keep the envelope evolvable and easier to map to established signed-message formats, the protocol should reserve optional forward-compatible fields such as `id`, `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. These are not required for the first messaging milestone, but the protocol must treat unknown fields as ignorable unless they are explicitly defined as signed mandatory fields in a later version.
 
-**Minimal example:**
+**Encrypted example (MVP default):**
 ```json
 {
   "sender":    "alice.example.com",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
-  "payload":   "Hey Bob, are you around?",
-  "signature": "MEUCIQDz...base64..."
+  "payload":   "<base64url ciphertext>",
+  "signature": "<base64 signature by the session key>",
+  "session_id": "sess_01j...",
+  "encryption": {
+    "alg":                   "x25519-chacha20-poly1305",
+    "ephemeral_public_key":  "<base64url>",
+    "nonce":                 "<base64url>"
+  }
 }
 ```
 
 ### Signing
 
-Before sending, the client constructs a canonical string by concatenating the following fields in order, separated by newlines:
+Before sending, the client constructs a canonical string by concatenating the following lines, separated by newlines:
 
 ```
-alice.example.com
-bob.example.org
-2026-03-28T12:00:00Z
-Hey Bob, are you around?
+<sender>
+<recipient>
+<timestamp>
+<payload>
+session:<session_id>            # only when session_id is present
+enc:<alg>:<ephemeral_public_key>:<nonce>   # only when encryption is present
 ```
 
-The sender signs this canonical string with their private key (Ed25519 in the MVP). The resulting signature is base64-encoded and placed in the `signature` field. Including the timestamp in the signed payload prevents trivial replay attacks.
+The lines are emitted in this exact order; any line whose field is empty is omitted. This keeps the canonical string backward compatible with the plaintext, session-less envelope (first four lines only) while binding the session identifier and encryption metadata into the signature whenever they are used.
+
+The sender signs this canonical string with:
+
+- the **session private key** when `session_id` is set (the normal MVP path), or
+- the **long-lived identity private key** when no session is in use (headless agents that opt out of sessions, or legacy clients).
+
+Ed25519 is used in both cases. The resulting signature is base64-encoded and placed in the `signature` field. Including the timestamp in the signed payload prevents trivial replay attacks. Binding `session_id` into the canonical string prevents a signature produced for one session from being replayed under another.
+
+### Session Registration
+
+Before a client can send messages with a session key, it must register that session with a relay:
+
+1. The client generates a fresh Ed25519 keypair for the session.
+2. The client builds a **session registration** object with `identity`, `session_public_key`, `issued_at`, `expires_at`, `nonce`, and an `identity_signature` produced by the long-lived identity key over the canonical string:
+   ```
+   session-registration
+   <identity>
+   <session_public_key>
+   <issued_at>
+   <expires_at>
+   <nonce>
+   ```
+3. The client POSTs this to `POST /sessions` on the relay. The relay verifies the `identity_signature` against the identity's long-lived public key (resolved from DNS), enforces the maximum TTL (24h), and issues a `session_id` back.
+4. The relay caches `(session_id → identity, session_public_key, expires_at)` in memory. On restart, all sessions are lost and clients re-register transparently.
+
+On mobile devices, step 3 is the single point at which a passkey unlock is required under normal operation. Between registrations the identity key material never leaves the secure enclave except to authorize a new session.
+
+### End-to-End Encryption
+
+Messages MUST be end-to-end encrypted when both sender and recipient have a published X25519 encryption key. The relay never sees plaintext. The encryption scheme for the MVP is:
+
+- **Key agreement:** X25519 ECDH between a sender-generated ephemeral keypair and the recipient's long-lived X25519 public key (resolved from `_eurything-enc.<recipient>` in DNS).
+- **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "eurything/msg/v1"`, producing a 32-byte key.
+- **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"eurything/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
+- **Envelope:** the ciphertext (base64url) goes into `payload`; `ephemeral_public_key` and `nonce` (base64url) go into the `encryption` object; `alg` is the fixed string `x25519-chacha20-poly1305`.
+
+Clients MAY fall back to plaintext when the recipient has no published encryption key. In that case `encryption` is omitted and `payload` is the plaintext. CLI clients must warn the user in this case. Mobile clients should refuse to send in plaintext and surface a clear error.
+
+Future versions may replace `x25519-chacha20-poly1305` with a stronger or more standardized suite. The `alg` field is the version marker; clients must reject envelopes whose `alg` they do not implement.
 
 ### Verification
 
 When a relay receives a message, it verifies the signature as follows:
 
-1. Extract the `sender` field from the message.
-2. Fetch the sender's public key. Public keys are stored in DNS `TXT` records at `_eurything.<sender-subdomain>`. The relay queries DNS for this record to retrieve the public key. As a fallback (e.g., if the TXT record is not yet propagated), the relay may call `GET /identities/:identity` on the peer relay resolved from the sender's subdomain DNS record.
-3. Reconstruct the canonical string from `sender`, `recipient`, `timestamp`, and `payload` in the same order used during signing.
-4. Verify the signature against the canonical string using the sender's public key.
+1. Extract the `sender` field and (optionally) `session_id` from the message.
+2. Resolve the verifying public key:
+   - If `session_id` is present, look it up in the session cache. If the session is missing or expired, reject with `401 Unauthorized` (`session_expired`) so the client can re-register. The session's bound `identity` must match `sender`.
+   - If `session_id` is absent, fetch the sender's long-lived public key from DNS (`_eurything.<sender>`) and fall back to `GET /identities/:identity` on the peer relay if the TXT record is not yet propagated.
+3. Reconstruct the canonical string using the rules in **Signing**, including the `session:<session_id>` and `enc:...` lines whenever those fields are present on the envelope.
+4. Verify the signature against the canonical string using the resolved public key.
 5. If verification fails, reject the message with `401 Unauthorized`.
 
-Relays forwarding messages on behalf of another relay do not re-sign; they forward the original signed envelope as-is. The receiving relay verifies against the original sender's public key.
+Relays forwarding messages on behalf of another relay do not re-sign; they forward the original signed envelope as-is. To make session-signed messages verifiable across relays (the session cache is local to each relay) the envelope MAY carry an optional `session_proof` object:
+
+```json
+"session_proof": {
+  "session_public_key":  "<base64url>",
+  "issued_at":           "...",
+  "expires_at":          "...",
+  "nonce":               "...",
+  "identity_signature":  "<base64>"
+}
+```
+
+The `session_proof` is produced once at session-registration time and is simply the inputs + identity signature from the session-registration canonical string. A receiving relay verifies the proof by fetching the sender's long-lived identity key from DNS and checking `identity_signature` over the canonical session-registration string. On success it caches the session and accepts the message. The sending client MAY attach the proof on every outbound message; the sending relay MUST attach it when forwarding a session-signed message to a peer relay if it is not already present.
 
 ### End-to-End Routing
 

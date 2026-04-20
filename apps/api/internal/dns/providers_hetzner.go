@@ -27,7 +27,7 @@ func NewHetznerProvider(cfg config.Config) *HetznerProvider {
 	}
 }
 
-func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, relayAddress string) error {
+func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error {
 	if token == "" {
 		return errors.New("missing hetzner api token")
 	}
@@ -42,6 +42,14 @@ func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, ident
 
 	if err := p.upsertRecord(ctx, token, zoneID, "TXT", pubName, pubValue, ttl); err != nil {
 		return err
+	}
+
+	if encryptionPublicKey != "" {
+		encName := fmt.Sprintf("_eurything-enc.%s", identity)
+		encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+		if err := p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl); err != nil {
+			return err
+		}
 	}
 
 	recordType, relayHost := relayRecord(relayAddress)

@@ -12,7 +12,7 @@ import (
 )
 
 type Provider interface {
-	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, relayAddress string) error
+	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error
 }
 
 type ProviderFactory struct {

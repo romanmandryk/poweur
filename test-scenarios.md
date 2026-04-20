@@ -65,9 +65,21 @@ Use for native mobile and passkey validation.
 | API-11 | Relay | `GET /messages/:identity` returns inbox after valid signed challenge | Automated |
 | CLI-01 | CLI | Create local identity and output machine-readable JSON | Automated |
 | CLI-02 | CLI | Show current identity and public key | Automated |
-| CLI-03 | CLI | Send a signed message through the relay | Automated |
-| CLI-04 | CLI | Read inbox through challenge-response flow | Automated |
+| CLI-03 | CLI | Send a signed, end-to-end encrypted message through the relay | Automated |
+| CLI-04 | CLI | Read inbox through challenge-response flow and decrypt payloads | Automated |
 | CLI-05 | CLI | Sign third-party verifier request in headless mode | Automated |
+| SESS-01 | Session | `POST /sessions` accepts a valid identity-signed session registration and issues a session id bounded by 24h TTL | Automated |
+| SESS-02 | Session | Session registration with a forged identity signature returns `401` | Automated |
+| SESS-03 | Session | Session registration exceeding the 24h TTL returns `400` | Automated |
+| SESS-04 | Session | Message signed with an expired/unknown session returns `401 session_expired` | Automated |
+| SESS-05 | Session | CLI transparently re-registers a session on `401 session_expired` and retries once | Automated |
+| SESS-06 | Session | `DELETE /sessions/:id` revokes a session; subsequent messages using that id are rejected | Automated |
+| SESS-07 | Session | Cross-relay message carrying a valid `session_proof` is verified by a relay that did not issue the session | Automated |
+| E2E-01 | Crypto | End-to-end encrypted payload roundtrips between sender and recipient CLI | Automated |
+| E2E-02 | Crypto | Relay never sees plaintext: inbox ciphertext matches exactly what the client sent | Automated |
+| E2E-03 | Crypto | Sending to a recipient without a published encryption key warns the user and either sends plaintext (CLI with `--no-encrypt`) or refuses (mobile) | Automated / Manual |
+| E2E-04 | Crypto | Tampering with the ciphertext after signing invalidates the signature | Automated |
+| E2E-05 | Crypto | Identity creation publishes both `_eurything.<id>` and `_eurything-enc.<id>` TXT records | Mostly automated |
 | AUTH-01 | Auth | Website sign-up request is approved in mobile app via QR | Manual |
 | AUTH-02 | Auth | Website sign-in request is approved in mobile app via QR | Manual |
 | AUTH-03 | Auth | Same-device deep-link sign-in works from mobile browser to app and back | Manual |
@@ -75,11 +87,14 @@ Use for native mobile and passkey validation.
 | AUTH-05 | Auth | Verifier can resolve identity from DNS and validate signature | Automated |
 | AUTH-06 | Auth | Verifier can consume `/.well-known/eurything.json` metadata | Automated |
 | AUTH-07 | Auth | Optional `did:web` document is served and matches DNS key material | Automated |
-| MOBILE-01 | iOS | Create identity with passkey-backed keypair and verify DNS propagation | Manual |
-| MOBILE-02 | Android | Create identity with passkey-backed keypair and verify DNS propagation | Manual |
-| MOBILE-03 | iOS | Approve third-party sign-up request and return signed response | Manual |
-| MOBILE-04 | Android | Approve third-party sign-in request and return signed response | Manual |
-| MOBILE-05 | Mobile | Send and receive messages between two mobile identities | Manual |
+| MOBILE-01 | iOS | Create identity with passkey-backed keypair (Ed25519) + X25519 encryption keypair, verify DNS propagation of both TXT records | Manual |
+| MOBILE-02 | Android | Create identity with passkey-backed keypair + X25519 encryption keypair, verify DNS propagation of both TXT records | Manual |
+| MOBILE-03 | iOS | Approve third-party sign-up request (passkey) and return signed response | Manual |
+| MOBILE-04 | Android | Approve third-party sign-in request (passkey) and return signed response | Manual |
+| MOBILE-05 | Mobile | Send and receive end-to-end encrypted messages between two mobile identities | Manual |
+| MOBILE-06 | Mobile | Session registration on first send triggers exactly one passkey prompt, and subsequent sends within 24h trigger none | Manual |
+| MOBILE-07 | Mobile | When a session expires, the next send triggers a single passkey prompt to re-register | Manual |
+| MOBILE-08 | Mobile | Client refuses to send plaintext to a recipient without a published encryption key, and surfaces a clear error | Manual |
 | INFRA-01 | Infra | Terraform plan succeeds with staging variables | Automated |
 | INFRA-02 | Infra | Terraform apply creates relay host, LB, DNS, and TLS resources in staging | Mostly automated |
 | INFRA-03 | Infra | Deployed relay passes health check behind load balancer | Mostly automated |
