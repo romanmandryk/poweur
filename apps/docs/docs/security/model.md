@@ -118,11 +118,44 @@ Because DNS zone integrity is critical:
 3. **Monitor DNS records.** Operators and users should monitor their DNS records for unexpected changes.
 4. **Rotate tokens regularly.** The relay never stores tokens, so the risk from a compromised relay is bounded to the duration of an active registration request.
 
+## Endpoint Authentication Surfaces
+
+The relay HTTP API is split into two classes (see
+[API Reference](/relay/api-reference#endpoint-classes)):
+
+- **Open / messaging** — `POST /messages`, `POST /acks`, public reads.
+  Anyone may call. Authentication is per-envelope: every message and ack
+  is signature-verified before storage. Per-sender and global per-relay
+  rate limits run *before* signature verification to keep the cheap
+  reject path cheap. The relay also enforces an
+  [at-least-one-local rule](/relay/api-reference#at-least-one-local-rule)
+  so it cannot be abused as an open forwarder for the world.
+- **Owner-only / admin** — `POST /identities`, `POST /identities/:identity/encryption-key`, `DELETE /sessions/:id`, `POST /sessions`, `GET /messages/:identity`. Each requires either challenge-response (`GET /messages/:identity`) or an identity-signed admin envelope verified against the long-lived signing key for the identity in question. The DNS-token check on `POST /identities` is necessary but no longer sufficient on its own; the request must also carry a signature verified against the body's `public_key`, so a hostile DNS-token holder cannot register an arbitrary public key.
+
+## Send Path Metadata Trade-off
+
+By default the sender's CLI POSTs `/messages` directly to the recipient's
+relay (DNS-resolved). This means **the recipient's relay observes the
+sender's IP** on every send. The sender's home relay never sees outbound
+traffic.
+
+Clients that prefer to hide their IP from the recipient's relay opt in
+to `--via-home-relay`. In that mode the sender posts to their own home
+relay, which accepts the message because the sender is locally hosted
+(satisfies the at-least-one-local rule) and forwards over HTTP to the
+recipient's relay. The recipient's relay then sees the sender's home
+relay IP instead of the sender's IP — restoring the previous metadata
+shielding for users who want it, at the cost of a re-introduced
+home-relay hop.
+
+The relay refuses to forward in any other shape: in particular, it never
+accepts a message where neither party is locally hosted.
+
 ## MVP Scope Notes
 
-- **Metadata is visible to the relay.** Sender, recipient, timestamp, and message size are not hidden from the relay. Hiding routing metadata (who talks to whom) is out of scope for the MVP.
+- **Metadata is visible to the relay.** Sender, recipient, timestamp, and message size are not hidden from the relay. Which relay sees the sender's IP depends on the chosen send path (default direct-to-recipient vs. `--via-home-relay`); see above.
 - **Forward secrecy is partial.** Each message uses a fresh ephemeral X25519 key, so compromising a recipient's long-lived encryption key does not reveal past messages once the ephemeral key is deleted. A dedicated double-ratchet session scheme (Signal-style) is a future improvement.
-- **Plaintext fallback.** If a recipient does not publish an encryption public key, the sender may opt in to sending plaintext. CLI warns on this path; mobile refuses. Operators should treat missing encryption keys as a hard error in production deployments.
+- **No plaintext fallback.** Encryption is mandatory end-to-end: CLI and mobile both refuse to send to a recipient without a published `_eurything-enc.<identity>` record, and relays reject any `POST /messages` lacking encryption metadata with `400 encryption_required`. A recipient without an encryption key simply cannot receive messages until they publish one (via `eurything identity add-encryption-key` or the mobile equivalent).
 - **Session keys are relay-local.** A relay seeing only an unfamiliar `session_id` cannot verify a forwarded message unless the envelope also carries `session_proof` (which the sending relay attaches automatically when forwarding).
 
 ## Related

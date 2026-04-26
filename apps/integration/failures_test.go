@@ -204,6 +204,7 @@ func TestINT07_TamperedSignatureRejected(t *testing.T) {
 	_, forgedPriv, _ := ed25519.GenerateKey(nil)
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	forged := map[string]any{
+		"id":         "msg_forged_int07",
 		"sender":     "alice.example.com",
 		"recipient":  "bob.example.com",
 		"timestamp":  timestamp,

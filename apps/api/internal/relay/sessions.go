@@ -115,12 +115,57 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSessionDelete is owner-only. The body must include an
+// identity-signed envelope (canonical: session-revocation/identity/
+// session_id/issued_at/nonce) verified against the long-lived signing
+// key of the identity that owns the session. Idempotent: deleting an
+// unknown session still returns 204, but only after auth succeeds.
 func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "session id required")
 		return
 	}
+	var req SessionRevokeRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		return
+	}
+	req.Identity = strings.TrimSpace(req.Identity)
+	req.IssuedAt = strings.TrimSpace(req.IssuedAt)
+	req.Nonce = strings.TrimSpace(req.Nonce)
+	req.IdentitySignature = strings.TrimSpace(req.IdentitySignature)
+	if req.Identity == "" || req.IssuedAt == "" || req.Nonce == "" || req.IdentitySignature == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing identity-signed admin envelope (identity, issued_at, nonce, identity_signature)")
+		return
+	}
+	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	// If the session is known, ensure the caller's claimed identity
+	// matches it. If unknown, fall through to identity verification on the
+	// claimed identity — revoking by id alone is fine as long as the
+	// caller proves they own *some* identity that DNS associates with
+	// this relay; the relay does not leak whether the id existed.
+	if existing, ok := s.sessions.Get(id); ok {
+		if existing.Identity != req.Identity {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
+			return
+		}
+	}
+
+	identityPub, err := s.resolveIdentityPublicKey(r.Context(), req.Identity)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
+		return
+	}
+	canonical := crypto.CanonicalSessionRevocation(req.Identity, id, req.IssuedAt, req.Nonce)
+	if err := crypto.VerifySignature(identityPub, canonical, req.IdentitySignature); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
+		return
+	}
+
 	s.sessions.Delete(id)
 	w.WriteHeader(http.StatusNoContent)
 }

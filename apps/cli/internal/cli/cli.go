@@ -19,6 +19,7 @@ import (
 	"github.com/eurything/cli/internal/config"
 	cryptoe2e "github.com/eurything/cli/internal/crypto"
 	"github.com/eurything/cli/internal/identity"
+	"github.com/eurything/cli/internal/journal"
 	"github.com/eurything/cli/internal/session"
 )
 
@@ -43,6 +44,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSend(args[1:], stdout, stderr)
 	case "inbox":
 		return runInbox(args[1:], stdout, stderr)
+	case "messages":
+		return runMessages(args[1:], stdout, stderr)
 	case "relay":
 		return runRelay(args[1:], stdout, stderr)
 	case "session":
@@ -152,8 +155,20 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
 			return 1
 		}
-		_, err := RegisterIdentity(context.Background(), *relayURL, identityValue, publicKey, encPublicKey, provider, token)
-		if err != nil {
+		issuedAt := time.Now().UTC().Format(time.RFC3339)
+		nonce := newAdminNonce()
+		relayAddr := relayAddressFromURL(*relayURL)
+		req := IdentityRegisterRequest{
+			Identity:            identityValue,
+			PublicKey:           publicKey,
+			EncryptionPublicKey: encPublicKey,
+			DNSProvider:         provider,
+			DNSToken:            token,
+			IssuedAt:            issuedAt,
+			Nonce:               nonce,
+			IdentitySignature:   signIdentityRegistration(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt, nonce),
+		}
+		if _, err := RegisterIdentity(context.Background(), *relayURL, req); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -438,7 +453,22 @@ func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
 	}
 
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
-	resp, err := PublishEncryptionKey(context.Background(), *relayURL, identityValue, encPublicKey, provider, token)
+	identityPriv, err := identity.LoadPrivateKey(signingKeyPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	issuedAt := time.Now().UTC().Format(time.RFC3339)
+	nonce := newAdminNonce()
+	publishReq := EncryptionKeyPublishRequest{
+		EncryptionPublicKey: encPublicKey,
+		DNSProvider:         provider,
+		DNSToken:            token,
+		IssuedAt:            issuedAt,
+		Nonce:               nonce,
+		IdentitySignature:   signEncryptionKeyUpdate(identityPriv, identityValue, encPublicKey, issuedAt, nonce),
+	}
+	resp, err := PublishEncryptionKey(context.Background(), *relayURL, identityValue, publishReq)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -459,6 +489,21 @@ func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s for %s (published to DNS)\n", verb, identityValue))
 }
 
+// runSend posts an encrypted, signed message envelope to the recipient's
+// relay. Routing is two-mode:
+//
+//   - Default: look up the recipient via DNS, derive their relay URL, and
+//     POST directly there. The home relay sees zero outbound traffic.
+//   - --via-home-relay (or via_home_relay=true in config): POST to the
+//     home relay (cfg.RelayURL) instead. The home relay enforces the
+//     at-least-one-local rule, accepts because the sender is local, and
+//     forwards on to the recipient relay. Useful when the user wants to
+//     hide their IP from the recipient relay.
+//
+// Either way, every successful send is recorded in the per-identity
+// pending journal so `eurything messages status` can render WhatsApp-style
+// ticks later. A 202 advances the local state to delivered_recipient_relay
+// (tick 1); tick 2 (delivered_client) shows up later via inbox polling.
 func runSend(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -468,12 +513,19 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	signWith := fs.String("sign-with", "session", "signing key to use: session (default) or identity")
+	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: eurything send <to> <message>")
+		fmt.Fprintln(stderr, "usage: eurything send <to> <message> [--sign-with=session|identity] [--via-home-relay]")
+		return 1
+	}
+	mode := strings.ToLower(strings.TrimSpace(*signWith))
+	if mode != "session" && mode != "identity" {
+		fmt.Fprintf(stderr, "invalid --sign-with value %q: must be \"session\" or \"identity\"\n", *signWith)
 		return 1
 	}
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
@@ -481,8 +533,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
-	if cfg.RelayURL == "" {
-		fmt.Fprintln(stderr, "relay url not configured")
+	useViaHomeRelay := *viaHomeRelay || cfg.ViaHomeRelay
+	if useViaHomeRelay && cfg.RelayURL == "" {
+		fmt.Fprintln(stderr, "--via-home-relay requires a configured home relay (RelayURL)")
 		return 1
 	}
 
@@ -492,19 +545,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	sess, err := ensureSession(context.Background(), cfg.RelayURL, identityValue, identityPriv)
-	if err != nil {
-		fmt.Fprintln(stderr, "session error:", err)
-		return 1
-	}
-
 	recipient := fs.Arg(0)
 	plaintext := fs.Arg(1)
 
-	// Encryption is mandatory. If the recipient has no published X25519 key
-	// at `_eurything-enc.<recipient>` we refuse to send rather than silently
-	// fall back to plaintext. This preserves the guarantee that the relay
-	// (and any network observer) never sees a message body in cleartext.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
 	cancel()
@@ -530,6 +573,86 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		Nonce:              sealed.Nonce,
 	}
 
+	targetURL := cfg.RelayURL
+	if !useViaHomeRelay {
+		resolved, err := resolveRecipientRelayURL(context.Background(), recipient, cfg)
+		if err != nil {
+			fmt.Fprintf(stderr, "cannot resolve recipient relay for %s: %v\n", recipient, err)
+			return 1
+		}
+		targetURL = resolved
+	}
+	if targetURL == "" {
+		fmt.Fprintln(stderr, "no target relay url available")
+		return 1
+	}
+
+	messageID := identity.NewMessageID()
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	_ = journal.Append(journal.Entry{
+		MessageID:    messageID,
+		Sender:       identityValue,
+		Recipient:    recipient,
+		Timestamp:    time.Now().UTC(),
+		State:        journal.StateQueued,
+		ViaHomeRelay: useViaHomeRelay,
+	})
+
+	if mode == "identity" {
+		msg := Message{
+			ID:         messageID,
+			Sender:     identityValue,
+			Recipient:  recipient,
+			Timestamp:  timestamp,
+			Payload:    payloadString,
+			Encryption: encMeta,
+		}
+		msg.Signature = signMessage(identityPriv, msg)
+
+		resp, err := SendMessage(context.Background(), targetURL, msg)
+		if err != nil {
+			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			body, _ := io.ReadAll(resp.Body)
+			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
+				fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+			fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+			return 1
+		}
+
+		recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
+
+		output := map[string]any{
+			"id":             messageID,
+			"status":         resp.StatusCode,
+			"message":        msg,
+			"encrypted":      true,
+			"sign_with":      "identity",
+			"target_relay":   targetURL,
+			"via_home_relay": useViaHomeRelay,
+		}
+		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s (id=%s, signed with identity key, tick 1 ✓)\n", msg.Recipient, messageID))
+	}
+
+	// Session-signed path. Sessions are registered with the home relay
+	// (which always knows our identity); we attach a SessionProof so the
+	// recipient relay (which has no prior session state) can verify too.
+	sessionRelayURL := cfg.RelayURL
+	if sessionRelayURL == "" {
+		sessionRelayURL = targetURL
+	}
+	sess, err := ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
+	if err != nil {
+		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error: "+err.Error())
+		fmt.Fprintln(stderr, "session error:", err)
+		return 1
+	}
+
 	sessionPriv, err := sess.PrivateKey()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -537,9 +660,10 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 
 	msg := Message{
+		ID:           messageID,
 		Sender:       identityValue,
 		Recipient:    recipient,
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		Timestamp:    timestamp,
 		Payload:      payloadString,
 		SessionID:    sess.SessionID,
 		SessionProof: sessionProofFrom(sess),
@@ -547,8 +671,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	msg.Signature = signMessage(sessionPriv, msg)
 
-	resp, err := SendMessage(context.Background(), cfg.RelayURL, msg)
+	resp, err := SendMessage(context.Background(), targetURL, msg)
 	if err != nil {
+		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -557,8 +682,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		if _, err := session.Load(identityValue); err == nil {
 			_ = session.Delete(identityValue)
 		}
-		sess, err = ensureSession(context.Background(), cfg.RelayURL, identityValue, identityPriv)
+		sess, err = ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
 		if err != nil {
+			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error (retry): "+err.Error())
 			fmt.Fprintln(stderr, "session error (after retry):", err)
 			return 1
 		}
@@ -570,8 +696,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		msg.SessionID = sess.SessionID
 		msg.SessionProof = sessionProofFrom(sess)
 		msg.Signature = signMessage(sessionPriv, msg)
-		resp, err = SendMessage(context.Background(), cfg.RelayURL, msg)
+		resp, err = SendMessage(context.Background(), targetURL, msg)
 		if err != nil {
+			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -579,16 +706,87 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
+		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
+			fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
 		return 1
 	}
 
+	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
+
 	output := map[string]any{
-		"status":    resp.StatusCode,
-		"message":   msg,
-		"encrypted": true,
+		"id":             messageID,
+		"status":         resp.StatusCode,
+		"message":        msg,
+		"encrypted":      true,
+		"sign_with":      "session",
+		"target_relay":   targetURL,
+		"via_home_relay": useViaHomeRelay,
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s\n", msg.Recipient))
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s (id=%s, tick 1 ✓)\n", msg.Recipient, messageID))
+}
+
+// resolveRecipientRelayURL looks up the recipient identity in DNS and
+// returns the URL to POST messages directly to that relay. Reuses the
+// home relay's scheme by default (http for tests, https for prod) since
+// scheme is not carried in DNS records.
+func resolveRecipientRelayURL(ctx context.Context, recipient string, cfg config.Config) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	dns, err := identity.LookupDNS(ctx, recipient)
+	if err != nil {
+		return "", err
+	}
+	var host string
+	if len(dns.RelayHosts) > 0 {
+		host = dns.RelayHosts[0]
+	} else if dns.CNAME != "" {
+		host = strings.TrimSuffix(dns.CNAME, ".")
+	}
+	if host == "" {
+		return "", errors.New("recipient relay host not resolvable")
+	}
+	scheme := schemeFromConfig(cfg)
+	return scheme + "://" + host, nil
+}
+
+// schemeFromConfig peels the http/https scheme off cfg.RelayURL so direct
+// sends use the same protocol as the home relay (works for both http
+// integration tests and https production).
+func schemeFromConfig(cfg config.Config) string {
+	if strings.HasPrefix(cfg.RelayURL, "http://") {
+		return "http"
+	}
+	return "https"
+}
+
+// recordTick1 marks an outbound message as delivered_recipient_relay (HTTP
+// 202 from the recipient relay was the trigger). Best-effort: a journal
+// write failure is logged but never aborts the send pipeline.
+func recordTick1(sender, messageID, recipient string, viaHomeRelay bool) {
+	_ = journal.Append(journal.Entry{
+		MessageID:    messageID,
+		Sender:       sender,
+		Recipient:    recipient,
+		Timestamp:    time.Now().UTC(),
+		State:        journal.StateDeliveredRecipientRelay,
+		ViaHomeRelay: viaHomeRelay,
+	})
+}
+
+// recordSendFailure marks a message as failed. Used for any non-2xx
+// status the recipient relay returns (and for transport errors before we
+// even got a response).
+func recordSendFailure(sender, messageID, recipient string, viaHomeRelay bool, detail string) {
+	_ = journal.Append(journal.Entry{
+		MessageID:    messageID,
+		Sender:       sender,
+		Recipient:    recipient,
+		Timestamp:    time.Now().UTC(),
+		State:        journal.StateFailed,
+		Detail:       detail,
+		ViaHomeRelay: viaHomeRelay,
+	})
 }
 
 func runInbox(args []string, stdout, stderr io.Writer) int {
@@ -641,18 +839,29 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		Messages []struct {
 			ID         string          `json:"id"`
 			Sender     string          `json:"sender"`
+			Recipient  string          `json:"recipient"`
 			Timestamp  string          `json:"timestamp"`
 			Payload    string          `json:"payload"`
 			Signature  string          `json:"signature"`
 			SessionID  string          `json:"session_id,omitempty"`
 			Encryption *EncryptionMeta `json:"encryption,omitempty"`
 		} `json:"messages"`
+		Acks []Ack `json:"acks"`
 	}
 	if err := json.Unmarshal(payload, &inbox); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if len(inbox.Messages) == 0 {
+
+	// Surface tick-2 (delivered_client) acks for previously-sent messages
+	// before printing inbound payloads. The ack stream is independent of
+	// the message stream — an empty inbox can still carry acks.
+	for _, ack := range inbox.Acks {
+		applyInboundAck(identityValue, ack)
+		fmt.Fprintf(stdout, "✓✓ [%s] %s delivered to %s (msg %s)\n", ack.Timestamp, ack.State, ack.Sender, ack.MessageID)
+	}
+
+	if len(inbox.Messages) == 0 && len(inbox.Acks) == 0 {
 		fmt.Fprintln(stdout, "no messages")
 		return 0
 	}
@@ -684,8 +893,185 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 			prefix = "🔒"
 		}
 		fmt.Fprintf(stdout, "%s [%s] %s: %s\n", prefix, msg.Timestamp, msg.Sender, display)
+
+		// Tick-2 ack: only emit when we actually decrypted the message,
+		// i.e. we have proof the inbound message reached the client.
+		// Failed decrypts (no key, wrong key, corruption) intentionally
+		// stay at tick 1 on the sender's side.
+		if decrypted && msg.ID != "" && msg.Sender != "" {
+			recipientForAck := msg.Recipient
+			if recipientForAck == "" {
+				recipientForAck = identityValue
+			}
+			if err := emitDeliveredClientAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, sess); err != nil {
+				fmt.Fprintf(stderr, "warning: failed to send delivery ack for %s: %v\n", msg.ID, err)
+			}
+		}
 	}
 	return 0
+}
+
+// applyInboundAck advances the local pending journal when an ack arrives
+// for an outbound message we previously sent. We keep this best-effort:
+// an unknown message_id is silently ignored (could be from a different
+// device or a client-side journal that was reset).
+func applyInboundAck(localIdentity string, ack Ack) {
+	if ack.State != AckStateDeliveredClient || ack.MessageID == "" {
+		return
+	}
+	_ = journal.Append(journal.Entry{
+		MessageID: ack.MessageID,
+		Sender:    localIdentity,
+		Recipient: ack.Sender,
+		Timestamp: time.Now().UTC(),
+		State:     journal.StateDeliveredClient,
+		Detail:    "ack id=" + ack.ID,
+	})
+}
+
+// emitDeliveredClientAck builds, signs, and POSTs a delivered_client ack
+// to the original sender's home relay. The relay is resolved via DNS so
+// this works whether the original message came directly or was forwarded
+// through the sender's home relay (privacy proxy mode).
+//
+// Signing prefers the active session key (cheap, common path); when no
+// session is loaded we fall back to the long-lived identity key. The
+// canonical layout is identical in both cases (matches relay's
+// crypto.CanonicalAck).
+func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentity string, identityPriv ed25519.PrivateKey, messageID, originalSender, originalRecipient string, sess session.Session) error {
+	if messageID == "" || originalSender == "" {
+		return errors.New("ack requires message id and original sender")
+	}
+
+	senderRelay, err := resolveRecipientRelayURL(ctx, originalSender, cfg)
+	if err != nil {
+		return fmt.Errorf("resolve sender relay: %w", err)
+	}
+
+	ack := Ack{
+		Type:      AckTypeDeliveryAck,
+		ID:        identity.NewAckID(),
+		MessageID: messageID,
+		State:     AckStateDeliveredClient,
+		Sender:    originalRecipient,
+		Recipient: originalSender,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if sess.IsValid() {
+		sessionPriv, perr := sess.PrivateKey()
+		if perr == nil {
+			ack.SessionID = sess.SessionID
+			ack.SessionProof = sessionProofFrom(sess)
+			ack.Signature = signAck(sessionPriv, ack)
+		}
+	}
+	if ack.Signature == "" {
+		ack.Signature = signAck(identityPriv, ack)
+	}
+
+	resp, err := SendAck(ctx, senderRelay, ack)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("ack rejected (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// runMessages dispatches the `eurything messages …` subcommands.
+func runMessages(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "messages subcommand required: status")
+		return 1
+	}
+	switch args[0] {
+	case "status":
+		return runMessagesStatus(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "unknown messages subcommand")
+		return 1
+	}
+}
+
+// runMessagesStatus prints the local pending journal — every outbound
+// message and its current tick state. Filters by --id when supplied.
+// `--json` renders the full collapsed view (including transition history)
+// for piping into other tools.
+func runMessagesStatus(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("messages status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	idFilter := fs.String("id", "", "filter to a single message id")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" {
+		fmt.Fprintln(stderr, "identity not configured")
+		return 1
+	}
+
+	statuses, err := journal.Statuses(identityValue)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *idFilter != "" {
+		filtered := make([]journal.Status, 0, 1)
+		for _, s := range statuses {
+			if s.MessageID == *idFilter {
+				filtered = append(filtered, s)
+			}
+		}
+		statuses = filtered
+	}
+
+	if *jsonOut {
+		encoded, err := json.MarshalIndent(statuses, "", "  ")
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(encoded))
+		return 0
+	}
+
+	if len(statuses) == 0 {
+		fmt.Fprintln(stdout, "no pending messages")
+		return 0
+	}
+	for _, s := range statuses {
+		fmt.Fprintf(stdout, "%s  %s  to=%s  state=%s\n", tickGlyph(s.State), s.MessageID, s.Recipient, s.State)
+	}
+	return 0
+}
+
+// tickGlyph maps journal states to a compact terminal-friendly indicator,
+// matching the WhatsApp metaphor: ✓ = relay accepted, ✓✓ = client decrypted.
+func tickGlyph(state journal.State) string {
+	switch state {
+	case journal.StateQueued:
+		return " · "
+	case journal.StateDeliveredHomeRelay:
+		return " ✓ "
+	case journal.StateDeliveredRecipientRelay:
+		return " ✓ "
+	case journal.StateDeliveredClient:
+		return " ✓✓"
+	case journal.StateFailed:
+		return " ✗ "
+	}
+	return "   "
 }
 
 func runRelay(args []string, stdout, stderr io.Writer) int {
@@ -817,6 +1203,11 @@ func runSessionRefresh(args []string, stdout, stderr io.Writer) int {
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("session refreshed: %s (expires %s)\n", sess.SessionID, sess.ExpiresAt.Format(time.RFC3339)))
 }
 
+// runSessionRevoke deletes the local session record and (when a relay
+// session_id is known) issues an identity-signed DELETE /sessions/:id to
+// the home relay so the relay drops its server-side state too. Relay
+// failures don't block local deletion; the local cache is the source of
+// truth for `eurything session status`.
 func runSessionRevoke(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -835,11 +1226,36 @@ func runSessionRevoke(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "identity not configured")
 		return 1
 	}
+
+	relayRevoked := false
+	if existing, err := session.Load(identityValue); err == nil && existing.SessionID != "" && cfg.RelayURL != "" && cfg.KeysDir != "" {
+		identityPriv, perr := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
+		if perr == nil {
+			issuedAt := time.Now().UTC().Format(time.RFC3339)
+			nonce := newAdminNonce()
+			req := SessionRevokeRequest{
+				Identity:          identityValue,
+				IssuedAt:          issuedAt,
+				Nonce:             nonce,
+				IdentitySignature: signSessionRevocation(identityPriv, identityValue, existing.SessionID, issuedAt, nonce),
+			}
+			if rerr := RevokeSession(context.Background(), cfg.RelayURL, existing.SessionID, req); rerr != nil {
+				fmt.Fprintf(stderr, "warning: relay session revoke failed: %v\n", rerr)
+			} else {
+				relayRevoked = true
+			}
+		}
+	}
+
 	if err := session.Delete(identityValue); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	return writeOutput(stdout, *jsonOut, map[string]string{"identity": identityValue}, fmt.Sprintf("session revoked for %s\n", identityValue))
+	output := map[string]any{
+		"identity":      identityValue,
+		"relay_revoked": relayRevoked,
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("session revoked for %s\n", identityValue))
 }
 
 func runAuth(args []string, stdout, stderr io.Writer) int {
@@ -1046,9 +1462,15 @@ func sessionProofFrom(sess session.Session) *SessionProof {
 }
 
 // signMessage produces a signature over the canonical representation of the
-// message, including session id and encryption metadata when present.
-func signMessage(sessionPriv ed25519.PrivateKey, msg Message) string {
+// message, including session id and encryption metadata when present. The
+// caller chooses which Ed25519 private key to pass: the short-lived session
+// key (normal path, SessionID is set) or the long-lived identity key
+// (headless/opt-out path, SessionID is empty).
+func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	parts := []string{msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload}
+	if msg.ID != "" {
+		parts = append(parts, "id:"+msg.ID)
+	}
 	if msg.SessionID != "" {
 		parts = append(parts, "session:"+msg.SessionID)
 	}
@@ -1056,7 +1478,104 @@ func signMessage(sessionPriv ed25519.PrivateKey, msg Message) string {
 		parts = append(parts, "enc:"+msg.Encryption.Alg+":"+msg.Encryption.EphemeralPublicKey+":"+msg.Encryption.Nonce)
 	}
 	canonical := strings.Join(parts, "\n")
-	sig := ed25519.Sign(sessionPriv, []byte(canonical))
+	sig := ed25519.Sign(priv, []byte(canonical))
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+// signIdentityRegistration builds the canonical signing string for a
+// POST /identities request. Mirrors crypto.CanonicalIdentityRegistration
+// on the relay so the owner-only check can be recomputed by any verifier.
+// The relay address is bound into the canonical so a captured signature
+// cannot be replayed against a different relay.
+func signIdentityRegistration(priv ed25519.PrivateKey, identityValue, publicKey, encPublicKey, relayAddress, issuedAt, nonce string) string {
+	parts := []string{
+		"identity-registration",
+		identityValue,
+		publicKey,
+		encPublicKey,
+		relayAddress,
+		issuedAt,
+		nonce,
+	}
+	canonical := strings.Join(parts, "\n")
+	sig := ed25519.Sign(priv, []byte(canonical))
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+// relayAddressFromURL extracts the host[:port] portion of a relay URL.
+// Used for owner-only canonical signing; must match cfg.RelayAddress on
+// the relay side. The port is preserved when present (matters for local
+// httptest setups; in production the relay address is the bare hostname).
+func relayAddressFromURL(relayURL string) string {
+	trimmed := strings.TrimPrefix(relayURL, "https://")
+	trimmed = strings.TrimPrefix(trimmed, "http://")
+	if i := strings.Index(trimmed, "/"); i >= 0 {
+		trimmed = trimmed[:i]
+	}
+	return trimmed
+}
+
+// signEncryptionKeyUpdate matches crypto.CanonicalEncryptionKeyUpdate on
+// the relay; covers both initial publish and rotation flows since the
+// payload shape is identical.
+func signEncryptionKeyUpdate(priv ed25519.PrivateKey, identityValue, encPublicKey, issuedAt, nonce string) string {
+	parts := []string{
+		"identity-encryption-key",
+		identityValue,
+		encPublicKey,
+		issuedAt,
+		nonce,
+	}
+	canonical := strings.Join(parts, "\n")
+	sig := ed25519.Sign(priv, []byte(canonical))
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+// signSessionRevocation matches crypto.CanonicalSessionRevocation on the
+// relay. Used by the (admin-only) DELETE /sessions/:id call.
+func signSessionRevocation(priv ed25519.PrivateKey, identityValue, sessionID, issuedAt, nonce string) string {
+	parts := []string{
+		"session-revocation",
+		identityValue,
+		sessionID,
+		issuedAt,
+		nonce,
+	}
+	canonical := strings.Join(parts, "\n")
+	sig := ed25519.Sign(priv, []byte(canonical))
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+// newAdminNonce returns a fresh URL-safe nonce for owner-only admin
+// envelopes. 16 bytes of entropy is enough that collisions are
+// unobservable across a relay's session lifetime; the relay also pins
+// timestamp recency separately so replay windows are tiny anyway.
+func newAdminNonce() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("nonce-%d", time.Now().UnixNano())
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+// signAck builds the canonical Ack signing string and produces an Ed25519
+// signature. The canonical layout matches crypto.CanonicalAck on the relay
+// so any verifier can recompute it from the wire fields.
+func signAck(priv ed25519.PrivateKey, ack Ack) string {
+	parts := []string{
+		"ack",
+		ack.ID,
+		ack.MessageID,
+		ack.State,
+		ack.Sender,
+		ack.Recipient,
+		ack.Timestamp,
+	}
+	if ack.SessionID != "" {
+		parts = append(parts, "session:"+ack.SessionID)
+	}
+	canonical := strings.Join(parts, "\n")
+	sig := ed25519.Sign(priv, []byte(canonical))
 	return base64.StdEncoding.EncodeToString(sig)
 }
 
@@ -1112,7 +1631,7 @@ func printHelp(w io.Writer) {
   eurything identity use <identity> [--json]
   eurything identity list [--json]
   eurything identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  eurything send <to> <message> [--use-identity=...] [--json]
+  eurything send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
   eurything inbox [--use-identity=...] [--json]
   eurything session status [--use-identity=...] [--json]
   eurything session refresh [--use-identity=...] [--json]

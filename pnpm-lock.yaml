@@ -10,8 +10,6 @@ importers:
 
   apps/android: {}
 
-  apps/cli: {}
-
   apps/docs:
     dependencies:
       '@docusaurus/core':

@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
         'protocol/dns-records',
         'protocol/message-format',
         'protocol/routing',
+        'protocol/delivery-acks',
         'protocol/interoperability',
         'protocol/rate-limiting',
       ],

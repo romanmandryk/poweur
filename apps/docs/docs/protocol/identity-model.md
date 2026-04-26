@@ -107,6 +107,14 @@ The CLI stores keys as files under `~/.eurything/keys/` (configurable via `keys_
 
 The CLI runs the same session flow as the mobile app, but the "authorize a new session" step is not gated by biometrics — it just uses the identity key on disk. Headless agents that want to opt out of sessions entirely can do so (messages signed directly with the identity key are still accepted by relays), but the default CLI path uses sessions so CLI and mobile behave identically.
 
+### When is the identity key used directly?
+
+The long-lived identity key signs a message envelope — as opposed to the short-lived session key — in these cases:
+
+- **Session registration.** Every call to `POST /sessions` is authorized by an identity signature over the registration canonical string.
+- **`eurything auth sign`.** Third-party authentication challenges (signup/signin) are always signed with the identity key, because relying parties do not have access to any relay's session cache.
+- **`eurything send --sign-with=identity`.** An explicit per-send opt-out of sessions. The CLI skips `POST /sessions`, leaves `session_id` and `session_proof` empty on the wire, and signs the canonical message with the identity Ed25519 key. Relays verify against the sender's DNS-published identity key (or via `GET /identities/<sender>` on a peer relay). See [Message Format → Choosing a signing key](/protocol/message-format#choosing-a-signing-key).
+
 ## Multiple Identities
 
 A single user can hold multiple Eurything identities. Each identity has its own passkey and its own DNS records. Common use cases for multiple identities:

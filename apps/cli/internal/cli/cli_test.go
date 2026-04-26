@@ -166,9 +166,15 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 
 	plaintext := "Hello"
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"send", "bob.example.org", plaintext}, &stdout, &stderr)
+	// Use --via-home-relay so the test mock relay (= home relay) receives
+	// the message; without this, the CLI would now try to DNS-resolve
+	// Bob's relay and post directly there.
+	code := Run([]string{"send", "--via-home-relay", "bob.example.org", plaintext}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if mr.received.ID == "" {
+		t.Fatal("expected client-assigned message id on outgoing message")
 	}
 	if mr.received.Sender != "alice.example.com" || mr.received.Recipient != "bob.example.org" {
 		t.Fatalf("unexpected message: %#v", mr.received)
@@ -190,9 +196,10 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	}
 
 	// Verify signature under the session public key (canonical form now
-	// includes the encryption line).
+	// includes the message id line and the encryption line).
 	parts := []string{
 		mr.received.Sender, mr.received.Recipient, mr.received.Timestamp, mr.received.Payload,
+		"id:" + mr.received.ID,
 		"session:" + mr.received.SessionID,
 		"enc:" + mr.received.Encryption.Alg + ":" + mr.received.Encryption.EphemeralPublicKey + ":" + mr.received.Encryption.Nonce,
 	}
@@ -223,6 +230,125 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	// Sanity check: TTL is ~24h.
 	if diff := time.Until(sess.ExpiresAt); diff < 23*time.Hour || diff > 25*time.Hour {
 		t.Fatalf("unexpected session TTL: %s", diff)
+	}
+}
+
+// TestSendMessageWithSignWithIdentity exercises the --sign-with=identity
+// path: the CLI must skip session registration entirely, leave session_id
+// and session_proof empty on the wire, and sign the canonical message with
+// the long-lived identity Ed25519 key (the mock relay asserts the
+// signature verifies under Alice's identity public key).
+func TestSendMessageWithSignWithIdentity(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	idPub, idPriv, _ := identity.GenerateKeypair()
+	keyPath, err := identity.SavePrivateKey("alice.example.com", idPriv)
+	if err != nil {
+		t.Fatalf("save key: %v", err)
+	}
+
+	bobEncPub, _, err := cryptoe2e.GenerateX25519Keypair()
+	if err != nil {
+		t.Fatalf("bob keygen: %v", err)
+	}
+	identity.SetResolver(stubResolver{txt: map[string][]string{
+		"_eurything-enc.bob.example.org": {
+			"eurything-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
+		},
+	}})
+	defer identity.ResetResolver()
+
+	mr := newMockRelay(t)
+	defer mr.server.Close()
+
+	cfg := config.Config{
+		RelayURL: mr.server.URL,
+		Identity: "alice.example.com",
+		KeysDir:  filepath.Dir(keyPath),
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"send", "--via-home-relay", "--sign-with", "identity", "bob.example.org", "hi bob"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if mr.received.ID == "" {
+		t.Fatal("expected client-assigned message id on outgoing message")
+	}
+
+	if mr.received.SessionID != "" {
+		t.Fatalf("expected empty session_id for identity-signed message, got %q", mr.received.SessionID)
+	}
+	if mr.received.SessionProof != nil {
+		t.Fatalf("expected nil session_proof for identity-signed message, got %+v", mr.received.SessionProof)
+	}
+	if mr.received.Signature == "" {
+		t.Fatal("missing signature")
+	}
+	if mr.received.Encryption == nil || mr.received.Encryption.Alg == "" {
+		t.Fatal("expected encryption metadata on outgoing message")
+	}
+
+	// Mock relay never saw a session registration when --sign-with=identity
+	// was used (no POST /sessions happened). The local session cache must
+	// therefore be empty too.
+	if mr.sessionID != "" {
+		t.Fatalf("mock relay unexpectedly observed a session registration: %s", mr.sessionID)
+	}
+	if _, err := session.Load("alice.example.com"); err == nil {
+		t.Fatal("expected no local session file after --sign-with=identity send")
+	}
+
+	// Signature must verify under the identity public key (no session: line
+	// in the canonical string because SessionID is empty; the id line is
+	// always present because the client always assigns one).
+	parts := []string{
+		mr.received.Sender, mr.received.Recipient, mr.received.Timestamp, mr.received.Payload,
+		"id:" + mr.received.ID,
+		"enc:" + mr.received.Encryption.Alg + ":" + mr.received.Encryption.EphemeralPublicKey + ":" + mr.received.Encryption.Nonce,
+	}
+	canonical := []byte(joinNewlines(parts))
+	sig, err := base64.StdEncoding.DecodeString(mr.received.Signature)
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	if !ed25519.Verify(idPub, canonical, sig) {
+		t.Fatal("identity signature does not verify under identity public key")
+	}
+}
+
+// TestSendMessageRejectsInvalidSignWith ensures the CLI refuses to send if
+// --sign-with is set to something other than "session" or "identity",
+// before any network IO or crypto work.
+func TestSendMessageRejectsInvalidSignWith(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	_, priv, _ := identity.GenerateKeypair()
+	keyPath, err := identity.SavePrivateKey("alice.example.com", priv)
+	if err != nil {
+		t.Fatalf("save key: %v", err)
+	}
+	cfg := config.Config{
+		RelayURL: "http://unused.invalid",
+		Identity: "alice.example.com",
+		KeysDir:  filepath.Dir(keyPath),
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"send", "--sign-with", "device", "bob.example.org", "hi"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for invalid --sign-with value, got 0; stderr=%s", stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("invalid --sign-with")) {
+		t.Fatalf("expected error message mentioning invalid --sign-with, got: %s", stderr.String())
 	}
 }
 

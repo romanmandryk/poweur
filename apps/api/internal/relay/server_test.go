@@ -81,6 +81,7 @@ func TestMessageInboxFlow(t *testing.T) {
 	// perspective — the values below are placeholders that only need to
 	// round-trip through the canonical signing input.
 	msg := Message{
+		ID:        "msg_test_basic_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -91,7 +92,7 @@ func TestMessageInboxFlow(t *testing.T) {
 			Nonce:              "nonce",
 		},
 	}
-	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, &crypto.EncryptionMeta{
 		Alg:                msg.Encryption.Alg,
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
@@ -182,6 +183,7 @@ func TestRateLimit(t *testing.T) {
 	defer ts.Close()
 
 	msg := Message{
+		ID:        "msg_test_ratelimit_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -192,7 +194,7 @@ func TestRateLimit(t *testing.T) {
 			Nonce:              "nonce",
 		},
 	}
-	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, &crypto.EncryptionMeta{
 		Alg:                msg.Encryption.Alg,
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
@@ -208,6 +210,98 @@ func TestRateLimit(t *testing.T) {
 	second, _ := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body))
 	if second.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", second.StatusCode)
+	}
+}
+
+// TestIdentitySignedMessageAccepted covers the opt-out path: a message
+// posted with no session_id, signed directly with the sender's long-lived
+// identity Ed25519 key. The relay must resolve the verifying key via DNS
+// (TXT record) and accept the envelope. This mirrors what the CLI produces
+// when the operator runs `eurything send --sign-with=identity ...`.
+func TestIdentitySignedMessageAccepted(t *testing.T) {
+	cfg := config.Config{
+		ListenAddr:   ":0",
+		RelayAddress: "relay.test",
+		RelayScheme:  "http",
+		DNSTTL:       time.Minute,
+		ChallengeTTL: time.Minute,
+		Version:      "test",
+		RateLimits: config.RateLimits{
+			PerMinute: 100,
+			PerHour:   1000,
+			PerDay:    10000,
+		},
+	}
+
+	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
+	recipientPub, _, _ := ed25519.GenerateKey(nil)
+
+	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	resolver := &fakeResolver{
+		txt: map[string][]string{
+			"_eurything.alice.example.com": {senderTxt},
+		},
+		hosts: map[string][]string{
+			"bob.example.org": {"relay.test"},
+		},
+	}
+
+	server := NewServer(cfg, resolver, dns.NewProviderFactory(cfg))
+	server.identities.Add(storage.Identity{
+		Identity:       "bob.example.org",
+		PublicKey:      base64.RawURLEncoding.EncodeToString(recipientPub),
+		PublicKeyBytes: recipientPub,
+		CreatedAt:      time.Now().UTC(),
+	})
+
+	ts := httptest.NewServer(server.Router())
+	defer ts.Close()
+
+	// Build an identity-signed message: empty session_id, canonical string
+	// omits the "session:" line entirely, signed with the long-lived key.
+	msg := Message{
+		ID:        "msg_test_idsigned_001",
+		Sender:    "alice.example.com",
+		Recipient: "bob.example.org",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Payload:   "identity-signed ciphertext",
+		Encryption: &EncryptionMeta{
+			Alg:                "x25519-chacha20-poly1305",
+			EphemeralPublicKey: "ephemeral-pub",
+			Nonce:              "nonce",
+		},
+	}
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, "", &crypto.EncryptionMeta{
+		Alg:                msg.Encryption.Alg,
+		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+		Nonce:              msg.Encryption.Nonce,
+	})
+	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(canonical)))
+
+	body, _ := json.Marshal(msg)
+	resp, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 for identity-signed message, got %d", resp.StatusCode)
+	}
+
+	// Now forge: sign a different canonical string and expect 401.
+	_, forgedPriv, _ := ed25519.GenerateKey(nil)
+	forged := msg
+	forged.ID = "msg_test_idsigned_forged_001"
+	forged.Timestamp = time.Now().UTC().Add(time.Second).Format(time.RFC3339)
+	forged.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(forgedPriv, []byte("not-the-canonical-message")))
+	body, _ = json.Marshal(forged)
+	resp2, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post forged: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for forged identity-signed message, got %d", resp2.StatusCode)
 	}
 }
 
@@ -233,6 +327,7 @@ func TestPlaintextMessageRejected(t *testing.T) {
 	defer ts.Close()
 
 	msg := Message{
+		ID:        "msg_test_plaintext_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),

@@ -75,7 +75,9 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 
 // LoadEncryptionPrivateKey reads the X25519 private key for an identity.
 // Returns os.ErrNotExist wrapped when the key file is missing so callers can
-// gracefully degrade to plaintext messaging.
+// surface an actionable error — there is no plaintext fallback, so a missing
+// key means the identity cannot decrypt inbound messages until one is
+// generated and published via `eurything identity add-encryption-key`.
 func LoadEncryptionPrivateKey(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -19,6 +19,7 @@ type SessionProof struct {
 }
 
 type Message struct {
+	ID           string          `json:"id"`
 	Sender       string          `json:"sender"`
 	Recipient    string          `json:"recipient"`
 	Timestamp    string          `json:"timestamp"`
@@ -29,8 +30,37 @@ type Message struct {
 	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
 }
 
+// Ack is the on-wire envelope for a delivery acknowledgement. Tick 1
+// (delivered to recipient relay) is conveyed in the HTTP layer (POST
+// /messages returning 202) and never travels as an Ack object. Tick 2
+// (delivered_client) is the recipient client telling the original sender
+// that they have decrypted the message.
+//
+// `Sender` is the party that produced the ack (Bob's client). `Recipient`
+// is who the ack is destined for (== the original message's sender, Alice).
+//
+// State is reserved for future expansion. v1 emits only `delivered_client`.
+type Ack struct {
+	Type         string        `json:"type"`
+	ID           string        `json:"id"`
+	MessageID    string        `json:"message_id"`
+	State        string        `json:"state"`
+	Sender       string        `json:"sender"`
+	Recipient    string        `json:"recipient"`
+	Timestamp    string        `json:"timestamp"`
+	Signature    string        `json:"signature"`
+	SessionID    string        `json:"session_id,omitempty"`
+	SessionProof *SessionProof `json:"session_proof,omitempty"`
+}
+
+const (
+	AckTypeDeliveryAck     = "ack"
+	AckStateDeliveredClient = "delivered_client"
+)
+
 type InboxResponse struct {
 	Messages []any `json:"messages"`
+	Acks     []any `json:"acks"`
 }
 
 type ErrorResponse struct {
@@ -49,12 +79,37 @@ type IdentityRequest struct {
 	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
 	DNSProvider         string `json:"dns_provider"`
 	DNSToken            string `json:"dns_token"`
+
+	// Identity-signed admin envelope. The relay verifies IdentitySignature
+	// over the canonical identity-registration string against the
+	// `public_key` in the body so that whoever calls this endpoint must
+	// also hold the matching private key (DNS-token possession alone is no
+	// longer sufficient).
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
 }
 
 type EncryptionKeyRequest struct {
 	EncryptionPublicKey string `json:"encryption_public_key"`
 	DNSProvider         string `json:"dns_provider"`
 	DNSToken            string `json:"dns_token"`
+
+	// Identity-signed admin envelope. Verified against the long-lived
+	// signing key registered for `:identity`.
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+}
+
+// SessionRevokeRequest is the body of DELETE /sessions/:id. The relay
+// resolves the session by id, then verifies IdentitySignature against the
+// session's owning identity (via the long-lived signing key).
+type SessionRevokeRequest struct {
+	Identity          string `json:"identity"`
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
 }
 
 type EncryptionKeyResponse struct {

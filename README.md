@@ -44,8 +44,16 @@ go run main.go       # starts the HTTP server on :8080
 
 ```bash
 cd apps/cli
-node src/index.js
+go run .
 ```
+
+The CLI signs outbound messages with a short-lived session key by default. Headless agents or operators who want to bypass session registration can opt into signing with the long-lived identity key on a per-send basis:
+
+```bash
+eurything send --sign-with=identity bob.example.com "hi bob"
+```
+
+Relays accept both paths; the recipient decrypts the same way regardless of which signing key the sender chose.
 
 ### Docs (`apps/docs`)
 

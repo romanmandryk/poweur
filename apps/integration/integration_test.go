@@ -19,8 +19,10 @@ package integration_test
 
 import (
 	"bytes"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +64,66 @@ func newRelay(t *testing.T, zone *fakedns.Zone) (*httptest.Server, string) {
 	ts.Start()
 	t.Cleanup(ts.Close)
 	return ts, addr
+}
+
+// relayCounter records how many POST /messages and POST /acks requests a
+// relay handler observes. Tests use it to assert routing decisions — for
+// example that --via-home-relay routes through the home relay and that the
+// default send path bypasses it.
+type relayCounter struct {
+	mu           sync.Mutex
+	postMessages int
+	postAcks     int
+}
+
+func (c *relayCounter) PostMessages() int { c.mu.Lock(); defer c.mu.Unlock(); return c.postMessages }
+func (c *relayCounter) PostAcks() int     { c.mu.Lock(); defer c.mu.Unlock(); return c.postAcks }
+
+// newRelayWithCounter is like newRelay but wraps the relay handler with a
+// counting middleware so the test can introspect how often POST /messages
+// and POST /acks actually arrived at this relay.
+func newRelayWithCounter(t *testing.T, zone *fakedns.Zone) (string, *relayCounter) {
+	t.Helper()
+	ts := httptest.NewUnstartedServer(nil)
+	addr := ts.Listener.Addr().String()
+
+	cfg := relaypkg.Config{
+		ListenAddr:   addr,
+		RelayAddress: addr,
+		RelayScheme:  "http",
+		DNSTTL:       time.Minute,
+		ChallengeTTL: time.Minute,
+		Version:      "integration-test",
+		RateLimits: relaypkg.RateLimits{
+			PerMinute: 1000,
+			PerHour:   10000,
+			PerDay:    100000,
+		},
+	}
+	providers := relaypkg.NewProviderFactory(cfg)
+	relaypkg.RegisterProvider(providers, "mock", zone.Provider())
+	server := relaypkg.NewServer(cfg, zone, providers)
+
+	counter := &relayCounter{}
+	inner := relaypkg.Router(server)
+	ts.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			switch r.URL.Path {
+			case "/messages":
+				counter.mu.Lock()
+				counter.postMessages++
+				counter.mu.Unlock()
+			case "/acks":
+				counter.mu.Lock()
+				counter.postAcks++
+				counter.mu.Unlock()
+			}
+		}
+		inner.ServeHTTP(w, r)
+	})
+	ts.Start()
+	t.Cleanup(ts.Close)
+	return addr, counter
 }
 
 // installZone wires the zone as the CLI's DNS resolver and restores the

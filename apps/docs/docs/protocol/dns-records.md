@@ -74,7 +74,7 @@ eurything-enckey=<algorithm>:<base64url-public-key>
 
 ### Presence
 
-In the MVP the encryption record is written at the same time as the identity public key. Clients that cannot find an encryption record for the recipient will warn the user and, at the user's option, fall back to sending in plaintext.
+The encryption record is written at the same time as the identity public key when an identity is created. Existing identities that predate E2E support can add one later via `eurything identity add-encryption-key`. The record is effectively mandatory for inbound messaging: senders that cannot find a recipient's encryption record abort with a clear error (there is no plaintext fallback), and relays reject any `POST /messages` whose envelope lacks encryption metadata with `400 encryption_required`.
 
 ---
 
@@ -103,7 +103,11 @@ The `CNAME` approach is recommended for operators hosting many identities — a 
 
 ### Resolution behaviour
 
-When a relay needs to forward a message to `alice.poweur.net`, it resolves the `A` record for that subdomain (following `CNAME` chains) to obtain the destination relay's IP address, then sends the message to `https://<relay-ip>/messages`.
+This same lookup is performed by **two different parties**:
+
+- **Sending clients** resolve the recipient identity to its relay and POST `/messages` directly there (the default send path; see [Routing → Default: Direct Send](/protocol/routing#default-direct-send)).
+- **Recipient clients** resolve the *original sender's* identity to that sender's home relay and POST `/acks` there to deliver tick-2 acks.
+- **Relays in privacy-proxy mode** (when a client opts into `--via-home-relay`) resolve the recipient's relay and forward the signed envelope over HTTPS.
 
 The relay caches resolved addresses for the duration of the DNS record's TTL to avoid redundant lookups on every forwarded message.
 

@@ -20,6 +20,8 @@ apps/android/build/
 apps/android/.gradle/
 
 # Go
+apps/api/coverage/
+apps/integration/coverage/
 *.exe
 *.exe~
 *.dll

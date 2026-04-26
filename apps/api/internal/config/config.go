@@ -16,24 +16,43 @@ const (
 	DefaultMinuteLimit  = 20
 	DefaultHourLimit    = 200
 	DefaultDayLimit     = 1000
-	DefaultVersion      = "0.1.0"
+	// Global default is roughly 10× the per-sender hourly cap times an
+	// expected-active-senders constant (here: 50). Tune per deployment via
+	// env vars; 0 disables the global cap entirely.
+	DefaultGlobalMinuteLimit = 1000
+	DefaultGlobalHourLimit   = 100000
+	DefaultGlobalDayLimit    = 1000000
+	DefaultVersion           = "0.1.0"
 )
 
+// RateLimits configures per-sender token-bucket caps. Each window resets on
+// its own schedule (rolling minute / hour / day).
 type RateLimits struct {
 	PerMinute int
 	PerHour   int
 	PerDay    int
 }
 
+// GlobalRateLimits configures relay-wide caps that apply across all
+// senders combined. They serve as a back-stop against many-sender DDoS
+// patterns that individually stay under the per-sender cap. A zero value
+// in any window disables that cap.
+type GlobalRateLimits struct {
+	PerMinute int
+	PerHour   int
+	PerDay    int
+}
+
 type Config struct {
-	ListenAddr   string
-	RelayAddress string
-	RelayScheme  string
-	DNSTTL       time.Duration
-	ChallengeTTL time.Duration
-	Version      string
-	RateLimits   RateLimits
-	DNSProxyMode string
+	ListenAddr        string
+	RelayAddress      string
+	RelayScheme       string
+	DNSTTL            time.Duration
+	ChallengeTTL      time.Duration
+	Version           string
+	RateLimits        RateLimits
+	GlobalRateLimits  GlobalRateLimits
+	DNSProxyMode      string
 }
 
 func (c Config) Validate() error {
@@ -70,6 +89,11 @@ func FromEnv() Config {
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),
 			PerDay:    getenvInt("RATE_LIMIT_DAY", DefaultDayLimit),
+		},
+		GlobalRateLimits: GlobalRateLimits{
+			PerMinute: getenvInt("GLOBAL_RATE_LIMIT_MINUTE", DefaultGlobalMinuteLimit),
+			PerHour:   getenvInt("GLOBAL_RATE_LIMIT_HOUR", DefaultGlobalHourLimit),
+			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
 		},
 	}
 }

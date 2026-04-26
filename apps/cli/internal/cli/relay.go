@@ -63,6 +63,7 @@ type SessionProof struct {
 }
 
 type Message struct {
+	ID           string          `json:"id"`
 	Sender       string          `json:"sender"`
 	Recipient    string          `json:"recipient"`
 	Timestamp    string          `json:"timestamp"`
@@ -71,6 +72,43 @@ type Message struct {
 	SessionID    string          `json:"session_id,omitempty"`
 	SessionProof *SessionProof   `json:"session_proof,omitempty"`
 	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
+}
+
+// Ack is the wire format of a delivery acknowledgement. v1 carries a
+// single state — `delivered_client` — emitted by the recipient client
+// after a successful decrypt of an inbound message; future protocol
+// versions can add `read` (or other states) without changing transport.
+//
+// `sender` is the producer of the ack (the recipient of the original
+// message). `recipient` is the original message's sender — this is who
+// the ack is *about*, and whose home relay must store the ack so it
+// surfaces on their next inbox poll. The `message_id` field references
+// the client-assigned id of the original message, threading the local
+// pending journal through to tick-2 surfacing.
+type Ack struct {
+	Type         string        `json:"type"`
+	ID           string        `json:"id"`
+	MessageID    string        `json:"message_id"`
+	State        string        `json:"state"`
+	Sender       string        `json:"sender"`
+	Recipient    string        `json:"recipient"`
+	Timestamp    string        `json:"timestamp"`
+	Signature    string        `json:"signature"`
+	SessionID    string        `json:"session_id,omitempty"`
+	SessionProof *SessionProof `json:"session_proof,omitempty"`
+}
+
+const (
+	AckTypeDeliveryAck      = "ack"
+	AckStateDeliveredClient = "delivered_client"
+)
+
+// InboxResponse is the shape returned by GET /messages/{identity}.
+// Both arrays are drained on every request: messages are inbound
+// payloads, acks are tick-2 receipts for previously sent messages.
+type InboxResponse struct {
+	Messages []json.RawMessage `json:"messages"`
+	Acks     []Ack             `json:"acks"`
 }
 
 type ChallengeResponse struct {
@@ -106,6 +144,45 @@ type SessionCreateRequest struct {
 	DeviceFingerprint string `json:"device_fingerprint,omitempty"`
 }
 
+// SessionRevokeRequest is the body of DELETE /sessions/:id. The relay's
+// admin auth check expects an identity-signed envelope so an attacker
+// who knows the session id alone cannot revoke someone else's session.
+type SessionRevokeRequest struct {
+	Identity          string `json:"identity"`
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+}
+
+// RevokeSession sends an identity-signed DELETE /sessions/:id. A 204 or
+// 404 is treated as success: the relay reports 404 only when the id is
+// already absent, which is the desired post-condition.
+func RevokeSession(ctx context.Context, relayURL, sessionID string, req SessionRevokeRequest) error {
+	if relayURL == "" || sessionID == "" {
+		return errors.New("relay url and session id required")
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s/sessions/%s", relayURL, sessionID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return parseErrorResponse("session revoke failed", resp)
+}
+
 type SessionResponse struct {
 	SessionID        string `json:"session_id"`
 	Identity         string `json:"identity"`
@@ -123,27 +200,36 @@ func CheckRelayHealth(ctx context.Context, relayURL string) error {
 	return err
 }
 
-func RegisterIdentity(ctx context.Context, relayURL, identity, publicKey, encryptionPublicKey, dnsProvider, dnsToken string) (IdentityResponse, error) {
+// IdentityRegisterRequest is the wire shape of POST /identities. The
+// owner-only fields (issued_at, nonce, identity_signature) prove that the
+// caller holds the private key matching public_key — the relay verifies
+// them in addition to the DNS-token check that authorizes the DNS write.
+type IdentityRegisterRequest struct {
+	Identity            string `json:"identity"`
+	PublicKey           string `json:"public_key"`
+	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
+	DNSProvider         string `json:"dns_provider,omitempty"`
+	DNSToken            string `json:"dns_token,omitempty"`
+	IssuedAt            string `json:"issued_at"`
+	Nonce               string `json:"nonce"`
+	IdentitySignature   string `json:"identity_signature"`
+}
+
+func RegisterIdentity(ctx context.Context, relayURL string, req IdentityRegisterRequest) (IdentityResponse, error) {
 	if relayURL == "" {
 		return IdentityResponse{}, errors.New("relay url is required")
 	}
-	payload, err := json.Marshal(map[string]string{
-		"identity":              identity,
-		"public_key":            publicKey,
-		"encryption_public_key": encryptionPublicKey,
-		"dns_provider":          dnsProvider,
-		"dns_token":             dnsToken,
-	})
+	payload, err := json.Marshal(req)
 	if err != nil {
 		return IdentityResponse{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/identities", bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/identities", bytes.NewReader(payload))
 	if err != nil {
 		return IdentityResponse{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return IdentityResponse{}, err
 	}
@@ -166,34 +252,39 @@ type EncryptionKeyResponse struct {
 	UpdatedAt           string `json:"updated_at"`
 }
 
-// PublishEncryptionKey calls POST /identities/{identity}/encryption-key on the
-// relay. The relay uses the caller's DNS token to upsert the
-// `_eurything-enc.<identity>` TXT record. This is the path used by
-// `eurything identity add-encryption-key` and will happily overwrite an
-// existing record (rotation).
-func PublishEncryptionKey(ctx context.Context, relayURL, identity, encryptionPublicKey, dnsProvider, dnsToken string) (EncryptionKeyResponse, error) {
+// EncryptionKeyPublishRequest is the wire shape of POST
+// /identities/{identity}/encryption-key. As with identity registration,
+// the owner-only fields (issued_at, nonce, identity_signature) prove
+// ownership of the long-lived signing key — without them the relay
+// rejects the request.
+type EncryptionKeyPublishRequest struct {
+	EncryptionPublicKey string `json:"encryption_public_key"`
+	DNSProvider         string `json:"dns_provider,omitempty"`
+	DNSToken            string `json:"dns_token,omitempty"`
+	IssuedAt            string `json:"issued_at"`
+	Nonce               string `json:"nonce"`
+	IdentitySignature   string `json:"identity_signature"`
+}
+
+func PublishEncryptionKey(ctx context.Context, relayURL, identityID string, req EncryptionKeyPublishRequest) (EncryptionKeyResponse, error) {
 	if relayURL == "" {
 		return EncryptionKeyResponse{}, errors.New("relay url is required")
 	}
-	if identity == "" {
+	if identityID == "" {
 		return EncryptionKeyResponse{}, errors.New("identity is required")
 	}
-	payload, err := json.Marshal(map[string]string{
-		"encryption_public_key": encryptionPublicKey,
-		"dns_provider":          dnsProvider,
-		"dns_token":             dnsToken,
-	})
+	payload, err := json.Marshal(req)
 	if err != nil {
 		return EncryptionKeyResponse{}, err
 	}
-	url := fmt.Sprintf("%s/identities/%s/encryption-key", relayURL, identity)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	url := fmt.Sprintf("%s/identities/%s/encryption-key", relayURL, identityID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return EncryptionKeyResponse{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return EncryptionKeyResponse{}, err
 	}
@@ -235,6 +326,29 @@ func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequ
 		return SessionResponse{}, err
 	}
 	return response, nil
+}
+
+// SendAck POSTs a signed delivery ack to the *original sender's* home
+// relay (i.e. the relay that hosts the identity named in `ack.recipient`).
+// The endpoint is open/messaging-class; the relay will rate-limit, verify
+// the signature, and enforce the at-least-one-local rule.
+func SendAck(ctx context.Context, relayURL string, ack Ack) (*http.Response, error) {
+	payload, err := json.Marshal(ack)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/acks", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	dumpRequest(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil {
+		dumpResponse(resp)
+	}
+	return resp, err
 }
 
 func SendMessage(ctx context.Context, relayURL string, msg Message) (*http.Response, error) {

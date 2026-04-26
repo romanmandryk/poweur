@@ -6,77 +6,98 @@ title: Routing
 
 # Routing
 
-The Eurything Protocol uses DNS as its routing layer. Every identity subdomain points to the relay that handles messages for that identity. Any relay anywhere in the world can route to any identity by performing a standard DNS lookup — no central routing registry, no relay coordination required.
+The Eurything Protocol uses DNS as its routing layer. Every identity subdomain points to the relay that handles messages for that identity ("its home relay"). By default a sending client posts each outbound message **directly** to the recipient's home relay — the sender's own home relay is uninvolved in outbound traffic. Any client anywhere in the world can deliver to any identity by performing a standard DNS lookup; no central routing registry and no relay coordination is required.
 
-## Routing Flow
+## Default: Direct Send
 
-The full delivery path for a message from Alice (`alice.poweur.net`) to Bob (`bob.example.org`):
+The full delivery path for a message from Alice (`alice.poweur.net`) to Bob (`bob.example.org`) under the default direct-send model:
 
 ```mermaid
 sequenceDiagram
     participant AC as Alice's Client<br/>(Mobile/CLI)
-    participant AR as Alice's Relay<br/>(relay.poweur.net)
     participant DNS as Public DNS
     participant BR as Bob's Relay<br/>(relay.example.org)
     participant BC as Bob's Client<br/>(Mobile/CLI)
+    participant AR as Alice's Relay<br/>(home; for inbox/acks only)
 
-    AC->>AC: Sign message with<br/>Ed25519 private key
-    AC->>AR: POST /messages<br/>{sender, recipient, timestamp, payload, signature}
-    AR->>AR: Rate-limit check<br/>(20/min, 200/hr, 1000/day)
-    AR->>DNS: TXT _eurything.alice.poweur.net
-    DNS-->>AR: "eurything-pubkey=ed25519:..."
-    AR->>AR: Verify signature against<br/>Alice's public key
-    AR->>DNS: A bob.example.org
-    DNS-->>AR: 198.51.100.42
-    AR->>BR: POST /messages<br/>(original signed envelope, unchanged)
+    AC->>AC: Generate id, sign canonical<br/>(includes id:<message_id>)
+    AC->>DNS: A bob.example.org
+    DNS-->>AC: 198.51.100.42
+    AC->>BR: POST /messages<br/>{id, sender, recipient, timestamp, payload, signature, encryption}
+    BR->>BR: Rate-limit (sender + global)<br/>encryption envelope check
     BR->>DNS: TXT _eurything.alice.poweur.net
     DNS-->>BR: "eurything-pubkey=ed25519:..."
-    BR->>BR: Verify signature (again)<br/>Store in Bob's inbox
-    BR-->>AR: 202 Accepted
-    AR-->>AC: 202 Accepted
-    BC->>BR: GET /messages/bob.example.org<br/>(after challenge-response auth)
-    BR-->>BC: {messages: [...]}
-    BC->>BC: Verify signature on<br/>each received message
+    BR->>BR: Verify signature, apply<br/>at-least-one-local rule (Bob is local),<br/>store in Bob's inbox keyed by id
+    BR-->>AC: 202 Accepted (tick 1)
+    BC->>BR: GET /messages/bob.example.org<br/>(challenge-response auth)
+    BR-->>BC: {messages: [...], acks: [...]}
+    BC->>BC: Verify signature, decrypt
+    BC->>DNS: A alice.poweur.net
+    DNS-->>BC: ...AR
+    BC->>AR: POST /acks {state: delivered_client, ...}
+    AR->>AR: At-least-one-local (Alice is local), store ack
+    AC->>AR: GET /messages/alice.poweur.net
+    AR-->>AC: {messages: [], acks: [tick 2]}
 ```
 
-## Step-by-Step Breakdown
+The home relay's role under the default model is symmetric: it receives **inbound** messages addressed to its locally hosted identities, and **inbound** acks addressed to its locally hosted identities (the original message senders). It is not on the outbound path.
 
-### 1. Client signs and submits
+## Optional: `--via-home-relay` (privacy proxy)
 
-Alice's app constructs the message and signs the canonical string (sender + recipient + timestamp + payload) with her private Ed25519 key. The signed message is submitted to Alice's configured relay via `POST /messages`.
+A client may opt into routing its outbound traffic through its own home relay so the recipient relay sees the home relay's IP rather than the client's IP. The home relay accepts because the **sender** is locally hosted ([at-least-one-local rule](/relay/api-reference#at-least-one-local-rule)), then forwards the original signed envelope to the recipient relay. This is the only sanctioned forwarding path; relays never act as open forwarders for unrelated parties.
 
-### 2. Sender relay rate-limits
+```mermaid
+sequenceDiagram
+    participant AC as Alice's Client
+    participant AR as Alice's Home Relay
+    participant BR as Bob's Relay
+    AC->>AR: POST /messages (sender local, recipient remote)
+    AR-->>AC: 202 Accepted
+    AR->>BR: POST /messages (forwarded; original envelope)
+    BR-->>AR: 202 Accepted
+```
 
-Alice's relay checks the per-sender rate limit counters **before** performing any expensive work. If the sender is within limits, processing continues. If not, the relay responds immediately with `429 Too Many Requests` without touching DNS or the message content.
+The signed envelope is unchanged on the wire; relays never re-sign forwarded traffic.
 
-### 3. Sender relay verifies signature
+## Step-by-Step Breakdown (default direct send)
 
-Alice's relay resolves `_eurything.alice.poweur.net` as a `TXT` record to retrieve Alice's public key, then verifies the message signature. If verification fails, `401 Unauthorized` is returned. This step ensures the relay only forwards legitimately signed messages.
+### 1. Client constructs and signs
 
-### 4. Sender relay resolves recipient
+Alice's client generates a client-side message id (ULID/UUID), constructs the canonical string (including `id:<message_id>` and the encryption envelope), and signs with the session key (or long-lived identity key for identity-signed sends).
 
-Alice's relay inspects the `recipient` field. If `bob.example.org` is not a locally hosted identity, the relay resolves `bob.example.org` as a DNS `A` (or `CNAME`) record to find Bob's relay IP address. Resolved addresses are cached for the DNS record's TTL to avoid a DNS round-trip on every message.
+### 2. Client resolves recipient relay
 
-### 5. Sender relay forwards
+Alice's client resolves `bob.example.org`'s `A`/`CNAME` directly to find Bob's relay address.
 
-Alice's relay forwards the **original signed envelope** (unchanged) to Bob's relay via `POST /messages` over HTTPS.
+### 3. Client posts directly
 
-### 6. Recipient relay verifies and stores
+Alice's client POSTs the signed envelope to Bob's relay's `/messages`. Alice's home relay is not contacted.
 
-Bob's relay performs the same signature verification (re-resolving Alice's public key from DNS), confirms that `bob.example.org` is a locally hosted identity, and stores the message in Bob's in-memory inbox.
+### 4. Recipient relay accepts
 
-### 7. Bob fetches
+Bob's relay applies rate limits (per-sender + global), verifies the signature against Alice's DNS-published public key, applies the [at-least-one-local rule](/relay/api-reference#at-least-one-local-rule) (Bob is local — accept), and stores the message in Bob's inbox keyed by the client-assigned id. It returns `202 Accepted` (tick 1).
 
-Bob's client polls `GET /messages/bob.example.org` (or receives a push notification if WebSocket delivery is available). Bob's relay returns all pending inbox messages. Bob's client should verify the signature on each received message as a final trust check, even though the relay has already verified it.
+### 5. Bob fetches and decrypts
 
-## Local vs. Remote Recipients
+Bob's client polls `GET /messages/bob.example.org`, which returns both `messages` and `acks` arrays. Bob's client verifies signatures, decrypts the payload, and emits a signed `delivered_client` ack.
 
-When a relay receives a `POST /messages` request, it determines delivery strategy based on whether the recipient is local:
+### 6. Recipient client posts the tick-2 ack
 
-- **Local identity** — the recipient's subdomain resolves to this relay's own address (or is registered on this relay). The message is verified and stored in the local inbox.
-- **Remote identity** — the recipient's subdomain resolves to a different IP address. The relay forwards the original signed envelope to that address via `POST /messages`.
+Bob's client resolves Alice's home relay via DNS and POSTs the ack to **Alice's** home relay's `/acks`. Alice's home relay accepts because Alice is locally hosted (at-least-one-local satisfied via `recipient`).
 
-Relays do **not** re-sign messages when forwarding. The original sender's signature travels end-to-end, and each relay in the path verifies it independently.
+### 7. Alice sees tick 2
+
+On Alice's next inbox poll, the `acks` array carries the `delivered_client` ack. Her CLI advances the local pending journal accordingly. See [Delivery Acks](/protocol/delivery-acks).
+
+## Local vs. Remote: the at-least-one-local rule
+
+A relay accepts a message or ack iff the sender or the recipient is a locally hosted identity. The three accepted cases are:
+
+- **Recipient-local** — store in inbox (the normal direct-send ingress).
+- **Sender-local, recipient-remote** — forward to the recipient relay (the privacy-proxy case for `--via-home-relay`).
+- **Both local** — note-to-self; store in inbox.
+
+Anything else returns `403 not_authorized`. Relays never re-sign forwarded envelopes; the original sender's signature travels end-to-end and is verified independently at every hop that handles it.
 
 ## DNS Routing Cache
 

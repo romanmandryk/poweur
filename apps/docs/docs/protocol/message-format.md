@@ -6,24 +6,25 @@ title: Message Format
 
 # Message Format
 
-An Eurything message is a JSON object that carries the sender identity, recipient identity, payload, and a cryptographic signature. In the MVP the payload is also end-to-end encrypted between sender and recipient whenever both sides publish an encryption key; the relay never sees plaintext.
+An Eurything message is a JSON object that carries the sender identity, recipient identity, payload, and a cryptographic signature. The payload is always end-to-end encrypted between sender and recipient: the relay never sees plaintext, and any message that reaches the relay without an `encryption` envelope is rejected with `400 encryption_required` before routing.
 
 ## Message Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | **Required.** Client-assigned unique message id (ULID-shaped). Bound into the signed canonical string and used as the inbox storage key on the recipient relay so acks can refer back to a verifiable identifier |
 | `sender` | string | Fully qualified identity subdomain of the sender (`alice.poweur.net`) |
 | `recipient` | string | Fully qualified identity subdomain of the recipient (`bob.example.org`) |
 | `timestamp` | string | ISO 8601 UTC timestamp of message creation (`2026-03-28T12:00:00Z`) |
-| `payload` | string | Base64url ciphertext when `encryption` is set, UTF-8 plaintext otherwise |
+| `payload` | string | Base64url of the AEAD ciphertext (always — plaintext is rejected) |
 | `signature` | string | Base64-encoded Ed25519 signature over the canonical fields |
 | `session_id` | string | Optional. Identifies the short-lived session whose key signed this message |
 | `session_proof` | object | Optional. Self-contained proof that the session key was authorized by the identity key. See [Session Proof](#session-proof) |
-| `encryption` | object | Optional. Present when the payload is end-to-end encrypted. See [End-to-End Encryption](#end-to-end-encryption) |
+| `encryption` | object | **Required.** End-to-end encryption envelope (`alg`, `ephemeral_public_key`, `nonce`). See [End-to-End Encryption](#end-to-end-encryption) |
 
-`sender`, `recipient`, `timestamp`, `payload`, and `signature` are always required. The remaining fields are optional in the protocol but in practice every CLI- and mobile-produced message in the MVP carries `session_id` and, when the recipient has a published encryption key, `encryption`.
+`id`, `sender`, `recipient`, `timestamp`, `payload`, `signature`, and `encryption` are always required. `session_id` is optional at the protocol level but present on every routine CLI- and mobile-produced message; identity-signed sends omit it.
 
-To keep the format extensible, future protocol revisions may reserve additional envelope fields such as `id`, `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. MVP relays and clients must ignore unknown top-level fields unless a newer protocol version marks them as mandatory.
+To keep the format extensible, future protocol revisions may reserve additional envelope fields such as `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. MVP relays and clients must ignore unknown top-level fields unless a newer protocol version marks them as mandatory.
 
 ## Wire Format Example
 
@@ -31,6 +32,7 @@ Encrypted, session-signed message (the common case):
 
 ```json
 {
+  "id":        "msg_01j9xkay7g000000000000000",
   "sender":    "alice.poweur.net",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
@@ -67,11 +69,12 @@ Before sending, the client constructs a canonical string by concatenating the fo
 <recipient>
 <timestamp>
 <payload>
+id:<message_id>
 session:<session_id>                              # if session_id is present
 enc:<alg>:<ephemeral_public_key>:<nonce>          # if encryption is present
 ```
 
-Lines for absent optional fields are **omitted**, not included as empty strings. This keeps the canonical string backward compatible with the plaintext, session-less envelope (first four lines only).
+The `id` line is always present (the client-assigned message id is mandatory). Lines for absent optional fields are **omitted**, not included as empty strings. In normal operation the `enc:` line is always present (encryption is mandatory) and the `session:` line is present whenever the client uses the session-signed path. Identity-signed sends drop only the `session:` line.
 
 For the encrypted example above the canonical string is:
 
@@ -80,6 +83,7 @@ alice.poweur.net
 bob.example.org
 2026-03-28T12:00:00Z
 b29LaWxvNC4xN...base64url ciphertext...
+id:msg_01j9xkay7g000000000000000
 session:sess_01j9xk...
 enc:x25519-chacha20-poly1305:kY0u...base64url...:iNv1...base64url...
 ```
@@ -96,6 +100,17 @@ Note: there is no trailing newline.
 4. Place the encoded signature in the `signature` field.
 
 The timestamp is included in the signed payload to prevent trivial replay. Binding `session_id`, `encryption`, and the ciphertext into the canonical string prevents an attacker from re-using a signature for a different session, cipher state, or ciphertext.
+
+### Choosing a signing key
+
+The sender picks the signing key per message. Relays MUST accept either path: the presence of `session_id` in the envelope is sufficient to disambiguate which public key the relay verifies against, and no explicit discriminator field is required.
+
+| Path | When | Envelope shape | Verifying key |
+|------|------|----------------|---------------|
+| Session-signed (default) | Routine interactive use; mobile | `session_id` present, optional `session_proof` | Session Ed25519 public key (from cache or `session_proof`) |
+| Identity-signed | Headless agents, rarely-sent messages, offline-prepared envelopes | `session_id` omitted, `session_proof` omitted | Long-lived identity Ed25519 public key (from DNS `_eurything.<sender>` or peer relay) |
+
+The CLI exposes this choice via `eurything send --sign-with=session|identity` (default `session`). Identity-signed sends skip session registration entirely — no `POST /sessions` round-trip, no passkey prompt on mobile, and nothing is written to the local session cache. The trade-off is that every identity-signed message is cryptographically bound to the long-lived key, which forgoes the forward-secrecy benefit of rotating short-lived session keys.
 
 ## Verification
 
@@ -128,7 +143,7 @@ The proof is produced once at session registration and re-used on every outbound
 
 ## End-to-End Encryption
 
-In the MVP, messages are end-to-end encrypted whenever the recipient has a published X25519 encryption key (`_eurything-enc.<recipient>`). The relay only sees ciphertext plus routing metadata.
+Messages are **always** end-to-end encrypted. The recipient must have a published X25519 encryption key at `_eurything-enc.<recipient>`; if they do not, senders refuse to send and relays reject the envelope. The relay only ever sees ciphertext plus routing metadata.
 
 The encryption suite:
 
@@ -137,13 +152,13 @@ The encryption suite:
 - **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"eurything/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** ciphertext (base64url) in `payload`; `ephemeral_public_key` and `nonce` (base64url) in `encryption`; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-Clients MAY fall back to plaintext when the recipient has no published encryption key. In that case `encryption` is omitted and `payload` is UTF-8 plaintext. CLI clients warn the user; mobile clients refuse to send.
+There is no plaintext fallback. When the recipient's `_eurything-enc.<identity>` TXT record is missing, clients abort with an error that points the user at `eurything identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected with `400 encryption_required` before signature verification or rate-limiting runs.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger suite. The `alg` string is the version marker; clients must reject envelopes whose `alg` they do not implement.
 
 ## Inbox Message Format
 
-When a client retrieves messages via `GET /messages/:identity`, each message includes an additional relay-assigned `id` field. All other envelope fields (including `encryption` and `session_id`) are preserved verbatim:
+When a client retrieves messages via `GET /messages/:identity`, each message preserves the original client-assigned `id` (relays do not rewrite it). All envelope fields (including `encryption` and `session_id`) are preserved verbatim, and the response also carries an `acks` array drained alongside `messages` (see [Delivery Acks](/protocol/delivery-acks)):
 
 ```json
 {
@@ -162,11 +177,12 @@ When a client retrieves messages via `GET /messages/:identity`, each message inc
         "nonce":                "iNv1...base64url..."
       }
     }
-  ]
+  ],
+  "acks": []
 }
 ```
 
-The `id` field is assigned by the receiving relay and is not part of the signed canonical string. Clients should verify the signature on received messages before displaying them, even if the relay has already verified it at ingress, and decrypt with their local X25519 private key.
+The `id` field is the client-assigned id from the original send and IS part of the signed canonical string, so receiving clients can rely on it as a stable, signature-bound message identifier. Clients should still verify the signature on received messages before displaying them, even if the relay has already verified it at ingress, and decrypt with their local X25519 private key.
 
 ## Related
 

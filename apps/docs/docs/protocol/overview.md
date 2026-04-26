@@ -55,26 +55,28 @@ Any party — another relay, a client, an auditor — can verify a message by fe
 
 ### Relay Layer
 
-Relays are stateless HTTP/JSON servers. Their responsibilities are:
+Relays are stateless HTTP/JSON servers. Each relay is the **home** for the identities it locally hosts. Its responsibilities are:
 
-1. Accept signed messages from senders
-2. Verify message signatures against public keys from DNS
-3. Resolve recipient relays via DNS and forward messages
-4. Accept forwarded messages and hold them in memory for retrieval
-5. Register new identities by writing DNS records on behalf of clients
+1. Accept signed messages directly from any client at `POST /messages`, subject to rate limits and the [at-least-one-local rule](/relay/api-reference#at-least-one-local-rule)
+2. Verify message signatures against public keys from DNS (or against cached session keys when present)
+3. Store accepted messages for local recipients; forward to the recipient relay only when the **sender** is locally hosted (privacy-proxy `--via-home-relay` mode)
+4. Accept signed delivery acks at `POST /acks` and surface them on the next inbox poll (the second tick in the [two-tick delivery model](/protocol/delivery-acks))
+5. Register new identities by writing DNS records on behalf of clients (owner-only / admin endpoints; identity-signed)
 
-Relays hold no database. The only in-memory state is rate limit counters and a DNS routing cache — both ephemeral and safe to lose on restart.
+Relays hold no database. The in-memory state is per-identity inboxes, the ack store, the session cache, rate-limit counters (per-sender + global), and a DNS routing cache — all ephemeral and safe to lose on restart.
 
 ### Client Layer
 
 Clients (mobile apps, CLI) are responsible for:
 
 1. Generating and storing identity key pairs (in secure hardware)
-2. Signing messages before dispatch
-3. Approving third-party authentication challenges
-4. Communicating with their configured relay for send and receive
+2. Generating client-side message ids, signing messages, and persisting a per-identity pending journal
+3. Sending each outbound message **directly** to the recipient's home relay (default), or routing through their own home relay for privacy (`--via-home-relay`)
+4. Polling their own home relay for inbound messages and acks
+5. Emitting signed `delivered_client` acks back to the original sender's home relay after successful decrypt
+6. Approving third-party authentication challenges
 
-Clients never communicate directly with other clients. All message exchange passes through relays.
+Clients never communicate directly with each other. Every message exchange is mediated by a relay — but in the default model, a single message touches only the recipient's home relay; the sender's home relay only sees the resulting tick-2 ack.
 
 ## Protocol Versioning
 
