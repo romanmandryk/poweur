@@ -10,24 +10,89 @@ The relay exposes an HTTP/JSON API consumed by mobile clients, the CLI, and peer
 
 **Base URL:** `https://<relay-host>`
 
+## Endpoint classification {#endpoint-classes}
+
+The relay exposes two distinct surfaces and authenticates them differently:
+
+- **Open / messaging** — anyone may call. Authentication is per-message:
+  every envelope (message or ack) is signature-verified before storage.
+  Per-sender and per-relay rate limits run before signature verification
+  to keep the cheap-rejection path fast.
+- **Owner-only / admin** — must prove ownership of the identity in
+  question via either a challenge–response (already-implemented for
+  `GET /messages/:identity`) or an identity-signed admin envelope
+  (`issued_at`, `nonce`, `identity_signature`). The DNS-token check on
+  `POST /identities` is necessary but no longer sufficient on its own.
+
+| Endpoint | Class | Notes |
+|----------|-------|-------|
+| `POST /messages` | open / messaging | Subject to the at-least-one-local rule (see below) |
+| `POST /acks` | open / messaging | Same rule and rate limits as `/messages` |
+| `GET /health` | public read | Global rate limit only |
+| `GET /identities/:identity` | public read | Global rate limit only |
+| `GET /auth/challenge` | public read | Issues short-lived owner-only auth material |
+| `GET /messages/:identity` | owner-only / admin | Challenge–response authenticated |
+| `POST /sessions` | owner-only / admin | Identity-signed |
+| `DELETE /sessions/:id` | owner-only / admin | Identity-signed |
+| `POST /identities` | owner-only / admin | DNS-token + identity-signed |
+| `POST /identities/:identity/encryption-key` | owner-only / admin | DNS-token + identity-signed |
+
+## At-least-one-local rule {#at-least-one-local-rule}
+
+Both `POST /messages` and `POST /acks` enforce a single forwarding rule
+that prevents the relay from being abused as an open forwarder for the
+world:
+
+```
+senderLocal    = identityStore.Exists(envelope.sender)    || dns(envelope.sender)    points here
+recipientLocal = identityStore.Exists(envelope.recipient) || dns(envelope.recipient) points here
+accept iff senderLocal || recipientLocal
+```
+
+Three accepted cases follow:
+
+1. **Recipient-local** (normal inbound): store in the local inbox.
+2. **Sender-local, recipient-remote** (the only sanctioned forward, used
+   by the `--via-home-relay` privacy proxy): forward over HTTP to the
+   recipient relay (DNS-resolved).
+3. **Both local** (note-to-self): store in the local inbox.
+
+Anything else returns `403 not_authorized` *before* signature
+verification, so the cheap reject path stays cheap.
+
 ---
 
 ## POST /messages
 
-Submit a signed message for delivery. The relay inspects the `recipient` field, verifies the sender's signature, and either delivers the message to a local identity inbox or forwards it to the appropriate peer relay via DNS resolution.
+Submit a signed message for delivery. The relay verifies the sender's
+signature, applies the at-least-one-local rule, and then either stores
+the message for a local recipient or forwards it to the recipient's relay
+over HTTP.
+
+By default, **clients post directly to the recipient's relay**, resolved
+via DNS (`A` / `CNAME` for `<recipient>` or `HOST:<recipient>` in the
+fake-DNS test environment). The sender's home relay never sees the
+outbound traffic. Clients that want to hide their IP from the recipient's
+relay opt into the home-relay proxy mode (CLI flag `--via-home-relay`),
+which posts to the sender's home relay; the home relay accepts because
+the sender is local and forwards over HTTP to the recipient relay.
 
 ### Rate limiting
 
-Rate limit checks run **before** signature verification. Requests that exceed per-sender limits are rejected immediately without touching DNS or message content.
+Rate limit checks run **before** signature verification. Both per-sender
+and global per-relay buckets are evaluated; whichever fires first
+produces the `429`. See [Rate Limiting](/protocol/rate-limiting) for the
+default thresholds.
 
 ### Request body
 
 ```json
 {
+  "id":        "msg_01j9xkay7g000000000000000",
   "sender":    "alice.poweur.net",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
-  "payload":   "<base64url ciphertext OR UTF-8 plaintext>",
+  "payload":   "<base64url AEAD ciphertext>",
   "signature": "<base64 Ed25519 signature over canonical fields>",
   "session_id": "sess_01j...",
   "session_proof": {
@@ -45,29 +110,84 @@ Rate limit checks run **before** signature verification. Requests that exceed pe
 }
 ```
 
-`sender`, `recipient`, `timestamp`, `payload`, and `signature` are always required. `session_id`, `session_proof`, and `encryption` are optional; MVP clients include `session_id` on every send and `encryption` whenever the recipient has a published X25519 key. See [Message Format](/protocol/message-format) for the canonical signing string and the signature verification rules.
+`id`, `sender`, `recipient`, `timestamp`, `payload`, `signature`, and `encryption` are always required. The client-assigned `id` is bound into the canonical signing string and used as the inbox storage key on the recipient relay. `session_id` and `session_proof` are optional — MVP clients include `session_id` on every routine (session-signed) send. Envelopes without `encryption.alg`, `encryption.ephemeral_public_key`, or `encryption.nonce` are rejected with `400 encryption_required` before signature verification or rate-limiting runs. See [Message Format](/protocol/message-format) for the canonical signing string and the signature verification rules.
 
 ### Responses
 
 | Status | Meaning |
 |--------|---------|
-| `202 Accepted` | Message accepted for delivery or forwarding |
-| `400 Bad Request` | Malformed message envelope (missing field, invalid JSON, invalid timestamp format) |
+| `202 Accepted` | Message accepted for delivery or forwarding (corresponds to delivery tick 1 — see [Delivery Acks](/protocol/delivery-acks)) |
+| `400 Bad Request` | Malformed message envelope (missing field, invalid JSON, invalid timestamp format). `encryption_required` when the envelope is missing the `encryption` block. |
 | `401 Unauthorized` | Signature verification failed, or `session_expired` when `session_id` is unknown and no valid `session_proof` is attached |
+| `403 Forbidden` | `not_authorized` — neither sender nor recipient is locally hosted on this relay (see [at-least-one-local rule](#at-least-one-local-rule)) |
 | `413 Content Too Large` | Request body exceeds 512 KB |
-| `429 Too Many Requests` | Sender has exceeded rate limits |
+| `429 Too Many Requests` | Sender or relay exceeded a rate-limit bucket. The `scope` field in the body is `sender` or `global`. |
 
 When the relay returns `401 session_expired`, the client should silently register a new session via `POST /sessions` and retry the send.
 
 **429 response body:**
 ```json
 {
-  "error": "rate_limit_exceeded",
-  "window": "minute",
-  "limit": 20,
+  "error":    "rate_limit_exceeded",
+  "scope":    "sender",
+  "window":   "minute",
+  "limit":    20,
   "reset_at": "2026-03-28T12:01:00Z"
 }
 ```
+
+The `202 Accepted` body echoes the client-assigned `id` so the sender can
+correlate the response with their pending journal entry:
+
+```json
+{
+  "id": "msg_01j9xkay7g000000000000000"
+}
+```
+
+---
+
+## POST /acks
+
+Submit a signed delivery acknowledgement. Open / messaging-class endpoint
+that shares signature verification, rate limits, and the at-least-one-
+local rule with `POST /messages`. In v1 the only valid `state` is
+`delivered_client`, recorded by a recipient client immediately after a
+successful decrypt.
+
+### Request body
+
+```json
+{
+  "type":       "ack",
+  "id":         "ack_01j...",
+  "message_id": "msg_01j...",
+  "state":      "delivered_client",
+  "sender":     "bob.example.org",
+  "recipient":  "alice.poweur.net",
+  "timestamp":  "2026-03-28T12:04:05Z",
+  "signature":  "<base64 Ed25519 signature over canonical fields>",
+  "session_id": "sess_...",
+  "session_proof": { ... }
+}
+```
+
+`sender` is the party that produced the ack (the recipient of the
+original message). `recipient` is the party that cares whether tick 2
+ever arrives (the original message's `sender`). See
+[Delivery Acks](/protocol/delivery-acks) for the canonical signing string
+and the journal semantics.
+
+### Responses
+
+| Status | Meaning |
+|--------|---------|
+| `202 Accepted` | Ack accepted; will be drained on the next `GET /messages/:identity` for the recipient |
+| `400 Bad Request` | Malformed ack envelope or unsupported `state` value |
+| `401 Unauthorized` | Signature verification failed |
+| `403 Forbidden` | `not_authorized` — neither party is locally hosted (see [at-least-one-local rule](#at-least-one-local-rule)) |
+| `413 Content Too Large` | Request body too large |
+| `429 Too Many Requests` | Sender or relay exceeded a rate-limit bucket |
 
 ---
 
@@ -103,7 +223,7 @@ When `X-Eurything-Session-Id` is present but the session is unknown or expired, 
       "sender":    "bob.example.org",
       "recipient": "alice.poweur.net",
       "timestamp": "2026-03-28T12:00:00Z",
-      "payload":   "<base64url ciphertext or plaintext>",
+      "payload":   "<base64url AEAD ciphertext>",
       "signature": "<base64-encoded signature>",
       "session_id": "sess_01j...",
       "encryption": {
@@ -112,13 +232,32 @@ When `X-Eurything-Session-Id` is present but the session is unknown or expired, 
         "nonce":                "<base64url>"
       }
     }
+  ],
+  "acks": [
+    {
+      "type":       "ack",
+      "id":         "ack_01j...",
+      "message_id": "msg_01j...",
+      "state":      "delivered_client",
+      "sender":     "bob.example.org",
+      "recipient":  "alice.poweur.net",
+      "timestamp":  "2026-03-28T12:04:05Z",
+      "signature":  "<base64>"
+    }
   ]
 }
 ```
 
-The relay forwards the envelope as it was signed. Clients should verify the signature and, when `encryption` is set, decrypt with the recipient's local X25519 private key before displaying the payload.
+The relay forwards each envelope as it was signed. Clients should verify
+the signature and, when `encryption` is set, decrypt with the recipient's
+local X25519 private key before displaying the payload.
 
-If there are no pending messages, `messages` is an empty array `[]`.
+The `acks` array carries delivery acknowledgements for messages this
+identity previously sent (tick 2 in the WhatsApp-style two-tick model —
+see [Delivery Acks](/protocol/delivery-acks)). Both arrays are drained on
+read, so a polling client gets exactly-one delivery of every pending
+event in a single round-trip. If there is nothing pending, the
+corresponding array is `[]`.
 
 ### Responses
 
@@ -168,9 +307,16 @@ Challenges expire after **60 seconds** and are invalidated after first use. The 
 
 ## POST /identities
 
-Register a new identity on this relay. The client provides its public key, the DNS provider to use, and a scoped API token for the identity's DNS zone. The relay writes the required DNS records and registers the identity as locally hosted.
+Register a new identity on this relay. **Owner-only / admin endpoint:**
+in addition to the DNS provider token (which authorises the zone write),
+the request body must include an identity-signed admin envelope so the
+relay can verify the caller actually holds the private key for the
+`public_key` they are publishing. A hostile DNS-token holder cannot
+register an arbitrary identity public key.
 
-The DNS provider token is used during this request only and **discarded immediately** after the DNS writes succeed or fail. The relay stores no write credentials at rest.
+The DNS provider token is used during this request only and **discarded
+immediately** after the DNS writes succeed or fail. The relay stores no
+write credentials at rest.
 
 ### Request body
 
@@ -180,7 +326,10 @@ The DNS provider token is used during this request only and **discarded immediat
   "public_key":            "<base64url-encoded Ed25519 public key>",
   "encryption_public_key": "<base64url-encoded X25519 public key>",
   "dns_provider":          "cloudflare",
-  "dns_token":             "<scoped DNS provider API token>"
+  "dns_token":             "<scoped DNS provider API token>",
+  "issued_at":             "2026-03-28T12:00:00Z",
+  "nonce":                 "<base64url random nonce>",
+  "identity_signature":    "<base64 signature of canonical identity-registration string>"
 }
 ```
 
@@ -191,6 +340,24 @@ The DNS provider token is used during this request only and **discarded immediat
 | `encryption_public_key` | string | Base64url-encoded X25519 encryption public key (no padding). Optional in the API but written for every identity by CLI and mobile clients in the MVP. |
 | `dns_provider` | string | DNS provider to use — `cloudflare` or `hetzner` |
 | `dns_token` | string | Scoped API token for the target DNS zone |
+| `issued_at` | string | RFC3339 UTC timestamp; relay enforces a recency window |
+| `nonce` | string | Per-request nonce; included in the canonical string to bind the signature to this exact request |
+| `identity_signature` | string | Base64-encoded Ed25519 signature over the canonical identity-registration string, verified against the `public_key` in this body |
+
+The canonical identity-registration string is:
+
+```
+identity-registration
+<identity>
+<public_key>
+<encryption_public_key>
+<relay_address>
+<issued_at>
+<nonce>
+```
+
+`<relay_address>` is the host[:port] of the relay the request is being
+made against (the relay's `RelayAddress` config value). `<encryption_public_key>` is the empty string when not supplied.
 
 ### DNS records written
 
@@ -205,7 +372,8 @@ On success, the relay creates (or updates) up to three DNS records:
 | Status | Meaning |
 |--------|---------|
 | `201 Created` | Identity registered and DNS records written |
-| `400 Bad Request` | Malformed request, missing fields, or unsupported `dns_provider` value |
+| `400 Bad Request` | Malformed request, missing fields (including a missing admin envelope), or unsupported `dns_provider` value |
+| `401 Unauthorized` | `identity_signature` failed to verify against the body's `public_key` |
 | `409 Conflict` | Identity is already registered on this relay |
 | `502 Bad Gateway` | DNS provider write failed (token invalid, zone not found, etc.) |
 
@@ -227,6 +395,80 @@ On success, the relay creates (or updates) up to three DNS records:
   "detail":  "Cloudflare API returned 403: token lacks zone:edit permission"
 }
 ```
+
+---
+
+## POST /identities/:identity/encryption-key
+
+Add or replace the X25519 encryption public key for a locally hosted
+identity. This endpoint exists so identities registered before E2E
+encryption was mandatory can be retrofitted without re-registering.
+**Owner-only / admin endpoint:** the request must carry an identity-
+signed admin envelope verified against the registered identity's
+long-lived signing key. The DNS provider token is used for the one DNS
+write and discarded immediately.
+
+### Path parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `:identity` | Fully qualified identity subdomain hosted on this relay |
+
+### Request body
+
+```json
+{
+  "encryption_public_key": "<base64url-encoded X25519 public key>",
+  "dns_provider":          "cloudflare",
+  "dns_token":             "<scoped DNS provider API token>",
+  "issued_at":             "2026-03-28T12:00:00Z",
+  "nonce":                 "<base64url random nonce>",
+  "identity_signature":    "<base64 signature of canonical identity-encryption-key string>"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `encryption_public_key` | string | Base64url-encoded X25519 encryption public key (no padding) |
+| `dns_provider` | string | DNS provider to use — `cloudflare` or `hetzner` |
+| `dns_token` | string | Scoped API token for the target DNS zone |
+| `issued_at` | string | RFC3339 UTC timestamp; relay enforces a recency window |
+| `nonce` | string | Per-request nonce |
+| `identity_signature` | string | Base64-encoded Ed25519 signature over the canonical identity-encryption-key string, verified against the registered identity's signing key |
+
+The canonical identity-encryption-key string is:
+
+```
+identity-encryption-key
+<identity>
+<encryption_public_key>
+<issued_at>
+<nonce>
+```
+
+### DNS records written
+
+1. `TXT` at `_eurything-enc.<identity>` — `eurything-enckey=x25519:<encryption_public_key>` (created or updated)
+
+### Responses
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | Encryption key written to DNS |
+| `400 Bad Request` | Malformed request, missing fields (including a missing admin envelope), or unsupported `dns_provider` value |
+| `401 Unauthorized` | `identity_signature` failed to verify against the registered signing key |
+| `404 Not Found` | Identity is not hosted on this relay |
+| `502 Bad Gateway` | DNS provider write failed |
+
+**200 response body:**
+```json
+{
+  "identity":              "alice.poweur.net",
+  "encryption_public_key": "<base64url-encoded encryption public key>"
+}
+```
+
+The equivalent CLI command is `eurything identity add-encryption-key`.
 
 ---
 
@@ -314,7 +556,11 @@ Relay restarts invalidate all sessions. Clients should treat `401 session_expire
 
 ## DELETE /sessions/:id
 
-Revoke a session. Idempotent — deleting a session that does not exist also returns `204`.
+Revoke a session. **Owner-only / admin endpoint:** the request body must
+carry an identity-signed admin envelope so an attacker who guesses a
+session id cannot invalidate someone else's sessions. Idempotent —
+deleting a session that does not exist still returns `204`, but only
+after authentication succeeds.
 
 ### Path parameters
 
@@ -322,12 +568,39 @@ Revoke a session. Idempotent — deleting a session that does not exist also ret
 |-----------|-------------|
 | `:id` | The session id returned by `POST /sessions` |
 
+### Request body
+
+```json
+{
+  "identity":           "alice.poweur.net",
+  "issued_at":          "2026-03-28T12:00:00Z",
+  "nonce":              "<base64url random nonce>",
+  "identity_signature": "<base64 signature of canonical session-revocation string>"
+}
+```
+
+The canonical session-revocation string is:
+
+```
+session-revocation
+<identity>
+<session_id>
+<issued_at>
+<nonce>
+```
+
+The relay verifies the signature against the long-lived signing key of
+the claimed `identity` (resolved from the local identity cache, then DNS
+on miss). If the session is known and its owning identity does not match
+the claimed `identity`, the relay rejects with `401 unauthorized`.
+
 ### Responses
 
 | Status | Meaning |
 |--------|---------|
-| `204 No Content` | Session removed from the cache |
-| `400 Bad Request` | Missing id |
+| `204 No Content` | Session removed (or already absent) |
+| `400 Bad Request` | Missing id or missing admin envelope |
+| `401 Unauthorized` | `identity_signature` failed to verify, or session belongs to a different identity |
 
 ---
 

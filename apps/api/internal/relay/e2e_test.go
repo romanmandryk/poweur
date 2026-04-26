@@ -86,6 +86,7 @@ func TestRelayTreatsEncryptedPayloadAsOpaque(t *testing.T) {
 	// Build an "encrypted" message (payload is opaque from the relay's perspective).
 	ciphertext := base64.RawURLEncoding.EncodeToString([]byte("opaque-ciphertext"))
 	msg := Message{
+		ID:        "msg_test_e2e_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -102,7 +103,7 @@ func TestRelayTreatsEncryptedPayloadAsOpaque(t *testing.T) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canon := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, enc)
+	canon := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, enc)
 	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(sessionPriv, []byte(canon)))
 
 	body, _ = json.Marshal(msg)

@@ -24,10 +24,28 @@ func CanonicalMessage(sender, recipient, timestamp, payload string) string {
 }
 
 // CanonicalMessageFull returns the canonical signing input for a message,
-// including session id and encryption metadata when present.
-// When sessionID is empty and enc is nil, the output equals CanonicalMessage.
-func CanonicalMessageFull(sender, recipient, timestamp, payload, sessionID string, enc *EncryptionMeta) string {
+// including the client-assigned message id, session id, and encryption
+// metadata when present. The id line binds the relay-stored identifier
+// into the signature so delivery acknowledgements can reference a value
+// the sender themselves committed to.
+//
+// Order is fixed:
+//
+//	<sender>
+//	<recipient>
+//	<timestamp>
+//	<payload>
+//	id:<message_id>           (only when id != "")
+//	session:<session_id>      (only when sessionID != "")
+//	enc:<alg>:<eph>:<nonce>   (only when enc != nil)
+//
+// When id, sessionID and enc are all empty/nil the output equals
+// CanonicalMessage.
+func CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID string, enc *EncryptionMeta) string {
 	parts := []string{sender, recipient, timestamp, payload}
+	if id != "" {
+		parts = append(parts, "id:"+id)
+	}
 	if sessionID != "" {
 		parts = append(parts, "session:"+sessionID)
 	}
@@ -35,6 +53,80 @@ func CanonicalMessageFull(sender, recipient, timestamp, payload, sessionID strin
 		parts = append(parts, "enc:"+enc.Alg+":"+enc.EphemeralPublicKey+":"+enc.Nonce)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// CanonicalAck is the signing input for a delivery acknowledgement. Acks
+// reference a previously-sent message by id and are signed by the
+// recipient (or, in v1, whichever party transitioned the message into
+// the new state). The state enum is open-ended for future expansion
+// (`read`, etc.); v1 only emits `delivered_client`.
+//
+// Order:
+//
+//	ack
+//	<id>
+//	<message_id>
+//	<state>
+//	<sender>            (the party producing the ack)
+//	<recipient>         (the party the ack is destined for, == original message sender)
+//	<timestamp>
+//	session:<session_id>  (only when sessionID != "")
+func CanonicalAck(id, messageID, state, sender, recipient, timestamp, sessionID string) string {
+	parts := []string{
+		"ack",
+		id,
+		messageID,
+		state,
+		sender,
+		recipient,
+		timestamp,
+	}
+	if sessionID != "" {
+		parts = append(parts, "session:"+sessionID)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// CanonicalIdentityRegistration is the string an identity owner signs over
+// a fresh registration body to prove they hold the private key matching the
+// `public_key` they are publishing. Bound to the relay address so a
+// captured registration cannot be replayed against a different relay.
+func CanonicalIdentityRegistration(identity, publicKey, encryptionPublicKey, relayAddress, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"identity-registration",
+		identity,
+		publicKey,
+		encryptionPublicKey,
+		relayAddress,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalEncryptionKeyUpdate is the string an identity owner signs to
+// authorize an encryption-key (re)publication. Verified against the
+// identity's long-lived signing key (resolved via DNS or local store).
+func CanonicalEncryptionKeyUpdate(identity, encryptionPublicKey, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"identity-encryption-key",
+		identity,
+		encryptionPublicKey,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalSessionRevocation is the string the identity owner signs to
+// authorize a `DELETE /sessions/:id`. Verified against the identity's
+// long-lived signing key.
+func CanonicalSessionRevocation(identity, sessionID, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"session-revocation",
+		identity,
+		sessionID,
+		issuedAt,
+		nonce,
+	}, "\n")
 }
 
 // CanonicalSessionRegistration is the string signed by the long-lived identity

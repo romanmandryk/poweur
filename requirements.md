@@ -102,19 +102,21 @@ A message is a JSON object with the following fields:
 
 | Field        | Type    | Description |
 |--------------|---------|-------------|
+| `id`         | string  | **Required.** Client-assigned unique message identifier (ULID/UUID). The relay echoes it in its `202 Accepted` response and uses it as the inbox storage key, so the original sender can correlate later delivery acks against the message it sent. |
 | `sender`     | string  | Fully qualified identity subdomain of the sender (e.g., `alice.example.com`) |
 | `recipient`  | string  | Fully qualified identity subdomain of the recipient (e.g., `bob.example.org`) |
 | `timestamp`  | string  | ISO 8601 UTC timestamp of when the message was created |
-| `payload`    | string  | When `encryption` is present, base64url of the AEAD ciphertext. Otherwise UTF-8 plaintext. |
+| `payload`    | string  | Base64url of the AEAD ciphertext. Always ciphertext — plaintext payloads are rejected by the relay. |
 | `signature`  | string  | Base64-encoded signature over the canonical fields (see below) |
 | `session_id` | string  | Optional. Identifies the short-lived session whose key signed this message. Required in the MVP for all clients that register a session. |
-| `encryption` | object  | Optional. Present when the payload is end-to-end encrypted. Omitted for unencrypted messages. See **End-to-End Encryption** below. |
+| `encryption` | object  | Required. Describes the end-to-end encryption envelope (`alg`, `ephemeral_public_key`, `nonce`). See **End-to-End Encryption** below. |
 
-To keep the envelope evolvable and easier to map to established signed-message formats, the protocol should reserve optional forward-compatible fields such as `id`, `type`, `nonce`, `thread_id`, `expires_at`, and `metadata`. These are not required for the first messaging milestone, but the protocol must treat unknown fields as ignorable unless they are explicitly defined as signed mandatory fields in a later version.
+The protocol must treat unknown fields as ignorable unless they are explicitly defined as signed mandatory fields in a later version. Reserved forward-compatible fields include `type`, `thread_id`, `expires_at`, and `metadata`.
 
 **Encrypted example (MVP default):**
 ```json
 {
+  "id":        "msg_01j...",
   "sender":    "alice.example.com",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
@@ -138,11 +140,12 @@ Before sending, the client constructs a canonical string by concatenating the fo
 <recipient>
 <timestamp>
 <payload>
+id:<message_id>
 session:<session_id>            # only when session_id is present
 enc:<alg>:<ephemeral_public_key>:<nonce>   # only when encryption is present
 ```
 
-The lines are emitted in this exact order; any line whose field is empty is omitted. This keeps the canonical string backward compatible with the plaintext, session-less envelope (first four lines only) while binding the session identifier and encryption metadata into the signature whenever they are used.
+The lines are emitted in this exact order; any line whose field is empty is omitted. The `id:` line is always present in the MVP (client-assigned message ids are mandatory), the `enc:` line is always present (encryption is mandatory), and the `session:` line is present whenever the client uses the session-signed path. Binding the message id into the canonical string makes delivery acks (which reference the message id) verifiable against a signed identifier rather than a relay-assigned alias.
 
 The sender signs this canonical string with:
 
@@ -150,6 +153,14 @@ The sender signs this canonical string with:
 - the **long-lived identity private key** when no session is in use (headless agents that opt out of sessions, or legacy clients).
 
 Ed25519 is used in both cases. The resulting signature is base64-encoded and placed in the `signature` field. Including the timestamp in the signed payload prevents trivial replay attacks. Binding `session_id` into the canonical string prevents a signature produced for one session from being replayed under another.
+
+The sender chooses which key to sign with per-message; relays must accept both paths. The CLI exposes the choice via `eurything send --sign-with=session|identity` (default: `session`). Signing with the identity key:
+
+- Skips session registration entirely (no `POST /sessions`, no passkey prompt on mobile), and the envelope carries neither `session_id` nor `session_proof`.
+- Ties the signature directly to the long-lived identity, which is the expected property for rarely-sent, high-value, or offline-prepared messages where a session round-trip is undesirable.
+- Trades away the forward-secrecy benefits of rotating session keys. For routine messaging the session path remains the recommended default.
+
+Recipients do not care which key signed the envelope: they decrypt using their long-lived X25519 private key, which is independent of the signing path.
 
 ### Session Registration
 
@@ -172,14 +183,14 @@ On mobile devices, step 3 is the single point at which a passkey unlock is requi
 
 ### End-to-End Encryption
 
-Messages MUST be end-to-end encrypted when both sender and recipient have a published X25519 encryption key. The relay never sees plaintext. The encryption scheme for the MVP is:
+Messages MUST be end-to-end encrypted. A recipient without a published X25519 encryption key at `_eurything-enc.<identity>` cannot receive messages — senders refuse, and relays reject any `POST /messages` lacking the `encryption` envelope with `400 encryption_required`. The relay never sees plaintext. The encryption scheme for the MVP is:
 
 - **Key agreement:** X25519 ECDH between a sender-generated ephemeral keypair and the recipient's long-lived X25519 public key (resolved from `_eurything-enc.<recipient>` in DNS).
 - **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "eurything/msg/v1"`, producing a 32-byte key.
 - **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"eurything/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** the ciphertext (base64url) goes into `payload`; `ephemeral_public_key` and `nonce` (base64url) go into the `encryption` object; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-Clients MAY fall back to plaintext when the recipient has no published encryption key. In that case `encryption` is omitted and `payload` is the plaintext. CLI clients must warn the user in this case. Mobile clients should refuse to send in plaintext and surface a clear error.
+There is no plaintext fallback. If the recipient's `_eurything-enc.<identity>` record is missing, all clients (CLI and mobile) must refuse to send and surface a clear error pointing the user at `eurything identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected before rate-limit or signature checks run.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger or more standardized suite. The `alg` field is the version marker; clients must reject envelopes whose `alg` they do not implement.
 
@@ -209,15 +220,28 @@ Relays forwarding messages on behalf of another relay do not re-sign; they forwa
 
 The `session_proof` is produced once at session-registration time and is simply the inputs + identity signature from the session-registration canonical string. A receiving relay verifies the proof by fetching the sender's long-lived identity key from DNS and checking `identity_signature` over the canonical session-registration string. On success it caches the session and accepts the message. The sending client MAY attach the proof on every outbound message; the sending relay MUST attach it when forwarding a session-signed message to a peer relay if it is not already present.
 
+### Send Path
+
+A client interacts with two distinct relays for two distinct purposes:
+
+- The **home relay** (DNS `A`/`CNAME` for the client's identity) is used for **inbound** (inbox polling, incoming acks) and **self-administration** (registering the identity, rotating the encryption key, refreshing or revoking sessions).
+- The **recipient relay** (the home relay of a message's *destination* identity) is the relay that accepts a given outbound message.
+
+By default a client posts each outbound message **directly to the recipient's relay** (resolved via DNS), bypassing its own home relay entirely. The home relay therefore never sees that client's outbound traffic in the default mode. Tick 1 (delivery to the recipient relay) is the recipient relay's `202 Accepted` response on `POST /messages`.
+
+A client MAY opt into routing through its own home relay (`--via-home-relay`) for privacy: the home relay accepts the message because the **sender** is locally hosted, then forwards it over HTTPS to the recipient relay. The recipient relay sees the request from the home relay's IP rather than from the client. This is the only sanctioned reason a relay forwards a message; see *Relay → At-Least-One-Local Rule*.
+
 ### End-to-End Routing
 
-The full delivery path for a message from Alice (`alice.example.com`) to Bob (`bob.example.org`) is:
+Default direct path for a message from Alice (`alice.example.com`) to Bob (`bob.example.org`):
 
-1. **Sender client → sender's relay**: Alice's mobile app or CLI signs the message and submits it to Alice's configured relay via `POST /messages`.
-2. **Sender relay resolves recipient**: Alice's relay inspects the `recipient` field. Since `bob.example.org` is not a locally hosted identity, it performs a DNS lookup for `bob.example.org` to discover Bob's relay IP or hostname.
-3. **Sender relay forwards**: Alice's relay forwards the original signed message envelope to Bob's relay via `POST /messages` over HTTPS.
-4. **Recipient relay delivers**: Bob's relay verifies the message signature, confirms `bob.example.org` is a locally hosted identity, and stores the message in Bob's inbox.
-5. **Bob fetches**: Bob's client polls or subscribes via WebSocket to his relay, retrieves the message from his inbox, and displays it.
+1. **Alice's client resolves Bob's relay** via DNS for `bob.example.org`.
+2. **Alice's client → Bob's relay**: Alice signs the message (binding `id`, `sender`, `recipient`, `timestamp`, `payload`, optional `session_id`, and the encryption envelope) and POSTs it directly to Bob's relay's `/messages`.
+3. **Bob's relay** verifies the signature, confirms `bob.example.org` is a locally hosted identity (recipient-local case of the at-least-one-local rule), and stores the message keyed by `id` in Bob's inbox. It returns `202 Accepted` (tick 1).
+4. **Bob's client** polls his relay (`GET /messages/bob`), decrypts the message, and POSTs a signed `delivered_client` ack to **Alice's home relay** at `/acks` (tick 2 source). The recipient of that ack is Alice; her home relay accepts because she is locally hosted.
+5. **Alice's client** sees tick 2 on its next inbox poll, which now returns both `messages` and `acks`.
+
+Privacy-proxy variant (`--via-home-relay`): step 2 becomes "Alice's client → Alice's home relay → Bob's relay" — Alice's home relay accepts because the sender is local, then forwards to Bob's relay over HTTPS. The signed envelope is unchanged.
 
 ### Wire Format
 
@@ -265,22 +289,57 @@ Authentication requests and responses should follow a structure close to establi
 
 The relay is the core server component, implemented in Go (`apps/api`). Its responsibilities in the MVP are:
 
-- **Message ingress**: Accept signed messages from senders (human clients, bots, or other relays).
+- **Message ingress**: Accept signed messages directly from any sender (clients, bots, or peer relays running in privacy-proxy mode for one of their local identities).
 - **Signature verification**: Verify that each inbound message is correctly signed by the claimed sender identity.
-- **Message routing**: Resolve the recipient's subdomain via DNS to locate their relay, then forward the message to that relay over HTTPS.
-- **Message delivery**: Accept inbound forwarded messages and deliver them to local identity inboxes.
-- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the configured DNS provider (Cloudflare or Hetzner).
+- **At-least-one-local enforcement**: Accept a message or ack iff the sender or the recipient is a locally hosted identity. Otherwise reject with `403 not_authorized`.
+- **Message delivery**: Store accepted messages in local inboxes when the recipient is local; forward to the recipient relay (over HTTPS) when the sender is local but the recipient is remote (the privacy-proxy case).
+- **Ack ingestion**: Accept signed `delivered_client` acks at `POST /acks` and surface them via inbox polls.
+- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the configured DNS provider (Cloudflare or Hetzner). Identity registration, encryption-key rotation, and session revocation must be authenticated as the identity owner (see **Endpoint Classification**).
 
 The relay exposes an HTTP/JSON API consumed by the mobile app, the CLI, and peer relays.
+
+### Endpoint Classification
+
+Every relay endpoint falls into one of two classes:
+
+- **Open / messaging.** Anyone may call them; cost is contained by per-sender + global rate limits, signature verification, and the at-least-one-local rule. No identity-ownership check beyond what is already in the signed envelope.
+  - `POST /messages`, `POST /acks`
+  - `GET /health`, `GET /identities/:identity`, `GET /auth/challenge` (public reads, global rate limit only)
+- **Owner-only / admin.** The caller must prove ownership of the identity in question. The relay verifies an `identity_signature` (or session bearer signature) over a canonical request string before mutating per-identity state.
+  - `GET /messages/:identity` — already challenge-signed; unchanged.
+  - `POST /sessions` — already requires `identity_signature`; unchanged.
+  - `DELETE /sessions/:id` — requires the session's bearer signature **or** the long-lived identity signature.
+  - `POST /identities` — requires both the DNS provider token (authorizing the DNS write) **and** an `identity_signature` over the canonical registration string verified against the `public_key` in the body.
+  - `POST /identities/:identity/encryption-key` — requires an `identity_signature` verified against the registered identity's long-lived signing key (resolved from DNS).
+
+### At-Least-One-Local Rule
+
+For `POST /messages` and `POST /acks` the relay computes:
+
+```
+senderLocal    = identityStore.has(sender)    || dns(sender) points to this relay
+recipientLocal = identityStore.has(recipient) || dns(recipient) points to this relay
+```
+
+and proceeds only if `senderLocal || recipientLocal`. There are exactly three accepted cases:
+
+1. **Recipient-local** (the default ingress for messages addressed to local users): store in inbox.
+2. **Sender-local, recipient-remote** (privacy-proxy mode for outbound): forward via HTTP to the recipient relay (DNS-resolved). This is the only sanctioned forwarding path.
+3. **Both local** (note-to-self): store in inbox like recipient-local.
+
+Anything else returns `403 not_authorized`. This single rule replaces the previous "strict vs lenient forward" split and explicitly forbids running a relay as an open relay for the world.
 
 ### Stateless Design
 
 The relay is intentionally almost stateless. The only in-memory state it maintains is:
 
-- **Rate limit counters** — per-sender sliding windows or token buckets (see Rate Limiting). These are ephemeral; losing them on restart is acceptable.
-- **DNS routing cache** — resolved peer relay addresses, cached for the duration of the DNS TTL to avoid redundant lookups on every forwarded message.
+- **Rate limit counters** — per-sender and global sliding windows / token buckets (see Rate Limiting). These are ephemeral; losing them on restart is acceptable.
+- **DNS routing cache** — resolved peer relay addresses, cached for the duration of the DNS TTL.
+- **Inbox** — undelivered messages awaiting the next inbox poll for each locally hosted identity.
+- **Ack store** — undelivered `delivered_client` acks awaiting the next inbox poll for each locally hosted identity.
+- **Session cache** — short-lived session keys registered via `POST /sessions`.
 
-There is no database and no disk I/O. All durable state (identities, public keys, routing) lives in DNS. This means the relay process can be restarted, replaced, or horizontally scaled without any data migration or coordination.
+There is no database and no disk I/O. All durable state (identities, public keys, routing) lives in DNS; pending messages and acks are explicitly ephemeral, reflecting the protocol's "best-effort, retry-from-the-client" model.
 
 ### DNS Management
 
@@ -302,17 +361,20 @@ Support for additional providers (Route 53, Porkbun, etc.) is a post-MVP concern
 
 ### Rate Limiting
 
-The relay must defend against spam cheaply, before performing any expensive work (signature verification, storage, or DNS lookups). Rate limits are enforced per sender identity, keyed by the sender's public key or identity subdomain as presented in the incoming request.
+The relay must defend against spam cheaply, before performing any expensive work (signature verification, storage, or DNS lookups). Two rate-limit dimensions are applied to `POST /messages` and `POST /acks`:
+
+- **Per sender** — keyed by the `sender` field in the envelope. Defends against a single noisy account.
+- **Global per relay** — relay-wide bucket. Defends against many-sender DDoS where each attacker stays just under the per-sender limit.
 
 Default limits (all configurable via environment variable or config file):
 
-| Window     | Limit          |
-|------------|----------------|
-| Per minute | 20 messages    |
-| Per hour   | 200 messages   |
-| Per day    | 1,000 messages |
+| Window     | Per-sender limit | Global limit       |
+|------------|------------------|--------------------|
+| Per minute | 20 messages      | 1,000 messages     |
+| Per hour   | 200 messages     | 100,000 messages   |
+| Per day    | 1,000 messages   | 1,000,000 messages |
 
-These thresholds are calibrated to slightly above average human messaging activity, making them permissive for normal use while blocking automated spam. Requests that exceed any limit are rejected with HTTP `429 Too Many Requests` **before** signature verification or any storage operation, keeping the rejection path cheap.
+The per-sender thresholds are calibrated to slightly above average human messaging activity. The global ceiling is sized at roughly 50× the per-sender limit, expecting that an active relay handles tens of concurrently busy senders; operators serving more or fewer senders should tune via configuration. Requests that exceed any bucket are rejected with HTTP `429 Too Many Requests` **before** signature verification or any storage operation, keeping the rejection path cheap. The 429 body carries a `scope` field (`sender` or `global`) so callers can tell which one fired.
 
 The implementation should use a stateless-friendly algorithm such as a sliding window counter or token bucket, backed by an in-memory store for the MVP. This keeps the rate limiter self-contained with no external dependencies while remaining straightforward to replace with a distributed store (e.g., Redis) in a production deployment.
 
@@ -449,7 +511,7 @@ eurything identity create <name>   # Generate a key pair and register the identi
 eurything identity show            # Display the current identity's subdomain and public key
 eurything identity use <identity>  # Set the default identity in config
 eurything identity list            # List known identities in the local keys directory
-eurything send <to> <message>      # Sign and send a message to the given identity address
+eurything send <to> <message> [--sign-with=session|identity]  # Sign and send a message to the given identity address
 eurything inbox                    # Fetch and display messages from the relay inbox
 eurything relay status             # Check relay connectivity, show configured endpoint and relay version
 ```
@@ -614,7 +676,7 @@ The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted
 
 | Can | Cannot |
 |-----|--------|
-| Forward messages between identities | Read encrypted message content (post-MVP; plaintext in MVP) |
+| Forward messages between identities | Read message content (payloads are end-to-end encrypted) |
 | Verify message authenticity (via public key from DNS) | Forge a message from any identity |
 | Rate-limit and reject spam | Impersonate a user (no private keys held) |
 | Write DNS records (ephemerally, with client-supplied token) | Retain DNS write credentials after a registration request |
@@ -634,10 +696,10 @@ The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted
 
 ### Threat Model Notes
 
-- A compromised relay can read plaintext message payloads (MVP limitation; end-to-end encryption is a post-MVP goal) and can drop or delay messages, but cannot forge signatures or impersonate identities.
+- A compromised relay can observe message metadata (sender, recipient, timestamp, session id, ciphertext length) and can drop or delay messages, but it cannot read payloads, forge signatures, or impersonate identities. Payloads are end-to-end encrypted under X25519 + ChaCha20-Poly1305; the relay only sees ciphertext.
 - A compromised relay cannot exfiltrate private keys or DNS write credentials because it never holds them at rest.
 - DNS records are the ground truth for public keys and routing. An attacker who can manipulate DNS records for an identity subdomain can redirect messages and substitute a public key. DNS zone security (DNSSEC, restricted API token scopes) is therefore important and should be documented in operator guidance.
-- The MVP uses plaintext payloads. Until end-to-end encryption is implemented, relay operators and network observers can read message content. This should be clearly disclosed to users.
+- Encryption is mandatory. Both the CLI and the relay refuse to send or accept any message that lacks an `encryption` envelope, and there is no plaintext fallback path — a recipient without a published X25519 key simply cannot receive messages until they publish one.
 
 ---
 

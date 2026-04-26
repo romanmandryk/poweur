@@ -140,15 +140,34 @@ eurything identity list
 
 ---
 
+### `eurything identity add-encryption-key`
+
+Retrofit an existing identity with an X25519 encryption key. Use this on identities created before E2E encryption was mandatory (they have no `_eurything-enc.<identity>` record and therefore cannot receive messages). The command generates an X25519 keypair on disk, hands the public half and a scoped DNS token to the relay, and waits until the relay confirms the DNS `TXT` record was written.
+
+```bash
+eurything identity add-encryption-key --use-identity alice.poweur.net
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--use-identity <identity>` | Identity to retrofit (overrides active identity) |
+| `--json` | Machine-readable output |
+
+---
+
 ### `eurything send <to> <message>`
 
-Sign and send a message. By default the CLI:
+Sign and send an end-to-end-encrypted message. The CLI:
 
 1. Loads (or creates) a session for the active identity via `ensure session`.
-2. Looks up the recipient's encryption public key from DNS.
-3. Encrypts the payload with ChaCha20-Poly1305 if the recipient has a published encryption key. If not, it prints a warning and sends plaintext.
-4. Signs the message with the **session private key**.
-5. Attaches `session_id` and `session_proof` so the recipient's relay can verify without contacting the sender's relay.
+2. Generates a client-side message id (ULID-shaped) and writes a `queued` entry to the local pending journal (`~/.eurything/pending/<identity>.jsonl`).
+3. Looks up the recipient's X25519 encryption public key at `_eurything-enc.<recipient>`. **If no record is found, the send is aborted** with an error that points the recipient at `eurything identity add-encryption-key`. There is no plaintext fallback.
+4. Encrypts the payload with ChaCha20-Poly1305 under an X25519-derived key (see [End-to-End Encryption](/protocol/message-format#end-to-end-encryption)).
+5. Signs the canonical envelope (including the `id:` line and the `enc:` line) with the **session private key**.
+6. Attaches `session_id` and `session_proof` so the recipient's relay can verify without contacting the sender's relay.
+7. Resolves the **recipient's** home relay via DNS and POSTs `/messages` directly there (default direct-send model). On `202 Accepted` the journal advances to `delivered_recipient_relay` (tick 1).
 
 ```bash
 eurything send bob.example.org "Hey Bob, are you there?"
@@ -159,10 +178,13 @@ eurything send bob.example.org "Hey Bob, are you there?"
 | Flag | Description |
 |------|-------------|
 | `--use-identity <identity>` | Send from a specific identity (overrides active identity) |
-| `--no-encrypt` | Skip encryption and send plaintext (not recommended) |
+| `--via-home-relay` | Privacy proxy: POST to the configured home relay (`relay_url`) instead of directly to the recipient's relay. The home relay accepts because the sender is locally hosted, then forwards to the recipient relay. Hides the sender's IP from the recipient relay at the cost of an extra hop. |
+| `--sign-with <session\|identity>` | Choose the signing key (default `session`). Identity-signed sends omit `session_id`/`session_proof`. |
 | `--json` | Machine-readable output |
 
-If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing.
+If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing. If the relay returns `400 encryption_required` the CLI surfaces the error — this indicates a client bug, since the CLI always encrypts. Network/HTTP errors during the send write a `failed` entry to the journal (sticky).
+
+Note that `cfg.RelayURL` (the configured `relay_url`) is the **home** relay — it is used for inbox polling, ack delivery, identity admin, and (only when `--via-home-relay` is set) outbound sends.
 
 ---
 
@@ -173,7 +195,9 @@ Fetch and display messages from the relay inbox for the active identity. The CLI
 1. Ensures a valid session.
 2. Fetches a challenge from the relay, signs it with the session key, and calls `GET /messages/:identity`.
 3. Decrypts any envelope with `encryption` metadata using the local X25519 private key. Decrypted messages are prefixed with `🔒` in human output.
-4. Silently re-registers and retries if the relay reports the session expired.
+4. For every successfully decrypted message, signs and POSTs a `delivered_client` ack to the **original sender's** home relay (DNS-resolved). The local pending journal records this as the source of tick 2 for that conversation partner.
+5. Drains the response's `acks` array, advancing the local pending journal to `delivered_client` for any referenced message ids — this is how the sender learns about tick 2.
+6. Silently re-registers and retries if the relay reports the session expired.
 
 ```bash
 eurything inbox
@@ -185,6 +209,37 @@ eurything inbox
 |------|-------------|
 | `--use-identity <identity>` | Fetch inbox for a specific identity |
 | `--json` | Raw JSON output (including undecrypted envelope) |
+
+---
+
+### `eurything messages status`
+
+Show the local pending journal for the active identity. Each line of
+`~/.eurything/pending/<identity>.jsonl` is collapsed to the latest state
+per `message_id`, then rendered with WhatsApp-style tick glyphs:
+
+| Glyph | State | Meaning |
+|-------|-------|---------|
+| `·` | `queued` | Send pipeline started, no relay response yet |
+| `✓` | `delivered_recipient_relay` | Recipient relay returned `202 Accepted` (tick 1) |
+| `✓✓` | `delivered_client` | Recipient client acked successful decrypt (tick 2) |
+| `✗` | `failed` | Send pipeline gave up; sticky |
+
+```bash
+eurything messages status
+eurything messages status --id msg_01j9xkay7g000000000000000
+eurything messages status --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--use-identity <identity>` | Read the journal for a specific identity |
+| `--id <message_id>` | Show only the entry for the given message id |
+| `--json` | Machine-readable JSON output |
+
+See [Delivery Acks](/protocol/delivery-acks) for the full state model.
 
 ---
 
@@ -239,6 +294,15 @@ Latency:  42ms
   "latency_ms": 42
 }
 ```
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `DNS_SERVER` | Override the system resolver for identity lookups. Accepts `host`, `host:port`, or an IPv4/IPv6 literal (e.g. `1.1.1.1`). Useful when the local network caches negative DNS responses. |
+| `DEBUG_HTTP` | When set to a non-empty value, dumps every relay HTTP request and response to stderr. Sensitive material (session and identity signatures) appears in these dumps — only use for local debugging. |
 
 ---
 

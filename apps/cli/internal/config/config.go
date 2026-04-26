@@ -9,19 +9,24 @@ import (
 )
 
 type Config struct {
-	RelayURL       string `toml:"relay_url"`
-	Identity       string `toml:"identity"`
-	KeysDir        string `toml:"keys_dir"`
-	ParentDomain   string `toml:"parent_domain"`
+	RelayURL     string `toml:"relay_url"`
+	Identity     string `toml:"identity"`
+	KeysDir      string `toml:"keys_dir"`
+	ParentDomain string `toml:"parent_domain"`
+	// ViaHomeRelay opts the user's outbound send path into the privacy
+	// proxy mode: messages are POSTed to RelayURL (the home relay), which
+	// forwards them onward. Default false → direct send to recipient relay.
+	ViaHomeRelay bool `toml:"via_home_relay"`
 }
 
 func DefaultConfig() Config {
 	keysDir, _ := KeysDir()
 	return Config{
-		RelayURL:       os.Getenv("RELAY_URL"),
-		Identity:       os.Getenv("IDENTITY"),
-		KeysDir:        getenvWithFallback("KEYS_DIR", keysDir),
-		ParentDomain:   os.Getenv("PARENT_DOMAIN"),
+		RelayURL:     os.Getenv("RELAY_URL"),
+		Identity:     os.Getenv("IDENTITY"),
+		KeysDir:      getenvWithFallback("KEYS_DIR", keysDir),
+		ParentDomain: os.Getenv("PARENT_DOMAIN"),
+		ViaHomeRelay: os.Getenv("VIA_HOME_RELAY") == "1" || os.Getenv("VIA_HOME_RELAY") == "true",
 	}
 }
 

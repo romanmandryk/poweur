@@ -77,7 +77,7 @@ Use for native mobile and passkey validation.
 | SESS-07 | Session | Cross-relay message carrying a valid `session_proof` is verified by a relay that did not issue the session | Automated |
 | E2E-01 | Crypto | End-to-end encrypted payload roundtrips between sender and recipient CLI | Automated |
 | E2E-02 | Crypto | Relay never sees plaintext: inbox ciphertext matches exactly what the client sent | Automated |
-| E2E-03 | Crypto | Sending to a recipient without a published encryption key warns the user and either sends plaintext (CLI with `--no-encrypt`) or refuses (mobile) | Automated / Manual |
+| E2E-03 | Crypto | Sending to a recipient without a published encryption key is refused by all clients (CLI aborts with an actionable error; mobile shows the same hard error) and, if bypassed, rejected by the relay with `400 encryption_required` | Automated |
 | E2E-04 | Crypto | Tampering with the ciphertext after signing invalidates the signature | Automated |
 | E2E-05 | Crypto | Identity creation publishes both `_eurything.<id>` and `_eurything-enc.<id>` TXT records | Mostly automated |
 | AUTH-01 | Auth | Website sign-up request is approved in mobile app via QR | Manual |
@@ -94,7 +94,7 @@ Use for native mobile and passkey validation.
 | MOBILE-05 | Mobile | Send and receive end-to-end encrypted messages between two mobile identities | Manual |
 | MOBILE-06 | Mobile | Session registration on first send triggers exactly one passkey prompt, and subsequent sends within 24h trigger none | Manual |
 | MOBILE-07 | Mobile | When a session expires, the next send triggers a single passkey prompt to re-register | Manual |
-| MOBILE-08 | Mobile | Client refuses to send plaintext to a recipient without a published encryption key, and surfaces a clear error | Manual |
+| MOBILE-08 | Mobile | Client refuses to send to a recipient without a published encryption key, and surfaces a clear error (encryption is mandatory; plaintext is never emitted) | Manual |
 | INT-01 | Integration | `identity create` via the CLI publishes signing, encryption, and host records into the shared zone | Automated |
 | INT-02 | Integration | End-to-end encrypted message round-trip on a single relay | Automated |
 | INT-03 | Integration | Encrypted message forwards across two relays; receiving relay verifies the session proof against DNS-published identity key | Automated |
@@ -104,6 +104,25 @@ Use for native mobile and passkey validation.
 | INT-07 | Integration | `POST /messages` with a forged signature returns `401` and does not reach any inbox | Automated |
 | INT-08 | Integration | Tampering with the DNS `_eurything.<id>` TXT record breaks cross-relay verification on the receiving relay; forwarding fails and the attacker's payload is never delivered | Automated |
 | INT-09 | Integration | Full two-way conversation: both users create identities, auto-register sessions on first send, exchange an Alice→Bob message and a Bob→Alice reply, both sides decrypt successfully | Automated |
+| INT-10 | Integration | Retrofit: a legacy identity without `_eurything-enc.<id>` cannot receive messages (sender aborts / relay returns `400 encryption_required`); after `eurything identity add-encryption-key`, the same recipient accepts and decrypts a fresh send | Automated |
+| INT-IDSIGN-01 | Integration | `eurything send --sign-with=identity` on a single relay: message accepted, recipient decrypts, and sender's local session file is NOT created | Automated |
+| INT-IDSIGN-02 | Integration | `eurything send --sign-with=identity` across two relays: receiving relay verifies the identity signature using the sender's DNS-published signing key; recipient decrypts | Automated |
+| INT-IDSIGN-03 | Integration | Forged identity-signed envelope (empty `session_id`, signature under an unknown key) is rejected with `401` and never reaches the recipient's inbox | Automated |
+| SEND-01 | Integration | Default send (no `--via-home-relay`) goes straight from Alice's CLI to Bob's relay; Alice's home relay sees zero `POST /messages` traffic on the send path | Automated |
+| SEND-02 | Integration | `--via-home-relay` posts to Alice's home relay, which accepts (sender-local) and forwards to Bob's relay; both relays see exactly one `POST /messages` | Automated |
+| FWD-01 | Integration | Note-to-self (sender == recipient, both local on the same relay) is accepted and stored in the sender's own inbox | Automated |
+| FWD-02 | Integration | A structurally-valid encrypted envelope POSTed directly to a third relay where neither party is locally hosted is rejected with `403 not_authorized` | Automated |
+| FWD-03 | Integration | The same at-least-one-local rule applies to `POST /acks`: an ack posted to a relay where neither party is local is rejected with `403 not_authorized` | Automated |
+| DLV-01 | Integration | After a successful default send, the sender's pending journal records tick 1 (`delivered_recipient_relay`) for that message id | Automated |
+| DLV-02 | Integration | After the recipient drains their inbox, an ack flows back to the sender's home relay; the sender's next `inbox` poll advances the journal to tick 2 (`delivered_client`) | Automated |
+| DLV-03 | Integration | If the recipient never polls, no ack is generated and the sender's journal stays pinned at tick 1 regardless of how many times the sender polls their own inbox | Automated |
+| DLV-04 | Integration | A `POST /acks` body whose signature was produced by a key nobody in the system holds is rejected with `401 unauthorized`; the sender's journal does NOT advance to tick 2 | Automated |
+| ADMIN-01 | Integration | `POST /identities` without an identity-signed admin envelope is rejected with `400 invalid_request`; no DNS write happens | Automated |
+| ADMIN-02 | Integration | `POST /identities` whose identity_signature was produced by a different key than the one in `public_key` is rejected with `401 unauthorized` | Automated |
+| ADMIN-03 | Integration | `POST /identities/:identity/encryption-key` without an identity-signed admin envelope is rejected with `400 invalid_request` | Automated |
+| ADMIN-04 | Integration | `POST /identities/:identity/encryption-key` whose identity_signature does not match the registered identity's signing key is rejected with `401 unauthorized` | Automated |
+| ADMIN-05 | Integration | `DELETE /sessions/:id` without an identity-signed admin envelope is rejected with `400 invalid_request` | Automated |
+| ADMIN-06 | Integration | `DELETE /sessions/:id` whose identity_signature does not match the claimed identity's signing key is rejected with `401 unauthorized`, even with a plausible session id | Automated |
 | INFRA-01 | Infra | Terraform plan succeeds with staging variables | Automated |
 | INFRA-02 | Infra | Terraform apply creates relay host, LB, DNS, and TLS resources in staging | Mostly automated |
 | INFRA-03 | Infra | Deployed relay passes health check behind load balancer | Mostly automated |
@@ -206,6 +225,94 @@ Expected result:
 
 - DNS and DID document expose equivalent verification material.
 - Both verification paths accept the same legitimate signature.
+
+### Send Path Suite (SEND-01, SEND-02)
+
+Goal: verify the v1 send path is direct-to-recipient by default and that
+the `--via-home-relay` opt-in privacy proxy still functions.
+
+These tests run as Go tests under `apps/integration/direct_send_test.go`
+and use a relay-handler middleware that counts `POST /messages` and
+`POST /acks` requests so they can assert routing decisions, not just
+end-to-end success.
+
+`SEND-01` spins up two relays (Alice's home relay A, Bob's home relay B),
+runs a default `eurything send` from Alice, and asserts that A's POST
+counter does NOT increment while B's does. The recipient's inbox decrypt
+proves the message landed.
+
+`SEND-02` repeats the scenario with `--via-home-relay`: A's POST counter
+must increment by one (the client → home hop) AND B's must too (the home
+→ recipient forward). End-to-end decryption still succeeds, and the
+counter assertion is what proves the message took the proxied route.
+
+### Forwarding Rule Suite (FWD-01 .. FWD-03)
+
+Goal: pin down the at-least-one-local rule that gates both `POST /messages`
+and `POST /acks`. The relay accepts a message iff at least one of its
+`sender` and `recipient` is a locally hosted identity (in-memory store or
+DNS A/CNAME points here); otherwise it returns `403 not_authorized`.
+
+`FWD-01` is the both-local case: Alice on relay A, sender == recipient ==
+`alice.example.com`. The relay stores the message and the next `inbox`
+poll decrypts it.
+
+`FWD-02` is the neither-local case: a structurally-valid encrypted
+envelope (correct fields, plausible encryption metadata, dummy signature)
+is POSTed to a third relay where neither Alice nor Bob is hosted. The
+relay short-circuits with `403 not_authorized` BEFORE signature
+verification — this is the rule that prevents an open-forwarder hazard.
+
+`FWD-03` is the same neither-local check on the ack endpoint, asserting
+that the rule is enforced uniformly across `/messages` and `/acks`.
+
+### Delivery Ticks Suite (DLV-01 .. DLV-04)
+
+Goal: exercise the WhatsApp-style two-tick model end-to-end through the
+real CLI, including the per-identity pending journal at
+`~/.eurything/pending/<identity>.jsonl`.
+
+These tests use `eurything messages status --json [--id <id>]` to read
+back the journal so they exercise the user-facing surface, not just the
+on-disk file format.
+
+`DLV-01` asserts tick 1: a successful default send records
+`delivered_recipient_relay` for the outbound message id.
+
+`DLV-02` asserts tick 2: after the recipient runs `inbox` (which decrypts
+and emits a signed `delivered_client` ack to the original sender's home
+relay), the sender's next `inbox` poll drains the acks array and the
+journal advances to `delivered_client`.
+
+`DLV-03` asserts the offline-recipient case: Alice's journal stays pinned
+at tick 1 regardless of how many times she polls her own inbox if Bob
+never decrypts.
+
+`DLV-04` asserts forgery rejection: a structurally-valid ack envelope
+with a signature produced by an unknown key is rejected with `401
+unauthorized` by the home relay; the sender's journal does NOT advance
+to tick 2.
+
+### Admin Auth Suite (ADMIN-01 .. ADMIN-06)
+
+Goal: pin down the owner-only ("admin") endpoint class. In v1 the
+messaging surface is intentionally open (anyone may post a properly-
+signed message or ack), but state-mutating per-identity endpoints
+(`POST /identities`, `POST /identities/:identity/encryption-key`,
+`DELETE /sessions/:id`) require an identity-signed admin envelope —
+`issued_at`, `nonce`, `identity_signature` over a relay-known canonical
+string.
+
+For each admin endpoint the suite asserts BOTH:
+
+- The unsigned case (no admin envelope) is rejected with
+  `400 invalid_request` before any side effect.
+- The forged-signature case (envelope present, signature produced by a
+  different key) is rejected with `401 unauthorized`.
+
+The positive (correctly signed) paths are exercised by every other
+integration test that runs `identity create` or
+`identity add-encryption-key`, so they are not duplicated here.
 
 ### Integration Suite (INT-01 .. INT-09)
 
@@ -386,6 +493,52 @@ Expected result:
 - Relay-B returns non-`202`, relay-A bubbles that up as `502 forward_failed`,
   the `send` CLI exits non-zero.
 - Bob's inbox does NOT contain the tampered message.
+
+#### INT-IDSIGN-01 / INT-IDSIGN-02 / INT-IDSIGN-03: Identity-signed send
+
+Goal: exercise the `eurything send --sign-with=identity` opt-out path — the
+sender skips session registration and signs the message directly with the
+long-lived identity Ed25519 key. Encryption is unchanged; only the
+verifying key differs on the relay side.
+
+Steps (same-relay, INT-IDSIGN-01):
+
+1. Alice and Bob create identities on the same relay.
+2. Alice runs `eurything send --sign-with=identity bob.example.com "<secret>"`.
+3. Bob runs `eurything inbox`.
+
+Expected result:
+
+- Relay accepts the envelope: `session_id` is empty, so the relay resolves
+  Alice's verifying key from her in-memory identity cache (or DNS TXT
+  record).
+- Bob's inbox shows the decrypted plaintext with the 🔒 glyph.
+- Alice's local session file at `$ALICE_HOME/.eurything/sessions/alice.example.com.toml`
+  does NOT exist afterwards (the whole point of the flag is to bypass it).
+
+Steps (cross-relay, INT-IDSIGN-02):
+
+1. Start two relays. Alice on relay-A, Bob on relay-B.
+2. Alice runs `send --sign-with=identity bob.example.org "<secret>"`.
+
+Expected result:
+
+- Relay-A verifies with its cached identity key and forwards to relay-B.
+- Relay-B has no knowledge of Alice, resolves `_eurything.alice.example.com`
+  via DNS, and accepts the signature.
+- Bob's inbox contains the decrypted plaintext.
+
+Steps (forged signature, INT-IDSIGN-03):
+
+1. Alice and Bob create identities. The test constructs a JSON envelope
+   with valid shape, `session_id` omitted, and a signature produced by a
+   random Ed25519 key over an unrelated string.
+2. The test POSTs the forged JSON directly to `/messages`.
+
+Expected result:
+
+- Relay returns `401 unauthorized`.
+- Bob's inbox contains no trace of the forged payload.
 
 #### INT-09: Full two-way conversation
 

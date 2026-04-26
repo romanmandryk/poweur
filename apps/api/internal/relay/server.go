@@ -32,6 +32,7 @@ type Server struct {
 	providers  *dns.ProviderFactory
 	identities *storage.IdentityStore
 	inbox      *storage.InboxStore
+	acks       *storage.AckStore
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
@@ -53,9 +54,10 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		providers:  providers,
 		identities: storage.NewIdentityStore(),
 		inbox:      storage.NewInboxStore(),
+		acks:       storage.NewAckStore(),
 		challenges: storage.NewChallengeStore(),
 		sessions:   storage.NewSessionStore(),
-		rateLimit:  ratelimit.NewLimiter(cfg.RateLimits),
+		rateLimit:  ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
 		client:     &http.Client{Timeout: 10 * time.Second},
 		relayCache: make(map[string]cachedRelay),
 	}
@@ -67,6 +69,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
+	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
@@ -84,6 +87,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Version: s.cfg.Version})
 }
 
+// handleIdentitiesPost is owner-only: in addition to a valid DNS token
+// (which proves the caller can write the zone), the request body MUST be
+// signed by the private half of the `public_key` it is publishing. This
+// prevents a hostile DNS-token holder from registering an identity under a
+// public key they don't actually control.
 func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 	var req IdentityRequest
 	if err := decodeJSON(w, r, &req); err != nil {
@@ -93,12 +101,21 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
 		return
 	}
+	if req.IssuedAt == "" || req.Nonce == "" || req.IdentitySignature == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing identity-signed admin envelope (issued_at, nonce, identity_signature)")
+		return
+	}
 	if s.cfg.RelayAddress == "" {
 		writeError(w, http.StatusInternalServerError, "relay_address_missing", "relay address is not configured")
 		return
 	}
 	if s.identities.Exists(req.Identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
+		return
+	}
+
+	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -116,6 +133,14 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		encryptionPublicKey = normalizedEnc
+	}
+
+	canonical := crypto.CanonicalIdentityRegistration(
+		req.Identity, normalized, encryptionPublicKey, s.cfg.RelayAddress, req.IssuedAt, req.Nonce,
+	)
+	if err := crypto.VerifySignature(publicKeyBytes, canonical, req.IdentitySignature); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
+		return
 	}
 
 	provider, err := s.providers.Provider(req.DNSProvider)
@@ -149,17 +174,14 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 
 // handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
 // `_eurything-enc.<identity>` TXT record for an already-registered identity.
+// Owner-only: caller must sign the canonical encryption-key-update string
+// with the long-lived identity key (verified via DNS or local store).
 //
 // This endpoint exists because early identities were minted before E2E
 // encryption landed, so they have a signing record in DNS but no encryption
 // record. A separate endpoint (instead of POST /identities with upsert
 // semantics) keeps the primary registration flow strict — "create once" —
 // and makes the "retro-fit an existing identity" flow explicit and auditable.
-//
-// Authority is proven by possession of the DNS token: whoever can write to the
-// zone owns the identity. The relay does not require the identity to exist in
-// its in-memory IdentityStore (which resets on restart), only that the caller
-// can name it and write to its DNS zone.
 func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.Request) {
 	identityValue := r.PathValue("identity")
 	if identityValue == "" {
@@ -174,10 +196,29 @@ func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
 		return
 	}
+	if req.IssuedAt == "" || req.Nonce == "" || req.IdentitySignature == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "missing identity-signed admin envelope (issued_at, nonce, identity_signature)")
+		return
+	}
+	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 
 	normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
+		return
+	}
+
+	identityPub, err := s.resolveIdentityPublicKey(r.Context(), identityValue)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
+		return
+	}
+	canonical := crypto.CanonicalEncryptionKeyUpdate(identityValue, normalizedEnc, req.IssuedAt, req.Nonce)
+	if err := crypto.VerifySignature(identityPub, canonical, req.IdentitySignature); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
 
@@ -197,6 +238,24 @@ func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.
 		EncryptionPublicKey: normalizedEnc,
 		UpdatedAt:           time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// requireRecentTimestamp parses an RFC3339 timestamp and rejects it if it
+// is more than 5 minutes off (in either direction) from now. Bounds the
+// replay window for identity-signed admin envelopes.
+func requireRecentTimestamp(ts string) error {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return fmt.Errorf("issued_at must be RFC3339")
+	}
+	now := time.Now().UTC()
+	if t.After(now.Add(5 * time.Minute)) {
+		return fmt.Errorf("issued_at is too far in the future")
+	}
+	if now.Sub(t) > 5*time.Minute {
+		return fmt.Errorf("issued_at is too old")
+	}
+	return nil
 }
 
 func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
@@ -236,13 +295,26 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMessagesPost is open/messaging-class: anyone may call it. The
+// relay accepts the message only when at least one of the parties is a
+// locally hosted identity (the "at-least-one-local" rule). Three cases:
+//
+//  1. Recipient-local — store in the recipient's inbox.
+//  2. Sender-local, recipient-remote — privacy-proxy mode; the relay
+//     forwards the message to the recipient's home relay over HTTP.
+//     This is the *only* sanctioned forward path.
+//  3. Both local (note-to-self) — store in inbox.
+//
+// Anything else (neither party local) is rejected with `403
+// not_authorized` so the relay never serves as an open forwarder for the
+// world.
 func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	var msg Message
 	if err := decodeJSON(w, r, &msg); err != nil {
 		return
 	}
-	if msg.Sender == "" || msg.Recipient == "" || msg.Timestamp == "" || msg.Payload == "" || msg.Signature == "" {
-		writeError(w, http.StatusBadRequest, "invalid_message", "missing required message fields")
+	if msg.ID == "" || msg.Sender == "" || msg.Recipient == "" || msg.Timestamp == "" || msg.Payload == "" || msg.Signature == "" {
+		writeError(w, http.StatusBadRequest, "invalid_message", "missing required message fields (id, sender, recipient, timestamp, payload, signature)")
 		return
 	}
 	if _, err := time.Parse(time.RFC3339, msg.Timestamp); err != nil {
@@ -264,10 +336,19 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	if !decision.Allowed {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{
 			"error":    "rate_limit_exceeded",
+			"scope":    decision.Scope,
 			"window":   decision.Window,
 			"limit":    decision.Limit,
 			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
 		})
+		return
+	}
+
+	senderLocal := s.isLocalIdentity(r.Context(), msg.Sender)
+	recipientLocal := s.isLocalIdentity(r.Context(), msg.Recipient)
+	if !senderLocal && !recipientLocal {
+		writeError(w, http.StatusForbidden, "not_authorized",
+			"relay refuses to forward messages where neither party is locally hosted")
 		return
 	}
 
@@ -277,47 +358,129 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var encMeta *crypto.EncryptionMeta
-	if msg.Encryption != nil {
-		encMeta = &crypto.EncryptionMeta{
-			Alg:                msg.Encryption.Alg,
-			EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
-			Nonce:              msg.Encryption.Nonce,
-		}
+	encMeta := &crypto.EncryptionMeta{
+		Alg:                msg.Encryption.Alg,
+		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
+		Nonce:              msg.Encryption.Nonce,
 	}
-	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, encMeta)
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
 
-	if s.isLocalRecipient(r.Context(), msg.Recipient) {
+	if recipientLocal {
 		stored := storage.StoredMessage{
-			ID:        newMessageID(),
+			ID:        msg.ID,
 			Sender:    msg.Sender,
 			Recipient: msg.Recipient,
 			Timestamp: msg.Timestamp,
 			Payload:   msg.Payload,
 			Signature: msg.Signature,
 			SessionID: msg.SessionID,
-		}
-		if msg.Encryption != nil {
-			stored.Encryption = &storage.StoredEncryptionMeta{
+			Encryption: &storage.StoredEncryptionMeta{
 				Alg:                msg.Encryption.Alg,
 				EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 				Nonce:              msg.Encryption.Nonce,
-			}
+			},
 		}
 		s.inbox.Add(msg.Recipient, stored)
-		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
 	}
 
+	// Sender-local, recipient-remote: privacy-proxy mode. The home relay
+	// forwards on the sender's behalf so the recipient relay sees the
+	// home relay's IP rather than the sender client's IP.
 	if err := s.forwardMessage(r.Context(), msg); err != nil {
 		writeError(w, http.StatusBadGateway, "forward_failed", err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
+}
+
+// handleAcksPost is open/messaging-class. It mirrors handleMessagesPost
+// for delivery-acknowledgement envelopes: rate-limited, at-least-one-local,
+// signature-verified, then either stored locally (recipient-local) or
+// forwarded over HTTP (sender-local privacy-proxy mode).
+func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
+	var ack Ack
+	if err := decodeJSON(w, r, &ack); err != nil {
+		return
+	}
+	if ack.Type == "" {
+		ack.Type = AckTypeDeliveryAck
+	}
+	if ack.Type != AckTypeDeliveryAck {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "type must be \"ack\"")
+		return
+	}
+	if ack.ID == "" || ack.MessageID == "" || ack.State == "" || ack.Sender == "" ||
+		ack.Recipient == "" || ack.Timestamp == "" || ack.Signature == "" {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "missing required ack fields")
+		return
+	}
+	if ack.State != AckStateDeliveredClient {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "unsupported ack state (v1 only emits delivered_client)")
+		return
+	}
+	if _, err := time.Parse(time.RFC3339, ack.Timestamp); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "timestamp must be RFC3339")
+		return
+	}
+
+	decision := s.rateLimit.Allow(ack.Sender)
+	if !decision.Allowed {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":    "rate_limit_exceeded",
+			"scope":    decision.Scope,
+			"window":   decision.Window,
+			"limit":    decision.Limit,
+			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+
+	senderLocal := s.isLocalIdentity(r.Context(), ack.Sender)
+	recipientLocal := s.isLocalIdentity(r.Context(), ack.Recipient)
+	if !senderLocal && !recipientLocal {
+		writeError(w, http.StatusForbidden, "not_authorized",
+			"relay refuses to forward acks where neither party is locally hosted")
+		return
+	}
+
+	publicKey, source, err := s.resolveSigningKey(r.Context(), ack.Sender, ack.SessionID, ack.SessionProof)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
+		return
+	}
+	canonical := crypto.CanonicalAck(ack.ID, ack.MessageID, ack.State, ack.Sender, ack.Recipient, ack.Timestamp, ack.SessionID)
+	if err := crypto.VerifySignature(publicKey, canonical, ack.Signature); err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "ack signature verification failed (key source: "+source+")")
+		return
+	}
+
+	if recipientLocal {
+		s.acks.Add(ack.Recipient, storage.StoredAck{
+			Type:      ack.Type,
+			ID:        ack.ID,
+			MessageID: ack.MessageID,
+			State:     ack.State,
+			Sender:    ack.Sender,
+			Recipient: ack.Recipient,
+			Timestamp: ack.Timestamp,
+			Signature: ack.Signature,
+			SessionID: ack.SessionID,
+		})
+		writeJSON(w, http.StatusAccepted, map[string]string{"id": ack.ID})
+		return
+	}
+
+	if err := s.forwardAck(r.Context(), ack); err != nil {
+		writeError(w, http.StatusBadGateway, "forward_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": ack.ID})
 }
 
 func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +534,14 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	messages := s.inbox.Drain(identity)
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
+	if messages == nil {
+		messages = []storage.StoredMessage{}
+	}
+	acks := s.acks.Drain(identity)
+	if acks == nil {
+		acks = []storage.StoredAck{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "acks": acks})
 }
 
 // resolveSigningKey returns the public key the relay should verify a message
@@ -504,7 +674,13 @@ func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) 
 	return crypto.ParsePublicKey(payload.PublicKey)
 }
 
-func (s *Server) isLocalRecipient(ctx context.Context, identity string) bool {
+// isLocalIdentity reports whether `identity` is hosted on this relay,
+// i.e. either present in the in-memory IdentityStore (canonical fast
+// path) or whose DNS A/CNAME resolves to this relay's address (covers
+// CDN-fronted setups where multiple identities share an IP). Used by
+// both the message and ack pipelines to enforce the at-least-one-local
+// rule.
+func (s *Server) isLocalIdentity(ctx context.Context, identity string) bool {
 	if s.identities.Exists(identity) {
 		return true
 	}
@@ -614,6 +790,47 @@ func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
 	return nil
 }
 
+// forwardAck mirrors forwardMessage for delivery acknowledgements: when
+// the ack-sender is local but the ack-recipient lives on another relay,
+// the home relay POSTs the ack onward. Used only in privacy-proxy mode;
+// normal direct sends never trigger this path.
+func (s *Server) forwardAck(ctx context.Context, ack Ack) error {
+	relayHost, err := s.resolveRelayHost(ctx, ack.Recipient)
+	if err != nil {
+		return err
+	}
+	if ack.SessionID != "" && ack.SessionProof == nil {
+		if sess, ok := s.sessions.Get(ack.SessionID); ok && sess.IdentitySignature != "" {
+			ack.SessionProof = &SessionProof{
+				SessionPublicKey:  sess.PublicKey,
+				IssuedAt:          sess.IssuedAtRaw,
+				ExpiresAt:         sess.ExpiresAtRaw,
+				Nonce:             sess.Nonce,
+				IdentitySignature: sess.IdentitySignature,
+			}
+		}
+	}
+	url := fmt.Sprintf("%s://%s/acks", s.cfg.RelayScheme, relayHost)
+	payload, err := json.Marshal(ack)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("forwarding failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMessageBytes)
 	body, err := io.ReadAll(r.Body)
@@ -646,10 +863,3 @@ func randomToken(length int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-func newMessageID() string {
-	token, err := randomToken(12)
-	if err != nil {
-		return fmt.Sprintf("msg_%d", time.Now().UnixNano())
-	}
-	return "msg_" + token
-}

@@ -96,6 +96,7 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 	}
 
 	msg := Message{
+		ID:        "msg_test_session_ok_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -112,7 +113,7 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, encMeta)
+	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, encMeta)
 	sig := ed25519.Sign(sessionPriv, []byte(canonicalMsg))
 	msg.Signature = base64.StdEncoding.EncodeToString(sig)
 
@@ -238,6 +239,7 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 	sessionID := "sess_" + base64.RawURLEncoding.EncodeToString([]byte("foreign"))
 
 	msg := Message{
+		ID:        "msg_test_crossrelay_001",
 		Sender:    "alice.example.com",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -256,7 +258,7 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 			Nonce:              "nonce",
 		},
 	}
-	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.SessionID, &crypto.EncryptionMeta{
+	canonicalMsg := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, &crypto.EncryptionMeta{
 		Alg:                msg.Encryption.Alg,
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
