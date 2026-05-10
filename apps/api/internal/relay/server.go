@@ -76,11 +76,15 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
-	return mux
+	mountWebStatic(mux, s.cfg.WebStaticDir)
+	return corsMiddleware(mux)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"service": "eurything-relay"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"service": "eurything-relay",
+		"web_ui":  "GET /app/ (when WEB_STATIC_DIR is set)",
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

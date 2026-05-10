@@ -3,7 +3,10 @@
   "private": true,
   "scripts": {
     "ios": "pnpm --filter @eurything/ios build",
-    "android": "pnpm --filter @eurything/android build"
+    "android": "pnpm --filter @eurything/android build",
+    "web": "pnpm --filter @eurything/web build",
+    "web:dev": "pnpm --filter @eurything/web dev",
+    "web:test": "pnpm --filter @eurything/web test"
   },
   "devDependencies": {},
   "engines": {

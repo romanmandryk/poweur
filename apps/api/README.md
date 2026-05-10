@@ -24,6 +24,24 @@ cd /Users/romanmandryk/git/eurything/apps/api
 go run .
 ```
 
+### Web client (static SPA)
+
+Build the web UI once (outputs to `apps/api/web/dist`):
+
+```bash
+pnpm --filter @eurything/web build
+```
+
+Point the relay at that directory so it serves the app under **`/app/`**:
+
+```bash
+WEB_STATIC_DIR=/absolute/path/to/eurything/apps/api/web/dist go run .
+```
+
+The relay sends permissive **CORS** headers on all routes so browsers can talk to any Eurything relay (direct POST to recipient hosts, not only the home relay).
+
+For local development without copying files, run Vite (`pnpm --filter @eurything/web dev`) — it proxies `/messages`, `/sessions`, etc. to `http://127.0.0.1:8080` by default.
+
 ## Test coverage
 
 ### Unit tests only (this module)
