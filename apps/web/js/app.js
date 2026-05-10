@@ -307,12 +307,39 @@ function renderFeatureCards() {
 // ─── Launcher page ────────────────────────────────────────────────────────────
 
 function renderLauncher() {
+  const cfg = S.config;
   return `
-    <div class="launcher-wrap">
-      <div class="launcher-icon">🚀</div>
-      <h2 class="launcher-title">Launcher</h2>
-      <p class="launcher-sub">One tap to deploy bots, agents, and automations on your identity.</p>
-      <span class="coming-soon-pill">Coming soon</span>
+    <div class="launcher-form-page">
+      <div class="section-label">New identity</div>
+      <div class="form-card">
+        <div class="form-group">
+          <label class="form-label" for="ni-handle">Handle</label>
+          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ni-domain">Parent domain</label>
+          <input id="ni-domain" class="input" type="text" placeholder="example.com" value="${esc(cfg.parentDomain)}" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ni-relay">Relay URL</label>
+          <input id="ni-relay" class="input" type="url" placeholder="https://relay.example.com" value="${esc(cfg.relayUrl)}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ni-provider">DNS provider</label>
+          <select id="ni-provider" class="input select">
+            <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
+            <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ni-token">DNS API token</label>
+          <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
+        </div>
+        <button class="btn btn-passkey" id="btn-create-id" style="width:100%;margin-top:4px">
+          🔑 Create with passkey
+        </button>
+        <p class="form-note small" style="margin-top:10px;text-align:center">Keys are generated locally and never leave your device in plain form.</p>
+      </div>
     </div>`;
 }
 
@@ -422,7 +449,6 @@ function renderSettings() {
 function renderSubPage() {
   switch (R.sub) {
     case "add-id":  return renderAddId();
-    case "new-id":  return renderNewId();
     case "unlock":  return renderUnlock();
     case "compose": return renderCompose();
     default:        return renderAddId();
@@ -432,7 +458,6 @@ function renderSubPage() {
 // Add ID ───────────────────────────────────────────────────────────────────────
 
 function renderAddId() {
-  const hasLocal = listIdentities().length > 0;
   return `
     <div class="sub-page">
       <div class="sub-header">
@@ -442,78 +467,39 @@ function renderAddId() {
       <div class="sub-body">
         <p class="muted small" style="margin-bottom:20px">Connect or create a Eurything identity on this device.</p>
         <div class="option-list">
-          ${hasLocal ? `
-          <button class="option-card" id="opt-use-existing">
-            <div class="option-icon-wrap">🔑</div>
-            <div class="option-body">
-              <div class="option-title">Use existing passkey</div>
-              <div class="option-desc">Unlock an identity already stored on this device</div>
+          <div class="option-card option-card-form-wrap">
+            <div class="option-card-top">
+              <div class="option-icon-wrap">🔑</div>
+              <div class="option-body">
+                <div class="option-title">Sign in with existing passkey</div>
+                <div class="option-desc">Enter your identity to authenticate on this device</div>
+              </div>
             </div>
-            <span class="option-arrow">›</span>
-          </button>` : ""}
+            <div class="option-inline-form">
+              <input id="signin-id-input" class="input" type="text" placeholder="alice.example.com"
+                autocomplete="off" spellcheck="false" inputmode="url" />
+              <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
+            </div>
+          </div>
 
-          <button class="option-card" disabled style="opacity:.5">
+          <div class="option-card" style="opacity:.55;pointer-events:none;cursor:default">
             <div class="option-icon-wrap">📱</div>
             <div class="option-body">
-              <div class="option-title">Transfer from another device</div>
-              <div class="option-desc">Add this device to an existing identity</div>
+              <div class="option-title">Add ID to existing device</div>
+              <div class="option-desc">Transfer your identity from another device</div>
             </div>
             <span class="option-soon">Soon</span>
-          </button>
+          </div>
 
           <button class="option-card" id="opt-create-new">
             <div class="option-icon-wrap">✨</div>
             <div class="option-body">
-              <div class="option-title">Create new identity</div>
-              <div class="option-desc">Generate fresh keys and register a new ID</div>
+              <div class="option-title">Add new ID</div>
+              <div class="option-desc">Create a fresh identity with a passkey</div>
             </div>
             <span class="option-arrow">›</span>
           </button>
         </div>
-      </div>
-    </div>`;
-}
-
-// New ID (creation form) ───────────────────────────────────────────────────────
-
-function renderNewId() {
-  const cfg = S.config;
-  return `
-    <div class="sub-page">
-      <div class="sub-header">
-        <button class="btn-back" id="btn-back">${svgBack}</button>
-        <span class="sub-title">New ID</span>
-      </div>
-      <div class="sub-body">
-        <div class="form-group">
-          <label class="form-label" for="ni-handle">Handle</label>
-          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" placeholder="example.com" value="${esc(cfg.parentDomain)}" autocomplete="off" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-relay">Relay URL</label>
-          <input id="ni-relay" class="input" type="url" placeholder="https://relay.example.com" value="${esc(cfg.relayUrl)}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-provider">DNS provider</label>
-          <select id="ni-provider" class="input select">
-            <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
-            <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-token">DNS API token</label>
-          <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
-        </div>
-      </div>
-      <div class="sub-footer">
-        <button class="btn btn-passkey" id="btn-create-id">
-          🔑 Create with passkey
-        </button>
-        <p class="form-note small" style="margin-top:12px">Keys are generated locally and never leave your device in plain form.</p>
       </div>
     </div>`;
 }
@@ -613,8 +599,7 @@ function attachEvents() {
 
   // Back button (sub-pages)
   q("#btn-back")?.addEventListener("click", () => {
-    if (R.sub === "new-id") { R.push("add-id"); }
-    else { R.sub = null; R.params = {}; render(); }
+    R.sub = null; R.params = {}; render();
   });
 
   // Welcome
@@ -636,8 +621,9 @@ function attachEvents() {
   }
 
   // Add ID options
-  q("#opt-use-existing")?.addEventListener("click", doUseExistingPasskey);
-  q("#opt-create-new")?.addEventListener("click", () => R.push("new-id"));
+  q("#btn-signin-passkey")?.addEventListener("click", doSignInWithPasskey);
+  q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
+  q("#opt-create-new")?.addEventListener("click", () => { R.sub = null; R.go("launcher"); });
 
   // New ID creation
   q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
@@ -669,13 +655,19 @@ const qAll = sel => document.querySelectorAll(sel);
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
-async function doUseExistingPasskey() {
-  const ids = listIdentities();
-  if (!ids.length) { toast("No identities on this device. Create one instead.", "info"); return; }
-  const target = ids.find(id => id !== S.identity) ?? ids[0];
+async function doSignInWithPasskey() {
+  const fqdn = q("#signin-id-input")?.value.trim().toLowerCase();
+  if (!fqdn) return toast("Enter your identity (e.g. alice.example.com)", "warning");
+
+  const rec = loadIdentityRecord(fqdn);
+  if (!rec) {
+    toast("Identity not found on this device. Use 'Add new ID' to create one.", "warning", 5000);
+    return;
+  }
+
   clearUnlockedKeys();
-  S.identity = target;
-  setActiveIdentity(target);
+  S.identity = fqdn;
+  setActiveIdentity(fqdn);
   R.push("unlock");
 }
 
