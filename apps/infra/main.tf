@@ -69,13 +69,13 @@ resource "acme_certificate" "wildcard" {
 
 resource "hcloud_server" "relay" {
   count       = var.relay_count
-  name        = "eurything-relay-${count.index + 1}"
+  name        = "poweur-relay-${count.index + 1}"
   server_type = var.server_type
   image       = "ubuntu-24.04"
   location    = var.location
 
   labels = {
-    app = "eurything-relay"
+    app = "poweur-relay"
   }
 
   # TODO: add user_data cloud-init script to install relay binary and systemd unit
@@ -86,12 +86,12 @@ resource "hcloud_server" "relay" {
 # ---------------------------------------------------------------------------
 
 resource "hcloud_load_balancer" "relay" {
-  name               = "eurything-lb"
+  name               = "poweur-lb"
   load_balancer_type = var.lb_type
   location           = var.location
 
   labels = {
-    app = "eurything-relay"
+    app = "poweur-relay"
   }
 }
 
@@ -147,7 +147,7 @@ resource "hetznerdns_record" "relay" {
 # ---------------------------------------------------------------------------
 
 resource "hcloud_firewall" "relay" {
-  name = "eurything-relay-fw"
+  name = "poweur-relay-fw"
 
   rule {
     direction  = "in"

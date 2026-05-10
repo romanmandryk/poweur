@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/storage"
 )
 
 func TestGETRoot(t *testing.T) {
@@ -35,7 +35,7 @@ func TestGETIdentitiesGet(t *testing.T) {
 	s, _ := newTestServer(t)
 	pub, _, _ := ed25519.GenerateKey(nil)
 	s.identities.Add(storage.Identity{
-		Identity:       "known.example.com",
+		Identity:       "known.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(pub),
 		PublicKeyBytes: pub,
 		CreatedAt:      time.Now().UTC(),
@@ -43,7 +43,7 @@ func TestGETIdentitiesGet(t *testing.T) {
 	ts := httptest.NewServer(s.Router())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/identities/known.example.com")
+	resp, err := http.Get(ts.URL + "/identities/known.poweur.net")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestGETIdentitiesGet(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("got %d", resp.StatusCode)
 	}
-	resp2, _ := http.Get(ts.URL + "/identities/missing.example.com")
+	resp2, _ := http.Get(ts.URL + "/identities/missing.poweur.net")
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing: %d", resp2.StatusCode)
@@ -63,7 +63,7 @@ func TestGETIdentitiesGet(t *testing.T) {
 func TestForwardMessageCrossRelay(t *testing.T) {
 	davePub, davePriv, _ := ed25519.GenerateKey(nil)
 	bobPub, _, _ := ed25519.GenerateKey(nil)
-	daveTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(davePub)
+	daveTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(davePub)
 
 	cfgB := config.Config{
 		ListenAddr:   ":0",
@@ -76,13 +76,13 @@ func TestForwardMessageCrossRelay(t *testing.T) {
 	}
 	resolverB := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.dave.example.com": {daveTxt},
+			"_poweur.dave.poweur.net": {daveTxt},
 		},
 		hosts: map[string][]string{},
 	}
 	serverB := NewServer(cfgB, resolverB, dns.NewProviderFactory(cfgB))
 	serverB.identities.Add(storage.Identity{
-		Identity:       "bob.example.com",
+		Identity:       "bob.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(bobPub),
 		PublicKeyBytes: bobPub,
 		CreatedAt:      time.Now().UTC(),
@@ -107,12 +107,12 @@ func TestForwardMessageCrossRelay(t *testing.T) {
 	resolverA := &fakeResolver{
 		txt: map[string][]string{},
 		hosts: map[string][]string{
-			"bob.example.com": {peerHost},
+			"bob.poweur.net": {peerHost},
 		},
 	}
 	serverA := NewServer(cfgA, resolverA, dns.NewProviderFactory(cfgA))
 	serverA.identities.Add(storage.Identity{
-		Identity:       "dave.example.com",
+		Identity:       "dave.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(davePub),
 		PublicKeyBytes: davePub,
 		CreatedAt:      time.Now().UTC(),
@@ -122,8 +122,8 @@ func TestForwardMessageCrossRelay(t *testing.T) {
 
 	msg := Message{
 		ID:        "msg_fwd_cross_1",
-		Sender:    "dave.example.com",
-		Recipient: "bob.example.com",
+		Sender:    "dave.poweur.net",
+		Recipient: "bob.poweur.net",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "cipher",
 		Encryption: &EncryptionMeta{
@@ -154,7 +154,7 @@ func TestForwardMessageCrossRelay(t *testing.T) {
 func TestForwardAckCrossRelay(t *testing.T) {
 	carolPub, _, _ := ed25519.GenerateKey(nil)
 	bobPub, bobPriv, _ := ed25519.GenerateKey(nil)
-	bobTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(bobPub)
+	bobTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(bobPub)
 
 	cfgA := config.Config{
 		ListenAddr:   ":0",
@@ -168,13 +168,13 @@ func TestForwardAckCrossRelay(t *testing.T) {
 	resolverA := &fakeResolver{
 		txt: map[string][]string{
 			// So A can verify Bob's signature when the forwarded ack lands.
-			"_eurything.bob.example.com": {bobTxt},
+			"_poweur.bob.poweur.net": {bobTxt},
 		},
 		hosts: map[string][]string{},
 	}
 	serverA := NewServer(cfgA, resolverA, dns.NewProviderFactory(cfgA))
 	serverA.identities.Add(storage.Identity{
-		Identity:       "carol.example.com",
+		Identity:       "carol.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(carolPub),
 		PublicKeyBytes: carolPub,
 		CreatedAt:      time.Now().UTC(),
@@ -194,15 +194,15 @@ func TestForwardAckCrossRelay(t *testing.T) {
 	}
 	resolverB := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.bob.example.com": {bobTxt},
+			"_poweur.bob.poweur.net": {bobTxt},
 		},
 		hosts: map[string][]string{
-			"carol.example.com": {uA.Host},
+			"carol.poweur.net": {uA.Host},
 		},
 	}
 	serverB := NewServer(cfgB, resolverB, dns.NewProviderFactory(cfgB))
 	serverB.identities.Add(storage.Identity{
-		Identity:       "bob.example.com",
+		Identity:       "bob.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(bobPub),
 		PublicKeyBytes: bobPub,
 		CreatedAt:      time.Now().UTC(),
@@ -215,8 +215,8 @@ func TestForwardAckCrossRelay(t *testing.T) {
 		ID:          "ack_fwd_1",
 		MessageID:   "msg_x",
 		State:       AckStateDeliveredClient,
-		Sender:      "bob.example.com",
-		Recipient:   "carol.example.com",
+		Sender:      "bob.poweur.net",
+		Recipient:   "carol.poweur.net",
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 	canonical := crypto.CanonicalAck(ack.ID, ack.MessageID, ack.State, ack.Sender, ack.Recipient, ack.Timestamp, ack.SessionID)
@@ -243,14 +243,14 @@ func TestNeitherLocalReturns403(t *testing.T) {
 		RateLimits:   config.RateLimits{PerMinute: 100, PerHour: 1000, PerDay: 10000},
 	}
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	res := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {senderTxt},
+			"_poweur.alice.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
-			"alice.example.com": {"192.0.2.1"},
-			"bob.example.com":   {"192.0.2.1"},
+			"alice.poweur.net": {"192.0.2.1"},
+			"bob.poweur.net":   {"192.0.2.1"},
 		},
 	}
 	s := NewServer(cfg, res, dns.NewProviderFactory(cfg))
@@ -258,8 +258,8 @@ func TestNeitherLocalReturns403(t *testing.T) {
 	defer ts.Close()
 	msg := Message{
 		ID:        "msg_403_1",
-		Sender:    "alice.example.com",
-		Recipient: "bob.example.com",
+		Sender:    "alice.poweur.net",
+		Recipient: "bob.poweur.net",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "x",
 		Encryption: &EncryptionMeta{
@@ -282,14 +282,14 @@ func TestNeitherLocalReturns403(t *testing.T) {
 // IP so the recipient is treated as local without being in the identity store.
 func TestMessageAcceptedWhenRecipientLocalViaSharedIP(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	shared := "10.11.12.13"
 	res := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.from.example.com": {senderTxt},
+			"_poweur.from.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
-			"bob.edge.example.com": {shared},
+			"bob.edge.poweur.net": {shared},
 			"relay.edge":           {shared},
 		},
 	}
@@ -308,8 +308,8 @@ func TestMessageAcceptedWhenRecipientLocalViaSharedIP(t *testing.T) {
 	defer ts.Close()
 	msg := Message{
 		ID:        "msg_ipoverlap_1",
-		Sender:    "from.example.com",
-		Recipient: "bob.edge.example.com",
+		Sender:    "from.poweur.net",
+		Recipient: "bob.edge.poweur.net",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "c",
 		Encryption: &EncryptionMeta{
@@ -331,13 +331,13 @@ func TestMessageAcceptedWhenRecipientLocalViaSharedIP(t *testing.T) {
 func TestGlobalRateLimitReturns429(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
 	recipientPub, _, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	res := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {senderTxt},
+			"_poweur.alice.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
-			"bob.example.com": {"relay.test"},
+			"bob.poweur.net": {"relay.test"},
 		},
 	}
 	cfg := config.Config{
@@ -356,7 +356,7 @@ func TestGlobalRateLimitReturns429(t *testing.T) {
 	}
 	s := NewServer(cfg, res, dns.NewProviderFactory(cfg))
 	s.identities.Add(storage.Identity{
-		Identity:       "bob.example.com",
+		Identity:       "bob.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(recipientPub),
 		PublicKeyBytes: recipientPub,
 		CreatedAt:      time.Now().UTC(),
@@ -365,18 +365,18 @@ func TestGlobalRateLimitReturns429(t *testing.T) {
 	defer ts.Close()
 	charliePub, charliePriv, _ := ed25519.GenerateKey(nil)
 	s.identities.Add(storage.Identity{
-		Identity:       "charlie.example.com",
+		Identity:       "charlie.poweur.net",
 		PublicKey:      base64.RawURLEncoding.EncodeToString(charliePub),
 		PublicKeyBytes: charliePub,
 		CreatedAt:      time.Now().UTC(),
 	})
-	cTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(charliePub)
-	res.txt["_eurything.charlie.example.com"] = []string{cTxt}
+	cTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(charliePub)
+	res.txt["_poweur.charlie.poweur.net"] = []string{cTxt}
 
 	post := func(t *testing.T, id, sender string, signPriv ed25519.PrivateKey) *http.Response {
 		t.Helper()
 		msg := Message{
-			ID: id, Sender: sender, Recipient: "bob.example.com",
+			ID: id, Sender: sender, Recipient: "bob.poweur.net",
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Payload:   "p",
 			Encryption: &EncryptionMeta{
@@ -395,13 +395,13 @@ func TestGlobalRateLimitReturns429(t *testing.T) {
 		return r
 	}
 	// first two (any sender) consume global=2; third hits global, not per-sender
-	if post(t, "m1", "alice.example.com", senderPriv).StatusCode != http.StatusAccepted {
+	if post(t, "m1", "alice.poweur.net", senderPriv).StatusCode != http.StatusAccepted {
 		t.Fatal("1")
 	}
-	if post(t, "m2", "alice.example.com", senderPriv).StatusCode != http.StatusAccepted {
+	if post(t, "m2", "alice.poweur.net", senderPriv).StatusCode != http.StatusAccepted {
 		t.Fatal("2")
 	}
-	r3 := post(t, "m3", "charlie.example.com", charliePriv)
+	r3 := post(t, "m3", "charlie.poweur.net", charliePriv)
 	defer r3.Body.Close()
 	if r3.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d", r3.StatusCode)

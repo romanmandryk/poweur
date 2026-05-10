@@ -1,5 +1,5 @@
 /**
- * Eurything Web Client — SPA controller (complete rewrite)
+ * Poweur ID Web Client — SPA controller (complete rewrite)
  *
  * Three top-level pages: main | launcher | settings
  * Sub-pages (full-screen, back button): add-id | new-id | unlock | compose
@@ -130,7 +130,7 @@ function renderHeader() {
   const themeIcon = document.documentElement.dataset.theme === "dark" ? "☀️" : "🌙";
   return `
     <header class="app-header">
-      <span class="app-wordmark">Eurything</span>
+      <span class="app-wordmark">Poweur ID</span>
       <div class="header-actions">
         <button class="btn-theme" id="btn-theme" aria-label="Toggle theme">${themeIcon}</button>
         <div class="id-pill-wrap" id="id-pill-wrap">
@@ -214,7 +214,7 @@ function renderWelcome() {
   return `
     <div class="welcome-wrap">
       <div class="welcome-icon">💬</div>
-      <h1 class="welcome-title">Welcome to Eurything</h1>
+      <h1 class="welcome-title">Welcome to Poweur ID</h1>
       <p class="welcome-sub">Encrypted, identity-first messaging. No phone number required.</p>
       <div class="welcome-cta">
         <button class="btn btn-primary" id="btn-welcome-start">Get started</button>
@@ -318,11 +318,11 @@ function renderLauncher() {
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" placeholder="example.com" value="${esc(cfg.parentDomain)}" autocomplete="off" />
+          <input id="ni-domain" class="input" type="text" placeholder="poweur.net" value="${esc(cfg.parentDomain)}" autocomplete="off" />
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-relay">Relay URL</label>
-          <input id="ni-relay" class="input" type="url" placeholder="https://relay.example.com" value="${esc(cfg.relayUrl)}" />
+          <input id="ni-relay" class="input" type="url" placeholder="https://relay.poweur.net" value="${esc(cfg.relayUrl)}" />
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-provider">DNS provider</label>
@@ -432,7 +432,7 @@ function renderSettings() {
         <div class="settings-row no-action">
           <span class="settings-row-icon">📋</span>
           <span class="settings-row-label">Protocol</span>
-          <span class="settings-row-value">Eurything v1</span>
+          <span class="settings-row-value">Poweur ID v1</span>
         </div>
         <div class="settings-row no-action">
           <span class="settings-row-icon">💻</span>
@@ -465,7 +465,7 @@ function renderAddId() {
         <span class="sub-title">Add identity</span>
       </div>
       <div class="sub-body">
-        <p class="muted small" style="margin-bottom:20px">Connect or create a Eurything identity on this device.</p>
+        <p class="muted small" style="margin-bottom:20px">Connect or create a Poweur ID identity on this device.</p>
         <div class="option-list">
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
@@ -476,7 +476,7 @@ function renderAddId() {
               </div>
             </div>
             <div class="option-inline-form">
-              <input id="signin-id-input" class="input" type="text" placeholder="alice.example.com"
+              <input id="signin-id-input" class="input" type="text" placeholder="alice.poweur.net"
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
@@ -545,7 +545,7 @@ function renderCompose() {
       <div class="sub-body compose-body">
         <div class="form-group">
           <label class="form-label" for="c-to">To</label>
-          <input id="c-to" class="input" type="text" placeholder="alice.example.com"
+          <input id="c-to" class="input" type="text" placeholder="alice.poweur.net"
             value="${esc(preset)}" autocomplete="off" spellcheck="false" />
         </div>
         <div class="form-group" style="flex:1">
@@ -657,7 +657,7 @@ const qAll = sel => document.querySelectorAll(sel);
 
 async function doSignInWithPasskey() {
   const fqdn = q("#signin-id-input")?.value.trim().toLowerCase();
-  if (!fqdn) return toast("Enter your identity (e.g. alice.example.com)", "warning");
+  if (!fqdn) return toast("Enter your identity (e.g. alice.poweur.net)", "warning");
 
   const rec = loadIdentityRecord(fqdn);
   if (!rec) {
@@ -905,7 +905,7 @@ function showIdentityKeysPanel() {
       <span class="chip ${rec.supportsPRF !== false ? "chip-green" : "chip-orange"}">${rec.supportsPRF !== false ? "Passkey PRF" : "PIN (PBKDF2)"}</span>
     </div>
     <div class="kv-row"><span class="kv-label">DNS</span>
-      <code class="kv-value small" style="font-size:11px;line-height:1.6">_eurything.${esc(rec.identity)}<br>_eurything-enc.${esc(rec.identity)}</code>
+      <code class="kv-value small" style="font-size:11px;line-height:1.6">_poweur.${esc(rec.identity)}<br>_poweur-enc.${esc(rec.identity)}</code>
     </div>`);
 }
 
@@ -983,7 +983,7 @@ function showDnsPanel() {
     </div>
     <div class="form-group">
       <label class="form-label">Parent domain</label>
-      <input id="panel-parent-domain" class="input" type="text" value="${esc(S.config.parentDomain)}" placeholder="example.com" />
+      <input id="panel-parent-domain" class="input" type="text" value="${esc(S.config.parentDomain)}" placeholder="poweur.net" />
     </div>
     <button class="btn btn-primary mt-sm" id="panel-save-dns">Save</button>`,
   () => {
@@ -1155,7 +1155,7 @@ function setLoading(active, text = "Working…") {
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
 function initTheme() {
-  const saved = localStorage.getItem("eurything:theme");
+  const saved = localStorage.getItem("poweur:theme");
   const theme = saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   document.documentElement.dataset.theme = theme;
 }
@@ -1163,7 +1163,7 @@ function initTheme() {
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  localStorage.setItem("eurything:theme", next);
+  localStorage.setItem("poweur:theme", next);
   render();
 }
 

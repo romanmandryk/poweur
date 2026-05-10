@@ -6,7 +6,7 @@ title: Delivery Acks
 
 # Delivery Acks (Two-Tick Model)
 
-Eurything tracks message delivery in WhatsApp-style ticks so a sender can
+Poweur ID tracks message delivery in WhatsApp-style ticks so a sender can
 tell, after the fact, whether a message reached the recipient's relay,
 whether the recipient's client actually decrypted it, and whether something
 went wrong along the way. The model intentionally has only two ticks in
@@ -93,7 +93,7 @@ Acks ride the same plumbing as messages, including the relay's
    confirms that at least one of `sender` or `recipient` is locally
    hosted (Alice is local, so the rule is satisfied), and stores the ack
    keyed by `recipient` (= Alice).
-4. The next time Alice runs `eurything inbox`, the relay drains both her
+4. The next time Alice runs `poweur inbox`, the relay drains both her
    `messages` and her `acks` arrays in a single round-trip. The CLI
    advances the local pending journal to `delivered_client` for any
    referenced message ids.
@@ -127,9 +127,9 @@ forwards to Alice's relay over HTTP.
 ## Local journal
 
 The CLI persists every state transition to a per-identity append-only
-JSON-Lines file at `~/.eurything/pending/<identity>.jsonl`. One line per
+JSON-Lines file at `~/.poweur/pending/<identity>.jsonl`. One line per
 transition; reads collapse the log into the latest state per
-`message_id`. The `eurything messages status [--id <msg_id>] [--json]`
+`message_id`. The `poweur messages status [--id <msg_id>] [--json]`
 command renders this view with WhatsApp-style tick glyphs (`·` queued,
 `✓` tick 1, `✓✓` tick 2, `✗` failed). See
 [CLI Reference](/clients/cli-reference) for usage.

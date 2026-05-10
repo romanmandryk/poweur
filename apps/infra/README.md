@@ -1,13 +1,13 @@
-# eurything — Infrastructure
+# poweur — Infrastructure
 
-Hetzner Cloud infrastructure for the Eurything relay, defined in Terraform.
+Hetzner Cloud infrastructure for the Poweur ID relay, defined in Terraform.
 
 ## What this provisions
 
 - Hetzner Cloud server(s) running the Go relay
 - Hetzner Load Balancer in front of relay instance(s)
 - DNS records pointing to the load balancer (via Hetzner DNS)
-- Wildcard TLS certificate (`*.example.com`) via Terraform ACME + Let's Encrypt (DNS-01 challenge)
+- Wildcard TLS certificate (`*.poweur.net`) via Terraform ACME + Let's Encrypt (DNS-01 challenge)
 - Firewall rules restricting direct server access
 
 ## Prerequisites
@@ -30,7 +30,7 @@ terraform apply
 
 ## TLS Certificate
 
-The wildcard cert (`*.example.com`) is provisioned by the Terraform ACME provider using a DNS-01 challenge against the Hetzner DNS API. DNS-01 is required — HTTP-01 does not support wildcard certificates.
+The wildcard cert (`*.poweur.net`) is provisioned by the Terraform ACME provider using a DNS-01 challenge against the Hetzner DNS API. DNS-01 is required — HTTP-01 does not support wildcard certificates.
 
 **Renewal:** Re-run `terraform apply` (e.g., via a scheduled CI job) — the ACME provider checks expiry and renews automatically when within the renewal window.
 
@@ -38,7 +38,7 @@ The wildcard cert (`*.example.com`) is provisioned by the Terraform ACME provide
 
 ## Certificate storage
 
-By default, the certificate and private key are written to the relay server at `/etc/eurything/tls/` during provisioning. Alternatively, store them in Hetzner Object Storage and configure the relay to fetch them at startup — see `variables.tf` for the `cert_storage` option.
+By default, the certificate and private key are written to the relay server at `/etc/poweur/tls/` during provisioning. Alternatively, store them in Hetzner Object Storage and configure the relay to fetch them at startup — see `variables.tf` for the `cert_storage` option.
 
 ## Structure
 

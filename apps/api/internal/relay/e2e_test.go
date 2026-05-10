@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/storage"
 )
 
 // TestRelayTreatsEncryptedPayloadAsOpaque ensures the relay only verifies the
@@ -39,7 +39,7 @@ func TestRelayTreatsEncryptedPayloadAsOpaque(t *testing.T) {
 
 	resolver := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {"eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)},
+			"_poweur.alice.poweur.net": {"poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)},
 		},
 		hosts: map[string][]string{
 			"bob.example.org": {"relay.test"},
@@ -63,12 +63,12 @@ func TestRelayTreatsEncryptedPayloadAsOpaque(t *testing.T) {
 	expiresAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
 	nonce := "nonce-e2e"
 	canonical := crypto.CanonicalSessionRegistration(
-		"alice.example.com", sessionPubB64, issuedAt, expiresAt, nonce,
+		"alice.poweur.net", sessionPubB64, issuedAt, expiresAt, nonce,
 	)
 	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(canonical)))
 
 	body, _ := json.Marshal(SessionCreateRequest{
-		Identity:          "alice.example.com",
+		Identity:          "alice.poweur.net",
 		SessionPublicKey:  sessionPubB64,
 		IssuedAt:          issuedAt,
 		ExpiresAt:         expiresAt,
@@ -87,7 +87,7 @@ func TestRelayTreatsEncryptedPayloadAsOpaque(t *testing.T) {
 	ciphertext := base64.RawURLEncoding.EncodeToString([]byte("opaque-ciphertext"))
 	msg := Message{
 		ID:        "msg_test_e2e_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   ciphertext,

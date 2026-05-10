@@ -31,14 +31,14 @@ func TestINT_FWD_01_NoteToSelf(t *testing.T) {
 
 	aliceHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayAddr,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	secret := "note-to-self memo"
-	runCLI(t, aliceHome, "send", "alice.example.com", secret)
+	runCLI(t, aliceHome, "send", "alice.poweur.net", secret)
 
 	stdout, _ := runCLI(t, aliceHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }
 
 // TestINT_FWD_02_NeitherLocalRejected posts a structurally-valid encrypted
@@ -63,7 +63,7 @@ func TestINT_FWD_02_NeitherLocalRejected(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -71,7 +71,7 @@ func TestINT_FWD_02_NeitherLocalRejected(t *testing.T) {
 
 	envelope := map[string]any{
 		"id":        "msg_neither_local",
-		"sender":    "alice.example.com",
+		"sender":    "alice.poweur.net",
 		"recipient": "bob.example.org",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"payload":   "should-be-rejected ciphertext",
@@ -115,7 +115,7 @@ func TestINT_FWD_03_AcksAtLeastOneLocal(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -127,7 +127,7 @@ func TestINT_FWD_03_AcksAtLeastOneLocal(t *testing.T) {
 		"message_id": "msg_irrelevant",
 		"state":      "delivered_client",
 		"sender":     "bob.example.org",
-		"recipient":  "alice.example.com",
+		"recipient":  "alice.poweur.net",
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"signature":  "AAAA",
 	}

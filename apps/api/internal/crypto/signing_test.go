@@ -24,7 +24,7 @@ func TestParseEncryptionTXTRecord(t *testing.T) {
 	// 32 raw bytes (valid x25519 public key size for the parser)
 	raw32 := [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 	enc := base64.RawURLEncoding.EncodeToString(raw32[:])
-	records := []string{`eurything-enckey=x25519:` + enc}
+	records := []string{`poweur-enckey=x25519:` + enc}
 	raw, err := ParseEncryptionTXTRecord(records)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestParseEncryptionTXTRecord(t *testing.T) {
 func TestParseTXTRecordRounds(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	b64 := base64.RawURLEncoding.EncodeToString(pub)
-	_, err := ParseTXTRecord([]string{`eurything-pubkey=ed25519:` + b64})
+	_, err := ParseTXTRecord([]string{`poweur-pubkey=ed25519:` + b64})
 	if err != nil {
 		t.Fatal(err)
 	}

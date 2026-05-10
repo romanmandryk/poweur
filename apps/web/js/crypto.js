@@ -1,5 +1,5 @@
 /**
- * Cryptographic primitives for the Eurything web client.
+ * Cryptographic primitives for the Poweur ID web client.
  *
  * Uses Web Crypto API (Ed25519, X25519, HKDF, AES-GCM) plus
  * @noble/ciphers for ChaCha20-Poly1305 (not in Web Crypto).
@@ -125,13 +125,13 @@ export async function encryptMessage(plaintext, recipientEncPubKey) {
     { name: "ECDH", public: recipientKey }, ephKP.privateKey, 256
   ));
 
-  // HKDF-SHA256: salt = ephPub || recipientPub, info = "eurything/msg/v1"
+  // HKDF-SHA256: salt = ephPub || recipientPub, info = "poweur/msg/v1"
   const salt = concatBytes(ephPubBytes, recipientPubBytes);
-  const key = await hkdf(sharedBits, salt, "eurything/msg/v1");
+  const key = await hkdf(sharedBits, salt, "poweur/msg/v1");
 
   // ChaCha20-Poly1305 AEAD
   const nonce = nobleRandomBytes(12);
-  const aad = concatBytes(enc.encode("eurything/msg/v1\n"), ephPubBytes, recipientPubBytes);
+  const aad = concatBytes(enc.encode("poweur/msg/v1\n"), ephPubBytes, recipientPubBytes);
   const chacha = chacha20poly1305(key, nonce, aad);
   const ciphertext = chacha.encrypt(enc.encode(plaintext));
 
@@ -170,12 +170,12 @@ export async function decryptMessage(myEncPrivKeyJWK, { ciphertext, ephemeralPub
     await crypto.subtle.deriveBits({ name: "ECDH", public: ephKey }, myPrivKey, 256)
   );
 
-  // HKDF-SHA256: salt = ephPub || myPub, info = "eurything/msg/v1"
+  // HKDF-SHA256: salt = ephPub || myPub, info = "poweur/msg/v1"
   const salt = concatBytes(ephPubBytes, myPubRaw);
-  const key  = await hkdf(sharedBits, salt, "eurything/msg/v1");
+  const key  = await hkdf(sharedBits, salt, "poweur/msg/v1");
 
   // ChaCha20-Poly1305 decrypt — AAD matches encryption side exactly
-  const aad = concatBytes(enc.encode("eurything/msg/v1\n"), ephPubBytes, myPubRaw);
+  const aad = concatBytes(enc.encode("poweur/msg/v1\n"), ephPubBytes, myPubRaw);
   const chacha = chacha20poly1305(key, nonceBytes, aad);
   const plaintext = chacha.decrypt(ciphertextBytes);
   return new TextDecoder().decode(plaintext);
@@ -191,7 +191,7 @@ export async function decryptMessage(myEncPrivKeyJWK, { ciphertext, ephemeralPub
 export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK) {
   const keyMaterial = await crypto.subtle.importKey("raw", secret32Bytes, "HKDF", false, ["deriveKey"]);
   const wrappingKey = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: enc.encode("eurything-key-wrapping-v1"), info: new Uint8Array() },
+    { name: "HKDF", hash: "SHA-256", salt: enc.encode("poweur-key-wrapping-v1"), info: new Uint8Array() },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false, ["encrypt", "decrypt"]
@@ -209,7 +209,7 @@ export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK) {
 export async function unwrapKeysAES(secret32Bytes, { iv, ciphertext }) {
   const keyMaterial = await crypto.subtle.importKey("raw", secret32Bytes, "HKDF", false, ["deriveKey"]);
   const wrappingKey = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: enc.encode("eurything-key-wrapping-v1"), info: new Uint8Array() },
+    { name: "HKDF", hash: "SHA-256", salt: enc.encode("poweur-key-wrapping-v1"), info: new Uint8Array() },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false, ["encrypt", "decrypt"]

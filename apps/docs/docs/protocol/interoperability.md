@@ -6,11 +6,11 @@ title: Interoperability
 
 # Interoperability
 
-Eurything is intentionally DNS-native: the canonical identifier is the fully qualified domain name itself, such as `alice.poweur.net`. Interoperability should be additive. Eurything should not depend on a DID method, an OpenID provider, or a federation hub in order to work, but it should map cleanly into those ecosystems where that improves adoption.
+Poweur ID is intentionally DNS-native: the canonical identifier is the fully qualified domain name itself, such as `alice.poweur.net`. Interoperability should be additive. Poweur ID should not depend on a DID method, an OpenID provider, or a federation hub in order to work, but it should map cleanly into those ecosystems where that improves adoption.
 
 ## Canonical Identifier
 
-The canonical Eurything identifier is the FQDN:
+The canonical Poweur ID identifier is the FQDN:
 
 ```text
 alice.poweur.net
@@ -23,13 +23,13 @@ Everything else is a projection of that identity:
 - Optional HTTP well-known metadata
 - Optional DID document representation
 
-This keeps Eurything understandable to operators and easy to verify with standard DNS tooling.
+This keeps Poweur ID understandable to operators and easy to verify with standard DNS tooling.
 
 ## DID Mapping
 
 ### `did:dns`
 
-`did:dns:<fqdn>` is the closest conceptual DID mapping because Eurything already anchors identity in DNS. It is a good target for future compatibility, but it should not be the only interop plan because the method is still emerging and is not yet as broadly deployed as more established DID patterns.
+`did:dns:<fqdn>` is the closest conceptual DID mapping because Poweur ID already anchors identity in DNS. It is a good target for future compatibility, but it should not be the only interop plan because the method is still emerging and is not yet as broadly deployed as more established DID patterns.
 
 ### `did:web`
 
@@ -43,10 +43,10 @@ That DID document should project the same verification material already publishe
 
 ## Well-Known Discovery
 
-Eurything should define its own metadata endpoint:
+Poweur ID should define its own metadata endpoint:
 
 ```text
-https://<identity>/.well-known/eurything.json
+https://<identity>/.well-known/poweur.json
 ```
 
 This document should advertise:
@@ -58,11 +58,11 @@ This document should advertise:
 - optional DID aliases
 - optional mobile app link metadata
 
-The same pattern can be used on verifier domains that want to request Eurything-based sign-in.
+The same pattern can be used on verifier domains that want to request Poweur ID-based sign-in.
 
 ## Messaging Alignment
 
-The current Eurything message format is a minimal signed JSON envelope. For broader interoperability, the envelope should evolve toward shapes that are familiar to existing signed-message ecosystems, while keeping the DNS-native trust model intact.
+The current Poweur ID message format is a minimal signed JSON envelope. For broader interoperability, the envelope should evolve toward shapes that are familiar to existing signed-message ecosystems, while keeping the DNS-native trust model intact.
 
 The closest conceptual matches are:
 
@@ -97,7 +97,7 @@ This is similar in spirit to SIWE / wallet login and SIOPv2-style self-issued fl
 The safest path is:
 
 1. Keep the DNS name as the only canonical identifier.
-2. Publish `/.well-known/eurything.json` for native Eurything discovery.
+2. Publish `/.well-known/poweur.json` for native Poweur ID discovery.
 3. Publish `/.well-known/did.json` when DID ecosystem compatibility is needed.
 4. Treat `did:dns` as a future-facing alias, not a dependency.
 5. Shape auth requests and signed envelopes so an OpenID / wallet bridge can be added later without redesigning the identity layer.

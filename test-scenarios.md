@@ -1,6 +1,6 @@
-# Eurything Test Scenarios
+# Poweur ID Test Scenarios
 
-This document defines the end-to-end scenarios needed to validate the Eurything system across the relay, CLI, documentation, infrastructure, and mobile apps.
+This document defines the end-to-end scenarios needed to validate the Poweur ID system across the relay, CLI, documentation, infrastructure, and mobile apps.
 
 It is intentionally split by automation level:
 
@@ -79,13 +79,13 @@ Use for native mobile and passkey validation.
 | E2E-02 | Crypto | Relay never sees plaintext: inbox ciphertext matches exactly what the client sent | Automated |
 | E2E-03 | Crypto | Sending to a recipient without a published encryption key is refused by all clients (CLI aborts with an actionable error; mobile shows the same hard error) and, if bypassed, rejected by the relay with `400 encryption_required` | Automated |
 | E2E-04 | Crypto | Tampering with the ciphertext after signing invalidates the signature | Automated |
-| E2E-05 | Crypto | Identity creation publishes both `_eurything.<id>` and `_eurything-enc.<id>` TXT records | Mostly automated |
+| E2E-05 | Crypto | Identity creation publishes both `_poweur.<id>` and `_poweur-enc.<id>` TXT records | Mostly automated |
 | AUTH-01 | Auth | Website sign-up request is approved in mobile app via QR | Manual |
 | AUTH-02 | Auth | Website sign-in request is approved in mobile app via QR | Manual |
 | AUTH-03 | Auth | Same-device deep-link sign-in works from mobile browser to app and back | Manual |
 | AUTH-04 | Auth | Expired or replayed auth request is rejected by verifier | Automated |
 | AUTH-05 | Auth | Verifier can resolve identity from DNS and validate signature | Automated |
-| AUTH-06 | Auth | Verifier can consume `/.well-known/eurything.json` metadata | Automated |
+| AUTH-06 | Auth | Verifier can consume `/.well-known/poweur.json` metadata | Automated |
 | AUTH-07 | Auth | Optional `did:web` document is served and matches DNS key material | Automated |
 | MOBILE-01 | iOS | Create identity with passkey-backed keypair (Ed25519) + X25519 encryption keypair, verify DNS propagation of both TXT records | Manual |
 | MOBILE-02 | Android | Create identity with passkey-backed keypair + X25519 encryption keypair, verify DNS propagation of both TXT records | Manual |
@@ -102,11 +102,11 @@ Use for native mobile and passkey validation.
 | INT-05 | Integration | Missing recipient encryption key surfaces a clear `[encrypted: no local encryption key]` marker instead of leaking ciphertext as prose | Automated |
 | INT-06 | Integration | Replayed signed message is rejected on the second submission | Pending (test skipped until dedup lands) |
 | INT-07 | Integration | `POST /messages` with a forged signature returns `401` and does not reach any inbox | Automated |
-| INT-08 | Integration | Tampering with the DNS `_eurything.<id>` TXT record breaks cross-relay verification on the receiving relay; forwarding fails and the attacker's payload is never delivered | Automated |
+| INT-08 | Integration | Tampering with the DNS `_poweur.<id>` TXT record breaks cross-relay verification on the receiving relay; forwarding fails and the attacker's payload is never delivered | Automated |
 | INT-09 | Integration | Full two-way conversation: both users create identities, auto-register sessions on first send, exchange an Alice→Bob message and a Bob→Alice reply, both sides decrypt successfully | Automated |
-| INT-10 | Integration | Retrofit: a legacy identity without `_eurything-enc.<id>` cannot receive messages (sender aborts / relay returns `400 encryption_required`); after `eurything identity add-encryption-key`, the same recipient accepts and decrypts a fresh send | Automated |
-| INT-IDSIGN-01 | Integration | `eurything send --sign-with=identity` on a single relay: message accepted, recipient decrypts, and sender's local session file is NOT created | Automated |
-| INT-IDSIGN-02 | Integration | `eurything send --sign-with=identity` across two relays: receiving relay verifies the identity signature using the sender's DNS-published signing key; recipient decrypts | Automated |
+| INT-10 | Integration | Retrofit: a legacy identity without `_poweur-enc.<id>` cannot receive messages (sender aborts / relay returns `400 encryption_required`); after `poweur identity add-encryption-key`, the same recipient accepts and decrypts a fresh send | Automated |
+| INT-IDSIGN-01 | Integration | `poweur send --sign-with=identity` on a single relay: message accepted, recipient decrypts, and sender's local session file is NOT created | Automated |
+| INT-IDSIGN-02 | Integration | `poweur send --sign-with=identity` across two relays: receiving relay verifies the identity signature using the sender's DNS-published signing key; recipient decrypts | Automated |
 | INT-IDSIGN-03 | Integration | Forged identity-signed envelope (empty `session_id`, signature under an unknown key) is rejected with `401` and never reaches the recipient's inbox | Automated |
 | SEND-01 | Integration | Default send (no `--via-home-relay`) goes straight from Alice's CLI to Bob's relay; Alice's home relay sees zero `POST /messages` traffic on the send path | Automated |
 | SEND-02 | Integration | `--via-home-relay` posts to Alice's home relay, which accepts (sender-local) and forwards to Bob's relay; both relays see exactly one `POST /messages` | Automated |
@@ -151,7 +151,7 @@ Steps:
 
 1. Start relay with test DNS provider credentials or a programmable fake provider.
 2. Submit `POST /identities` with a new identity and public key.
-3. Query DNS for `_eurything.<identity>` and `<identity>`.
+3. Query DNS for `_poweur.<identity>` and `<identity>`.
 
 Expected result:
 
@@ -199,7 +199,7 @@ Steps:
 
 1. Open a relying-party website in a desktop browser.
 2. Start a sign-up or sign-in flow that displays a QR code.
-3. Scan the QR code with the Eurything mobile app.
+3. Scan the QR code with the Poweur ID mobile app.
 4. Review verifier domain, requested action, and statement.
 5. Approve with biometrics or passkey confirmation.
 6. Return to the website and verify completion.
@@ -212,7 +212,7 @@ Expected result:
 
 ### AUTH-07: `did:web` compatibility
 
-Goal: ensure Eurything can interoperate with DID-aware systems without changing its canonical identifier.
+Goal: ensure Poweur ID can interoperate with DID-aware systems without changing its canonical identifier.
 
 Steps:
 
@@ -237,7 +237,7 @@ and use a relay-handler middleware that counts `POST /messages` and
 end-to-end success.
 
 `SEND-01` spins up two relays (Alice's home relay A, Bob's home relay B),
-runs a default `eurything send` from Alice, and asserts that A's POST
+runs a default `poweur send` from Alice, and asserts that A's POST
 counter does NOT increment while B's does. The recipient's inbox decrypt
 proves the message landed.
 
@@ -254,7 +254,7 @@ and `POST /acks`. The relay accepts a message iff at least one of its
 DNS A/CNAME points here); otherwise it returns `403 not_authorized`.
 
 `FWD-01` is the both-local case: Alice on relay A, sender == recipient ==
-`alice.example.com`. The relay stores the message and the next `inbox`
+`alice.poweur.net`. The relay stores the message and the next `inbox`
 poll decrypts it.
 
 `FWD-02` is the neither-local case: a structurally-valid encrypted
@@ -270,9 +270,9 @@ that the rule is enforced uniformly across `/messages` and `/acks`.
 
 Goal: exercise the WhatsApp-style two-tick model end-to-end through the
 real CLI, including the per-identity pending journal at
-`~/.eurything/pending/<identity>.jsonl`.
+`~/.poweur/pending/<identity>.jsonl`.
 
-These tests use `eurything messages status --json [--id <id>]` to read
+These tests use `poweur messages status --json [--id <id>]` to read
 back the journal so they exercise the user-facing surface, not just the
 on-disk file format.
 
@@ -335,7 +335,7 @@ Shared test scaffolding:
   listener address (`host:port`). Cross-relay forwarding over HTTP therefore
   reaches the right `httptest` server automatically.
 
-Run with `go test github.com/eurything/integration/...` from the workspace
+Run with `go test github.com/poweur/integration/...` from the workspace
 root, or `cd apps/integration && go test ./...`.
 
 #### INT-01: Identity creation publishes DNS
@@ -345,15 +345,15 @@ Goal: prove the CLI → relay → DNS write path is closed end-to-end.
 Steps:
 
 1. Spin up a single relay backed by a fresh `Zone`.
-2. Give Alice a temp `HOME` and run `eurything identity create alice`
+2. Give Alice a temp `HOME` and run `poweur identity create alice`
    against the relay with the mock provider.
 3. Inspect `Zone.Snapshot()`.
 
 Expected result:
 
-- `TXT:_eurything.alice.example.com` contains `eurything-pubkey=ed25519:<b64>`.
-- `TXT:_eurything-enc.alice.example.com` contains `eurything-enckey=x25519:<b64>`.
-- `HOST:alice.example.com` points at the relay's `host:port`.
+- `TXT:_poweur.alice.poweur.net` contains `poweur-pubkey=ed25519:<b64>`.
+- `TXT:_poweur-enc.alice.poweur.net` contains `poweur-enckey=x25519:<b64>`.
+- `HOST:alice.poweur.net` points at the relay's `host:port`.
 
 #### INT-02: Encrypted round-trip on one relay
 
@@ -363,12 +363,12 @@ no relay-level ambiguity.
 Steps:
 
 1. Both Alice and Bob create identities against the same relay.
-2. Alice runs `eurything send bob.example.com "<secret>"` (default = encrypted).
-3. Bob runs `eurything inbox` (text mode) on his `HOME`.
+2. Alice runs `poweur send bob.poweur.net "<secret>"` (default = encrypted).
+3. Bob runs `poweur inbox` (text mode) on his `HOME`.
 
 Expected result:
 
-- Bob's output contains `alice.example.com`, the decrypted plaintext, and the
+- Bob's output contains `alice.poweur.net`, the decrypted plaintext, and the
   🔒 lock glyph that the CLI only prints when it successfully decrypted a
   real encryption envelope.
 
@@ -423,8 +423,8 @@ Steps:
 
 1. Alice and Bob create identities and Alice sends an encrypted message.
 2. Before Bob drains his inbox, the test removes
-   `$BOB_HOME/.eurything/keys/bob.example.com.enc`.
-3. Bob runs `eurything inbox`.
+   `$BOB_HOME/.poweur/keys/bob.poweur.net.enc`.
+3. Bob runs `poweur inbox`.
 
 Expected result:
 
@@ -480,7 +480,7 @@ re-checks DNS for the sender's identity key.
 Steps:
 
 1. Start two relays. Alice on relay-A, Bob on relay-B.
-2. An attacker overwrites `_eurything.alice.example.com` in the shared zone
+2. An attacker overwrites `_poweur.alice.poweur.net` in the shared zone
    with a public key nobody in the system holds. Alice's encryption key and
    Alice's cached key on relay-A are untouched.
 3. Alice sends to Bob.
@@ -496,7 +496,7 @@ Expected result:
 
 #### INT-IDSIGN-01 / INT-IDSIGN-02 / INT-IDSIGN-03: Identity-signed send
 
-Goal: exercise the `eurything send --sign-with=identity` opt-out path — the
+Goal: exercise the `poweur send --sign-with=identity` opt-out path — the
 sender skips session registration and signs the message directly with the
 long-lived identity Ed25519 key. Encryption is unchanged; only the
 verifying key differs on the relay side.
@@ -504,8 +504,8 @@ verifying key differs on the relay side.
 Steps (same-relay, INT-IDSIGN-01):
 
 1. Alice and Bob create identities on the same relay.
-2. Alice runs `eurything send --sign-with=identity bob.example.com "<secret>"`.
-3. Bob runs `eurything inbox`.
+2. Alice runs `poweur send --sign-with=identity bob.poweur.net "<secret>"`.
+3. Bob runs `poweur inbox`.
 
 Expected result:
 
@@ -513,7 +513,7 @@ Expected result:
   Alice's verifying key from her in-memory identity cache (or DNS TXT
   record).
 - Bob's inbox shows the decrypted plaintext with the 🔒 glyph.
-- Alice's local session file at `$ALICE_HOME/.eurything/sessions/alice.example.com.toml`
+- Alice's local session file at `$ALICE_HOME/.poweur/sessions/alice.poweur.net.toml`
   does NOT exist afterwards (the whole point of the flag is to bypass it).
 
 Steps (cross-relay, INT-IDSIGN-02):
@@ -524,7 +524,7 @@ Steps (cross-relay, INT-IDSIGN-02):
 Expected result:
 
 - Relay-A verifies with its cached identity key and forwards to relay-B.
-- Relay-B has no knowledge of Alice, resolves `_eurything.alice.example.com`
+- Relay-B has no knowledge of Alice, resolves `_poweur.alice.poweur.net`
   via DNS, and accepts the signature.
 - Bob's inbox contains the decrypted plaintext.
 

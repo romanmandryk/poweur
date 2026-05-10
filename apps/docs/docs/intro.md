@@ -5,9 +5,9 @@ sidebar_position: 1
 title: Introduction
 ---
 
-# What is the Eurything Protocol?
+# What is the Poweur ID Protocol?
 
-Eurything is an **open, DNS-native identity and messaging protocol**. Every participant — human, bot, or autonomous agent — is identified by a subdomain they control, such as `alice.poweur.net`. That subdomain is their globally unique, human-readable identity. The public key associated with that subdomain is their cryptographic identity.
+Poweur ID is an **open, DNS-native identity and messaging protocol**. Every participant — human, bot, or autonomous agent — is identified by a subdomain they control, such as `alice.poweur.net`. That subdomain is their globally unique, human-readable identity. The public key associated with that subdomain is their cryptographic identity.
 
 There is no central registry. No OAuth provider. No username database. Just DNS — the internet's existing, massively distributed lookup infrastructure — repurposed as the ground truth for identity and routing.
 
@@ -20,9 +20,9 @@ DNS is already the internet's naming layer. Every device on the internet can res
 - **Already trusted** — decades of infrastructure exist to protect and serve DNS records reliably.
 - **Human-readable** — `alice.poweur.net` is as readable as an email address.
 
-Eurything uses DNS not just for routing (as email does) but as the **authoritative data store** for identity. An identity's public key lives in a DNS `TXT` record. Its relay address lives in an `A` or `CNAME` record on the same subdomain. Any relay that can resolve DNS can verify any message and route to any identity — without coordination, without a central service.
+Poweur ID uses DNS not just for routing (as email does) but as the **authoritative data store** for identity. An identity's public key lives in a DNS `TXT` record. Its relay address lives in an `A` or `CNAME` record on the same subdomain. Any relay that can resolve DNS can verify any message and route to any identity — without coordination, without a central service.
 
-## What can you do with an Eurything identity?
+## What can you do with an Poweur ID identity?
 
 In the MVP, identities are used for **end-to-end verified messaging**: signing and sending messages that any recipient can verify came from you, without trusting any server in the middle.
 
@@ -41,7 +41,7 @@ You own a subdomain. Your private key lives in your phone's secure enclave — i
 
 ## System components
 
-The Eurything system is composed of:
+The Poweur ID system is composed of:
 
 - **Relay (`apps/api`)** — a stateless Go server that routes, verifies, and delivers messages. Writes DNS records on behalf of new identities. Holds no private keys and no durable storage.
 - **Mobile apps (`apps/ios`, `apps/android`)** — native iOS and Android clients. The app is the user's cryptographic vault. Private keys are stored in the hardware secure enclave and never leave the device.

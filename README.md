@@ -1,11 +1,11 @@
-# eurything
+# poweur
 
-A pnpm monorepo for the Eurything DNS-identity protocol, relay, clients, docs, and infrastructure.
+A pnpm monorepo for the Poweur ID DNS-identity protocol, relay, clients, docs, and infrastructure.
 
 ## Structure
 
 ```
-eurything/
+poweur/
 ├── apps/
 │   ├── api/      # Go relay / HTTP API
 │   ├── cli/      # Node CLI
@@ -50,7 +50,7 @@ go run .
 The CLI signs outbound messages with a short-lived session key by default. Headless agents or operators who want to bypass session registration can opt into signing with the long-lived identity key on a per-send basis:
 
 ```bash
-eurything send --sign-with=identity bob.example.com "hi bob"
+poweur send --sign-with=identity bob.poweur.net "hi bob"
 ```
 
 Relays accept both paths; the recipient decrypts the same way regardless of which signing key the sender chose.

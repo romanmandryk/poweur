@@ -34,7 +34,7 @@ func TestINT_SEND_01_DirectSendBypassesHomeRelay(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -54,7 +54,7 @@ func TestINT_SEND_01_DirectSendBypassesHomeRelay(t *testing.T) {
 	}
 
 	stdout, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }
 
 // TestINT_SEND_02_ViaHomeRelayRoutesThroughHome flips the routing knob:
@@ -79,7 +79,7 @@ func TestINT_SEND_02_ViaHomeRelayRoutesThroughHome(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -99,5 +99,5 @@ func TestINT_SEND_02_ViaHomeRelayRoutesThroughHome(t *testing.T) {
 	}
 
 	stdout, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }

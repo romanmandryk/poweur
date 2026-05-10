@@ -11,7 +11,7 @@ variable "hetzner_dns_token" {
 }
 
 variable "domain" {
-  description = "Parent domain for the relay (e.g. example.com). Wildcard cert covers *.domain."
+  description = "Parent domain for the relay (e.g. poweur.net). Wildcard cert covers *.domain."
   type        = string
 }
 
@@ -51,7 +51,7 @@ variable "operator_ips" {
 }
 
 variable "cert_storage" {
-  description = "Where to store the TLS certificate: 'server' (write to /etc/eurything/tls/) or 'object-storage'"
+  description = "Where to store the TLS certificate: 'server' (write to /etc/poweur/tls/) or 'object-storage'"
   type        = string
   default     = "server"
   validation {

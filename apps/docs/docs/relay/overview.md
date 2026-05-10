@@ -6,7 +6,7 @@ title: Relay Overview
 
 # Relay Overview
 
-The Eurything relay (`apps/api`) is the core server component of the Eurything system. It is a Go HTTP server that implements the relay-side of the Eurything Protocol: accepting, verifying, routing, and delivering signed messages; ingesting signed delivery acks; and registering new identities by writing DNS records.
+The Poweur ID relay (`apps/api`) is the core server component of the Poweur ID system. It is a Go HTTP server that implements the relay-side of the Poweur ID Protocol: accepting, verifying, routing, and delivering signed messages; ingesting signed delivery acks; and registering new identities by writing DNS records.
 
 A relay is the **home** for the identities it locally hosts. It ingests messages **for** them (the default direct-send path; clients of any sender post directly to the recipient's home relay), and it optionally ingests messages **from** them when the user opts into routing outbound traffic via the home relay (`--via-home-relay`). It does **not** act as a generic open relay for unrelated parties — see the at-least-one-local rule in the [API Reference](/relay/api-reference#at-least-one-local-rule).
 
@@ -16,7 +16,7 @@ The relay has six core responsibilities in the MVP:
 
 **Message ingress.** Accept signed messages submitted by any client at `POST /messages`. The signed envelope is the unit of trust; rate limiting, signature verification, and the at-least-one-local rule decide whether the relay accepts and where it stores the message.
 
-**Signature verification.** Verify that every inbound message is correctly signed by the claimed sender identity. Signature verification uses the sender's public key fetched from DNS (`_eurything.<sender>` TXT record), or — for session-signed envelopes — a cached session key (or the attached `session_proof`).
+**Signature verification.** Verify that every inbound message is correctly signed by the claimed sender identity. Signature verification uses the sender's public key fetched from DNS (`_poweur.<sender>` TXT record), or — for session-signed envelopes — a cached session key (or the attached `session_proof`).
 
 **Message routing.** For messages where the **sender** is local but the **recipient** is remote (the privacy-proxy / `--via-home-relay` case), resolve the recipient's relay via DNS and forward the signed envelope. This is the only sanctioned forwarding path; all other "neither-local" forwards are rejected with `403 not_authorized`.
 
@@ -56,7 +56,7 @@ This stateless design has several important properties:
 
 DNS is the relay's only durable backend. When the relay needs to:
 
-- **Verify a message** → fetch the sender's public key from `_eurything.<sender>` TXT
+- **Verify a message** → fetch the sender's public key from `_poweur.<sender>` TXT
 - **Route a message** → resolve the recipient's `A`/`CNAME` record
 - **Register an identity** → write a TXT + A/CNAME record via the DNS provider API
 

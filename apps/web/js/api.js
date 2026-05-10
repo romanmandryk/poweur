@@ -1,5 +1,5 @@
 /**
- * Relay HTTP client for the Eurything web client.
+ * Relay HTTP client for the Poweur ID web client.
  * Talks to the relay API and does DNS-over-HTTPS lookups via Cloudflare.
  */
 
@@ -80,9 +80,9 @@ export async function fetchInbox(relayUrl, identity, challenge, signature) {
     `/messages/${encodeURIComponent(identity)}`,
     undefined,
     {
-      "X-Eurything-Identity": identity,
-      "X-Eurything-Challenge": challenge,
-      "X-Eurything-Signature": signature,
+      "X-Poweur-Identity": identity,
+      "X-Poweur-Challenge": challenge,
+      "X-Poweur-Signature": signature,
     }
   );
 }
@@ -142,14 +142,14 @@ async function dohLookup(name, type) {
 
 /**
  * Look up a recipient's signing public key via DNS TXT.
- * Record format: eurything-pubkey=ed25519:<base64url>
+ * Record format: poweur-pubkey=ed25519:<base64url>
  * Returns base64url public key string or null.
  */
 export async function resolveSigningKey(identity) {
-  const records = await dohLookup(`_eurything.${identity}`, "TXT");
+  const records = await dohLookup(`_poweur.${identity}`, "TXT");
   for (const rec of records) {
-    if (rec.startsWith("eurything-pubkey=")) {
-      let val = rec.slice("eurything-pubkey=".length);
+    if (rec.startsWith("poweur-pubkey=")) {
+      let val = rec.slice("poweur-pubkey=".length);
       if (val.startsWith("ed25519:")) val = val.slice("ed25519:".length);
       return val;
     }
@@ -159,14 +159,14 @@ export async function resolveSigningKey(identity) {
 
 /**
  * Look up a recipient's X25519 encryption public key via DNS TXT.
- * Record format: eurything-enckey=x25519:<base64url>
+ * Record format: poweur-enckey=x25519:<base64url>
  * Returns base64url public key string or null.
  */
 export async function resolveEncryptionKey(identity) {
-  const records = await dohLookup(`_eurything-enc.${identity}`, "TXT");
+  const records = await dohLookup(`_poweur-enc.${identity}`, "TXT");
   for (const rec of records) {
-    if (rec.startsWith("eurything-enckey=")) {
-      let val = rec.slice("eurything-enckey=".length);
+    if (rec.startsWith("poweur-enckey=")) {
+      let val = rec.slice("poweur-enckey=".length);
       if (val.startsWith("x25519:")) val = val.slice("x25519:".length);
       return val;
     }

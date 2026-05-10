@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/storage"
 )
 
 type fakeResolver struct {
@@ -54,10 +54,10 @@ func TestMessageInboxFlow(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
 	recipientPub, recipientPriv, _ := ed25519.GenerateKey(nil)
 
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	resolver := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {senderTxt},
+			"_poweur.alice.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
 			"bob.example.org": {"relay.test"},
@@ -82,7 +82,7 @@ func TestMessageInboxFlow(t *testing.T) {
 	// round-trip through the canonical signing input.
 	msg := Message{
 		ID:        "msg_test_basic_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "Hello Bob",
@@ -120,8 +120,8 @@ func TestMessageInboxFlow(t *testing.T) {
 
 	challengeSig := ed25519.Sign(recipientPriv, []byte(challenge.Challenge))
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/messages/bob.example.org", nil)
-	req.Header.Set("X-Eurything-Identity", "bob.example.org")
-	req.Header.Set("X-Eurything-Signature", base64.StdEncoding.EncodeToString(challengeSig))
+	req.Header.Set("X-Poweur-Identity", "bob.example.org")
+	req.Header.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(challengeSig))
 	inboxResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("inbox: %v", err)
@@ -161,10 +161,10 @@ func TestRateLimit(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
 	recipientPub, _, _ := ed25519.GenerateKey(nil)
 
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	resolver := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {senderTxt},
+			"_poweur.alice.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
 			"bob.example.org": {"relay.test"},
@@ -184,7 +184,7 @@ func TestRateLimit(t *testing.T) {
 
 	msg := Message{
 		ID:        "msg_test_ratelimit_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "Hello Bob",
@@ -217,7 +217,7 @@ func TestRateLimit(t *testing.T) {
 // posted with no session_id, signed directly with the sender's long-lived
 // identity Ed25519 key. The relay must resolve the verifying key via DNS
 // (TXT record) and accept the envelope. This mirrors what the CLI produces
-// when the operator runs `eurything send --sign-with=identity ...`.
+// when the operator runs `poweur send --sign-with=identity ...`.
 func TestIdentitySignedMessageAccepted(t *testing.T) {
 	cfg := config.Config{
 		ListenAddr:   ":0",
@@ -236,10 +236,10 @@ func TestIdentitySignedMessageAccepted(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
 	recipientPub, _, _ := ed25519.GenerateKey(nil)
 
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
 	resolver := &fakeResolver{
 		txt: map[string][]string{
-			"_eurything.alice.example.com": {senderTxt},
+			"_poweur.alice.poweur.net": {senderTxt},
 		},
 		hosts: map[string][]string{
 			"bob.example.org": {"relay.test"},
@@ -261,7 +261,7 @@ func TestIdentitySignedMessageAccepted(t *testing.T) {
 	// omits the "session:" line entirely, signed with the long-lived key.
 	msg := Message{
 		ID:        "msg_test_idsigned_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "identity-signed ciphertext",
@@ -328,7 +328,7 @@ func TestPlaintextMessageRejected(t *testing.T) {
 
 	msg := Message{
 		ID:        "msg_test_plaintext_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "plain text",

@@ -1,8 +1,8 @@
-# Eurything — MVP Requirements
+# Poweur ID — MVP Requirements
 
 ## Overview
 
-The goal of the MVP is to implement a decentralized, DNS-based identity and messaging system. Every participant in the system — whether a human, a bot, or an autonomous agent — is identified by a subdomain of a domain they control (e.g., `myname.example.com`). This subdomain serves as the participant's globally unique, human-readable identity. In the MVP, identities are used primarily for messaging, but the protocol and mobile app must already reserve a stable path for using the same DNS identity to sign up to and sign in to third-party websites and apps.
+The goal of the MVP is to implement a decentralized, DNS-based identity and messaging system. Every participant in the system — whether a human, a bot, or an autonomous agent — is identified by a subdomain of a domain they control (e.g., `myname.poweur.net`). This subdomain serves as the participant's globally unique, human-readable identity. In the MVP, identities are used primarily for messaging, but the protocol and mobile app must already reserve a stable path for using the same DNS identity to sign up to and sign in to third-party websites and apps.
 
 The system is composed of several applications and supporting packages within a pnpm monorepo:
 
@@ -16,26 +16,26 @@ The system is composed of several applications and supporting packages within a 
 
 ## Identity Model
 
-An identity is a fully qualified subdomain, such as `alice.example.com`. The owner of that subdomain controls the associated cryptographic key pair. The public key is the authoritative identifier for the identity; the subdomain is the human-readable handle that resolves to it.
+An identity is a fully qualified subdomain, such as `alice.poweur.net`. The owner of that subdomain controls the associated cryptographic key pair. The public key is the authoritative identifier for the identity; the subdomain is the human-readable handle that resolves to it.
 
 Humans authenticate using passkeys on their mobile device. The passkey is tied to the identity's key pair and is used both to prove ownership of the identity and to sign outgoing messages. Bots and automated agents manage their own key pairs programmatically and interact with the system via the API or CLI rather than a mobile UI.
 
 A signed message carries the sender's identity subdomain and a signature verifiable against the public key associated with that subdomain. Recipients and relays can verify authenticity without a central authority.
 
-The same identity key pair must also be usable outside messaging. A third-party website or app must be able to issue a challenge to `alice.example.com`, have Alice approve that request in the mobile app, and verify the resulting signature against Alice's published public key. This makes the DNS identity a general-purpose authentication primitive rather than a messaging-only handle.
+The same identity key pair must also be usable outside messaging. A third-party website or app must be able to issue a challenge to `alice.poweur.net`, have Alice approve that request in the mobile app, and verify the resulting signature against Alice's published public key. This makes the DNS identity a general-purpose authentication primitive rather than a messaging-only handle.
 
 ### Long-Lived vs. Short-Lived Keys
 
 Every identity uses two tiers of keys:
 
-- **Long-lived identity key pair (Ed25519)** — the authoritative signing key. Its public half is published in DNS at `_eurything.<identity>`. On mobile devices the private half is bound to a passkey (WebAuthn/FIDO2) and only unlocked via biometric or platform authenticator interaction. On headless hosts (CLI, bots) it lives as a file under `keys_dir`.
+- **Long-lived identity key pair (Ed25519)** — the authoritative signing key. Its public half is published in DNS at `_poweur.<identity>`. On mobile devices the private half is bound to a passkey (WebAuthn/FIDO2) and only unlocked via biometric or platform authenticator interaction. On headless hosts (CLI, bots) it lives as a file under `keys_dir`.
 - **Short-lived session key pair (Ed25519)** — generated on the device and registered with a relay for a bounded window (max 24 hours in the MVP). Sessions are signed into existence by the long-lived identity key, but day-to-day messages and inbox reads are signed by the session key. This ensures the long-lived key is used as rarely as possible — typically once per session — and that a passkey prompt is only required at session refresh time.
 
 Sessions are cached in relay memory. Relay restarts invalidate all sessions; clients must re-register transparently. Clients must delete or rotate session keys when the user signs out.
 
 ### Encryption Key Pair
 
-Alongside the signing identity, every identity also owns a **long-lived X25519 encryption key pair**. The public key is published in DNS at `_eurything-enc.<identity>`. Senders use it to perform X25519 ECDH with an ephemeral key pair, derive a symmetric key, and encrypt the message body with an AEAD cipher (ChaCha20-Poly1305 in the MVP). The relay never sees plaintext payloads. See **Eurything Protocol → End-to-End Encryption** for the concrete envelope.
+Alongside the signing identity, every identity also owns a **long-lived X25519 encryption key pair**. The public key is published in DNS at `_poweur-enc.<identity>`. Senders use it to perform X25519 ECDH with an ephemeral key pair, derive a symmetric key, and encrypt the message body with an AEAD cipher (ChaCha20-Poly1305 in the MVP). The relay never sees plaintext payloads. See **Poweur ID Protocol → End-to-End Encryption** for the concrete envelope.
 
 The encryption private key is stored next to the signing private key on the same device, with the same storage rules (secure enclave on mobile, file on CLI/bots).
 
@@ -44,7 +44,7 @@ The encryption private key is stored next to the signing private key on the same
 DNS is not only the routing layer — it is the only durable store in the system. All state that must survive a relay restart lives in DNS records:
 
 - An `A` or `CNAME` record on the identity subdomain points to the relay that handles that identity.
-- A `TXT` record on the identity subdomain (e.g., `_eurything.alice.example.com`) stores the identity's public key.
+- A `TXT` record on the identity subdomain (e.g., `_poweur.alice.poweur.net`) stores the identity's public key.
 
 Because DNS is the authoritative store, the relay itself holds no database and performs no disk writes for identity or routing data. Any relay that can resolve DNS can verify messages and route to any identity, without coordination with any central registry.
 
@@ -54,7 +54,7 @@ For the MVP, the relay writes DNS records on behalf of identities via a configur
 
 ## Identity Beyond Messaging
 
-The protocol must support using the same DNS identity for third-party sign-up and sign-in flows, not only for Eurything relay access. The mobile app is the primary signer and consent surface for human users. A relying party (website or app) can ask the user to prove control of `alice.example.com`, and the user confirms that request in the mobile app using the identity's passkey-backed private key.
+The protocol must support using the same DNS identity for third-party sign-up and sign-in flows, not only for Poweur ID relay access. The mobile app is the primary signer and consent surface for human users. A relying party (website or app) can ask the user to prove control of `alice.poweur.net`, and the user confirms that request in the mobile app using the identity's passkey-backed private key.
 
 ### Third-Party Authentication Flow
 
@@ -66,7 +66,7 @@ The baseline flow is:
 4. On approval, the mobile app signs the challenge payload with the identity's private key and returns the signed response to the relying party.
 5. The relying party verifies the signature using the public key published in DNS for the claimed identity, or through a compatible DID document derived from that DNS identity.
 
-This flow must be designed so that websites and apps can adopt it without running an Eurything relay themselves. The relay remains important for messaging and DNS management, but third-party authentication must work as a standalone verifier pattern.
+This flow must be designed so that websites and apps can adopt it without running an Poweur ID relay themselves. The relay remains important for messaging and DNS management, but third-party authentication must work as a standalone verifier pattern.
 
 ### Mobile App as Signer
 
@@ -83,7 +83,7 @@ The mobile app must support a dedicated approval flow for external authenticatio
 
 DNS is the routing layer. Each identity subdomain must have an `A` or `CNAME` record pointing to the relay server that handles messages for that identity. For example:
 
-- `alice.example.com` → Alice's relay IP or hostname
+- `alice.poweur.net` → Alice's relay IP or hostname
 - `bob.example.org` → Bob's relay IP or hostname
 
 When a relay needs to deliver a message to `bob.example.org`, it resolves the DNS record for that subdomain to find the destination relay and forwards the message there. This eliminates the need for a central routing registry: any relay can route to any identity by performing a standard DNS lookup.
@@ -92,9 +92,9 @@ Operators hosting multiple identities on a single relay point all of their subdo
 
 ---
 
-## Eurything Protocol
+## Poweur ID Protocol
 
-The Eurything Protocol defines the message format, signing scheme, verification procedure, and end-to-end routing model used across all system components. All clients, relays, and automated agents must conform to this protocol.
+The Poweur ID Protocol defines the message format, signing scheme, verification procedure, and end-to-end routing model used across all system components. All clients, relays, and automated agents must conform to this protocol.
 
 ### Message Structure
 
@@ -103,7 +103,7 @@ A message is a JSON object with the following fields:
 | Field        | Type    | Description |
 |--------------|---------|-------------|
 | `id`         | string  | **Required.** Client-assigned unique message identifier (ULID/UUID). The relay echoes it in its `202 Accepted` response and uses it as the inbox storage key, so the original sender can correlate later delivery acks against the message it sent. |
-| `sender`     | string  | Fully qualified identity subdomain of the sender (e.g., `alice.example.com`) |
+| `sender`     | string  | Fully qualified identity subdomain of the sender (e.g., `alice.poweur.net`) |
 | `recipient`  | string  | Fully qualified identity subdomain of the recipient (e.g., `bob.example.org`) |
 | `timestamp`  | string  | ISO 8601 UTC timestamp of when the message was created |
 | `payload`    | string  | Base64url of the AEAD ciphertext. Always ciphertext — plaintext payloads are rejected by the relay. |
@@ -117,7 +117,7 @@ The protocol must treat unknown fields as ignorable unless they are explicitly d
 ```json
 {
   "id":        "msg_01j...",
-  "sender":    "alice.example.com",
+  "sender":    "alice.poweur.net",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
   "payload":   "<base64url ciphertext>",
@@ -154,7 +154,7 @@ The sender signs this canonical string with:
 
 Ed25519 is used in both cases. The resulting signature is base64-encoded and placed in the `signature` field. Including the timestamp in the signed payload prevents trivial replay attacks. Binding `session_id` into the canonical string prevents a signature produced for one session from being replayed under another.
 
-The sender chooses which key to sign with per-message; relays must accept both paths. The CLI exposes the choice via `eurything send --sign-with=session|identity` (default: `session`). Signing with the identity key:
+The sender chooses which key to sign with per-message; relays must accept both paths. The CLI exposes the choice via `poweur send --sign-with=session|identity` (default: `session`). Signing with the identity key:
 
 - Skips session registration entirely (no `POST /sessions`, no passkey prompt on mobile), and the envelope carries neither `session_id` nor `session_proof`.
 - Ties the signature directly to the long-lived identity, which is the expected property for rarely-sent, high-value, or offline-prepared messages where a session round-trip is undesirable.
@@ -183,14 +183,14 @@ On mobile devices, step 3 is the single point at which a passkey unlock is requi
 
 ### End-to-End Encryption
 
-Messages MUST be end-to-end encrypted. A recipient without a published X25519 encryption key at `_eurything-enc.<identity>` cannot receive messages — senders refuse, and relays reject any `POST /messages` lacking the `encryption` envelope with `400 encryption_required`. The relay never sees plaintext. The encryption scheme for the MVP is:
+Messages MUST be end-to-end encrypted. A recipient without a published X25519 encryption key at `_poweur-enc.<identity>` cannot receive messages — senders refuse, and relays reject any `POST /messages` lacking the `encryption` envelope with `400 encryption_required`. The relay never sees plaintext. The encryption scheme for the MVP is:
 
-- **Key agreement:** X25519 ECDH between a sender-generated ephemeral keypair and the recipient's long-lived X25519 public key (resolved from `_eurything-enc.<recipient>` in DNS).
-- **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "eurything/msg/v1"`, producing a 32-byte key.
-- **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"eurything/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
+- **Key agreement:** X25519 ECDH between a sender-generated ephemeral keypair and the recipient's long-lived X25519 public key (resolved from `_poweur-enc.<recipient>` in DNS).
+- **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "poweur/msg/v1"`, producing a 32-byte key.
+- **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"poweur/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** the ciphertext (base64url) goes into `payload`; `ephemeral_public_key` and `nonce` (base64url) go into the `encryption` object; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-There is no plaintext fallback. If the recipient's `_eurything-enc.<identity>` record is missing, all clients (CLI and mobile) must refuse to send and surface a clear error pointing the user at `eurything identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected before rate-limit or signature checks run.
+There is no plaintext fallback. If the recipient's `_poweur-enc.<identity>` record is missing, all clients (CLI and mobile) must refuse to send and surface a clear error pointing the user at `poweur identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected before rate-limit or signature checks run.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger or more standardized suite. The `alg` field is the version marker; clients must reject envelopes whose `alg` they do not implement.
 
@@ -201,7 +201,7 @@ When a relay receives a message, it verifies the signature as follows:
 1. Extract the `sender` field and (optionally) `session_id` from the message.
 2. Resolve the verifying public key:
    - If `session_id` is present, look it up in the session cache. If the session is missing or expired, reject with `401 Unauthorized` (`session_expired`) so the client can re-register. The session's bound `identity` must match `sender`.
-   - If `session_id` is absent, fetch the sender's long-lived public key from DNS (`_eurything.<sender>`) and fall back to `GET /identities/:identity` on the peer relay if the TXT record is not yet propagated.
+   - If `session_id` is absent, fetch the sender's long-lived public key from DNS (`_poweur.<sender>`) and fall back to `GET /identities/:identity` on the peer relay if the TXT record is not yet propagated.
 3. Reconstruct the canonical string using the rules in **Signing**, including the `session:<session_id>` and `enc:...` lines whenever those fields are present on the envelope.
 4. Verify the signature against the canonical string using the resolved public key.
 5. If verification fails, reject the message with `401 Unauthorized`.
@@ -233,7 +233,7 @@ A client MAY opt into routing through its own home relay (`--via-home-relay`) fo
 
 ### End-to-End Routing
 
-Default direct path for a message from Alice (`alice.example.com`) to Bob (`bob.example.org`):
+Default direct path for a message from Alice (`alice.poweur.net`) to Bob (`bob.example.org`):
 
 1. **Alice's client resolves Bob's relay** via DNS for `bob.example.org`.
 2. **Alice's client → Bob's relay**: Alice signs the message (binding `id`, `sender`, `recipient`, `timestamp`, `payload`, optional `session_id`, and the encryption envelope) and POSTs it directly to Bob's relay's `/messages`.
@@ -251,25 +251,25 @@ The wire format is JSON for the MVP. All messages and API responses are UTF-8 en
 
 ## Protocol Interoperability Requirements
 
-The Eurything identifier remains the DNS name itself (for example `alice.example.com`). Protocol interop should be additive: Eurything must not require a DID or an external identity provider, but it should map cleanly to existing standards where that improves adoption.
+The Poweur ID identifier remains the DNS name itself (for example `alice.poweur.net`). Protocol interop should be additive: Poweur ID must not require a DID or an external identity provider, but it should map cleanly to existing standards where that improves adoption.
 
 ### DID Mapping
 
-- The canonical Eurything identifier is the FQDN.
-- The protocol should support a deterministic DID projection for interoperability. `did:dns:<fqdn>` is the closest conceptual fit, but because the broader ecosystem around `did:dns` is still emerging, Eurything should also support publishing a compatible DID document through `did:web`-style hosting.
+- The canonical Poweur ID identifier is the FQDN.
+- The protocol should support a deterministic DID projection for interoperability. `did:dns:<fqdn>` is the closest conceptual fit, but because the broader ecosystem around `did:dns` is still emerging, Poweur ID should also support publishing a compatible DID document through `did:web`-style hosting.
 - Where HTTP hosting is available, an identity should be able to expose `https://<identity>/.well-known/did.json` so that external systems can consume the same key material and service metadata through a familiar DID resolution path.
 
 ### Messaging Interoperability
 
 - The current signed JSON envelope is intentionally simple, but future revisions should move toward a more explicit envelope shape similar in spirit to DIDComm basic messages or Nostr-style signed events: message identifier, message type, creation time, expiry, optional threading metadata, and canonicalized signing input.
 - Once optional fields become common, the signature base should evolve from newline concatenation toward a canonical JSON representation to reduce ambiguity and make bridge implementations easier.
-- Relay-to-relay delivery remains HTTPS JSON, but the protocol should use explicit content types and version markers so bridges can translate Eurything messages into other signed-message ecosystems when needed.
+- Relay-to-relay delivery remains HTTPS JSON, but the protocol should use explicit content types and version markers so bridges can translate Poweur ID messages into other signed-message ecosystems when needed.
 
 ### Well-Known HTTP Discovery
 
 To integrate cleanly with browsers, mobile apps, and third-party services, the protocol should define well-known HTTP metadata endpoints:
 
-- `/.well-known/eurything.json` — identity or relay metadata, supported protocol versions, relay endpoints, authentication capabilities, and mobile app handoff information.
+- `/.well-known/poweur.json` — identity or relay metadata, supported protocol versions, relay endpoints, authentication capabilities, and mobile app handoff information.
 - `/.well-known/did.json` — optional DID document representation for interoperability with DID-aware systems.
 - `/.well-known/did-configuration.json` — optional domain-to-DID binding for ecosystems that already use DID configuration files.
 
@@ -345,7 +345,7 @@ There is no database and no disk I/O. All durable state (identities, public keys
 
 When a client registers an identity, it supplies a DNS provider API token scoped to the relevant DNS zone. The relay uses this token to create the required DNS records on the client's behalf:
 
-- A `TXT` record at `_eurything.<subdomain>` containing the identity's base64-encoded public key.
+- A `TXT` record at `_poweur.<subdomain>` containing the identity's base64-encoded public key.
 - An `A` or `CNAME` record at `<subdomain>` pointing to the relay's own address, making the identity reachable.
 
 The API token is used in-process for the duration of the registration request and then discarded. The relay stores no write credentials at rest.
@@ -410,7 +410,7 @@ The app does not perform DNS routing itself; it delegates all relay-protocol net
 
 Shown on first launch, before any identity has been created:
 
-- Short explainer of what Eurything is: *"Create your DNS Identity. Use it for everything: messaging, receiving payments, signing up to services, sharing data securely."*
+- Short explainer of what Poweur ID is: *"Create your DNS Identity. Use it for everything: messaging, receiving payments, signing up to services, sharing data securely."*
 - Explain that IDs can belong to humans, agents, or bots.
 - Emphasise spam and bot resistance as a core property of the system.
 - Single CTA: **"Create your ID"** button.
@@ -420,7 +420,7 @@ Shown on first launch, before any identity has been created:
 - User chooses a unique handle — minimum 8 characters, DNS subdomain-safe characters only (`a–z`, `0–9`, hyphens; no leading or trailing hyphens).
 - The resulting identity is `<handle>.poweur.net` (the parent domain is configurable in app settings).
 - Optional profile fields at creation time: Display Name, Profile Picture URL, short bio (1–2 sentences), long bio (paragraph).
-- On submission: generate a new passkey (WebAuthn/FIDO2) scoped to the identity's domain. The app extracts the public key and uploads it as a DNS `TXT` record at `_eurything.<handle>.poweur.net` via the relay, supplying the DNS provider token for the duration of the write.
+- On submission: generate a new passkey (WebAuthn/FIDO2) scoped to the identity's domain. The app extracts the public key and uploads it as a DNS `TXT` record at `_poweur.<handle>.poweur.net` via the relay, supplying the DNS provider token for the duration of the write.
 - The app supports **multiple identities** — the user can create more than one handle. Each identity has its own passkey.
 
 ### Pending Registrations Screen
@@ -428,7 +428,7 @@ Shown on first launch, before any identity has been created:
 Shown when at least one identity has been submitted but DNS propagation has not yet been confirmed:
 
 - Lists pending identities with their current status.
-- **"Check DNS"** button per identity — triggers a live DNS `TXT` lookup for `_eurything.<handle>.poweur.net` and confirms whether the record is visible.
+- **"Check DNS"** button per identity — triggers a live DNS `TXT` lookup for `_poweur.<handle>.poweur.net` and confirms whether the record is visible.
 - Once verified, the identity moves into the active identity pool and the user is taken to the Dashboard.
 
 ### Active Identity Selector
@@ -454,7 +454,7 @@ The primary screen after an identity is verified. Shows the service modules avai
 - Contact list stored locally on-device (no server-side contact sync).
 - Add a contact by entering their DNS identity (e.g., `alice.poweur.net`).
 - Tapping a contact opens a detail sheet showing:
-  - Parsed Eurything DNS records for that identity: handle, display name, profile picture (if set), short bio.
+  - Parsed Poweur ID DNS records for that identity: handle, display name, profile picture (if set), short bio.
   - All advertised capabilities from DNS: messaging relay address, payment methods, ID verification proofs, and any future capability records.
   - This is a **live DNS lookup** on each open — not a cached read.
 
@@ -466,7 +466,7 @@ Classic messenger interface:
 - Conversation list shows all threads, stored locally on the device.
 - Thread view: chat bubbles, newest at bottom.
 - Messages are signed with the sender's passkey-backed private key before dispatch.
-- Messages are sent via the Eurything relay protocol (`POST /messages`).
+- Messages are sent via the Poweur ID relay protocol (`POST /messages`).
 - Received messages are fetched from the user's relay (polling for MVP; WebSocket is a stretch goal).
 - **All message storage is local** — the relay is a forwarder only and holds no persistent message history.
 
@@ -484,7 +484,7 @@ The vault is not a visible screen but an architectural constraint enforced throu
 The mobile apps must support external authentication approval flows for websites and apps:
 
 - Accept inbound auth requests via QR scan, universal link, deep link, or clipboard import.
-- Display verifier metadata from `/.well-known/eurything.json` or equivalent discovery metadata before asking for consent.
+- Display verifier metadata from `/.well-known/poweur.json` or equivalent discovery metadata before asking for consent.
 - Require biometric/passkey confirmation before signing any third-party auth challenge.
 - Return the signed response using the verifier's requested callback mechanism (browser redirect, deep link, HTTPS callback, or QR handoff continuation).
 - Keep a local approval history for the user, at least for the current device, so the user can review recent sign-in/sign-up approvals.
@@ -502,18 +502,18 @@ The CLI (`apps/cli`) is the third application in the monorepo. It provides a scr
 - **Relay interaction**: All network operations go through a configured relay endpoint (set via config file or environment variable).
 - **Scriptability**: The CLI should support machine-readable output (e.g., JSON) to facilitate use in scripts and automated pipelines.
 
-The CLI package is named `@eurything/cli` and lives at `apps/cli` within the monorepo. The CLI must support multiple identities per device by storing keys under a single `keys_dir` and allowing per-command overrides.
+The CLI package is named `@poweur/cli` and lives at `apps/cli` within the monorepo. The CLI must support multiple identities per device by storing keys under a single `keys_dir` and allowing per-command overrides.
 
 ### MVP Commands
 
 ```
-eurything identity create <name>   # Generate a key pair and register the identity with the configured relay
-eurything identity show            # Display the current identity's subdomain and public key
-eurything identity use <identity>  # Set the default identity in config
-eurything identity list            # List known identities in the local keys directory
-eurything send <to> <message> [--sign-with=session|identity]  # Sign and send a message to the given identity address
-eurything inbox                    # Fetch and display messages from the relay inbox
-eurything relay status             # Check relay connectivity, show configured endpoint and relay version
+poweur identity create <name>   # Generate a key pair and register the identity with the configured relay
+poweur identity show            # Display the current identity's subdomain and public key
+poweur identity use <identity>  # Set the default identity in config
+poweur identity list            # List known identities in the local keys directory
+poweur send <to> <message> [--sign-with=session|identity]  # Sign and send a message to the given identity address
+poweur inbox                    # Fetch and display messages from the relay inbox
+poweur relay status             # Check relay connectivity, show configured endpoint and relay version
 ```
 
 All commands accept a `--json` flag that produces machine-readable JSON output, suitable for use in scripts and automated pipelines.
@@ -521,11 +521,11 @@ All commands accept a `--json` flag that produces machine-readable JSON output, 
 The CLI should also reserve a future-compatible authentication command surface such as:
 
 ```
-eurything auth sign <request-file-or-url>    # Sign a third-party auth request for bots and automated agents
-eurything auth inspect <request-file-or-url> # Display verifier request metadata before signing
+poweur auth sign <request-file-or-url>    # Sign a third-party auth request for bots and automated agents
+poweur auth inspect <request-file-or-url> # Display verifier request metadata before signing
 ```
 
-Configuration is stored at `~/.eurything/config.toml`. The config file holds the relay endpoint, the default identity subdomain, and a root `keys_dir`. Individual settings can be overridden via environment variables (e.g., `RELAY_URL`, `KEYS_DIR`) or command-line flags such as `--use-identity`.
+Configuration is stored at `~/.poweur/config.toml`. The config file holds the relay endpoint, the default identity subdomain, and a root `keys_dir`. Individual settings can be overridden via environment variables (e.g., `RELAY_URL`, `KEYS_DIR`) or command-line flags such as `--use-identity`.
 
 ---
 
@@ -537,10 +537,10 @@ The relay exposes an HTTP/JSON API. All endpoints consume and produce `applicati
 
 Submit a signed message for delivery. The relay inspects the recipient field, determines whether the recipient is local or remote, and either delivers locally or forwards to the appropriate peer relay via DNS resolution.
 
-**Request body** (Eurything message envelope — see Eurything Protocol section):
+**Request body** (Poweur ID message envelope — see Poweur ID Protocol section):
 ```json
 {
-  "sender":    "alice.example.com",
+  "sender":    "alice.poweur.net",
   "recipient": "bob.example.org",
   "timestamp": "2026-03-28T12:00:00Z",
   "payload":   "Hello, Bob.",
@@ -562,8 +562,8 @@ Submit a signed message for delivery. The relay inspects the recipient field, de
 Retrieve pending messages for a local identity. The requester must prove ownership of the identity via a challenge–response: the client signs a short-lived server-issued challenge with its private key, and the relay verifies the signature against the registered public key for that identity. This avoids passwords or bearer tokens while remaining consistent with the passkey model used in the mobile app.
 
 **Authentication flow:**
-1. Client calls `GET /auth/challenge?identity=alice.example.com` to obtain a short-lived challenge string.
-2. Client signs the challenge with its private key and includes it as the `X-Eurything-Signature` request header, with the identity in `X-Eurything-Identity`.
+1. Client calls `GET /auth/challenge?identity=alice.poweur.net` to obtain a short-lived challenge string.
+2. Client signs the challenge with its private key and includes it as the `X-Poweur-Signature` request header, with the identity in `X-Poweur-Identity`.
 
 **Response body:**
 ```json
@@ -572,7 +572,7 @@ Retrieve pending messages for a local identity. The requester must prove ownersh
     {
       "id":        "msg_01j...",
       "sender":    "bob.example.org",
-      "recipient": "alice.example.com",
+      "recipient": "alice.poweur.net",
       "timestamp": "2026-03-28T12:00:00Z",
       "payload":   "Hey Alice!",
       "signature": "<base64-encoded signature>"
@@ -613,7 +613,7 @@ Register a new identity on this relay. The client supplies its public key, the D
 **Request body:**
 ```json
 {
-  "identity":      "alice.example.com",
+  "identity":      "alice.poweur.net",
   "public_key":    "<base64-encoded public key>",
   "dns_provider":  "cloudflare",
   "dns_token":     "<scoped DNS provider API token>"
@@ -635,7 +635,7 @@ Look up the public key registered for an identity on this relay. Used by other r
 **Response body:**
 ```json
 {
-  "identity":   "alice.example.com",
+  "identity":   "alice.poweur.net",
   "public_key": "<base64-encoded public key>"
 }
 ```
@@ -666,7 +666,7 @@ The API is consumed by the mobile app, the CLI, and peer relays performing messa
 
 ## Security Model
 
-The key principle of the Eurything security model is: **trust is rooted in the device's secure enclave; the relay is an untrusted forwarder**.
+The key principle of the Poweur ID security model is: **trust is rooted in the device's secure enclave; the relay is an untrusted forwarder**.
 
 ### Trust Hierarchy
 
@@ -717,7 +717,7 @@ The Terraform configuration provisions the following resources:
 
 - **Hetzner Cloud server(s)** — one or more VMs running the Go relay binary. The relay is stateless, so horizontal scaling requires no coordination; adding servers behind the load balancer is sufficient.
 - **Hetzner Load Balancer** — sits in front of the relay server(s) and terminates incoming traffic. Handles health checks and distributes load across relay instances. TLS termination occurs here using the provisioned wildcard certificate.
-- **DNS records** — `A`/`CNAME` records for the relay's own hostname (e.g., `relay.example.com`) pointing to the load balancer IP, provisioned via the Hetzner DNS Terraform provider.
+- **DNS records** — `A`/`CNAME` records for the relay's own hostname (e.g., `relay.poweur.net`) pointing to the load balancer IP, provisioned via the Hetzner DNS Terraform provider.
 - **Firewall rules** — restrict direct access to relay VMs; only the load balancer and operator IPs can reach them on non-public ports.
 
 ### TLS Certificate Provisioning
@@ -726,7 +726,7 @@ TLS certificate provisioning is automated using the **Terraform ACME provider** 
 
 **Challenge type: DNS-01 is required.** HTTP-01 challenge is not used. DNS-01 is the only challenge type that supports wildcard certificates, and wildcard certificates are the correct strategy for this deployment (see below).
 
-**Wildcard certificate strategy:** A single `*.example.com` wildcard certificate covers every first-level identity subdomain (`alice.example.com`, `bob.example.com`, etc.) hosted on the relay. This is appropriate because the operator controls the parent domain as a prerequisite for running a relay, and all identity subdomains are first-level. There is no need to provision or renew a certificate per identity — one cert covers all of them. The one-level wildcard limitation (i.e., `*.example.com` does not cover `deep.alice.example.com`) is a non-issue since the protocol does not use deeper subdomains.
+**Wildcard certificate strategy:** A single `*.poweur.net` wildcard certificate covers every first-level identity subdomain (`alice.poweur.net`, `bob.poweur.net`, etc.) hosted on the relay. This is appropriate because the operator controls the parent domain as a prerequisite for running a relay, and all identity subdomains are first-level. There is no need to provision or renew a certificate per identity — one cert covers all of them. The one-level wildcard limitation (i.e., `*.poweur.net` does not cover `deep.alice.poweur.net`) is a non-issue since the protocol does not use deeper subdomains.
 
 DNS-01 challenge is automated via the Hetzner DNS API, using an API token held in Terraform (or passed via environment variable during `terraform apply`). This is the same Hetzner DNS API used for identity record management, so no additional provider account is needed.
 
@@ -743,7 +743,7 @@ A minimal deployment script or CI hook should:
 
 1. Build the Go relay binary.
 2. Copy it to the Hetzner server(s) (e.g., via `scp` or a Hetzner snapshot).
-3. Restart the relay service (e.g., `systemctl restart eurything-relay`).
+3. Restart the relay service (e.g., `systemctl restart poweur-relay`).
 
 A full CI/CD pipeline is a post-MVP concern; the MVP deployment process can be a documented manual script.
 
@@ -755,7 +755,7 @@ The following are explicitly out of scope for the MVP but should be kept in mind
 
 - **Capability advertisement via DNS**: Additional DNS record types (e.g., `TXT` records) can be used to advertise capabilities associated with an identity, such as supported protocols, service endpoints, or metadata. This allows the DNS layer to evolve from pure routing into a richer discovery mechanism.
 - **Additional identity use cases**: Beyond messaging, identities could be used for richer authentication, authorization, payments, or social graph discovery. The core protocol should be designed so these additions reuse the same DNS identity and key material rather than introducing parallel identity systems.
-- **OIDC / wallet bridge**: A bridge to OpenID-based wallet flows (such as SIOPv2 / OID4VP-style verifier requests) may be added later so Eurything identities can participate in ecosystems that already expect OpenID-style metadata and request objects.
+- **OIDC / wallet bridge**: A bridge to OpenID-based wallet flows (such as SIOPv2 / OID4VP-style verifier requests) may be added later so Poweur ID identities can participate in ecosystems that already expect OpenID-style metadata and request objects.
 - **Federation and relay peering**: Relays may eventually maintain persistent connections or trust relationships with known peer relays to improve reliability and reduce per-message DNS lookups.
 - **Key rotation and revocation**: A mechanism for rotating or revoking the key pair associated with an identity without losing the subdomain will be necessary for production use.
 - **Scalability and persistence**: The relay's storage and delivery model will need to be hardened for production workloads.

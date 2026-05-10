@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/storage"
 )
 
 // maxSessionTTL caps how long a session can be valid. Mobile passkey flows can

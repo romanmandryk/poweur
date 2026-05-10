@@ -4,9 +4,9 @@
 //
 // A Zone implements three contracts at once:
 //
-//   - github.com/eurything/api/internal/dns.Resolver   (read path used by the relay)
-//   - github.com/eurything/cli/internal/identity.Resolver (read path used by the CLI)
-//   - github.com/eurything/api/internal/dns.Provider via Provider() (write path
+//   - github.com/poweur/api/internal/dns.Resolver   (read path used by the relay)
+//   - github.com/poweur/cli/internal/identity.Resolver (read path used by the CLI)
+//   - github.com/poweur/api/internal/dns.Provider via Provider() (write path
 //     used by the relay when handling POST /identities)
 //
 // Because the same Zone object backs both read and write paths, writes the
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	relaypkg "github.com/eurything/api/pkg/relay"
+	relaypkg "github.com/poweur/api/pkg/relay"
 )
 
 // Zone is a tiny DNS stub keyed by fully qualified name.
@@ -143,10 +143,10 @@ type zoneProvider struct {
 
 func (p zoneProvider) WriteIdentityRecords(_ context.Context, _, identity, publicKey, encryptionPublicKey, relayAddress string) error {
 	// Record the long-lived Ed25519 identity key.
-	p.zone.SetTXT("_eurything."+identity, "eurything-pubkey=ed25519:"+publicKey)
+	p.zone.SetTXT("_poweur."+identity, "poweur-pubkey=ed25519:"+publicKey)
 
 	if encryptionPublicKey != "" {
-		p.zone.SetTXT("_eurything-enc."+identity, "eurything-enckey=x25519:"+encryptionPublicKey)
+		p.zone.SetTXT("_poweur-enc."+identity, "poweur-enckey=x25519:"+encryptionPublicKey)
 	}
 
 	// Deliberately keep the raw relay address (including port) so
@@ -161,6 +161,6 @@ func (p zoneProvider) WriteEncryptionKey(_ context.Context, _, identity, encrypt
 	if encryptionPublicKey == "" {
 		return errors.New("fakedns: missing encryption public key")
 	}
-	p.zone.SetTXT("_eurything-enc."+identity, "eurything-enckey=x25519:"+encryptionPublicKey)
+	p.zone.SetTXT("_poweur-enc."+identity, "poweur-enckey=x25519:"+encryptionPublicKey)
 	return nil
 }

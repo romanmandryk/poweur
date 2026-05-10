@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 type Provider interface {
@@ -18,7 +18,7 @@ type Provider interface {
 	WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error
 
 	// WriteEncryptionKey publishes (or overwrites) just the
-	// `_eurything-enc.<identity>` TXT record. It exists so that an identity
+	// `_poweur-enc.<identity>` TXT record. It exists so that an identity
 	// created before the encryption-key support landed can be retro-fitted
 	// with an X25519 key, and so existing identities can rotate their
 	// encryption key without touching the signing key or the relay host

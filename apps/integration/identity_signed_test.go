@@ -1,4 +1,4 @@
-// Integration tests for the `eurything send --sign-with=identity` path.
+// Integration tests for the `poweur send --sign-with=identity` path.
 //
 // Under this mode the CLI skips session registration entirely and signs the
 // outbound message with the long-lived identity Ed25519 key. Encryption is
@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	clipkg "github.com/eurything/cli/pkg/cli"
+	clipkg "github.com/poweur/cli/pkg/cli"
 )
 
 // TestINT_IDSIGN_01_SameRelayIdentitySignedSend: Alice and Bob are on the
@@ -38,24 +38,24 @@ func TestINT_IDSIGN_01_SameRelayIdentitySignedSend(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	secret := "identity-signed hello"
-	runCLI(t, aliceHome, "send", "--sign-with", "identity", "bob.example.com", secret)
+	runCLI(t, aliceHome, "send", "--sign-with", "identity", "bob.poweur.net", secret)
 
 	// No local session file should exist for Alice because we never went
 	// through ensureSession on this path.
-	aliceSess := filepath.Join(aliceHome, ".eurything", "sessions", "alice.example.com.toml")
+	aliceSess := filepath.Join(aliceHome, ".poweur", "sessions", "alice.poweur.net.toml")
 	if _, err := os.Stat(aliceSess); !os.IsNotExist(err) {
 		t.Fatalf("expected no session file after --sign-with=identity, got err=%v", err)
 	}
 
 	inbox, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, inbox, "alice.example.com", secret)
+	assertDecryptedInbox(t, inbox, "alice.poweur.net", secret)
 }
 
 // TestINT_IDSIGN_02_CrossRelayIdentitySignedSend: Alice on relay-A, Bob on
@@ -75,7 +75,7 @@ func TestINT_IDSIGN_02_CrossRelayIdentitySignedSend(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -85,7 +85,7 @@ func TestINT_IDSIGN_02_CrossRelayIdentitySignedSend(t *testing.T) {
 	runCLI(t, aliceHome, "send", "--sign-with", "identity", "bob.example.org", secret)
 
 	inbox, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, inbox, "alice.example.com", secret)
+	assertDecryptedInbox(t, inbox, "alice.poweur.net", secret)
 }
 
 // TestINT_IDSIGN_03_ForgedIdentitySignatureRejected: posting a well-formed
@@ -101,18 +101,18 @@ func TestINT_IDSIGN_03_ForgedIdentitySignatureRejected(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	_, forgedPriv, _ := ed25519.GenerateKey(nil)
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	forged := map[string]any{
 		"id":        "msg_forged_idsign03",
-		"sender":    "alice.example.com",
-		"recipient": "bob.example.com",
+		"sender":    "alice.poweur.net",
+		"recipient": "bob.poweur.net",
 		"timestamp": timestamp,
 		"payload":   "forged identity-signed attempt",
 		"signature": base64.StdEncoding.EncodeToString(ed25519.Sign(forgedPriv, []byte("not-the-canonical-message"))),

@@ -399,10 +399,10 @@ func FetchInbox(ctx context.Context, relayURL, identity, signature, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Eurything-Identity", identity)
-	req.Header.Set("X-Eurything-Signature", signature)
+	req.Header.Set("X-Poweur-Identity", identity)
+	req.Header.Set("X-Poweur-Signature", signature)
 	if sessionID != "" {
-		req.Header.Set("X-Eurything-Session-Id", sessionID)
+		req.Header.Set("X-Poweur-Session-Id", sessionID)
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

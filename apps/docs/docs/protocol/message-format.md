@@ -6,7 +6,7 @@ title: Message Format
 
 # Message Format
 
-An Eurything message is a JSON object that carries the sender identity, recipient identity, payload, and a cryptographic signature. The payload is always end-to-end encrypted between sender and recipient: the relay never sees plaintext, and any message that reaches the relay without an `encryption` envelope is rejected with `400 encryption_required` before routing.
+An Poweur ID message is a JSON object that carries the sender identity, recipient identity, payload, and a cryptographic signature. The payload is always end-to-end encrypted between sender and recipient: the relay never sees plaintext, and any message that reaches the relay without an `encryption` envelope is rejected with `400 encryption_required` before routing.
 
 ## Message Fields
 
@@ -108,9 +108,9 @@ The sender picks the signing key per message. Relays MUST accept either path: th
 | Path | When | Envelope shape | Verifying key |
 |------|------|----------------|---------------|
 | Session-signed (default) | Routine interactive use; mobile | `session_id` present, optional `session_proof` | Session Ed25519 public key (from cache or `session_proof`) |
-| Identity-signed | Headless agents, rarely-sent messages, offline-prepared envelopes | `session_id` omitted, `session_proof` omitted | Long-lived identity Ed25519 public key (from DNS `_eurything.<sender>` or peer relay) |
+| Identity-signed | Headless agents, rarely-sent messages, offline-prepared envelopes | `session_id` omitted, `session_proof` omitted | Long-lived identity Ed25519 public key (from DNS `_poweur.<sender>` or peer relay) |
 
-The CLI exposes this choice via `eurything send --sign-with=session|identity` (default `session`). Identity-signed sends skip session registration entirely — no `POST /sessions` round-trip, no passkey prompt on mobile, and nothing is written to the local session cache. The trade-off is that every identity-signed message is cryptographically bound to the long-lived key, which forgoes the forward-secrecy benefit of rotating short-lived session keys.
+The CLI exposes this choice via `poweur send --sign-with=session|identity` (default `session`). Identity-signed sends skip session registration entirely — no `POST /sessions` round-trip, no passkey prompt on mobile, and nothing is written to the local session cache. The trade-off is that every identity-signed message is cryptographically bound to the long-lived key, which forgoes the forward-secrecy benefit of rotating short-lived session keys.
 
 ## Verification
 
@@ -118,7 +118,7 @@ When a relay receives a message, it verifies as follows:
 
 1. Extract `sender` and (optionally) `session_id` from the message.
 2. Resolve the verifying public key:
-   - If `session_id` is present, look it up in the session cache. If not found **and** `session_proof` is present, verify the proof against the sender's long-lived identity key (DNS: `_eurything.<sender>`) and cache the resulting session. If the session is missing and no proof is supplied, reject with `401 session_expired` so the client can re-register.
+   - If `session_id` is present, look it up in the session cache. If not found **and** `session_proof` is present, verify the proof against the sender's long-lived identity key (DNS: `_poweur.<sender>`) and cache the resulting session. If the session is missing and no proof is supplied, reject with `401 session_expired` so the client can re-register.
    - If `session_id` is absent, fetch the sender's long-lived public key directly from DNS (with a peer-relay fallback via `GET /identities/:identity`).
 3. Reconstruct the canonical string exactly as the sender did, including the `session:` and `enc:` lines when the corresponding fields are present.
 4. Verify the signature with the resolved public key.
@@ -143,16 +143,16 @@ The proof is produced once at session registration and re-used on every outbound
 
 ## End-to-End Encryption
 
-Messages are **always** end-to-end encrypted. The recipient must have a published X25519 encryption key at `_eurything-enc.<recipient>`; if they do not, senders refuse to send and relays reject the envelope. The relay only ever sees ciphertext plus routing metadata.
+Messages are **always** end-to-end encrypted. The recipient must have a published X25519 encryption key at `_poweur-enc.<recipient>`; if they do not, senders refuse to send and relays reject the envelope. The relay only ever sees ciphertext plus routing metadata.
 
 The encryption suite:
 
 - **Key agreement:** X25519 ECDH between a sender-generated ephemeral keypair and the recipient's long-lived X25519 public key.
-- **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "eurything/msg/v1"`, producing a 32-byte key.
-- **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"eurything/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
+- **Key derivation:** HKDF-SHA256 with `salt = ephemeral_public_key || recipient_public_key` and `info = "poweur/msg/v1"`, producing a 32-byte key.
+- **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"poweur/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** ciphertext (base64url) in `payload`; `ephemeral_public_key` and `nonce` (base64url) in `encryption`; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-There is no plaintext fallback. When the recipient's `_eurything-enc.<identity>` TXT record is missing, clients abort with an error that points the user at `eurything identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected with `400 encryption_required` before signature verification or rate-limiting runs.
+There is no plaintext fallback. When the recipient's `_poweur-enc.<identity>` TXT record is missing, clients abort with an error that points the user at `poweur identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected with `400 encryption_required` before signature verification or rate-limiting runs.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger suite. The `alg` string is the version marker; clients must reject envelopes whose `alg` they do not implement.
 

@@ -1,4 +1,4 @@
-// Package cli is the public entry point of the Eurything CLI. It re-exports
+// Package cli is the public entry point of the Poweur ID CLI. It re-exports
 // the internal command runner so external consumers (notably integration
 // tests that live in a separate Go module) can invoke the CLI in-process
 // without shelling out.
@@ -7,8 +7,8 @@ package cli
 import (
 	"io"
 
-	internalcli "github.com/eurything/cli/internal/cli"
-	"github.com/eurything/cli/internal/identity"
+	internalcli "github.com/poweur/cli/internal/cli"
+	"github.com/poweur/cli/internal/identity"
 )
 
 // Run executes a single CLI invocation and returns its exit code.

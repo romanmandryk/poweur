@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/eurything/cli/internal/cli"
-	"github.com/eurything/cli/internal/config"
+	"github.com/poweur/cli/internal/cli"
+	"github.com/poweur/cli/internal/config"
 )
 
 func main() {

@@ -1,20 +1,20 @@
 /**
- * Persistence layer for the Eurything web client.
+ * Persistence layer for the Poweur ID web client.
  *
  * localStorage  — persists across sessions:  identity records, config
  * sessionStorage — cleared on tab close:      unlocked session keys
  */
 
-const IDENTITY_PREFIX = "eurything:identity:";
-const ACTIVE_KEY = "eurything:active";
-const CONFIG_KEY = "eurything:config";
-const SESSION_PREFIX = "eurything:session:";
+const IDENTITY_PREFIX = "poweur:identity:";
+const ACTIVE_KEY = "poweur:active";
+const CONFIG_KEY = "poweur:config";
+const SESSION_PREFIX = "poweur:session:";
 
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
-  relayUrl: "http://localhost:8080",
-  parentDomain: "",
+  relayUrl: "https://relay.poweur.net",
+  parentDomain: "poweur.net",
   dnsProvider: "cloudflare",
   dnsToken: "",
 };
@@ -39,7 +39,7 @@ export function saveConfig(config) {
 /**
  * Identity record shape:
  * {
- *   identity: string,           // FQDN (alice.example.com)
+ *   identity: string,           // FQDN (alice.poweur.net)
  *   publicKey: string,          // base64url Ed25519 public key
  *   encPublicKey: string,       // base64url X25519 public key
  *   credentialId: string,       // base64url WebAuthn credential ID

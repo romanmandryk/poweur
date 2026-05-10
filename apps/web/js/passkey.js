@@ -1,5 +1,5 @@
 /**
- * WebAuthn / Passkey integration for Eurything.
+ * WebAuthn / Passkey integration for Poweur ID.
  *
  * Keys are protected using the PRF (Pseudo-Random Function) WebAuthn extension,
  * which allows deriving a deterministic secret from the authenticator — used to
@@ -11,14 +11,14 @@
 
 import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./crypto.js";
 
-const PRF_SALT = new TextEncoder().encode("eurything-prf-v1");
+const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
 
 // ─── Passkey Creation ─────────────────────────────────────────────────────────
 
 /**
  * Create a passkey for an identity, requesting PRF output.
  *
- * @param {string} identity  — Full FQDN (alice.example.com)
+ * @param {string} identity  — Full FQDN (alice.poweur.net)
  * @param {string} userId    — Stable user ID (base64url-encoded random bytes)
  * @returns {{ credentialId: string, prfOutput: Uint8Array|null, supportsPRF: boolean }}
  */
@@ -31,7 +31,7 @@ export async function createPasskey(identity, userId) {
   const createOptions = {
     challenge,
     rp: {
-      name: "Eurything",
+      name: "Poweur ID",
       id: window.location.hostname === "localhost" ? "localhost" : window.location.hostname,
     },
     user: {

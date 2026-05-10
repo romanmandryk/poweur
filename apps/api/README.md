@@ -1,4 +1,4 @@
-# Eurything Relay (`apps/api`)
+# Poweur ID Relay (`apps/api`)
 
 ## Local development
 
@@ -20,7 +20,7 @@ VERSION=0.1.0
 Start the relay:
 
 ```bash
-cd /Users/romanmandryk/git/eurything/apps/api
+cd /Users/romanmandryk/git/poweur/apps/api
 go run .
 ```
 
@@ -29,18 +29,18 @@ go run .
 Build the web UI once (outputs to `apps/api/web/dist`):
 
 ```bash
-pnpm --filter @eurything/web build
+pnpm --filter @poweur/web build
 ```
 
 Point the relay at that directory so it serves the app under **`/app/`**:
 
 ```bash
-WEB_STATIC_DIR=/absolute/path/to/eurything/apps/api/web/dist go run .
+WEB_STATIC_DIR=/absolute/path/to/poweur/apps/api/web/dist go run .
 ```
 
-The relay sends permissive **CORS** headers on all routes so browsers can talk to any Eurything relay (direct POST to recipient hosts, not only the home relay).
+The relay sends permissive **CORS** headers on all routes so browsers can talk to any Poweur ID relay (direct POST to recipient hosts, not only the home relay).
 
-For local development without copying files, run Vite (`pnpm --filter @eurything/web dev`) — it proxies `/messages`, `/sessions`, etc. to `http://127.0.0.1:8080` by default.
+For local development without copying files, run Vite (`pnpm --filter @poweur/web dev`) — it proxies `/messages`, `/sessions`, etc. to `http://127.0.0.1:8080` by default.
 
 ## Test coverage
 
@@ -55,7 +55,7 @@ make cover-html     # + coverage/index.html (line-by-line in your browser)
 make cover-func     # per-function breakdown (long)
 ```
 
-This **does not** include `apps/integration` tests. It only reflects code hit by `go test ./...` inside `apps/api`. The Makefile passes **`-coverpkg=github.com/eurything/api/...`**, so code exercised from **`pkg/relay` tests** (e.g. `GET /health`) is counted against **`internal/relay`**, not only tests defined under `internal/relay/`.
+This **does not** include `apps/integration` tests. It only reflects code hit by `go test ./...` inside `apps/api`. The Makefile passes **`-coverpkg=github.com/poweur/api/...`**, so code exercised from **`pkg/relay` tests** (e.g. `GET /health`) is counted against **`internal/relay`**, not only tests defined under `internal/relay/`.
 
 As of the last refresh, **`make cover`** (with `-coverpkg` for the whole module) reports on the order of **57%** merged statement coverage for `apps/api`. The **`internal/relay` package alone** (HTTP handlers) is about **~64%** when measured by tests in `internal/relay` (run `go test -cover ./internal/relay/...` for that number). Gaps: the **`main` package**; **Cloudflare/Hetzner** providers; and **`resolveIdentityPublicKey`’s** HTTP fallback to a peer’s `GET /identities/...` (needs a peer test server or integration). The HTML report highlights remaining branches in `server.go`.
 
@@ -65,7 +65,7 @@ End-to-end tests under `apps/integration` run the relay **in-process** (`httptes
 
 ```bash
 cd apps/integration
-make cover         # instruments github.com/eurything/api/... and github.com/eurything/cli/...
+make cover         # instruments github.com/poweur/api/... and github.com/poweur/cli/...
 make cover-html
 ```
 

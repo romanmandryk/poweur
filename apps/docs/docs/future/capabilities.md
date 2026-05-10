@@ -6,14 +6,14 @@ title: Future Capabilities
 
 # Future Capabilities
 
-The Eurything Protocol is designed to grow. Because identity is expressed in DNS, new capabilities can be advertised by adding new DNS record types — without modifying the core protocol, without changing the relay, and without any central registry update.
+The Poweur ID Protocol is designed to grow. Because identity is expressed in DNS, new capabilities can be advertised by adding new DNS record types — without modifying the core protocol, without changing the relay, and without any central registry update.
 
 ## DNS Capability Advertisement Pattern
 
 The pattern for advertising a new capability is to define a new `TXT` record at a well-known subdomain prefix of the identity:
 
 ```
-_eurything-caps.<identity>.  300  IN  TXT  "eurything-caps=<cap1>,<cap2>,..."
+_eurything-caps.<identity>.  300  IN  TXT  "poweur-caps=<cap1>,<cap2>,..."
 ```
 
 Clients can inspect capability records to determine whether to attempt a capability-specific interaction with an identity before initiating it. This is analogous to DNS `SRV` records, but uses a more compact single-record format.
@@ -22,13 +22,13 @@ Clients can inspect capability records to determine whether to attempt a capabil
 
 ```
 ; Alice supports messaging and publishing
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=messaging,publishing"
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=messaging,publishing"
 
 ; A payment-accepting merchant
-_eurything-caps.shop.example.com.  300  IN  TXT  "eurything-caps=messaging,payments"
+_eurything-caps.shop.poweur.net.  300  IN  TXT  "poweur-caps=messaging,payments"
 
 ; An automated agent
-_eurything-caps.r2d2.poweur.net.   300  IN  TXT  "eurything-caps=messaging,bot"
+_eurything-caps.r2d2.poweur.net.   300  IN  TXT  "poweur-caps=messaging,bot"
 ```
 
 Future capabilities can define their own dedicated `TXT` record formats for richer metadata (e.g. a payment record with a structured currency and address list). The capability record serves as a discovery hint; the detailed record format is capability-specific.
@@ -39,7 +39,7 @@ Future capabilities can define their own dedicated `TXT` record formats for rich
 
 ### Messaging (MVP — Active)
 
-Signed, verified, relay-routed messages between any two Eurything identities. Covered in full in this documentation.
+Signed, verified, relay-routed messages between any two Poweur ID identities. Covered in full in this documentation.
 
 **Planned improvements:**
 - End-to-end encryption (the most pressing post-MVP priority)
@@ -54,46 +54,46 @@ Signed content (posts, articles, announcements) published under an identity's su
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=publishing"
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=publishing"
 ```
 
 **Publishing record (proposed):**
 ```
-_eurything-pub.alice.poweur.net.   300  IN  TXT  "eurything-pub-url=https://alice.poweur.net/feed"
+_eurything-pub.alice.poweur.net.   300  IN  TXT  "poweur-pub-url=https://alice.poweur.net/feed"
 ```
 
 ### Payments
 
-Payment address advertisement under an Eurything identity. Instead of sharing a crypto address or bank account number, a payer can look up a recipient's DNS identity and discover all advertised payment methods.
+Payment address advertisement under an Poweur ID identity. Instead of sharing a crypto address or bank account number, a payer can look up a recipient's DNS identity and discover all advertised payment methods.
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=payments"
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=payments"
 ```
 
 **Payment record (proposed format, not final):**
 ```
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "eurything-pay=btc:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "eurything-pay=lightning:alice@getalby.com"
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "eurything-pay=iban:GB29NWBK60161331926819"
+_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=btc:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=lightning:alice@getalby.com"
+_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=iban:GB29NWBK60161331926819"
 ```
 
 Multiple payment records can be combined in a single `TXT` value or across multiple `TXT` records in the same RRset.
 
 ### Authentication
 
-Allow Eurything identities to authenticate to third-party services without passwords. A service can issue a challenge, the user signs it with their Eurything private key, and the service verifies the signature against the public key in DNS.
+Allow Poweur ID identities to authenticate to third-party services without passwords. A service can issue a challenge, the user signs it with their Poweur ID private key, and the service verifies the signature against the public key in DNS.
 
 This is essentially the same challenge-response flow used in the relay API (`GET /auth/challenge`), generalized to any service and wrapped in a mobile-friendly approval UX.
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=auth"
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=auth"
 ```
 
 **Recommended verifier discovery:**
 ```
-https://service.example/.well-known/eurything.json
+https://service.example/.well-known/poweur.json
 ```
 
 The verifier metadata should describe its domain, supported protocol versions, callback mechanism, and whether it supports QR-based or deep-link based handoff to the mobile signer.
@@ -119,31 +119,31 @@ The verifier metadata should describe its domain, supported protocol versions, c
 
 ### File Sharing
 
-Allow an Eurything identity to act as a portable file-sharing address for systems similar to Google Drive, Dropbox, or Nextcloud.
+Allow an Poweur ID identity to act as a portable file-sharing address for systems similar to Google Drive, Dropbox, or Nextcloud.
 
 There are two distinct levels of support:
 
-1. **Native Eurything file-sharing capability.** A future Eurything-compatible storage provider could let users share files and folders directly to a DNS identity, with verification and discovery handled through Eurything records and signatures.
-2. **Mapping to existing provider identities.** Existing platforms can often be integrated only indirectly by publishing a mapping from the Eurything DNS identity to the provider's native account identifier.
+1. **Native Poweur ID file-sharing capability.** A future Poweur ID-compatible storage provider could let users share files and folders directly to a DNS identity, with verification and discovery handled through Poweur ID records and signatures.
+2. **Mapping to existing provider identities.** Existing platforms can often be integrated only indirectly by publishing a mapping from the Poweur ID DNS identity to the provider's native account identifier.
 
 **Important interoperability note:**
 
-- **Google Drive** sharing is tied to Google-native identities such as Google account email addresses, Google groups, Workspace domains, or public links. A DNS record can advertise which Google account corresponds to an Eurything identity, but Google Drive does not natively resolve DNS identities in its ACL model.
+- **Google Drive** sharing is tied to Google-native identities such as Google account email addresses, Google groups, Workspace domains, or public links. A DNS record can advertise which Google account corresponds to an Poweur ID identity, but Google Drive does not natively resolve DNS identities in its ACL model.
 - **Dropbox** sharing similarly relies on Dropbox account email addresses or Dropbox account IDs. A DNS record can publish that mapping, but Dropbox does not support granting access directly to a DNS identity.
-- **Nextcloud** is the closest fit because it already has a federated identity model (`<user>@<instance>`). An Eurything identity could advertise a mapping to a Nextcloud Federated Cloud ID, making lookup and client-side translation more natural. Even here, the native share target remains the Nextcloud federated ID, not the Eurything DNS name itself.
+- **Nextcloud** is the closest fit because it already has a federated identity model (`<user>@<instance>`). An Poweur ID identity could advertise a mapping to a Nextcloud Federated Cloud ID, making lookup and client-side translation more natural. Even here, the native share target remains the Nextcloud federated ID, not the Poweur ID DNS name itself.
 
 This means the practical first step is not "replace Google Drive or Dropbox identity models with DNS." The practical first step is "let a DNS identity advertise where it can receive file shares on existing systems."
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "eurything-caps=files"
+_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=files"
 ```
 
 **Provider mapping record (proposed):**
 ```
-_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=nextcloud:alice@cloud.example.com"
-_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=dropbox:alice@example.com"
-_eurything-files.alice.poweur.net.  300  IN  TXT  "eurything-files=gdrive:alice@example.com"
+_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=nextcloud:alice@cloud.poweur.net"
+_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=dropbox:alice@poweur.net"
+_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=gdrive:alice@poweur.net"
 ```
 
 The intent of this record is discovery and interoperability:
@@ -152,18 +152,18 @@ The intent of this record is discovery and interoperability:
 - a bridge service can translate the DNS identity into a provider-specific target account
 - a sender can choose the best supported platform before initiating the share
 
-It does **not** imply that the third-party provider will verify Eurything signatures or treat the DNS identity itself as a first-class ACL subject.
+It does **not** imply that the third-party provider will verify Poweur ID signatures or treat the DNS identity itself as a first-class ACL subject.
 
-**Native Eurything file-sharing direction:**
+**Native Poweur ID file-sharing direction:**
 
-A future Eurything-native file-sharing capability could define:
+A future Poweur ID-native file-sharing capability could define:
 
 - a signed file manifest format
 - capability records that advertise storage endpoints or sync providers
 - optional encrypted file transfer or envelope keys
 - recipient-based sharing to DNS identities rather than platform-specific accounts
 
-That would make the Eurything identity itself the true share target, with Google Drive / Dropbox / Nextcloud mappings treated as compatibility bridges rather than the primary model.
+That would make the Poweur ID identity itself the true share target, with Google Drive / Dropbox / Nextcloud mappings treated as compatibility bridges rather than the primary model.
 
 ### Key Rotation and Revocation
 

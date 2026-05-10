@@ -6,7 +6,7 @@ title: Identity Model
 
 # Identity Model
 
-An Eurything identity is a **fully qualified subdomain** that the owner controls. The subdomain is the human-readable handle; the associated public key is the cryptographic identity.
+An Poweur ID identity is a **fully qualified subdomain** that the owner controls. The subdomain is the human-readable handle; the associated public key is the cryptographic identity.
 
 ## Identity Format
 
@@ -24,7 +24,7 @@ Examples of valid identity addresses:
 alice.poweur.net
 r2d2-bot.poweur.net
 mycompany.example.org
-agent-007.example.com
+agent-007.poweur.net
 ```
 
 ## Key Pairs
@@ -35,11 +35,11 @@ Each identity owns **three** cryptographic keys. The first two are long-lived; t
 
 The authoritative signing key for the identity. Used to authorize sessions, sign auth challenges for third-party login, and (for clients that opt out of sessions) sign messages directly.
 
-- **Private key** — never leaves the device. Stored in hardware-backed secure storage (iOS Secure Enclave / Android StrongBox on mobile; OS keychain or a key file under `~/.eurything/keys/` for the CLI).
-- **Public key** — published in DNS at `_eurything.<identity>` as a `TXT` record:
+- **Private key** — never leaves the device. Stored in hardware-backed secure storage (iOS Secure Enclave / Android StrongBox on mobile; OS keychain or a key file under `~/.poweur/keys/` for the CLI).
+- **Public key** — published in DNS at `_poweur.<identity>` as a `TXT` record:
 
 ```
-_eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64url-public-key>"
+_poweur.alice.poweur.net.  300  IN  TXT  "poweur-pubkey=ed25519:<base64url-public-key>"
 ```
 
 Because the public key is published in DNS and the private key never leaves the device, there is no central authority that can forge or revoke an identity's signatures. The owner of the DNS zone is the owner of the identity.
@@ -48,10 +48,10 @@ Because the public key is published in DNS and the private key never leaves the 
 
 Enables senders to end-to-end encrypt messages to this identity. Generated alongside the identity key at registration time and stored on the same device with the same storage rules.
 
-- **Public key** — published in DNS at `_eurything-enc.<identity>`:
+- **Public key** — published in DNS at `_poweur-enc.<identity>`:
 
 ```
-_eurything-enc.alice.poweur.net.  300  IN  TXT  "eurything-enckey=x25519:<base64url-public-key>"
+_poweur-enc.alice.poweur.net.  300  IN  TXT  "poweur-enckey=x25519:<base64url-public-key>"
 ```
 
 - **Private key** — stored locally and used only for decrypting incoming messages. The identity key and encryption key are separate so the cryptographic signing role and the cryptographic encryption role have independent lifetimes and threat models.
@@ -84,7 +84,7 @@ On mobile, the **long-lived identity key** is managed through the **WebAuthn/FID
 2. The platform generates an Ed25519 key pair in the hardware secure enclave.
 3. The app also generates an X25519 encryption key pair in secure storage.
 4. The app submits both public keys to the relay via `POST /identities`.
-5. The relay writes two `TXT` records (`_eurything.<identity>` and `_eurything-enc.<identity>`) and the `A`/`CNAME` routing record using the client-supplied DNS provider token.
+5. The relay writes two `TXT` records (`_poweur.<identity>` and `_poweur-enc.<identity>`) and the `A`/`CNAME` routing record using the client-supplied DNS provider token.
 
 During normal operation the passkey is used **only** to authorize new sessions — at most once per 24 hours. Every routine action (sending a message, reading the inbox, replying to a conversation) is signed by the short-lived session key stored locally in the app, which does **not** trigger a biometric prompt. The session key never leaves the device but does not require hardware-backed storage: losing it only invalidates an in-memory relay entry, not the identity.
 
@@ -92,18 +92,18 @@ Passkey-protected operations on mobile:
 
 - Creating a new identity.
 - Refreshing an expired or soon-to-expire session.
-- Approving a third-party authentication challenge (signup/signin with an Eurything identity on an external site).
+- Approving a third-party authentication challenge (signup/signin with an Poweur ID identity on an external site).
 - Key rotation (post-MVP).
 
 Everything else — sending, receiving, session check — proceeds without user friction.
 
 ## CLI Key Management
 
-The CLI stores keys as files under `~/.eurything/keys/` (configurable via `keys_dir` in `~/.eurything/config.toml`):
+The CLI stores keys as files under `~/.poweur/keys/` (configurable via `keys_dir` in `~/.poweur/config.toml`):
 
 - `<identity>.key` — the long-lived Ed25519 identity private key.
 - `<identity>.enc` — the long-lived X25519 encryption private key.
-- `~/.eurything/sessions/<identity>.toml` — the current short-lived session (session id, session private key, the raw `session_proof` inputs, and expiry).
+- `~/.poweur/sessions/<identity>.toml` — the current short-lived session (session id, session private key, the raw `session_proof` inputs, and expiry).
 
 The CLI runs the same session flow as the mobile app, but the "authorize a new session" step is not gated by biometrics — it just uses the identity key on disk. Headless agents that want to opt out of sessions entirely can do so (messages signed directly with the identity key are still accepted by relays), but the default CLI path uses sessions so CLI and mobile behave identically.
 
@@ -112,12 +112,12 @@ The CLI runs the same session flow as the mobile app, but the "authorize a new s
 The long-lived identity key signs a message envelope — as opposed to the short-lived session key — in these cases:
 
 - **Session registration.** Every call to `POST /sessions` is authorized by an identity signature over the registration canonical string.
-- **`eurything auth sign`.** Third-party authentication challenges (signup/signin) are always signed with the identity key, because relying parties do not have access to any relay's session cache.
-- **`eurything send --sign-with=identity`.** An explicit per-send opt-out of sessions. The CLI skips `POST /sessions`, leaves `session_id` and `session_proof` empty on the wire, and signs the canonical message with the identity Ed25519 key. Relays verify against the sender's DNS-published identity key (or via `GET /identities/<sender>` on a peer relay). See [Message Format → Choosing a signing key](/protocol/message-format#choosing-a-signing-key).
+- **`poweur auth sign`.** Third-party authentication challenges (signup/signin) are always signed with the identity key, because relying parties do not have access to any relay's session cache.
+- **`poweur send --sign-with=identity`.** An explicit per-send opt-out of sessions. The CLI skips `POST /sessions`, leaves `session_id` and `session_proof` empty on the wire, and signs the canonical message with the identity Ed25519 key. Relays verify against the sender's DNS-published identity key (or via `GET /identities/<sender>` on a peer relay). See [Message Format → Choosing a signing key](/protocol/message-format#choosing-a-signing-key).
 
 ## Multiple Identities
 
-A single user can hold multiple Eurything identities. Each identity has its own passkey and its own DNS records. Common use cases for multiple identities:
+A single user can hold multiple Poweur ID identities. Each identity has its own passkey and its own DNS records. Common use cases for multiple identities:
 
 - Separate personal and professional identities
 - A human identity and one or more bot/agent identities
@@ -127,7 +127,7 @@ The mobile app provides an **Active Identity Selector** — a persistent header 
 
 ## Third-Party Authentication
 
-An Eurything identity should be usable as a portable login identity for websites and apps. The recommended flow is:
+An Poweur ID identity should be usable as a portable login identity for websites and apps. The recommended flow is:
 
 1. The verifier creates a challenge containing `domain`, `audience`, `nonce`, `issued_at`, `expires_at`, `request_id`, and the requested action such as `signup` or `signin`.
 2. The request is handed to the mobile app via QR, universal link, or deep link.
@@ -135,7 +135,7 @@ An Eurything identity should be usable as a portable login identity for websites
 4. After approval, the app signs the challenge with the identity's private key.
 5. The verifier resolves the public key from DNS, or via a compatible DID document, and verifies the signature.
 
-This keeps the Eurything DNS name as the canonical identifier while making it usable in login ecosystems that expect signed challenge-response proofs.
+This keeps the Poweur ID DNS name as the canonical identifier while making it usable in login ecosystems that expect signed challenge-response proofs.
 
 ## Bots and Automated Agents
 
@@ -145,7 +145,7 @@ Bots and automated agents interact with the protocol through the CLI or the rela
 - Sign and send messages via `POST /messages`
 - Retrieve inbox messages via `GET /messages/:identity` after completing the challenge–response flow
 
-Bot identities are indistinguishable from human identities at the protocol level. Participants who wish to signal that an identity is automated can add a future capability record (e.g., `eurything-caps=bot`) — but that is not enforced in the MVP.
+Bot identities are indistinguishable from human identities at the protocol level. Participants who wish to signal that an identity is automated can add a future capability record (e.g., `poweur-caps=bot`) — but that is not enforced in the MVP.
 
 ## Identity Lifecycle
 
@@ -153,7 +153,7 @@ Bot identities are indistinguishable from human identities at the protocol level
 
 1. Client generates the long-lived identity (Ed25519) and encryption (X25519) key pairs.
 2. Client calls `POST /identities` with the identity, both public keys, DNS provider type, and a scoped DNS provider API token.
-3. Relay uses the token to write three DNS records: `_eurything.<identity>` (identity public key), `_eurything-enc.<identity>` (encryption public key), and the `A`/`CNAME` routing record.
+3. Relay uses the token to write three DNS records: `_poweur.<identity>` (identity public key), `_poweur-enc.<identity>` (encryption public key), and the `A`/`CNAME` routing record.
 4. Relay discards the token immediately after the DNS writes succeed.
 5. The identity is now resolvable from any relay or client that can reach public DNS.
 6. On first use, the client registers a session via `POST /sessions` so subsequent operations can skip the identity key.

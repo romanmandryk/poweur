@@ -6,11 +6,11 @@ title: Clients Overview
 
 # Clients Overview
 
-Eurything is designed for two categories of client: **human users** interacting through mobile apps, and **automated agents** (bots, scripts, pipelines) using the CLI or the HTTP API directly.
+Poweur ID is designed for two categories of client: **human users** interacting through mobile apps, and **automated agents** (bots, scripts, pipelines) using the CLI or the HTTP API directly.
 
 ## Mobile Apps
 
-Two native mobile apps implement the Eurything Protocol for end-users:
+Two native mobile apps implement the Poweur ID Protocol for end-users:
 
 - **iOS** (`apps/ios`) — built in Swift
 - **Android** (`apps/android`) — built in Kotlin
@@ -32,7 +32,7 @@ A compromised relay cannot expose user secrets because the relay never holds the
 
 **Identity creation.** The user chooses a handle (minimum 8 characters, DNS-safe). The app generates a passkey, extracts the public key, and registers the identity with the relay. The relay writes DNS records. The user sees a confirmation screen once DNS propagation is verified.
 
-**Multiple identities.** A user can hold multiple Eurything identities. Each identity has its own passkey. An Active Identity Selector header persists across all screens.
+**Multiple identities.** A user can hold multiple Poweur ID identities. Each identity has its own passkey. An Active Identity Selector header persists across all screens.
 
 **Contacts.** Contacts are stored locally. Adding a contact by DNS identity triggers a live DNS lookup to show their capability records, display name, and profile picture.
 
@@ -65,7 +65,7 @@ Authentication is not treated as a separate identity system. It reuses the same 
 
 The CLI (`apps/cli`) provides a scriptable interface to the relay API for developers, bots, and automated agents. See [CLI Reference](/clients/cli-reference) for full command documentation.
 
-The CLI stores key pairs locally (OS keychain or `~/.eurything/keys/`) and communicates with a configured relay. It supports machine-readable JSON output (`--json`) for use in scripts and automated pipelines.
+The CLI stores key pairs locally (OS keychain or `~/.poweur/keys/`) and communicates with a configured relay. It supports machine-readable JSON output (`--json`) for use in scripts and automated pipelines.
 
 ## Direct API Access
 
