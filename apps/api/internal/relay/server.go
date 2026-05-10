@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/ratelimit"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/ratelimit"
+	"github.com/poweur/api/internal/storage"
 )
 
 const (
@@ -76,11 +76,15 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
-	return mux
+	mountWebStatic(mux, s.cfg.WebStaticDir)
+	return corsMiddleware(mux)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"service": "eurything-relay"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"service": "poweur-relay",
+		"web_ui":  "GET /app/ (when WEB_STATIC_DIR is set)",
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +177,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
-// `_eurything-enc.<identity>` TXT record for an already-registered identity.
+// `_poweur-enc.<identity>` TXT record for an already-registered identity.
 // Owner-only: caller must sign the canonical encryption-key-update string
 // with the long-lived identity key (verified via DNS or local store).
 //
@@ -489,17 +493,17 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
 		return
 	}
-	headerIdentity := r.Header.Get("X-Eurything-Identity")
+	headerIdentity := r.Header.Get("X-Poweur-Identity")
 	if headerIdentity == "" || headerIdentity != identity {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing or mismatch")
 		return
 	}
-	signature := r.Header.Get("X-Eurything-Signature")
+	signature := r.Header.Get("X-Poweur-Signature")
 	if signature == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
 		return
 	}
-	sessionID := r.Header.Get("X-Eurything-Session-Id")
+	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
 	challenge, ok := s.challenges.Consume(identity)
 	if !ok {
@@ -641,7 +645,7 @@ func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) 
 		return entry.PublicKeyBytes, nil
 	}
 
-	txtRecords, err := s.resolver.LookupTXT(ctx, fmt.Sprintf("_eurything.%s", identity))
+	txtRecords, err := s.resolver.LookupTXT(ctx, fmt.Sprintf("_poweur.%s", identity))
 	if err == nil {
 		return crypto.ParseTXTRecord(txtRecords)
 	}

@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eurything/cli/internal/config"
-	cryptoe2e "github.com/eurything/cli/internal/crypto"
-	"github.com/eurything/cli/internal/identity"
-	"github.com/eurything/cli/internal/journal"
-	"github.com/eurything/cli/internal/session"
+	"github.com/poweur/cli/internal/config"
+	cryptoe2e "github.com/poweur/cli/internal/crypto"
+	"github.com/poweur/cli/internal/identity"
+	"github.com/poweur/cli/internal/journal"
+	"github.com/poweur/cli/internal/session"
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -249,7 +249,7 @@ func runIdentityDNS(args []string, stdout, stderr io.Writer) int {
 	}
 	identityValue := resolveIdentity(fs.Arg(0), *useIdentity)
 	if identityValue == "" {
-		fmt.Fprintln(stderr, "usage: eurything identity dns <identity>")
+		fmt.Fprintln(stderr, "usage: poweur identity dns <identity>")
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -299,7 +299,7 @@ func runIdentityUse(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "usage: eurything identity use <identity>")
+		fmt.Fprintln(stderr, "usage: poweur identity use <identity>")
 		return 1
 	}
 	identityValue := fs.Arg(0)
@@ -377,7 +377,7 @@ func runIdentityList(args []string, stdout, stderr io.Writer) int {
 
 // runIdentityAddEncryptionKey generates a fresh X25519 keypair for an
 // already-registered identity, saves the private half locally, and asks the
-// relay to publish the public half to DNS under `_eurything-enc.<identity>`.
+// relay to publish the public half to DNS under `_poweur-enc.<identity>`.
 //
 // Modes:
 //   - no existing .enc file: a new keypair is minted (the normal "retro-fit"
@@ -409,7 +409,7 @@ func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
 		identityValue = resolveIdentity(*useIdentity, cfg.Identity)
 	}
 	if identityValue == "" || cfg.KeysDir == "" {
-		fmt.Fprintln(stderr, "identity not configured (pass <identity> or run `eurything identity use <identity>` first)")
+		fmt.Fprintln(stderr, "identity not configured (pass <identity> or run `poweur identity use <identity>` first)")
 		return 1
 	}
 	if *relayURL == "" {
@@ -501,7 +501,7 @@ func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
 //     hide their IP from the recipient relay.
 //
 // Either way, every successful send is recorded in the per-identity
-// pending journal so `eurything messages status` can render WhatsApp-style
+// pending journal so `poweur messages status` can render WhatsApp-style
 // ticks later. A 202 advances the local state to delivered_recipient_relay
 // (tick 1); tick 2 (delivered_client) shows up later via inbox polling.
 func runSend(args []string, stdout, stderr io.Writer) int {
@@ -520,7 +520,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: eurything send <to> <message> [--sign-with=session|identity] [--via-home-relay]")
+		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay]")
 		return 1
 	}
 	mode := strings.ToLower(strings.TrimSpace(*signWith))
@@ -557,7 +557,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(recipientEncPub) != 32 {
 		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n"+
-			"Ask them to run `eurything identity add-encryption-key %s` to publish one.\n",
+			"Ask them to run `poweur identity add-encryption-key %s` to publish one.\n",
 			recipient, recipient)
 		return 1
 	}
@@ -982,7 +982,7 @@ func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentit
 	return nil
 }
 
-// runMessages dispatches the `eurything messages …` subcommands.
+// runMessages dispatches the `poweur messages …` subcommands.
 func runMessages(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "messages subcommand required: status")
@@ -1076,7 +1076,7 @@ func tickGlyph(state journal.State) string {
 
 func runRelay(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "status" {
-		fmt.Fprintln(stderr, "usage: eurything relay status")
+		fmt.Fprintln(stderr, "usage: poweur relay status")
 		return 1
 	}
 	cfg, err := config.Load()
@@ -1207,7 +1207,7 @@ func runSessionRefresh(args []string, stdout, stderr io.Writer) int {
 // session_id is known) issues an identity-signed DELETE /sessions/:id to
 // the home relay so the relay drops its server-side state too. Relay
 // failures don't block local deletion; the local cache is the source of
-// truth for `eurything session status`.
+// truth for `poweur session status`.
 func runSessionRevoke(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -1625,20 +1625,20 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  eurything identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--json]
-  eurything identity show [--use-identity=...] [--json]
-  eurything identity dns <identity> [--use-identity=...] [--json]
-  eurything identity use <identity> [--json]
-  eurything identity list [--json]
-  eurything identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  eurything send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
-  eurything inbox [--use-identity=...] [--json]
-  eurything session status [--use-identity=...] [--json]
-  eurything session refresh [--use-identity=...] [--json]
-  eurything session revoke [--use-identity=...] [--json]
-  eurything relay status [--json]
-  eurything auth inspect <request-file-or-url> [--json]
-  eurything auth sign <request-file-or-url> [--use-identity=...] [--json]
+  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--json]
+  poweur identity show [--use-identity=...] [--json]
+  poweur identity dns <identity> [--use-identity=...] [--json]
+  poweur identity use <identity> [--json]
+  poweur identity list [--json]
+  poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
+  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
+  poweur inbox [--use-identity=...] [--json]
+  poweur session status [--use-identity=...] [--json]
+  poweur session refresh [--use-identity=...] [--json]
+  poweur session revoke [--use-identity=...] [--json]
+  poweur relay status [--json]
+  poweur auth inspect <request-file-or-url> [--json]
+  poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)
 }
 

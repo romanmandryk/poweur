@@ -1,9 +1,12 @@
 {
-  "name": "eurything",
+  "name": "poweur",
   "private": true,
   "scripts": {
-    "ios": "pnpm --filter @eurything/ios build",
-    "android": "pnpm --filter @eurything/android build"
+    "ios": "pnpm --filter @poweur/ios build",
+    "android": "pnpm --filter @poweur/android build",
+    "web": "pnpm --filter @poweur/web build",
+    "web:dev": "pnpm --filter @poweur/web dev",
+    "web:test": "pnpm --filter @poweur/web test"
   },
   "devDependencies": {},
   "engines": {

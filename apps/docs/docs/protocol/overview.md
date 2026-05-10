@@ -6,7 +6,7 @@ title: Protocol Overview
 
 # Protocol Overview
 
-The Eurything Protocol defines the message format, signing scheme, verification procedure, authentication flow, and end-to-end routing model used across all system components. Every client, relay, and automated agent that participates in the Eurything network must conform to this protocol.
+The Poweur ID Protocol defines the message format, signing scheme, verification procedure, authentication flow, and end-to-end routing model used across all system components. Every client, relay, and automated agent that participates in the Poweur ID network must conform to this protocol.
 
 ## Design Principles
 
@@ -18,7 +18,7 @@ The Eurything Protocol defines the message format, signing scheme, verification 
 
 **Signatures prevent forgery; DNS prevents impersonation.** A message cannot be forged because it must be signed by the identity's private key. An identity cannot be impersonated because the authoritative public key is in DNS — which only the domain owner controls.
 
-**The same identity must work outside messaging.** An Eurything DNS identity is not only a messaging address. The same key material should be usable for third-party sign-up and sign-in flows, with the mobile app acting as the user's signer and approval surface.
+**The same identity must work outside messaging.** An Poweur ID DNS identity is not only a messaging address. The same key material should be usable for third-party sign-up and sign-in flows, with the mobile app acting as the user's signer and approval surface.
 
 **Wire format is JSON for MVP.** All messages are UTF-8 encoded JSON. A future iteration may adopt a compact binary format (Protocol Buffers, MessagePack) while preserving the field schema and signing semantics.
 
@@ -27,7 +27,7 @@ The Eurything Protocol defines the message format, signing scheme, verification 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    DNS (Global)                          │
-│  _eurything.alice.poweur.net TXT "eurything-pubkey=..."  │
+│  _poweur.alice.poweur.net TXT "poweur-pubkey=..."  │
 │  alice.poweur.net            A   <relay-ip>              │
 └─────────────────────┬───────────────────────────────────┘
                       │ lookup
@@ -49,7 +49,7 @@ The Eurything Protocol defines the message format, signing scheme, verification 
 
 ### Identity Layer (DNS)
 
-Each identity is a fully qualified subdomain (`alice.poweur.net`). The identity's public key is stored in a `TXT` record at `_eurything.<subdomain>`. The identity's relay is found by resolving an `A` or `CNAME` record on the subdomain itself.
+Each identity is a fully qualified subdomain (`alice.poweur.net`). The identity's public key is stored in a `TXT` record at `_poweur.<subdomain>`. The identity's relay is found by resolving an `A` or `CNAME` record on the subdomain itself.
 
 Any party — another relay, a client, an auditor — can verify a message by fetching the sender's public key from DNS and checking the signature. No trusted third party is involved.
 
@@ -84,11 +84,11 @@ The current protocol version is **0.1** (MVP). The `version` field is included i
 
 ## Interoperability Direction
 
-Eurything keeps the DNS name as the canonical identifier, but it should map cleanly into existing ecosystems:
+Poweur ID keeps the DNS name as the canonical identifier, but it should map cleanly into existing ecosystems:
 
 - `did:dns:<fqdn>` is the closest conceptual DID mapping, but that method is still emerging.
 - `did:web:<fqdn>` via `https://<identity>/.well-known/did.json` is the most practical bridge for existing DID-aware tooling.
-- `/.well-known/eurything.json` should be the protocol's own discovery endpoint for relay metadata, supported capabilities, and mobile app auth handoff details.
+- `/.well-known/poweur.json` should be the protocol's own discovery endpoint for relay metadata, supported capabilities, and mobile app auth handoff details.
 - Signed message envelopes should evolve toward a more explicit structure, conceptually similar to DIDComm basic messages or Nostr-style events, while preserving DNS-native verification and routing.
 
 ## Related

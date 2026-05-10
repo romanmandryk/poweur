@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 func TestMemoryProviderWriteAndRead(t *testing.T) {

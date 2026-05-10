@@ -201,11 +201,11 @@ Before calling this endpoint, obtain a challenge from `GET /auth/challenge?ident
 
 | Header | Required | Value |
 |--------|:--------:|-------|
-| `X-Eurything-Identity`   | Yes | The identity subdomain (e.g. `alice.poweur.net`) |
-| `X-Eurything-Signature`  | Yes | Base64-encoded signature of the challenge string |
-| `X-Eurything-Session-Id` | No  | Session identifier when the challenge is signed with the session key. If omitted, the relay verifies with the long-lived identity key. |
+| `X-Poweur-Identity`   | Yes | The identity subdomain (e.g. `alice.poweur.net`) |
+| `X-Poweur-Signature`  | Yes | Base64-encoded signature of the challenge string |
+| `X-Poweur-Session-Id` | No  | Session identifier when the challenge is signed with the session key. If omitted, the relay verifies with the long-lived identity key. |
 
-When `X-Eurything-Session-Id` is present but the session is unknown or expired, the relay responds with `401 session_expired` so the client can re-register and retry.
+When `X-Poweur-Session-Id` is present but the session is unknown or expired, the relay responds with `401 session_expired` so the client can re-register and retry.
 
 ### Path parameters
 
@@ -363,8 +363,8 @@ made against (the relay's `RelayAddress` config value). `<encryption_public_key>
 
 On success, the relay creates (or updates) up to three DNS records:
 
-1. `TXT` at `_eurything.<identity>` — `eurything-pubkey=ed25519:<public_key>`
-2. `TXT` at `_eurything-enc.<identity>` — `eurything-enckey=x25519:<encryption_public_key>` (only when `encryption_public_key` is supplied)
+1. `TXT` at `_poweur.<identity>` — `poweur-pubkey=ed25519:<public_key>`
+2. `TXT` at `_poweur-enc.<identity>` — `poweur-enckey=x25519:<encryption_public_key>` (only when `encryption_public_key` is supplied)
 3. `A` (or `CNAME`) at `<identity>` — pointing to the relay's own address
 
 ### Responses
@@ -448,7 +448,7 @@ identity-encryption-key
 
 ### DNS records written
 
-1. `TXT` at `_eurything-enc.<identity>` — `eurything-enckey=x25519:<encryption_public_key>` (created or updated)
+1. `TXT` at `_poweur-enc.<identity>` — `poweur-enckey=x25519:<encryption_public_key>` (created or updated)
 
 ### Responses
 
@@ -468,7 +468,7 @@ identity-encryption-key
 }
 ```
 
-The equivalent CLI command is `eurything identity add-encryption-key`.
+The equivalent CLI command is `poweur identity add-encryption-key`.
 
 ---
 

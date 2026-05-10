@@ -3,16 +3,16 @@ import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'Eurything Protocol',
+  title: 'Poweur ID Protocol',
   tagline: 'Open, DNS-native identity and messaging protocol',
   favicon: 'img/favicon.ico',
 
   // Production URL — deploy standalone
-  url: 'https://docs.eurything.com',
+  url: 'https://docs.poweur.com',
   baseUrl: '/',
 
-  organizationName: 'eurything',
-  projectName: 'eurything',
+  organizationName: 'poweur',
+  projectName: 'poweur',
 
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
@@ -35,7 +35,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
-          editUrl: 'https://github.com/eurything/eurything/edit/main/apps/docs/',
+          editUrl: 'https://github.com/poweur/poweur/edit/main/apps/docs/',
         },
         blog: false,
         theme: {
@@ -48,9 +48,9 @@ const config: Config = {
   themeConfig: {
     image: 'img/social-card.png',
     navbar: {
-      title: 'Eurything Protocol',
+      title: 'Poweur ID Protocol',
       logo: {
-        alt: 'Eurything Logo',
+        alt: 'Poweur ID Logo',
         src: 'img/logo.svg',
       },
       items: [
@@ -107,7 +107,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Eurything. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Poweur ID. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

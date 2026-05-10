@@ -1,4 +1,4 @@
-// Package relay is the public entry point of the Eurything relay server.
+// Package relay is the public entry point of the Poweur ID relay server.
 // It re-exports just enough of the internal implementation so external
 // consumers (notably integration tests living in a separate Go module) can
 // spin up an in-process relay server.
@@ -7,9 +7,9 @@ package relay
 import (
 	"net/http"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/dns"
-	irelay "github.com/eurything/api/internal/relay"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/dns"
+	irelay "github.com/poweur/api/internal/relay"
 )
 
 type (

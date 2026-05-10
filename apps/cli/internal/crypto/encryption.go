@@ -121,7 +121,7 @@ func Decrypt(recipientPrivateKey []byte, payload EncryptedPayload) ([]byte, erro
 func deriveKey(shared, ephemeralPub, recipientPub []byte) ([]byte, error) {
 	salt := append([]byte{}, ephemeralPub...)
 	salt = append(salt, recipientPub...)
-	info := []byte("eurything/msg/v1")
+	info := []byte("poweur/msg/v1")
 	kdf := hkdf.New(sha256.New, shared, salt, info)
 	key := make([]byte, chacha20poly1305.KeySize)
 	if _, err := io.ReadFull(kdf, key); err != nil {
@@ -131,7 +131,7 @@ func deriveKey(shared, ephemeralPub, recipientPub []byte) ([]byte, error) {
 }
 
 func buildAAD(ephemeralPub, recipientPub []byte) []byte {
-	ad := []byte("eurything/msg/v1\n")
+	ad := []byte("poweur/msg/v1\n")
 	ad = append(ad, ephemeralPub...)
 	ad = append(ad, recipientPub...)
 	return ad

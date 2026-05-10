@@ -6,32 +6,32 @@ title: CLI Reference
 
 # CLI Reference
 
-The Eurything CLI (`eurything`) is a scriptable command-line tool for developers, bots, and automated agents. It provides full access to the Eurything Protocol: identity management, message sending, inbox retrieval, and relay diagnostics.
+The Poweur ID CLI (`poweur`) is a scriptable command-line tool for developers, bots, and automated agents. It provides full access to the Poweur ID Protocol: identity management, message sending, inbox retrieval, and relay diagnostics.
 
 ## Installation
 
 The CLI is distributed as a single binary. It can also be run via the monorepo:
 
 ```bash
-pnpm --filter @eurything/cli start
+pnpm --filter @poweur/cli start
 ```
 
 Or built and installed globally:
 
 ```bash
-pnpm --filter @eurything/cli build
-cp dist/eurything /usr/local/bin/
+pnpm --filter @poweur/cli build
+cp dist/poweur /usr/local/bin/
 ```
 
 ## Configuration
 
-Configuration is stored at `~/.eurything/config.toml`. The CLI stores a default identity plus a root keys directory; you can override the identity per command.
+Configuration is stored at `~/.poweur/config.toml`. The CLI stores a default identity plus a root keys directory; you can override the identity per command.
 
 ```toml
-# ~/.eurything/config.toml
+# ~/.poweur/config.toml
 relay_url = "https://relay.poweur.net"
 identity  = "mybot.poweur.net"
-keys_dir  = "~/.eurything/keys"
+keys_dir  = "~/.poweur/keys"
 ```
 
 Individual settings can be overridden via environment variables:
@@ -55,21 +55,21 @@ All commands accept these global flags:
 
 ## Commands
 
-### `eurything identity create <name>`
+### `poweur identity create <name>`
 
 Generate a new long-lived Ed25519 signing keypair **and** an X25519 encryption keypair, then register both public keys (and the relay routing record) with the configured relay.
 
 ```bash
-eurything identity create alice
+poweur identity create alice
 ```
 
 The relay writes three DNS records:
 
-- `_eurything.<identity>` — identity public key
-- `_eurything-enc.<identity>` — encryption public key
+- `_poweur.<identity>` — identity public key
+- `_poweur-enc.<identity>` — encryption public key
 - `<identity>` — `A`/`CNAME` routing record
 
-Private keys are written to `~/.eurything/keys/` (`<identity>.key` and `<identity>.enc`).
+Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.enc`).
 
 **Flags:**
 
@@ -83,7 +83,7 @@ Private keys are written to `~/.eurything/keys/` (`<identity>.key` and `<identit
 
 **Example (JSON output):**
 ```bash
-eurything identity create alice --dns-provider cloudflare --json
+poweur identity create alice --dns-provider cloudflare --json
 ```
 
 ```json
@@ -91,8 +91,8 @@ eurything identity create alice --dns-provider cloudflare --json
   "identity":              "alice.poweur.net",
   "public_key":            "MCowBQYDK2VwAyEAn3a7...",
   "encryption_public_key": "2qsV0x9Ru9v3o_VzH7mHsH-yjwI5sOqO6sRpCVoqXxA",
-  "key_path":              "~/.eurything/keys/alice.poweur.net.key",
-  "encryption_key_path":   "~/.eurything/keys/alice.poweur.net.enc",
+  "key_path":              "~/.poweur/keys/alice.poweur.net.key",
+  "encryption_key_path":   "~/.poweur/keys/alice.poweur.net.enc",
   "relay":                 "https://relay.poweur.net",
   "registered":            true
 }
@@ -100,52 +100,52 @@ eurything identity create alice --dns-provider cloudflare --json
 
 ---
 
-### `eurything identity show`
+### `poweur identity show`
 
 Display the current identity's subdomain, identity public key, and (if available) encryption public key.
 
 ```bash
-eurything identity show
+poweur identity show
 ```
 
 ---
 
-### `eurything identity dns <identity>`
+### `poweur identity dns <identity>`
 
 Perform a live DNS lookup to verify that the identity's `TXT` (public key), `TXT` (encryption key), and `A`/`CNAME` records are propagated.
 
 ```bash
-eurything identity dns alice.poweur.net
+poweur identity dns alice.poweur.net
 ```
 
 ---
 
-### `eurything identity use <identity>`
+### `poweur identity use <identity>`
 
-Update the default identity stored in `~/.eurything/config.toml`.
+Update the default identity stored in `~/.poweur/config.toml`.
 
 ```bash
-eurything identity use id2.poweur.net
+poweur identity use id2.poweur.net
 ```
 
 ---
 
-### `eurything identity list`
+### `poweur identity list`
 
 List all identities discovered in the keys directory. The current default is marked with `*`.
 
 ```bash
-eurything identity list
+poweur identity list
 ```
 
 ---
 
-### `eurything identity add-encryption-key`
+### `poweur identity add-encryption-key`
 
-Retrofit an existing identity with an X25519 encryption key. Use this on identities created before E2E encryption was mandatory (they have no `_eurything-enc.<identity>` record and therefore cannot receive messages). The command generates an X25519 keypair on disk, hands the public half and a scoped DNS token to the relay, and waits until the relay confirms the DNS `TXT` record was written.
+Retrofit an existing identity with an X25519 encryption key. Use this on identities created before E2E encryption was mandatory (they have no `_poweur-enc.<identity>` record and therefore cannot receive messages). The command generates an X25519 keypair on disk, hands the public half and a scoped DNS token to the relay, and waits until the relay confirms the DNS `TXT` record was written.
 
 ```bash
-eurything identity add-encryption-key --use-identity alice.poweur.net
+poweur identity add-encryption-key --use-identity alice.poweur.net
 ```
 
 **Flags:**
@@ -157,20 +157,20 @@ eurything identity add-encryption-key --use-identity alice.poweur.net
 
 ---
 
-### `eurything send <to> <message>`
+### `poweur send <to> <message>`
 
 Sign and send an end-to-end-encrypted message. The CLI:
 
 1. Loads (or creates) a session for the active identity via `ensure session`.
-2. Generates a client-side message id (ULID-shaped) and writes a `queued` entry to the local pending journal (`~/.eurything/pending/<identity>.jsonl`).
-3. Looks up the recipient's X25519 encryption public key at `_eurything-enc.<recipient>`. **If no record is found, the send is aborted** with an error that points the recipient at `eurything identity add-encryption-key`. There is no plaintext fallback.
+2. Generates a client-side message id (ULID-shaped) and writes a `queued` entry to the local pending journal (`~/.poweur/pending/<identity>.jsonl`).
+3. Looks up the recipient's X25519 encryption public key at `_poweur-enc.<recipient>`. **If no record is found, the send is aborted** with an error that points the recipient at `poweur identity add-encryption-key`. There is no plaintext fallback.
 4. Encrypts the payload with ChaCha20-Poly1305 under an X25519-derived key (see [End-to-End Encryption](/protocol/message-format#end-to-end-encryption)).
 5. Signs the canonical envelope (including the `id:` line and the `enc:` line) with the **session private key**.
 6. Attaches `session_id` and `session_proof` so the recipient's relay can verify without contacting the sender's relay.
 7. Resolves the **recipient's** home relay via DNS and POSTs `/messages` directly there (default direct-send model). On `202 Accepted` the journal advances to `delivered_recipient_relay` (tick 1).
 
 ```bash
-eurything send bob.example.org "Hey Bob, are you there?"
+poweur send bob.example.org "Hey Bob, are you there?"
 ```
 
 **Flags:**
@@ -188,7 +188,7 @@ Note that `cfg.RelayURL` (the configured `relay_url`) is the **home** relay — 
 
 ---
 
-### `eurything inbox`
+### `poweur inbox`
 
 Fetch and display messages from the relay inbox for the active identity. The CLI:
 
@@ -200,7 +200,7 @@ Fetch and display messages from the relay inbox for the active identity. The CLI
 6. Silently re-registers and retries if the relay reports the session expired.
 
 ```bash
-eurything inbox
+poweur inbox
 ```
 
 **Flags:**
@@ -212,10 +212,10 @@ eurything inbox
 
 ---
 
-### `eurything messages status`
+### `poweur messages status`
 
 Show the local pending journal for the active identity. Each line of
-`~/.eurything/pending/<identity>.jsonl` is collapsed to the latest state
+`~/.poweur/pending/<identity>.jsonl` is collapsed to the latest state
 per `message_id`, then rendered with WhatsApp-style tick glyphs:
 
 | Glyph | State | Meaning |
@@ -226,9 +226,9 @@ per `message_id`, then rendered with WhatsApp-style tick glyphs:
 | `✗` | `failed` | Send pipeline gave up; sticky |
 
 ```bash
-eurything messages status
-eurything messages status --id msg_01j9xkay7g000000000000000
-eurything messages status --json
+poweur messages status
+poweur messages status --id msg_01j9xkay7g000000000000000
+poweur messages status --json
 ```
 
 **Flags:**
@@ -243,38 +243,38 @@ See [Delivery Acks](/protocol/delivery-acks) for the full state model.
 
 ---
 
-### `eurything session status`
+### `poweur session status`
 
 Show the locally cached session for the active identity.
 
 ```bash
-eurything session status
+poweur session status
 ```
 
-### `eurything session refresh`
+### `poweur session refresh`
 
 Force-delete the cached session and register a new one. Useful when debugging or rotating keys without waiting for the 24h TTL.
 
 ```bash
-eurything session refresh
+poweur session refresh
 ```
 
-### `eurything session revoke`
+### `poweur session revoke`
 
 Delete the local session file only (does not call `DELETE /sessions/:id` on the relay). The next send or inbox call will transparently re-register.
 
 ```bash
-eurything session revoke
+poweur session revoke
 ```
 
 ---
 
-### `eurything relay status`
+### `poweur relay status`
 
 Check relay connectivity. Displays the configured relay endpoint and relay version, and reports whether the relay is reachable.
 
 ```bash
-eurything relay status
+poweur relay status
 ```
 
 **Output:**

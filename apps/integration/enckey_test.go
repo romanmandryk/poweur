@@ -5,10 +5,10 @@
 //
 //   - Alice and Bob both have working signing keys and relay host records in
 //     DNS, but Bob is a "legacy" identity that never published an
-//     `_eurything-enc.<bob>` TXT record (and has no local .enc file).
+//     `_poweur-enc.<bob>` TXT record (and has no local .enc file).
 //   - Under the strict encrypt-only policy, Alice's CLI MUST refuse to send
 //     to Bob (exit non-zero with a clear "publish an encryption key" hint).
-//   - Bob runs `eurything identity add-encryption-key`. The CLI mints an
+//   - Bob runs `poweur identity add-encryption-key`. The CLI mints an
 //     X25519 keypair, saves the private half locally, and hits the new
 //     POST /identities/{identity}/encryption-key relay endpoint. The relay
 //     uses the caller's DNS token to upsert the TXT record.
@@ -26,9 +26,9 @@ import (
 	"strings"
 	"testing"
 
-	clipkg "github.com/eurything/cli/pkg/cli"
+	clipkg "github.com/poweur/cli/pkg/cli"
 
-	"github.com/eurything/integration/fakedns"
+	"github.com/poweur/integration/fakedns"
 )
 
 func TestINT10_AddEncryptionKeyRetrofit(t *testing.T) {
@@ -45,22 +45,22 @@ func TestINT10_AddEncryptionKeyRetrofit(t *testing.T) {
 	// legacy identity.
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 	runCLI(t, bobHome,
 		"identity", "create", "bob",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 
 	// Rewind Bob to the "legacy" state.
-	zone.SetTXT("_eurything-enc.bob.example.com")
-	bobEncPath := filepath.Join(bobHome, ".eurything", "keys", "bob.example.com.enc")
+	zone.SetTXT("_poweur-enc.bob.poweur.net")
+	bobEncPath := filepath.Join(bobHome, ".poweur", "keys", "bob.poweur.net.enc")
 	if err := os.Remove(bobEncPath); err != nil {
 		t.Fatalf("remove bob enc key: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestINT10_AddEncryptionKeyRetrofit(t *testing.T) {
 	t.Setenv("HOME", aliceHome)
 	var preOut, preErr bytes.Buffer
 	preCode := clipkg.Run(
-		[]string{"send", "bob.example.com", "pre-retrofit ping"},
+		[]string{"send", "bob.poweur.net", "pre-retrofit ping"},
 		&preOut, &preErr,
 	)
 	if preCode == 0 {
@@ -94,8 +94,8 @@ func TestINT10_AddEncryptionKeyRetrofit(t *testing.T) {
 
 	// Zone now has a non-empty enc record again, and the local file is back.
 	snapshot := zone.Snapshot()
-	encTXT, ok := snapshot["TXT:_eurything-enc.bob.example.com"]
-	if !ok || len(encTXT) == 0 || !strings.HasPrefix(encTXT[0], "eurything-enckey=x25519:") {
+	encTXT, ok := snapshot["TXT:_poweur-enc.bob.poweur.net"]
+	if !ok || len(encTXT) == 0 || !strings.HasPrefix(encTXT[0], "poweur-enckey=x25519:") {
 		t.Fatalf("encryption TXT record missing after add-encryption-key:\n%v", snapshot)
 	}
 	if _, err := os.Stat(bobEncPath); err != nil {
@@ -108,9 +108,9 @@ func TestINT10_AddEncryptionKeyRetrofit(t *testing.T) {
 
 	// Alice sends an encrypted follow-up; Bob decrypts end-to-end.
 	secret := "post-retrofit payload"
-	runCLI(t, aliceHome, "send", "bob.example.com", secret)
+	runCLI(t, aliceHome, "send", "bob.poweur.net", secret)
 	stdout, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }
 
 func TestINT10b_RotateEncryptionKeyRefusesWithoutFlag(t *testing.T) {
@@ -122,7 +122,7 @@ func TestINT10b_RotateEncryptionKeyRefusesWithoutFlag(t *testing.T) {
 	aliceHome := t.TempDir()
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
@@ -148,7 +148,7 @@ func TestINT10b_RotateEncryptionKeyRefusesWithoutFlag(t *testing.T) {
 	}
 
 	// With --rotate the command succeeds and the DNS record changes.
-	before := zone.Snapshot()["TXT:_eurything-enc.alice.example.com"][0]
+	before := zone.Snapshot()["TXT:_poweur-enc.alice.poweur.net"][0]
 	runCLI(t, aliceHome,
 		"identity", "add-encryption-key",
 		"--rotate",
@@ -156,7 +156,7 @@ func TestINT10b_RotateEncryptionKeyRefusesWithoutFlag(t *testing.T) {
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
-	after := zone.Snapshot()["TXT:_eurything-enc.alice.example.com"][0]
+	after := zone.Snapshot()["TXT:_poweur-enc.alice.poweur.net"][0]
 	if before == after {
 		t.Fatalf("enc TXT record did not change after rotate: %s", after)
 	}

@@ -10,7 +10,7 @@ COV_DIR := coverage
 PROF    := $(COV_DIR)/cover.out
 HTML    := $(COV_DIR)/index.html
 # Count every package in this module toward coverage (matches `go help test` -coverpkg).
-COVERPKG := github.com/eurything/api/...
+COVERPKG := github.com/poweur/api/...
 
 .PHONY: test cover cover-html cover-func clean-coverage
 test:

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/eurything/cli/internal/config"
-	cryptoe2e "github.com/eurything/cli/internal/crypto"
+	"github.com/poweur/cli/internal/config"
+	cryptoe2e "github.com/poweur/cli/internal/crypto"
 )
 
 // GenerateKeypair returns a new Ed25519 signing keypair for long-lived identity signing.
@@ -77,7 +77,7 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 // Returns os.ErrNotExist wrapped when the key file is missing so callers can
 // surface an actionable error — there is no plaintext fallback, so a missing
 // key means the identity cannot decrypt inbound messages until one is
-// generated and published via `eurything identity add-encryption-key`.
+// generated and published via `poweur identity add-encryption-key`.
 func LoadEncryptionPrivateKey(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

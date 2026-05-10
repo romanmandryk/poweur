@@ -6,7 +6,7 @@ title: Security Model
 
 # Security Model
 
-The fundamental principle of the Eurything security model is: **trust is rooted in the device's secure enclave; the relay is an untrusted forwarder**.
+The fundamental principle of the Poweur ID security model is: **trust is rooted in the device's secure enclave; the relay is an untrusted forwarder**.
 
 Every design decision in the protocol follows from this principle. The relay can be observed, replaced, or fully compromised without exposing user private keys, allowing message forgery, or enabling identity impersonation.
 
@@ -56,10 +56,10 @@ Every design decision in the protocol follows from this principle. The relay can
 |---------------|-----------|:----------:|
 | Long-lived identity private key (Ed25519) | Device secure enclave (iOS / Android); key file on CLI | Never |
 | Long-lived encryption private key (X25519) | Device secure storage; key file on CLI | Never |
-| Session private key (Ed25519, ≤24h) | Device local storage (mobile app / CLI `~/.eurything/sessions/`) | Never; discarded on revoke or expiry |
+| Session private key (Ed25519, ≤24h) | Device local storage (mobile app / CLI `~/.poweur/sessions/`) | Never; discarded on revoke or expiry |
 | DNS provider API token | iOS Keychain / Android Keystore | Only during DNS writes |
-| Identity public key | DNS `_eurything.<identity>` TXT record | Public — visible to all |
-| Encryption public key | DNS `_eurything-enc.<identity>` TXT record | Public — visible to all |
+| Identity public key | DNS `_poweur.<identity>` TXT record | Public — visible to all |
+| Encryption public key | DNS `_poweur-enc.<identity>` TXT record | Public — visible to all |
 | Session public key | Relay in-memory session cache | Lost on relay restart |
 | Relay endpoint | App config | Not a secret |
 | Rate limit counters | Relay in-memory | Lost on restart |
@@ -114,7 +114,7 @@ TLS protects the transport between clients and relays, and between relays. Certi
 Because DNS zone integrity is critical:
 
 1. **Scope API tokens.** DNS provider tokens supplied during identity registration should be scoped to the minimum required zone and permissions (create/update TXT and A/CNAME records only, no delete, no cross-zone).
-2. **Enable DNSSEC.** DNSSEC signs DNS records cryptographically, preventing cache poisoning attacks. Both Cloudflare and Hetzner support DNSSEC. Operators should enable it for zones hosting Eurything identities.
+2. **Enable DNSSEC.** DNSSEC signs DNS records cryptographically, preventing cache poisoning attacks. Both Cloudflare and Hetzner support DNSSEC. Operators should enable it for zones hosting Poweur ID identities.
 3. **Monitor DNS records.** Operators and users should monitor their DNS records for unexpected changes.
 4. **Rotate tokens regularly.** The relay never stores tokens, so the risk from a compromised relay is bounded to the duration of an active registration request.
 
@@ -155,7 +155,7 @@ accepts a message where neither party is locally hosted.
 
 - **Metadata is visible to the relay.** Sender, recipient, timestamp, and message size are not hidden from the relay. Which relay sees the sender's IP depends on the chosen send path (default direct-to-recipient vs. `--via-home-relay`); see above.
 - **Forward secrecy is partial.** Each message uses a fresh ephemeral X25519 key, so compromising a recipient's long-lived encryption key does not reveal past messages once the ephemeral key is deleted. A dedicated double-ratchet session scheme (Signal-style) is a future improvement.
-- **No plaintext fallback.** Encryption is mandatory end-to-end: CLI and mobile both refuse to send to a recipient without a published `_eurything-enc.<identity>` record, and relays reject any `POST /messages` lacking encryption metadata with `400 encryption_required`. A recipient without an encryption key simply cannot receive messages until they publish one (via `eurything identity add-encryption-key` or the mobile equivalent).
+- **No plaintext fallback.** Encryption is mandatory end-to-end: CLI and mobile both refuse to send to a recipient without a published `_poweur-enc.<identity>` record, and relays reject any `POST /messages` lacking encryption metadata with `400 encryption_required`. A recipient without an encryption key simply cannot receive messages until they publish one (via `poweur identity add-encryption-key` or the mobile equivalent).
 - **Session keys are relay-local.** A relay seeing only an unfamiliar `session_id` cannot verify a forwarded message unless the envelope also carries `session_proof` (which the sending relay attaches automatically when forwarding).
 
 ## Related

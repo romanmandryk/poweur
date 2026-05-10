@@ -27,7 +27,7 @@ For a registration of `alice.poweur.net`:
 
 ```
 ; Public key TXT record
-_eurything.alice.poweur.net.  300  IN  TXT  "eurything-pubkey=ed25519:<base64url-pubkey>"
+_poweur.alice.poweur.net.  300  IN  TXT  "poweur-pubkey=ed25519:<base64url-pubkey>"
 
 ; Relay routing record (A record pointing to this relay)
 alice.poweur.net.             300  IN  A    <this-relay-ip>
@@ -46,7 +46,7 @@ The Cloudflare provider uses the [Cloudflare DNS API v4](https://developers.clou
 **API calls made:**
 
 1. `GET /zones?name=<parent-domain>` — resolve the zone ID for the parent domain (e.g. `poweur.net`).
-2. `POST /zones/<zone-id>/dns_records` — create the `TXT` record at `_eurything.<identity>`.
+2. `POST /zones/<zone-id>/dns_records` — create the `TXT` record at `_poweur.<identity>`.
 3. `POST /zones/<zone-id>/dns_records` — create the `A` record at `<identity>`.
 
 If a record with the same name and type already exists, the relay issues a `PUT` (update) instead of `POST` (create). This allows re-registration of an identity to update its public key and relay address.

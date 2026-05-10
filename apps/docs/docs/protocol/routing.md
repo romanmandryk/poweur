@@ -6,7 +6,7 @@ title: Routing
 
 # Routing
 
-The Eurything Protocol uses DNS as its routing layer. Every identity subdomain points to the relay that handles messages for that identity ("its home relay"). By default a sending client posts each outbound message **directly** to the recipient's home relay — the sender's own home relay is uninvolved in outbound traffic. Any client anywhere in the world can deliver to any identity by performing a standard DNS lookup; no central routing registry and no relay coordination is required.
+The Poweur ID Protocol uses DNS as its routing layer. Every identity subdomain points to the relay that handles messages for that identity ("its home relay"). By default a sending client posts each outbound message **directly** to the recipient's home relay — the sender's own home relay is uninvolved in outbound traffic. Any client anywhere in the world can deliver to any identity by performing a standard DNS lookup; no central routing registry and no relay coordination is required.
 
 ## Default: Direct Send
 
@@ -25,8 +25,8 @@ sequenceDiagram
     DNS-->>AC: 198.51.100.42
     AC->>BR: POST /messages<br/>{id, sender, recipient, timestamp, payload, signature, encryption}
     BR->>BR: Rate-limit (sender + global)<br/>encryption envelope check
-    BR->>DNS: TXT _eurything.alice.poweur.net
-    DNS-->>BR: "eurything-pubkey=ed25519:..."
+    BR->>DNS: TXT _poweur.alice.poweur.net
+    DNS-->>BR: "poweur-pubkey=ed25519:..."
     BR->>BR: Verify signature, apply<br/>at-least-one-local rule (Bob is local),<br/>store in Bob's inbox keyed by id
     BR-->>AC: 202 Accepted (tick 1)
     BC->>BR: GET /messages/bob.example.org<br/>(challenge-response auth)

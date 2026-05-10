@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/crypto"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/storage"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/crypto"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/storage"
 )
 
 func newTestServer(t *testing.T) (*Server, *fakeResolver) {
@@ -45,8 +45,8 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
 	recipientPub, _, _ := ed25519.GenerateKey(nil)
 
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
-	resolver.txt["_eurything.alice.example.com"] = []string{senderTxt}
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	resolver.txt["_poweur.alice.poweur.net"] = []string{senderTxt}
 	resolver.hosts["bob.example.org"] = []string{"relay.test"}
 
 	server.identities.Add(storage.Identity{
@@ -66,12 +66,12 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 	nonce := "nonce-abc"
 
 	canonical := crypto.CanonicalSessionRegistration(
-		"alice.example.com", sessionPubB64, issuedAt, expiresAt, nonce,
+		"alice.poweur.net", sessionPubB64, issuedAt, expiresAt, nonce,
 	)
 	identitySig := base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(canonical)))
 
 	sessionReq := SessionCreateRequest{
-		Identity:          "alice.example.com",
+		Identity:          "alice.poweur.net",
 		SessionPublicKey:  sessionPubB64,
 		IssuedAt:          issuedAt,
 		ExpiresAt:         expiresAt,
@@ -97,7 +97,7 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 
 	msg := Message{
 		ID:        "msg_test_session_ok_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "ciphertext-placeholder",
@@ -131,8 +131,8 @@ func TestSessionCreateAndMessageFlow(t *testing.T) {
 func TestSessionRejectsForgedSignature(t *testing.T) {
 	server, resolver := newTestServer(t)
 	senderPub, _, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
-	resolver.txt["_eurything.alice.example.com"] = []string{senderTxt}
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	resolver.txt["_poweur.alice.poweur.net"] = []string{senderTxt}
 
 	ts := httptest.NewServer(server.Router())
 	defer ts.Close()
@@ -144,12 +144,12 @@ func TestSessionRejectsForgedSignature(t *testing.T) {
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	expiresAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
 	canonical := crypto.CanonicalSessionRegistration(
-		"alice.example.com", sessionPubB64, issuedAt, expiresAt, "n",
+		"alice.poweur.net", sessionPubB64, issuedAt, expiresAt, "n",
 	)
 	identitySig := base64.StdEncoding.EncodeToString(ed25519.Sign(wrongPriv, []byte(canonical)))
 
 	body, _ := json.Marshal(SessionCreateRequest{
-		Identity:          "alice.example.com",
+		Identity:          "alice.poweur.net",
 		SessionPublicKey:  sessionPubB64,
 		IssuedAt:          issuedAt,
 		ExpiresAt:         expiresAt,
@@ -168,8 +168,8 @@ func TestSessionRejectsForgedSignature(t *testing.T) {
 func TestSessionRejectsTTLOverLimit(t *testing.T) {
 	server, resolver := newTestServer(t)
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
-	resolver.txt["_eurything.alice.example.com"] = []string{senderTxt}
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	resolver.txt["_poweur.alice.poweur.net"] = []string{senderTxt}
 
 	ts := httptest.NewServer(server.Router())
 	defer ts.Close()
@@ -180,12 +180,12 @@ func TestSessionRejectsTTLOverLimit(t *testing.T) {
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	expiresAt := time.Now().UTC().Add(25 * time.Hour).Format(time.RFC3339)
 	canonical := crypto.CanonicalSessionRegistration(
-		"alice.example.com", sessionPubB64, issuedAt, expiresAt, "n",
+		"alice.poweur.net", sessionPubB64, issuedAt, expiresAt, "n",
 	)
 	identitySig := base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(canonical)))
 
 	body, _ := json.Marshal(SessionCreateRequest{
-		Identity:          "alice.example.com",
+		Identity:          "alice.poweur.net",
 		SessionPublicKey:  sessionPubB64,
 		IssuedAt:          issuedAt,
 		ExpiresAt:         expiresAt,
@@ -210,8 +210,8 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 	peer, peerResolver := newTestServer(t)
 
 	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
-	senderTxt := "eurything-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
-	peerResolver.txt["_eurything.alice.example.com"] = []string{senderTxt}
+	senderTxt := "poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)
+	peerResolver.txt["_poweur.alice.poweur.net"] = []string{senderTxt}
 
 	recipientPub, _, _ := ed25519.GenerateKey(nil)
 	peer.identities.Add(storage.Identity{
@@ -232,7 +232,7 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 	nonce := "n-proof"
 
 	regCanonical := crypto.CanonicalSessionRegistration(
-		"alice.example.com", sessionPubB64, issuedAt, expiresAt, nonce,
+		"alice.poweur.net", sessionPubB64, issuedAt, expiresAt, nonce,
 	)
 	identitySig := base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(regCanonical)))
 
@@ -240,7 +240,7 @@ func TestSessionProofAcceptedByForeignRelay(t *testing.T) {
 
 	msg := Message{
 		ID:        "msg_test_crossrelay_001",
-		Sender:    "alice.example.com",
+		Sender:    "alice.poweur.net",
 		Recipient: "bob.example.org",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload:   "hello-cross-relay",

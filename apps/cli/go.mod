@@ -1,4 +1,4 @@
-module github.com/eurything/cli
+module github.com/poweur/cli
 
 go 1.25.0
 

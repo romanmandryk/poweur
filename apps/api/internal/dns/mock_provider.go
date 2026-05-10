@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 type MemoryProvider struct {
@@ -24,9 +24,9 @@ func NewMemoryProvider(cfg config.Config) *MemoryProvider {
 func (p *MemoryProvider) WriteIdentityRecords(ctx context.Context, token, identity, publicKey, encryptionPublicKey, relayAddress string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.records[fmt.Sprintf("_eurything.%s", identity)] = fmt.Sprintf("eurything-pubkey=ed25519:%s", publicKey)
+	p.records[fmt.Sprintf("_poweur.%s", identity)] = fmt.Sprintf("poweur-pubkey=ed25519:%s", publicKey)
 	if encryptionPublicKey != "" {
-		p.records[fmt.Sprintf("_eurything-enc.%s", identity)] = fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+		p.records[fmt.Sprintf("_poweur-enc.%s", identity)] = fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
 	}
 	p.records[identity] = relayAddress
 	return nil
@@ -38,7 +38,7 @@ func (p *MemoryProvider) WriteEncryptionKey(ctx context.Context, token, identity
 	if encryptionPublicKey == "" {
 		return fmt.Errorf("missing encryption public key")
 	}
-	p.records[fmt.Sprintf("_eurything-enc.%s", identity)] = fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+	p.records[fmt.Sprintf("_poweur-enc.%s", identity)] = fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
 	return nil
 }
 

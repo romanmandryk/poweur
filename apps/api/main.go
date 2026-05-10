@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/eurything/api/internal/config"
-	"github.com/eurything/api/internal/dns"
-	"github.com/eurything/api/internal/relay"
+	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/relay"
 )
 
 func main() {

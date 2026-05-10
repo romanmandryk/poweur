@@ -120,14 +120,14 @@ For a production deployment on Linux, a minimal systemd unit file:
 
 ```ini
 [Unit]
-Description=Eurything Relay
+Description=Poweur ID Relay
 After=network.target
 
 [Service]
 Type=simple
-User=eurything
-EnvironmentFile=/etc/eurything/relay.env
-ExecStart=/usr/local/bin/eurything-relay
+User=poweur
+EnvironmentFile=/etc/poweur/relay.env
+ExecStart=/usr/local/bin/poweur-relay
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -136,7 +136,7 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 ```
 
-Where `/etc/eurything/relay.env` contains the environment variables listed above.
+Where `/etc/poweur/relay.env` contains the environment variables listed above.
 
 ## Related
 

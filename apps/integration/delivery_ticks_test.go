@@ -20,7 +20,7 @@ import (
 )
 
 // extractFirstMessageID reads the per-identity pending journal directly
-// from the home tempdir (we already know its layout: $HOME/.eurything/
+// from the home tempdir (we already know its layout: $HOME/.poweur/
 // pending/<identity>.jsonl). It returns the first non-empty message id
 // found, which is enough for tests that only send a single message.
 func extractFirstMessageID(t *testing.T, home, identity string) string {
@@ -42,7 +42,7 @@ func extractFirstMessageID(t *testing.T, home, identity string) string {
 }
 
 // statusForID returns the per-message status (latest state, etc) by
-// running `eurything messages status --json --id <id>` and parsing the
+// running `poweur messages status --json --id <id>` and parsing the
 // single-element output.
 func statusForID(t *testing.T, home, id string) map[string]any {
 	t.Helper()
@@ -68,7 +68,7 @@ func TestINT_DLV_01_Tick1OnSuccessfulSend(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -76,7 +76,7 @@ func TestINT_DLV_01_Tick1OnSuccessfulSend(t *testing.T) {
 
 	runCLI(t, aliceHome, "send", "bob.example.org", "tick-test")
 
-	id := extractFirstMessageID(t, aliceHome, "alice.example.com")
+	id := extractFirstMessageID(t, aliceHome, "alice.poweur.net")
 	status := statusForID(t, aliceHome, id)
 	if got, _ := status["state"].(string); got != "delivered_recipient_relay" {
 		t.Fatalf("expected tick 1 state delivered_recipient_relay, got %q (%+v)", got, status)
@@ -95,18 +95,18 @@ func TestINT_DLV_02_Tick2AfterRecipientPolls(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	runCLI(t, aliceHome, "send", "bob.example.org", "two-tick test")
-	id := extractFirstMessageID(t, aliceHome, "alice.example.com")
+	id := extractFirstMessageID(t, aliceHome, "alice.poweur.net")
 
 	// Bob polls — this decrypts and emits the delivered_client ack.
 	inbox, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, inbox, "alice.example.com", "two-tick test")
+	assertDecryptedInbox(t, inbox, "alice.poweur.net", "two-tick test")
 
 	// Alice polls — this drains the acks array and advances her journal.
 	runCLI(t, aliceHome, "inbox")
@@ -129,14 +129,14 @@ func TestINT_DLV_03_OfflineRecipientStaysAtTick1(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	runCLI(t, aliceHome, "send", "bob.example.org", "still offline")
-	id := extractFirstMessageID(t, aliceHome, "alice.example.com")
+	id := extractFirstMessageID(t, aliceHome, "alice.poweur.net")
 
 	for i := 0; i < 3; i++ {
 		runCLI(t, aliceHome, "inbox")
@@ -162,14 +162,14 @@ func TestINT_DLV_04_ForgedAckRejected(t *testing.T) {
 	aliceHome := t.TempDir()
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	runCLI(t, aliceHome, "send", "bob.example.org", "ack me if real")
-	id := extractFirstMessageID(t, aliceHome, "alice.example.com")
+	id := extractFirstMessageID(t, aliceHome, "alice.poweur.net")
 
 	forged := map[string]any{
 		"type":       "ack",
@@ -177,7 +177,7 @@ func TestINT_DLV_04_ForgedAckRejected(t *testing.T) {
 		"message_id": id,
 		"state":      "delivered_client",
 		"sender":     "bob.example.org",
-		"recipient":  "alice.example.com",
+		"recipient":  "alice.poweur.net",
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"signature":  "AAAA",
 	}

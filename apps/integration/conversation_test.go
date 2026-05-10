@@ -39,14 +39,14 @@ func TestINT09_FullConversation(t *testing.T) {
 
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 	runCLI(t, bobHome,
 		"identity", "create", "bob",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
@@ -58,14 +58,14 @@ func TestINT09_FullConversation(t *testing.T) {
 	)
 
 	// Alice -> Bob
-	runCLI(t, aliceHome, "send", "bob.example.com", msgAlice)
+	runCLI(t, aliceHome, "send", "bob.poweur.net", msgAlice)
 	bobInbox, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, bobInbox, "alice.example.com", msgAlice)
+	assertDecryptedInbox(t, bobInbox, "alice.poweur.net", msgAlice)
 
 	// Bob -> Alice
-	runCLI(t, bobHome, "send", "alice.example.com", msgBob)
+	runCLI(t, bobHome, "send", "alice.poweur.net", msgBob)
 	aliceInbox, _ := runCLI(t, aliceHome, "inbox")
-	assertDecryptedInbox(t, aliceInbox, "bob.example.com", msgBob)
+	assertDecryptedInbox(t, aliceInbox, "bob.poweur.net", msgBob)
 
 	// Sanity: each user should see exactly one decrypted message, not the
 	// other message, and not leftover inbox items from prior sends.
@@ -86,7 +86,7 @@ func TestINT09_FullConversation(t *testing.T) {
 // TestINT09_FullConversation_IdentitySigned is the twin of
 // TestINT09_FullConversation but both directions of the conversation are
 // signed with the sender's long-lived identity (Ed25519) key via
-// `eurything send --sign-with=identity` instead of the default session
+// `poweur send --sign-with=identity` instead of the default session
 // key.
 //
 // This locks in two properties of the identity-signed path end-to-end:
@@ -109,14 +109,14 @@ func TestINT09_FullConversation_IdentitySigned(t *testing.T) {
 
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 	runCLI(t, bobHome,
 		"identity", "create", "bob",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
@@ -127,8 +127,8 @@ func TestINT09_FullConversation_IdentitySigned(t *testing.T) {
 		msgBob   = "sure alice, see you then (identity-signed)"
 	)
 
-	aliceSess := filepath.Join(aliceHome, ".eurything", "sessions", "alice.example.com.toml")
-	bobSess := filepath.Join(bobHome, ".eurything", "sessions", "bob.example.com.toml")
+	aliceSess := filepath.Join(aliceHome, ".poweur", "sessions", "alice.poweur.net.toml")
+	bobSess := filepath.Join(bobHome, ".poweur", "sessions", "bob.poweur.net.toml")
 
 	assertNoSession := func(path string, when string) {
 		t.Helper()
@@ -140,21 +140,21 @@ func TestINT09_FullConversation_IdentitySigned(t *testing.T) {
 	// Alice -> Bob, signed with Alice's long-lived identity key. No
 	// session file should exist for Alice afterwards; `identity create`
 	// above also must not have triggered one for Bob yet.
-	runCLI(t, aliceHome, "send", "--sign-with", "identity", "bob.example.com", msgAlice)
+	runCLI(t, aliceHome, "send", "--sign-with", "identity", "bob.poweur.net", msgAlice)
 	assertNoSession(aliceSess, "after alice identity-signed send")
 	assertNoSession(bobSess, "before bob has done anything session-bearing")
 
 	bobInbox, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, bobInbox, "alice.example.com", msgAlice)
+	assertDecryptedInbox(t, bobInbox, "alice.poweur.net", msgAlice)
 
 	// Bob -> Alice, signed with Bob's long-lived identity key. Bob's
 	// session now exists (his inbox call created it), but Alice's still
 	// must not because her only outbound action was identity-signed.
-	runCLI(t, bobHome, "send", "--sign-with", "identity", "alice.example.com", msgBob)
+	runCLI(t, bobHome, "send", "--sign-with", "identity", "alice.poweur.net", msgBob)
 	assertNoSession(aliceSess, "after bob identity-signed send, before alice inbox")
 
 	aliceInbox, _ := runCLI(t, aliceHome, "inbox")
-	assertDecryptedInbox(t, aliceInbox, "bob.example.com", msgBob)
+	assertDecryptedInbox(t, aliceInbox, "bob.poweur.net", msgBob)
 
 	if strings.Count(bobInbox, "🔒") != 1 {
 		t.Fatalf("bob's inbox had unexpected lock-glyph count:\n%s", bobInbox)

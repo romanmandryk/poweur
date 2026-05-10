@@ -1,9 +1,9 @@
 {
-  "name": "@eurything/ios",
+  "name": "@poweur/ios",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "xcodebuild -scheme Eurything -configuration Release",
-    "dev": "xcodebuild -scheme Eurything -configuration Debug"
+    "build": "xcodebuild -scheme Poweur ID -configuration Release",
+    "dev": "xcodebuild -scheme Poweur ID -configuration Debug"
   }
 }

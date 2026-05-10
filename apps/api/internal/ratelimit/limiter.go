@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 // Limiter tracks per-sender and global request budgets.

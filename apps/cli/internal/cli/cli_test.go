@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/cli/internal/config"
-	cryptoe2e "github.com/eurything/cli/internal/crypto"
-	"github.com/eurything/cli/internal/identity"
-	"github.com/eurything/cli/internal/session"
+	"github.com/poweur/cli/internal/config"
+	cryptoe2e "github.com/poweur/cli/internal/crypto"
+	"github.com/poweur/cli/internal/identity"
+	"github.com/poweur/cli/internal/session"
 )
 
 // stubResolver is a minimal identity.Resolver that the send-path tests use to
@@ -46,7 +46,7 @@ func TestIdentityCreateWritesConfig(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"identity", "create", "alice", "--parent-domain", "example.com"}, &stdout, &stderr)
+	code := Run([]string{"identity", "create", "alice", "--parent-domain", "poweur.net"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
@@ -55,17 +55,17 @@ func TestIdentityCreateWritesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Identity != "alice.example.com" {
+	if cfg.Identity != "alice.poweur.net" {
 		t.Fatalf("unexpected identity: %s", cfg.Identity)
 	}
 	if cfg.KeysDir == "" {
 		t.Fatal("expected keys dir")
 	}
-	keyPath := identity.KeyPath(cfg.KeysDir, "alice.example.com")
+	keyPath := identity.KeyPath(cfg.KeysDir, "alice.poweur.net")
 	if _, err := os.Stat(keyPath); err != nil {
 		t.Fatalf("missing key file: %v", err)
 	}
-	encKeyPath := identity.EncryptionKeyPath(cfg.KeysDir, "alice.example.com")
+	encKeyPath := identity.EncryptionKeyPath(cfg.KeysDir, "alice.poweur.net")
 	if _, err := os.Stat(encKeyPath); err != nil {
 		t.Fatalf("missing encryption key file: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	_, priv, _ := identity.GenerateKeypair()
-	keyPath, err := identity.SavePrivateKey("alice.example.com", priv)
+	keyPath, err := identity.SavePrivateKey("alice.poweur.net", priv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)
 	}
@@ -146,8 +146,8 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 		t.Fatalf("bob keygen: %v", err)
 	}
 	identity.SetResolver(stubResolver{txt: map[string][]string{
-		"_eurything-enc.bob.example.org": {
-			"eurything-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
+		"_poweur-enc.bob.example.org": {
+			"poweur-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
 		},
 	}})
 	defer identity.ResetResolver()
@@ -157,7 +157,7 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 
 	cfg := config.Config{
 		RelayURL: mr.server.URL,
-		Identity: "alice.example.com",
+		Identity: "alice.poweur.net",
 		KeysDir:  filepath.Dir(keyPath),
 	}
 	if err := config.Save(cfg); err != nil {
@@ -176,7 +176,7 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	if mr.received.ID == "" {
 		t.Fatal("expected client-assigned message id on outgoing message")
 	}
-	if mr.received.Sender != "alice.example.com" || mr.received.Recipient != "bob.example.org" {
+	if mr.received.Sender != "alice.poweur.net" || mr.received.Recipient != "bob.example.org" {
 		t.Fatalf("unexpected message: %#v", mr.received)
 	}
 	if mr.received.Signature == "" {
@@ -213,7 +213,7 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	}
 
 	// Session should have been persisted locally.
-	sess, err := session.Load("alice.example.com")
+	sess, err := session.Load("alice.poweur.net")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestSendMessageWithSignWithIdentity(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	idPub, idPriv, _ := identity.GenerateKeypair()
-	keyPath, err := identity.SavePrivateKey("alice.example.com", idPriv)
+	keyPath, err := identity.SavePrivateKey("alice.poweur.net", idPriv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)
 	}
@@ -253,8 +253,8 @@ func TestSendMessageWithSignWithIdentity(t *testing.T) {
 		t.Fatalf("bob keygen: %v", err)
 	}
 	identity.SetResolver(stubResolver{txt: map[string][]string{
-		"_eurything-enc.bob.example.org": {
-			"eurything-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
+		"_poweur-enc.bob.example.org": {
+			"poweur-enckey=x25519:" + cryptoe2e.EncodePublicKey(bobEncPub),
 		},
 	}})
 	defer identity.ResetResolver()
@@ -264,7 +264,7 @@ func TestSendMessageWithSignWithIdentity(t *testing.T) {
 
 	cfg := config.Config{
 		RelayURL: mr.server.URL,
-		Identity: "alice.example.com",
+		Identity: "alice.poweur.net",
 		KeysDir:  filepath.Dir(keyPath),
 	}
 	if err := config.Save(cfg); err != nil {
@@ -299,7 +299,7 @@ func TestSendMessageWithSignWithIdentity(t *testing.T) {
 	if mr.sessionID != "" {
 		t.Fatalf("mock relay unexpectedly observed a session registration: %s", mr.sessionID)
 	}
-	if _, err := session.Load("alice.example.com"); err == nil {
+	if _, err := session.Load("alice.poweur.net"); err == nil {
 		t.Fatal("expected no local session file after --sign-with=identity send")
 	}
 
@@ -329,13 +329,13 @@ func TestSendMessageRejectsInvalidSignWith(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	_, priv, _ := identity.GenerateKeypair()
-	keyPath, err := identity.SavePrivateKey("alice.example.com", priv)
+	keyPath, err := identity.SavePrivateKey("alice.poweur.net", priv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)
 	}
 	cfg := config.Config{
 		RelayURL: "http://unused.invalid",
-		Identity: "alice.example.com",
+		Identity: "alice.poweur.net",
 		KeysDir:  filepath.Dir(keyPath),
 	}
 	if err := config.Save(cfg); err != nil {
@@ -357,7 +357,7 @@ func TestEncryptDecryptRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
-	plaintext := []byte("hello eurything")
+	plaintext := []byte("hello poweur")
 	sealed, err := cryptoe2e.Encrypt(pub, plaintext)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)

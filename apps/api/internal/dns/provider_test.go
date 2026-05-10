@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 func TestNewProviderFactoryAndRegister(t *testing.T) {
@@ -43,8 +43,8 @@ func TestRelayRecord(t *testing.T) {
 	if typ != "A" || v != "192.0.2.5" {
 		t.Fatalf("ip: %s %s", typ, v)
 	}
-	typ, v = relayRecord("relay.example.com")
-	if typ != "CNAME" || v != "relay.example.com" {
+	typ, v = relayRecord("relay.poweur.net")
+	if typ != "CNAME" || v != "relay.poweur.net" {
 		t.Fatalf("host: %s %s", typ, v)
 	}
 	typ, v = relayRecord("https://host.example:443")

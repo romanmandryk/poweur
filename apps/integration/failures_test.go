@@ -14,11 +14,11 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 
-	clipkg "github.com/eurything/cli/pkg/cli"
+	clipkg "github.com/poweur/cli/pkg/cli"
 )
 
 // sessionFile is a minimal reflection of what the CLI persists at
-// $HOME/.eurything/sessions/<identity>.toml. We only parse the fields we
+// $HOME/.poweur/sessions/<identity>.toml. We only parse the fields we
 // need for failure-mode tests; extra keys round-trip through toml without
 // us having to stay in sync with the production struct field-for-field.
 type sessionFile struct {
@@ -37,7 +37,7 @@ type sessionFile struct {
 }
 
 func sessionPath(home, identity string) string {
-	return filepath.Join(home, ".eurything", "sessions", identity+".toml")
+	return filepath.Join(home, ".poweur", "sessions", identity+".toml")
 }
 
 func readSessionFile(t *testing.T, path string) sessionFile {
@@ -83,15 +83,15 @@ func TestINT04_SessionAutoRefreshOnLocalExpiry(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
-	runCLI(t, aliceHome, "send", "bob.example.com", "first message")
+	runCLI(t, aliceHome, "send", "bob.poweur.net", "first message")
 
-	aliceSessPath := sessionPath(aliceHome, "alice.example.com")
+	aliceSessPath := sessionPath(aliceHome, "alice.poweur.net")
 	before := readSessionFile(t, aliceSessPath)
 	if before.SessionID == "" {
 		t.Fatalf("expected a session id after first send, got empty: %+v", before)
@@ -104,7 +104,7 @@ func TestINT04_SessionAutoRefreshOnLocalExpiry(t *testing.T) {
 	before.ExpiresAtRaw = before.ExpiresAt.Format(time.RFC3339)
 	writeSessionFile(t, aliceSessPath, before)
 
-	runCLI(t, aliceHome, "send", "bob.example.com", "second message")
+	runCLI(t, aliceHome, "send", "bob.poweur.net", "second message")
 
 	after := readSessionFile(t, aliceSessPath)
 	if after.SessionID == "" {
@@ -139,17 +139,17 @@ func TestINT05_DecryptionFailureIsReportedGracefully(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
-	runCLI(t, aliceHome, "send", "bob.example.com", "ciphertext only")
+	runCLI(t, aliceHome, "send", "bob.poweur.net", "ciphertext only")
 
 	// Wipe Bob's encryption private key. Note: the DNS-published encryption
 	// public key stays in place so Alice's earlier send looked healthy.
-	bobEncKey := filepath.Join(bobHome, ".eurything", "keys", "bob.example.com.enc")
+	bobEncKey := filepath.Join(bobHome, ".poweur", "keys", "bob.poweur.net.enc")
 	if err := os.Remove(bobEncKey); err != nil {
 		t.Fatalf("remove bob enc key: %v", err)
 	}
@@ -188,15 +188,15 @@ func TestINT07_TamperedSignatureRejected(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", relayURL,
+		"--parent-domain", "poweur.net", "--relay", relayURL,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	// Bootstrap a real session for Alice by sending one legit message.
-	runCLI(t, aliceHome, "send", "bob.example.com", "real message")
-	sess := readSessionFile(t, sessionPath(aliceHome, "alice.example.com"))
+	runCLI(t, aliceHome, "send", "bob.poweur.net", "real message")
+	sess := readSessionFile(t, sessionPath(aliceHome, "alice.poweur.net"))
 
 	// Construct a forged envelope: valid shape, valid session id known to
 	// the relay, but the signature is a random 64 bytes signed under a
@@ -205,8 +205,8 @@ func TestINT07_TamperedSignatureRejected(t *testing.T) {
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	forged := map[string]any{
 		"id":         "msg_forged_int07",
-		"sender":     "alice.example.com",
-		"recipient":  "bob.example.com",
+		"sender":     "alice.poweur.net",
+		"recipient":  "bob.poweur.net",
 		"timestamp":  timestamp,
 		"payload":    "impersonation attempt",
 		"session_id": sess.SessionID,
@@ -262,7 +262,7 @@ func TestINT08_TamperedDNSBreaksCrossRelayVerification(t *testing.T) {
 	bobHome := t.TempDir()
 
 	runCLI(t, aliceHome, "identity", "create", "alice",
-		"--parent-domain", "example.com", "--relay", "http://"+relayA,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayA,
 		"--dns-provider", "mock", "--dns-token", "integration")
 	runCLI(t, bobHome, "identity", "create", "bob",
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
@@ -273,7 +273,7 @@ func TestINT08_TamperedDNSBreaksCrossRelayVerification(t *testing.T) {
 	// path, not to break the CLI's earlier encryption step.
 	_, forgedPub, _ := ed25519.GenerateKey(nil)
 	forgedPubB64 := base64.RawURLEncoding.EncodeToString([]byte(forgedPub))
-	zone.SetTXT("_eurything.alice.example.com", "eurything-pubkey=ed25519:"+forgedPubB64)
+	zone.SetTXT("_poweur.alice.poweur.net", "poweur-pubkey=ed25519:"+forgedPubB64)
 
 	// Drive the CLI directly (bypassing runCLI) so we can inspect the exit
 	// code without failing the test, since the expectation is non-zero.

@@ -106,19 +106,19 @@ type DNSStatus struct {
 
 func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 	status := DNSStatus{Identity: identity}
-	txtRecords, _ := defaultResolver.LookupTXT(ctx, "_eurything."+identity)
+	txtRecords, _ := defaultResolver.LookupTXT(ctx, "_poweur."+identity)
 	for _, record := range txtRecords {
 		record = strings.TrimSpace(record)
-		if strings.HasPrefix(record, "eurything-pubkey=") {
+		if strings.HasPrefix(record, "poweur-pubkey=") {
 			status.PublicKeyTXT = record
 			break
 		}
 	}
 
-	encRecords, _ := defaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
+	encRecords, _ := defaultResolver.LookupTXT(ctx, "_poweur-enc."+identity)
 	for _, record := range encRecords {
 		record = strings.TrimSpace(record)
-		if strings.HasPrefix(record, "eurything-enckey=") {
+		if strings.HasPrefix(record, "poweur-enckey=") {
 			status.EncryptionKeyTXT = record
 			break
 		}
@@ -136,13 +136,13 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 // LookupEncryptionKey returns the raw X25519 public key bytes for the given identity,
 // or nil if the identity has no published encryption key.
 func LookupEncryptionKey(ctx context.Context, identity string) ([]byte, error) {
-	records, err := defaultResolver.LookupTXT(ctx, "_eurything-enc."+identity)
+	records, err := defaultResolver.LookupTXT(ctx, "_poweur-enc."+identity)
 	if err != nil {
 		return nil, err
 	}
 	for _, record := range records {
 		record = strings.TrimSpace(record)
-		if !strings.HasPrefix(record, "eurything-enckey=") {
+		if !strings.HasPrefix(record, "poweur-enckey=") {
 			continue
 		}
 		parts := strings.SplitN(record, "=", 2)

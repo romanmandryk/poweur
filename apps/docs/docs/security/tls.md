@@ -6,7 +6,7 @@ title: TLS Configuration
 
 # TLS Configuration
 
-All relay-to-relay and client-to-relay communication must use HTTPS. This page describes the TLS certificate strategy, provisioning approach, and renewal automation for Eurything relay deployments.
+All relay-to-relay and client-to-relay communication must use HTTPS. This page describes the TLS certificate strategy, provisioning approach, and renewal automation for Poweur ID relay deployments.
 
 ## Wildcard Certificate Strategy
 
@@ -26,7 +26,7 @@ The ACME DNS-01 challenge is **required** for wildcard certificates. HTTP-01 can
 
 DNS-01 works by having the certificate provisioner create a temporary `TXT` record (`_acme-challenge.poweur.net`) that Let's Encrypt verifies before issuing the certificate.
 
-The Eurything infrastructure (`apps/infra`) automates DNS-01 via the Terraform ACME provider, using the same Hetzner DNS API credentials used for identity record management. No additional provider accounts are needed.
+The Poweur ID infrastructure (`apps/infra`) automates DNS-01 via the Terraform ACME provider, using the same Hetzner DNS API credentials used for identity record management. No additional provider accounts are needed.
 
 ## Provisioning with Terraform ACME
 
@@ -54,7 +54,7 @@ resource "tls_private_key" "acme_account" {
 
 resource "acme_registration" "relay" {
   account_key_pem = tls_private_key.acme_account.private_key_pem
-  email_address   = "ops@example.com"
+  email_address   = "ops@poweur.net"
 }
 
 resource "acme_certificate" "wildcard" {

@@ -1,6 +1,6 @@
 # Coverage for the API and CLI as exercised by integration tests.
 #
-# Integration tests import github.com/eurything/api and github.com/eurything/cli
+# Integration tests import github.com/poweur/api and github.com/poweur/cli
 # and run the relay in-process (httptest); the default -cover only counts the
 # integration package itself. -coverpkg instruments those dependencies so you
 # see real end-to-end coverage.
@@ -15,7 +15,7 @@ PROF    := $(COV_DIR)/cover.out
 HTML    := $(COV_DIR)/index.html
 
 # Packages to instrument (must be dependencies of this module’s tests).
-COVERPKGS := github.com/eurything/api/...,github.com/eurything/cli/...
+COVERPKGS := github.com/poweur/api/...,github.com/poweur/cli/...
 
 .PHONY: test cover cover-html cover-func clean-coverage
 test:

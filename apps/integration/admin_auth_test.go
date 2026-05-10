@@ -33,7 +33,7 @@ func TestINT_ADMIN_01_IdentityCreateRejectsUnsigned(t *testing.T) {
 
 	pub, _, _ := ed25519.GenerateKey(nil)
 	body, _ := json.Marshal(map[string]any{
-		"identity":     "mallory.example.com",
+		"identity":     "mallory.poweur.net",
 		"public_key":   base64.RawURLEncoding.EncodeToString(pub),
 		"dns_provider": "mock",
 		"dns_token":    "integration",
@@ -46,7 +46,7 @@ func TestINT_ADMIN_01_IdentityCreateRejectsUnsigned(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 invalid_request for unsigned identity create, got %d", resp.StatusCode)
 	}
-	if zone.Snapshot()["TXT:_eurything.mallory.example.com"] != nil {
+	if zone.Snapshot()["TXT:_poweur.mallory.poweur.net"] != nil {
 		t.Fatalf("DNS was written despite missing identity signature")
 	}
 }
@@ -67,7 +67,7 @@ func TestINT_ADMIN_02_IdentityCreateRejectsForgedSignature(t *testing.T) {
 	nonce := "n0123456789abcdef"
 	canonical := strings.Join([]string{
 		"identity-registration",
-		"mallory.example.com",
+		"mallory.poweur.net",
 		base64.RawURLEncoding.EncodeToString(pub),
 		"",
 		relayAddr,
@@ -77,7 +77,7 @@ func TestINT_ADMIN_02_IdentityCreateRejectsForgedSignature(t *testing.T) {
 	sig := ed25519.Sign(forgedPriv, []byte(canonical))
 
 	body, _ := json.Marshal(map[string]any{
-		"identity":           "mallory.example.com",
+		"identity":           "mallory.poweur.net",
 		"public_key":         base64.RawURLEncoding.EncodeToString(pub),
 		"dns_provider":       "mock",
 		"dns_token":          "integration",
@@ -104,7 +104,7 @@ func TestINT_ADMIN_03_EncryptionKeyRejectsUnsigned(t *testing.T) {
 
 	bobHome := t.TempDir()
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", "http://"+relayAddr,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	body, _ := json.Marshal(map[string]any{
@@ -112,7 +112,7 @@ func TestINT_ADMIN_03_EncryptionKeyRejectsUnsigned(t *testing.T) {
 		"dns_provider":          "mock",
 		"dns_token":             "integration",
 	})
-	resp, err := http.Post("http://"+relayAddr+"/identities/bob.example.com/encryption-key",
+	resp, err := http.Post("http://"+relayAddr+"/identities/bob.poweur.net/encryption-key",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("post unsigned encryption-key: %v", err)
@@ -133,7 +133,7 @@ func TestINT_ADMIN_04_EncryptionKeyRejectsForgedSignature(t *testing.T) {
 
 	bobHome := t.TempDir()
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", "http://"+relayAddr,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	encPub := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
@@ -142,7 +142,7 @@ func TestINT_ADMIN_04_EncryptionKeyRejectsForgedSignature(t *testing.T) {
 	nonce := "nffeeddccbbaa9988"
 	canonical := strings.Join([]string{
 		"identity-encryption-key",
-		"bob.example.com",
+		"bob.poweur.net",
 		encPub,
 		issuedAt,
 		nonce,
@@ -157,7 +157,7 @@ func TestINT_ADMIN_04_EncryptionKeyRejectsForgedSignature(t *testing.T) {
 		"nonce":                 nonce,
 		"identity_signature":    base64.StdEncoding.EncodeToString(sig),
 	})
-	resp, err := http.Post("http://"+relayAddr+"/identities/bob.example.com/encryption-key",
+	resp, err := http.Post("http://"+relayAddr+"/identities/bob.poweur.net/encryption-key",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("post forged encryption-key: %v", err)
@@ -197,7 +197,7 @@ func TestINT_ADMIN_06_SessionDeleteRejectsForgedSignature(t *testing.T) {
 
 	bobHome := t.TempDir()
 	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "example.com", "--relay", "http://"+relayAddr,
+		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
 	_, forgedPriv, _ := ed25519.GenerateKey(nil)
@@ -206,7 +206,7 @@ func TestINT_ADMIN_06_SessionDeleteRejectsForgedSignature(t *testing.T) {
 	sessionID := "sess_unknown"
 	canonical := strings.Join([]string{
 		"session-revocation",
-		"bob.example.com",
+		"bob.poweur.net",
 		sessionID,
 		issuedAt,
 		nonce,
@@ -214,7 +214,7 @@ func TestINT_ADMIN_06_SessionDeleteRejectsForgedSignature(t *testing.T) {
 	sig := ed25519.Sign(forgedPriv, []byte(canonical))
 
 	body, _ := json.Marshal(map[string]any{
-		"identity":           "bob.example.com",
+		"identity":           "bob.poweur.net",
 		"issued_at":          issuedAt,
 		"nonce":              nonce,
 		"identity_signature": base64.StdEncoding.EncodeToString(sig),

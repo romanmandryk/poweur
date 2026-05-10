@@ -1,4 +1,4 @@
-// Package integration runs end-to-end tests that span the Eurything CLI,
+// Package integration runs end-to-end tests that span the Poweur ID CLI,
 // the relay HTTP server, and an in-memory DNS zone inside a single process.
 //
 // The tests follow the same design every time:
@@ -26,11 +26,11 @@ import (
 	"testing"
 	"time"
 
-	clipkg "github.com/eurything/cli/pkg/cli"
+	clipkg "github.com/poweur/cli/pkg/cli"
 
-	relaypkg "github.com/eurything/api/pkg/relay"
+	relaypkg "github.com/poweur/api/pkg/relay"
 
-	"github.com/eurything/integration/fakedns"
+	"github.com/poweur/integration/fakedns"
 )
 
 // newRelay builds an in-process relay whose DNS reads/writes flow through
@@ -168,30 +168,30 @@ func TestINT01_IdentityCreatePublishesDNS(t *testing.T) {
 	aliceHome := t.TempDir()
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", "http://"+relayAddr,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 
 	snapshot := zone.Snapshot()
-	pubTXT, ok := snapshot["TXT:_eurything.alice.example.com"]
+	pubTXT, ok := snapshot["TXT:_poweur.alice.poweur.net"]
 	if !ok || len(pubTXT) == 0 {
 		t.Fatalf("missing signing-key TXT record\nzone=%v", snapshot)
 	}
-	if !strings.HasPrefix(pubTXT[0], "eurything-pubkey=ed25519:") {
+	if !strings.HasPrefix(pubTXT[0], "poweur-pubkey=ed25519:") {
 		t.Fatalf("unexpected pubkey TXT: %s", pubTXT[0])
 	}
 
-	encTXT, ok := snapshot["TXT:_eurything-enc.alice.example.com"]
+	encTXT, ok := snapshot["TXT:_poweur-enc.alice.poweur.net"]
 	if !ok || len(encTXT) == 0 {
 		t.Fatalf("missing encryption-key TXT record\nzone=%v", snapshot)
 	}
-	if !strings.HasPrefix(encTXT[0], "eurything-enckey=x25519:") {
+	if !strings.HasPrefix(encTXT[0], "poweur-enckey=x25519:") {
 		t.Fatalf("unexpected enc TXT: %s", encTXT[0])
 	}
 
-	hosts, ok := snapshot["HOST:alice.example.com"]
+	hosts, ok := snapshot["HOST:alice.poweur.net"]
 	if !ok || len(hosts) == 0 {
 		t.Fatalf("missing relay host record\nzone=%v", snapshot)
 	}
@@ -214,24 +214,24 @@ func TestINT02_EncryptedMessageSameRelay(t *testing.T) {
 
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 	runCLI(t, bobHome,
 		"identity", "create", "bob",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", relayURL,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
 	)
 
 	secret := "meet me at the fountain at noon"
-	runCLI(t, aliceHome, "send", "bob.example.com", secret)
+	runCLI(t, aliceHome, "send", "bob.poweur.net", secret)
 
 	stdout, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }
 
 // TestINT03_EncryptedMessageCrossRelay places Alice and Bob on different
@@ -254,7 +254,7 @@ func TestINT03_EncryptedMessageCrossRelay(t *testing.T) {
 
 	runCLI(t, aliceHome,
 		"identity", "create", "alice",
-		"--parent-domain", "example.com",
+		"--parent-domain", "poweur.net",
 		"--relay", "http://"+relayA,
 		"--dns-provider", "mock",
 		"--dns-token", "integration",
@@ -271,7 +271,7 @@ func TestINT03_EncryptedMessageCrossRelay(t *testing.T) {
 	runCLI(t, aliceHome, "send", "bob.example.org", secret)
 
 	stdout, _ := runCLI(t, bobHome, "inbox")
-	assertDecryptedInbox(t, stdout, "alice.example.com", secret)
+	assertDecryptedInbox(t, stdout, "alice.poweur.net", secret)
 }
 
 // assertDecryptedInbox parses the text-mode inbox output and confirms it

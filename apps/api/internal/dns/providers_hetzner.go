@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eurything/api/internal/config"
+	"github.com/poweur/api/internal/config"
 )
 
 type HetznerProvider struct {
@@ -37,16 +37,16 @@ func (p *HetznerProvider) WriteIdentityRecords(ctx context.Context, token, ident
 	}
 
 	ttl := int(defaultTTL(p.cfg).Seconds())
-	pubName := fmt.Sprintf("_eurything.%s", identity)
-	pubValue := fmt.Sprintf("eurything-pubkey=ed25519:%s", publicKey)
+	pubName := fmt.Sprintf("_poweur.%s", identity)
+	pubValue := fmt.Sprintf("poweur-pubkey=ed25519:%s", publicKey)
 
 	if err := p.upsertRecord(ctx, token, zoneID, "TXT", pubName, pubValue, ttl); err != nil {
 		return err
 	}
 
 	if encryptionPublicKey != "" {
-		encName := fmt.Sprintf("_eurything-enc.%s", identity)
-		encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+		encName := fmt.Sprintf("_poweur-enc.%s", identity)
+		encValue := fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
 		if err := p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl); err != nil {
 			return err
 		}
@@ -71,8 +71,8 @@ func (p *HetznerProvider) WriteEncryptionKey(ctx context.Context, token, identit
 		return err
 	}
 	ttl := int(defaultTTL(p.cfg).Seconds())
-	encName := fmt.Sprintf("_eurything-enc.%s", identity)
-	encValue := fmt.Sprintf("eurything-enckey=x25519:%s", encryptionPublicKey)
+	encName := fmt.Sprintf("_poweur-enc.%s", identity)
+	encValue := fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
 	return p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl)
 }
 

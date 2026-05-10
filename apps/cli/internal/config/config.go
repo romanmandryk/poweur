@@ -86,7 +86,7 @@ func ConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".eurything", "config.toml"), nil
+	return filepath.Join(home, ".poweur", "config.toml"), nil
 }
 
 func KeysDir() (string, error) {
@@ -94,7 +94,7 @@ func KeysDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".eurything", "keys"), nil
+	return filepath.Join(home, ".poweur", "keys"), nil
 }
 
 func getenvWithFallback(key, fallback string) string {

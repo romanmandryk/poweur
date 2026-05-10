@@ -3,7 +3,7 @@
 // after the fact, even after the relay has dropped its in-memory inbox.
 //
 // Storage is an append-only JSON-Lines file at
-// ~/.eurything/pending/<identity>.jsonl, one record per state transition.
+// ~/.poweur/pending/<identity>.jsonl, one record per state transition.
 // Reads collapse the log into the latest state per message_id. This is
 // resilient to concurrent CLI invocations (every record is a single short
 // write) and trivially auditable by tail-ing the file.
@@ -67,7 +67,7 @@ func Dir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".eurything", "pending"), nil
+	return filepath.Join(home, ".poweur", "pending"), nil
 }
 
 // Path returns the journal file path for a given identity.

@@ -190,7 +190,7 @@ func VerifySignature(publicKey ed25519.PublicKey, payload string, signatureB64 s
 func ParseTXTRecord(records []string) (ed25519.PublicKey, error) {
 	for _, record := range records {
 		record = strings.TrimSpace(record)
-		if strings.HasPrefix(record, "eurything-pubkey=") {
+		if strings.HasPrefix(record, "poweur-pubkey=") {
 			parts := strings.SplitN(record, "=", 2)
 			if len(parts) != 2 {
 				continue
@@ -202,15 +202,15 @@ func ParseTXTRecord(records []string) (ed25519.PublicKey, error) {
 			return ParsePublicKey(value)
 		}
 	}
-	return nil, errors.New("eurything public key record not found")
+	return nil, errors.New("poweur public key record not found")
 }
 
 // ParseEncryptionTXTRecord extracts an X25519 encryption public key from
-// DNS TXT records under `_eurything-enc.<identity>`.
+// DNS TXT records under `_poweur-enc.<identity>`.
 func ParseEncryptionTXTRecord(records []string) ([]byte, error) {
 	for _, record := range records {
 		record = strings.TrimSpace(record)
-		if strings.HasPrefix(record, "eurything-enckey=") {
+		if strings.HasPrefix(record, "poweur-enckey=") {
 			parts := strings.SplitN(record, "=", 2)
 			if len(parts) != 2 {
 				continue
@@ -226,7 +226,7 @@ func ParseEncryptionTXTRecord(records []string) ([]byte, error) {
 			return raw, nil
 		}
 	}
-	return nil, errors.New("eurything encryption key record not found")
+	return nil, errors.New("poweur encryption key record not found")
 }
 
 func decodeAnyBase64(value string) ([]byte, error) {

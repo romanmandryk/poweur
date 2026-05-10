@@ -38,7 +38,7 @@ func Dir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".eurything", "sessions"), nil
+	return filepath.Join(home, ".poweur", "sessions"), nil
 }
 
 // Path returns the TOML file path for the given identity.
