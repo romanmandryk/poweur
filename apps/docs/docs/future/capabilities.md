@@ -13,7 +13,7 @@ The Poweur ID Protocol is designed to grow. Because identity is expressed in DNS
 The pattern for advertising a new capability is to define a new `TXT` record at a well-known subdomain prefix of the identity:
 
 ```
-_eurything-caps.<identity>.  300  IN  TXT  "poweur-caps=<cap1>,<cap2>,..."
+_poweur-caps.<identity>.  300  IN  TXT  "poweur-caps=<cap1>,<cap2>,..."
 ```
 
 Clients can inspect capability records to determine whether to attempt a capability-specific interaction with an identity before initiating it. This is analogous to DNS `SRV` records, but uses a more compact single-record format.
@@ -22,13 +22,13 @@ Clients can inspect capability records to determine whether to attempt a capabil
 
 ```
 ; Alice supports messaging and publishing
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=messaging,publishing"
+_poweur-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=messaging,publishing"
 
 ; A payment-accepting merchant
-_eurything-caps.shop.poweur.net.  300  IN  TXT  "poweur-caps=messaging,payments"
+_poweur-caps.shop.poweur.net.  300  IN  TXT  "poweur-caps=messaging,payments"
 
 ; An automated agent
-_eurything-caps.r2d2.poweur.net.   300  IN  TXT  "poweur-caps=messaging,bot"
+_poweur-caps.r2d2.poweur.net.   300  IN  TXT  "poweur-caps=messaging,bot"
 ```
 
 Future capabilities can define their own dedicated `TXT` record formats for richer metadata (e.g. a payment record with a structured currency and address list). The capability record serves as a discovery hint; the detailed record format is capability-specific.
@@ -54,12 +54,12 @@ Signed content (posts, articles, announcements) published under an identity's su
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=publishing"
+_poweur-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=publishing"
 ```
 
 **Publishing record (proposed):**
 ```
-_eurything-pub.alice.poweur.net.   300  IN  TXT  "poweur-pub-url=https://alice.poweur.net/feed"
+_poweur-pub.alice.poweur.net.   300  IN  TXT  "poweur-pub-url=https://alice.poweur.net/feed"
 ```
 
 ### Payments
@@ -68,14 +68,14 @@ Payment address advertisement under an Poweur ID identity. Instead of sharing a 
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=payments"
+_poweur-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=payments"
 ```
 
 **Payment record (proposed format, not final):**
 ```
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=btc:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=lightning:alice@getalby.com"
-_eurything-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=iban:GB29NWBK60161331926819"
+_poweur-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=btc:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+_poweur-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=lightning:alice@getalby.com"
+_poweur-pay.alice.poweur.net.  300  IN  TXT  "poweur-pay=iban:GB29NWBK60161331926819"
 ```
 
 Multiple payment records can be combined in a single `TXT` value or across multiple `TXT` records in the same RRset.
@@ -88,7 +88,7 @@ This is essentially the same challenge-response flow used in the relay API (`GET
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=auth"
+_poweur-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=auth"
 ```
 
 **Recommended verifier discovery:**
@@ -136,14 +136,14 @@ This means the practical first step is not "replace Google Drive or Dropbox iden
 
 **DNS capability record:**
 ```
-_eurything-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=files"
+_poweur-caps.alice.poweur.net.  300  IN  TXT  "poweur-caps=files"
 ```
 
 **Provider mapping record (proposed):**
 ```
-_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=nextcloud:alice@cloud.poweur.net"
-_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=dropbox:alice@poweur.net"
-_eurything-files.alice.poweur.net.  300  IN  TXT  "poweur-files=gdrive:alice@poweur.net"
+_poweur-files.alice.poweur.net.  300  IN  TXT  "poweur-files=nextcloud:alice@cloud.poweur.net"
+_poweur-files.alice.poweur.net.  300  IN  TXT  "poweur-files=dropbox:alice@poweur.net"
+_poweur-files.alice.poweur.net.  300  IN  TXT  "poweur-files=gdrive:alice@poweur.net"
 ```
 
 The intent of this record is discovery and interoperability:
@@ -171,10 +171,10 @@ A formal protocol for rotating or revoking the key pair associated with an ident
 
 1. Generate a new key pair.
 2. Publish the new public key in DNS.
-3. Optionally publish a signed rotation statement (`_eurything-rotate.<identity>` TXT record) signed by the old key, providing proof of continuity.
+3. Optionally publish a signed rotation statement (`_poweur-rotate.<identity>` TXT record) signed by the old key, providing proof of continuity.
 4. The old key is considered deprecated after a grace period.
 
-Key revocation would involve publishing a `_eurything-revoke.<identity>` TXT record and notifying known contacts.
+Key revocation would involve publishing a `_poweur-revoke.<identity>` TXT record and notifying known contacts.
 
 ### Federation and Relay Peering
 

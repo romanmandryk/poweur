@@ -1,0 +1,12 @@
+# Relay API
+relay.poweur.net {
+    reverse_proxy poweur-relay:8080
+}
+
+# Grafana
+grafana.poweur.net {
+    # basicauth {
+    #     admin JDJhJDE0J...  # generate: caddy hash-password
+    # }
+    reverse_proxy infra-grafana:3000
+}

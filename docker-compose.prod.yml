@@ -1,0 +1,18 @@
+services:
+  relay:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/poweur-relay:latest
+    container_name: poweur-relay
+    restart: unless-stopped
+    env_file:
+      - apps/api/.env.prod
+    networks:
+      - poweur_net
+      - infra_net
+
+networks:
+  poweur_net:
+    name: poweur_net
+    driver: bridge
+  infra_net:
+    name: infra_net
+    external: true

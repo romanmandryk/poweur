@@ -37,6 +37,9 @@ bin/
 .env.*
 !.env.example
 
+# Ansible secrets (never commit)
+deploy/ansible/secrets.yml
+
 # OS
 .DS_Store
 Thumbs.db

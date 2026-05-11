@@ -1,0 +1,334 @@
+# Usage:
+#   ansible-galaxy collection install -r requirements.yml
+#   cp secrets.example.yml secrets.yml && $EDITOR secrets.yml
+#   $EDITOR inventory.yml          # set ansible_host to your server IP
+#   ansible-playbook -i inventory.yml playbook.yml
+#
+# Re-run at any time — skips completed steps, applies only diffs.
+# SSH keys and the git clone are generated/attempted once; subsequent runs
+# update config files and env vars but leave keys and the repo untouched.
+
+---
+- name: Bootstrap poweur production server
+  hosts: poweur
+  become: true
+  vars_files:
+    - secrets.yml
+
+  vars:
+    infra_dir: /opt/infra
+    app_dir: /opt/apps/poweur
+
+  tasks:
+
+    # ── 1. System packages ─────────────────────────────────────────────────────
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name: [git, curl, ca-certificates, gnupg, lsb-release, rsync, ufw]
+        state: present
+        update_cache: true
+
+    # ── 2. Docker CE ───────────────────────────────────────────────────────────
+
+    - name: Create Docker apt keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+        force: false
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/ubuntu
+          {{ ansible_distribution_release }} stable
+        state: present
+        filename: docker
+
+    - name: Install Docker CE
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Enable and start Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        enabled: true
+        state: started
+
+    # ── 3. Linux users ─────────────────────────────────────────────────────────
+
+    - name: Create system users with docker access
+      ansible.builtin.user:
+        name: "{{ item }}"
+        shell: /bin/bash
+        create_home: true
+        groups: docker
+        append: true
+      loop:
+        - infra
+        - poweur
+
+    # ── 4. Directories ─────────────────────────────────────────────────────────
+
+    - name: Create infra directory
+      ansible.builtin.file:
+        path: "{{ infra_dir }}"
+        state: directory
+        owner: infra
+        group: infra
+        mode: '0750'
+
+    - name: Create app directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: poweur
+        group: poweur
+        mode: '0750'
+      loop:
+        - /opt/apps
+        - "{{ app_dir }}"
+
+    # ── 5. Infra config ────────────────────────────────────────────────────────
+
+    - name: Sync infra config files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../infra/"
+        dest: "{{ infra_dir }}/"
+        owner: infra
+        group: infra
+        mode: preserve
+
+    - name: Ensure postgres init script is executable
+      ansible.builtin.file:
+        path: "{{ infra_dir }}/postgres/init.sh"
+        mode: '0755'
+
+    - name: Write infra .env from template
+      ansible.builtin.template:
+        src: templates/infra.env.j2
+        dest: "{{ infra_dir }}/.env"
+        owner: infra
+        group: infra
+        mode: '0600'
+
+    # ── 6. SSH keys ────────────────────────────────────────────────────────────
+
+    - name: Create poweur .ssh directory
+      ansible.builtin.file:
+        path: /home/poweur/.ssh
+        state: directory
+        owner: poweur
+        group: poweur
+        mode: '0700'
+
+    - name: Generate git deploy key (server → GitHub read-only)
+      ansible.builtin.command:
+        cmd: ssh-keygen -t ed25519 -f /home/poweur/.ssh/github_deploy -N "" -C "poweur-server"
+        creates: /home/poweur/.ssh/github_deploy
+      become_user: poweur
+      register: git_key
+
+    - name: Write SSH client config
+      ansible.builtin.copy:
+        dest: /home/poweur/.ssh/config
+        owner: poweur
+        group: poweur
+        mode: '0600'
+        content: |
+          Host github.com
+            IdentityFile ~/.ssh/github_deploy
+            StrictHostKeyChecking accept-new
+
+    - name: Generate GitHub Actions deploy key (CI → server)
+      ansible.builtin.command:
+        cmd: ssh-keygen -t ed25519 -f /home/poweur/.ssh/github_actions -N "" -C "github-actions"
+        creates: /home/poweur/.ssh/github_actions
+      register: actions_key
+
+    - name: Fix ownership on GitHub Actions key files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: poweur
+        group: poweur
+        mode: '0600'
+      loop:
+        - /home/poweur/.ssh/github_actions
+        - /home/poweur/.ssh/github_actions.pub
+
+    - name: Read GitHub Actions public key
+      ansible.builtin.slurp:
+        src: /home/poweur/.ssh/github_actions.pub
+      register: actions_pubkey
+
+    - name: Authorize GitHub Actions key for SSH login
+      ansible.posix.authorized_key:
+        user: poweur
+        state: present
+        key: "{{ actions_pubkey.content | b64decode | trim }}"
+
+    # ── 7. App repo ────────────────────────────────────────────────────────────
+
+    - name: Clone / update app repo
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: master
+        update: true
+        force: false
+      become_user: poweur
+      ignore_errors: true
+      register: repo_clone
+      # First run fails until the git deploy key is added to GitHub.
+      # Re-run the playbook after adding it.
+
+    - name: Check if app directory was cloned
+      ansible.builtin.stat:
+        path: "{{ app_dir }}/apps/api"
+      register: api_dir
+
+    - name: Write app .env.prod from template
+      ansible.builtin.template:
+        src: templates/api.env.prod.j2
+        dest: "{{ app_dir }}/apps/api/.env.prod"
+        owner: poweur
+        group: poweur
+        mode: '0600'
+      when: api_dir.stat.exists
+
+    # ── 8. Docker network ──────────────────────────────────────────────────────
+
+    - name: Create infra_net Docker network
+      ansible.builtin.command: docker network create infra_net
+      register: net_result
+      failed_when:
+        - net_result.rc != 0
+        - '"already exists" not in net_result.stderr'
+      changed_when: net_result.rc == 0
+
+    # ── 9. Systemd services ────────────────────────────────────────────────────
+
+    - name: Write poweur-infra systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/poweur-infra.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Poweur Infrastructure (Caddy, Postgres, Prometheus, Grafana)
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          User=infra
+          Group=infra
+          WorkingDirectory={{ infra_dir }}
+          ExecStart=/usr/bin/docker compose up --remove-orphans
+          ExecStop=/usr/bin/docker compose down
+          Restart=on-failure
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Write poweur-app systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/poweur-app.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Poweur App Stack
+          After=docker.service poweur-infra.service
+          Requires=docker.service
+          Wants=poweur-infra.service
+
+          [Service]
+          Type=simple
+          User=poweur
+          Group=poweur
+          WorkingDirectory={{ app_dir }}
+          ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up --remove-orphans
+          ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+          Restart=on-failure
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable systemd services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        daemon_reload: true
+      loop:
+        - poweur-infra
+        - poweur-app
+
+    # ── 10. Firewall ───────────────────────────────────────────────────────────
+
+    - name: Configure UFW rules
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        comment: "{{ item.comment }}"
+      loop:
+        - { port: '22',  proto: tcp, comment: SSH }
+        - { port: '80',  proto: tcp, comment: HTTP }
+        - { port: '443', proto: tcp, comment: HTTPS }
+        - { port: '443', proto: udp, comment: "HTTP/3" }
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+    # ── 11. Post-run instructions ──────────────────────────────────────────────
+
+    - name: Read git deploy public key
+      ansible.builtin.slurp:
+        src: /home/poweur/.ssh/github_deploy.pub
+      register: git_pubkey
+
+    - name: Read GitHub Actions private key
+      ansible.builtin.slurp:
+        src: /home/poweur/.ssh/github_actions
+      register: actions_privkey
+
+    - name: "ACTION 1/3 — Add git deploy key to GitHub (Settings → Deploy keys)"
+      ansible.builtin.debug:
+        msg: "{{ git_pubkey.content | b64decode | trim }}"
+      when: git_key.changed
+
+    - name: "ACTION 2/3 — Add DEPLOY_SSH_KEY Actions secret (Settings → Secrets → Actions)"
+      ansible.builtin.debug:
+        msg: "{{ actions_privkey.content | b64decode }}"
+      when: actions_key.changed
+
+    - name: "ACTION 3/3 — Add DEPLOY_HOST Actions secret"
+      ansible.builtin.debug:
+        msg: "Name: DEPLOY_HOST   Value: {{ ansible_host }}"
+      when: actions_key.changed
+
+    - name: Bootstrap summary
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            'Repo clone failed — add the deploy key to GitHub, then re-run.'
+            if repo_clone.failed | default(false) else
+            'Done. Start services: systemctl start poweur-infra && systemctl start poweur-app'
+          }}
