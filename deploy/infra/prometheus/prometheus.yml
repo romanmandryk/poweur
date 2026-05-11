@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  # Uncomment when poweur relay exposes /metrics
+  # - job_name: poweur-relay
+  #   static_configs:
+  #     - targets: [poweur-relay:8080]
+  #   metrics_path: /metrics
+
+  # Template for future apps — add a block per app:
+  # - job_name: my-other-app
+  #   static_configs:
+  #     - targets: [my-other-app-container:PORT]

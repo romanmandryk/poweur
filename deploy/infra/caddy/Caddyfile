@@ -1,0 +1,17 @@
+# Cloudflare terminates TLS; Caddy only sees plain HTTP from Cloudflare's edge.
+# All traffic arrives on port 80 from Cloudflare IPs — no cert management needed.
+
+# Relay API
+http://relay.poweur.net {
+    reverse_proxy poweur-relay:8080
+}
+
+# Grafana
+http://grafana.poweur.net {
+    reverse_proxy infra-grafana:3000
+}
+
+# Identity subdomains — Cloudflare proxies *.poweur.net CNAMEs here
+http://poweur.net http://*.poweur.net {
+    reverse_proxy poweur-relay:8080
+}

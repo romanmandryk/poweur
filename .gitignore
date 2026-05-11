@@ -31,11 +31,16 @@ apps/integration/coverage/
 *.out
 vendor/
 bin/
+apps/cli/poweur
+
 
 # Environment
 .env
 .env.*
 !.env.example
+
+# Ansible secrets (never commit)
+deploy/ansible/secrets.yml
 
 # OS
 .DS_Store

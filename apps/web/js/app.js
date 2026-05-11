@@ -485,7 +485,7 @@ function renderAddId() {
           <div class="option-card" style="opacity:.55;pointer-events:none;cursor:default">
             <div class="option-icon-wrap">📱</div>
             <div class="option-body">
-              <div class="option-title">Add ID to existing device</div>
+              <div class="option-title">Add new device(key) to existing ID</div>
               <div class="option-desc">Transfer your identity from another device</div>
             </div>
             <span class="option-soon">Soon</span>
