@@ -1,6 +1,6 @@
 services:
   relay:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/poweur-relay:latest
+    image: ghcr.io/romanmandryk/poweur-relay:latest
     container_name: poweur-relay
     restart: unless-stopped
     env_file:

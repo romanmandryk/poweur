@@ -190,7 +190,7 @@
         dest: "{{ app_dir }}"
         version: master
         update: true
-        force: false
+        force: true
       become_user: poweur
       ignore_errors: true
       register: repo_clone
@@ -211,17 +211,7 @@
         mode: '0600'
       when: api_dir.stat.exists
 
-    # ── 8. Docker network ──────────────────────────────────────────────────────
-
-    - name: Create infra_net Docker network
-      ansible.builtin.command: docker network create infra_net
-      register: net_result
-      failed_when:
-        - net_result.rc != 0
-        - '"already exists" not in net_result.stderr'
-      changed_when: net_result.rc == 0
-
-    # ── 9. Systemd services ────────────────────────────────────────────────────
+    # ── 8. Systemd services ────────────────────────────────────────────────────
 
     - name: Write poweur-infra systemd service
       ansible.builtin.copy:

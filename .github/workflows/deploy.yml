@@ -31,6 +31,7 @@ jobs:
         with:
           context: apps/api
           push: true
+          build-args: VERSION=${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
@@ -47,16 +48,12 @@ jobs:
         run: ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy
-        env:
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
           ssh poweur@${{ secrets.DEPLOY_HOST }} bash << 'EOF'
             set -euo pipefail
             cd /opt/apps/poweur
-            git pull --ff-only origin main
-            GITHUB_REPOSITORY_OWNER=${{ github.repository_owner }} \
-              docker compose -f docker-compose.prod.yml pull
-            GITHUB_REPOSITORY_OWNER=${{ github.repository_owner }} \
-              docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            git pull --ff-only origin master
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
             echo "Deployed $(git rev-parse --short HEAD)"
           EOF
