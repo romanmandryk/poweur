@@ -31,6 +31,8 @@ apps/integration/coverage/
 *.out
 vendor/
 bin/
+apps/cli/poweur
+
 
 # Environment
 .env
