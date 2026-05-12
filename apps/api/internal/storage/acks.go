@@ -32,9 +32,15 @@ func NewAckStore() *AckStore {
 	return &AckStore{acks: make(map[string][]StoredAck)}
 }
 
-func (s *AckStore) Add(identity string, ack StoredAck) {
+// Add appends ack to the identity's queue. When max > 0 and the queue is
+// already at capacity the oldest ack is dropped to make room — acks are
+// delivery receipts and it is better to surface recent ones than old ones.
+func (s *AckStore) Add(identity string, ack StoredAck, max int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if max > 0 && len(s.acks[identity]) >= max {
+		s.acks[identity] = s.acks[identity][1:]
+	}
 	s.acks[identity] = append(s.acks[identity], ack)
 }
 

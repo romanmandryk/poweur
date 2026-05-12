@@ -5,6 +5,10 @@ services:
     restart: unless-stopped
     env_file:
       - apps/api/.env.prod
+    environment:
+      WEB_STATIC_DIR: /web
+    volumes:
+      - ./apps/web:/web:ro
     networks:
       - poweur_net
       - infra_net

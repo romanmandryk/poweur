@@ -144,6 +144,107 @@ func TestMessageInboxFlow(t *testing.T) {
 	}
 }
 
+// TestInboxDNSFallback verifies that GET /messages/{identity} works when the
+// identity is absent from the in-memory store (simulating a server restart)
+// but its pubkey is discoverable via DNS TXT and its hostname resolves to this
+// relay's address. This is the "DNS as source of truth, store as cache" model.
+func TestInboxDNSFallback(t *testing.T) {
+	cfg := config.Config{
+		ListenAddr:   ":0",
+		RelayAddress: "relay.test",
+		RelayScheme:  "http",
+		DNSTTL:       time.Minute,
+		ChallengeTTL: time.Minute,
+		Version:      "test",
+		RateLimits: config.RateLimits{
+			PerMinute: 100,
+			PerHour:   1000,
+			PerDay:    10000,
+		},
+	}
+
+	senderPub, senderPriv, _ := ed25519.GenerateKey(nil)
+	recipientPub, recipientPriv, _ := ed25519.GenerateKey(nil)
+
+	resolver := &fakeResolver{
+		txt: map[string][]string{
+			"_poweur.alice.poweur.net": {"poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(senderPub)},
+			"_poweur.bob.example.org":  {"poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(recipientPub)},
+		},
+		hosts: map[string][]string{
+			"alice.poweur.net": {"relay.test"},
+			"bob.example.org":  {"relay.test"},
+		},
+	}
+
+	// bob.example.org intentionally absent from server.identities — cold store.
+	server := NewServer(cfg, resolver, dns.NewProviderFactory(cfg))
+	ts := httptest.NewServer(server.Router())
+	defer ts.Close()
+
+	msg := Message{
+		ID:        "msg_dns_fallback_001",
+		Sender:    "alice.poweur.net",
+		Recipient: "bob.example.org",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Payload:   "DNS fallback payload",
+		Encryption: &EncryptionMeta{
+			Alg:                "x25519-chacha20-poly1305",
+			EphemeralPublicKey: "ephemeral-pub",
+			Nonce:              "nonce",
+		},
+	}
+	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, "", &crypto.EncryptionMeta{
+		Alg: msg.Encryption.Alg, EphemeralPublicKey: msg.Encryption.EphemeralPublicKey, Nonce: msg.Encryption.Nonce,
+	})
+	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(canonical)))
+
+	body, _ := json.Marshal(msg)
+	if resp, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("post message: err=%v status=%v", err, resp.StatusCode)
+	}
+
+	challengeResp, err := http.Get(ts.URL + "/auth/challenge?identity=bob.example.org")
+	if err != nil {
+		t.Fatalf("challenge: %v", err)
+	}
+	var challenge ChallengeResponse
+	if err := json.NewDecoder(challengeResp.Body).Decode(&challenge); err != nil {
+		t.Fatalf("decode challenge: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/messages/bob.example.org", nil)
+	req.Header.Set("X-Poweur-Identity", "bob.example.org")
+	req.Header.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(ed25519.Sign(recipientPriv, []byte(challenge.Challenge))))
+	inboxResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	if inboxResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", inboxResp.StatusCode)
+	}
+	var inbox struct {
+		Messages []storage.StoredMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(inboxResp.Body).Decode(&inbox); err != nil {
+		t.Fatalf("decode inbox: %v", err)
+	}
+	if len(inbox.Messages) != 1 || inbox.Messages[0].Payload != "DNS fallback payload" {
+		t.Fatalf("unexpected inbox: %+v", inbox.Messages)
+	}
+
+	// Second drain: store should now be warm (no DNS needed).
+	challengeResp2, _ := http.Get(ts.URL + "/auth/challenge?identity=bob.example.org")
+	var challenge2 ChallengeResponse
+	json.NewDecoder(challengeResp2.Body).Decode(&challenge2)
+	req2, _ := http.NewRequest(http.MethodGet, ts.URL+"/messages/bob.example.org", nil)
+	req2.Header.Set("X-Poweur-Identity", "bob.example.org")
+	req2.Header.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(ed25519.Sign(recipientPriv, []byte(challenge2.Challenge))))
+	if resp2, err := http.DefaultClient.Do(req2); err != nil || resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second inbox (warm cache): err=%v status=%v", err, resp2.StatusCode)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	cfg := config.Config{
 		ListenAddr:   ":0",

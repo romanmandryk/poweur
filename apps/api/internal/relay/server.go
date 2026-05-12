@@ -38,8 +38,14 @@ type Server struct {
 	rateLimit  *ratelimit.Limiter
 	client     *http.Client
 
-	cacheMu    sync.Mutex
-	relayCache map[string]cachedRelay
+	cacheMu      sync.Mutex
+	relayCache   map[string]cachedRelay
+	localityCache map[string]cachedLocality
+}
+
+type cachedLocality struct {
+	Local     bool
+	ExpiresAt time.Time
 }
 
 type cachedRelay struct {
@@ -48,18 +54,42 @@ type cachedRelay struct {
 }
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
-	return &Server{
-		cfg:        cfg,
-		resolver:   resolver,
-		providers:  providers,
-		identities: storage.NewIdentityStore(),
-		inbox:      storage.NewInboxStore(),
-		acks:       storage.NewAckStore(),
-		challenges: storage.NewChallengeStore(),
-		sessions:   storage.NewSessionStore(),
-		rateLimit:  ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
-		client:     &http.Client{Timeout: 10 * time.Second},
-		relayCache: make(map[string]cachedRelay),
+	s := &Server{
+		cfg:           cfg,
+		resolver:      resolver,
+		providers:     providers,
+		identities:    storage.NewIdentityStore(),
+		inbox:         storage.NewInboxStore(),
+		acks:          storage.NewAckStore(),
+		challenges:    storage.NewChallengeStore(),
+		sessions:      storage.NewSessionStore(),
+		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		client:        &http.Client{Timeout: 10 * time.Second},
+		relayCache:    make(map[string]cachedRelay),
+		localityCache: make(map[string]cachedLocality),
+	}
+	go s.runPruner()
+	return s
+}
+
+// runPruner periodically evicts expired sessions and locality cache entries.
+func (s *Server) runPruner() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.sessions.Prune()
+		s.pruneLocalityCache()
+	}
+}
+
+func (s *Server) pruneLocalityCache() {
+	now := time.Now()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	for k, v := range s.localityCache {
+		if now.After(v.ExpiresAt) {
+			delete(s.localityCache, k)
+		}
 	}
 }
 
@@ -268,14 +298,26 @@ func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
 		return
 	}
-	entry, ok := s.identities.Get(identity)
-	if !ok {
+	if entry, ok := s.identities.Get(identity); ok {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"identity":   entry.Identity,
+			"public_key": entry.PublicKey,
+		})
+		return
+	}
+	if !s.isLocalIdentity(r.Context(), identity) {
 		writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
 		return
 	}
+	pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
+		return
+	}
+	s.warmIdentityCache(identity, pub)
 	writeJSON(w, http.StatusOK, map[string]string{
-		"identity":   entry.Identity,
-		"public_key": entry.PublicKey,
+		"identity":   identity,
+		"public_key": base64.RawURLEncoding.EncodeToString(pub),
 	})
 }
 
@@ -336,18 +378,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision := s.rateLimit.Allow(msg.Sender)
-	if !decision.Allowed {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error":    "rate_limit_exceeded",
-			"scope":    decision.Scope,
-			"window":   decision.Window,
-			"limit":    decision.Limit,
-			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
-		})
-		return
-	}
-
 	senderLocal := s.isLocalIdentity(r.Context(), msg.Sender)
 	recipientLocal := s.isLocalIdentity(r.Context(), msg.Recipient)
 	if !senderLocal && !recipientLocal {
@@ -373,6 +403,20 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Rate limit by verified sender only — charging an unverified sender field
+	// before sig check would let any attacker exhaust another identity's quota.
+	decision := s.rateLimit.Allow(msg.Sender)
+	if !decision.Allowed {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":    "rate_limit_exceeded",
+			"scope":    decision.Scope,
+			"window":   decision.Window,
+			"limit":    decision.Limit,
+			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+
 	if recipientLocal {
 		stored := storage.StoredMessage{
 			ID:        msg.ID,
@@ -388,7 +432,11 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 				Nonce:              msg.Encryption.Nonce,
 			},
 		}
-		s.inbox.Add(msg.Recipient, stored)
+		if !s.inbox.Add(msg.Recipient, stored, s.cfg.MaxInboxPerIdentity) {
+			writeError(w, http.StatusServiceUnavailable, "inbox_full",
+				"recipient inbox is full; retry after the recipient drains their messages")
+			return
+		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
 	}
@@ -433,18 +481,6 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	decision := s.rateLimit.Allow(ack.Sender)
-	if !decision.Allowed {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error":    "rate_limit_exceeded",
-			"scope":    decision.Scope,
-			"window":   decision.Window,
-			"limit":    decision.Limit,
-			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
-		})
-		return
-	}
-
 	senderLocal := s.isLocalIdentity(r.Context(), ack.Sender)
 	recipientLocal := s.isLocalIdentity(r.Context(), ack.Recipient)
 	if !senderLocal && !recipientLocal {
@@ -464,6 +500,18 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	decision := s.rateLimit.Allow(ack.Sender)
+	if !decision.Allowed {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":    "rate_limit_exceeded",
+			"scope":    decision.Scope,
+			"window":   decision.Window,
+			"limit":    decision.Limit,
+			"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+
 	if recipientLocal {
 		s.acks.Add(ack.Recipient, storage.StoredAck{
 			Type:      ack.Type,
@@ -475,7 +523,7 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 			Timestamp: ack.Timestamp,
 			Signature: ack.Signature,
 			SessionID: ack.SessionID,
-		})
+		}, s.cfg.MaxAcksPerIdentity)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": ack.ID})
 		return
 	}
@@ -524,12 +572,17 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		}
 		publicKey = session.PublicKeyBytes
 	} else {
-		entry, ok := s.identities.Get(identity)
-		if !ok {
+		if !s.isLocalIdentity(r.Context(), identity) {
 			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
 			return
 		}
-		publicKey = entry.PublicKeyBytes
+		pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
+			return
+		}
+		s.warmIdentityCache(identity, pub)
+		publicKey = pub
 	}
 
 	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
@@ -640,50 +693,26 @@ func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID strin
 	return sess, nil
 }
 
+// resolveIdentityPublicKey returns the Ed25519 public key for identity.
+// It checks the in-memory store first (populated on registration or DNS warm),
+// then falls back to the _poweur.<identity> DNS TXT record. There is no HTTP
+// fallback to peer relays — that path was an SSRF vector and DNS TXT is the
+// canonical source of truth for all registered identities.
 func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
 	if entry, ok := s.identities.Get(identity); ok {
 		return entry.PublicKeyBytes, nil
 	}
-
 	txtRecords, err := s.resolver.LookupTXT(ctx, fmt.Sprintf("_poweur.%s", identity))
-	if err == nil {
-		return crypto.ParseTXTRecord(txtRecords)
-	}
-
-	relayHost, err := s.resolveRelayHost(ctx, identity)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("identity public key not found (no TXT record for _poweur.%s)", identity)
 	}
-
-	url := fmt.Sprintf("%s://%s/identities/%s", s.cfg.RelayScheme, relayHost, identity)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("identity lookup failed on peer relay")
-	}
-	var payload struct {
-		PublicKey string `json:"public_key"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-	return crypto.ParsePublicKey(payload.PublicKey)
+	return crypto.ParseTXTRecord(txtRecords)
 }
 
-// isLocalIdentity reports whether `identity` is hosted on this relay,
-// i.e. either present in the in-memory IdentityStore (canonical fast
-// path) or whose DNS A/CNAME resolves to this relay's address (covers
-// CDN-fronted setups where multiple identities share an IP). Used by
-// both the message and ack pipelines to enforce the at-least-one-local
-// rule.
+// isLocalIdentity reports whether `identity` is hosted on this relay.
+// Fast paths in order: identity store hit, locality cache hit, DNS lookup.
+// DNS results (both local and non-local) are cached for cfg.DNSTTL to
+// prevent per-request lookups and DNS amplification via spoofed sender fields.
 func (s *Server) isLocalIdentity(ctx context.Context, identity string) bool {
 	if s.identities.Exists(identity) {
 		return true
@@ -691,24 +720,41 @@ func (s *Server) isLocalIdentity(ctx context.Context, identity string) bool {
 	if s.cfg.RelayAddress == "" {
 		return false
 	}
+
+	now := time.Now()
+	s.cacheMu.Lock()
+	if entry, ok := s.localityCache[identity]; ok && now.Before(entry.ExpiresAt) {
+		local := entry.Local
+		s.cacheMu.Unlock()
+		return local
+	}
+	s.cacheMu.Unlock()
+
+	local := s.resolveLocality(ctx, identity)
+
+	s.cacheMu.Lock()
+	s.localityCache[identity] = cachedLocality{
+		Local:     local,
+		ExpiresAt: now.Add(s.cfg.DNSTTL),
+	}
+	s.cacheMu.Unlock()
+
+	return local
+}
+
+// resolveLocality performs the DNS-based locality check without any caching.
+// Both hostname-match (test/direct) and IP-overlap (CDN-fronted) cases are handled.
+func (s *Server) resolveLocality(ctx context.Context, identity string) bool {
 	identityHosts, err := s.resolver.LookupHost(ctx, identity)
 	if err != nil || len(identityHosts) == 0 {
 		return false
 	}
-	// Fast path — DNS returned the relay's configured hostname directly.
-	// Covers test environments that mock DNS with hostname targets.
 	for _, h := range identityHosts {
 		if strings.EqualFold(h, s.cfg.RelayAddress) {
 			return true
 		}
 	}
-	// Production path — behind Cloudflare (or any reverse-proxy) both
-	// `<identity>` and `<RelayAddress>` resolve to the same edge IPs, so
-	// the hostname compare above never matches. Resolve the relay's own
-	// hostname and treat the recipient as local when the IP sets overlap.
-	// Without this, the relay tries to forward the message to one of CF's
-	// edge IPs and fails the TLS handshake (502 forward_failed), even
-	// though the recipient lives on this very relay.
+	// CDN-fronted: both identity and relay resolve to the same edge IPs.
 	selfHosts, err := s.resolver.LookupHost(ctx, s.cfg.RelayAddress)
 	if err != nil || len(selfHosts) == 0 {
 		return false
@@ -833,6 +879,18 @@ func (s *Server) forwardAck(ctx context.Context, ack Ack) error {
 		return fmt.Errorf("forwarding failed with status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// warmIdentityCache populates the in-memory identity store from a public key
+// already resolved from DNS. Subsequent requests hit the store fast path instead
+// of re-doing DNS. No-op if the identity was registered (already present).
+func (s *Server) warmIdentityCache(identity string, pub ed25519.PublicKey) {
+	s.identities.Add(storage.Identity{
+		Identity:       identity,
+		PublicKey:      base64.RawURLEncoding.EncodeToString(pub),
+		PublicKeyBytes: pub,
+		CreatedAt:      time.Now().UTC(),
+	})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {

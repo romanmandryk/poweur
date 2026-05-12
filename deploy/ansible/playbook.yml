@@ -269,7 +269,20 @@
         - poweur-infra
         - poweur-app
 
-    # ── 10. Firewall ───────────────────────────────────────────────────────────
+    # ── 9. Start services ──────────────────────────────────────────────────────
+
+    - name: Start poweur-infra
+      ansible.builtin.systemd_service:
+        name: poweur-infra
+        state: started
+
+    - name: Start poweur-app (relay)
+      ansible.builtin.systemd_service:
+        name: poweur-app
+        state: started
+      when: api_dir.stat.exists
+
+    # ── 10. Firewall ──────────────────────────────────────────────────────────
 
     - name: Configure UFW rules
       community.general.ufw:
