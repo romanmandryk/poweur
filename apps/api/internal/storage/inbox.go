@@ -33,10 +33,17 @@ func NewInboxStore() *InboxStore {
 	}
 }
 
-func (s *InboxStore) Add(identity string, msg StoredMessage) {
+// Add appends msg to the identity's inbox. Returns false without storing when
+// the inbox is at capacity (max > 0), so the caller can return a 503 and let
+// the sender retry later rather than silently losing the message.
+func (s *InboxStore) Add(identity string, msg StoredMessage, max int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if max > 0 && len(s.messages[identity]) >= max {
+		return false
+	}
 	s.messages[identity] = append(s.messages[identity], msg)
+	return true
 }
 
 func (s *InboxStore) Drain(identity string) []StoredMessage {

@@ -749,7 +749,8 @@ async function doCreateIdentity() {
     setLoading(true, "Registering identity…");
     const issuedAt = now();
     const nonce    = randomNonce();
-    const canonical = canonicalIdentityRegistration(identity, pubB64, encB64, relayUrl, issuedAt, nonce);
+    const relayAddr = relayUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const canonical = canonicalIdentityRegistration(identity, pubB64, encB64, relayAddr, issuedAt, nonce);
     const identitySignature = await sign(sigPriv, canonical);
 
     await registerIdentity(relayUrl, {

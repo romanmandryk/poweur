@@ -8,7 +8,7 @@ import (
 
 func TestInboxAddDrain(t *testing.T) {
 	s := NewInboxStore()
-	s.Add("a", StoredMessage{ID: "1", Payload: "p"})
+	s.Add("a", StoredMessage{ID: "1", Payload: "p"}, 50)
 	if x := s.Drain("a"); len(x) != 1 {
 		t.Fatalf("drain1: %d", len(x))
 	}
@@ -19,7 +19,7 @@ func TestInboxAddDrain(t *testing.T) {
 
 func TestAckAddDrain(t *testing.T) {
 	s := NewAckStore()
-	s.Add("u", StoredAck{ID: "a1", MessageID: "m1"})
+	s.Add("u", StoredAck{ID: "a1", MessageID: "m1"}, 50)
 	got := s.Drain("u")
 	if len(got) != 1 {
 		t.Fatal(len(got))

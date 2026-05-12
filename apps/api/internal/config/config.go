@@ -19,10 +19,12 @@ const (
 	// Global default is roughly 10× the per-sender hourly cap times an
 	// expected-active-senders constant (here: 50). Tune per deployment via
 	// env vars; 0 disables the global cap entirely.
-	DefaultGlobalMinuteLimit = 1000
-	DefaultGlobalHourLimit   = 100000
-	DefaultGlobalDayLimit    = 1000000
-	DefaultVersion           = "0.1.0"
+	DefaultGlobalMinuteLimit    = 1000
+	DefaultGlobalHourLimit      = 100000
+	DefaultGlobalDayLimit       = 1000000
+	DefaultVersion              = "0.1.0"
+	DefaultMaxInboxPerIdentity  = 50
+	DefaultMaxAcksPerIdentity   = 50
 )
 
 // RateLimits configures per-sender token-bucket caps. Each window resets on
@@ -46,15 +48,17 @@ type GlobalRateLimits struct {
 type Config struct {
 	ListenAddr string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
-	WebStaticDir     string
-	RelayAddress     string
-	RelayScheme      string
-	DNSTTL           time.Duration
-	ChallengeTTL     time.Duration
-	Version          string
-	RateLimits       RateLimits
-	GlobalRateLimits GlobalRateLimits
-	DNSProxyMode     string
+	WebStaticDir        string
+	RelayAddress        string
+	RelayScheme         string
+	DNSTTL              time.Duration
+	ChallengeTTL        time.Duration
+	Version             string
+	RateLimits          RateLimits
+	GlobalRateLimits    GlobalRateLimits
+	DNSProxyMode        string
+	MaxInboxPerIdentity int
+	MaxAcksPerIdentity  int
 }
 
 func (c Config) Validate() error {
@@ -87,7 +91,9 @@ func FromEnv() Config {
 		DNSTTL:       getenvDuration("DNS_TTL", DefaultDNSTTL),
 		ChallengeTTL: getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
 		Version:      getenv("VERSION", DefaultVersion),
-		DNSProxyMode: strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
+		DNSProxyMode:        strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
+		MaxInboxPerIdentity: getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
+		MaxAcksPerIdentity:  getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),
