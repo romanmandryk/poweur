@@ -80,7 +80,7 @@ async function importEd25519Public(keyBytesOrStr) {
  */
 export async function generateEncryptionKeypair() {
   const kp = await crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "X25519" }, true, ["deriveBits"]
+    { name: "X25519" }, true, ["deriveBits"]
   );
   const publicKeyBytes = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
   const privateKeyJWK = await crypto.subtle.exportKey("jwk", kp.privateKey);
@@ -111,18 +111,18 @@ export async function encryptMessage(plaintext, recipientEncPubKey) {
 
   // Generate ephemeral X25519 keypair
   const ephKP = await crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "X25519" }, true, ["deriveBits"]
+    { name: "X25519" }, true, ["deriveBits"]
   );
   const ephPubBytes = new Uint8Array(await crypto.subtle.exportKey("raw", ephKP.publicKey));
 
   // Import recipient's public key
   const recipientKey = await crypto.subtle.importKey(
-    "raw", recipientPubBytes, { name: "ECDH", namedCurve: "X25519" }, false, []
+    "raw", recipientPubBytes, { name: "X25519" }, false, []
   );
 
-  // ECDH shared secret
+  // X25519 shared secret
   const sharedBits = new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "ECDH", public: recipientKey }, ephKP.privateKey, 256
+    { name: "X25519", public: recipientKey }, ephKP.privateKey, 256
   ));
 
   // HKDF-SHA256: salt = ephPub || recipientPub, info = "poweur/msg/v1"
@@ -155,19 +155,19 @@ export async function decryptMessage(myEncPrivKeyJWK, { ciphertext, ephemeralPub
   // The JWK `x` field IS the X25519 public key (base64url, 32 bytes).
   const myPubRaw = fromBase64url(myEncPrivKeyJWK.x);
 
-  // Import private key for ECDH
+  // Import private key for X25519
   const myPrivKey = await crypto.subtle.importKey(
-    "jwk", myEncPrivKeyJWK, { name: "ECDH", namedCurve: "X25519" }, false, ["deriveBits"]
+    "jwk", myEncPrivKeyJWK, { name: "X25519" }, false, ["deriveBits"]
   );
 
   // Import ephemeral public key (public-only, no key_ops needed)
   const ephKey = await crypto.subtle.importKey(
-    "raw", ephPubBytes, { name: "ECDH", namedCurve: "X25519" }, false, []
+    "raw", ephPubBytes, { name: "X25519" }, false, []
   );
 
-  // ECDH shared secret
+  // X25519 shared secret
   const sharedBits = new Uint8Array(
-    await crypto.subtle.deriveBits({ name: "ECDH", public: ephKey }, myPrivKey, 256)
+    await crypto.subtle.deriveBits({ name: "X25519", public: ephKey }, myPrivKey, 256)
   );
 
   // HKDF-SHA256: salt = ephPub || myPub, info = "poweur/msg/v1"

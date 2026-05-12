@@ -60,7 +60,22 @@ export async function createPasskey(identity, userId) {
   try {
     credential = await navigator.credentials.create({ publicKey: createOptions });
   } catch (err) {
-    throw new Error(`Passkey creation failed: ${err.message}`);
+    // Firefox on macOS and older Safari can fail with platform-authenticator
+    // errors or unsupported PRF. Retry without PRF and without locking to
+    // platform-only — lets Firefox use its own authenticator UI flow.
+    try {
+      const fallbackOptions = {
+        ...createOptions,
+        extensions: {},
+        authenticatorSelection: {
+          residentKey: "required",
+          userVerification: "required",
+        },
+      };
+      credential = await navigator.credentials.create({ publicKey: fallbackOptions });
+    } catch (err2) {
+      throw new Error(`Passkey creation failed: ${err2.message}`);
+    }
   }
 
   const credentialId = toBase64url(new Uint8Array(credential.rawId));
