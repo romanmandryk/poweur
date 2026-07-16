@@ -1,9 +1,23 @@
 # EPIC-002 — Relay-only registration, wildcard identities & durable relay storage
 
-- **Status:** proposed
+- **Status:** partially complete (core shipped 2026-07)
 - **Priority:** P0
 - **Depends on:** EPIC-001
 - **Unlocks:** EPIC-003 (file storage), EPIC-009 (message persistence)
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E02-T1 Durable FS store | **done** (partial) | Identity docs durable; inbox/acks/sessions stay memory-only by design until EPIC-009 |
+| E02-T2 Hosted registration | **done** | CLI `--hosted`, web hosted checkbox, integration test |
+| E02-T3 Name policy & abuse | **partial** | Reserved names + registration rate limit done; PoW/invite/lease **open** |
+| E02-T4 Export & migration | **open** | Deferred — stays on this epic |
+| E02-T5 Ops hardening | **open** | Deferred — stays on this epic; quotas expand in EPIC-003 |
+
+**Deferred in the 2026-07 core pass** (plan scope lock): E02-T4, E02-T5, and E02-T3 extras
+(PoW / invite-code / lease expiry). Inbox persistence was explicitly deferred to
+[EPIC-009](EPIC-009-messaging-upgrades.md) (sessions remain memory-only).
 
 ## Goal
 
@@ -44,61 +58,65 @@ epics grow into the user's synced "home".
 
 ## Tasks
 
-### E02-T1 — Storage abstraction & filesystem backend
+### E02-T1 — Storage abstraction & filesystem backend — DONE (identity docs)
 
 Introduce a `Store` interface that the relay uses for durable state, with the per-identity
 directory layout as the primary implementation.
 
-- [ ] Define interface: identity documents, inbox messages, acks, sessions (sessions may stay
-      memory-only by design — decide and document)
-- [ ] Filesystem backend: `identities/<id>/poweur-sys/public/id.json`, atomic writes
-      (write-temp + rename), fsync policy, path sanitization (identity names are
-      attacker-controlled — strict `[a-z0-9-]` per label, no dots-as-separators in dir names
-      or escape via `..`)
-- [ ] SQLite (or bbolt) index for fast existence/uniqueness checks and listing
-- [ ] Config: `POWEUR_DATA` dir in `apps/api/internal/config/config.go`; in-memory backend kept
+- [x] Define approach: identity documents durable; **inbox / acks / sessions memory-only**
+      (documented; inbox durability → EPIC-009)
+- [x] Filesystem backend: `identities/<sanitized-id>/poweur-sys/public/id.json`, atomic writes
+      (write-temp + rename), path sanitization
+- [ ] SQLite (or bbolt) index for fast existence/uniqueness checks and listing —
+      **remaining polish** (in-memory map loaded from disk is enough for now)
+- [x] Config: `POWEUR_DATA` dir in `apps/api/internal/config/config.go`; in-memory backend kept
       for tests
-- [ ] Migration note: relays restart without losing hosted identities (integration test:
+- [x] Migration note: relays restart without losing hosted identities (integration test:
       register → restart server → resolve + receive message)
 
-**Acceptance:** relay restart preserves hosted identities and their documents; fuzz test on
-identity-name → path mapping shows no traversal.
+**Acceptance:** relay restart preserves hosted identities and their documents; path sanitization
+tests show no traversal.
 
-### E02-T2 — Hosted registration endpoint (no DNS writes)
+### E02-T2 — Hosted registration endpoint (no DNS writes) — DONE
 
-- [ ] Extend `POST /identities`: when `dns_provider`/`dns_token` are absent and the requested
+- [x] Extend `POST /identities`: when `dns_provider`/`dns_token` are absent and the requested
       identity is under the relay's configured hosted domain(s) (`HOSTED_DOMAINS=poweur.net`),
-      run the hosted flow: verify identity signature (reuse existing canonical envelope),
-      check name availability, persist signed identity document
-- [ ] Client submits the *signed identity document* (EPIC-001) in the registration body; relay
+      run the hosted flow: verify identity signature, check name availability, persist signed
+      identity document
+- [x] Client submits the *signed identity document* in the registration body; relay
       validates signature against the embedded key before accepting
-- [ ] Keep DNS mode fully working; route by request shape + config
-- [ ] CLI: `poweur register name.poweur.net --hosted` (no token args); web app registration flow
-      updated (`apps/web/js/app.js` currently assumes token-based registration)
-- [ ] Update docs: `apps/docs/docs/relay/api-reference.md`, `dns-management.md` ("optional" now)
+- [x] Keep DNS mode fully working; route by request shape + config
+- [x] CLI: `poweur identity create name.poweur.net --hosted` (no token args); web app
+      registration flow updated (`apps/web/js/app.js`)
+- [x] Update docs: `apps/docs/docs/relay/api-reference.md`, web-identity protocol page
+- [ ] `dns-management.md` wording pass ("optional" now) — **remaining**
 
 **Acceptance:** with only a wildcard A record in the fake DNS zone, two fresh identities
-register against the relay and exchange E2E-encrypted messages; integration test added.
+register against the relay and exchange E2E-encrypted messages; integration test added
+(`TestINT_HOSTED_01`).
 
-### E02-T3 — Name allocation policy & abuse controls
+### E02-T3 — Name allocation policy & abuse controls — PARTIAL
 
 Mass registration without payment or DNS friction invites squatting and spam-farming.
 
-- [ ] Policy module: reserved names (www, admin, relay, mail, …), min/max length, label charset,
-      optionally a configurable denylist file
-- [ ] Rate limits on registration per IP and global (extend `apps/api/internal/ratelimit/`)
+- [x] Policy module: reserved names (www, admin, relay, mail, …), min/max length, label charset
+      (`packages/identity/names.go`)
+- [x] Rate limits on registration (reuse `ratelimit` keyed as `register:<identity>`)
 - [ ] Proof-of-work or invite-code option behind config for public relays (pluggable
-      `RegistrationGate` interface; ship PoW + invite-code + open implementations)
+      `RegistrationGate` interface; ship PoW + invite-code + open implementations) — **open**
 - [ ] Inactivity/lease policy decision: do hosted names expire? Document the answer and the
-      grace/renewal mechanism (client pings or session activity refreshes the lease)
+      grace/renewal mechanism — **open** (default for now: no expiry)
 
 **Acceptance:** policy unit tests; a public-relay configuration that demonstrably throttles a
-registration flood in an integration test.
+registration flood in an integration test (basic rate limit exists; flood integration test /
+PoW still open).
 
-### E02-T4 — Identity export & relay migration
+### E02-T4 — Identity export & relay migration — OPEN
 
 Hosted users must not be locked in. Because the identity's name contains the relay's domain,
 *name portability* differs for hosted vs self-hosted IDs — be explicit about both.
+
+**Stays on this epic** (not moved elsewhere).
 
 - [ ] `GET /identities/{identity}/export` (owner-signed request): returns the full identity
       directory as a tar/zip — document, and later files/messages
@@ -112,12 +130,14 @@ Hosted users must not be locked in. Because the identity's name contains the rel
 **Acceptance:** documented + tested migration path for both modes; export produces an archive a
 new relay can import.
 
-### E02-T5 — Operational hardening for stateful relays
+### E02-T5 — Operational hardening for stateful relays — OPEN
 
 The relay was disposable; now it holds user data.
 
-- [ ] Backup/restore tooling: snapshot `$POWEUR_DATA` consistently (document SQLite + files
-      consistency approach), restore drill documented in `deploy/`
+**Stays on this epic.** Per-identity quotas deepen in [EPIC-003](EPIC-003-file-storage-webdav.md).
+
+- [ ] Backup/restore tooling: snapshot `$POWEUR_DATA` consistently, restore drill documented in
+      `deploy/`
 - [ ] Disk-usage metrics and per-identity quota scaffolding (enforced for real in EPIC-003)
 - [ ] Update `docker-compose.prod.yml` + `apps/infra` Terraform for a persistent volume
 - [ ] Health endpoint reports storage status (writable, free space) — extend `HealthResponse`

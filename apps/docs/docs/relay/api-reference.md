@@ -307,16 +307,25 @@ Challenges expire after **60 seconds** and are invalidated after first use. The 
 
 ## POST /identities
 
-Register a new identity on this relay. **Owner-only / admin endpoint:**
-in addition to the DNS provider token (which authorises the zone write),
-the request body must include an identity-signed admin envelope so the
-relay can verify the caller actually holds the private key for the
-`public_key` they are publishing. A hostile DNS-token holder cannot
-register an arbitrary identity public key.
+Register a new identity on this relay. Two modes:
 
-The DNS provider token is used during this request only and **discarded
-immediately** after the DNS writes succeed or fail. The relay stores no
-write credentials at rest.
+### Hosted registration (no DNS writes)
+
+Omit `dns_provider` / `dns_token`. The identity must be under a domain listed in
+`HOSTED_DOMAINS`. Supply a signed `identity_document` (see [Web Identity](/protocol/web-identity)).
+A single wildcard DNS A/CNAME for the hosted domain routes all identities; the
+relay persists the document under `POWEUR_DATA` and serves it at
+`/.well-known/poweur/id.json`.
+
+### DNS registration (self-hosted)
+
+Include `dns_provider` + `dns_token`. The relay writes zone records as before.
+When `POWEUR_DATA` is set, a signed `identity_document` is also required so the
+relay can serve well-known endpoints.
+
+**Owner-only:** the request always includes an identity-signed admin envelope
+(`issued_at`, `nonce`, `identity_signature`) so a DNS-token holder cannot
+register a public key they do not control.
 
 ### Request body
 
@@ -327,6 +336,7 @@ write credentials at rest.
   "encryption_public_key": "<base64url-encoded X25519 public key>",
   "dns_provider":          "cloudflare",
   "dns_token":             "<scoped DNS provider API token>",
+  "identity_document":     { "version": 1, "identity": "...", "signature": "..." },
   "issued_at":             "2026-03-28T12:00:00Z",
   "nonce":                 "<base64url random nonce>",
   "identity_signature":    "<base64 signature of canonical identity-registration string>"
@@ -338,11 +348,14 @@ write credentials at rest.
 | `identity` | string | Fully qualified identity subdomain to register |
 | `public_key` | string | Base64url-encoded Ed25519 identity public key (no padding) |
 | `encryption_public_key` | string | Base64url-encoded X25519 encryption public key (no padding). Optional in the API but written for every identity by CLI and mobile clients in the MVP. |
-| `dns_provider` | string | DNS provider to use — `cloudflare` or `hetzner` |
-| `dns_token` | string | Scoped API token for the target DNS zone |
+| `dns_provider` | string | DNS provider — `cloudflare` or `hetzner`. Omit for hosted registration. |
+| `dns_token` | string | Scoped API token for the target DNS zone. Omit for hosted registration. |
+| `identity_document` | object | Signed Identity Document (required for hosted; required when `POWEUR_DATA` is set) |
 | `issued_at` | string | RFC3339 UTC timestamp; relay enforces a recency window |
 | `nonce` | string | Per-request nonce; included in the canonical string to bind the signature to this exact request |
 | `identity_signature` | string | Base64-encoded Ed25519 signature over the canonical identity-registration string, verified against the `public_key` in this body |
+
+Also: `GET /.well-known/poweur/id.json` (Host-routed) serves the stored document.
 
 The canonical identity-registration string is:
 

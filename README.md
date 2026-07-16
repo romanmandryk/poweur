@@ -1,6 +1,8 @@
-# poweur
+# Poweur
 
 A pnpm monorepo for the Poweur ID DNS-identity protocol, relay, clients, docs, and infrastructure.
+
+**Agents / contributors:** see [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Roadmap tasks: [epics/](epics/README.md).
 
 ## Structure
 

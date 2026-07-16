@@ -1,9 +1,21 @@
 # EPIC-001 — Web-based identity resolution (`/.well-known/poweur/`)
 
-- **Status:** proposed
+- **Status:** partially complete (core shipped 2026-07)
 - **Priority:** P0 (foundation for everything else)
 - **Depends on:** —
 - **Unlocks:** EPIC-002 (relay-only registration), EPIC-008 (sign-in)
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E01-T1 Spec | **done** | [`apps/docs/docs/protocol/web-identity.md`](../apps/docs/docs/protocol/web-identity.md) |
+| E01-T2 Well-known serving | **done** | Host-routed handlers + integration coverage |
+| E01-T3 Resolver library | **done** | [`packages/identity`](../packages/identity); wired into relay + CLI |
+| E01-T4 Web + CLI clients | **done** | `identity lookup`, web well-known-first resolve |
+| E01-T5 Key rotation | **open** | Deferred from first pass; overlaps [EPIC-011](EPIC-011-key-management-recovery.md) |
+
+**Deferred in the 2026-07 core pass** (plan scope lock): E01-T5 only. Pick up when starting key management / recovery work (EPIC-011) or as a standalone follow-up on this epic.
 
 ## Goal
 
@@ -62,7 +74,7 @@ Also exposed as plain files for trivial integrations:
 
 ## Tasks
 
-### E01-T1 — Specify the Identity Document and resolver chain
+### E01-T1 — Specify the Identity Document and resolver chain — DONE
 
 Write the normative spec for `id.json`: canonical JSON serialization for signing (sorted keys,
 no insignificant whitespace — reuse the canonical-string discipline from
@@ -70,69 +82,75 @@ no insignificant whitespace — reuse the canonical-string discipline from
 caching semantics (`Cache-Control`, max staleness), and the DNS↔HTTPS agreement rule. Define
 error behavior: key mismatch between sources, expired documents, malformed signatures.
 
-- [ ] Spec page `apps/docs/docs/protocol/web-identity.md` covering document format, resolver
+- [x] Spec page `apps/docs/docs/protocol/web-identity.md` covering document format, resolver
       chain order, caching, and failure modes
-- [ ] Canonicalization rules with test vectors (valid doc, tampered doc, key-mismatch pair)
-- [ ] Decide and document the trust rule for `relay` changes (relay endpoint is *advisory*
+- [x] Canonicalization rules with test vectors (valid doc, tampered doc, key-mismatch pair)
+      — covered in `packages/identity` unit tests
+- [x] Decide and document the trust rule for `relay` changes (relay endpoint is *advisory*
       routing data, keys are *authoritative* — relay change must be signed by identity key)
-- [ ] Security analysis section: SSRF, redirect handling (no redirects followed), response size
+- [x] Security analysis section: SSRF, redirect handling (no redirects followed), response size
       cap (16 KB), content-type requirements, IP-literal identities rejected
 
 **Acceptance:** spec merged with test vectors; reviewed against the existing
 `identity-model.md` and `dns-records.md` pages with cross-links.
 
-### E01-T2 — Relay serves `/.well-known/poweur/` for hosted identities
+### E01-T2 — Relay serves `/.well-known/poweur/` for hosted identities — DONE
 
 The relay answers well-known requests for any identity it hosts. Because identities are
 virtual-hosted on a wildcard (`alice.poweur.net` resolves to the relay), the relay must route by
 `Host` header: `GET https://alice.poweur.net/.well-known/poweur/id.json` → alice's document.
 
-- [ ] New handler in `apps/api/internal/relay/` for `/.well-known/poweur/{id.json,pubkey,enckey}`
+- [x] New handler in `apps/api/internal/relay/` for `/.well-known/poweur/{id.json,pubkey,enckey}`
       keyed on the request `Host`
-- [ ] Documents are generated from the identity store and signed at registration time by the
+- [x] Documents are generated from the identity store and signed at registration time by the
       *client* (relay stores, never signs — it doesn't have the private key)
-- [ ] Correct `Cache-Control`, `ETag`, and CORS headers (public, immutable until rotation)
-- [ ] `GET /identities/{identity}` response (`IdentityResponse` in
+- [x] Correct `Cache-Control`, `ETag`, and CORS headers (public, immutable until rotation)
+- [x] `GET /identities/{identity}` response (`IdentityResponse` in
       `apps/api/internal/relay/types.go`) extended to include the signed document
-- [ ] Unit tests + integration test in `apps/integration/` covering Host-based routing
+- [x] Unit tests + integration test in `apps/integration/` covering Host-based routing
 
 **Acceptance:** with a wildcard DNS entry in the fake zone, a registered identity's keys are
 fetchable via HTTPS well-known and verify against the registration signature.
 
-### E01-T3 — Resolver-chain client library (Go)
+### E01-T3 — Resolver-chain client library (Go) — DONE
 
 Implement the resolver chain once, in a shared package consumable by both the relay and the CLI
 (currently the lookup logic is duplicated between `apps/api/internal/dns/resolver.go` and
 `apps/cli/internal/identity/dns.go`).
 
-- [ ] New module/package (e.g. `pkg/identity-resolver`) with `Resolve(ctx, identity) (IdentityDoc, error)`
-- [ ] HTTPS fetch with hard limits: 5s timeout, 16 KB body cap, no redirects, HTTPS only,
+- [x] New module/package (`packages/identity`) with `Resolve(ctx, identity) (Result, error)`
+- [x] HTTPS fetch with hard limits: 5s timeout, 16 KB body cap, no redirects, HTTPS only,
       reject private/loopback IPs unless explicitly configured (test mode)
-- [ ] DNS TXT path folded in behind the same interface; agreement check when both resolve
+- [x] DNS TXT path folded in behind the same interface; agreement check when both resolve
 - [ ] Pluggable cache with TTL honoring `Cache-Control` (relay reuses its existing
-      `cacheMu`/TTL pattern from `server.go`)
-- [ ] Swap `resolveIdentityPublicKey` (relay) and `LookupEncryptionKey` (CLI) to the new
-      resolver behind a feature flag/env (`POWEUR_RESOLVER=chain|dns`)
+      `cacheMu`/TTL pattern from `server.go`) — **remaining polish**; local store + DNS TTL
+      cache still cover common paths
+- [x] Swap `resolveIdentityPublicKey` (relay) and `LookupEncryptionKey` (CLI) to the new
+      resolver (web-first; DNS enc TXT fallback retained)
 
-**Acceptance:** integration suite passes with `POWEUR_RESOLVER=chain` for both DNS-published and
-web-published identities; SSRF tests prove private-range fetches are refused.
+**Acceptance:** integration suite passes with web-published and DNS-published identities; SSRF
+tests prove private-range fetches are refused.
 
-### E01-T4 — Web client & CLI use the resolver chain
+### E01-T4 — Web client & CLI use the resolver chain — DONE
 
-- [ ] `apps/web/js/api.js`: resolve recipient keys via well-known with DNS-over-HTTPS TXT as
+- [x] `apps/web/js/api.js`: resolve recipient keys via well-known with DNS-over-HTTPS TXT as
       fallback (browser can't do raw DNS); document the trade-off
-- [ ] CLI `poweur lookup <identity>` command prints the full resolution result (source used,
+- [x] CLI `poweur identity lookup <identity>` command prints the full resolution result (source used,
       keys, relay, capabilities) — extends the existing DNS status output
-- [ ] Docs: update `apps/docs/docs/clients/` for the new lookup behavior
+- [ ] Docs: update `apps/docs/docs/clients/` for the new lookup behavior — **remaining**
+      (protocol page exists; client overview still thin)
 
 **Acceptance:** sending a message from web/CLI to a web-resolved identity works end to end in
-the integration environment.
+the integration environment (`TestINT_HOSTED_01`).
 
-### E01-T5 — Key rotation & history in the Identity Document
+### E01-T5 — Key rotation & history in the Identity Document — OPEN
 
 Today key rotation is only sketched in `future/capabilities.md` (`_poweur-rotate` TXT). The
 identity document makes rotation tractable: `previous_keys` carries old keys with validity
 windows, and a rotation statement signed by the *old* key proves continuity.
+
+**Also tracked in:** [EPIC-011](EPIC-011-key-management-recovery.md) (E11-T2 seed rotation
+ceremony). Prefer implementing rotation once here so EPIC-011 consumes the same statements.
 
 - [ ] Spec: rotation statement format, grace-period semantics, verifier behavior for messages
       signed by a previous key within its window

@@ -281,6 +281,29 @@ export function canonicalIdentityRegistration(identity, publicKey, encPublicKey,
   return ["identity-registration", identity, publicKey, encPublicKey, relayAddress, issuedAt, nonce].join("\n");
 }
 
+/** Build and sign a v1 identity document (EPIC-001). */
+export async function buildSignedIdentityDocument(signingJWK, { identity, publicKey, encPublicKey, relay, updatedAt }) {
+  const doc = {
+    version: 1,
+    identity,
+    public_key: publicKey.startsWith("ed25519:") ? publicKey : `ed25519:${publicKey}`,
+    encryption_public_key: encPublicKey
+      ? (encPublicKey.startsWith("x25519:") ? encPublicKey : `x25519:${encPublicKey}`)
+      : undefined,
+    relay,
+    capabilities: ["messaging"],
+    updated_at: updatedAt,
+  };
+  // Canonical JSON: sorted keys, no signature, no undefined
+  const canonObj = {};
+  for (const k of Object.keys(doc).filter(k => doc[k] !== undefined).sort()) {
+    canonObj[k] = doc[k];
+  }
+  const canon = JSON.stringify(canonObj);
+  const signature = await sign(signingJWK, canon);
+  return { ...doc, signature };
+}
+
 export function canonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce) {
   return ["session-registration", identity, sessionPublicKey, issuedAt, expiresAt, nonce].join("\n");
 }

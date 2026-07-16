@@ -205,14 +205,15 @@ func CheckRelayHealth(ctx context.Context, relayURL string) error {
 // caller holds the private key matching public_key — the relay verifies
 // them in addition to the DNS-token check that authorizes the DNS write.
 type IdentityRegisterRequest struct {
-	Identity            string `json:"identity"`
-	PublicKey           string `json:"public_key"`
-	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
-	DNSProvider         string `json:"dns_provider,omitempty"`
-	DNSToken            string `json:"dns_token,omitempty"`
-	IssuedAt            string `json:"issued_at"`
-	Nonce               string `json:"nonce"`
-	IdentitySignature   string `json:"identity_signature"`
+	Identity            string          `json:"identity"`
+	PublicKey           string          `json:"public_key"`
+	EncryptionPublicKey string          `json:"encryption_public_key,omitempty"`
+	DNSProvider         string          `json:"dns_provider,omitempty"`
+	DNSToken            string          `json:"dns_token,omitempty"`
+	IdentityDocument    json.RawMessage `json:"identity_document,omitempty"`
+	IssuedAt            string          `json:"issued_at"`
+	Nonce               string          `json:"nonce"`
+	IdentitySignature   string          `json:"identity_signature"`
 }
 
 func RegisterIdentity(ctx context.Context, relayURL string, req IdentityRegisterRequest) (IdentityResponse, error) {

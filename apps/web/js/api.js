@@ -148,11 +148,18 @@ async function dohLookup(name, type) {
 }
 
 /**
- * Look up a recipient's signing public key via DNS TXT.
- * Record format: poweur-pubkey=ed25519:<base64url>
+ * Look up a recipient's signing public key (web-first, then DNS TXT).
  * Returns base64url public key string or null.
  */
 export async function resolveSigningKey(identity) {
+  try {
+    const doc = await fetchIdentityDocument(identity);
+    if (doc?.public_key) {
+      let val = doc.public_key;
+      if (val.startsWith("ed25519:")) val = val.slice("ed25519:".length);
+      return val;
+    }
+  } catch { /* fall through to DNS */ }
   const records = await dohLookup(`_poweur.${identity}`, "TXT");
   for (const rec of records) {
     if (rec.startsWith("poweur-pubkey=")) {
@@ -165,11 +172,18 @@ export async function resolveSigningKey(identity) {
 }
 
 /**
- * Look up a recipient's X25519 encryption public key via DNS TXT.
- * Record format: poweur-enckey=x25519:<base64url>
+ * Look up a recipient's X25519 encryption public key (web-first, then DNS TXT).
  * Returns base64url public key string or null.
  */
 export async function resolveEncryptionKey(identity) {
+  try {
+    const doc = await fetchIdentityDocument(identity);
+    if (doc?.encryption_public_key) {
+      let val = doc.encryption_public_key;
+      if (val.startsWith("x25519:")) val = val.slice("x25519:".length);
+      return val;
+    }
+  } catch { /* fall through to DNS */ }
   const records = await dohLookup(`_poweur-enc.${identity}`, "TXT");
   for (const rec of records) {
     if (rec.startsWith("poweur-enckey=")) {
@@ -179,6 +193,21 @@ export async function resolveEncryptionKey(identity) {
     }
   }
   return null;
+}
+
+/**
+ * Fetch https://<identity>/.well-known/poweur/id.json (same-origin when on
+ * the identity host; otherwise absolute URL). Browser cannot do raw DNS.
+ */
+export async function fetchIdentityDocument(identity) {
+  const url = `https://${identity}/.well-known/poweur/id.json`;
+  // Prefer same-origin relative path when Host is already the identity
+  const localUrl = window.location.hostname.toLowerCase() === identity.toLowerCase()
+    ? "/.well-known/poweur/id.json"
+    : url;
+  const res = await fetch(localUrl, { method: "GET", redirect: "error" });
+  if (!res.ok) throw new Error(`well-known ${res.status}`);
+  return res.json();
 }
 
 /**

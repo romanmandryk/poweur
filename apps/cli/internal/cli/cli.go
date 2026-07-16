@@ -21,6 +21,7 @@ import (
 	"github.com/poweur/cli/internal/identity"
 	"github.com/poweur/cli/internal/journal"
 	"github.com/poweur/cli/internal/session"
+	idpkg "github.com/poweur/identity"
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -80,6 +81,8 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityList(args[1:], stdout, stderr)
 	case "add-encryption-key":
 		return runIdentityAddEncryptionKey(args[1:], stdout, stderr)
+	case "lookup":
+		return runIdentityLookup(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "unknown identity subcommand")
 		return 1
@@ -96,11 +99,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dnsProvider := fs.String("dns-provider", "", "dns provider (cloudflare, hetzner)")
 	dnsToken := fs.String("dns-token", "", "dns provider api token")
+	hosted := fs.Bool("hosted", false, "register as hosted identity (no DNS token; requires HOSTED_DOMAINS on relay)")
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true})); err != nil {
 		return 1
 	}
 	_ = useIdentity
@@ -140,9 +144,6 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	provider := resolveDNSProvider(*dnsProvider)
-	token := resolveDNSToken(provider, *dnsToken)
-
 	publicKey := identity.PublicKeyString(pub)
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
 	registered := false
@@ -151,23 +152,41 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		if token == "" {
-			fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
-			return 1
-		}
 		issuedAt := time.Now().UTC().Format(time.RFC3339)
 		nonce := newAdminNonce()
 		relayAddr := relayAddressFromURL(*relayURL)
+
 		req := IdentityRegisterRequest{
 			Identity:            identityValue,
 			PublicKey:           publicKey,
 			EncryptionPublicKey: encPublicKey,
-			DNSProvider:         provider,
-			DNSToken:            token,
 			IssuedAt:            issuedAt,
 			Nonce:               nonce,
 			IdentitySignature:   signIdentityRegistration(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt, nonce),
 		}
+
+		if *hosted {
+			docRaw, err := buildSignedIdentityDocument(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			req.IdentityDocument = docRaw
+		} else {
+			provider := resolveDNSProvider(*dnsProvider)
+			token := resolveDNSToken(provider, *dnsToken)
+			if token == "" {
+				fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN), or use --hosted")
+				return 1
+			}
+			req.DNSProvider = provider
+			req.DNSToken = token
+			// Optional document for DNS path when relay has POWEUR_DATA
+			if docRaw, err := buildSignedIdentityDocument(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt); err == nil {
+				req.IdentityDocument = docRaw
+			}
+		}
+
 		if _, err := RegisterIdentity(context.Background(), *relayURL, req); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -192,9 +211,14 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		"encryption_key_path":   encKeyPath,
 		"relay":                 *relayURL,
 		"registered":            registered,
+		"hosted":                *hosted,
 	}
 	if registered {
-		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (registered with relay, e2e encryption enabled)\n", identityValue))
+		mode := "registered with relay"
+		if *hosted {
+			mode = "hosted registration"
+		}
+		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (%s, e2e encryption enabled)\n", identityValue, mode))
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (local only; relay not configured)\n", identityValue))
 }
@@ -1500,6 +1524,68 @@ func signIdentityRegistration(priv ed25519.PrivateKey, identityValue, publicKey,
 	canonical := strings.Join(parts, "\n")
 	sig := ed25519.Sign(priv, []byte(canonical))
 	return base64.StdEncoding.EncodeToString(sig)
+}
+
+func buildSignedIdentityDocument(priv ed25519.PrivateKey, identityValue, publicKey, encPublicKey, relayAddress, updatedAt string) (json.RawMessage, error) {
+	encFmt := ""
+	if encPublicKey != "" {
+		encFmt = "x25519:" + encPublicKey
+		if strings.HasPrefix(encPublicKey, "x25519:") {
+			encFmt = encPublicKey
+		}
+	}
+	pubFmt := publicKey
+	if !strings.HasPrefix(pubFmt, "ed25519:") {
+		pubFmt = "ed25519:" + pubFmt
+	}
+	doc := idpkg.NewDocument(identityValue, pubFmt, encFmt, relayAddress, nil)
+	doc.UpdatedAt = updatedAt
+	if err := doc.Sign(priv); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
+
+func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("identity lookup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: poweur identity lookup <identity>")
+		return 1
+	}
+	identityValue := fs.Arg(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := identity.ResolveIdentity(ctx, identityValue)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	out := map[string]any{
+		"identity":              res.Document.Identity,
+		"source":                res.Source,
+		"public_key":            res.Document.PublicKey,
+		"encryption_public_key": res.Document.EncryptionPublicKey,
+		"relay":                 res.Document.Relay,
+		"capabilities":          res.Document.Capabilities,
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, out, "")
+	}
+	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
+	fmt.Fprintf(stdout, "source: %s\n", res.Source)
+	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
+	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
+	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
+	return 0
 }
 
 // relayAddressFromURL extracts the host[:port] portion of a relay URL.

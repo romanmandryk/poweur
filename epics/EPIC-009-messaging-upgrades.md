@@ -5,6 +5,10 @@
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
 
+> **Inbound from EPIC-002:** identity documents are durable under `POWEUR_DATA`; **inbox / acks /
+> sessions remain memory-only** until this epic (E09-T1). Do not re-implement inbox durability
+> under EPIC-002.
+
 ## Goal
 
 Grow messaging from "polled, in-memory, 1:1 text" to the real-time collaboration substrate the

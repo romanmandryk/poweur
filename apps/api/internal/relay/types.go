@@ -1,5 +1,7 @@
 package relay
 
+import "encoding/json"
+
 type EncryptionMeta struct {
 	Alg                string `json:"alg"`
 	EphemeralPublicKey string `json:"ephemeral_public_key"`
@@ -77,14 +79,21 @@ type IdentityRequest struct {
 	Identity            string `json:"identity"`
 	PublicKey           string `json:"public_key"`
 	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
-	DNSProvider         string `json:"dns_provider"`
-	DNSToken            string `json:"dns_token"`
+	DNSProvider         string `json:"dns_provider,omitempty"`
+	DNSToken            string `json:"dns_token,omitempty"`
+
+	// IdentityDocument is the signed web identity document (EPIC-001).
+	// Required for hosted registration; optional for DNS registration
+	// (relay synthesizes one from fields when absent).
+	IdentityDocument json.RawMessage `json:"identity_document,omitempty"`
 
 	// Identity-signed admin envelope. The relay verifies IdentitySignature
 	// over the canonical identity-registration string against the
 	// `public_key` in the body so that whoever calls this endpoint must
 	// also hold the matching private key (DNS-token possession alone is no
-	// longer sufficient).
+	// longer sufficient). For hosted registration with a full identity
+	// document, the document signature is authoritative and this envelope
+	// may still be required for replay protection.
 	IssuedAt          string `json:"issued_at"`
 	Nonce             string `json:"nonce"`
 	IdentitySignature string `json:"identity_signature"`
@@ -119,11 +128,12 @@ type EncryptionKeyResponse struct {
 }
 
 type IdentityResponse struct {
-	Identity            string `json:"identity"`
-	PublicKey           string `json:"public_key"`
-	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
-	Relay               string `json:"relay"`
-	CreatedAt           string `json:"created_at"`
+	Identity            string          `json:"identity"`
+	PublicKey           string          `json:"public_key"`
+	EncryptionPublicKey string          `json:"encryption_public_key,omitempty"`
+	Relay               string          `json:"relay"`
+	CreatedAt           string          `json:"created_at"`
+	IdentityDocument    json.RawMessage `json:"identity_document,omitempty"`
 }
 
 type HealthResponse struct {

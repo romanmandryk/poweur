@@ -10,6 +10,7 @@ import {
   encryptMessage, decryptMessage,
   wrapKeysWithPin, unwrapKeysWithPin,
   canonicalMessage, canonicalAck, canonicalIdentityRegistration,
+  buildSignedIdentityDocument,
   canonicalSessionRegistration, canonicalSessionRevocation,
   generateMessageId, now, randomNonce, toBase64url,
 } from "./crypto.js";
@@ -332,15 +333,23 @@ function renderLauncher() {
             <input class="input" type="text" value="${esc(domain)}" disabled />
           </div>
           <div class="form-group">
-            <label class="form-label" for="ni-provider">DNS provider</label>
-            <select id="ni-provider" class="input select">
-              <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
-              <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
-            </select>
+            <label class="form-label" style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="ni-hosted" checked />
+              Hosted registration (no DNS token — identity under this relay's domain)
+            </label>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="ni-token">DNS API token</label>
-            <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
+          <div id="ni-dns-fields">
+            <div class="form-group">
+              <label class="form-label" for="ni-provider">DNS provider (self-hosted only)</label>
+              <select id="ni-provider" class="input select">
+                <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
+                <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="ni-token">DNS API token</label>
+              <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
+            </div>
           </div>
           <button class="btn btn-passkey" id="btn-create-id" style="width:100%;margin-top:4px">
             🔑 Create with passkey
@@ -757,8 +766,9 @@ async function doCreateIdentity() {
   const relayUrl = window.location.origin;
   const provider = q("#ni-provider")?.value;
   const dnsToken = q("#ni-token")?.value.trim();
+  const hosted = q("#ni-hosted")?.checked !== false;
 
-  if (!dnsToken) return toast("Enter a DNS API token", "warning");
+  if (!hosted && !dnsToken) return toast("Enter a DNS API token, or enable hosted registration", "warning");
 
   const identity = `${handle}.${domain}`;
   if (loadIdentityRecord(identity)) return toast("Identity already exists on this device", "warning");
@@ -795,11 +805,21 @@ async function doCreateIdentity() {
     const canonical = canonicalIdentityRegistration(identity, pubB64, encB64, relayAddr, issuedAt, nonce);
     const identitySignature = await sign(sigPriv, canonical);
 
-    await registerIdentity(relayUrl, {
-      identity, public_key: pubB64, encryption_public_key: encB64,
-      dns_provider: provider, dns_token: dnsToken,
-      issued_at: issuedAt, nonce, identity_signature: identitySignature,
+    const identityDocument = await buildSignedIdentityDocument(sigPriv, {
+      identity, publicKey: pubB64, encPublicKey: encB64, relay: relayAddr, updatedAt: issuedAt,
     });
+
+    const regReq = {
+      identity, public_key: pubB64, encryption_public_key: encB64,
+      issued_at: issuedAt, nonce, identity_signature: identitySignature,
+      identity_document: identityDocument,
+    };
+    if (!hosted) {
+      regReq.dns_provider = provider;
+      regReq.dns_token = dnsToken;
+    }
+
+    await registerIdentity(relayUrl, regReq);
 
     saveIdentityRecord(identity, {
       identity, publicKey: pubB64, encPublicKey: encB64,
