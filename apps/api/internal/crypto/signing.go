@@ -103,6 +103,28 @@ func CanonicalIdentityRegistration(identity, publicKey, encryptionPublicKey, rel
 	}, "\n")
 }
 
+// CanonicalIdentityExport is signed by the owner to authorize a full export.
+func CanonicalIdentityExport(identity, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"identity-export",
+		identity,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalIdentityRotation is signed by the *old* key to authorize a key change.
+func CanonicalIdentityRotation(identity, oldPublicKey, newPublicKey, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"identity-rotation",
+		identity,
+		oldPublicKey,
+		newPublicKey,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
 // CanonicalEncryptionKeyUpdate is the string an identity owner signs to
 // authorize an encryption-key (re)publication. Verified against the
 // identity's long-lived signing key (resolved via DNS or local store).

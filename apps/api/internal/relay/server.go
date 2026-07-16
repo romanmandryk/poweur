@@ -38,10 +38,12 @@ type Server struct {
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
+	regGate    *RegistrationGate
 	client     *http.Client
+	idCache    *idpkg.Cache
 
-	cacheMu      sync.Mutex
-	relayCache   map[string]cachedRelay
+	cacheMu       sync.Mutex
+	relayCache    map[string]cachedRelay
 	localityCache map[string]cachedLocality
 }
 
@@ -71,7 +73,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		challenges:    storage.NewChallengeStore(),
 		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
 		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:        &http.Client{Timeout: 10 * time.Second},
+		idCache:       idpkg.NewCache(),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
 	}
@@ -111,6 +115,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
+	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
+	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
@@ -127,7 +133,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Version: s.cfg.Version})
+	resp := HealthResponse{Status: "ok", Version: s.cfg.Version, Storage: s.storageHealth()}
+	if resp.Storage != nil && resp.Storage.Configured && !resp.Storage.Writable {
+		resp.Status = "degraded"
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleIdentitiesPost registers an identity. Two modes:
@@ -161,8 +171,27 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Registration rate limit (per identity name + cheap IP-ish bucket via identity key).
+	if hosted {
+		if err := s.regGate.AllowHosted(req.InviteCode); err != nil {
+			if ge, ok := err.(gateError); ok {
+				status := http.StatusForbidden
+				if ge.code == "invite_required" {
+					status = http.StatusUnauthorized
+				}
+				writeError(w, status, ge.code, ge.detail)
+				return
+			}
+			writeError(w, http.StatusForbidden, "registration_denied", err.Error())
+			return
+		}
+	}
+
+	// Registration rate limit (per identity name + flood bucket).
 	if decision := s.rateLimit.Allow("register:" + strings.ToLower(req.Identity)); !decision.Allowed {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "registration rate limit exceeded")
+		return
+	}
+	if decision := s.rateLimit.Allow("register:flood"); !decision.Allowed {
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "registration rate limit exceeded")
 		return
 	}

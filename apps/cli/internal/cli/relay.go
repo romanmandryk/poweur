@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -125,8 +126,17 @@ type IdentityResponse struct {
 }
 
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status  string         `json:"status"`
+	Version string         `json:"version"`
+	Storage *StorageHealth `json:"storage,omitempty"`
+}
+
+type StorageHealth struct {
+	Configured bool   `json:"configured"`
+	Path       string `json:"path,omitempty"`
+	Writable   bool   `json:"writable"`
+	FreeBytes  uint64 `json:"free_bytes,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type ErrorResponse struct {
@@ -210,10 +220,26 @@ type IdentityRegisterRequest struct {
 	EncryptionPublicKey string          `json:"encryption_public_key,omitempty"`
 	DNSProvider         string          `json:"dns_provider,omitempty"`
 	DNSToken            string          `json:"dns_token,omitempty"`
+	InviteCode          string          `json:"invite_code,omitempty"`
 	IdentityDocument    json.RawMessage `json:"identity_document,omitempty"`
 	IssuedAt            string          `json:"issued_at"`
 	Nonce               string          `json:"nonce"`
 	IdentitySignature   string          `json:"identity_signature"`
+}
+
+type IdentityExportRequest struct {
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+}
+
+type IdentityRotateRequest struct {
+	IdentityDocument    json.RawMessage `json:"identity_document"`
+	NewPublicKey        string          `json:"new_public_key"`
+	EncryptionPublicKey string          `json:"encryption_public_key,omitempty"`
+	IssuedAt            string          `json:"issued_at"`
+	Nonce               string          `json:"nonce"`
+	RotationSignature   string          `json:"rotation_signature"`
 }
 
 func RegisterIdentity(ctx context.Context, relayURL string, req IdentityRegisterRequest) (IdentityResponse, error) {
@@ -237,6 +263,55 @@ func RegisterIdentity(ctx context.Context, relayURL string, req IdentityRegister
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		return IdentityResponse{}, parseErrorResponse("identity registration failed", resp)
+	}
+	var response IdentityResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return IdentityResponse{}, err
+	}
+	return response, nil
+}
+
+func ExportIdentity(ctx context.Context, relayURL, identity string, req IdentityExportRequest) ([]byte, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/identities/"+url.PathEscape(identity)+"/export", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("export failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+func RotateIdentity(ctx context.Context, relayURL, identity string, req IdentityRotateRequest) (IdentityResponse, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return IdentityResponse{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/identities/"+url.PathEscape(identity)+"/rotate", bytes.NewReader(payload))
+	if err != nil {
+		return IdentityResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return IdentityResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return IdentityResponse{}, parseErrorResponse("identity rotation failed", resp)
 	}
 	var response IdentityResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {

@@ -193,6 +193,24 @@ func (s *IdentityStore) Exists(name string) bool {
 	return ok
 }
 
+// DataDir returns the configured POWEUR_DATA root (may be empty).
+func (s *IdentityStore) DataDir() string {
+	return s.dataDir
+}
+
+// IdentityHomeDir returns the on-disk directory for an identity, or "" if
+// the store is memory-only.
+func (s *IdentityStore) IdentityHomeDir(identity string) (string, error) {
+	if s.dataDir == "" {
+		return "", nil
+	}
+	dirName, err := idpkg.SanitizeIdentityDirName(identity)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(s.identitiesRoot(), dirName), nil
+}
+
 // DocumentJSON returns the raw signed id.json for an identity, if present.
 func (s *IdentityStore) DocumentJSON(name string) ([]byte, bool) {
 	s.mu.RLock()

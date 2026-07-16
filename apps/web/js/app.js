@@ -342,6 +342,10 @@ function renderLauncher() {
               Hosted registration (no DNS token — identity under this relay's domain)
             </label>
           </div>
+          <div class="form-group">
+            <label class="form-label" for="ni-invite">Invite code (if required by relay)</label>
+            <input id="ni-invite" class="input" type="text" placeholder="optional" autocomplete="off" />
+          </div>
           <div id="ni-dns-fields" style="display:none">
             <div class="form-group">
               <label class="form-label" for="ni-provider">DNS provider (self-hosted only)</label>
@@ -860,6 +864,8 @@ async function doCreateIdentity() {
       regReq.dns_provider = provider;
       regReq.dns_token = dnsToken;
     }
+    const invite = q("#ni-invite")?.value.trim();
+    if (invite) regReq.invite_code = invite;
 
     await registerIdentity(relayUrl, regReq);
 

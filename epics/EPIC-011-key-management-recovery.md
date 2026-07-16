@@ -5,9 +5,9 @@
 - **Depends on:** EPIC-001 (rotation statements, E01-T5), EPIC-002 (durable storage); interacts with EPIC-004 (device registry), EPIC-007 (contacts — for social recovery), EPIC-008 (Poweur as recovery anchor for other services)
 - **Unlocks:** trustworthy "Poweur ID as your primary identity" positioning
 
-> **Inbound from EPIC-001:** E01-T5 (identity document key rotation / `previous_keys`) was
-> deferred from the web-identity core pass. Implement rotation statements there or here first,
-> then wire E11-T2 seed rotation to the same format — avoid two incompatible rotation protocols.
+> **Inbound from EPIC-001:** E01-T5 is **done** — rotation uses `previous_keys` +
+> `identity-rotation` canonical string (`POST /identities/{id}/rotate`, `poweur key rotate`).
+> Wire E11-T2 seed rotation to that same format — do not invent a second protocol.
 
 ## Goal
 

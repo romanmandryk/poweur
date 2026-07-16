@@ -62,6 +62,12 @@ type Config struct {
 	DataDir              string
 	HostedDomains        []string
 	ResolverAllowPrivate bool
+	// RegistrationGate is "open" (default) or "invite".
+	RegistrationGate string
+	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
+	RegistrationInviteCodes []string
+	// MaxIdentityBytes soft quota scaffolding (0 = unlimited); enforced in EPIC-003.
+	MaxIdentityBytes int64
 }
 
 func (c Config) Validate() error {
@@ -78,6 +84,11 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("invalid DNS_PROXY_MODE: %s (use auto|always|never)", c.DNSProxyMode)
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(c.RegistrationGate)) {
+	case "", "open", "invite":
+	default:
+		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite)", c.RegistrationGate)
 	}
 	if len(missing) == 0 {
 		return nil
@@ -112,9 +123,12 @@ func FromEnv() Config {
 		DNSProxyMode:         strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
 		MaxInboxPerIdentity:  getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
 		MaxAcksPerIdentity:   getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
-		DataDir:              strings.TrimSpace(os.Getenv("POWEUR_DATA")),
-		HostedDomains:        splitCSV(os.Getenv("HOSTED_DOMAINS")),
-		ResolverAllowPrivate: getenvBool("RESOLVER_ALLOW_PRIVATE"),
+		DataDir:                 strings.TrimSpace(os.Getenv("POWEUR_DATA")),
+		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),
+		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
+		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
+		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
+		MaxIdentityBytes:        int64(getenvInt("MAX_IDENTITY_BYTES", 0)),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),
@@ -137,6 +151,23 @@ func splitCSV(s string) []string {
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitCSVRaw splits on commas without lowercasing (invite codes).
+func splitCSVRaw(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
 		if p != "" {
 			out = append(out, p)
 		}

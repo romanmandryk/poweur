@@ -1,6 +1,6 @@
 # EPIC-001 — Web-based identity resolution (`/.well-known/poweur/`)
 
-- **Status:** partially complete (core shipped 2026-07)
+- **Status:** complete (core + rotation shipped)
 - **Priority:** P0 (foundation for everything else)
 - **Depends on:** —
 - **Unlocks:** EPIC-002 (relay-only registration), EPIC-008 (sign-in)
@@ -11,11 +11,11 @@
 |------|--------|-------|
 | E01-T1 Spec | **done** | [`apps/docs/docs/protocol/web-identity.md`](../apps/docs/docs/protocol/web-identity.md) |
 | E01-T2 Well-known serving | **done** | Host-routed handlers + integration coverage |
-| E01-T3 Resolver library | **done** | [`packages/identity`](../packages/identity); wired into relay + CLI |
-| E01-T4 Web + CLI clients | **done** | `identity lookup`, web well-known-first resolve |
-| E01-T5 Key rotation | **open** | Deferred from first pass; overlaps [EPIC-011](EPIC-011-key-management-recovery.md) |
+| E01-T3 Resolver library | **done** | [`packages/identity`](../packages/identity); wired into relay + CLI; in-memory TTL cache |
+| E01-T4 Web + CLI clients | **done** | `identity lookup`, web well-known-first resolve; client docs updated |
+| E01-T5 Key rotation | **done** | Spec + `POST …/rotate` + `poweur key rotate` + `TestINT_ROTATE_01`; EPIC-011 consumes same statements |
 
-**Deferred in the 2026-07 core pass** (plan scope lock): E01-T5 only. Pick up when starting key management / recovery work (EPIC-011) or as a standalone follow-up on this epic.
+**Core + polish + rotation shipped.** EPIC-011 seed/multi-passkey work builds on E01-T5.
 
 ## Goal
 
@@ -122,9 +122,8 @@ Implement the resolver chain once, in a shared package consumable by both the re
 - [x] HTTPS fetch with hard limits: 5s timeout, 16 KB body cap, no redirects, HTTPS only,
       reject private/loopback IPs unless explicitly configured (test mode)
 - [x] DNS TXT path folded in behind the same interface; agreement check when both resolve
-- [ ] Pluggable cache with TTL honoring `Cache-Control` (relay reuses its existing
-      `cacheMu`/TTL pattern from `server.go`) — **remaining polish**; local store + DNS TTL
-      cache still cover common paths
+- [x] Pluggable in-memory TTL cache (`packages/identity.Cache`, default 5m matching
+      well-known `max-age=300`)
 - [x] Swap `resolveIdentityPublicKey` (relay) and `LookupEncryptionKey` (CLI) to the new
       resolver (web-first; DNS enc TXT fallback retained)
 
@@ -137,27 +136,19 @@ tests prove private-range fetches are refused.
       fallback (browser can't do raw DNS); document the trade-off
 - [x] CLI `poweur identity lookup <identity>` command prints the full resolution result (source used,
       keys, relay, capabilities) — extends the existing DNS status output
-- [ ] Docs: update `apps/docs/docs/clients/` for the new lookup behavior — **remaining**
-      (protocol page exists; client overview still thin)
+- [x] Docs: update `apps/docs/docs/clients/` for lookup / hosted registration
 
 **Acceptance:** sending a message from web/CLI to a web-resolved identity works end to end in
 the integration environment (`TestINT_HOSTED_01`).
 
-### E01-T5 — Key rotation & history in the Identity Document — OPEN
+### E01-T5 — Key rotation & history in the Identity Document — DONE
 
-Today key rotation is only sketched in `future/capabilities.md` (`_poweur-rotate` TXT). The
-identity document makes rotation tractable: `previous_keys` carries old keys with validity
-windows, and a rotation statement signed by the *old* key proves continuity.
+`previous_keys` carries old keys with `valid_until` grace windows; a rotation statement signed
+by the *old* key proves continuity. EPIC-011 E11-T2 must reuse this format.
 
-**Also tracked in:** [EPIC-011](EPIC-011-key-management-recovery.md) (E11-T2 seed rotation
-ceremony). Prefer implementing rotation once here so EPIC-011 consumes the same statements.
+- [x] Spec: rotation statement + grace semantics (`web-identity.md`, `KeyValidAt`)
+- [x] Relay: `POST /identities/{id}/rotate`
+- [x] CLI: `poweur key rotate` (web doc; DNS TXT update for self-hosted remains operator follow-up)
+- [x] Integration test: `TestINT_ROTATE_01_KeyRotateUpdatesDocument` (grace via `KeyValidAt`)
 
-- [ ] Spec: rotation statement format, grace-period semantics, verifier behavior for messages
-      signed by a previous key within its window
-- [ ] Relay: accept a rotation request (new doc signed by old key + new key), update stored doc
-- [ ] CLI: `poweur key rotate` generating the statement and updating both web doc and
-      (if DNS-published) TXT records
-- [ ] Integration test: rotate a key, verify old-signed sessions are rejected after grace period
-
-**Acceptance:** an identity rotates keys without losing its name; contacts resolve and verify
-the new key with continuity proof.
+**Acceptance:** identity rotates keys without losing its name; previous key valid only within grace.

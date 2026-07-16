@@ -34,8 +34,10 @@ The relay exposes two distinct surfaces and authenticates them differently:
 | `GET /messages/:identity` | owner-only / admin | Challenge–response authenticated |
 | `POST /sessions` | owner-only / admin | Identity-signed |
 | `DELETE /sessions/:id` | owner-only / admin | Identity-signed |
-| `POST /identities` | owner-only / admin | DNS-token + identity-signed |
+| `POST /identities` | owner-only / admin | DNS-token (self-hosted) or invite (hosted) + identity-signed |
 | `POST /identities/:identity/encryption-key` | owner-only / admin | DNS-token + identity-signed |
+| `POST /identities/:identity/export` | owner-only | identity-signed export envelope → `application/gzip` |
+| `POST /identities/:identity/rotate` | owner-only | old-key rotation signature + new signed document |
 
 ## At-least-one-local rule {#at-least-one-local-rule}
 
@@ -337,6 +339,7 @@ register a public key they do not control.
   "dns_provider":          "cloudflare",
   "dns_token":             "<scoped DNS provider API token>",
   "identity_document":     { "version": 1, "identity": "...", "signature": "..." },
+  "invite_code":           "<optional; required when REGISTRATION_GATE=invite>",
   "issued_at":             "2026-03-28T12:00:00Z",
   "nonce":                 "<base64url random nonce>",
   "identity_signature":    "<base64 signature of canonical identity-registration string>"
@@ -617,16 +620,34 @@ the claimed `identity`, the relay rejects with `401 unauthorized`.
 
 ---
 
+## POST /identities/:identity/export
+
+Owner-signed export of the identity home directory as `application/gzip` (tar.gz).
+Canonical string: `identity-export\n<identity>\n<issued_at>\n<nonce>`.
+
+## POST /identities/:identity/rotate
+
+Rotate the long-lived signing key. Body includes `identity_document` (signed by the **new**
+key, with `previous_keys`), `new_public_key`, and `rotation_signature` from the **old** key
+over `identity-rotation\n…`. See [Web identity — Key rotation](/protocol/web-identity).
+
 ## GET /health
 
-Liveness check. Returns a minimal response indicating the relay is running and reachable. Used by load balancers, monitoring systems, and client connectivity checks.
+Liveness check. Used by load balancers, monitoring systems, and client connectivity checks.
+When `POWEUR_DATA` is set, includes storage health; `status` may be `degraded` if not writable.
 
 ### Response body
 
 ```json
 {
   "status":  "ok",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "storage": {
+    "configured": true,
+    "path": "/data",
+    "writable": true,
+    "free_bytes": 123456789
+  }
 }
 ```
 
@@ -634,9 +655,7 @@ Liveness check. Returns a minimal response indicating the relay is running and r
 
 | Status | Meaning |
 |--------|---------|
-| `200 OK` | Relay is healthy |
-
-The `version` field reflects the relay software version and can be used by clients to detect incompatible protocol versions.
+| `200 OK` | Relay is healthy (or degraded but still serving) |
 
 ---
 

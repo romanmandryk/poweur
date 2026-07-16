@@ -74,8 +74,38 @@ on a wildcard-hosted relay.
 Hosted identities must fall under `HOSTED_DOMAINS` (e.g. `poweur.net`). Reserved
 leftmost labels (`www`, `admin`, `relay`, …) are rejected.
 
+**Lease (v1):** hosted names do not expire automatically.
+
+## Key rotation
+
+Rotation publishes a **new** identity document signed by the **new** key, with the old key
+listed in `previous_keys` (grace window via `valid_until`). Continuity is proven by a separate
+`rotation_signature` from the **old** key over:
+
+```
+identity-rotation
+<identity>
+<old_public_key>
+<new_public_key>
+<issued_at>
+<nonce>
+```
+
+Relay: `POST /identities/{identity}/rotate`. CLI: `poweur key rotate`.
+
+Verifiers should accept signatures under the current `public_key`, or under a `previous_keys`
+entry whose `valid_until` is still in the future (`IdentityDocument.KeyValidAt`).
+
+## Migration (`moved_to`)
+
+Hosted names are not portable across parent domains. When leaving a hosted relay, publish a
+tombstone document with `moved_to` set to the new identity FQDN (signed by the current key).
+Resolvers SHOULD follow `moved_to` once. Self-hosted IDs move by updating DNS + the `relay`
+field (`poweur relay set`). Export: `POST /identities/{id}/export` / `poweur identity export`.
+
 ## Related
 
 - [Identity Model](/protocol/identity-model)
 - [DNS Records](/protocol/dns-records)
+- [DNS Management](/relay/dns-management)
 - EPIC-001 / EPIC-002

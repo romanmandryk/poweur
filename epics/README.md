@@ -26,8 +26,8 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 
 | ID | Title | Theme | Status | Depends on |
 |----|-------|-------|--------|------------|
-| [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | partial (core done; E01-T5 open) | — |
-| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | partial (core done; T3 extras, T4, T5 open) | E01 |
+| [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | complete | — |
+| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (PoW gate deferred) | E01 |
 | [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | proposed | E02 |
 | [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | proposed | E03 |
 | [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | proposed | E03 |

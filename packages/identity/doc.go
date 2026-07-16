@@ -14,18 +14,28 @@ import (
 	"time"
 )
 
+// PreviousKey is a retired signing key that remains valid for verification
+// until ValidUntil (RFC3339). Empty ValidUntil means informational only.
+type PreviousKey struct {
+	PublicKey  string `json:"public_key"`
+	ValidUntil string `json:"valid_until,omitempty"`
+}
+
 // IdentityDocument is the signed, machine-readable description of a Poweur ID.
 // Clients sign at registration; relays store and serve but never sign.
 type IdentityDocument struct {
-	Version              int      `json:"version"`
-	Identity             string   `json:"identity"`
-	PublicKey            string   `json:"public_key"`
-	EncryptionPublicKey  string   `json:"encryption_public_key,omitempty"`
-	Relay                string   `json:"relay"`
-	Capabilities         []string `json:"capabilities,omitempty"`
-	PreviousKeys         []string `json:"previous_keys,omitempty"`
-	UpdatedAt            string   `json:"updated_at"`
-	Signature            string   `json:"signature,omitempty"`
+	Version             int           `json:"version"`
+	Identity            string        `json:"identity"`
+	PublicKey           string        `json:"public_key"`
+	EncryptionPublicKey string        `json:"encryption_public_key,omitempty"`
+	Relay               string        `json:"relay"`
+	Capabilities        []string      `json:"capabilities,omitempty"`
+	PreviousKeys        []PreviousKey `json:"previous_keys,omitempty"`
+	// MovedTo, when set, is a permanent redirect target for resolvers
+	// (hosted migration tombstone).
+	MovedTo   string `json:"moved_to,omitempty"`
+	UpdatedAt string `json:"updated_at"`
+	Signature string `json:"signature,omitempty"`
 }
 
 // NewDocument builds an unsigned v1 document ready for Sign.
@@ -67,11 +77,41 @@ func (d IdentityDocument) CanonicalBytes() ([]byte, error) {
 	if len(d.PreviousKeys) > 0 {
 		pk := make([]any, len(d.PreviousKeys))
 		for i, k := range d.PreviousKeys {
-			pk[i] = k
+			entry := map[string]any{"public_key": k.PublicKey}
+			if k.ValidUntil != "" {
+				entry["valid_until"] = k.ValidUntil
+			}
+			pk[i] = entry
 		}
 		m["previous_keys"] = pk
 	}
+	if d.MovedTo != "" {
+		m["moved_to"] = d.MovedTo
+	}
 	return marshalCanonical(m)
+}
+
+// KeyValidAt reports whether pubKey (bare or ed25519:) is the current key or
+// a previous key still within its grace window at instant at.
+func (d IdentityDocument) KeyValidAt(pubKey string, at time.Time) bool {
+	want := NormalizePublicKeyKey(pubKey)
+	if NormalizePublicKeyKey(d.PublicKey) == want {
+		return true
+	}
+	for _, pk := range d.PreviousKeys {
+		if NormalizePublicKeyKey(pk.PublicKey) != want {
+			continue
+		}
+		if pk.ValidUntil == "" {
+			return false
+		}
+		until, err := time.Parse(time.RFC3339, pk.ValidUntil)
+		if err != nil {
+			return false
+		}
+		return !at.After(until)
+	}
+	return false
 }
 
 func marshalCanonical(v any) ([]byte, error) {

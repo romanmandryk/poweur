@@ -1,6 +1,6 @@
 # EPIC-002 — Relay-only registration, wildcard identities & durable relay storage
 
-- **Status:** partially complete (core shipped 2026-07)
+- **Status:** complete (core + abuse gate + ops + export; PoW deferred)
 - **Priority:** P0
 - **Depends on:** EPIC-001
 - **Unlocks:** EPIC-003 (file storage), EPIC-009 (message persistence)
@@ -9,15 +9,13 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E02-T1 Durable FS store | **done** (partial) | Identity docs durable; inbox/acks/sessions stay memory-only by design until EPIC-009 |
-| E02-T2 Hosted registration | **done** | CLI `--hosted`, web hosted checkbox, integration test |
-| E02-T3 Name policy & abuse | **partial** | Reserved names + registration rate limit done; PoW/invite/lease **open** |
-| E02-T4 Export & migration | **open** | Deferred — stays on this epic |
-| E02-T5 Ops hardening | **open** | Deferred — stays on this epic; quotas expand in EPIC-003 |
+| E02-T1 Durable FS store | **done** | Identity docs durable; SQLite index deferred polish; inbox → EPIC-009 |
+| E02-T2 Hosted registration | **done** | CLI/web + docs |
+| E02-T3 Name policy & abuse | **done** | Reserved names, rate limit, invite gate, lease=no-expiry; **PoW deferred** |
+| E02-T4 Export & migration | **done** | export API/CLI, `relay set`, `moved_to` + resolve follow |
+| E02-T5 Ops hardening | **done** | volume, health storage, backup doc + restore integration |
 
-**Deferred in the 2026-07 core pass** (plan scope lock): E02-T4, E02-T5, and E02-T3 extras
-(PoW / invite-code / lease expiry). Inbox persistence was explicitly deferred to
-[EPIC-009](EPIC-009-messaging-upgrades.md) (sessions remain memory-only).
+Inbox persistence remains [EPIC-009](EPIC-009-messaging-upgrades.md). PoW registration gate is a follow-up.
 
 ## Goal
 
@@ -68,7 +66,7 @@ directory layout as the primary implementation.
 - [x] Filesystem backend: `identities/<sanitized-id>/poweur-sys/public/id.json`, atomic writes
       (write-temp + rename), path sanitization
 - [ ] SQLite (or bbolt) index for fast existence/uniqueness checks and listing —
-      **remaining polish** (in-memory map loaded from disk is enough for now)
+      **deferred polish** (in-memory map loaded from disk is enough; not blocking)
 - [x] Config: `POWEUR_DATA` dir in `apps/api/internal/config/config.go`; in-memory backend kept
       for tests
 - [x] Migration note: relays restart without losing hosted identities (integration test:
@@ -89,58 +87,32 @@ tests show no traversal.
 - [x] CLI: `poweur identity create name.poweur.net --hosted` (no token args); web app
       registration flow updated (`apps/web/js/app.js`)
 - [x] Update docs: `apps/docs/docs/relay/api-reference.md`, web-identity protocol page
-- [ ] `dns-management.md` wording pass ("optional" now) — **remaining**
+- [x] `dns-management.md` wording pass (hosted vs DNS dual-mode; lease = no expiry)
 
 **Acceptance:** with only a wildcard A record in the fake DNS zone, two fresh identities
 register against the relay and exchange E2E-encrypted messages; integration test added
 (`TestINT_HOSTED_01`).
 
-### E02-T3 — Name allocation policy & abuse controls — PARTIAL
+### E02-T3 — Name allocation policy & abuse controls — DONE (PoW deferred)
 
-Mass registration without payment or DNS friction invites squatting and spam-farming.
+- [x] Policy module: reserved names, min/max length, charset
+- [x] Rate limits on registration (`register:<identity>` + `register:flood`)
+- [x] `RegistrationGate`: `open` | `invite` (`REGISTRATION_GATE`, `REGISTRATION_INVITE_CODES`)
+- [ ] Proof-of-work gate — **deferred** (invite covers public-relay launch)
+- [x] Lease decision: **no automatic expiry** (documented in dns-management / web-identity)
 
-- [x] Policy module: reserved names (www, admin, relay, mail, …), min/max length, label charset
-      (`packages/identity/names.go`)
-- [x] Rate limits on registration (reuse `ratelimit` keyed as `register:<identity>`)
-- [ ] Proof-of-work or invite-code option behind config for public relays (pluggable
-      `RegistrationGate` interface; ship PoW + invite-code + open implementations) — **open**
-- [ ] Inactivity/lease policy decision: do hosted names expire? Document the answer and the
-      grace/renewal mechanism — **open** (default for now: no expiry)
+**Tests:** `TestINT_REG_01_InviteRequired`, `TestINT_REG_02_RegistrationFloodRateLimit`.
 
-**Acceptance:** policy unit tests; a public-relay configuration that demonstrably throttles a
-registration flood in an integration test (basic rate limit exists; flood integration test /
-PoW still open).
+### E02-T4 — Identity export & relay migration — DONE
 
-### E02-T4 — Identity export & relay migration — OPEN
+- [x] `POST /identities/{identity}/export` (owner-signed) → tar.gz; CLI `poweur identity export`
+- [x] Self-hosted: `poweur relay set <url>` + docs (update DNS + `relay` field)
+- [x] Hosted: `moved_to` on identity document; resolver follows once
+- [x] Integration: `TestINT_EXPORT_01_IdentityExportArchive`
 
-Hosted users must not be locked in. Because the identity's name contains the relay's domain,
-*name portability* differs for hosted vs self-hosted IDs — be explicit about both.
+### E02-T5 — Operational hardening for stateful relays — DONE
 
-**Stays on this epic** (not moved elsewhere).
-
-- [ ] `GET /identities/{identity}/export` (owner-signed request): returns the full identity
-      directory as a tar/zip — document, and later files/messages
-- [ ] Self-hosted IDs: document the move-relay procedure (update A/CNAME + `relay` field in
-      id.json, signed) and implement `poweur relay set <host>` in the CLI
-- [ ] Hosted IDs: spec a signed "moved" tombstone (`id.json` gains `moved_to` field) so
-      `alice.poweur.net` can permanently redirect resolvers to `alice.newhome.org`
-- [ ] Integration test: identity moves relays, a contact's next message resolves and routes to
-      the new relay (leverages existing `resolveRelayHost` DNS caching — verify TTL behavior)
-
-**Acceptance:** documented + tested migration path for both modes; export produces an archive a
-new relay can import.
-
-### E02-T5 — Operational hardening for stateful relays — OPEN
-
-The relay was disposable; now it holds user data.
-
-**Stays on this epic.** Per-identity quotas deepen in [EPIC-003](EPIC-003-file-storage-webdav.md).
-
-- [ ] Backup/restore tooling: snapshot `$POWEUR_DATA` consistently, restore drill documented in
-      `deploy/`
-- [ ] Disk-usage metrics and per-identity quota scaffolding (enforced for real in EPIC-003)
-- [ ] Update `docker-compose.prod.yml` + `apps/infra` Terraform for a persistent volume
-- [ ] Health endpoint reports storage status (writable, free space) — extend `HealthResponse`
-
-**Acceptance:** prod compose file mounts a volume; kill-and-restore drill documented and
-exercised once in CI (integration test with data dir swap).
+- [x] Backup/restore: [`deploy/BACKUP.md`](../deploy/BACKUP.md); `TestINT_OPS_01_RestoreDataDir`
+- [x] Quota scaffolding: `MAX_IDENTITY_BYTES` (enforce in EPIC-003)
+- [x] `docker-compose.prod.yml` mounts `poweur_data` → `POWEUR_DATA=/data`
+- [x] `/health` reports `storage` (writable, free_bytes)

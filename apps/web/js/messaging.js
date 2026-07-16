@@ -48,7 +48,7 @@ export function assertSignWith(mode) {
  * Register a hosted identity with a signed identity_document.
  * Returns local key material (not persisted).
  */
-export async function registerHostedIdentity(relayUrl, { identity, signingJWK, encJWK, publicKey, encPublicKey }) {
+export async function registerHostedIdentity(relayUrl, { identity, signingJWK, encJWK, publicKey, encPublicKey, inviteCode }) {
   const relayAddr = await fetchRelayAddress(relayUrl);
   const issuedAt = now();
   const nonce = randomNonce();
@@ -63,7 +63,7 @@ export async function registerHostedIdentity(relayUrl, { identity, signingJWK, e
     relay: relayAddr,
     updatedAt: issuedAt,
   });
-  const resp = await registerIdentity(relayUrl, {
+  const body = {
     identity,
     public_key: publicKey,
     encryption_public_key: encPublicKey,
@@ -71,7 +71,9 @@ export async function registerHostedIdentity(relayUrl, { identity, signingJWK, e
     nonce,
     identity_signature: identitySignature,
     identity_document: identityDocument,
-  });
+  };
+  if (inviteCode) body.invite_code = inviteCode;
+  const resp = await registerIdentity(relayUrl, body);
   return { resp, relayAddr, issuedAt };
 }
 

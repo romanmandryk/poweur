@@ -18,6 +18,14 @@ The relay is configured via environment variables. On startup, the relay also lo
 | `RELAY_ADDRESS` | *(required)* | Public host or IP of this relay (e.g. `relay.poweur.net`). Do not include a port. |
 | `RELAY_SCHEME` | `https` | Scheme used for relay-to-relay calls (`http` or `https`) |
 | `VERSION` | `0.1.0` | Relay version exposed in `GET /health` |
+| `POWEUR_DATA` | *(empty)* | Durable identity store root (`identities/…/id.json`) |
+| `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net`) |
+| `REGISTRATION_GATE` | `open` | `open` or `invite` for hosted registrations |
+| `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when gate=`invite` |
+| `RESOLVER_ALLOW_PRIVATE` | `false` | Allow well-known resolve to private IPs (dev/test) |
+| `MAX_IDENTITY_BYTES` | `0` | Soft quota scaffolding (0 = unlimited; enforce in EPIC-003) |
+
+`GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
 
 ### DNS Provider
 

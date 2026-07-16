@@ -48,6 +48,13 @@ type ResolveOptions struct {
 	SkipWeb bool
 	// SkipDNS skips DNS fallback.
 	SkipDNS bool
+	// Cache, when set, stores successful results for CacheTTL (default 5m,
+	// matching well-known Cache-Control max-age=300).
+	Cache *Cache
+	// CacheTTL overrides the default cache duration.
+	CacheTTL time.Duration
+	// SkipMovedTo disables following moved_to (used when already following once).
+	SkipMovedTo bool
 }
 
 // Result is a verified identity document plus resolution metadata.
@@ -67,6 +74,12 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 	}
 	if opts.Timeout == 0 {
 		opts.Timeout = DefaultTimeout
+	}
+	if opts.CacheTTL == 0 {
+		opts.CacheTTL = 5 * time.Minute
+	}
+	if cached, ok := opts.Cache.Get(identity); ok {
+		return cached, nil
 	}
 
 	var webDoc *IdentityDocument
@@ -91,16 +104,17 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 		}
 	}
 
+	var result Result
 	switch {
 	case webDoc != nil && dnsDoc != nil:
 		if NormalizePublicKeyKey(webDoc.PublicKey) != NormalizePublicKeyKey(dnsDoc.PublicKey) {
 			return Result{}, errors.New("identity key mismatch between web and DNS sources")
 		}
-		return Result{Document: *webDoc, Source: SourceBoth}, nil
+		result = Result{Document: *webDoc, Source: SourceBoth}
 	case webDoc != nil:
-		return Result{Document: *webDoc, Source: SourceWeb}, nil
+		result = Result{Document: *webDoc, Source: SourceWeb}
 	case dnsDoc != nil:
-		return Result{Document: *dnsDoc, Source: SourceDNS}, nil
+		result = Result{Document: *dnsDoc, Source: SourceDNS}
 	default:
 		if webErr != nil && dnsErr != nil {
 			return Result{}, fmt.Errorf("identity not found: web: %v; dns: %v", webErr, dnsErr)
@@ -113,6 +127,30 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 		}
 		return Result{}, errors.New("identity not found")
 	}
+	// Follow hosted migration tombstone once (no chains).
+	if !opts.SkipMovedTo && result.Document.MovedTo != "" {
+		target := strings.ToLower(strings.TrimSpace(result.Document.MovedTo))
+		if target != "" && target != identity {
+			followed, err := Resolve(ctx, target, ResolveOptions{
+				Scheme:       opts.Scheme,
+				AllowPrivate: opts.AllowPrivate,
+				Timeout:      opts.Timeout,
+				HTTPClient:   opts.HTTPClient,
+				TXT:          opts.TXT,
+				SkipWeb:      opts.SkipWeb,
+				SkipDNS:      opts.SkipDNS,
+				Cache:        opts.Cache,
+				CacheTTL:     opts.CacheTTL,
+				SkipMovedTo:  true,
+			})
+			if err == nil {
+				result = followed
+			}
+		}
+	}
+
+	opts.Cache.Put(identity, result, opts.CacheTTL)
+	return result, nil
 }
 
 func resolveWeb(ctx context.Context, identity string, opts ResolveOptions) (IdentityDocument, error) {
