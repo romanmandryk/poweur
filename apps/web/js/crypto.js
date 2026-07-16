@@ -7,8 +7,11 @@
  * Key encoding: base64url without padding throughout, matching the relay.
  */
 
-import { chacha20poly1305 } from "https://esm.sh/@noble/ciphers@1.1.3/chacha";
-import { randomBytes as nobleRandomBytes } from "https://esm.sh/@noble/ciphers@1.1.3/webcrypto";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+
+function nobleRandomBytes(n) {
+  return crypto.getRandomValues(new Uint8Array(n));
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -279,6 +282,29 @@ export function canonicalAck(id, messageID, state, sender, recipient, timestamp,
 
 export function canonicalIdentityRegistration(identity, publicKey, encPublicKey, relayAddress, issuedAt, nonce) {
   return ["identity-registration", identity, publicKey, encPublicKey, relayAddress, issuedAt, nonce].join("\n");
+}
+
+/** Build and sign a v1 identity document (EPIC-001). */
+export async function buildSignedIdentityDocument(signingJWK, { identity, publicKey, encPublicKey, relay, updatedAt }) {
+  const doc = {
+    version: 1,
+    identity,
+    public_key: publicKey.startsWith("ed25519:") ? publicKey : `ed25519:${publicKey}`,
+    encryption_public_key: encPublicKey
+      ? (encPublicKey.startsWith("x25519:") ? encPublicKey : `x25519:${encPublicKey}`)
+      : undefined,
+    relay,
+    capabilities: ["messaging"],
+    updated_at: updatedAt,
+  };
+  // Canonical JSON: sorted keys, no signature, no undefined
+  const canonObj = {};
+  for (const k of Object.keys(doc).filter(k => doc[k] !== undefined).sort()) {
+    canonObj[k] = doc[k];
+  }
+  const canon = JSON.stringify(canonObj);
+  const signature = await sign(signingJWK, canon);
+  return { ...doc, signature };
 }
 
 export function canonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce) {

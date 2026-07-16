@@ -6,7 +6,9 @@
     "android": "pnpm --filter @poweur/android build",
     "web": "pnpm --filter @poweur/web build",
     "web:dev": "pnpm --filter @poweur/web dev",
-    "web:test": "pnpm --filter @poweur/web test"
+    "web:test": "pnpm --filter @poweur/web test",
+    "web:test:e2e": "pnpm --filter @poweur/web test:e2e",
+    "web:test:all": "pnpm --filter @poweur/web test:all"
   },
   "devDependencies": {},
   "engines": {

@@ -30,11 +30,17 @@ A compromised relay cannot expose user secrets because the relay never holds the
 
 ### Key Features
 
-**Identity creation.** The user chooses a handle (minimum 8 characters, DNS-safe). The app generates a passkey, extracts the public key, and registers the identity with the relay. The relay writes DNS records. The user sees a confirmation screen once DNS propagation is verified.
+**Identity creation.** The user chooses a handle and either **hosted** registration (no DNS
+token — identity under the relay's wildcard domain, keys via well-known) or **self-hosted**
+DNS registration (provider token; relay writes TXT/A). The web client (`apps/web`) supports
+both; hosted is the default for `*.poweur.net`.
 
 **Multiple identities.** A user can hold multiple Poweur ID identities. Each identity has its own passkey. An Active Identity Selector header persists across all screens.
 
-**Contacts.** Contacts are stored locally. Adding a contact by DNS identity triggers a live DNS lookup to show their capability records, display name, and profile picture.
+**Contacts / lookup.** Resolving another identity is **web-first**: fetch
+`https://<id>/.well-known/poweur/id.json`, fall back to DNS TXT / DoH. The web Settings
+panel and CLI `poweur identity lookup` expose the same chain (see
+[Web identity](/protocol/web-identity)).
 
 **Messaging.** Messages are signed with the sender's passkey before dispatch and sent via the relay protocol. Received messages are fetched from the user's relay (polling for MVP; WebSocket is a stretch goal). All message storage is local — the relay is a forwarder only.
 
@@ -66,6 +72,13 @@ Authentication is not treated as a separate identity system. It reuses the same 
 The CLI (`apps/cli`) provides a scriptable interface to the relay API for developers, bots, and automated agents. See [CLI Reference](/clients/cli-reference) for full command documentation.
 
 The CLI stores key pairs locally (OS keychain or `~/.poweur/keys/`) and communicates with a configured relay. It supports machine-readable JSON output (`--json`) for use in scripts and automated pipelines.
+
+Key commands for web identity:
+
+- `poweur identity create … --hosted` — relay-only registration
+- `poweur identity lookup <id>` — web-first resolve
+- `poweur key rotate` — rotate signing keys (identity document + `previous_keys`)
+- `poweur identity export` / `poweur relay set` — migration helpers
 
 ## Direct API Access
 

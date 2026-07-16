@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/poweur/api/internal/dns"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
+	idpkg "github.com/poweur/identity"
 )
 
 const (
@@ -36,10 +38,12 @@ type Server struct {
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
+	regGate    *RegistrationGate
 	client     *http.Client
+	idCache    *idpkg.Cache
 
-	cacheMu      sync.Mutex
-	relayCache   map[string]cachedRelay
+	cacheMu       sync.Mutex
+	relayCache    map[string]cachedRelay
 	localityCache map[string]cachedLocality
 }
 
@@ -54,17 +58,24 @@ type cachedRelay struct {
 }
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
+	store, err := storage.OpenIdentityStore(cfg.DataDir)
+	if err != nil {
+		// Fall back to memory-only rather than crashing constructors used in tests.
+		store = storage.NewIdentityStore()
+	}
 	s := &Server{
 		cfg:           cfg,
 		resolver:      resolver,
 		providers:     providers,
-		identities:    storage.NewIdentityStore(),
+		identities:    store,
 		inbox:         storage.NewInboxStore(),
 		acks:          storage.NewAckStore(),
 		challenges:    storage.NewChallengeStore(),
-		sessions:      storage.NewSessionStore(),
+		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
 		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:        &http.Client{Timeout: 10 * time.Second},
+		idCache:       idpkg.NewCache(),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
 	}
@@ -104,34 +115,44 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
+	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
+	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
+	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return corsMiddleware(mux)
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
-		"service": "poweur-relay",
-		"web_ui":  "GET /app/ (when WEB_STATIC_DIR is set)",
+		"service":       "poweur-relay",
+		"relay_address": s.cfg.RelayAddress,
+		"web_ui":        "GET /app/ (when WEB_STATIC_DIR is set)",
 	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Version: s.cfg.Version})
+	resp := HealthResponse{Status: "ok", Version: s.cfg.Version, Storage: s.storageHealth()}
+	if resp.Storage != nil && resp.Storage.Configured && !resp.Storage.Writable {
+		resp.Status = "degraded"
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleIdentitiesPost is owner-only: in addition to a valid DNS token
-// (which proves the caller can write the zone), the request body MUST be
-// signed by the private half of the `public_key` it is publishing. This
-// prevents a hostile DNS-token holder from registering an identity under a
-// public key they don't actually control.
+// handleIdentitiesPost registers an identity. Two modes:
+//
+//   - Hosted: no dns_provider/dns_token; identity must be under HOSTED_DOMAINS;
+//     client supplies a signed identity_document (or fields + admin envelope).
+//   - DNS: dns_provider + dns_token present; relay writes zone records as before.
+//
+// In both modes the relay persists a signed identity document when possible.
 func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 	var req IdentityRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		return
 	}
-	if req.Identity == "" || req.PublicKey == "" || req.DNSProvider == "" || req.DNSToken == "" {
+	if req.Identity == "" || req.PublicKey == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
 		return
 	}
@@ -143,6 +164,52 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "relay_address_missing", "relay address is not configured")
 		return
 	}
+
+	hosted := req.DNSProvider == "" && req.DNSToken == ""
+	if !hosted && (req.DNSProvider == "" || req.DNSToken == "") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "dns_provider and dns_token are both required for DNS registration")
+		return
+	}
+
+	if hosted {
+		if err := s.regGate.AllowHosted(req.InviteCode); err != nil {
+			if ge, ok := err.(gateError); ok {
+				status := http.StatusForbidden
+				if ge.code == "invite_required" {
+					status = http.StatusUnauthorized
+				}
+				writeError(w, status, ge.code, ge.detail)
+				return
+			}
+			writeError(w, http.StatusForbidden, "registration_denied", err.Error())
+			return
+		}
+	}
+
+	// Registration rate limit (per identity name + flood bucket).
+	if decision := s.rateLimit.Allow("register:" + strings.ToLower(req.Identity)); !decision.Allowed {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "registration rate limit exceeded")
+		return
+	}
+	if decision := s.rateLimit.Allow("register:flood"); !decision.Allowed {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "registration rate limit exceeded")
+		return
+	}
+
+	if err := idpkg.ValidateHostedHandle(req.Identity); err != nil && hosted {
+		writeError(w, http.StatusBadRequest, "invalid_identity", err.Error())
+		return
+	}
+	if err := idpkg.ValidateIdentityName(req.Identity); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_identity", err.Error())
+		return
+	}
+
+	if hosted && !s.cfg.IsHostedDomain(req.Identity) {
+		writeError(w, http.StatusBadRequest, "not_hosted_domain", "identity is not under a configured hosted domain")
+		return
+	}
+
 	if s.identities.Exists(req.Identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
 		return
@@ -177,24 +244,74 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider, err := s.providers.Provider(req.DNSProvider)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
-		return
+	var docJSON []byte
+	if len(req.IdentityDocument) > 0 {
+		doc, err := idpkg.ParseDocument(req.IdentityDocument, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_identity_document", err.Error())
+			return
+		}
+		if !strings.EqualFold(doc.Identity, req.Identity) {
+			writeError(w, http.StatusBadRequest, "invalid_identity_document", "document identity mismatch")
+			return
+		}
+		if idpkg.NormalizePublicKeyKey(doc.PublicKey) != normalized {
+			writeError(w, http.StatusBadRequest, "invalid_identity_document", "document public key mismatch")
+			return
+		}
+		docJSON = req.IdentityDocument
+	} else {
+		// Synthesize a document for DNS registrations (and hosted clients that
+		// only send the admin envelope). Signed by the same key via the fact
+		// we already verified the registration envelope — but the document
+		// itself must be signed. Clients should send identity_document; for
+		// backward compat DNS path we store fields without a document when
+		// durable store is off, or reject if durable store requires one.
+		encFmt := ""
+		if encryptionPublicKey != "" {
+			encFmt = idpkg.FormatX25519PublicKey(mustDecodeB64(encryptionPublicKey))
+		}
+		doc := idpkg.NewDocument(req.Identity, idpkg.FormatEd25519PublicKey(publicKeyBytes), encFmt, s.cfg.RelayAddress, nil)
+		doc.UpdatedAt = req.IssuedAt
+		// Cannot sign without private key on relay — leave unsigned only in memory.
+		// For durable/hosted, require client-supplied signed document.
+		if hosted || s.cfg.DataDir != "" {
+			writeError(w, http.StatusBadRequest, "identity_document_required", "signed identity_document is required")
+			return
+		}
+		_ = doc
 	}
 
-	if err := provider.WriteIdentityRecords(r.Context(), req.DNSToken, req.Identity, normalized, encryptionPublicKey, s.cfg.RelayAddress); err != nil {
-		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
-		return
+	if !hosted {
+		provider, err := s.providers.Provider(req.DNSProvider)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
+			return
+		}
+		if err := provider.WriteIdentityRecords(r.Context(), req.DNSToken, req.Identity, normalized, encryptionPublicKey, s.cfg.RelayAddress); err != nil {
+			writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
+			return
+		}
 	}
 
 	identity := storage.Identity{
-		Identity:       req.Identity,
-		PublicKey:      normalized,
-		PublicKeyBytes: publicKeyBytes,
-		CreatedAt:      time.Now().UTC(),
+		Identity:            strings.ToLower(req.Identity),
+		PublicKey:           normalized,
+		PublicKeyBytes:      publicKeyBytes,
+		EncryptionPublicKey: encryptionPublicKey,
+		Relay:               s.cfg.RelayAddress,
+		DocumentJSON:        docJSON,
+		CreatedAt:           time.Now().UTC(),
 	}
-	s.identities.Add(identity)
+	if s.cfg.DataDir != "" {
+		if err := s.identities.Put(identity); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
+			return
+		}
+	} else if !s.identities.Add(identity) {
+		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
+		return
+	}
 
 	resp := IdentityResponse{
 		Identity:            identity.Identity,
@@ -202,8 +319,17 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		EncryptionPublicKey: encryptionPublicKey,
 		Relay:               s.cfg.RelayAddress,
 		CreatedAt:           identity.CreatedAt.Format(time.RFC3339),
+		IdentityDocument:    docJSON,
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func mustDecodeB64(s string) []byte {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		b, _ = base64.StdEncoding.DecodeString(s)
+	}
+	return b
 }
 
 // handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
@@ -299,10 +425,18 @@ func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entry, ok := s.identities.Get(identity); ok {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"identity":   entry.Identity,
-			"public_key": entry.PublicKey,
-		})
+		resp := IdentityResponse{
+			Identity:            entry.Identity,
+			PublicKey:           entry.PublicKey,
+			EncryptionPublicKey: entry.EncryptionPublicKey,
+			Relay:               entry.Relay,
+			CreatedAt:           entry.CreatedAt.Format(time.RFC3339),
+			IdentityDocument:    entry.DocumentJSON,
+		}
+		if resp.Relay == "" {
+			resp.Relay = s.cfg.RelayAddress
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	if !s.isLocalIdentity(r.Context(), identity) {
@@ -315,9 +449,10 @@ func (s *Server) handleIdentitiesGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.warmIdentityCache(identity, pub)
-	writeJSON(w, http.StatusOK, map[string]string{
-		"identity":   identity,
-		"public_key": base64.RawURLEncoding.EncodeToString(pub),
+	writeJSON(w, http.StatusOK, IdentityResponse{
+		Identity:  identity,
+		PublicKey: base64.RawURLEncoding.EncodeToString(pub),
+		Relay:     s.cfg.RelayAddress,
 	})
 }
 
@@ -694,19 +829,46 @@ func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID strin
 }
 
 // resolveIdentityPublicKey returns the Ed25519 public key for identity.
-// It checks the in-memory store first (populated on registration or DNS warm),
-// then falls back to the _poweur.<identity> DNS TXT record. There is no HTTP
-// fallback to peer relays — that path was an SSRF vector and DNS TXT is the
-// canonical source of truth for all registered identities.
+// Order: local store → web-first identity.Resolve (HTTPS then DNS TXT).
 func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
 	if entry, ok := s.identities.Get(identity); ok {
 		return entry.PublicKeyBytes, nil
 	}
-	txtRecords, err := s.resolver.LookupTXT(ctx, fmt.Sprintf("_poweur.%s", identity))
-	if err != nil {
-		return nil, fmt.Errorf("identity public key not found (no TXT record for _poweur.%s)", identity)
+	opts := idpkg.ResolveOptions{
+		Scheme:       s.cfg.RelayScheme,
+		AllowPrivate: s.cfg.ResolverAllowPrivate,
+		TXT:          s.resolver,
 	}
-	return crypto.ParseTXTRecord(txtRecords)
+	if s.cfg.ResolverAllowPrivate && s.cfg.RelayAddress != "" {
+		opts.HTTPClient = s.virtualHostClient()
+	}
+	res, err := idpkg.Resolve(ctx, identity, opts)
+	if err != nil {
+		return nil, fmt.Errorf("identity public key not found for %s: %w", identity, err)
+	}
+	pub, err := idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	return pub, nil
+}
+
+// virtualHostClient dials this relay's address while preserving the request Host,
+// so well-known fetches work in tests (and any setup) where the identity FQDN
+// is not in system DNS but is Host-routed on this relay.
+func (s *Server) virtualHostClient() *http.Client {
+	dialAddr := s.cfg.RelayAddress
+	return &http.Client{
+		Timeout: idpkg.DefaultTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return errors.New("redirects are not allowed when resolving identity documents")
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, dialAddr)
+			},
+		},
+	}
 }
 
 // isLocalIdentity reports whether `identity` is hosted on this relay.
@@ -882,10 +1044,10 @@ func (s *Server) forwardAck(ctx context.Context, ack Ack) error {
 }
 
 // warmIdentityCache populates the in-memory identity store from a public key
-// already resolved from DNS. Subsequent requests hit the store fast path instead
-// of re-doing DNS. No-op if the identity was registered (already present).
+// already resolved from DNS/web. Subsequent requests hit the store fast path.
+// No-op if the identity was registered (already present with a document).
 func (s *Server) warmIdentityCache(identity string, pub ed25519.PublicKey) {
-	s.identities.Add(storage.Identity{
+	s.identities.Warm(storage.Identity{
 		Identity:       identity,
 		PublicKey:      base64.RawURLEncoding.EncodeToString(pub),
 		PublicKeyBytes: pub,

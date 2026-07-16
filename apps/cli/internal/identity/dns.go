@@ -3,9 +3,13 @@ package identity
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net"
+	"net/http"
 	"strings"
 	"time"
+
+	idpkg "github.com/poweur/identity"
 )
 
 func decodeBase64(value string) ([]byte, error) {
@@ -135,8 +139,18 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 
 // LookupEncryptionKey returns the raw X25519 public key bytes for the given identity,
 // or nil if the identity has no published encryption key.
-func LookupEncryptionKey(ctx context.Context, identity string) ([]byte, error) {
-	records, err := defaultResolver.LookupTXT(ctx, "_poweur-enc."+identity)
+// Resolution is web-first (/.well-known/poweur/id.json) then DNS TXT for the
+// full identity document; if that fails, falls back to `_poweur-enc` TXT only.
+func LookupEncryptionKey(ctx context.Context, identityName string) ([]byte, error) {
+	res, err := ResolveIdentity(ctx, identityName)
+	if err == nil && res.Document.EncryptionPublicKey != "" {
+		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
+	}
+	return lookupEncryptionKeyDNS(ctx, identityName)
+}
+
+func lookupEncryptionKeyDNS(ctx context.Context, identityName string) ([]byte, error) {
+	records, err := defaultResolver.LookupTXT(ctx, "_poweur-enc."+identityName)
 	if err != nil {
 		return nil, err
 	}
@@ -159,4 +173,56 @@ func LookupEncryptionKey(ctx context.Context, identity string) ([]byte, error) {
 		}
 	}
 	return nil, nil
+}
+
+// ResolveIdentity resolves via the shared web-first resolver chain.
+func ResolveIdentity(ctx context.Context, identityName string) (idpkg.Result, error) {
+	opts := resolveOptions()
+	opts.TXT = txtAdapter{}
+	return idpkg.Resolve(ctx, identityName, opts)
+}
+
+type txtAdapter struct{}
+
+func (txtAdapter) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	return defaultResolver.LookupTXT(ctx, name)
+}
+
+var (
+	resolveScheme       = "https"
+	resolveAllowPrivate bool
+	resolveHTTPClient   *http.Client
+	resolveDialAddr     string
+)
+
+// ConfigureResolver sets web-first resolve options (used by CLI entrypoint and tests).
+func ConfigureResolver(scheme string, allowPrivate bool, dialAddr string, client *http.Client) {
+	if scheme != "" {
+		resolveScheme = scheme
+	}
+	resolveAllowPrivate = allowPrivate
+	resolveDialAddr = dialAddr
+	resolveHTTPClient = client
+}
+
+func resolveOptions() idpkg.ResolveOptions {
+	opts := idpkg.ResolveOptions{
+		Scheme:       resolveScheme,
+		AllowPrivate: resolveAllowPrivate,
+		HTTPClient:   resolveHTTPClient,
+	}
+	if resolveDialAddr != "" && opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{
+			Timeout: idpkg.DefaultTimeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return errors.New("redirects not allowed")
+			},
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, resolveDialAddr)
+				},
+			},
+		}
+	}
+	return opts
 }

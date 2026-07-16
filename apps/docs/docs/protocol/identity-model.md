@@ -8,6 +8,9 @@ title: Identity Model
 
 An Poweur ID identity is a **fully qualified subdomain** that the owner controls. The subdomain is the human-readable handle; the associated public key is the cryptographic identity.
 
+Public keys are published via a signed [Identity Document](/protocol/web-identity) at
+`/.well-known/poweur/id.json` (primary), and optionally via DNS TXT records (fallback).
+
 ## Identity Format
 
 Identities follow standard DNS subdomain rules:

@@ -27,3 +27,8 @@ func SetDNSResolver(r Resolver) { identity.SetResolver(r) }
 
 // ResetDNSResolver restores the default net.DefaultResolver-backed resolver.
 func ResetDNSResolver() { identity.ResetResolver() }
+
+// ConfigureIdentityResolver sets web-first resolve options for integration tests.
+func ConfigureIdentityResolver(scheme string, allowPrivate bool, dialAddr string) {
+	identity.ConfigureResolver(scheme, allowPrivate, dialAddr, nil)
+}

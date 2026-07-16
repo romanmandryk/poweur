@@ -19,12 +19,12 @@ const (
 	// Global default is roughly 10× the per-sender hourly cap times an
 	// expected-active-senders constant (here: 50). Tune per deployment via
 	// env vars; 0 disables the global cap entirely.
-	DefaultGlobalMinuteLimit    = 1000
-	DefaultGlobalHourLimit      = 100000
-	DefaultGlobalDayLimit       = 1000000
-	DefaultVersion              = "0.1.0"
-	DefaultMaxInboxPerIdentity  = 50
-	DefaultMaxAcksPerIdentity   = 50
+	DefaultGlobalMinuteLimit   = 1000
+	DefaultGlobalHourLimit     = 100000
+	DefaultGlobalDayLimit      = 1000000
+	DefaultVersion             = "0.1.0"
+	DefaultMaxInboxPerIdentity = 50
+	DefaultMaxAcksPerIdentity  = 50
 )
 
 // RateLimits configures per-sender token-bucket caps. Each window resets on
@@ -48,17 +48,26 @@ type GlobalRateLimits struct {
 type Config struct {
 	ListenAddr string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
-	WebStaticDir        string
-	RelayAddress        string
-	RelayScheme         string
-	DNSTTL              time.Duration
-	ChallengeTTL        time.Duration
-	Version             string
-	RateLimits          RateLimits
-	GlobalRateLimits    GlobalRateLimits
-	DNSProxyMode        string
-	MaxInboxPerIdentity int
-	MaxAcksPerIdentity  int
+	WebStaticDir         string
+	RelayAddress         string
+	RelayScheme          string
+	DNSTTL               time.Duration
+	ChallengeTTL         time.Duration
+	Version              string
+	RateLimits           RateLimits
+	GlobalRateLimits     GlobalRateLimits
+	DNSProxyMode         string
+	MaxInboxPerIdentity  int
+	MaxAcksPerIdentity   int
+	DataDir              string
+	HostedDomains        []string
+	ResolverAllowPrivate bool
+	// RegistrationGate is "open" (default) or "invite".
+	RegistrationGate string
+	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
+	RegistrationInviteCodes []string
+	// MaxIdentityBytes soft quota scaffolding (0 = unlimited); enforced in EPIC-003.
+	MaxIdentityBytes int64
 }
 
 func (c Config) Validate() error {
@@ -76,24 +85,50 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid DNS_PROXY_MODE: %s (use auto|always|never)", c.DNSProxyMode)
 		}
 	}
+	switch strings.ToLower(strings.TrimSpace(c.RegistrationGate)) {
+	case "", "open", "invite":
+	default:
+		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite)", c.RegistrationGate)
+	}
 	if len(missing) == 0 {
 		return nil
 	}
 	return fmt.Errorf("missing required config values: %s", strings.Join(missing, ", "))
 }
 
+// IsHostedDomain reports whether identity is under a configured hosted parent.
+func (c Config) IsHostedDomain(identity string) bool {
+	identity = strings.ToLower(strings.TrimSuffix(identity, "."))
+	for _, d := range c.HostedDomains {
+		parent := strings.ToLower(strings.TrimSuffix(d, "."))
+		if parent == "" {
+			continue
+		}
+		if identity == parent || strings.HasSuffix(identity, "."+parent) {
+			return true
+		}
+	}
+	return false
+}
+
 func FromEnv() Config {
 	return Config{
-		ListenAddr:   getenv("LISTEN_ADDR", DefaultListenAddr),
-		WebStaticDir: strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
-		RelayAddress: os.Getenv("RELAY_ADDRESS"),
-		RelayScheme:  getenv("RELAY_SCHEME", DefaultRelayScheme),
-		DNSTTL:       getenvDuration("DNS_TTL", DefaultDNSTTL),
-		ChallengeTTL: getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
-		Version:      getenv("VERSION", DefaultVersion),
-		DNSProxyMode:        strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
-		MaxInboxPerIdentity: getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
-		MaxAcksPerIdentity:  getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
+		ListenAddr:           getenv("LISTEN_ADDR", DefaultListenAddr),
+		WebStaticDir:         strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
+		RelayAddress:         os.Getenv("RELAY_ADDRESS"),
+		RelayScheme:          getenv("RELAY_SCHEME", DefaultRelayScheme),
+		DNSTTL:               getenvDuration("DNS_TTL", DefaultDNSTTL),
+		ChallengeTTL:         getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
+		Version:              getenv("VERSION", DefaultVersion),
+		DNSProxyMode:         strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
+		MaxInboxPerIdentity:  getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
+		MaxAcksPerIdentity:   getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
+		DataDir:                 strings.TrimSpace(os.Getenv("POWEUR_DATA")),
+		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),
+		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
+		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
+		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
+		MaxIdentityBytes:        int64(getenvInt("MAX_IDENTITY_BYTES", 0)),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),
@@ -105,6 +140,44 @@ func FromEnv() Config {
 			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
 		},
 	}
+}
+
+func splitCSV(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitCSVRaw splits on commas without lowercasing (invite codes).
+func splitCSVRaw(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func getenvBool(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes"
 }
 
 func getenv(key, fallback string) string {

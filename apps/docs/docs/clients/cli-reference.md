@@ -57,17 +57,25 @@ All commands accept these global flags:
 
 ### `poweur identity create <name>`
 
-Generate a new long-lived Ed25519 signing keypair **and** an X25519 encryption keypair, then register both public keys (and the relay routing record) with the configured relay.
+Generate a new long-lived Ed25519 signing keypair **and** an X25519 encryption keypair, then register with the configured relay. Two modes:
+
+**Hosted** (`--hosted`): no DNS token. The client submits a signed identity document; the relay
+persists it under `HOSTED_DOMAINS` (e.g. `*.poweur.net` wildcard). Keys are published via
+`/.well-known/poweur/` (see [Web identity](/protocol/web-identity)).
 
 ```bash
-poweur identity create alice
+poweur identity create alice --hosted --relay http://127.0.0.1:8080
 ```
 
-The relay writes three DNS records:
+**Self-hosted** (DNS token): the relay writes DNS records using your provider token:
 
 - `_poweur.<identity>` — identity public key
 - `_poweur-enc.<identity>` — encryption public key
 - `<identity>` — `A`/`CNAME` routing record
+
+```bash
+poweur identity create alice --dns-provider cloudflare
+```
 
 Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.enc`).
 
@@ -75,11 +83,14 @@ Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.
 
 | Flag | Description |
 |------|-------------|
-| `--dns-provider <name>` | DNS provider (`cloudflare` \| `hetzner`) |
+| `--hosted` | Hosted registration (no DNS token; requires `HOSTED_DOMAINS` on relay) |
+| `--invite-code <code>` | Invite code when the relay gate is `invite` |
+| `--dns-provider <name>` | DNS provider (`cloudflare` \| `hetzner`) — self-hosted mode |
 | `--dns-token <value>` | DNS API token (prefer `CLOUDFLARE_API_TOKEN` / `HETZNER_API_TOKEN`) |
 | `--parent-domain <domain>` | Parent domain used when a handle is provided |
 | `--relay <url>` | Relay URL override |
 | `--use-identity <subdomain>` | Override identity for this command |
+| `--json` | Machine-readable output |
 
 **Example (JSON output):**
 ```bash
@@ -116,6 +127,20 @@ Perform a live DNS lookup to verify that the identity's `TXT` (public key), `TXT
 
 ```bash
 poweur identity dns alice.poweur.net
+```
+
+---
+
+### `poweur identity lookup <identity>`
+
+Resolve an identity using the **web-first** chain (HTTPS
+`/.well-known/poweur/id.json`, then DNS TXT). Prints source (`web` / `dns` /
+`both`), keys, relay, and capabilities. Prefer this over `identity dns` for
+hosted identities that have no per-user TXT records.
+
+```bash
+poweur identity lookup alice.poweur.net
+poweur identity lookup alice.poweur.net --json
 ```
 
 ---

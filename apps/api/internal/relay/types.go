@@ -1,5 +1,7 @@
 package relay
 
+import "encoding/json"
+
 type EncryptionMeta struct {
 	Alg                string `json:"alg"`
 	EphemeralPublicKey string `json:"ephemeral_public_key"`
@@ -77,17 +79,48 @@ type IdentityRequest struct {
 	Identity            string `json:"identity"`
 	PublicKey           string `json:"public_key"`
 	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
-	DNSProvider         string `json:"dns_provider"`
-	DNSToken            string `json:"dns_token"`
+	DNSProvider         string `json:"dns_provider,omitempty"`
+	DNSToken            string `json:"dns_token,omitempty"`
+	// InviteCode is required when REGISTRATION_GATE=invite (hosted registrations).
+	InviteCode string `json:"invite_code,omitempty"`
+
+	// IdentityDocument is the signed web identity document (EPIC-001).
+	// Required for hosted registration; optional for DNS registration
+	// (relay synthesizes one from fields when absent).
+	IdentityDocument json.RawMessage `json:"identity_document,omitempty"`
 
 	// Identity-signed admin envelope. The relay verifies IdentitySignature
 	// over the canonical identity-registration string against the
 	// `public_key` in the body so that whoever calls this endpoint must
 	// also hold the matching private key (DNS-token possession alone is no
-	// longer sufficient).
+	// longer sufficient). For hosted registration with a full identity
+	// document, the document signature is authoritative and this envelope
+	// may still be required for replay protection.
 	IssuedAt          string `json:"issued_at"`
 	Nonce             string `json:"nonce"`
 	IdentitySignature string `json:"identity_signature"`
+}
+
+// ExportRequest is the owner-signed body for POST /identities/{id}/export.
+type ExportRequest struct {
+	IssuedAt          string `json:"issued_at"`
+	Nonce             string `json:"nonce"`
+	IdentitySignature string `json:"identity_signature"`
+}
+
+// RotateRequest rotates the long-lived signing key for an identity.
+type RotateRequest struct {
+	// IdentityDocument is the new document signed by the *new* key, with previous_keys set.
+	IdentityDocument json.RawMessage `json:"identity_document"`
+	// NewPublicKey is the bare/ed25519 public key of the new identity key.
+	NewPublicKey string `json:"new_public_key"`
+	// EncryptionPublicKey optional updated enc key (base64url / x25519:).
+	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
+	IssuedAt            string `json:"issued_at"`
+	Nonce               string `json:"nonce"`
+	// RotationSignature is ed25519 signature by the *old* key over
+	// CanonicalIdentityRotation(identity, oldKey, newKey, issuedAt, nonce).
+	RotationSignature string `json:"rotation_signature"`
 }
 
 type EncryptionKeyRequest struct {
@@ -119,16 +152,27 @@ type EncryptionKeyResponse struct {
 }
 
 type IdentityResponse struct {
-	Identity            string `json:"identity"`
-	PublicKey           string `json:"public_key"`
-	EncryptionPublicKey string `json:"encryption_public_key,omitempty"`
-	Relay               string `json:"relay"`
-	CreatedAt           string `json:"created_at"`
+	Identity            string          `json:"identity"`
+	PublicKey           string          `json:"public_key"`
+	EncryptionPublicKey string          `json:"encryption_public_key,omitempty"`
+	Relay               string          `json:"relay"`
+	CreatedAt           string          `json:"created_at"`
+	IdentityDocument    json.RawMessage `json:"identity_document,omitempty"`
 }
 
 type HealthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
+	// Storage reports POWEUR_DATA health when configured.
+	Storage *StorageHealth `json:"storage,omitempty"`
+}
+
+type StorageHealth struct {
+	Configured bool   `json:"configured"`
+	Path       string `json:"path,omitempty"`
+	Writable   bool   `json:"writable"`
+	FreeBytes  uint64 `json:"free_bytes,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type SessionCreateRequest struct {

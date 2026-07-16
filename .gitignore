@@ -5,6 +5,11 @@ dist/
 build/
 .cache/
 
+# Playwright
+**/test-results/
+**/playwright-report/
+**/blob-report/
+
 # Native build artifacts
 .expo/
 *.jks

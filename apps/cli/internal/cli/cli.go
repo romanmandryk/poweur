@@ -21,6 +21,7 @@ import (
 	"github.com/poweur/cli/internal/identity"
 	"github.com/poweur/cli/internal/journal"
 	"github.com/poweur/cli/internal/session"
+	idpkg "github.com/poweur/identity"
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -48,6 +49,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runMessages(args[1:], stdout, stderr)
 	case "relay":
 		return runRelay(args[1:], stdout, stderr)
+	case "key":
+		return runKey(args[1:], stdout, stderr)
 	case "session":
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
@@ -80,6 +83,10 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityList(args[1:], stdout, stderr)
 	case "add-encryption-key":
 		return runIdentityAddEncryptionKey(args[1:], stdout, stderr)
+	case "lookup":
+		return runIdentityLookup(args[1:], stdout, stderr)
+	case "export":
+		return runIdentityExport(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "unknown identity subcommand")
 		return 1
@@ -96,11 +103,13 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	dnsProvider := fs.String("dns-provider", "", "dns provider (cloudflare, hetzner)")
 	dnsToken := fs.String("dns-token", "", "dns provider api token")
+	hosted := fs.Bool("hosted", false, "register as hosted identity (no DNS token; requires HOSTED_DOMAINS on relay)")
+	inviteCode := fs.String("invite-code", "", "invite code when REGISTRATION_GATE=invite")
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true})); err != nil {
 		return 1
 	}
 	_ = useIdentity
@@ -140,9 +149,6 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	provider := resolveDNSProvider(*dnsProvider)
-	token := resolveDNSToken(provider, *dnsToken)
-
 	publicKey := identity.PublicKeyString(pub)
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
 	registered := false
@@ -151,23 +157,44 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		if token == "" {
-			fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
-			return 1
-		}
 		issuedAt := time.Now().UTC().Format(time.RFC3339)
 		nonce := newAdminNonce()
 		relayAddr := relayAddressFromURL(*relayURL)
+
 		req := IdentityRegisterRequest{
 			Identity:            identityValue,
 			PublicKey:           publicKey,
 			EncryptionPublicKey: encPublicKey,
-			DNSProvider:         provider,
-			DNSToken:            token,
 			IssuedAt:            issuedAt,
 			Nonce:               nonce,
 			IdentitySignature:   signIdentityRegistration(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt, nonce),
 		}
+
+		if *inviteCode != "" {
+			req.InviteCode = *inviteCode
+		}
+		if *hosted {
+			docRaw, err := buildSignedIdentityDocument(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			req.IdentityDocument = docRaw
+		} else {
+			provider := resolveDNSProvider(*dnsProvider)
+			token := resolveDNSToken(provider, *dnsToken)
+			if token == "" {
+				fmt.Fprintln(stderr, "dns token is required to register with relay (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN), or use --hosted")
+				return 1
+			}
+			req.DNSProvider = provider
+			req.DNSToken = token
+			// Optional document for DNS path when relay has POWEUR_DATA
+			if docRaw, err := buildSignedIdentityDocument(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt); err == nil {
+				req.IdentityDocument = docRaw
+			}
+		}
+
 		if _, err := RegisterIdentity(context.Background(), *relayURL, req); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -192,9 +219,14 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		"encryption_key_path":   encKeyPath,
 		"relay":                 *relayURL,
 		"registered":            registered,
+		"hosted":                *hosted,
 	}
 	if registered {
-		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (registered with relay, e2e encryption enabled)\n", identityValue))
+		mode := "registered with relay"
+		if *hosted {
+			mode = "hosted registration"
+		}
+		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (%s, e2e encryption enabled)\n", identityValue, mode))
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (local only; relay not configured)\n", identityValue))
 }
@@ -1075,10 +1107,22 @@ func tickGlyph(state journal.State) string {
 }
 
 func runRelay(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "status" {
-		fmt.Fprintln(stderr, "usage: poweur relay status")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: poweur relay status|set <url>")
 		return 1
 	}
+	switch args[0] {
+	case "status":
+		return runRelayStatus(args[1:], stdout, stderr)
+	case "set":
+		return runRelaySet(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "usage: poweur relay status|set <url>")
+		return 1
+	}
+}
+
+func runRelayStatus(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -1088,7 +1132,7 @@ func runRelay(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
 	if *useIdentity != "" {
@@ -1103,11 +1147,39 @@ func runRelay(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	output := map[string]string{
+	output := map[string]any{
 		"status":  health.Status,
 		"version": health.Version,
 	}
+	if health.Storage != nil {
+		output["storage"] = health.Storage
+	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version))
+}
+
+func runRelaySet(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("relay set", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: poweur relay set <url>")
+		return 1
+	}
+	cfg.RelayURL = strings.TrimRight(fs.Arg(0), "/")
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "relay url set to %s\n", cfg.RelayURL)
+	fmt.Fprintln(stdout, "note: self-hosted IDs should also update id.json relay field and DNS A/CNAME")
+	return 0
 }
 
 func runSession(args []string, stdout, stderr io.Writer) int {
@@ -1502,6 +1574,68 @@ func signIdentityRegistration(priv ed25519.PrivateKey, identityValue, publicKey,
 	return base64.StdEncoding.EncodeToString(sig)
 }
 
+func buildSignedIdentityDocument(priv ed25519.PrivateKey, identityValue, publicKey, encPublicKey, relayAddress, updatedAt string) (json.RawMessage, error) {
+	encFmt := ""
+	if encPublicKey != "" {
+		encFmt = "x25519:" + encPublicKey
+		if strings.HasPrefix(encPublicKey, "x25519:") {
+			encFmt = encPublicKey
+		}
+	}
+	pubFmt := publicKey
+	if !strings.HasPrefix(pubFmt, "ed25519:") {
+		pubFmt = "ed25519:" + pubFmt
+	}
+	doc := idpkg.NewDocument(identityValue, pubFmt, encFmt, relayAddress, nil)
+	doc.UpdatedAt = updatedAt
+	if err := doc.Sign(priv); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
+
+func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("identity lookup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: poweur identity lookup <identity>")
+		return 1
+	}
+	identityValue := fs.Arg(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := identity.ResolveIdentity(ctx, identityValue)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	out := map[string]any{
+		"identity":              res.Document.Identity,
+		"source":                res.Source,
+		"public_key":            res.Document.PublicKey,
+		"encryption_public_key": res.Document.EncryptionPublicKey,
+		"relay":                 res.Document.Relay,
+		"capabilities":          res.Document.Capabilities,
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, out, "")
+	}
+	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
+	fmt.Fprintf(stdout, "source: %s\n", res.Source)
+	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
+	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
+	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
+	return 0
+}
+
 // relayAddressFromURL extracts the host[:port] portion of a relay URL.
 // Used for owner-only canonical signing; must match cfg.RelayAddress on
 // the relay side. The port is preserved when present (matters for local
@@ -1705,4 +1839,161 @@ func resolveDNSToken(provider, flagValue string) string {
 // publicFromPrivateX25519 derives the X25519 public key for an identity's stored encryption private key.
 func publicFromPrivateX25519(privateKey []byte) ([]byte, error) {
 	return cryptoe2e.PublicFromPrivate(privateKey)
+}
+
+func runIdentityExport(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("identity export", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity to export")
+	outPath := fs.String("out", "", "output .tar.gz path (default: <identity>.tar.gz)")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" {
+		fmt.Fprintln(stderr, "identity not configured")
+		return 1
+	}
+	if cfg.RelayURL == "" {
+		fmt.Fprintln(stderr, "relay url not configured")
+		return 1
+	}
+	priv, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	issuedAt := time.Now().UTC().Format(time.RFC3339)
+	nonce := newAdminNonce()
+	canonical := strings.Join([]string{"identity-export", identityValue, issuedAt, nonce}, "\n")
+	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(canonical)))
+	raw, err := ExportIdentity(context.Background(), cfg.RelayURL, identityValue, IdentityExportRequest{
+		IssuedAt: issuedAt, Nonce: nonce, IdentitySignature: sig,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	path := *outPath
+	if path == "" {
+		path = identityValue + ".tar.gz"
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "exported %s (%d bytes)\n", path, len(raw))
+	return 0
+}
+
+func runKey(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "rotate" {
+		fmt.Fprintln(stderr, "usage: poweur key rotate [--use-identity <id>] [--grace 168h]")
+		return 1
+	}
+	return runKeyRotate(args[1:], stdout, stderr)
+}
+
+func runKeyRotate(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("key rotate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity to rotate")
+	grace := fs.Duration("grace", 7*24*time.Hour, "previous key grace period")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || cfg.RelayURL == "" {
+		fmt.Fprintln(stderr, "identity and relay url required")
+		return 1
+	}
+	oldPriv, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, identityValue))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	oldPub := oldPriv.Public().(ed25519.PublicKey)
+	oldPubStr := identity.PublicKeyString(oldPub)
+
+	newPub, newPriv, err := identity.GenerateKeypair()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	newPubStr := identity.PublicKeyString(newPub)
+	encPubStr := ""
+	if encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue)); err == nil {
+		if encPub, err := publicFromPrivateX25519(encPriv); err == nil {
+			encPubStr = cryptoe2e.EncodePublicKey(encPub)
+		}
+	}
+
+	issuedAt := time.Now().UTC().Format(time.RFC3339)
+	nonce := newAdminNonce()
+	relayAddr := relayAddressFromURL(cfg.RelayURL)
+	validUntil := time.Now().UTC().Add(*grace).Format(time.RFC3339)
+
+	encFmt := ""
+	if encPubStr != "" {
+		encFmt = "x25519:" + encPubStr
+	}
+	doc := idpkg.NewDocument(identityValue, "ed25519:"+newPubStr, encFmt, relayAddr, nil)
+	doc.UpdatedAt = issuedAt
+	doc.PreviousKeys = []idpkg.PreviousKey{{
+		PublicKey:  "ed25519:" + oldPubStr,
+		ValidUntil: validUntil,
+	}}
+	if err := doc.Sign(newPriv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	docRaw, err := json.Marshal(doc)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	rotCanon := strings.Join([]string{
+		"identity-rotation", identityValue, oldPubStr, newPubStr, issuedAt, nonce,
+	}, "\n")
+	rotSig := base64.StdEncoding.EncodeToString(ed25519.Sign(oldPriv, []byte(rotCanon)))
+
+	resp, err := RotateIdentity(context.Background(), cfg.RelayURL, identityValue, IdentityRotateRequest{
+		IdentityDocument:    docRaw,
+		NewPublicKey:        newPubStr,
+		EncryptionPublicKey: encPubStr,
+		IssuedAt:            issuedAt,
+		Nonce:               nonce,
+		RotationSignature:   rotSig,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	// Backup old key, then overwrite with new key material.
+	oldPath := identity.KeyPath(cfg.KeysDir, identityValue)
+	_ = os.Rename(oldPath, oldPath+".pre-rotate")
+	if _, err := identity.SavePrivateKey(identityValue, newPriv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	out := map[string]any{
+		"identity":     identityValue,
+		"public_key":   resp.PublicKey,
+		"previous_key": oldPubStr,
+		"valid_until":  validUntil,
+	}
+	return writeOutput(stdout, *jsonOut, out, fmt.Sprintf("rotated signing key for %s (old key valid until %s)\n", identityValue, validUntil))
 }
