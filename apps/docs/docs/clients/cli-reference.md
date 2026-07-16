@@ -294,6 +294,41 @@ poweur session revoke
 
 ---
 
+### `poweur dav token`
+
+Mint a WebDAV bearer token signed with the long-lived identity key. Use for rclone,
+custom clients, or visitors reading another identity's `/public` tree
+(see [WebDAV access](/files/webdav)).
+
+```bash
+poweur dav token
+poweur dav token --audience=bob.poweur.net --scope=dav:read
+poweur dav token --json
+```
+
+### `poweur dav mount`
+
+Print a ready-to-paste mount command for the current OS (macOS `mount_webdav`,
+Linux `davfs2`/`rclone`, etc.), including a freshly minted token or a reminder to
+create an app password for Finder.
+
+```bash
+poweur dav mount
+```
+
+### `poweur dav password add|list|remove`
+
+Manage named app passwords for Basic-auth WebDAV clients. Hashes are stored at
+`poweur-sys/relay/app-passwords.json` on the relay (owner + relay readable).
+
+```bash
+poweur dav password add --name=finder
+poweur dav password list
+poweur dav password remove --name=finder
+```
+
+---
+
 ### `poweur relay status`
 
 Check relay connectivity. Displays the configured relay endpoint and relay version, and reports whether the relay is reachable.

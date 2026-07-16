@@ -25,6 +25,10 @@ const (
 	DefaultVersion             = "0.1.0"
 	DefaultMaxInboxPerIdentity = 50
 	DefaultMaxAcksPerIdentity  = 50
+	// EPIC-003 storage defaults: 5 GiB per identity, 2 GiB max single file.
+	DefaultMaxIdentityBytes = int64(5) << 30
+	DefaultMaxFileBytes     = int64(2) << 30
+	DefaultStorageProvider  = "relay-fs"
 )
 
 // RateLimits configures per-sender token-bucket caps. Each window resets on
@@ -66,8 +70,13 @@ type Config struct {
 	RegistrationGate string
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
-	// MaxIdentityBytes soft quota scaffolding (0 = unlimited); enforced in EPIC-003.
+	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
+	// Enforced on WebDAV PUT/MKCOL with 507 Insufficient Storage.
 	MaxIdentityBytes int64
+	// MaxFileBytes caps a single uploaded file (0 = unlimited).
+	MaxFileBytes int64
+	// StorageProvider selects the file-body backend (E03-T8). v1: "relay-fs".
+	StorageProvider string
 }
 
 func (c Config) Validate() error {
@@ -89,6 +98,11 @@ func (c Config) Validate() error {
 	case "", "open", "invite":
 	default:
 		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite)", c.RegistrationGate)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.StorageProvider)) {
+	case "", "relay-fs":
+	default:
+		return fmt.Errorf("invalid STORAGE_PROVIDER: %s (v1 supports relay-fs)", c.StorageProvider)
 	}
 	if len(missing) == 0 {
 		return nil
@@ -128,7 +142,9 @@ func FromEnv() Config {
 		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
 		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
-		MaxIdentityBytes:        int64(getenvInt("MAX_IDENTITY_BYTES", 0)),
+		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
+		MaxFileBytes:            getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
+		StorageProvider:         strings.ToLower(getenv("STORAGE_PROVIDER", DefaultStorageProvider)),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),
@@ -190,6 +206,16 @@ func getenv(key, fallback string) string {
 func getenvInt(key string, fallback int) int {
 	if value := os.Getenv(key); value != "" {
 		parsed, err := strconv.Atoi(value)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func getenvInt64(key string, fallback int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err == nil {
 			return parsed
 		}

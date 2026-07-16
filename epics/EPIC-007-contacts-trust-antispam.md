@@ -33,7 +33,9 @@ this epic turns verified identity into *usable trust*.
 - **Inbox policy** = `poweur-sys/relay/inbox-policy.json`:
   `contacts_only` (default for humans) | `contacts_and_requests` | `open` (bots/support
   addresses). Non-contact senders get exactly **one** pending contact-request slot — no
-  message stream until accepted.
+  message stream until accepted. **Follow-on (EPIC-012):** optional opt-in for unsigned /
+  web-form / anonymous ingress (`allow_unsigned_web_forms`, etc.) — default remain deny;
+  refine vocabulary here so web contact forms and general messaging share one policy surface.
 - **Contact requests ride on messaging** as typed system messages (`sys.contact.request` with
   a short E2E-encrypted intro, `sys.contact.accept`, `sys.contact.block`). Accept = both sides
   write the other into contacts with pinned keys (mutual, like Signal/XMPP presence

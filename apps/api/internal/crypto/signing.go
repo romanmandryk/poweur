@@ -138,6 +138,20 @@ func CanonicalEncryptionKeyUpdate(identity, encryptionPublicKey, issuedAt, nonce
 	}, "\n")
 }
 
+// CanonicalDAVToken is the string a client signs (session or identity key)
+// to obtain a WebDAV bearer token. `identity` is the requester; `audience`
+// is the tree owner the token grants access to (== identity for own tree).
+func CanonicalDAVToken(identity, audience, scope, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"dav-token",
+		identity,
+		audience,
+		scope,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
 // CanonicalSessionRevocation is the string the identity owner signs to
 // authorize a `DELETE /sessions/:id`. Verified against the identity's
 // long-lived signing key.

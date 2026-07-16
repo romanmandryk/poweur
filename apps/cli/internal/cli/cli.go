@@ -51,6 +51,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runRelay(args[1:], stdout, stderr)
 	case "key":
 		return runKey(args[1:], stdout, stderr)
+	case "dav":
+		return runDAV(args[1:], stdout, stderr)
 	case "session":
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
@@ -1771,6 +1773,11 @@ func printHelp(w io.Writer) {
   poweur session refresh [--use-identity=...] [--json]
   poweur session revoke [--use-identity=...] [--json]
   poweur relay status [--json]
+  poweur dav token [--audience=...] [--scope=dav:full|dav:read|dav:rw:<path>] [--use-identity=...] [--json]
+  poweur dav mount [--use-identity=...]
+  poweur dav password add --name=<name> [--scope=...] [--use-identity=...] [--json]
+  poweur dav password list [--use-identity=...] [--json]
+  poweur dav password remove --name=<name> [--use-identity=...]
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)

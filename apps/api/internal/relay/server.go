@@ -19,9 +19,11 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
+	"golang.org/x/net/webdav"
 )
 
 const (
@@ -41,6 +43,14 @@ type Server struct {
 	regGate    *RegistrationGate
 	client     *http.Client
 	idCache    *idpkg.Cache
+
+	// File layer (EPIC-003). Nil when POWEUR_DATA is not configured.
+	filesProvider files.StorageProvider
+	filesIndex    *files.Index
+	davTokens     *davTokenStore
+
+	locksMu  sync.Mutex
+	davLocks map[string]webdav.LockSystem
 
 	cacheMu       sync.Mutex
 	relayCache    map[string]cachedRelay
@@ -76,8 +86,16 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:        &http.Client{Timeout: 10 * time.Second},
 		idCache:       idpkg.NewCache(),
+		davTokens:     newDAVTokenStore(),
+		davLocks:      make(map[string]webdav.LockSystem),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
+	}
+	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
+	// only ever talks to the StorageProvider interface.
+	if cfg.DataDir != "" {
+		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
+		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
 	}
 	go s.runPruner()
 	return s
@@ -89,6 +107,7 @@ func (s *Server) runPruner() {
 	defer ticker.Stop()
 	for range ticker.C {
 		s.sessions.Prune()
+		s.davTokens.Prune()
 		s.pruneLocalityCache()
 	}
 }
@@ -119,6 +138,20 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
+	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
+	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
+	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	// WebDAV needs non-standard methods (PROPFIND, MKCOL, …); register each
+	// explicitly (a method-less pattern would conflict with "GET /").
+	// Covers both /dav/<identity>/… and the Host-routed /dav/… vanity form.
+	for _, m := range []string{
+		"GET", "HEAD", "OPTIONS", "PUT", "DELETE",
+		"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+	} {
+		mux.HandleFunc(m+" /dav/", s.handleDAV)
+		mux.HandleFunc(m+" /dav", s.handleDAV)
+	}
+	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return corsMiddleware(mux)
@@ -307,6 +340,11 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		if err := s.identities.Put(identity); err != nil {
 			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
 			return
+		}
+		// Materialize the home filesystem skeleton (five roots + poweur-sys
+		// subdirs) so DAV clients see a stable tree immediately.
+		if s.filesProvider != nil {
+			_ = s.filesProvider.EnsureTree(r.Context(), identity.Identity)
 		}
 	} else if !s.identities.Add(identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")

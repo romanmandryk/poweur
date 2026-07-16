@@ -601,6 +601,16 @@ input, textarea, select { font-family: inherit; }
 }
 .feature-card.coming-soon { opacity: .65; }
 
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent, #007AFF);
+  cursor: pointer;
+}
+.link-btn:active { opacity: .7; }
+
 /* ─── Options list (Add ID page) ──────────────────────────────────────────── */
 .option-list { display: flex; flex-direction: column; gap: 12px; }
 

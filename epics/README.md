@@ -28,7 +28,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 |----|-------|-------|--------|------------|
 | [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | complete | — |
 | [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (PoW gate deferred) | E01 |
-| [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | proposed | E02 |
+| [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete (S3 provider deferred) | E02 |
 | [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | proposed | E03 |
 | [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | proposed | E03 |
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | proposed | E03 |
@@ -37,6 +37,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | proposed | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | proposed | E01, E02 |
+| [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
 
 ## Integration epics (`integrations/`)
 
@@ -76,6 +77,8 @@ EPIC-001 ──► EPIC-008 (sign-in)         EPIC-002/003 ──► EPIC-009 (m
 EPIC-001/002 ──► EPIC-011 (key management & recovery)
                    ├─ uses EPIC-005 shares + EPIC-007 contacts (social recovery)
                    └─ feeds EPIC-008 (Poweur as recovery anchor for other services)
+
+EPIC-003 + EPIC-007/009 ──► EPIC-012 (identity websites; design notes)
 ```
 
 ## Architecture deltas at a glance

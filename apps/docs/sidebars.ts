@@ -35,6 +35,16 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Files',
+      collapsed: false,
+      items: [
+        'files/storage-model',
+        'files/webdav',
+        'files/e2ee-design',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Clients',
       collapsed: false,
       items: [
