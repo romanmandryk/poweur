@@ -65,7 +65,7 @@ The Dashboard shows module cards for upcoming capabilities:
 - **Publishing** — signed content under your identity
 - **Receiving Payments** — payment address advertisement via DNS capability records
 
-Authentication is not treated as a separate identity system. It reuses the same DNS identity, key material, and approval surface.
+Authentication is not treated as a separate identity system. It reuses the same Poweur ID (FQDN), key material, and approval surface.
 
 ## CLI
 

@@ -6,24 +6,25 @@ title: Interoperability
 
 # Interoperability
 
-Poweur ID is intentionally DNS-native: the canonical identifier is the fully qualified domain name itself, such as `alice.poweur.net`. Interoperability should be additive. Poweur ID should not depend on a DID method, an OpenID provider, or a federation hub in order to work, but it should map cleanly into those ecosystems where that improves adoption.
+Poweur ID uses a **DNS name as the canonical identifier** (an FQDN such as `alice.com` or a hosted name like `alice.poweur.net`). Discovery of keys is **web-first** (`/.well-known/poweur/`), with DNS `TXT` as a fallback. Interoperability with DID/OIDC ecosystems should be additive: Poweur must not depend on a DID method or OpenID provider to work, but should map cleanly into those ecosystems where that improves adoption.
 
 ## Canonical Identifier
 
-The canonical Poweur ID identifier is the FQDN:
+The canonical Poweur ID identifier is the FQDN — any domain the owner controls:
 
 ```text
+alice.com
 alice.poweur.net
 ```
 
-Everything else is a projection of that identity:
+Projections of that identity:
 
-- DNS `TXT` record for the public key
-- DNS `A` / `CNAME` record for relay routing
-- Optional HTTP well-known metadata
+- HTTPS well-known identity document (primary discovery)
+- Optional DNS `TXT` for public keys (fallback / self-host)
+- Optional DNS `A` / `CNAME` for relay routing
 - Optional DID document representation
 
-This keeps Poweur ID understandable to operators and easy to verify with standard DNS tooling.
+Operators can still verify with standard DNS and HTTPS tooling.
 
 ## DID Mapping
 
@@ -39,17 +40,17 @@ This keeps Poweur ID understandable to operators and easy to verify with standar
 https://alice.poweur.net/.well-known/did.json
 ```
 
-That DID document should project the same verification material already published in DNS. DNS remains the ground truth; the DID document is a convenience layer for external ecosystems.
+That DID document should project the same verification material as the Poweur identity document / DNS records. The Poweur well-known document is the protocol's own ground truth for hosted identities; DNS remains important for naming and for self-hosters who publish TXT.
 
 ## Well-Known Discovery
 
-Poweur ID should define its own metadata endpoint:
+Primary identity discovery (shipped):
 
 ```text
-https://<identity>/.well-known/poweur.json
+https://<identity>/.well-known/poweur/id.json
 ```
 
-This document should advertise:
+See [Web Identity](/protocol/web-identity). A broader metadata document may also advertise:
 
 - protocol version
 - supported capabilities

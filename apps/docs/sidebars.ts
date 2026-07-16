@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'protocol/overview',
         'protocol/identity-model',
+        'protocol/web-identity',
         'protocol/dns-records',
         'protocol/message-format',
         'protocol/routing',

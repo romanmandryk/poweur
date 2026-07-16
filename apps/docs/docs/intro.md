@@ -7,51 +7,54 @@ title: Introduction
 
 # What is the Poweur ID Protocol?
 
-Poweur ID is an **open, DNS-native identity and messaging protocol**. Every participant — human, bot, or autonomous agent — is identified by a subdomain they control, such as `alice.poweur.net`. That subdomain is their globally unique, human-readable identity. The public key associated with that subdomain is their cryptographic identity.
+Poweur ID is an **open, DNS-named identity and messaging protocol**. Every participant — human, bot, or autonomous agent — is identified by a domain name they control (an FQDN), such as `alice.com` if they own that domain, or a hosted name like `alice.poweur.net` on a relay that offers wildcard hosting. That name is their globally unique, human-readable identity. The public key bound to that name is their cryptographic identity.
 
-There is no central registry. No OAuth provider. No username database. Just DNS — the internet's existing, massively distributed lookup infrastructure — repurposed as the ground truth for identity and routing.
+There is no central username database and no OAuth provider you must join. **DNS remains the naming layer** (your identity *is* a domain name), while keys and capabilities are discovered **web-first** at `https://<identity>/.well-known/poweur/` — with DNS `TXT` records as a fallback for self-hosted setups that prefer DNS publication.
 
-## Why DNS-native identity?
+## Why a DNS name — and why also the web?
 
-DNS is already the internet's naming layer. Every device on the internet can resolve a DNS record. DNS is:
+DNS is already the internet's naming layer. Every device can resolve a domain. DNS is:
 
-- **Decentralised by design** — records are controlled by the domain owner, not a platform.
-- **Globally available** — any relay anywhere can look up any identity without calling home.
-- **Already trusted** — decades of infrastructure exist to protect and serve DNS records reliably.
-- **Human-readable** — `alice.poweur.net` is as readable as an email address.
+- **Decentralised by design** — names are controlled by the domain owner, not a platform.
+- **Globally available** — any relay can look up any identity without calling home.
+- **Already trusted** — decades of infrastructure protect and serve DNS reliably.
+- **Human-readable** — `alice.com` or `alice.poweur.net` is as readable as an email address.
 
-Poweur ID uses DNS not just for routing (as email does) but as the **authoritative data store** for identity. An identity's public key lives in a DNS `TXT` record. Its relay address lives in an `A` or `CNAME` record on the same subdomain. Any relay that can resolve DNS can verify any message and route to any identity — without coordination, without a central service.
+Poweur keeps the **DNS name as the canonical identifier**, but does **not** require every identity to publish keys only in DNS. Hosted identities on a wildcard domain (`*.poweur.net` → one relay) publish a signed [identity document](/protocol/web-identity) over HTTPS. Self-hosters may publish the same document from their own origin, and/or publish keys in DNS `TXT` records. Relays and clients resolve **web first, DNS second**, and fail closed if both are present and disagree.
 
-## What can you do with an Poweur ID identity?
+`alice.poweur.net` in examples is a **hosted-service illustration**, not a requirement to use that parent. You still need *some* domain name: if you own `alice.com` (or `bot.example.org`), that FQDN can be your Poweur ID. There is no protocol path without a resolvable name.
 
-In the MVP, identities are used for **end-to-end verified messaging**: signing and sending messages that any recipient can verify came from you, without trusting any server in the middle.
+## What can you do with a Poweur ID?
 
-The protocol is designed to grow. Because identity is expressed in DNS, new capabilities can be advertised by adding new DNS records. The same subdomain that routes your messages today can announce payment addresses, service endpoints, or capability flags tomorrow — all without modifying the core protocol or any central registry.
+Identities are used for **end-to-end encrypted, cryptographically verified messaging**: signing and sending messages that any recipient can verify came from you, without trusting any server with your private key.
 
-Planned capabilities include:
+The same name is also a **home filesystem** on your relay (WebDAV, public/shared/private trees — see [File storage](/files/storage-model)), and is designed to grow into publishing, payments, and third-party sign-in without a separate account system.
 
-- **Messaging** (MVP — active)
-- **Publishing** — signed content under your identity
-- **Receiving payments** — payment address advertisement via DNS capability records
+Planned and in-progress capabilities include:
+
+- **Messaging** — active
+- **Files & WebDAV** — active (per-identity home on the relay)
+- **Publishing** — signed content under your identity (see also [identity websites](/files/webdav#public-web-serving-pub) for file sharing; full sites are a later epic)
+- **Receiving payments** — payment address advertisement via capability records
 - **Authentication** — prove identity to third-party services without passwords
 
 ## How it works in one paragraph
 
-You own a subdomain. Your private key lives in your phone's secure enclave — it never leaves your device. Your public key is published in a DNS `TXT` record on your subdomain. When you send a message, your phone signs it with your private key. The recipient's relay looks up your subdomain in DNS to find your public key, verifies the signature, and delivers the message. No central server ever holds your private key, and any message that claims to be from you can be verified by anyone who can resolve DNS.
+You control a domain name. Your private key lives on your device (passkey / secure storage) — it never leaves in plaintext. Your public keys are published in a signed identity document at `/.well-known/poweur/id.json` (and optionally in DNS `TXT`). When you send a message, your client signs and encrypts it. The recipient (or their relay) resolves your identity over HTTPS or DNS, verifies the signature, and delivers the ciphertext. No central server holds your private key.
 
 ## System components
 
-The Poweur ID system is composed of:
-
-- **Relay (`apps/api`)** — a stateless Go server that routes, verifies, and delivers messages. Writes DNS records on behalf of new identities. Holds no private keys and no durable storage.
-- **Mobile apps (`apps/ios`, `apps/android`)** — native iOS and Android clients. The app is the user's cryptographic vault. Private keys are stored in the hardware secure enclave and never leave the device.
-- **CLI (`apps/cli`)** — a scriptable command-line client for developers, bots, and automated agents.
-- **Infrastructure (`apps/infra`)** — Terraform configuration for deploying a relay on Hetzner Cloud.
+- **Relay (`apps/api`)** — Go server that routes and verifies messages, hosts identity documents and per-identity file trees (`POWEUR_DATA`), and optionally writes DNS records for self-hosted registration. Holds no identity private keys.
+- **Web client (`apps/web`)** — browser SPA for hosted identity creation, messaging, and files.
+- **CLI (`apps/cli`)** — scriptable client for developers, bots, and agents.
+- **Mobile apps (`apps/ios`, `apps/android`)** — native clients; the device is the user's cryptographic vault.
+- **Infrastructure (`apps/infra`)** — Terraform for deploying a relay (e.g. on Hetzner Cloud).
 
 ## Next steps
 
 - [Protocol Overview](/protocol/overview) — design principles and architecture
-- [Identity Model](/protocol/identity-model) — how identities work
-- [DNS Records](/protocol/dns-records) — the full DNS record format specification
-- [Interoperability](/protocol/interoperability) — DID, well-known, and third-party auth alignment
+- [Web Identity](/protocol/web-identity) — `/.well-known/poweur/` discovery (primary)
+- [Identity Model](/protocol/identity-model) — how identities and keys work
+- [DNS Records](/protocol/dns-records) — DNS publication format (fallback / self-host)
+- [File storage](/files/storage-model) — per-identity home filesystem
 - [Relay API Reference](/relay/api-reference) — HTTP API endpoints
