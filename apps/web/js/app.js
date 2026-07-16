@@ -30,7 +30,7 @@ import {
 import {
   registerIdentity, updateEncryptionKey, getIdentityKey,
   getChallenge, fetchInbox, sendMessage, submitAck,
-  registerSession, revokeSession, checkHealth,
+  registerSession, revokeSession, checkHealth, fetchRelayAddress,
   resolveEncryptionKey,
 } from "./api.js";
 
@@ -306,11 +306,54 @@ function renderFeatureCards() {
 
 // ─── Launcher page ────────────────────────────────────────────────────────────
 
+function parseCreateHash() {
+  const hash = window.location.hash;
+  if (!hash.startsWith("#create=")) return null;
+  try { return JSON.parse(atob(hash.slice("#create=".length))); } catch { return null; }
+}
+
 function renderLauncher() {
   const cfg = S.config;
+  const step2 = parseCreateHash();
+
+  if (step2) {
+    // Step 2 — on the identity's own domain, collect DNS credentials and create
+    const { handle, domain } = step2;
+    return `
+      <div class="launcher-form-page">
+        <div class="section-label">New identity — step 2 of 2</div>
+        <div class="form-card">
+          <div class="form-group">
+            <label class="form-label">Handle</label>
+            <input class="input" type="text" value="${esc(handle)}" disabled />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Domain</label>
+            <input class="input" type="text" value="${esc(domain)}" disabled />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ni-provider">DNS provider</label>
+            <select id="ni-provider" class="input select">
+              <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
+              <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ni-token">DNS API token</label>
+            <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
+          </div>
+          <button class="btn btn-passkey" id="btn-create-id" style="width:100%;margin-top:4px">
+            🔑 Create with passkey
+          </button>
+          <p class="form-note small" style="margin-top:10px;text-align:center">Keys are generated locally and never leave your device in plain form.</p>
+        </div>
+      </div>`;
+  }
+
+  // Step 1 — pick a handle, then redirect to the identity's domain for passkey creation
   return `
     <div class="launcher-form-page">
-      <div class="section-label">New identity</div>
+      <div class="section-label">New identity — step 1 of 2</div>
       <div class="form-card">
         <div class="form-group">
           <label class="form-label" for="ni-handle">Handle</label>
@@ -318,27 +361,12 @@ function renderLauncher() {
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" placeholder="poweur.net" value="${esc(cfg.parentDomain)}" autocomplete="off" />
+          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain)}" autocomplete="off" />
         </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-relay">Relay URL</label>
-          <input id="ni-relay" class="input" type="url" placeholder="https://relay.poweur.net" value="${esc(cfg.relayUrl)}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-provider">DNS provider</label>
-          <select id="ni-provider" class="input select">
-            <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
-            <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-token">DNS API token</label>
-          <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
-        </div>
-        <button class="btn btn-passkey" id="btn-create-id" style="width:100%;margin-top:4px">
-          🔑 Create with passkey
+        <button class="btn btn-primary" id="btn-next-id" style="width:100%;margin-top:4px">
+          Next →
         </button>
-        <p class="form-note small" style="margin-top:10px;text-align:center">Keys are generated locally and never leave your device in plain form.</p>
+        <p class="form-note small" style="margin-top:10px;text-align:center">You'll be taken to your identity's domain to create a passkey.</p>
       </div>
     </div>`;
 }
@@ -625,7 +653,11 @@ function attachEvents() {
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
   q("#opt-create-new")?.addEventListener("click", () => { R.sub = null; R.go("launcher"); });
 
-  // New ID creation
+  // Launcher step 1 → redirect to identity domain
+  q("#btn-next-id")?.addEventListener("click", doRedirectToIdentityDomain);
+  q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doRedirectToIdentityDomain(); });
+
+  // Launcher step 2 → create identity
   q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
 
   // Unlock sub-page
@@ -707,16 +739,25 @@ async function doUnlock() {
   }
 }
 
-async function doCreateIdentity() {
-  const handle    = q("#ni-handle")?.value.trim();
-  const domain    = q("#ni-domain")?.value.trim();
-  const relayUrl  = q("#ni-relay")?.value.trim();
-  const provider  = q("#ni-provider")?.value;
-  const dnsToken  = q("#ni-token")?.value.trim();
+function doRedirectToIdentityDomain() {
+  const handle = q("#ni-handle")?.value.trim();
+  const domain = q("#ni-domain")?.value.trim();
+  if (!handle) return toast("Enter a handle", "warning");
+  if (!domain) return toast("Enter a parent domain", "warning");
+  const encoded = btoa(JSON.stringify({ handle, domain }));
+  window.location.href = `https://${handle}.${domain}/app/#create=${encoded}`;
+}
 
-  if (!handle)   return toast("Enter a handle", "warning");
-  if (!domain)   return toast("Enter a parent domain", "warning");
-  if (!relayUrl) return toast("Enter the relay URL", "warning");
+async function doCreateIdentity() {
+  const step2 = parseCreateHash();
+  if (!step2) return;
+
+  const handle   = step2.handle;
+  const domain   = step2.domain;
+  const relayUrl = window.location.origin;
+  const provider = q("#ni-provider")?.value;
+  const dnsToken = q("#ni-token")?.value.trim();
+
   if (!dnsToken) return toast("Enter a DNS API token", "warning");
 
   const identity = `${handle}.${domain}`;
@@ -732,9 +773,13 @@ async function doCreateIdentity() {
     const pubB64 = toBase64url(sigPub);
     const encB64 = toBase64url(encPub);
 
+    setLoading(true, "Registering identity…");
+    const relayAddr = await fetchRelayAddress(relayUrl);
+    const rpId = deriveRpId(relayAddr);
+
     setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF } = await createPasskey(identity, userId);
+    const { credentialId, prfOutput, supportsPRF } = await createPasskey(identity, userId, rpId);
 
     setLoading(true, "Securing keys…");
     let encryptedKeys;
@@ -745,11 +790,8 @@ async function doCreateIdentity() {
       if (!pin) { setLoading(false); return; }
       encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv);
     }
-
-    setLoading(true, "Registering identity…");
     const issuedAt = now();
     const nonce    = randomNonce();
-    const relayAddr = relayUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     const canonical = canonicalIdentityRegistration(identity, pubB64, encB64, relayAddr, issuedAt, nonce);
     const identitySignature = await sign(sigPriv, canonical);
 
@@ -1175,7 +1217,9 @@ function boot() {
   S.identity = getActiveIdentity();
   S.config   = getConfig();
 
-  if (!S.identity) {
+  if (parseCreateHash()) {
+    R.page = "launcher";
+  } else if (!S.identity) {
     R.page = "main";
   } else if (!getUnlockedKeys() && !isSessionValid(S.identity)) {
     // Auto-push unlock only if session is gone; otherwise session key in

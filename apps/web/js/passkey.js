@@ -27,12 +27,13 @@ export async function createPasskey(identity, userId) {
 
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userIdBytes = fromBase64url(userId);
+  const rpId = window.location.hostname;
 
   const createOptions = {
     challenge,
     rp: {
       name: "Poweur ID",
-      id: window.location.hostname === "localhost" ? "localhost" : window.location.hostname,
+      id: rpId,
     },
     user: {
       id: userIdBytes,

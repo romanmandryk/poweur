@@ -112,8 +112,9 @@ func (s *Server) Router() http.Handler {
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
-		"service": "poweur-relay",
-		"web_ui":  "GET /app/ (when WEB_STATIC_DIR is set)",
+		"service":       "poweur-relay",
+		"relay_address": s.cfg.RelayAddress,
+		"web_ui":        "GET /app/ (when WEB_STATIC_DIR is set)",
 	})
 }
 

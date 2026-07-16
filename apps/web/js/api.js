@@ -127,6 +127,13 @@ export async function checkHealth(relayUrl) {
   return apiRequest(relayUrl, "GET", "/health");
 }
 
+/** Fetch the relay's canonical address (host[:port]) for use in canonical strings. */
+export async function fetchRelayAddress(relayUrl) {
+  const { relay_address } = await apiRequest(relayUrl, "GET", "/");
+  if (!relay_address) throw new Error("Relay did not return its address");
+  return relay_address;
+}
+
 // ─── DNS-over-HTTPS (Cloudflare) ─────────────────────────────────────────────
 
 const DOH_URL = "https://cloudflare-dns.com/dns-query";
