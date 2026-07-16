@@ -2,7 +2,7 @@
 
 - **Status:** proposed
 - **Priority:** P1
-- **Depends on:** EPIC-003 (`poweur-sys/private`), EPIC-006 (schemas); interacts with EPIC-009
+- **Depends on:** EPIC-003 (`poweur-sys/relay`), EPIC-006 (schemas); interacts with EPIC-009
 - **Unlocks:** spam-free collaboration — a core promise of the project
 
 ## Goal
@@ -22,15 +22,15 @@ this epic turns verified identity into *usable trust*.
 - Hosted registration (EPIC-002) makes identities *cheap*, which makes per-identity reputation
   weak — policy must therefore be **recipient-consent based** (allow-list + request flow), not
   reputation based. Cheap IDs also argue for cost on the *sender's relay* (see E07-T5).
-- The relay can enforce policy because it can read `poweur-sys/private/` (the explicit trust
-  split documented in EPIC-003).
+- The relay can enforce policy because it can read `poweur-sys/relay/` (the explicit trust
+  split documented in EPIC-003; `poweur-sys/private/` is owner-only).
 
 ## Design direction
 
-- **Contacts** = `poweur-sys/private/contacts.json` (PCP schema, EPIC-006): per contact the
+- **Contacts** = `poweur-sys/relay/contacts.json` (PCP schema, EPIC-006): per contact the
   identity, **pinned public key** (TOFU — trust on first use), state
   (`requested|accepted|blocked`), petname, tags/groups, added_at, and the source of the intro.
-- **Inbox policy** = `poweur-sys/private/inbox-policy.json`:
+- **Inbox policy** = `poweur-sys/relay/inbox-policy.json`:
   `contacts_only` (default for humans) | `contacts_and_requests` | `open` (bots/support
   addresses). Non-contact senders get exactly **one** pending contact-request slot — no
   message stream until accepted.
@@ -64,7 +64,7 @@ this epic turns verified identity into *usable trust*.
       rejected with a distinct error (`policy_rejected`) — sender's client can explain why
 - [ ] `contacts_and_requests`: non-contact sender's first `sys.contact.request` is accepted into
       a separate **requests queue** (not the main inbox: extend
-      `apps/api/internal/storage/inbox.go` or store under `poweur-sys/private/requests/`);
+      `apps/api/internal/storage/inbox.go` or store under `poweur-sys/relay/requests/`);
       anything else from them is rejected until accepted
 - [ ] Per-sender pending-request dedup + cooldown (one open request, re-request after N days)
 - [ ] Forwarded (cross-relay) traffic: policy enforced by the **recipient's** relay — verify

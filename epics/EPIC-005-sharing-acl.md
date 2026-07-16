@@ -17,7 +17,8 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
 ## Design direction
 
 - **Grants are signed documents, stored in the owner's tree.** A grant lives at
-  `poweur-sys/private/shares/<share-id>.json`, signed by the owner's identity key:
+  `poweur-sys/relay/shares/<share-id>.json` (relay-readable zone — the relay must enforce
+  grants), signed by the owner's identity key:
 
 ```json
 {
@@ -33,7 +34,7 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
 
   The relay *enforces* grants but cannot forge them (signature check), and the grant set syncs
   to the owner's devices like any other file — the filesystem stays the source of truth.
-- **Groups are files too**: `poweur-sys/private/groups/<name>.json` = signed member list owned
+- **Groups are files too**: `poweur-sys/relay/groups/<name>.json` = signed member list owned
   by whoever administers the group. v1 groups are owner-local (alice's groups, used in alice's
   grants). Cross-owner "group identities" (a group with its own Poweur ID) are a later layer on
   the same format.
@@ -62,7 +63,7 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
 
 ### E05-T2 — Relay grant engine
 
-- [ ] Grant store: watch/load `poweur-sys/private/shares/` + `groups/` into the permission
+- [ ] Grant store: watch/load `poweur-sys/relay/shares/` + `groups/` into the permission
       engine stubbed in E03-T4; verify signatures on load; reject malformed grants loudly
       (owner notification via `sys.*` message)
 - [ ] Enforce on every DAV/sync/changes request: visitor identity × path → effective permission
@@ -111,7 +112,7 @@ kills the link.
 Groups that are *addressable* (`team.acme.poweur.net` as a share audience AND message
 recipient) unify EPIC-005 and EPIC-009 group messaging.
 
-- [ ] Design doc: a group as a hosted identity whose `poweur-sys/private/groups/self.json`
+- [ ] Design doc: a group as a hosted identity whose `poweur-sys/relay/groups/self.json`
       holds members; admin operations are signed member-list updates; relays resolve
       group→members server-side for shares and message fan-out
 - [ ] v1: create/admin group identities via CLI; usable as share audience

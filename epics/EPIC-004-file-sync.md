@@ -124,7 +124,7 @@ test matrix.
 Sync introduces "the user's devices" as first-class actors (they already exist implicitly as
 sessions, `apps/api/internal/relay/sessions.go` keeps a `DeviceFingerprint`).
 
-- [ ] `poweur-sys/private/devices.json` convention: device id, name, kind (laptop/phone/agent),
+- [ ] `poweur-sys/relay/devices.json` convention: device id, name, kind (laptop/phone/agent),
       sync scopes, added_at, last_seen — written by the relay, readable by owner
 - [ ] CLI/web UI to list devices and revoke one (revokes its app passwords/tokens + sessions)
 - [ ] Per-device sync cursors stored server-side so the owner can see staleness ("phone last

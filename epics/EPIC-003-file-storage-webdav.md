@@ -48,16 +48,62 @@ https://<identity>/dav/                    ← vanity alias via Host-routing (wi
 ```
 /poweur-sys/          system data — managed, convention-governed
   public/             world-readable (id.json, profile, capabilities) — backs /.well-known/poweur/
-  private/            owner + relay only (contacts, device registry, inbox policy, share grants)
+  relay/              owner + RELAY (config the relay must read to function: contacts,
+                      inbox policy, device registry, share grants, app passwords, logs)
+  private/            OWNER ONLY — relay stores but must not read; contents that live on the
+                      relay are encrypted to the owner's X25519 key (e.g. storage-credentials)
 /public/              readable by ANY authenticated Poweur ID (valid signature required, no grant)
 /shared/              readable/writable per explicit grants (EPIC-005)
 /private/             owner (and owner's devices/agents) only
 /apps/<app-id>/       per-application data, ACL defaults private (EPIC-006)
 ```
 
-Note the deliberate trust split the system depends on: `poweur-sys/private` is readable by the
-**relay** (it must enforce inbox policy and shares from it) but never by other users. True
-end-to-end-encrypted storage (relay-blind) is a later, opt-in layer — see E03-T7.
+The trust split is explicit in the tree: `poweur-sys/relay` is the *relay-readable* config zone
+(the relay must enforce inbox policy and shares from it; never visible to other users), while
+`poweur-sys/private` is *owner-only* — the relay hosts and syncs those bytes but has no business
+reading them, and anything sensitive placed there is encrypted client-side to the owner's key.
+True end-to-end-encrypted storage for the general roots (relay-blind) is a later, opt-in
+layer — see E03-T7.
+
+**Why not git.** Decision record (2026-07): git-over-HTTPS could reuse the same token bridge
+(E03-T3), but git's ACL boundary is the *repo* — per-path **read** ACLs inside one repo are
+structurally impossible (a clone ships every object + full history). Our model needs per-path
+audiences (`public`/`private`/`shared`/`poweur-sys`), cheap revocation (git history retains
+shared data forever), large binaries (would force LFS), and non-developer conflict UX
+(conflicted-copy rename, not merge markers). WebDAV + changes journal (EPIC-004) keeps the
+useful 20% of git — content-hash etags and "what changed since X" — without the history
+liability. Git remains welcome as an *app layer* (relay-hosted forge, INT-004; git working
+trees inside `/apps/...`).
+
+**Storage providers.** The relay accesses file bodies through a `StorageProvider` adapter, not
+the OS filesystem directly:
+
+- **`relay-fs` (v1 default):** all roots under a configurable directory (reuses `POWEUR_DATA`
+  from EPIC-002, `identities/<id>/files/`). The relay sees all bytes; this is the mode where
+  relay-mediated everything (DAV, shares, public serving) just works. Acceptable for the relay
+  to hold any credentials here — it sees the data anyway.
+- **`s3` (later; client-direct private zone):** for S3-compatible backends (AWS, MinIO, R2).
+  Design intent only for now — v1 ships `relay-fs`; the adapter interface just has to be robust
+  enough that `s3` plugs in without reworking the DAV layer. Sketch: the relay keeps
+  `poweur-sys/public` + `poweur-sys/relay` locally (it needs them to function) and mediates
+  `/public` + `/shared`; the owner's **`/private`** (and private `/apps` data) goes
+  **client → S3 directly**, so the relay never sees private unencrypted bytes. The S3 gateway
+  may be hosted by the relay operator or as a separate service — undecided, and the adapter
+  must not care.
+  - `/public` and `/shared` remain **relay-mediated**: visitors authenticate to the relay with
+    Poweur IDs, not to the owner's bucket, so the relay must be in the read path for those
+    roots. (Owner-online presigned-URL handoff for shares is a possible later optimization.)
+  - **Credentials:** S3 auth is SigV4 (access key + secret) — Poweur Ed25519 identity keys
+    cannot sign S3 requests. Per-identity bucket/prefix-scoped credentials are held by the
+    client and backed up encrypted at `poweur-sys/private/storage-credentials.json` (encrypted
+    to the identity's enc key; relay hosts, cannot decrypt — that is the `poweur-sys/private`
+    contract). A shared/public relay-run gateway would inevitably hold a root key for the
+    buckets it manages; that is an accepted trade-off for relay-mediated roots, but per-identity
+    private zones must not depend on relay-held keys.
+  - **Target state:** once Poweur sign-in is an OIDC provider (EPIC-008/INT-000), clients
+    exchange a Poweur-signed token for temporary scoped S3 credentials via STS
+    `AssumeRoleWithWebIdentity` (supported by AWS and MinIO) — no long-lived secret stored
+    anywhere, no relay custody.
 
 ## Tasks
 
@@ -77,7 +123,8 @@ end-to-end-encrypted storage (relay-blind) is a later, opt-in layer — see E03-
 ### E03-T2 — WebDAV server on the relay
 
 - [ ] Mount `golang.org/x/net/webdav` handler at `/dav/{identity}/` backed by a custom
-      `webdav.FileSystem` over `$POWEUR_DATA/identities/<id>/files/` with the layout-aware
+      `webdav.FileSystem` over the `StorageProvider` interface (E03-T8) — `relay-fs` v1
+      implementation reads `$POWEUR_DATA/identities/<id>/files/` — with the layout-aware
       permission checks from E03-T1
 - [ ] Class 2 DAV (locks) via in-memory `LockSystem` per identity; document lock semantics
 - [ ] ETags from content hashes stored in the metadata index (E02-T1's SQLite), updated on PUT
@@ -96,7 +143,7 @@ WebDAV clients speak Basic/Bearer, not Ed25519. Bridge without weakening the key
       (same envelope as message signing, reuse `resolveSigningKey`); returns an opaque token
       bound to (identity, scope, expiry ≤ session expiry). Token store is in-memory + revocable
 - [ ] **App passwords** for legacy Basic-auth clients (Finder can't do Bearer): owner generates
-      named app passwords via CLI/web, stored hashed (argon2id) in `poweur-sys/private/`;
+      named app passwords via CLI/web, stored hashed (argon2id) in `poweur-sys/relay/`;
       Basic username = identity, password = app password. Revocation = file edit
 - [ ] Scopes: `dav:full`, `dav:read`, path-scoped tokens (`dav:rw:/apps/taskapp/`) — the same
       scope grammar agents use later (EPIC-010)
@@ -120,7 +167,7 @@ extends to `/shared`).
       now, EPIC-005 fills it in)
 - [ ] Anonymous (no-auth) requests: only `poweur-sys/public/` (it backs `.well-known`) —
       everything else 401
-- [ ] Audit log of cross-identity reads in `poweur-sys/private/logs/access.log` (owner-readable;
+- [ ] Audit log of cross-identity reads in `poweur-sys/relay/logs/access.log` (owner-readable;
       this is also anti-abuse evidence for EPIC-007)
 - [ ] Integration test: bob (hosted on relay B in the test harness) reads alice's `/public`
       over WebDAV using a token issued by alice's relay
@@ -157,9 +204,32 @@ Not implementation — a serious design study so v1 decisions don't paint us int
 - [ ] Survey: Cryptomator-style per-file envelope encryption, Nextcloud E2EE folders lessons,
       age/AES-GCM streaming formats; key distribution to share recipients via Poweur messaging
 - [ ] Identify which layout roots can ever be relay-blind (relay *must* read
-      `poweur-sys/private` for policy enforcement; `/private` and `/shared` could be blind)
+      `poweur-sys/relay` for policy enforcement; `poweur-sys/private`, `/private` and
+      `/shared` could be blind)
 - [ ] Define the v1 hooks to keep: content-hash ETags must not preclude encrypted blobs;
       metadata index must tolerate opaque names
 - [ ] Output: `apps/docs/docs/files/e2ee-design.md` with a recommended phased path
 
 **Acceptance:** design doc merged; v1 storage spec (E03-T1) updated with any hooks it requires.
+
+### E03-T8 — Storage provider abstraction (`relay-fs` first, `s3`-ready)
+
+Lands with/before E03-T2 so the DAV layer never assumes local disk. v1 implements only
+`relay-fs`; `s3` is deliberately deferred — the deliverable here is an interface robust enough
+that it plugs in later without touching the DAV/permission layers.
+
+- [ ] `StorageProvider` interface in the relay (open/read/write/delete/stat/list/rename +
+      content-hash etag hooks), consumed by the DAV `FileSystem` and later by sync endpoints
+      (EPIC-004); no `*os.File` or path-on-disk leaks through the interface
+- [ ] `relay-fs` provider: configurable root (reuse `POWEUR_DATA`,
+      `identities/<id>/files/`); v1 default; the relay mediates all roots in this mode
+- [ ] Provider selection via config (`STORAGE_PROVIDER=relay-fs`, default) with validation
+- [ ] `s3` provider: **not implemented in v1** — design notes above; interface reviewed
+      against S3 semantics (no atomic rename, no real directories, eventual list consistency)
+      so the contract doesn't assume POSIX
+- [ ] Credential note: future client-direct S3 credentials live encrypted at
+      `poweur-sys/private/storage-credentials.json` (owner-only zone; relay cannot read)
+
+**Acceptance:** DAV suite runs entirely through the provider interface; grepping the DAV/
+permission packages shows no direct `os.*` file access; a doc comment records the S3
+semantics review.

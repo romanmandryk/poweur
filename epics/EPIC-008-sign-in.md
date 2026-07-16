@@ -95,7 +95,8 @@ The interop superpower: RP requests scopes, approval mints a relay token.
       `profile:read`) and human-readable scope rendering rules in the signer UX
 - [ ] Relay endpoint `POST /auth/grant`: verifier exchanges the user-signed approval for a
       scoped token (TTL + refresh via re-presentation; builds directly on E03-T3 token store)
-- [ ] App registrations file `poweur-sys/private/connected-apps.json`: granted scopes per RP,
+- [ ] App registrations file `poweur-sys/relay/connected-apps.json` (relay enforces
+      revocation): granted scopes per RP,
       revocation by file edit; web UI list + revoke buttons
 - [ ] Worked example: the reference RP stores guestbook entries in the *user's* home under
       `/apps/net.poweur.guestbook/` — the data-portability demo

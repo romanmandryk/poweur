@@ -28,7 +28,7 @@ instead of an email address being the thing that recovers your Poweur ID.
 | Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/js/passkey.js`); **exactly one credential supported**; PIN/PBKDF2 fallback when PRF unavailable |
 | Session keys | Ed25519 | client memory/disk + relay session store | identity-signed `SessionProof`, ≤ 24 h TTL (`apps/api/internal/relay/sessions.go`) | hours |
 | Relay challenges | nonce | relay memory | single-use, short expiry | minutes |
-| (planned) DAV tokens / app passwords | bearer / argon2id hash | relay + `poweur-sys/private/` | scoped, revocable (E03-T3) | hours–long |
+| (planned) DAV tokens / app passwords | bearer / argon2id hash | relay + `poweur-sys/relay/` | scoped, revocable (E03-T3) | hours–long |
 | (planned) agent tokens | bearer | relay | path/scope-bound (E08-T4, E10) | configurable |
 
 Key observations driving the design:

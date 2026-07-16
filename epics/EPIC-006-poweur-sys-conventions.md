@@ -17,8 +17,9 @@ RFC 822 — apps start with their own formats, then domains standardize.
 ## Background
 
 - EPIC-002/003 already *use* `poweur-sys/public/id.json` (identity document) and
-  `poweur-sys/private/` (app passwords, shares, groups, devices). This epic is where those
-  ad-hoc decisions get a single normative home.
+  `poweur-sys/relay/` (app passwords, shares, groups, devices — relay-readable config).
+  `poweur-sys/private/` is owner-only: the relay stores it but must not read it. This epic is
+  where those ad-hoc decisions get a single normative home.
 - Prior art to lean on instead of inventing: **XDG base dirs** (per-app namespacing),
   **`.well-known` URI registry** (IANA-style registries), **vCard/jCard** (contacts),
   **iCalendar/jsCalendar** (events), **JSON Schema** (validation), **Solid Pods** (the closest
@@ -34,7 +35,7 @@ RFC 822 — apps start with their own formats, then domains standardize.
     id.json            identity document (EPIC-001)          [world]
     profile.json       display name, avatar ref, bio          [world]
     capabilities.json  supported features + endpoints         [world]
-  private/
+  relay/               config the relay must read to function — never visible to other users
     contacts.json      contact list (EPIC-007)                [owner + relay]
     inbox-policy.json  message acceptance rules (EPIC-007)    [owner + relay]
     devices.json       device registry (EPIC-004)             [owner + relay]
@@ -42,6 +43,9 @@ RFC 822 — apps start with their own formats, then domains standardize.
     groups/…           group documents (EPIC-005)             [owner + relay]
     app-passwords.json credentials (EPIC-003)                 [owner + relay]
     logs/…             access/audit logs                      [owner + relay]
+  private/             OWNER ONLY — relay stores/syncs but must not read; anything
+                       sensitive stored here is encrypted to the owner's key
+    storage-credentials.json  future client-direct S3 creds (E03-T8)   [owner only]
 /apps/<app-id>/        app data; <app-id> is reverse-DNS of the app vendor
                        (e.g. /apps/net.poweur.tasks/), default ACL private,
                        shareable per EPIC-005 like any other path
