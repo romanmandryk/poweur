@@ -1,6 +1,7 @@
 /**
  * Relay HTTP client for the Poweur ID web client.
- * Talks to the relay API and does DNS-over-HTTPS lookups via Cloudflare.
+ * Talks to the relay API; resolves identities web-first (well-known / identities API)
+ * with DNS-over-HTTPS as fallback.
  */
 
 // ─── Low-level HTTP ───────────────────────────────────────────────────────────
@@ -33,11 +34,8 @@ async function apiRequest(relayUrl, method, path, body, headers = {}) {
 
 /**
  * Register a new identity on the relay.
- * request: {
- *   identity, public_key, encryption_public_key,
- *   dns_provider, dns_token,
- *   issued_at, nonce, identity_signature
- * }
+ * Hosted: omit dns_provider/dns_token; include identity_document.
+ * DNS: include dns_provider, dns_token; identity_document recommended.
  */
 export async function registerIdentity(relayUrl, request) {
   return apiRequest(relayUrl, "POST", "/identities", request);
@@ -51,7 +49,7 @@ export async function updateEncryptionKey(relayUrl, identity, request) {
 }
 
 /**
- * Fetch an identity's public key from the relay.
+ * Fetch an identity's public key / document from the relay API.
  */
 export async function getIdentityKey(relayUrl, identity) {
   return apiRequest(relayUrl, "GET", `/identities/${encodeURIComponent(identity)}`);
@@ -59,10 +57,6 @@ export async function getIdentityKey(relayUrl, identity) {
 
 // ─── Inbox ────────────────────────────────────────────────────────────────────
 
-/**
- * Fetch a challenge for inbox authentication.
- * Returns { challenge: string }
- */
 export async function getChallenge(relayUrl, identity) {
   return apiRequest(
     relayUrl, "GET",
@@ -70,10 +64,6 @@ export async function getChallenge(relayUrl, identity) {
   );
 }
 
-/**
- * Fetch pending messages and acks for an identity.
- * signature: base64url signature of the challenge string.
- */
 export async function fetchInbox(relayUrl, identity, challenge, signature) {
   return apiRequest(
     relayUrl, "GET",
@@ -89,34 +79,20 @@ export async function fetchInbox(relayUrl, identity, challenge, signature) {
 
 // ─── Messaging ────────────────────────────────────────────────────────────────
 
-/**
- * Send an encrypted, signed message.
- * message: full Message object per relay types.
- */
 export async function sendMessage(relayUrl, message) {
   return apiRequest(relayUrl, "POST", "/messages", message);
 }
 
-/**
- * Submit a delivery acknowledgement.
- */
 export async function submitAck(relayUrl, ack) {
   return apiRequest(relayUrl, "POST", "/acks", ack);
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
-/**
- * Register a short-lived session key.
- * request: SessionCreateRequest
- */
 export async function registerSession(relayUrl, request) {
   return apiRequest(relayUrl, "POST", "/sessions", request);
 }
 
-/**
- * Revoke a session.
- */
 export async function revokeSession(relayUrl, sessionId, request) {
   return apiRequest(relayUrl, "DELETE", `/sessions/${encodeURIComponent(sessionId)}`, request);
 }
@@ -134,7 +110,7 @@ export async function fetchRelayAddress(relayUrl) {
   return relay_address;
 }
 
-// ─── DNS-over-HTTPS (Cloudflare) ─────────────────────────────────────────────
+// ─── Identity resolution (web-first) ──────────────────────────────────────────
 
 const DOH_URL = "https://cloudflare-dns.com/dns-query";
 
@@ -148,26 +124,129 @@ async function dohLookup(name, type) {
 }
 
 /**
+ * Fetch identity document via well-known or relay API.
+ * @param {string} identity
+ * @param {{ relayUrl?: string }} [opts] — when set, also try GET /identities/:id
+ *   (needed when the browser cannot set Host for virtual hosting).
+ */
+export async function fetchIdentityDocument(identity, opts = {}) {
+  const hostname = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
+  const candidates = [];
+
+  if (hostname && hostname === identity.toLowerCase()) {
+    candidates.push("/.well-known/poweur/id.json");
+  }
+  if (opts.relayUrl) {
+    // Same-origin style: ask the relay API (returns identity_document when hosted)
+    candidates.push(`${opts.relayUrl.replace(/\/$/, "")}/identities/${encodeURIComponent(identity)}`);
+  }
+  candidates.push(`https://${identity}/.well-known/poweur/id.json`);
+  // Local/dev HTTP well-known (Host must match — only works when already on that host)
+  if (opts.relayUrl && opts.relayUrl.startsWith("http://")) {
+    candidates.push(`${opts.relayUrl.replace(/\/$/, "")}/.well-known/poweur/id.json`);
+  }
+
+  let lastErr;
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { method: "GET", redirect: "error" });
+      if (!res.ok) {
+        lastErr = new Error(`well-known ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      // GET /identities wraps the document
+      if (data.identity_document) {
+        return typeof data.identity_document === "string"
+          ? JSON.parse(data.identity_document)
+          : data.identity_document;
+      }
+      if (data.public_key && data.identity) {
+        // May be IdentityResponse without nested document — synthesize view
+        if (data.version || data.signature) return data;
+        return {
+          version: 1,
+          identity: data.identity,
+          public_key: data.public_key.startsWith("ed25519:")
+            ? data.public_key
+            : `ed25519:${data.public_key}`,
+          encryption_public_key: data.encryption_public_key
+            ? (data.encryption_public_key.startsWith("x25519:")
+              ? data.encryption_public_key
+              : `x25519:${data.encryption_public_key}`)
+            : undefined,
+          relay: data.relay,
+        };
+      }
+      return data;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("identity document not found");
+}
+
+/**
+ * Resolve an identity like CLI `identity lookup`.
+ * Returns { source: "web"|"dns"|"api", document }.
+ */
+export async function lookupIdentity(identity, opts = {}) {
+  try {
+    const document = await fetchIdentityDocument(identity, opts);
+    const source = opts.relayUrl ? "web" : "web";
+    return { source, document };
+  } catch {
+    /* fall through to DNS */
+  }
+
+  const pubRecords = await dohLookup(`_poweur.${identity}`, "TXT");
+  let public_key = "";
+  for (const rec of pubRecords) {
+    if (rec.startsWith("poweur-pubkey=")) {
+      public_key = rec.slice("poweur-pubkey=".length);
+      if (!public_key.startsWith("ed25519:")) public_key = `ed25519:${public_key}`;
+      break;
+    }
+  }
+  if (!public_key) throw new Error("identity not found via web or DNS");
+
+  let encryption_public_key = "";
+  const encRecords = await dohLookup(`_poweur-enc.${identity}`, "TXT");
+  for (const rec of encRecords) {
+    if (rec.startsWith("poweur-enckey=")) {
+      encryption_public_key = rec.slice("poweur-enckey=".length);
+      if (!encryption_public_key.startsWith("x25519:")) {
+        encryption_public_key = `x25519:${encryption_public_key}`;
+      }
+      break;
+    }
+  }
+
+  return {
+    source: "dns",
+    document: {
+      version: 1,
+      identity,
+      public_key,
+      encryption_public_key: encryption_public_key || undefined,
+      relay: identity,
+    },
+  };
+}
+
+/**
  * Look up a recipient's signing public key (web-first, then DNS TXT).
  * Returns base64url public key string or null.
  */
-export async function resolveSigningKey(identity) {
+export async function resolveSigningKey(identity, opts = {}) {
   try {
-    const doc = await fetchIdentityDocument(identity);
-    if (doc?.public_key) {
-      let val = doc.public_key;
+    const { document } = await lookupIdentity(identity, opts);
+    if (document?.public_key) {
+      let val = document.public_key;
       if (val.startsWith("ed25519:")) val = val.slice("ed25519:".length);
       return val;
     }
-  } catch { /* fall through to DNS */ }
-  const records = await dohLookup(`_poweur.${identity}`, "TXT");
-  for (const rec of records) {
-    if (rec.startsWith("poweur-pubkey=")) {
-      let val = rec.slice("poweur-pubkey=".length);
-      if (val.startsWith("ed25519:")) val = val.slice("ed25519:".length);
-      return val;
-    }
-  }
+  } catch { /* ignore */ }
   return null;
 }
 
@@ -175,49 +254,21 @@ export async function resolveSigningKey(identity) {
  * Look up a recipient's X25519 encryption public key (web-first, then DNS TXT).
  * Returns base64url public key string or null.
  */
-export async function resolveEncryptionKey(identity) {
+export async function resolveEncryptionKey(identity, opts = {}) {
   try {
-    const doc = await fetchIdentityDocument(identity);
-    if (doc?.encryption_public_key) {
-      let val = doc.encryption_public_key;
+    const { document } = await lookupIdentity(identity, opts);
+    if (document?.encryption_public_key) {
+      let val = document.encryption_public_key;
       if (val.startsWith("x25519:")) val = val.slice("x25519:".length);
       return val;
     }
-  } catch { /* fall through to DNS */ }
-  const records = await dohLookup(`_poweur-enc.${identity}`, "TXT");
-  for (const rec of records) {
-    if (rec.startsWith("poweur-enckey=")) {
-      let val = rec.slice("poweur-enckey=".length);
-      if (val.startsWith("x25519:")) val = val.slice("x25519:".length);
-      return val;
-    }
-  }
+  } catch { /* ignore */ }
   return null;
 }
 
 /**
- * Fetch https://<identity>/.well-known/poweur/id.json (same-origin when on
- * the identity host; otherwise absolute URL). Browser cannot do raw DNS.
+ * Resolve recipient's relay address — unused in MVP (direct send uses recipient DNS).
  */
-export async function fetchIdentityDocument(identity) {
-  const url = `https://${identity}/.well-known/poweur/id.json`;
-  // Prefer same-origin relative path when Host is already the identity
-  const localUrl = window.location.hostname.toLowerCase() === identity.toLowerCase()
-    ? "/.well-known/poweur/id.json"
-    : url;
-  const res = await fetch(localUrl, { method: "GET", redirect: "error" });
-  if (!res.ok) throw new Error(`well-known ${res.status}`);
-  return res.json();
-}
-
-/**
- * Resolve recipient's relay address from DNS (A/CNAME for the identity FQDN).
- * Returns the relay base URL or null if not resolvable.
- */
-export async function resolveRelay(identity) {
-  // Try TXT first for explicit relay annotation (future extension)
-  // For now, derive from the identity's FQDN host lookup:
-  // The relay runs at the identity's domain.
-  // In practice, we fallback to the home relay for cross-relay delivery.
+export async function resolveRelay(_identity) {
   return null;
 }

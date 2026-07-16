@@ -7,17 +7,16 @@
 
 import {
   generateSigningKeypair, generateEncryptionKeypair, sign,
-  encryptMessage, decryptMessage,
   wrapKeysWithPin, unwrapKeysWithPin,
-  canonicalMessage, canonicalAck, canonicalIdentityRegistration,
+  canonicalIdentityRegistration,
   buildSignedIdentityDocument,
-  canonicalSessionRegistration, canonicalSessionRevocation,
-  generateMessageId, now, randomNonce, toBase64url,
+  canonicalSessionRevocation,
+  now, randomNonce, toBase64url,
 } from "./crypto.js";
 
 import {
   createPasskey, authenticatePasskey,
-  wrapKeysWithPRF, unwrapKeysWithPRF, signChallenge, checkPasskeySupport,
+  wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport,
 } from "./passkey.js";
 
 import {
@@ -29,11 +28,16 @@ import {
 } from "./storage.js";
 
 import {
-  registerIdentity, updateEncryptionKey, getIdentityKey,
-  getChallenge, fetchInbox, sendMessage, submitAck,
-  registerSession, revokeSession, checkHealth, fetchRelayAddress,
-  resolveEncryptionKey,
+  registerIdentity, updateEncryptionKey,
+  revokeSession, checkHealth, fetchRelayAddress,
+  lookupIdentity,
 } from "./api.js";
+
+import {
+  createSession as registerMessagingSession,
+  sendEncryptedMessage,
+  pullInbox,
+} from "./messaging.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -338,7 +342,7 @@ function renderLauncher() {
               Hosted registration (no DNS token — identity under this relay's domain)
             </label>
           </div>
-          <div id="ni-dns-fields">
+          <div id="ni-dns-fields" style="display:none">
             <div class="form-group">
               <label class="form-label" for="ni-provider">DNS provider (self-hosted only)</label>
               <select id="ni-provider" class="input select">
@@ -359,7 +363,7 @@ function renderLauncher() {
       </div>`;
   }
 
-  // Step 1 — pick a handle, then redirect to the identity's domain for passkey creation
+  // Step 1 — pick a handle; hosted stays on this relay, DNS mode redirects to identity host
   return `
     <div class="launcher-form-page">
       <div class="section-label">New identity — step 1 of 2</div>
@@ -370,12 +374,20 @@ function renderLauncher() {
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain)}" autocomplete="off" />
+          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="ni-hosted-step1" checked />
+            Hosted on this relay (no DNS token)
+          </label>
         </div>
         <button class="btn btn-primary" id="btn-next-id" style="width:100%;margin-top:4px">
           Next →
         </button>
-        <p class="form-note small" style="margin-top:10px;text-align:center">You'll be taken to your identity's domain to create a passkey.</p>
+        <p class="form-note small" style="margin-top:10px;text-align:center" id="ni-step1-note">
+          Hosted: create passkey on this relay. Uncheck for self-hosted DNS (redirects to your subdomain).
+        </p>
       </div>
     </div>`;
 }
@@ -429,6 +441,11 @@ function renderSettings() {
           <span class="settings-row-icon">🔗</span>
           <span class="settings-row-label">Relay URL</span>
           <span class="settings-row-value truncate">${esc(S.config.relayUrl)}</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
+        <div class="settings-row" id="row-lookup">
+          <span class="settings-row-icon">🔎</span>
+          <span class="settings-row-label">Lookup identity</span>
           <span class="settings-row-arrow">›</span>
         </div>
       </div>
@@ -662,12 +679,19 @@ function attachEvents() {
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
   q("#opt-create-new")?.addEventListener("click", () => { R.sub = null; R.go("launcher"); });
 
-  // Launcher step 1 → redirect to identity domain
-  q("#btn-next-id")?.addEventListener("click", doRedirectToIdentityDomain);
-  q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doRedirectToIdentityDomain(); });
+  // Launcher step 1 → hosted stays here; DNS mode redirects to identity host
+  q("#btn-next-id")?.addEventListener("click", doNextIdentityStep);
+  q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doNextIdentityStep(); });
 
-  // Launcher step 2 → create identity
+  // Launcher step 2 → create identity + toggle DNS fields
   q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
+  const hostedCb = q("#ni-hosted");
+  const dnsFields = q("#ni-dns-fields");
+  const syncDnsVisibility = () => {
+    if (dnsFields) dnsFields.style.display = hostedCb?.checked ? "none" : "block";
+  };
+  hostedCb?.addEventListener("change", syncDnsVisibility);
+  syncDnsVisibility();
 
   // Unlock sub-page
   q("#btn-do-unlock")?.addEventListener("click", doUnlock);
@@ -680,6 +704,7 @@ function attachEvents() {
   q("#row-switch-id")?.addEventListener("click", () => R.push("add-id"));
   q("#row-identity-keys")?.addEventListener("click", showIdentityKeysPanel);
   q("#row-relay")?.addEventListener("click", showRelayPanel);
+  q("#row-lookup")?.addEventListener("click", showLookupPanel);
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
   q("#row-rotate-enc")?.addEventListener("click", doRotateEncKey);
@@ -725,8 +750,10 @@ async function doUnlock() {
       if (!prfOutput) throw new Error("PRF not available from this authenticator.");
       ({ signingJWK: sigPriv, encJWK: encPriv } = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys));
     } else {
+      setLoading(false);
       const pin = await promptPin("Enter your PIN:");
-      if (!pin) { setLoading(false); return; }
+      if (!pin) return;
+      setLoading(true, "Unlocking…");
       ({ signingJWK: sigPriv, encJWK: encPriv } = await unwrapKeysWithPin(pin, rec.encryptedKeys));
     }
 
@@ -748,13 +775,26 @@ async function doUnlock() {
   }
 }
 
-function doRedirectToIdentityDomain() {
-  const handle = q("#ni-handle")?.value.trim();
-  const domain = q("#ni-domain")?.value.trim();
+function doNextIdentityStep() {
+  const handle = q("#ni-handle")?.value.trim().toLowerCase();
+  const domain = q("#ni-domain")?.value.trim().toLowerCase();
+  const hosted = q("#ni-hosted-step1")?.checked !== false;
   if (!handle) return toast("Enter a handle", "warning");
   if (!domain) return toast("Enter a parent domain", "warning");
-  const encoded = btoa(JSON.stringify({ handle, domain }));
+  if (handle.length < 3) return toast("Handle must be at least 3 characters", "warning");
+  const encoded = btoa(JSON.stringify({ handle, domain, hosted }));
+  if (hosted) {
+    // Stay on this relay (wildcard / local) — same as CLI --hosted
+    window.location.hash = `create=${encoded}`;
+    render();
+    return;
+  }
   window.location.href = `https://${handle}.${domain}/app/#create=${encoded}`;
+}
+
+/** @deprecated use doNextIdentityStep */
+function doRedirectToIdentityDomain() {
+  doNextIdentityStep();
 }
 
 async function doCreateIdentity() {
@@ -785,19 +825,21 @@ async function doCreateIdentity() {
 
     setLoading(true, "Registering identity…");
     const relayAddr = await fetchRelayAddress(relayUrl);
-    const rpId = deriveRpId(relayAddr);
 
     setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF } = await createPasskey(identity, userId, rpId);
+    const { credentialId, prfOutput, supportsPRF } = await createPasskey(identity, userId);
 
-    setLoading(true, "Securing keys…");
     let encryptedKeys;
     if (supportsPRF) {
+      setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPRF(prfOutput, sigPriv, encPriv);
     } else {
+      // Drop overlay so the PIN sheet can receive clicks.
+      setLoading(false);
       const pin = await promptPin("Set a PIN to protect your keys:", true);
-      if (!pin) { setLoading(false); return; }
+      if (!pin) return;
+      setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv);
     }
     const issuedAt = now();
@@ -849,25 +891,8 @@ async function doCreateIdentity() {
 }
 
 async function createSession(identity, sigPriv, relayUrl) {
-  const { publicKeyBytes: sesPub, privateKeyJWK: sesPriv } = await generateSigningKeypair();
-  const sesPubB64  = toBase64url(sesPub);
-  const issuedAt   = now();
-  const expiresAt  = new Date(Date.now() + 23 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
-  const nonce      = randomNonce();
-  const canonical  = canonicalSessionRegistration(identity, sesPubB64, issuedAt, expiresAt, nonce);
-  const identitySignature = await sign(sigPriv, canonical);
-
-  const res = await registerSession(relayUrl, {
-    identity, session_public_key: sesPubB64,
-    issued_at: issuedAt, expires_at: expiresAt,
-    nonce, identity_signature: identitySignature,
-  });
-  saveSessionRecord(identity, {
-    sessionId: res.session_id,
-    sessionPublicKey: sesPubB64,
-    sessionSigningJWK: sesPriv,
-    issuedAt, expiresAt, nonce, identitySignature,
-  });
+  const sess = await registerMessagingSession(relayUrl, identity, sigPriv);
+  saveSessionRecord(identity, sess);
 }
 
 async function loadInbox() {
@@ -877,9 +902,7 @@ async function loadInbox() {
   const relayUrl = rec?.relay || S.config.relayUrl;
   const keys     = getUnlockedKeys();
   try {
-    const { challenge } = await getChallenge(relayUrl, id);
-    const signature     = await signChallenge(keys.signingJWK, challenge);
-    const { messages = [], acks = [] } = await fetchInbox(relayUrl, id, challenge, signature);
+    const { messages = [], acks = [] } = await pullInbox(relayUrl, id, keys.signingJWK);
     S.messages = messages;
     S.acks     = acks;
     if (R.page === "main" && !R.sub) render();
@@ -905,42 +928,17 @@ async function doSend() {
   const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
 
   try {
-    setStatus("Resolving keys…");
-    let recipientEncKey = await resolveEncryptionKey(to);
-    if (!recipientEncKey) {
-      try { const r = await getIdentityKey(relayUrl, to); recipientEncKey = r.encryption_public_key; } catch {}
-    }
-    if (!recipientEncKey) throw new Error(`Cannot resolve encryption key for ${to}`);
-
-    setStatus("Encrypting…");
-    const { ciphertext, ephemeralPublicKey, nonce } = await encryptMessage(body, recipientEncKey);
-
-    setStatus("Signing…");
-    const msgId     = generateMessageId();
-    const timestamp = now();
-    const enc_      = { alg: "x25519-chacha20-poly1305", ephemeralPublicKey, nonce };
-    const canonical = canonicalMessage(id, to, timestamp, ciphertext, msgId, sess?.sessionId, enc_);
-    const sigJWK    = sess?.sessionSigningJWK || keys.signingJWK;
-    const signature = await sign(sigJWK, canonical);
-
-    const message = {
-      id: msgId, sender: id, recipient: to, timestamp,
-      payload: ciphertext, signature,
-      ...(sess ? {
-        session_id: sess.sessionId,
-        session_proof: {
-          session_public_key: sess.sessionPublicKey,
-          issued_at: sess.issuedAt,
-          expires_at: sess.expiresAt,
-          nonce: sess.nonce,
-          identity_signature: sess.identitySignature,
-        },
-      } : {}),
-      encryption: { alg: enc_.alg, ephemeral_public_key: ephemeralPublicKey, nonce },
-    };
-
     setStatus("Sending…");
-    await sendMessage(relayUrl, message);
+    const signWith = sess?.sessionId ? "session" : "identity";
+    await sendEncryptedMessage({
+      relayUrl,
+      sender: id,
+      recipient: to,
+      plaintext: body,
+      identitySigningJWK: keys.signingJWK,
+      signWith,
+      session: sess,
+    });
     setStatus("✓ Sent", "ok");
     if (q("#c-body")) q("#c-body").value = "";
     toast("Message sent!", "success");
@@ -970,6 +968,42 @@ function showIdentityKeysPanel() {
     <div class="kv-row"><span class="kv-label">DNS</span>
       <code class="kv-value small" style="font-size:11px;line-height:1.6">_poweur.${esc(rec.identity)}<br>_poweur-enc.${esc(rec.identity)}</code>
     </div>`);
+}
+
+function showLookupPanel() {
+  showPanel("Lookup identity", `
+    <p class="muted small" style="margin-bottom:12px">Resolve keys via well-known / relay API (then DNS), like <code>poweur identity lookup</code>.</p>
+    <div class="form-group">
+      <label class="form-label" for="lookup-id">Identity</label>
+      <input id="lookup-id" class="input" type="text" placeholder="bob.poweur.net" autocomplete="off" spellcheck="false" />
+    </div>
+    <button class="btn btn-primary mt-sm" id="btn-lookup-run">Lookup</button>
+    <pre id="lookup-result" class="mono small" style="margin-top:14px;white-space:pre-wrap;word-break:break-all"></pre>`,
+  () => {
+    q("#btn-lookup-run")?.addEventListener("click", async () => {
+      const id = q("#lookup-id")?.value.trim().toLowerCase();
+      const out = q("#lookup-result");
+      if (!id) return toast("Enter an identity", "warning");
+      if (out) out.textContent = "Looking up…";
+      try {
+        const relayUrl = S.config.relayUrl || window.location.origin;
+        const { source, document } = await lookupIdentity(id, { relayUrl });
+        if (out) {
+          out.textContent = [
+            `identity: ${document.identity}`,
+            `source: ${source}`,
+            `public_key: ${document.public_key || ""}`,
+            `encryption_public_key: ${document.encryption_public_key || ""}`,
+            `relay: ${document.relay || ""}`,
+            `capabilities: ${(document.capabilities || []).join(", ")}`,
+          ].join("\n");
+        }
+      } catch (e) {
+        if (out) out.textContent = `Error: ${e.message}`;
+        toast(e.message, "error");
+      }
+    });
+  });
 }
 
 function showRelayPanel() {
@@ -1084,8 +1118,10 @@ async function doRotateEncKey() {
       const { prfOutput } = await authenticatePasskey(rec.credentialId);
       encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew);
     } else {
+      setLoading(false);
       const pin = await promptPin("Re-enter PIN to save new key:");
-      if (!pin) { setLoading(false); return; }
+      if (!pin) return;
+      setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew);
     }
 

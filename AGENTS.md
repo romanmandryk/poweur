@@ -28,7 +28,7 @@ go test ./apps/api/...
 go test ./apps/cli/...
 ```
 
-### Integration tests
+### Integration tests (CLI / Go)
 
 Any change that touches **relay HTTP**, **CLI send/inbox/register**, **identity resolution**, or **cross-relay forwarding** needs coverage under `apps/integration/`.
 
@@ -44,11 +44,27 @@ Hosted-identity path (web identity, no DNS token):
 cd apps/integration && go test -run TestINT_HOSTED -count=1 -v
 ```
 
+### Web client tests (Vitest + Playwright)
+
+`apps/web` tests spawn a **real Go relay** (`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR`), same spirit as CLI integration tests.
+
+```bash
+cd apps/web && pnpm install   # postinstall downloads Chromium for Playwright
+pnpm test          # Vitest: crypto/storage unit + hosted/messaging vs live relay
+pnpm test:e2e      # Playwright: hosted create UI + messaging protocol smoke
+pnpm test:all
+# If e2e says browser executable missing: pnpm exec playwright install chromium
+```
+
+Web Vitest mirrors CLI unit tests (`encrypt/decrypt`, identity persistence, session send,
+identity-signed send, invalid `--sign-with`) plus CLI↔relay messaging (register → session
+→ encrypt/send → inbox decrypt) via `js/messaging.js` against a real `go run` relay.
+
 If a feature cannot be asserted in unit tests alone (Host routing, restart/`POWEUR_DATA`, E2E encrypt/send/inbox), write an integration test.
 
 ### After substantive changes
 
-Run the slice you touched **and** `apps/integration` before declaring done. Fix failures; do not skip with `-short` to hide them.
+Run the slice you touched **and** `apps/integration` (and `apps/web` tests if the SPA changed) before declaring done. Fix failures; do not skip with `-short` to hide them.
 
 ## Architecture notes agents should respect
 

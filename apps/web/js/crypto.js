@@ -7,8 +7,11 @@
  * Key encoding: base64url without padding throughout, matching the relay.
  */
 
-import { chacha20poly1305 } from "https://esm.sh/@noble/ciphers@1.1.3/chacha";
-import { randomBytes as nobleRandomBytes } from "https://esm.sh/@noble/ciphers@1.1.3/webcrypto";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+
+function nobleRandomBytes(n) {
+  return crypto.getRandomValues(new Uint8Array(n));
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

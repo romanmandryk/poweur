@@ -13,7 +13,9 @@ const SESSION_PREFIX = "poweur:session:";
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
-  relayUrl: window.location.origin,
+  relayUrl: typeof globalThis !== "undefined" && globalThis.location?.origin
+    ? globalThis.location.origin
+    : "",
   parentDomain: "poweur.net",
   dnsProvider: "cloudflare",
   dnsToken: "",
