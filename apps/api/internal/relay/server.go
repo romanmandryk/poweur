@@ -44,9 +44,10 @@ type Server struct {
 	client     *http.Client
 	idCache    *idpkg.Cache
 
-	// File layer (EPIC-003). Nil when POWEUR_DATA is not configured.
+	// File layer (EPIC-003/004). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
 	filesIndex    *files.Index
+	uploads       *files.Uploads
 	davTokens     *davTokenStore
 
 	locksMu  sync.Mutex
@@ -96,6 +97,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 	if cfg.DataDir != "" {
 		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
 		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
+		s.uploads = files.NewUploads(store.IdentityHomeDir)
 	}
 	go s.runPruner()
 	return s
@@ -141,6 +143,12 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
 	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
 	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
+	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
+	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)
+	mux.HandleFunc("HEAD /sync/{identity}/upload/{id}", s.handleUploadStatus)
+	mux.HandleFunc("PATCH /sync/{identity}/upload/{id}", s.handleUploadPatch)
+	mux.HandleFunc("DELETE /sync/{identity}/upload/{id}", s.handleUploadDelete)
 	// WebDAV needs non-standard methods (PROPFIND, MKCOL, …); register each
 	// explicitly (a method-less pattern would conflict with "GET /").
 	// Covers both /dav/<identity>/… and the Host-routed /dav/… vanity form.

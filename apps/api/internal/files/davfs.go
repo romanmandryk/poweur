@@ -87,7 +87,7 @@ func (d *DavFS) Mkdir(ctx context.Context, name string, perm os.FileMode) error 
 	if err := d.Provider.Mkdir(ctx, d.Owner, clean); err != nil {
 		return err
 	}
-	d.Index.RecordWrite(d.Owner, clean, "", 0, time.Now().UTC())
+	d.Index.RecordMkdir(d.Owner, clean, time.Now().UTC(), PrincipalFrom(ctx).Identity)
 	return nil
 }
 
@@ -116,7 +116,8 @@ func (d *DavFS) OpenFile(ctx context.Context, name string, flag int, perm os.Fil
 		return nil, err
 	}
 	if writing {
-		return &hashingFile{File: f, fs: d, ctx: ctx, path: clean, h: sha256.New()}, nil
+		created := flag&os.O_TRUNC != 0
+		return &hashingFile{File: f, fs: d, ctx: ctx, path: clean, h: sha256.New(), created: created}, nil
 	}
 	return &davFile{File: f, fs: d, ctx: ctx, path: clean}, nil
 }
@@ -135,7 +136,7 @@ func (d *DavFS) RemoveAll(ctx context.Context, name string) error {
 	if err := d.Provider.RemoveAll(ctx, d.Owner, clean); err != nil {
 		return err
 	}
-	d.Index.RecordDelete(d.Owner, clean)
+	d.Index.RecordDelete(d.Owner, clean, PrincipalFrom(ctx).Identity)
 	return nil
 }
 
@@ -160,7 +161,7 @@ func (d *DavFS) Rename(ctx context.Context, oldName, newName string) error {
 	if err := d.Provider.Rename(ctx, d.Owner, oldClean, newClean); err != nil {
 		return err
 	}
-	d.Index.RecordRename(d.Owner, oldClean, newClean)
+	d.Index.RecordRename(d.Owner, oldClean, newClean, PrincipalFrom(ctx).Identity)
 	return nil
 }
 
@@ -242,13 +243,14 @@ func (f *davFile) Readdir(count int) ([]os.FileInfo, error) {
 // incremental hash is invalid, so the file is re-hashed on Close.
 type hashingFile struct {
 	File
-	fs     *DavFS
-	ctx    context.Context
-	path   string
-	h      hash.Hash
-	size   int64
-	seeked bool
-	wrote  bool
+	fs      *DavFS
+	ctx     context.Context
+	path    string
+	h       hash.Hash
+	size    int64
+	seeked  bool
+	wrote   bool
+	created bool
 }
 
 func (f *hashingFile) Write(p []byte) (int, error) {
@@ -276,7 +278,9 @@ func (f *hashingFile) Close() error {
 	if err := f.File.Close(); err != nil {
 		return err
 	}
-	if !f.wrote {
+	// An O_TRUNC open with no writes is an empty-body PUT — it still
+	// changed the file and must be indexed and journaled.
+	if !f.wrote && !f.created {
 		return nil
 	}
 	etag := hex.EncodeToString(f.h.Sum(nil))
@@ -291,6 +295,6 @@ func (f *hashingFile) Close() error {
 			_ = rf.Close()
 		}
 	}
-	f.fs.Index.RecordWrite(f.fs.Owner, f.path, etag, size, time.Now().UTC())
+	f.fs.Index.RecordWrite(f.fs.Owner, f.path, etag, size, time.Now().UTC(), PrincipalFrom(f.ctx).Identity)
 	return nil
 }

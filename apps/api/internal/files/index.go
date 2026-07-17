@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +15,11 @@ import (
 
 // FileMeta is the per-file metadata index entry.
 type FileMeta struct {
-	ETag     string    `json:"etag"` // hex sha256 of content
+	ETag     string    `json:"etag"` // hex sha256 of content ("" for directories)
 	Size     int64     `json:"size"`
 	ModTime  time.Time `json:"mtime"`
 	ChangeID int64     `json:"change_id"`
+	Dir      bool      `json:"dir,omitempty"`
 }
 
 // treeIndex is the persisted per-identity metadata index.
@@ -26,17 +28,24 @@ type treeIndex struct {
 	Files    map[string]FileMeta `json:"files"`
 }
 
-// Index maintains per-identity content-hash etags and the monotonic
-// change counter that backs EPIC-004 sync. Persisted as JSON at
-// identities/<id>/meta/files-index.json — outside the visible tree.
+// Index maintains per-identity content-hash etags, the monotonic change
+// counter and the changes journal that back EPIC-004 sync. Persisted as
+// JSON at identities/<id>/meta/ — outside the visible tree. (An S3-class
+// StorageProvider pairs with its own metadata persistence later; the
+// journal/index API is the provider-agnostic surface.)
 type Index struct {
-	mu      sync.Mutex
-	trees   map[string]*treeIndex
-	homeDir func(identity string) (string, error)
+	mu       sync.Mutex
+	trees    map[string]*treeIndex
+	journals map[string]*journalState
+	homeDir  func(identity string) (string, error)
 }
 
 func NewIndex(homeDir func(identity string) (string, error)) *Index {
-	return &Index{trees: make(map[string]*treeIndex), homeDir: homeDir}
+	return &Index{
+		trees:    make(map[string]*treeIndex),
+		journals: make(map[string]*journalState),
+		homeDir:  homeDir,
+	}
 }
 
 func (ix *Index) path(identity string) (string, error) {
@@ -83,8 +92,10 @@ func (ix *Index) persistLocked(identity string) {
 	_ = os.Rename(tmp, p)
 }
 
-// RecordWrite stores fresh metadata for path and bumps the change counter.
-func (ix *Index) RecordWrite(identity, path, etag string, size int64, mtime time.Time) FileMeta {
+// RecordWrite stores fresh metadata for path, bumps the change counter and
+// journals a put. actor is the identity that performed the write ("" for
+// relay-internal writes).
+func (ix *Index) RecordWrite(identity, path, etag string, size int64, mtime time.Time, actor string) FileMeta {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	t := ix.tree(identity)
@@ -92,11 +103,34 @@ func (ix *Index) RecordWrite(identity, path, etag string, size int64, mtime time
 	meta := FileMeta{ETag: etag, Size: size, ModTime: mtime, ChangeID: t.ChangeID}
 	t.Files[path] = meta
 	ix.persistLocked(identity)
+	ix.appendJournalLocked(identity, JournalRecord{
+		ChangeID: t.ChangeID, Op: OpPut, Path: path,
+		ETag: etag, Size: size, ModTime: mtime,
+		Actor: actor, Time: time.Now().UTC(),
+	})
 	return meta
 }
 
-// RecordDelete drops path (and any children) and bumps the change counter.
-func (ix *Index) RecordDelete(identity, path string) {
+// RecordMkdir stores a directory entry, bumps the change counter and
+// journals a mkdir.
+func (ix *Index) RecordMkdir(identity, path string, mtime time.Time, actor string) FileMeta {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	t := ix.tree(identity)
+	t.ChangeID++
+	meta := FileMeta{ModTime: mtime, ChangeID: t.ChangeID, Dir: true}
+	t.Files[path] = meta
+	ix.persistLocked(identity)
+	ix.appendJournalLocked(identity, JournalRecord{
+		ChangeID: t.ChangeID, Op: OpMkdir, Path: path,
+		ModTime: mtime, Actor: actor, Time: time.Now().UTC(),
+	})
+	return meta
+}
+
+// RecordDelete drops path (and any children), bumps the change counter and
+// journals one delete covering the subtree.
+func (ix *Index) RecordDelete(identity, path, actor string) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	t := ix.tree(identity)
@@ -107,25 +141,48 @@ func (ix *Index) RecordDelete(identity, path string) {
 		}
 	}
 	ix.persistLocked(identity)
+	ix.appendJournalLocked(identity, JournalRecord{
+		ChangeID: t.ChangeID, Op: OpDelete, Path: path,
+		Actor: actor, Time: time.Now().UTC(),
+	})
 }
 
-// RecordRename moves metadata for old subtree to the new prefix.
-func (ix *Index) RecordRename(identity, oldPath, newPath string) {
+// RecordRename moves metadata for old subtree to the new prefix. The
+// journal sees a move as delete(old) + put/mkdir per moved entry (v1
+// moves-as-delete+put), each with its own change_id so cursors stay strict.
+func (ix *Index) RecordRename(identity, oldPath, newPath, actor string) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	t := ix.tree(identity)
+	now := time.Now().UTC()
 	t.ChangeID++
-	moved := make(map[string]FileMeta)
-	for p, m := range t.Files {
+	ix.appendJournalLocked(identity, JournalRecord{
+		ChangeID: t.ChangeID, Op: OpDelete, Path: oldPath,
+		Actor: actor, Time: now,
+	})
+	var movedFrom []string
+	for p := range t.Files {
 		if Under(p, oldPath) {
-			rel := strings.TrimPrefix(p, oldPath)
-			m.ChangeID = t.ChangeID
-			moved[newPath+rel] = m
-			delete(t.Files, p)
+			movedFrom = append(movedFrom, p)
 		}
 	}
-	for p, m := range moved {
-		t.Files[p] = m
+	sort.Strings(movedFrom)
+	for _, p := range movedFrom {
+		m := t.Files[p]
+		delete(t.Files, p)
+		t.ChangeID++
+		m.ChangeID = t.ChangeID
+		dst := newPath + strings.TrimPrefix(p, oldPath)
+		t.Files[dst] = m
+		op := OpPut
+		if m.Dir {
+			op = OpMkdir
+		}
+		ix.appendJournalLocked(identity, JournalRecord{
+			ChangeID: t.ChangeID, Op: op, Path: dst,
+			ETag: m.ETag, Size: m.Size, ModTime: m.ModTime,
+			Actor: actor, Time: now,
+		})
 	}
 	ix.persistLocked(identity)
 }

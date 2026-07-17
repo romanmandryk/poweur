@@ -122,13 +122,13 @@ func TestIndexChangeCounterAndETags(t *testing.T) {
 	homeFn := func(string) (string, error) { return home, nil }
 	ix := NewIndex(homeFn)
 
-	m1 := ix.RecordWrite("alice.poweur.net", "private/a.txt", "abc123", 5, time.Now())
-	m2 := ix.RecordWrite("alice.poweur.net", "private/b.txt", "def456", 7, time.Now())
+	m1 := ix.RecordWrite("alice.poweur.net", "private/a.txt", "abc123", 5, time.Now(), "alice.poweur.net")
+	m2 := ix.RecordWrite("alice.poweur.net", "private/b.txt", "def456", 7, time.Now(), "alice.poweur.net")
 	if m2.ChangeID != m1.ChangeID+1 {
 		t.Fatalf("change ids must be monotonic: %d then %d", m1.ChangeID, m2.ChangeID)
 	}
 
-	ix.RecordRename("alice.poweur.net", "private/a.txt", "public/a.txt")
+	ix.RecordRename("alice.poweur.net", "private/a.txt", "public/a.txt", "alice.poweur.net")
 	if _, ok := ix.Get("alice.poweur.net", "private/a.txt"); ok {
 		t.Fatal("old path must be gone after rename")
 	}
@@ -137,7 +137,7 @@ func TestIndexChangeCounterAndETags(t *testing.T) {
 		t.Fatalf("rename must carry etag: %+v ok=%v", moved, ok)
 	}
 
-	ix.RecordDelete("alice.poweur.net", "public/a.txt")
+	ix.RecordDelete("alice.poweur.net", "public/a.txt", "alice.poweur.net")
 	if _, ok := ix.Get("alice.poweur.net", "public/a.txt"); ok {
 		t.Fatal("deleted path must leave the index")
 	}

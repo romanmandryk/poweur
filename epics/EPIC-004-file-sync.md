@@ -1,9 +1,20 @@
 # EPIC-004 — File sync protocol & sync clients
 
-- **Status:** proposed
+- **Status:** core complete (T1–T4 shipped; T5/T6 + daemon mode deferred, see Progress)
 - **Priority:** P1
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-010 (watch-folder automations), offline-capable apps
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E04-T1 Sync protocol spec | **done** | [`apps/docs/docs/files/sync-protocol.md`](../apps/docs/docs/files/sync-protocol.md); moves-as-delete+put documented for v1; `sys.sync.changed` payload defined, delivery deferred to EPIC-009 |
+| E04-T2 Journal + changes/manifest | **done** | Journal hooked into the metadata `Index` (single choke point: DAV, uploads, relay writes all journal); compaction is lazy (on load/append: 30 d / 10 000 records) instead of a `runPruner` job; per-principal visibility via the E03-T4 permission engine (EPIC-005 grants slot in) |
+| E04-T3 Chunked resumable upload | **done** (web wiring open) | tus-header-style protocol at `/sync/{id}/upload` (choice written up in the spec); quota at start; 24 h spool expiry; kill-and-resume covered in `TestSyncChunkedUploadResume`; **open:** wire web-app uploads > 50 MB (`apps/web/js/files.js`) |
+| E04-T4 `poweur sync` client | **done** (one-shot) | `pull`/`push`/`run`/`status` + conflicted-copy matrix + `--path` selective sync + `.poweurignore` (subset, no negation); engine in `apps/cli/internal/sync` with fake-remote conflict-matrix tests + `TestINT_SYNC_01` two-device convergence; **deferred:** fsnotify daemon mode (poll with `run` or cron until then) |
+| E04-T5 Mobile & desktop passes | **deferred** | mount-vs-sync doc, launchd/systemd templates, iOS/Android File-Provider notes, web auto-refresh — none started |
+| E04-T6 Device registry | **deferred** | design sketch in sync-protocol.md §Device registry; lands with EPIC-007/009 groundwork (`devices.json`, per-device cursors, revocation) |
 
 ## Goal
 
@@ -51,27 +62,28 @@ later only if third-party DAV sync clients demand it.
 
 ### E04-T1 — Changes journal & sync API spec
 
-- [ ] Spec `apps/docs/docs/files/sync-protocol.md`: journal record schema, cursor semantics
+- [x] Spec `apps/docs/docs/files/sync-protocol.md`: journal record schema, cursor semantics
       (opaque, per-identity), compaction rules (journal pruned after N days — full-resync path
       must exist), move detection (or document moves-as-delete+put for v1)
-- [ ] `GET /sync/{identity}/changes?since=` endpoint design w/ auth scopes from E03-T3,
+- [x] `GET /sync/{identity}/changes?since=` endpoint design w/ auth scopes from E03-T3,
       pagination, and `?paths=/apps/taskapp/` filtering (agents sync only their slice)
-- [ ] Full-resync procedure: tree manifest endpoint (`GET /sync/{identity}/manifest`, streamed
+- [x] Full-resync procedure: tree manifest endpoint (`GET /sync/{identity}/manifest`, streamed
       NDJSON of path+etag+size) for first sync and journal-gap recovery
-- [ ] Define `sys.sync.changed` notification payload (sent via existing messaging to the
-      owner's own devices)
+- [x] Define `sys.sync.changed` notification payload (spec only; delivery via messaging to
+      the owner's own devices lands with EPIC-009)
 
 **Acceptance:** spec merged with worked examples (fresh sync, incremental, gap recovery).
 
 ### E04-T2 — Relay implementation: journal, changes & manifest endpoints
 
-- [ ] Journal writes hooked into every DAV mutation path from E03-T2 (PUT/DELETE/MOVE/MKCOL),
+- [x] Journal writes hooked into every DAV mutation path from E03-T2 (PUT/DELETE/MOVE/MKCOL),
       transactional with the metadata index
-- [ ] `changes` + `manifest` endpoints with auth, pagination, filtering; journal compaction job
-      (extend the `runPruner` pattern in `apps/api/internal/relay/server.go`)
-- [ ] Per-path-scope visibility: a visitor's changes feed for someone else's tree only contains
+- [x] `changes` + `manifest` endpoints with auth, pagination, filtering; journal compaction
+      is lazy (on load/append: 30 d / 10 000 records) rather than a `runPruner` job
+- [x] Per-path-scope visibility: a visitor's changes feed for someone else's tree only contains
       paths they can read (depends on E03-T4 permission engine; shares from EPIC-005 slot in)
-- [ ] Integration tests incl. journal compaction forcing a client full-resync
+- [x] Integration tests incl. journal compaction forcing a client full-resync
+      (`TestJournalCompactionForcesResync`, `TestJournalGapFallsBackToManifest`)
 
 **Acceptance:** two clients observe each other's writes through the changes feed within one
 poll interval; gap recovery test passes.
@@ -82,11 +94,13 @@ poll interval; gap recovery test passes.
 **tus.io** resumable-upload protocol if practical (open standard, many client libs), else
 Nextcloud-style chunk-assembly:
 
-- [ ] Evaluate tus vs custom chunk dirs — write up choice in the sync spec (1 page)
-- [ ] Implement chosen protocol at `/sync/{identity}/upload`, final assembly atomically
+- [x] Evaluate tus vs custom chunk dirs — choice written up in sync-protocol.md (tus header
+      vocabulary, minimal custom protocol)
+- [x] Implement chosen protocol at `/sync/{identity}/upload`, final assembly atomically
       replaces target path + journal entry; partial uploads expire (pruner)
-- [ ] Quota check at upload start, not just finish
-- [ ] Wire into web app uploads (E03-T5) for files > 50 MB
+- [x] Quota check at upload start, not just finish
+- [ ] Wire into web app uploads (E03-T5) for files > 50 MB — **open** (CLI uses chunking
+      for files ≥ 64 MiB; web app still does single PUT)
 
 **Acceptance:** kill-and-resume test: a 1 GB upload interrupted at 60% resumes and completes
 without re-sending earlier chunks.
@@ -95,14 +109,15 @@ without re-sending earlier chunks.
 
 The reference sync client, sharing code with `apps/cli`.
 
-- [ ] One-shot `poweur sync push/pull/status <local-dir>` (rsync-like UX) first
-- [ ] Daemon mode: fsnotify watcher + changes-feed poller (and push channel when available),
-      bidirectional reconciliation against a local state DB (path → etag/cursor)
-- [ ] Conflict handling per spec (conflicted-copy rename, never silent overwrite), with tests
+- [x] One-shot `poweur sync push/pull/status <local-dir>` (rsync-like UX) first (+ `run` =
+      pull-then-push bidirectional one-shot)
+- [ ] Daemon mode: fsnotify watcher + changes-feed poller — **deferred** (the state-DB
+      reconciliation core is shipped and daemon mode is a loop around it; run `poweur sync
+      run` from cron/launchd until then)
+- [x] Conflict handling per spec (conflicted-copy rename, never silent overwrite), with tests
       for the classic matrix: local-edit/remote-edit, local-delete/remote-edit, both-create
-- [ ] Selective sync: include/exclude path patterns in config
-      (`apps/cli/internal/config/config.go` style)
-- [ ] `.poweurignore` support (gitignore syntax)
+- [x] Selective sync: `--path <prefix>` (repeatable) includes; `.poweurignore` excludes
+- [x] `.poweurignore` support (gitignore-flavored subset; no negation in v1)
 
 **Acceptance:** two laptops (two temp dirs in the integration suite) converge through a relay
 under concurrent edits with all conflicts surfaced as conflicted copies; no data loss in the
