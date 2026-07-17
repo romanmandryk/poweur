@@ -15,7 +15,9 @@
 | E02-T4 Export & migration | **done** | export API/CLI, `relay set`, `moved_to` + resolve follow |
 | E02-T5 Ops hardening | **done** | volume, health storage, backup doc + restore integration |
 
-Inbox persistence remains [EPIC-009](EPIC-009-messaging-upgrades.md). PoW registration gate is a follow-up.
+Inbox persistence remains [EPIC-009](EPIC-009-messaging-upgrades.md). The PoW registration
+gate lands via the shared challenge primitive in
+[EPIC-014](EPIC-014-anonymous-messaging-challenges.md) (E14-T5).
 
 ## Goal
 

@@ -9,6 +9,7 @@ type StoredMessage struct {
 	Timestamp  string               `json:"timestamp"`
 	Payload    string               `json:"payload"`
 	Signature  string               `json:"signature"`
+	Type       string               `json:"type,omitempty"`
 	SessionID  string               `json:"session_id,omitempty"`
 	Encryption *StoredEncryptionMeta `json:"encryption,omitempty"`
 }

@@ -55,6 +55,21 @@ func CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID s
 	return strings.Join(parts, "\n")
 }
 
+// CanonicalMessageTyped extends CanonicalMessageFull with the envelope-level
+// message type (EPIC-007 `sys.contact.*`; empty type keeps the exact
+// pre-type canonical string, so untyped clients stay compatible).
+//
+// The trailing line, only when msgType != "":
+//
+//	type:<msgType>
+func CanonicalMessageTyped(sender, recipient, timestamp, payload, id, sessionID, msgType string, enc *EncryptionMeta) string {
+	s := CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID, enc)
+	if msgType != "" {
+		s += "\ntype:" + msgType
+	}
+	return s
+}
+
 // CanonicalAck is the signing input for a delivery acknowledgement. Acks
 // reference a previously-sent message by id and are signed by the
 // recipient (or, in v1, whichever party transitioned the message into
@@ -133,6 +148,20 @@ func CanonicalEncryptionKeyUpdate(identity, encryptionPublicKey, issuedAt, nonce
 		"identity-encryption-key",
 		identity,
 		encryptionPublicKey,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalDAVToken is the string a client signs (session or identity key)
+// to obtain a WebDAV bearer token. `identity` is the requester; `audience`
+// is the tree owner the token grants access to (== identity for own tree).
+func CanonicalDAVToken(identity, audience, scope, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"dav-token",
+		identity,
+		audience,
+		scope,
 		issuedAt,
 		nonce,
 	}, "\n")

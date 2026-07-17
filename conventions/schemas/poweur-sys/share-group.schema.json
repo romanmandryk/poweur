@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/share-group.schema.json",
+  "title": "share group \u2014 poweur-sys/relay/groups/<name>.json (owner + relay; owner-signed)",
+  "type": "object",
+  "required": [
+    "group",
+    "owner",
+    "signature"
+  ],
+  "properties": {
+    "group": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$"
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "members": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "string"
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

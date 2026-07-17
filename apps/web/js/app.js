@@ -39,6 +39,11 @@ import {
   pullInbox,
 } from "./messaging.js";
 
+import {
+  ROOT_INFO, mintDavToken, listDir, uploadFile, downloadFile,
+  makeDir, moveEntry, deleteEntry, fetchQuota, fmtBytes,
+} from "./files.js";
+
 // ─── Router & State ───────────────────────────────────────────────────────────
 
 const R = {
@@ -65,6 +70,7 @@ const S = {
   messages: [],
   acks: [],
   dropdownOpen: false,
+  files: { token: null, tokenExp: 0, path: "", entries: [], quota: null, loading: false },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -293,14 +299,19 @@ function buildConversations() {
 
 function renderFeatureCards() {
   const features = [
+    { icon: "📁", name: "Files",        desc: "Your home filesystem", id: "feature-files" },
     { icon: "📞", name: "Voice calls",  desc: "Crystal-clear encrypted calls" },
     { icon: "🎥", name: "Video",        desc: "Face-to-face, end-to-end" },
-    { icon: "📁", name: "Files",        desc: "Send any file securely" },
     { icon: "👥", name: "Groups",       desc: "Encrypted group messaging" },
     { icon: "🔍", name: "Discover",     desc: "Find people by identity" },
     { icon: "💎", name: "Wallet",       desc: "Identity-native payments" },
   ];
-  return features.map(f => `
+  return features.map(f => f.id ? `
+    <button class="feature-card active-card" id="${f.id}">
+      <span class="feature-icon">${f.icon}</span>
+      <span class="feature-name">${f.name}</span>
+      <span class="feature-desc">${f.desc}</span>
+    </button>` : `
     <div class="feature-card coming-soon">
       <span class="feature-icon">${f.icon}</span>
       <span class="feature-name">${f.name}</span>
@@ -509,6 +520,7 @@ function renderSubPage() {
     case "add-id":  return renderAddId();
     case "unlock":  return renderUnlock();
     case "compose": return renderCompose();
+    case "files":   return renderFiles();
     default:        return renderAddId();
   }
 }
@@ -618,6 +630,68 @@ function renderCompose() {
     </div>`;
 }
 
+// Files ───────────────────────────────────────────────────────────────────────
+
+function renderFiles() {
+  const F = S.files;
+  const crumbs = F.path ? F.path.split("/") : [];
+  const atRoot = !F.path;
+  const quota = F.quota;
+  const quotaPct = quota?.quota_bytes > 0
+    ? Math.min(100, Math.round((quota.used_bytes / quota.quota_bytes) * 100))
+    : 0;
+  return `
+    <div class="sub-page">
+      <div class="sub-header">
+        <button class="btn-back" id="btn-back">${svgBack}</button>
+        <span class="sub-title">Files</span>
+        <span style="flex:1"></span>
+        ${atRoot ? "" : `
+          <button class="btn btn-sm" id="btn-new-folder" title="New folder">📁+</button>
+          <label class="btn btn-sm" for="ff-upload" style="cursor:pointer" title="Upload">⬆️
+            <input id="ff-upload" type="file" multiple style="display:none" />
+          </label>`}
+      </div>
+      <div class="sub-body">
+        ${quota ? `
+          <div class="small muted" style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span>${fmtBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${fmtBytes(quota.quota_bytes)}` : ""} used</span>
+            <span>${esc(quota.provider)}</span>
+          </div>
+          ${quota.quota_bytes > 0 ? `
+          <div style="height:4px;border-radius:2px;background:var(--border,#ddd);margin-bottom:14px">
+            <div style="height:100%;width:${quotaPct}%;border-radius:2px;background:${quotaPct > 90 ? "#FF3B30" : "#34C759"}"></div>
+          </div>` : ""}` : ""}
+        <div class="small" style="margin-bottom:10px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+          <button class="link-btn" data-nav-path="" style="font-weight:600">home</button>
+          ${crumbs.map((c, i) => `
+            <span class="muted">/</span>
+            <button class="link-btn" data-nav-path="${esc(crumbs.slice(0, i + 1).join("/"))}">${esc(c)}</button>`).join("")}
+        </div>
+        ${F.loading ? `<p class="muted small">Loading…</p>` : `
+        <div class="conv-list">
+          ${F.entries.length === 0 ? `<p class="muted small" style="padding:12px">Empty folder</p>` : ""}
+          ${F.entries.map(e => {
+            const rootInfo = atRoot ? ROOT_INFO[e.name] : null;
+            return `
+            <div class="conv-row" style="align-items:center">
+              <div style="font-size:22px;width:36px;text-align:center">${e.dir ? "📁" : "📄"}</div>
+              <div class="conv-info" ${e.dir ? `data-open-dir="${esc(e.path)}"` : `data-download="${esc(e.path)}"`} style="cursor:pointer">
+                <div class="conv-name">${esc(e.name)}
+                  ${rootInfo ? `<span class="chip" style="margin-left:6px">${esc(rootInfo.badge)}</span>` : ""}
+                </div>
+                <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : fmtBytes(e.size)}</div>
+              </div>
+              ${atRoot ? "" : `
+                <button class="btn btn-sm" data-rename="${esc(e.path)}" title="Rename">✏️</button>
+                <button class="btn btn-sm" data-delete="${esc(e.path)}" title="Delete">🗑</button>`}
+            </div>`;
+          }).join("")}
+        </div>`}
+      </div>
+    </div>`;
+}
+
 // ─── Event wiring ─────────────────────────────────────────────────────────────
 
 function attachEvents() {
@@ -702,6 +776,16 @@ function attachEvents() {
 
   // Compose send
   q("#btn-send-msg")?.addEventListener("click", doSend);
+
+  // Files
+  q("#feature-files")?.addEventListener("click", () => openFiles(""));
+  qAll("[data-nav-path]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.navPath)));
+  qAll("[data-open-dir]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.openDir)));
+  qAll("[data-download]").forEach(b => b.addEventListener("click", () => doDownloadEntry(b.dataset.download)));
+  qAll("[data-rename]").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); doRenameEntry(b.dataset.rename); }));
+  qAll("[data-delete]").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); doDeleteEntry(b.dataset.delete); }));
+  q("#btn-new-folder")?.addEventListener("click", doNewFolder);
+  q("#ff-upload")?.addEventListener("change", e => doUploadFiles(e.target.files));
 
   // Settings rows
   q("#settings-add-id")?.addEventListener("click", () => R.push("add-id"));
@@ -954,6 +1038,130 @@ async function doSend() {
     toast(err.message, "error");
   } finally {
     if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+// ─── Files actions ────────────────────────────────────────────────────────────
+
+function filesRelayUrl() {
+  const rec = loadIdentityRecord(S.identity);
+  return rec?.relay || S.config.relayUrl;
+}
+
+async function ensureDavToken() {
+  const keys = getUnlockedKeys();
+  if (!keys) { toast("Unlock your identity first", "warning"); return null; }
+  if (S.files.token && S.files.tokenExp > Date.now() + 60_000) return S.files.token;
+  const tok = await mintDavToken(filesRelayUrl(), S.identity, keys.signingJWK);
+  S.files.token = tok.token;
+  S.files.tokenExp = new Date(tok.expires_at).getTime();
+  return tok.token;
+}
+
+async function openFiles(path) {
+  if (!getUnlockedKeys()) { R.push("unlock"); return; }
+  S.files.path = path;
+  S.files.entries = [];
+  S.files.loading = true;
+  R.push("files");
+  await loadFiles(path);
+}
+
+async function loadFiles(path) {
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    S.files.loading = true;
+    render();
+    const relayUrl = filesRelayUrl();
+    const [entries, quota] = await Promise.all([
+      listDir(relayUrl, S.identity, token, path),
+      fetchQuota(relayUrl, S.identity, token).catch(() => S.files.quota),
+    ]);
+    S.files.path = path;
+    S.files.entries = entries;
+    S.files.quota = quota;
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    S.files.loading = false;
+    render();
+  }
+}
+
+async function doUploadFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    const relayUrl = filesRelayUrl();
+    setLoading(true, `Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
+    for (const f of files) {
+      await uploadFile(relayUrl, S.identity, token, `${S.files.path}/${f.name}`, f);
+    }
+    setLoading(false);
+    toast(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}`, "success");
+    await loadFiles(S.files.path);
+  } catch (err) {
+    setLoading(false);
+    toast(err.status === 507 ? "Storage quota exceeded" : err.message, "error");
+  }
+}
+
+async function doDownloadEntry(path) {
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    const res = await downloadFile(filesRelayUrl(), S.identity, token, path);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = path.split("/").pop();
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function doNewFolder() {
+  const name = prompt("Folder name:");
+  if (!name?.trim()) return;
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    await makeDir(filesRelayUrl(), S.identity, token, `${S.files.path}/${name.trim()}`);
+    await loadFiles(S.files.path);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function doRenameEntry(path) {
+  const oldName = path.split("/").pop();
+  const name = prompt("Rename to:", oldName);
+  if (!name?.trim() || name.trim() === oldName) return;
+  const parent = path.split("/").slice(0, -1).join("/");
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    await moveEntry(filesRelayUrl(), S.identity, token, path, `${parent}/${name.trim()}`);
+    await loadFiles(S.files.path);
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function doDeleteEntry(path) {
+  if (!confirm(`Delete ${path.split("/").pop()}?`)) return;
+  try {
+    const token = await ensureDavToken();
+    if (!token) return;
+    await deleteEntry(filesRelayUrl(), S.identity, token, path);
+    await loadFiles(S.files.path);
+  } catch (err) {
+    toast(err.message, "error");
   }
 }
 

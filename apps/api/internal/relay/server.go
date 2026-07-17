@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -19,9 +20,11 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
+	"golang.org/x/net/webdav"
 )
 
 const (
@@ -34,6 +37,7 @@ type Server struct {
 	providers  *dns.ProviderFactory
 	identities *storage.IdentityStore
 	inbox      *storage.InboxStore
+	requests   *storage.RequestStore
 	acks       *storage.AckStore
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
@@ -41,6 +45,16 @@ type Server struct {
 	regGate    *RegistrationGate
 	client     *http.Client
 	idCache    *idpkg.Cache
+
+	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
+	filesProvider files.StorageProvider
+	filesIndex    *files.Index
+	uploads       *files.Uploads
+	grants        *files.GrantStore
+	davTokens     *davTokenStore
+
+	locksMu  sync.Mutex
+	davLocks map[string]webdav.LockSystem
 
 	cacheMu       sync.Mutex
 	relayCache    map[string]cachedRelay
@@ -69,6 +83,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		providers:     providers,
 		identities:    store,
 		inbox:         storage.NewInboxStore(),
+		requests:      storage.NewRequestStore(),
 		acks:          storage.NewAckStore(),
 		challenges:    storage.NewChallengeStore(),
 		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
@@ -76,8 +91,25 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:        &http.Client{Timeout: 10 * time.Second},
 		idCache:       idpkg.NewCache(),
+		davTokens:     newDAVTokenStore(),
+		davLocks:      make(map[string]webdav.LockSystem),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
+	}
+	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
+	// only ever talks to the StorageProvider interface.
+	if cfg.DataDir != "" {
+		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
+		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
+		s.uploads = files.NewUploads(store.IdentityHomeDir)
+		s.grants = &files.GrantStore{
+			Provider: s.filesProvider,
+			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
+				id, ok := store.Get(owner)
+				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
+			},
+			Logf: log.Printf,
+		}
 	}
 	go s.runPruner()
 	return s
@@ -89,6 +121,7 @@ func (s *Server) runPruner() {
 	defer ticker.Stop()
 	for range ticker.C {
 		s.sessions.Prune()
+		s.davTokens.Prune()
 		s.pruneLocalityCache()
 	}
 }
@@ -110,6 +143,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
+	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
@@ -119,6 +153,26 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
+	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
+	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
+	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
+	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
+	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)
+	mux.HandleFunc("HEAD /sync/{identity}/upload/{id}", s.handleUploadStatus)
+	mux.HandleFunc("PATCH /sync/{identity}/upload/{id}", s.handleUploadPatch)
+	mux.HandleFunc("DELETE /sync/{identity}/upload/{id}", s.handleUploadDelete)
+	// WebDAV needs non-standard methods (PROPFIND, MKCOL, …); register each
+	// explicitly (a method-less pattern would conflict with "GET /").
+	// Covers both /dav/<identity>/… and the Host-routed /dav/… vanity form.
+	for _, m := range []string{
+		"GET", "HEAD", "OPTIONS", "PUT", "DELETE",
+		"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+	} {
+		mux.HandleFunc(m+" /dav/", s.handleDAV)
+		mux.HandleFunc(m+" /dav", s.handleDAV)
+	}
+	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return corsMiddleware(mux)
@@ -307,6 +361,11 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		if err := s.identities.Put(identity); err != nil {
 			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
 			return
+		}
+		// Materialize the home filesystem skeleton (five roots + poweur-sys
+		// subdirs) so DAV clients see a stable tree immediately.
+		if s.filesProvider != nil {
+			_ = s.filesProvider.EnsureTree(r.Context(), identity.Identity)
 		}
 	} else if !s.identities.Add(identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
@@ -532,7 +591,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, encMeta)
+	canonical := crypto.CanonicalMessageTyped(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, msg.Type, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
@@ -553,21 +612,24 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if recipientLocal {
-		stored := storage.StoredMessage{
-			ID:        msg.ID,
-			Sender:    msg.Sender,
-			Recipient: msg.Recipient,
-			Timestamp: msg.Timestamp,
-			Payload:   msg.Payload,
-			Signature: msg.Signature,
-			SessionID: msg.SessionID,
-			Encryption: &storage.StoredEncryptionMeta{
-				Alg:                msg.Encryption.Alg,
-				EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
-				Nonce:              msg.Encryption.Nonce,
-			},
+		// Inbox policy (EPIC-007): the recipient's relay is the enforcement
+		// point for local and cross-relay-forwarded senders alike.
+		verdict, detail := s.evaluateInboxPolicy(r.Context(), msg)
+		switch verdict {
+		case policyReject:
+			writeError(w, http.StatusForbidden, "policy_rejected", detail)
+			return
+		case policyQueueRequest:
+			outcome := s.requests.Add(msg.Recipient, msg.Sender, storedFromMessage(msg), requestCooldown)
+			if outcome != storage.RequestQueued {
+				writeError(w, http.StatusConflict, outcome,
+					"a contact request from this sender is already pending or in cooldown")
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
+			return
 		}
-		if !s.inbox.Add(msg.Recipient, stored, s.cfg.MaxInboxPerIdentity) {
+		if !s.inbox.Add(msg.Recipient, storedFromMessage(msg), s.cfg.MaxInboxPerIdentity) {
 			writeError(w, http.StatusServiceUnavailable, "inbox_full",
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return

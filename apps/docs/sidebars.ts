@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'protocol/overview',
         'protocol/identity-model',
+        'protocol/web-identity',
         'protocol/dns-records',
         'protocol/message-format',
         'protocol/routing',
@@ -31,6 +32,16 @@ const sidebars: SidebarsConfig = {
         'relay/api-reference',
         'relay/configuration',
         'relay/dns-management',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Files',
+      collapsed: false,
+      items: [
+        'files/storage-model',
+        'files/webdav',
+        'files/e2ee-design',
       ],
     },
     {

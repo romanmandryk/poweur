@@ -1,9 +1,19 @@
 # EPIC-007 — Contacts, trust & anti-spam
 
-- **Status:** proposed
+- **Status:** core complete (T1/T2 + CLI + pinning shipped; web UX and T5 open)
 - **Priority:** P1
 - **Depends on:** EPIC-003 (`poweur-sys/relay`), EPIC-006 (schemas); interacts with EPIC-009
 - **Unlocks:** spam-free collaboration — a core promise of the project
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E07-T1 Spec + schemas | **done** | [`apps/docs/docs/trust/contacts.md`](../apps/docs/docs/trust/contacts.md); formats in `packages/identity` (`contacts.go`, `inboxpolicy.go`), schemas + PCP-0004; `sys.contact.*` are envelope-level types bound into the message signature (`CanonicalMessageTyped`) since EPIC-009 typed payloads haven't landed |
+| E07-T2 Relay enforcement | **done** | Policy evaluated in `handleMessagesPost` for local + forwarded senders (`TestPolicyEnforcedOnForwardedCrossRelay`); requests queue (`GET /requests/{identity}`, memory-only until EPIC-009) with one-slot dedup + 7-day cooldown; uniform `policy_rejected` (blocks not observable); default without a policy file = `open` for compatibility — clients set `contacts_and_requests` |
+| E07-T3 Contact UX | **partial** | CLI shipped: `contacts ls/add/request/accept/block/rm`, `requests`, `policy show/set`; full request→accept→chat covered by `TestINT_CONTACTS_01`. **Deferred:** web app contacts/requests UI + profile cards; `poweur send` auto-prompt to send a request (the relay's rejection hint covers it) |
+| E07-T4 Key pinning | **done** (fingerprint format open) | Pin at add/request/accept; send-time compare with rotation-statement awareness (`previous_keys`) and `--accept-new-key` override; key-swap covered by `TestINT_CONTACTS_02`. **Open:** short-auth-string fingerprint display format (full keys printed today); web blocking dialog |
+| E07-T5 Abuse pressure | **open** | Only `sys.abuse.report` registry reservation done; per-sender-relay metering, blocklists design doc, block export await a follow-up (PoW primitive comes from EPIC-014) |
 
 ## Goal
 
@@ -33,7 +43,11 @@ this epic turns verified identity into *usable trust*.
 - **Inbox policy** = `poweur-sys/relay/inbox-policy.json`:
   `contacts_only` (default for humans) | `contacts_and_requests` | `open` (bots/support
   addresses). Non-contact senders get exactly **one** pending contact-request slot — no
-  message stream until accepted.
+  message stream until accepted. **Follow-on:** optional opt-in for unsigned / web-form /
+  anonymous ingress with sender challenges (none / proof-of-work / verified / payment) is
+  [EPIC-014](EPIC-014-anonymous-messaging-challenges.md), consumed by EPIC-012 contact
+  forms — default remains deny; the policy vocabulary lands in this epic's schema so web
+  forms and general messaging share one policy surface.
 - **Contact requests ride on messaging** as typed system messages (`sys.contact.request` with
   a short E2E-encrypted intro, `sys.contact.accept`, `sys.contact.block`). Accept = both sides
   write the other into contacts with pinned keys (mutual, like Signal/XMPP presence
@@ -46,55 +60,58 @@ this epic turns verified identity into *usable trust*.
 
 ### E07-T1 — Contacts & inbox-policy spec + schemas
 
-- [ ] PCP + schemas for `contacts.json` and `inbox-policy.json` (fields above; petnames vs
+- [x] PCP + schemas for `contacts.json` and `inbox-policy.json` (fields above; petnames vs
       display names; tags reusable as share-audience groups via EPIC-005 groups)
-- [ ] Spec the request lifecycle state machine (none → requested → accepted/blocked;
+- [x] Spec the request lifecycle state machine (none → requested → accepted/blocked;
       re-request cooldowns; unblock) in `apps/docs/docs/trust/contacts.md`
-- [ ] Define `sys.contact.*` message payloads (encrypted intro ≤ 1 KB, sender profile hint)
-      and register them (EPIC-006 registry)
-- [ ] Privacy analysis: contact lists are sensitive — document exactly who reads them (owner
+- [x] Define `sys.contact.*` message payloads (encrypted intro; 4 KB envelope cap) and
+      register them (EPIC-006 registry) — envelope-level `type` field, signature-bound
+- [x] Privacy analysis: contact lists are sensitive — document exactly who reads them (owner
       devices + enforcing relay; never other users), and the EPIC-003 E2EE-design implications
 
 **Acceptance:** spec + schemas merged; state machine has a test-vector table.
 
 ### E07-T2 — Relay enforcement of inbox policy
 
-- [ ] `handleMessagesPost`/`handleAcksPost`: after signature verification, evaluate recipient's
+- [x] `handleMessagesPost`: after signature verification, evaluate recipient's
       inbox policy against sender's contact state; non-contacts under `contacts_only` are
       rejected with a distinct error (`policy_rejected`) — sender's client can explain why
-- [ ] `contacts_and_requests`: non-contact sender's first `sys.contact.request` is accepted into
+- [x] `contacts_and_requests`: non-contact sender's first `sys.contact.request` is accepted into
       a separate **requests queue** (not the main inbox: extend
       `apps/api/internal/storage/inbox.go` or store under `poweur-sys/relay/requests/`);
       anything else from them is rejected until accepted
-- [ ] Per-sender pending-request dedup + cooldown (one open request, re-request after N days)
-- [ ] Forwarded (cross-relay) traffic: policy enforced by the **recipient's** relay — verify
+- [x] Per-sender pending-request dedup + cooldown (one open request, re-request after 7 days)
+- [x] Forwarded (cross-relay) traffic: policy enforced by the **recipient's** relay — verify
       this holds in the forwarding path (`forwardMessage` peers POST to recipient relay, so
       enforcement point is already right; add tests)
-- [ ] Integration tests: contact can message; stranger is rejected; stranger's request lands in
-      requests queue; accept converts to normal flow
+- [x] Integration tests: contact can message; stranger is rejected; stranger's request lands in
+      requests queue; accept converts to normal flow (`policy_test.go` matrix +
+      `TestINT_CONTACTS_01`)
 
 **Acceptance:** policy matrix integration tests pass for local and cross-relay senders.
 
 ### E07-T3 — Contact UX in CLI and web app
 
-- [ ] CLI: `poweur contacts ls/add/accept/block/rm`, `poweur requests` (pending in/out);
-      `poweur send` to a non-contact prompts to send a contact request first
-- [ ] Web app (`apps/web/js/app.js`): contacts list with profile cards (E06-T2), requests
+- [x] CLI: `poweur contacts ls/add/request/accept/block/rm`, `poweur requests`, `poweur
+      policy show/set` (send-to-non-contact prompt deferred — the relay's rejection hint
+      tells the sender to request)
+- [ ] **Deferred:** web app (`apps/web/js/app.js`): contacts list with profile cards (E06-T2), requests
       inbox with accept/block, badge counts; message composer constrained by policy errors
-- [ ] Both clients write/read `contacts.json` through the normal file API so contacts sync
+- [x] CLI writes/reads `contacts.json` through the normal file API so contacts sync
       across devices for free (EPIC-004)
 
 **Acceptance:** full request→accept→chat flow demo between two browsers on two relays.
 
 ### E07-T4 — Key pinning & change alerts
 
-- [ ] Clients pin the contact's key at accept time (already in `contacts.json` schema)
-- [ ] Resolver results compared against pins on every send/receive; mismatch without a valid
+- [x] Clients pin the contact's key at accept time (already in `contacts.json` schema)
+- [x] Resolver results compared against pins on every send; mismatch without a valid
       rotation statement (E01-T5) → hard warning UX (CLI: refuse without `--accept-new-key`;
       web: blocking dialog with both key fingerprints)
-- [ ] Fingerprint display format (short auth string / emoji or numeric, pick one and spec it)
-      for out-of-band verification
-- [ ] Test: simulate a malicious relay swapping a hosted identity's key → both clients flag
+- [ ] Fingerprint display format (short auth string / emoji or numeric) — **open** (full
+      key strings printed today)
+- [x] Test: simulated key swap → CLI refuses (`TestINT_CONTACTS_02`); web client flag
+      deferred with the web UX pass
 
 **Acceptance:** key-swap test produces warnings in CLI and web; legitimate rotation does not.
 
@@ -106,8 +123,9 @@ Recipient consent stops 1:1 spam but not request-flood and not bad *relays*.
       relay, not just the ID) — extend `ratelimit` with per-peer-relay buckets keyed on the
       forwarding source
 - [ ] Design doc: relay reputation options — shared blocklists (file-based, subscribable, like
-      DNSBL but signed), proof-of-work on contact requests from unknown relays, postage-style
-      deposits (note only; don't build)
+      DNSBL but signed), proof-of-work on contact requests from unknown relays (primitive +
+      challenge protocol come from [EPIC-014](EPIC-014-anonymous-messaging-challenges.md)),
+      postage-style deposits (note only; don't build)
 - [ ] User-level block export/import: blocklists as shareable signed files (EPIC-005 share of
       a `blocks.json`) so communities can pool defense
 - [ ] Abuse-report message type `sys.abuse.report` to sender's relay operator (registry entry +

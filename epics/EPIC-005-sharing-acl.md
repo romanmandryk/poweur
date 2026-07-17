@@ -1,9 +1,19 @@
 # EPIC-005 — Sharing, ACLs, groups & public-to-any-valid-ID
 
-- **Status:** proposed
+- **Status:** core complete (grant engine + CLI shipped; offer/accept UX, link shares, group identities deferred)
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E05-T1 Sharing & permissions spec | **done** | [`apps/docs/docs/files/sharing.md`](../apps/docs/docs/files/sharing.md); grant/group canonical signing in `packages/identity/grants.go`; inheritance = whole-subtree, no per-file exceptions (documented why); mount model deferred with T3 |
+| E05-T2 Relay grant engine | **done** | `apps/api/internal/files/grants.go`: per-request verified snapshot (revocation immediate, no ≤60 s window — app-password pattern); enforced on DAV + changes + manifest + chunked upload; visitor writes journal `actor`; forged/replayed/malformed grants rejected loudly; extensive scenario matrix in `apps/api/internal/relay/shares_test.go` + cross-relay `TestINT_SHARE_01` |
+| E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest). **Deferred:** `sys.share.offer/accept/revoked` messages, recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages), web app share dialog + received-shares view, unaccepted-offer policy (EPIC-007) |
+| E05-T4 Public-link shares | **deferred** | not started; `link` audience field reserved in the grant format |
+| E05-T5 Group identities | **deferred** | owner-local groups shipped (same document format); addressable group identities not started |
 
 ## Goal
 
@@ -48,47 +58,52 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
 
 ### E05-T1 — Sharing & permissions spec
 
-- [ ] Spec `apps/docs/docs/files/sharing.md`: grant document format + canonical signing,
+- [x] Spec `apps/docs/docs/files/sharing.md`: grant document format + canonical signing,
       permission vocabulary (v1: `read`, `write`; reserve `share`, `admin`), evaluation order,
       inheritance (grants apply to subtree; no per-file exceptions in v1 — document why),
       expiry, revocation semantics (tombstone + token invalidation timing)
-- [ ] Group document format, membership update rules, max sizes
-- [ ] Mount model for recipients: how `/shared/<owner>/<name>/` paths resolve to the owner's
+- [x] Group document format, membership update rules, max sizes
+- [ ] Mount model for recipients — **deferred with E05-T3** (v1 recipients access the
+      owner's relay directly with a visitor token): how `/shared/<owner>/<name>/` paths resolve to the owner's
       relay (recipient's relay proxies vs client connects to owner's relay directly — decide:
       v1 = client-direct, proxy later for privacy parity with messaging's privacy-proxy mode)
-- [ ] Threat analysis: audience enumeration, grant replay across relays, group-membership
+- [x] Threat analysis: audience enumeration, grant replay across relays, group-membership
       privacy (who can see who's in a group), revoked-but-cached access windows
 
 **Acceptance:** spec merged with worked examples for direct, group, expiring and revoked shares.
 
 ### E05-T2 — Relay grant engine
 
-- [ ] Grant store: watch/load `poweur-sys/relay/shares/` + `groups/` into the permission
-      engine stubbed in E03-T4; verify signatures on load; reject malformed grants loudly
-      (owner notification via `sys.*` message)
-- [ ] Enforce on every DAV/sync/changes request: visitor identity × path → effective permission
-- [ ] `PUT`-through-share: writes by grant-holders journal with `actor` = visitor id (E04-T1
+- [x] Grant store: load `poweur-sys/relay/shares/` + `groups/` into the permission engine
+      stubbed in E03-T4 (per-request snapshot, not a watcher); verify signatures on load;
+      reject malformed grants loudly (relay log; owner `sys.*` notification deferred to
+      EPIC-009)
+- [x] Enforce on every DAV/sync/changes request: visitor identity × path → effective permission
+      (plus manifest and chunked-upload endpoints; visitor token scope caps grants)
+- [x] `PUT`-through-share: writes by grant-holders journal with `actor` = visitor id (E04-T1
       journal already carries `actor`) so owners can audit who changed what
-- [ ] Revocation: deleting the grant file (or writing tombstone) invalidates within ≤ 60 s
-      (token store re-check), tested
-- [ ] Integration tests: read-only audience can't write; expiry honored; group member added →
-      gains access without new grant
+- [x] Revocation: deleting the grant file invalidates on the next request (grants are
+      re-read per request, app-password style — no cache window), tested
+- [x] Integration tests: read-only audience can't write; expiry honored; group member added →
+      gains access without new grant (relay scenario matrix in `shares_test.go` + engine
+      matrix in `files/grants_test.go` + cross-relay `apps/integration/sharing_test.go`)
 
 **Acceptance:** cross-relay share (bob on relay B granted by alice on relay A) read+write works;
 revocation and expiry tests pass.
 
 ### E05-T3 — Share lifecycle UX: offer, accept, mount, list
 
-- [ ] `sys.share.offer` / `sys.share.accept` / `sys.share.revoked` message types (uses the
+- [ ] **Deferred (EPIC-009):** `sys.share.offer` / `sys.share.accept` / `sys.share.revoked` message types (uses the
       typed-message groundwork from EPIC-009; if that hasn't landed, define `type` in payload
       JSON — coordinate)
-- [ ] Recipient's relay materializes accepted shares as mount-references under
+- [ ] **Deferred (with offer flow):** recipient's relay materializes accepted shares as mount-references under
       `/shared/<owner>/…` (a small JSON pointer file; sync clients and DAV resolve through it)
-- [ ] CLI: `poweur share add <path> --with bob.example.org --perm rw`, `poweur share ls`,
-      `poweur share revoke`, `poweur shares` (received)
-- [ ] Web app: share dialog on any file/folder (audience picker fed by contacts, EPIC-007),
+- [x] CLI: `poweur share add <path> --with bob.example.org --perm rw`, `poweur share ls`,
+      `poweur share revoke`, plus `poweur share group set/ls/remove` (`poweur shares`
+      received-view deferred with the offer flow)
+- [ ] **Deferred:** web app share dialog on any file/folder (audience picker fed by contacts, EPIC-007),
       received-shares view, "shared with" badges
-- [ ] Unaccepted-offer policy: offers expire after N days; offers from non-contacts follow
+- [ ] **Deferred (EPIC-007):** unaccepted-offer policy: offers expire after N days; offers from non-contacts follow
       EPIC-007 inbox policy (shares are spam vectors too)
 
 **Acceptance:** end-to-end demo test: alice shares a folder with bob, bob accepts in web UI,

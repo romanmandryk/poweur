@@ -23,9 +23,13 @@ The relay is configured via environment variables. On startup, the relay also lo
 | `REGISTRATION_GATE` | `open` | `open` or `invite` for hosted registrations |
 | `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when gate=`invite` |
 | `RESOLVER_ALLOW_PRIVATE` | `false` | Allow well-known resolve to private IPs (dev/test) |
-| `MAX_IDENTITY_BYTES` | `0` | Soft quota scaffolding (0 = unlimited; enforce in EPIC-003) |
+| `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Per-identity storage quota; `0` = unlimited. Enforced on WebDAV `PUT`/`MKCOL` with `507` |
+| `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Max single uploaded file; `0` = unlimited |
+| `STORAGE_PROVIDER` | `relay-fs` | File-body backend. v1 supports `relay-fs` only (`POWEUR_DATA` required for DAV) |
 
 `GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
+File trees live under `$POWEUR_DATA/identities/<id>/` and are served at `/dav/<identity>/`
+(see [WebDAV access](/files/webdav)).
 
 ### DNS Provider
 

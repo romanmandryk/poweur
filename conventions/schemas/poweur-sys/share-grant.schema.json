@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/share-grant.schema.json",
+  "title": "share grant \u2014 poweur-sys/relay/shares/<share-id>.json (owner + relay; owner-signed)",
+  "type": "object",
+  "required": [
+    "share_id",
+    "owner",
+    "path",
+    "audience",
+    "permissions",
+    "signature"
+  ],
+  "properties": {
+    "share_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/?(shared|apps)/.+",
+      "description": "clean tree path under a shareable root"
+    },
+    "audience": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          }
+        },
+        "minProperties": 1,
+        "maxProperties": 1,
+        "additionalProperties": false
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "read",
+          "write"
+        ]
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "description": "base64url ed25519 by the owner identity key over the canonical string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -51,6 +51,18 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runRelay(args[1:], stdout, stderr)
 	case "key":
 		return runKey(args[1:], stdout, stderr)
+	case "dav":
+		return runDAV(args[1:], stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
+	case "share":
+		return runShare(args[1:], stdout, stderr)
+	case "contacts":
+		return runContacts(args[1:], stdout, stderr)
+	case "requests":
+		return runRequests(args[1:], stdout, stderr)
+	case "policy":
+		return runPolicy(args[1:], stdout, stderr)
 	case "session":
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
@@ -547,8 +559,10 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	signWith := fs.String("sign-with", "session", "signing key to use: session (default) or identity")
 	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
+	msgType := fs.String("type", "", "envelope message type (sys.* system messages, e.g. sys.contact.request)")
+	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
@@ -579,6 +593,13 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	recipient := fs.Arg(0)
 	plaintext := fs.Arg(1)
+
+	// Key pinning (E07-T4): when the recipient is a pinned contact, the
+	// resolved signing key must match the pin (or be covered by a signed
+	// rotation statement) — the known-hosts / safety-number model.
+	if code := checkPinnedKey(cfg, identityValue, identityPriv, recipient, *acceptNewKey, stderr); code != 0 {
+		return code
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
@@ -638,6 +659,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			Recipient:  recipient,
 			Timestamp:  timestamp,
 			Payload:    payloadString,
+			Type:       *msgType,
 			Encryption: encMeta,
 		}
 		msg.Signature = signMessage(identityPriv, msg)
@@ -697,6 +719,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		Recipient:    recipient,
 		Timestamp:    timestamp,
 		Payload:      payloadString,
+		Type:         *msgType,
 		SessionID:    sess.SessionID,
 		SessionProof: sessionProofFrom(sess),
 		Encryption:   encMeta,
@@ -1549,6 +1572,9 @@ func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	if msg.Encryption != nil && msg.Encryption.Alg != "" {
 		parts = append(parts, "enc:"+msg.Encryption.Alg+":"+msg.Encryption.EphemeralPublicKey+":"+msg.Encryption.Nonce)
 	}
+	if msg.Type != "" {
+		parts = append(parts, "type:"+msg.Type)
+	}
 	canonical := strings.Join(parts, "\n")
 	sig := ed25519.Sign(priv, []byte(canonical))
 	return base64.StdEncoding.EncodeToString(sig)
@@ -1771,6 +1797,21 @@ func printHelp(w io.Writer) {
   poweur session refresh [--use-identity=...] [--json]
   poweur session revoke [--use-identity=...] [--json]
   poweur relay status [--json]
+  poweur dav token [--audience=...] [--scope=dav:full|dav:read|dav:rw:<path>] [--use-identity=...] [--json]
+  poweur dav mount [--use-identity=...]
+  poweur dav password add --name=<name> [--scope=...] [--use-identity=...] [--json]
+  poweur dav password list [--use-identity=...] [--json]
+  poweur dav password remove --name=<name> [--use-identity=...]
+  poweur sync <pull|push|run|status> <local-dir> [--path=<prefix> ...] [--audience=...] [--use-identity=...]
+  poweur share add <path> --with=<id> [--with-group=<name>] [--perm=read|rw] [--expires=<rfc3339>] [--json]
+  poweur share ls [--json]
+  poweur share revoke <share-id>
+  poweur share group set <name> --members=<id,id,...> [--json]
+  poweur share group ls [--json]
+  poweur share group remove <name>
+  poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
+  poweur requests [--use-identity=...] [--json]
+  poweur policy <show|set open|contacts_only|contacts_and_requests> [--use-identity=...]
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)

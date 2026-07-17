@@ -64,12 +64,16 @@ type SessionProof struct {
 }
 
 type Message struct {
-	ID           string          `json:"id"`
-	Sender       string          `json:"sender"`
-	Recipient    string          `json:"recipient"`
-	Timestamp    string          `json:"timestamp"`
-	Payload      string          `json:"payload"`
-	Signature    string          `json:"signature"`
+	ID        string `json:"id"`
+	Sender    string `json:"sender"`
+	Recipient string `json:"recipient"`
+	Timestamp string `json:"timestamp"`
+	Payload   string `json:"payload"`
+	Signature string `json:"signature"`
+	// Type is the optional envelope-level message type (EPIC-007
+	// sys.contact.*); plaintext so the recipient relay can route on it,
+	// and bound into the signature.
+	Type         string          `json:"type,omitempty"`
 	SessionID    string          `json:"session_id,omitempty"`
 	SessionProof *SessionProof   `json:"session_proof,omitempty"`
 	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
