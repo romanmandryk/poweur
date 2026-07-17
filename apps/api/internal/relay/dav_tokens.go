@@ -125,10 +125,9 @@ func (s *Server) handleDAVTokenPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_scope", err.Error())
 		return
 	}
-	if !owner && scope.Write {
-		writeError(w, http.StatusForbidden, "invalid_scope", "visitor tokens are read-only in v1 (grants land with sharing)")
-		return
-	}
+	// Visitor tokens may carry write scope since EPIC-005: the scope only
+	// caps the token — the layout + grant engine decide per path whether a
+	// visitor write is actually allowed.
 
 	// The audience tree must be hosted here — this relay can only grant
 	// access to trees it stores.

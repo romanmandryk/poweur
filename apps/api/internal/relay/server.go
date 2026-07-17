@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -44,10 +45,11 @@ type Server struct {
 	client     *http.Client
 	idCache    *idpkg.Cache
 
-	// File layer (EPIC-003/004). Nil when POWEUR_DATA is not configured.
+	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
 	filesIndex    *files.Index
 	uploads       *files.Uploads
+	grants        *files.GrantStore
 	davTokens     *davTokenStore
 
 	locksMu  sync.Mutex
@@ -98,6 +100,14 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
 		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
 		s.uploads = files.NewUploads(store.IdentityHomeDir)
+		s.grants = &files.GrantStore{
+			Provider: s.filesProvider,
+			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
+				id, ok := store.Get(owner)
+				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
+			},
+			Logf: log.Printf,
+		}
 	}
 	go s.runPruner()
 	return s

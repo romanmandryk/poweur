@@ -66,8 +66,8 @@ func syncPathFilters(r *http.Request) ([]string, error) {
 
 // syncVisible builds the per-record visibility predicate: layout/grant
 // permissions for the principal plus any ?paths= prefixes.
-func syncVisible(owner string, principal files.Principal, prefixes []string) func(string) bool {
-	perms := files.Permissions{}
+func syncVisible(owner string, principal files.Principal, prefixes []string, grants files.GrantChecker) func(string) bool {
+	perms := files.Permissions{Grants: grants}
 	return func(path string) bool {
 		if !perms.Allowed(owner, principal, path, files.AccessRead) {
 			return false
@@ -124,7 +124,7 @@ func (s *Server) handleSyncChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recs, latest, gap := s.filesIndex.Changes(owner, since, limit, syncVisible(owner, principal, prefixes))
+	recs, latest, gap := s.filesIndex.Changes(owner, since, limit, syncVisible(owner, principal, prefixes, s.grantSnapshot(r, owner)))
 	next := since
 	if len(recs) > 0 {
 		next = recs[len(recs)-1].ChangeID
@@ -168,7 +168,7 @@ func (s *Server) handleSyncManifest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_path", err.Error())
 		return
 	}
-	visible := syncVisible(owner, principal, prefixes)
+	visible := syncVisible(owner, principal, prefixes, s.grantSnapshot(r, owner))
 	snapshot, changeID := s.filesIndex.Snapshot(owner)
 	paths := make([]string, 0, len(snapshot))
 	for p := range snapshot {
@@ -223,7 +223,7 @@ func (s *Server) handleUploadCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_path", "path query parameter must name a file inside the tree")
 		return
 	}
-	perms := files.Permissions{}
+	perms := files.Permissions{Grants: s.grantSnapshot(r, owner)}
 	if !perms.Allowed(owner, principal, clean, files.AccessWrite) {
 		writeError(w, http.StatusForbidden, "forbidden", "path not permitted for this principal")
 		return
@@ -265,7 +265,7 @@ func (s *Server) uploadForRequest(w http.ResponseWriter, r *http.Request) (owner
 		writeError(w, http.StatusNotFound, "not_found", "upload not found or expired")
 		return "", files.UploadInfo{}, false
 	}
-	perms := files.Permissions{}
+	perms := files.Permissions{Grants: s.grantSnapshot(r, owner)}
 	if !perms.Allowed(owner, principal, info.Path, files.AccessWrite) {
 		writeError(w, http.StatusForbidden, "forbidden", "path not permitted for this principal")
 		return "", files.UploadInfo{}, false

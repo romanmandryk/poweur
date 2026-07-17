@@ -56,8 +56,14 @@ func (allowAllGrants) Allowed(owner, visitor, path string, access Access) bool {
 
 func TestGrantCheckerHookUsedForShared(t *testing.T) {
 	pe := Permissions{Grants: allowAllGrants{}}
-	visitor := Principal{Identity: "bob.example.org"}
+	visitor := Principal{Identity: "bob.example.org", Scope: Scope{Write: true}}
 	if !pe.Allowed("alice.poweur.net", visitor, "shared/project/file", AccessWrite) {
 		t.Fatal("grant checker must be consulted for /shared")
+	}
+	// The token scope caps visitors: a read-only credential cannot write
+	// even where a grant would allow it.
+	readOnly := Principal{Identity: "bob.example.org"}
+	if pe.Allowed("alice.poweur.net", readOnly, "shared/project/file", AccessWrite) {
+		t.Fatal("read-only visitor scope must cap grant writes")
 	}
 }

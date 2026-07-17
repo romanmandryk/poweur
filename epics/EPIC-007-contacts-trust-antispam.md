@@ -33,9 +33,11 @@ this epic turns verified identity into *usable trust*.
 - **Inbox policy** = `poweur-sys/relay/inbox-policy.json`:
   `contacts_only` (default for humans) | `contacts_and_requests` | `open` (bots/support
   addresses). Non-contact senders get exactly **one** pending contact-request slot — no
-  message stream until accepted. **Follow-on (EPIC-012):** optional opt-in for unsigned /
-  web-form / anonymous ingress (`allow_unsigned_web_forms`, etc.) — default remain deny;
-  refine vocabulary here so web contact forms and general messaging share one policy surface.
+  message stream until accepted. **Follow-on:** optional opt-in for unsigned / web-form /
+  anonymous ingress with sender challenges (none / proof-of-work / verified / payment) is
+  [EPIC-014](EPIC-014-anonymous-messaging-challenges.md), consumed by EPIC-012 contact
+  forms — default remains deny; the policy vocabulary lands in this epic's schema so web
+  forms and general messaging share one policy surface.
 - **Contact requests ride on messaging** as typed system messages (`sys.contact.request` with
   a short E2E-encrypted intro, `sys.contact.accept`, `sys.contact.block`). Accept = both sides
   write the other into contacts with pinned keys (mutual, like Signal/XMPP presence
@@ -108,8 +110,9 @@ Recipient consent stops 1:1 spam but not request-flood and not bad *relays*.
       relay, not just the ID) — extend `ratelimit` with per-peer-relay buckets keyed on the
       forwarding source
 - [ ] Design doc: relay reputation options — shared blocklists (file-based, subscribable, like
-      DNSBL but signed), proof-of-work on contact requests from unknown relays, postage-style
-      deposits (note only; don't build)
+      DNSBL but signed), proof-of-work on contact requests from unknown relays (primitive +
+      challenge protocol come from [EPIC-014](EPIC-014-anonymous-messaging-challenges.md)),
+      postage-style deposits (note only; don't build)
 - [ ] User-level block export/import: blocklists as shareable signed files (EPIC-005 share of
       a `blocks.json`) so communities can pool defense
 - [ ] Abuse-report message type `sys.abuse.report` to sender's relay operator (registry entry +

@@ -18,6 +18,15 @@ func (s *Server) davEnabled() bool {
 	return s.filesProvider != nil
 }
 
+// grantSnapshot loads the owner's verified grants once for this request
+// (EPIC-005). Revocation is a grant-file delete: the next request reloads.
+func (s *Server) grantSnapshot(r *http.Request, owner string) files.GrantChecker {
+	if s.grants == nil {
+		return files.DenyAllGrants
+	}
+	return s.grants.Snapshot(r.Context(), owner)
+}
+
 // lockSystem returns the per-identity DAV lock system (Class 2 locks are
 // in-memory: relay restart drops locks, which vanilla clients re-acquire).
 func (s *Server) lockSystem(identity string) webdav.LockSystem {
@@ -188,7 +197,7 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	perms := files.Permissions{}
+	perms := files.Permissions{Grants: s.grantSnapshot(r, owner)}
 	if !perms.Allowed(owner, principal, clean, access) {
 		if principal == files.Anonymous {
 			w.Header().Set("WWW-Authenticate", `Basic realm="poweur-dav", Bearer`)

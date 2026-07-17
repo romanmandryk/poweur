@@ -122,7 +122,7 @@ func (p *FSProvider) resolve(identity, name string) (string, error) {
 // identity so DAV clients see a stable skeleton.
 func (p *FSProvider) EnsureTree(ctx context.Context, identity string) error {
 	_ = ctx
-	for _, dir := range []string{RootPublic, RootShared, RootPrivate, RootApps, SysPublic, SysRelay, SysPrivate} {
+	for _, dir := range []string{RootPublic, RootShared, RootPrivate, RootApps, SysPublic, SysRelay, SysPrivate, sharesDir, groupsDir} {
 		onDisk, err := p.resolve(identity, dir)
 		if err != nil {
 			return err

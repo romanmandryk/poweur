@@ -62,8 +62,9 @@ type Principal struct {
 	Identity string
 	// Owner is true when Identity == the tree owner (verified at auth time).
 	Owner bool
-	// Scope bounds what the credential may touch (owner credentials only;
-	// visitors always get exactly the layout defaults).
+	// Scope bounds what the credential may touch. For visitors the scope
+	// caps what the layout + grants would otherwise allow (a dav:read
+	// visitor token cannot write even into a write-granted share).
 	Scope Scope
 }
 
@@ -112,6 +113,12 @@ func (pe Permissions) Allowed(owner string, p Principal, path string, access Acc
 		return p.Scope.Allows(path, access)
 	}
 
+	// The credential scope caps visitors too — layout and grants can only
+	// allow what the token was minted for.
+	if !p.Scope.Allows(path, access) {
+		return false
+	}
+
 	// poweur-sys/public is world-readable (it backs /.well-known).
 	if Under(path, SysPublic) || path == RootSys {
 		return access == AccessRead
@@ -126,7 +133,7 @@ func (pe Permissions) Allowed(owner string, p Principal, path string, access Acc
 		return true
 	}
 
-	// /shared and /apps go through grants (EPIC-005; v1 denies).
+	// /shared and /apps go through grants (EPIC-005).
 	if Under(path, RootShared) || Under(path, RootApps) {
 		return grants.Allowed(owner, p.Identity, path, access)
 	}

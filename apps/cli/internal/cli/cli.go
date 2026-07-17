@@ -55,6 +55,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runDAV(args[1:], stdout, stderr)
 	case "sync":
 		return runSync(args[1:], stdout, stderr)
+	case "share":
+		return runShare(args[1:], stdout, stderr)
 	case "session":
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
@@ -1781,6 +1783,12 @@ func printHelp(w io.Writer) {
   poweur dav password list [--use-identity=...] [--json]
   poweur dav password remove --name=<name> [--use-identity=...]
   poweur sync <pull|push|run|status> <local-dir> [--path=<prefix> ...] [--audience=...] [--use-identity=...]
+  poweur share add <path> --with=<id> [--with-group=<name>] [--perm=read|rw] [--expires=<rfc3339>] [--json]
+  poweur share ls [--json]
+  poweur share revoke <share-id>
+  poweur share group set <name> --members=<id,id,...> [--json]
+  poweur share group ls [--json]
+  poweur share group remove <name>
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)

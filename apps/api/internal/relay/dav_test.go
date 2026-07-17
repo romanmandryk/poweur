@@ -261,18 +261,13 @@ func TestDAVVisitorAndAnonymousRules(t *testing.T) {
 		t.Fatalf("visitor /public write: %d want 403", resp.StatusCode)
 	}
 
-	// Visitor write scopes are refused at mint time.
-	issued := time.Now().UTC().Format(time.RFC3339)
-	canon := crypto.CanonicalDAVToken(bob.name, alice.name, "dav:full", issued, "wn")
-	sig := base64.RawURLEncoding.EncodeToString(ed25519.Sign(bob.priv, []byte(canon)))
-	body, _ := json.Marshal(DAVTokenRequest{Identity: bob.name, Audience: alice.name, Scope: "dav:full", IssuedAt: issued, Nonce: "wn", Signature: sig})
-	mintResp, err := http.Post(ts.URL+"/auth/dav-token", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mintResp.Body.Close()
-	if mintResp.StatusCode != http.StatusForbidden {
-		t.Fatalf("visitor dav:full mint: %d want 403", mintResp.StatusCode)
+	// Visitor write scopes mint fine since EPIC-005 (grants decide what a
+	// visitor may actually write) — but without a grant, writes still 403.
+	fullTok := mintDAVToken(t, ts, bob, alice.name, "dav:full")
+	resp = davReq(t, ts, http.MethodPut, base+"/shared/nope.txt", fullTok, []byte("x"), nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("ungranted visitor write with dav:full: %d want 403", resp.StatusCode)
 	}
 
 	// Anonymous: poweur-sys/public readable, everything else 401.
