@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/profile.schema.json",
+  "title": "profile.json \u2014 poweur-sys/public/profile.json (world-readable)",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "display_name": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "avatar": {
+      "type": "string",
+      "pattern": "^public/",
+      "description": "tree path under /public, never an external URL"
+    },
+    "bio": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "locale": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

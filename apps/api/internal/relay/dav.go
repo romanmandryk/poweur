@@ -239,6 +239,12 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Schema validation for known system documents (E06-T1): a malformed
+	// contacts.json / inbox-policy.json / grant / manifest never lands.
+	if !s.checkSysWrite(w, r, clean) {
+		return
+	}
+
 	// Audit cross-identity access (E03-T4): any authenticated non-owner
 	// touching the tree is logged to poweur-sys/relay/logs/access.log.
 	if principal.Identity != "" && !principal.Owner {

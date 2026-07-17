@@ -37,6 +37,7 @@ type Server struct {
 	providers  *dns.ProviderFactory
 	identities *storage.IdentityStore
 	inbox      *storage.InboxStore
+	requests   *storage.RequestStore
 	acks       *storage.AckStore
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
@@ -82,6 +83,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		providers:     providers,
 		identities:    store,
 		inbox:         storage.NewInboxStore(),
+		requests:      storage.NewRequestStore(),
 		acks:          storage.NewAckStore(),
 		challenges:    storage.NewChallengeStore(),
 		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
@@ -141,6 +143,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
+	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
@@ -588,7 +591,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canonical := crypto.CanonicalMessageFull(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, encMeta)
+	canonical := crypto.CanonicalMessageTyped(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, msg.Type, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
@@ -609,21 +612,24 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if recipientLocal {
-		stored := storage.StoredMessage{
-			ID:        msg.ID,
-			Sender:    msg.Sender,
-			Recipient: msg.Recipient,
-			Timestamp: msg.Timestamp,
-			Payload:   msg.Payload,
-			Signature: msg.Signature,
-			SessionID: msg.SessionID,
-			Encryption: &storage.StoredEncryptionMeta{
-				Alg:                msg.Encryption.Alg,
-				EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
-				Nonce:              msg.Encryption.Nonce,
-			},
+		// Inbox policy (EPIC-007): the recipient's relay is the enforcement
+		// point for local and cross-relay-forwarded senders alike.
+		verdict, detail := s.evaluateInboxPolicy(r.Context(), msg)
+		switch verdict {
+		case policyReject:
+			writeError(w, http.StatusForbidden, "policy_rejected", detail)
+			return
+		case policyQueueRequest:
+			outcome := s.requests.Add(msg.Recipient, msg.Sender, storedFromMessage(msg), requestCooldown)
+			if outcome != storage.RequestQueued {
+				writeError(w, http.StatusConflict, outcome,
+					"a contact request from this sender is already pending or in cooldown")
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
+			return
 		}
-		if !s.inbox.Add(msg.Recipient, stored, s.cfg.MaxInboxPerIdentity) {
+		if !s.inbox.Add(msg.Recipient, storedFromMessage(msg), s.cfg.MaxInboxPerIdentity) {
 			writeError(w, http.StatusServiceUnavailable, "inbox_full",
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return

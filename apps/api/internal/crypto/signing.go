@@ -55,6 +55,21 @@ func CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID s
 	return strings.Join(parts, "\n")
 }
 
+// CanonicalMessageTyped extends CanonicalMessageFull with the envelope-level
+// message type (EPIC-007 `sys.contact.*`; empty type keeps the exact
+// pre-type canonical string, so untyped clients stay compatible).
+//
+// The trailing line, only when msgType != "":
+//
+//	type:<msgType>
+func CanonicalMessageTyped(sender, recipient, timestamp, payload, id, sessionID, msgType string, enc *EncryptionMeta) string {
+	s := CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID, enc)
+	if msgType != "" {
+		s += "\ntype:" + msgType
+	}
+	return s
+}
+
 // CanonicalAck is the signing input for a delivery acknowledgement. Acks
 // reference a previously-sent message by id and are signed by the
 // recipient (or, in v1, whichever party transitioned the message into

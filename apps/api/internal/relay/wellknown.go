@@ -5,9 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/poweur/api/internal/files"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -31,8 +34,43 @@ func (s *Server) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, "/enckey") || path == "/.well-known/poweur/enckey":
 		s.serveIdentityEnckey(w, host)
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		// Any other path serves the identity's poweur-sys/public/ tree
+		// (E06-T1: /.well-known/poweur/ is backed by that world-readable
+		// directory — profile.json, capabilities.json, future documents).
+		s.serveSysPublicFile(w, r, host, strings.TrimPrefix(path, "/.well-known/poweur/"))
 	}
+}
+
+// serveSysPublicFile serves poweur-sys/public/<sub> for a hosted identity.
+func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, identity, sub string) {
+	if !s.davEnabled() || !s.identities.Exists(identity) {
+		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		return
+	}
+	clean, err := files.CleanPath(sub)
+	if err != nil || clean == "" || strings.Contains(clean, "..") {
+		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		return
+	}
+	f, err := s.filesProvider.OpenFile(r.Context(), identity, files.SysPublic+"/"+clean, os.O_RDONLY, 0)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		return
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || fi.IsDir() {
+		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		return
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if strings.HasSuffix(clean, ".json") {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, f)
 }
 
 func (s *Server) serveIdentityDocument(w http.ResponseWriter, r *http.Request, identity string) {

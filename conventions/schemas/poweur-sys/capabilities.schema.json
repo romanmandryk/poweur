@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/capabilities.schema.json",
+  "title": "capabilities.json \u2014 poweur-sys/public/capabilities.json (world-readable)",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "features": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "feature name -> version/variant; unknown names allowed (forward compat)"
+    },
+    "endpoints": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/contacts.schema.json",
+  "title": "contacts.json \u2014 poweur-sys/relay/contacts.json (owner + relay)",
+  "type": "object",
+  "required": [
+    "contacts"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "contacts": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "required": [
+          "identity",
+          "state"
+        ],
+        "properties": {
+          "identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "requested",
+              "accepted",
+              "blocked"
+            ]
+          },
+          "pinned_key": {
+            "type": "string",
+            "pattern": "^(ed25519:)?[A-Za-z0-9_-]{43}$"
+          },
+          "petname": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

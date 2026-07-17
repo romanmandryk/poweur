@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/inbox-policy.schema.json",
+  "title": "inbox-policy.json \u2014 poweur-sys/relay/inbox-policy.json (owner + relay)",
+  "type": "object",
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "mode": {
+      "enum": [
+        "open",
+        "contacts_only",
+        "contacts_and_requests"
+      ]
+    }
+  },
+  "additionalProperties": false
+}
