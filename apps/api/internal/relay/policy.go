@@ -145,30 +145,32 @@ func storedFromMessage(msg Message) storage.StoredMessage {
 	return stored
 }
 
-// handleRequestsGet drains the recipient's pending contact-request queue.
-// Auth mirrors GET /messages/{identity}: challenge-signed by the owner.
-func (s *Server) handleRequestsGet(w http.ResponseWriter, r *http.Request) {
+// authChallengeSignedGet authenticates an owner-drain GET (inbox /
+// requests / anon queues): the caller proves control of {identity} by
+// signing a previously issued challenge with their session or identity
+// key. Returns ok=false with the response already written on failure.
+func (s *Server) authChallengeSignedGet(w http.ResponseWriter, r *http.Request) (string, bool) {
 	identity := r.PathValue("identity")
 	if identity == "" {
 		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
-		return
+		return "", false
 	}
 	headerIdentity := r.Header.Get("X-Poweur-Identity")
 	if headerIdentity == "" || headerIdentity != identity {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing or mismatch")
-		return
+		return "", false
 	}
 	signature := r.Header.Get("X-Poweur-Signature")
 	if signature == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
-		return
+		return "", false
 	}
 	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
 	challenge, ok := s.challenges.Consume(identity)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge missing or expired")
-		return
+		return "", false
 	}
 
 	var publicKey ed25519.PublicKey
@@ -176,22 +178,22 @@ func (s *Server) handleRequestsGet(w http.ResponseWriter, r *http.Request) {
 		session, ok := s.sessions.Get(sessionID)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "session_expired", "session expired or not found")
-			return
+			return "", false
 		}
 		if session.Identity != identity {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
-			return
+			return "", false
 		}
 		publicKey = session.PublicKeyBytes
 	} else {
 		if !s.isLocalIdentity(r.Context(), identity) {
 			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
-			return
+			return "", false
 		}
 		pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-			return
+			return "", false
 		}
 		s.warmIdentityCache(identity, pub)
 		publicKey = pub
@@ -199,9 +201,17 @@ func (s *Server) handleRequestsGet(w http.ResponseWriter, r *http.Request) {
 
 	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
+		return "", false
+	}
+	return identity, true
+}
+
+// handleRequestsGet drains the recipient's pending contact-request queue.
+func (s *Server) handleRequestsGet(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.authChallengeSignedGet(w, r)
+	if !ok {
 		return
 	}
-
 	requests := s.requests.Drain(identity)
 	if requests == nil {
 		requests = []storage.StoredMessage{}

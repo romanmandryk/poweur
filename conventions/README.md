@@ -31,3 +31,4 @@ app-namespace rules are in
 | [pcp-0003](pcp-0003-share-grant.md) | Share grant & group documents | experimental |
 | [pcp-0004](pcp-0004-contacts.md) | Contacts, inbox policy & `sys.contact.*` | experimental |
 | [pcp-0005](pcp-0005-sync-journal.md) | Sync journal record & changes cursor | experimental |
+| [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |

@@ -2,19 +2,69 @@
   "version": 1,
   "comment": "Claimed names across the Poweur ecosystem (EPIC-006 E06-T4). Merged via PR; conflict = first-come + review. CI validates shape and uniqueness.",
   "app_ids": [
-    {"id": "net.poweur.tasks", "owner": "poweur core", "pcp": "pcp-0006-tasks", "status": "reserved"}
+    {
+      "id": "net.poweur.tasks",
+      "owner": "poweur core",
+      "pcp": "pcp-0007-tasks",
+      "status": "reserved"
+    }
   ],
   "message_types": [
-    {"type": "sys.contact.request", "owner": "poweur core", "pcp": "pcp-0004-contacts", "status": "experimental"},
-    {"type": "sys.contact.accept", "owner": "poweur core", "pcp": "pcp-0004-contacts", "status": "experimental"},
-    {"type": "sys.contact.block", "owner": "poweur core", "pcp": "pcp-0004-contacts", "status": "reserved"},
-    {"type": "sys.share.offer", "owner": "poweur core", "pcp": "pcp-0003-share-grant", "status": "reserved"},
-    {"type": "sys.share.accept", "owner": "poweur core", "pcp": "pcp-0003-share-grant", "status": "reserved"},
-    {"type": "sys.share.revoked", "owner": "poweur core", "pcp": "pcp-0003-share-grant", "status": "reserved"},
-    {"type": "sys.sync.changed", "owner": "poweur core", "pcp": "pcp-0005-sync-journal", "status": "reserved"},
-    {"type": "sys.abuse.report", "owner": "poweur core", "pcp": null, "status": "reserved"}
+    {
+      "type": "sys.contact.request",
+      "owner": "poweur core",
+      "pcp": "pcp-0004-contacts",
+      "status": "experimental"
+    },
+    {
+      "type": "sys.contact.accept",
+      "owner": "poweur core",
+      "pcp": "pcp-0004-contacts",
+      "status": "experimental"
+    },
+    {
+      "type": "sys.contact.block",
+      "owner": "poweur core",
+      "pcp": "pcp-0004-contacts",
+      "status": "reserved"
+    },
+    {
+      "type": "sys.share.offer",
+      "owner": "poweur core",
+      "pcp": "pcp-0003-share-grant",
+      "status": "reserved"
+    },
+    {
+      "type": "sys.share.accept",
+      "owner": "poweur core",
+      "pcp": "pcp-0003-share-grant",
+      "status": "reserved"
+    },
+    {
+      "type": "sys.share.revoked",
+      "owner": "poweur core",
+      "pcp": "pcp-0003-share-grant",
+      "status": "reserved"
+    },
+    {
+      "type": "sys.sync.changed",
+      "owner": "poweur core",
+      "pcp": "pcp-0005-sync-journal",
+      "status": "reserved"
+    },
+    {
+      "type": "sys.abuse.report",
+      "owner": "poweur core",
+      "pcp": null,
+      "status": "reserved"
+    }
   ],
   "schema_namespaces": [
-    {"namespace": "poweur-sys", "owner": "poweur core", "path": "conventions/schemas/poweur-sys/", "status": "experimental"}
+    {
+      "namespace": "poweur-sys",
+      "owner": "poweur core",
+      "path": "conventions/schemas/poweur-sys/",
+      "status": "experimental"
+    }
   ]
 }

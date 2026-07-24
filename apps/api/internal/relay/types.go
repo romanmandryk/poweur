@@ -35,6 +35,11 @@ type Message struct {
 	SessionID    string          `json:"session_id,omitempty"`
 	SessionProof *SessionProof   `json:"session_proof,omitempty"`
 	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
+
+	// Anonymous-sender challenge response (EPIC-014): set only on unsigned
+	// messages (Sender and Signature empty) answering a 428 challenge.
+	ChallengeToken    string `json:"challenge_token,omitempty"`
+	ChallengeSolution string `json:"challenge_solution,omitempty"`
 }
 
 // Ack is the on-wire envelope for a delivery acknowledgement. Tick 1
@@ -88,6 +93,10 @@ type IdentityRequest struct {
 	DNSToken            string `json:"dns_token,omitempty"`
 	// InviteCode is required when REGISTRATION_GATE=invite (hosted registrations).
 	InviteCode string `json:"invite_code,omitempty"`
+	// PowToken/PowSolution answer the relay's proof-of-work challenge when
+	// REGISTRATION_GATE=pow (GET /auth/pow?purpose=registration).
+	PowToken    string `json:"pow_token,omitempty"`
+	PowSolution string `json:"pow_solution,omitempty"`
 
 	// IdentityDocument is the signed web identity document (EPIC-001).
 	// Required for hosted registration; optional for DNS registration

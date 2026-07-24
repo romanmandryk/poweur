@@ -27,7 +27,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | ID | Title | Theme | Status | Depends on |
 |----|-------|-------|--------|------------|
 | [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | complete | — |
-| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (PoW gate deferred) | E01 |
+| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete | E01 |
 | [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete (S3 provider deferred) | E02 |
 | [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | core complete (daemon, T5/T6 deferred) | E03 |
 | [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | core complete (offer UX, links, group IDs deferred) | E03 |
@@ -39,7 +39,9 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | proposed | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
 | [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (CI gates, metrics, Grafana, federated ecosystem metrics) | Infra / Ops | proposed | E02 |
-| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | proposed | E06, E07 |
+| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web page → E12, stranger gate → E07-T5) | E06, E07 |
+| [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | proposed | E03, E04, E05, E06, E07, E14 |
+| [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
 
 ## Integration epics (`integrations/`)
 
@@ -86,6 +88,15 @@ EPIC-002 ──► EPIC-013 (deployment & observability; feeds every epic's ops 
 EPIC-006/007 ──► EPIC-014 (anon messaging + PoW challenges)
                    ├─ PoW primitive closes EPIC-002's deferred registration gate
                    └─ anon ingress feeds EPIC-012 contact forms
+
+EPIC-014 + INT-002 ──► EPIC-016 (sender-challenge v2: memory-hard PoW + pay-to-send)
+                   ├─ fixes the sha256 GPU-vs-mobile asymmetry; algo made pluggable
+                   └─ turns the reserved `payment` slot into a recipient-priced fast-lane
+
+EPIC-003/004/005/006/007/014 ──► EPIC-015 (web app UX: the whole product surfaced)
+                   ├─ absorbs the deferred "web UX" items of E05/E07/E14
+                   └─ its reusable components (IdentityInput, ProfileCard, anon PoW send)
+                      feed EPIC-012 identity websites / contact forms
 ```
 
 ## Architecture deltas at a glance

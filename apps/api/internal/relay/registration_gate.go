@@ -9,6 +9,10 @@ import (
 const (
 	RegistrationGateOpen   = "open"
 	RegistrationGateInvite = "invite"
+	// RegistrationGatePow requires a solved proof-of-work challenge
+	// (EPIC-014 primitive; verification happens in the registration
+	// handler, which holds the relay's challenge secret).
+	RegistrationGatePow = "pow"
 )
 
 // RegistrationGate checks invite codes (and later PoW) before hosted registration.

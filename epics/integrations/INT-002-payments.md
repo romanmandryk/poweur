@@ -123,3 +123,8 @@ arrive on a verified, spam-free channel with cryptographic delivery receipts.
 - [ ] **INT-002-T7** `sys.invoice` message-type PCP + Invoice Ninja PoC
 - [ ] **INT-002-T8** Payment-request UX study: "request €20 from bob" as a typed message with
       deep links per shared rail (design doc; feeds clients)
+
+> **Inbound counterpart:** this epic publishes *how alice gets paid in general*
+> (`payments.json`, LNURL/x402 endpoints). [EPIC-016](../EPIC-016-pow-v2-and-pay-to-send.md)
+> *spends* those rails to gate an inbound message on a recipient-priced payment (pay-to-send),
+> reusing the x402/L402/Stripe adapters and the `/.well-known/lnurlp/` endpoint from here.

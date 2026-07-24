@@ -1,6 +1,6 @@
 # EPIC-002 — Relay-only registration, wildcard identities & durable relay storage
 
-- **Status:** complete (core + abuse gate + ops + export; PoW deferred)
+- **Status:** complete (PoW gate shipped via EPIC-014: `REGISTRATION_GATE=pow`)
 - **Priority:** P0
 - **Depends on:** EPIC-001
 - **Unlocks:** EPIC-003 (file storage), EPIC-009 (message persistence)
@@ -11,13 +11,13 @@
 |------|--------|-------|
 | E02-T1 Durable FS store | **done** | Identity docs durable; SQLite index deferred polish; inbox → EPIC-009 |
 | E02-T2 Hosted registration | **done** | CLI/web + docs |
-| E02-T3 Name policy & abuse | **done** | Reserved names, rate limit, invite gate, lease=no-expiry; **PoW deferred** |
+| E02-T3 Name policy & abuse | **done** | Reserved names, rate limit, invite gate, lease=no-expiry; PoW gate shipped via EPIC-014 (`REGISTRATION_GATE=pow`, `TestINT_ANON_02`) |
 | E02-T4 Export & migration | **done** | export API/CLI, `relay set`, `moved_to` + resolve follow |
 | E02-T5 Ops hardening | **done** | volume, health storage, backup doc + restore integration |
 
 Inbox persistence remains [EPIC-009](EPIC-009-messaging-upgrades.md). The PoW registration
-gate lands via the shared challenge primitive in
-[EPIC-014](EPIC-014-anonymous-messaging-challenges.md) (E14-T5).
+gate shipped via the shared challenge primitive in
+[EPIC-014](EPIC-014-anonymous-messaging-challenges.md) (E14-T5): `REGISTRATION_GATE=pow`.
 
 ## Goal
 
@@ -95,12 +95,13 @@ tests show no traversal.
 register against the relay and exchange E2E-encrypted messages; integration test added
 (`TestINT_HOSTED_01`).
 
-### E02-T3 — Name allocation policy & abuse controls — DONE (PoW deferred)
+### E02-T3 — Name allocation policy & abuse controls — DONE
 
 - [x] Policy module: reserved names, min/max length, charset
 - [x] Rate limits on registration (`register:<identity>` + `register:flood`)
 - [x] `RegistrationGate`: `open` | `invite` (`REGISTRATION_GATE`, `REGISTRATION_INVITE_CODES`)
-- [ ] Proof-of-work gate — **deferred** (invite covers public-relay launch)
+- [x] Proof-of-work gate — shipped via EPIC-014 (`REGISTRATION_GATE=pow`,
+      `REGISTRATION_POW_BITS`; CLI auto-solves; `TestINT_ANON_02_PowRegistrationGate`)
 - [x] Lease decision: **no automatic expiry** (documented in dns-management / web-identity)
 
 **Tests:** `TestINT_REG_01_InviteRequired`, `TestINT_REG_02_RegistrationFloodRateLimit`.

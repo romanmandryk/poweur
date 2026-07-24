@@ -16,6 +16,42 @@
         "contacts_only",
         "contacts_and_requests"
       ]
+    },
+    "anonymous": {
+      "type": "object",
+      "description": "opt-in for unsigned (anonymous) senders (EPIC-014); absent = deny",
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "challenge": {
+          "enum": [
+            "none",
+            "pow",
+            "verified",
+            "payment"
+          ]
+        },
+        "pow_bits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "max_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "required": [
+        "allow"
+      ],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

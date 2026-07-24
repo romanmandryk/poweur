@@ -27,10 +27,86 @@ const (
 	DefaultInboxMode = InboxOpen
 )
 
+// Anonymous sender challenges (EPIC-014). "verified" and "payment" are
+// designed policy slots — the relay answers with the typed challenge
+// envelope but enforcement is not implemented in v1.
+const (
+	AnonChallengeNone     = "none"
+	AnonChallengePow      = "pow"
+	AnonChallengeVerified = "verified"
+	AnonChallengePayment  = "payment"
+
+	// Defaults applied when the anonymous block leaves fields zero.
+	AnonDefaultMaxBytes  = 4096
+	AnonDefaultMaxPerDay = 20
+)
+
+// AnonymousPolicy is the opt-in block for unsigned (anonymous) senders
+// (EPIC-014). Absent block or Allow=false = deny — the default is always
+// closed.
+type AnonymousPolicy struct {
+	Allow bool `json:"allow"`
+	// Challenge the sender must pass: none | pow | verified | payment
+	// ("" = none).
+	Challenge string `json:"challenge,omitempty"`
+	// PowBits is the recipient's difficulty dial (0 = issuer default;
+	// clamped into [PowMinBits, PowMaxBits]).
+	PowBits int `json:"pow_bits,omitempty"`
+	// MaxBytes caps the anonymous message payload (0 = 4096).
+	MaxBytes int `json:"max_bytes,omitempty"`
+	// MaxPerDay caps accepted anonymous messages per day (0 = 20).
+	MaxPerDay int `json:"max_per_day,omitempty"`
+}
+
+// EffectiveChallenge normalizes the challenge field.
+func (a AnonymousPolicy) EffectiveChallenge() string {
+	if a.Challenge == "" {
+		return AnonChallengeNone
+	}
+	return a.Challenge
+}
+
+// EffectiveMaxBytes returns the payload cap with the default applied.
+func (a AnonymousPolicy) EffectiveMaxBytes() int {
+	if a.MaxBytes <= 0 {
+		return AnonDefaultMaxBytes
+	}
+	return a.MaxBytes
+}
+
+// EffectiveMaxPerDay returns the daily cap with the default applied.
+func (a AnonymousPolicy) EffectiveMaxPerDay() int {
+	if a.MaxPerDay <= 0 {
+		return AnonDefaultMaxPerDay
+	}
+	return a.MaxPerDay
+}
+
+// Validate checks the anonymous block.
+func (a AnonymousPolicy) Validate() error {
+	switch a.EffectiveChallenge() {
+	case AnonChallengeNone, AnonChallengePow, AnonChallengeVerified, AnonChallengePayment:
+	default:
+		return fmt.Errorf("invalid anonymous challenge %q (want none, pow, verified or payment)", a.Challenge)
+	}
+	if a.PowBits < 0 || a.PowBits > 64 {
+		return fmt.Errorf("pow_bits out of range")
+	}
+	if a.MaxBytes < 0 || a.MaxBytes > 64*1024 {
+		return fmt.Errorf("max_bytes out of range (max 65536)")
+	}
+	if a.MaxPerDay < 0 || a.MaxPerDay > 10000 {
+		return fmt.Errorf("max_per_day out of range (max 10000)")
+	}
+	return nil
+}
+
 // InboxPolicy is the schema of poweur-sys/relay/inbox-policy.json.
 type InboxPolicy struct {
 	Version int    `json:"version"`
 	Mode    string `json:"mode"`
+	// Anonymous opts into unsigned senders (EPIC-014); nil = deny.
+	Anonymous *AnonymousPolicy `json:"anonymous,omitempty"`
 }
 
 // Validate checks the policy document.
@@ -40,11 +116,16 @@ func (p InboxPolicy) Validate() error {
 	}
 	switch p.Mode {
 	case InboxOpen, InboxContactsOnly, InboxContactsAndRequests:
-		return nil
 	default:
 		return fmt.Errorf("invalid inbox policy mode %q (want %s, %s or %s)",
 			p.Mode, InboxOpen, InboxContactsOnly, InboxContactsAndRequests)
 	}
+	if p.Anonymous != nil {
+		if err := p.Anonymous.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ParseInboxPolicy decodes and validates inbox-policy.json.

@@ -225,6 +225,8 @@ type IdentityRegisterRequest struct {
 	DNSProvider         string          `json:"dns_provider,omitempty"`
 	DNSToken            string          `json:"dns_token,omitempty"`
 	InviteCode          string          `json:"invite_code,omitempty"`
+	PowToken            string          `json:"pow_token,omitempty"`
+	PowSolution         string          `json:"pow_solution,omitempty"`
 	IdentityDocument    json.RawMessage `json:"identity_document,omitempty"`
 	IssuedAt            string          `json:"issued_at"`
 	Nonce               string          `json:"nonce"`

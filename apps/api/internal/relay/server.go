@@ -38,6 +38,9 @@ type Server struct {
 	identities *storage.IdentityStore
 	inbox      *storage.InboxStore
 	requests   *storage.RequestStore
+	anonInbox  *storage.InboxStore
+	anon       *anonState
+	powSecret  []byte
 	acks       *storage.AckStore
 	challenges *storage.ChallengeStore
 	sessions   *storage.SessionStore
@@ -84,6 +87,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		identities:    store,
 		inbox:         storage.NewInboxStore(),
 		requests:      storage.NewRequestStore(),
+		anonInbox:     storage.NewInboxStore(),
+		anon:          newAnonState(),
+		powSecret:     newPowSecret(),
 		acks:          storage.NewAckStore(),
 		challenges:    storage.NewChallengeStore(),
 		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
@@ -122,6 +128,7 @@ func (s *Server) runPruner() {
 	for range ticker.C {
 		s.sessions.Prune()
 		s.davTokens.Prune()
+		s.anon.prune()
 		s.pruneLocalityCache()
 	}
 }
@@ -144,8 +151,10 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
+	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
+	mux.HandleFunc("GET /auth/pow", s.handleAuthPow)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
@@ -225,7 +234,13 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if hosted {
+	if hosted && s.regGate.Mode() == RegistrationGatePow {
+		// PoW gate (EPIC-014 E14-T5): verified here rather than inside the
+		// gate because the handler holds the challenge secret.
+		if !s.checkRegistrationPow(w, req) {
+			return
+		}
+	} else if hosted {
 		if err := s.regGate.AllowHosted(req.InviteCode); err != nil {
 			if ge, ok := err.(gateError); ok {
 				status := http.StatusForbidden
@@ -551,6 +566,13 @@ func (s *Server) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	var msg Message
 	if err := decodeJSON(w, r, &msg); err != nil {
+		return
+	}
+	// Unsigned + senderless = anonymous ingress (EPIC-014): opt-in per
+	// recipient, challenge-gated, separate queue. A message with a sender
+	// but no signature (or vice versa) stays invalid below.
+	if msg.Sender == "" && msg.Signature == "" {
+		s.handleAnonMessage(w, r, msg)
 		return
 	}
 	if msg.ID == "" || msg.Sender == "" || msg.Recipient == "" || msg.Timestamp == "" || msg.Payload == "" || msg.Signature == "" {
