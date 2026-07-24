@@ -10,7 +10,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E06-T1 Normative spec + validation | **done** | [`apps/docs/docs/conventions/poweur-sys.md`](../apps/docs/docs/conventions/poweur-sys.md); JSON Schemas in `conventions/schemas/poweur-sys/` (CI-validated); enforced validators are Go (`packages/identity`), run on DAV PUT (`422 invalid_document`, `TestSysWriteValidation`); unknown files preserved; bootstrap = EnsureTree skeleton + registration-written `id.json` |
-| E06-T2 profile.json + capabilities.json | **partial** | Schemas + write validation shipped; `poweur-sys/public/*` now world-served via `/.well-known/poweur/` (no new endpoints). **Open:** CLI `poweur lookup` showing profile/capabilities; web profile card |
+| E06-T2 profile.json + capabilities.json | **partial** | Schemas + write validation shipped; `poweur-sys/public/*` now world-served via `/.well-known/poweur/` (no new endpoints). **Open:** CLI `poweur lookup` showing profile/capabilities; web profile card → [EPIC-015](EPIC-015-web-app-ux.md) E15-T5 |
 | E06-T3 `/apps` namespace rules | **done** | [`apps/docs/docs/conventions/app-data.md`](../apps/docs/docs/conventions/app-data.md); `manifest.json` validated on write (app_id must match directory); shared-app-data = EPIC-005 share of an `/apps` subtree (`TestShareAppsSubtree` is the worked example) |
 | E06-T4 PCP process + registry | **done** | `conventions/README.md`, `pcp-0001-process.md`, `registry.json` (validated in CI incl. code-emitted `sys.*` types), seed PCPs 0002–0005 filed |
 | E06-T5 Tasks-domain dogfood | **deferred** | reference app + tasks PCP not started; `net.poweur.tasks` app-id reserved in the registry |

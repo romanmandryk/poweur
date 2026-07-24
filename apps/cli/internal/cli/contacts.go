@@ -331,7 +331,9 @@ type requestEntry struct {
 	Payload   string `json:"payload"`
 }
 
-func fetchRequests(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey) ([]requestEntry, error) {
+// challengeSignedGet performs an owner-drain GET (requests / anon queues):
+// fetch a challenge, sign it with the identity key, call the endpoint.
+func challengeSignedGet(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey, path string) ([]byte, error) {
 	if cfg.RelayURL == "" {
 		return nil, fmt.Errorf("relay url not configured")
 	}
@@ -348,7 +350,7 @@ func fetchRequests(ctx context.Context, cfg config.Config, identityValue string,
 	if err != nil || ch.Challenge == "" {
 		return nil, fmt.Errorf("challenge request failed")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/requests/"+identityValue, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path+identityValue, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -359,14 +361,25 @@ func fetchRequests(ctx context.Context, cfg config.Config, identityValue string,
 		return nil, err
 	}
 	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("requests fetch failed: %d %s", resp.StatusCode, bytes.TrimSpace(raw))
+		return nil, fmt.Errorf("%s fetch failed: %d %s", path, resp.StatusCode, bytes.TrimSpace(raw))
+	}
+	return raw, nil
+}
+
+func fetchRequests(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey) ([]requestEntry, error) {
+	raw, err := challengeSignedGet(ctx, cfg, identityValue, priv, "/requests/")
+	if err != nil {
+		return nil, err
 	}
 	var out struct {
 		Requests []requestEntry `json:"requests"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
 	return out.Requests, nil
@@ -382,8 +395,13 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("policy "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "identity")
+	anonAllow := fs.Bool("anon-allow", false, "accept anonymous (unsigned) messages")
+	anonChallenge := fs.String("anon-challenge", "", "challenge for anonymous senders: none | pow | verified | payment")
+	anonBits := fs.Int("anon-bits", 0, "proof-of-work difficulty in bits (0 = relay default; each +1 doubles the work)")
+	anonMaxBytes := fs.Int("anon-max-bytes", 0, "max anonymous payload bytes (0 = default 4096)")
+	anonMaxPerDay := fs.Int("anon-max-per-day", 0, "max accepted anonymous messages per day (0 = default 20)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--anon-allow": true})); err != nil {
 		return 1
 	}
 	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
@@ -412,13 +430,32 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 			note = " (no policy file — relay default)"
 		}
 		fmt.Fprintf(stdout, "inbox policy: %s%s\n", policy.Mode, note)
+		if policy.Anonymous != nil && policy.Anonymous.Allow {
+			fmt.Fprintf(stdout, "anonymous: allowed, challenge=%s", policy.Anonymous.EffectiveChallenge())
+			if policy.Anonymous.EffectiveChallenge() == idpkg.AnonChallengePow {
+				fmt.Fprintf(stdout, " (%d bits)", idpkg.ClampPowBits(policy.Anonymous.PowBits))
+			}
+			fmt.Fprintf(stdout, ", max %d bytes, %d/day\n",
+				policy.Anonymous.EffectiveMaxBytes(), policy.Anonymous.EffectiveMaxPerDay())
+		} else {
+			fmt.Fprintln(stdout, "anonymous: denied (default)")
+		}
 		return 0
 	case "set":
 		if fs.NArg() != 1 {
-			fmt.Fprintln(stderr, "usage: poweur policy set <open|contacts_only|contacts_and_requests>")
+			fmt.Fprintln(stderr, "usage: poweur policy set <open|contacts_only|contacts_and_requests> [--anon-allow --anon-challenge=pow --anon-bits=N]")
 			return 1
 		}
 		policy := idpkg.InboxPolicy{Version: 1, Mode: fs.Arg(0)}
+		if *anonAllow || *anonChallenge != "" || *anonBits > 0 {
+			policy.Anonymous = &idpkg.AnonymousPolicy{
+				Allow:     *anonAllow,
+				Challenge: *anonChallenge,
+				PowBits:   *anonBits,
+				MaxBytes:  *anonMaxBytes,
+				MaxPerDay: *anonMaxPerDay,
+			}
+		}
 		if err := policy.Validate(); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -428,7 +465,11 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "inbox policy set to %s\n", policy.Mode)
+		anonNote := ""
+		if policy.Anonymous != nil && policy.Anonymous.Allow {
+			anonNote = fmt.Sprintf(" (anonymous allowed, challenge=%s)", policy.Anonymous.EffectiveChallenge())
+		}
+		fmt.Fprintf(stdout, "inbox policy set to %s%s\n", policy.Mode, anonNote)
 		return 0
 	default:
 		fmt.Fprintln(stderr, "unknown policy subcommand (want show, set)")

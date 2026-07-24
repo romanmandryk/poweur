@@ -63,6 +63,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runRequests(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
+	case "anon":
+		return runAnon(args[1:], stdout, stderr)
 	case "session":
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
@@ -208,8 +210,24 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		}
 
 		if _, err := RegisterIdentity(context.Background(), *relayURL, req); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
+			// REGISTRATION_GATE=pow (EPIC-014): fetch the challenge, solve
+			// it locally, retry once.
+			if *hosted && strings.Contains(err.Error(), "pow_required") {
+				token, solution, powErr := solveRegistrationPow(context.Background(), *relayURL, stderr)
+				if powErr != nil {
+					fmt.Fprintln(stderr, powErr)
+					return 1
+				}
+				req.PowToken = token
+				req.PowSolution = solution
+				if _, err := RegisterIdentity(context.Background(), *relayURL, req); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 1
+				}
+			} else {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 		}
 		registered = true
 	}
@@ -561,13 +579,17 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
 	msgType := fs.String("type", "", "envelope message type (sys.* system messages, e.g. sys.contact.request)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
+	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay]")
+		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
 		return 1
+	}
+	if *anonFlag {
+		return runSendAnon(cfg, fs.Arg(0), fs.Arg(1), *jsonOut, stdout, stderr)
 	}
 	mode := strings.ToLower(strings.TrimSpace(*signWith))
 	if mode != "session" && mode != "identity" {
@@ -1811,7 +1833,9 @@ func printHelp(w io.Writer) {
   poweur share group remove <name>
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
-  poweur policy <show|set open|contacts_only|contacts_and_requests> [--use-identity=...]
+  poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
+  poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
+  poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
 `)

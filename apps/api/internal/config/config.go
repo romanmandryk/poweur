@@ -66,8 +66,12 @@ type Config struct {
 	DataDir              string
 	HostedDomains        []string
 	ResolverAllowPrivate bool
-	// RegistrationGate is "open" (default) or "invite".
+	// RegistrationGate is "open" (default), "invite" or "pow" (EPIC-014:
+	// hosted registration requires a solved proof-of-work challenge).
 	RegistrationGate string
+	// RegistrationPowBits is the PoW difficulty for REGISTRATION_GATE=pow
+	// (0 = default; clamped by the pow window).
+	RegistrationPowBits int
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
 	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
@@ -95,9 +99,9 @@ func (c Config) Validate() error {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(c.RegistrationGate)) {
-	case "", "open", "invite":
+	case "", "open", "invite", "pow":
 	default:
-		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite)", c.RegistrationGate)
+		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite|pow)", c.RegistrationGate)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.StorageProvider)) {
 	case "", "relay-fs":
@@ -141,6 +145,7 @@ func FromEnv() Config {
 		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),
 		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
 		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
+		RegistrationPowBits:     int(getenvInt64("REGISTRATION_POW_BITS", 0)),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
 		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
 		MaxFileBytes:            getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
