@@ -364,7 +364,10 @@ export async function sendAnonymous(recipient, plaintext, options = {}) {
         }
         options.onChallenge?.({ type, bits });
         body["challenge_token"] = token;
-        body["challenge_solution"] = await solvePow(token, bits);
+        body["challenge_solution"] = await solvePow(token, bits, {
+            ...(options.onSolveProgress ? { onProgress: options.onSolveProgress } : {}),
+            ...(options.signal ? { signal: options.signal } : {}),
+        });
         response = await post();
     }
     if (response.status >= 400) {

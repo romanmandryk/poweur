@@ -11,7 +11,7 @@
 
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
-  EnrollApi, RelayClient,
+  EnrollApi, RelayClient, sendAnonymous, clampPowBits,
 } from "@poweur/client";
 
 import {
@@ -33,10 +33,11 @@ import {
   defaultRelayUrl, relayUrlFor,
 } from "./storage.js";
 
-import { clientFor, identityApiFor, lookup } from "./client.js";
+import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
 
 import { resolveProfile, clearProfileCache } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
+import { PolicyControls, INBOX_MODES, describePowBits } from "./components/policy-controls.js";
 import { ProfileCard } from "./components/profile-card.js";
 import {
   listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
@@ -77,6 +78,8 @@ const S = {
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
   requests: { incoming: [], loading: false, loaded: false, error: null },
+  anon: { messages: [], loading: false, loaded: false, error: null },
+  policy: { doc: null, explicit: false, loading: false, loaded: false },
   files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false },
 };
 
@@ -325,10 +328,7 @@ function renderMessages() {
 
 function renderTray() {
   if (S.tray === "requests") return renderRequestsTray();
-  if (S.tray === "anonymous") {
-    return emptyState("🎭", "No anonymous messages",
-      "Turn on anonymous messages in Settings to let strangers reach you behind a proof-of-work cost.");
-  }
+  if (S.tray === "anonymous") return renderAnonTray();
 
   const conversations = buildConversations();
   if (!conversations.length) {
@@ -429,6 +429,45 @@ function renderRequestsTray() {
             </div>
           </div>`).join("")}
       </div>` : ""}`;
+}
+
+/**
+ * The anonymous tray.
+ *
+ * These messages are **unauthenticated** — encrypted to us, but signed by
+ * nobody — so they are rendered as a different kind of object entirely: no
+ * sender, no avatar, and no reply affordance, because there is nobody to
+ * reply to. That visual difference is a requirement of the spec, not styling.
+ */
+function renderAnonTray() {
+  const A = S.anon;
+  const anon = S.policy.doc?.anonymous;
+  const off = S.policy.loaded && !anon?.allow;
+
+  if (!A.messages.length) {
+    return `
+      ${A.error ? `<p class="small val-warn" style="padding:16px">${esc(A.error)}</p>` : ""}
+      ${emptyState("🎭", "No anonymous messages",
+        off
+          ? "Anonymous messages are turned off. Strangers with no identity cannot reach you until you allow it in Settings."
+          : "Messages from strangers with no identity land here. Nobody is identified, so there is nothing to reply to.",
+        off ? `<button class="btn btn-primary" id="btn-anon-settings">Open inbox settings</button>` : "")}`;
+  }
+
+  return `
+    <p class="anon-explainer small">
+      Encrypted to you, signed by nobody. Anyone could have sent these, and there is no way to reply.
+    </p>
+    <div class="conv-list">
+      ${A.messages.map(m => `
+        <div class="anon-row">
+          <div class="anon-row-head">
+            <span class="chip chip-orange">Anonymous</span>
+            <span class="conv-time">${fmtRelative(m.timestamp)}</span>
+          </div>
+          <div class="anon-body">${m.plaintext ? esc(m.plaintext) : "🔒 Could not decrypt"}</div>
+        </div>`).join("")}
+    </div>`;
 }
 
 function emptyState(icon, title, body, actionHtml = "") {
@@ -684,15 +723,17 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Inbox</div>
       <div class="settings-rows">
-        <div class="settings-row no-action">
+        <div class="settings-row" id="row-policy">
           <span class="settings-row-icon">🛡️</span>
           <span class="settings-row-label">Who can message you</span>
-          <span class="settings-row-value muted">Soon</span>
+          <span class="settings-row-value">${esc(policySummary().mode)}</span>
+          <span class="settings-row-arrow">›</span>
         </div>
-        <div class="settings-row no-action">
+        <div class="settings-row" id="row-policy-anon">
           <span class="settings-row-icon">🎭</span>
           <span class="settings-row-label">Anonymous &amp; proof-of-work</span>
-          <span class="settings-row-value muted">Soon</span>
+          <span class="settings-row-value ${policySummary().anonOn ? "val-ok" : "muted"}">${esc(policySummary().anon)}</span>
+          <span class="settings-row-arrow">›</span>
         </div>
       </div>
     </div>
@@ -879,6 +920,16 @@ function renderCompose() {
           <label class="form-label" for="c-body">Message</label>
           <textarea id="c-body" class="compose-textarea" placeholder="Write your message…"></textarea>
         </div>
+        <label class="policy-toggle compose-anon" for="c-anon">
+          <input type="checkbox" id="c-anon" class="policy-check" />
+          <span>
+            <div class="policy-toggle-label">Send anonymously</div>
+            <div class="policy-toggle-detail muted small">
+              Still encrypted to them, but unsigned and unattributed — they will not know it is you and
+              cannot reply. Their policy decides whether it costs you proof-of-work.
+            </div>
+          </span>
+        </label>
         <p id="c-status" class="compose-status"></p>
       </div>
       <div class="sub-footer">
@@ -1060,7 +1111,9 @@ function attachEvents() {
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
     loadInbox();
     if (S.tray === "requests") loadRequests();
+    if (S.tray === "anonymous") { loadPolicy(); loadAnon(); }
   }
+  q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
   // Add ID options
   q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
@@ -1109,7 +1162,10 @@ function attachEvents() {
   q("#row-lookup")?.addEventListener("click", showLookupPanel);
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
+  q("#row-policy")?.addEventListener("click", showPolicyPanel);
+  q("#row-policy-anon")?.addEventListener("click", showPolicyPanel);
   q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
+  if (R.page === "settings" && !R.sub && getUnlockedKeys()) loadPolicy();
   q("#row-recovery-kit")?.addEventListener("click", showRecoveryKitPanel);
   q("#row-rotate-enc")?.addEventListener("click", doRotateEncKey);
   q("#row-remove-id")?.addEventListener("click", doRemoveIdentity);
@@ -1131,6 +1187,8 @@ function switchIdentity(identity) {
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
   S.requests = { incoming: [], loading: false, loaded: false, error: null };
+  S.anon = { messages: [], loading: false, loaded: false, error: null };
+  S.policy = { doc: null, explicit: false, loading: false, loaded: false };
   S.files = { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false };
 }
 
@@ -1609,6 +1667,15 @@ async function doSend() {
   sendBtn.disabled = true;
   const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
 
+  if (q("#c-anon")?.checked) {
+    try {
+      await doSendAnonymous(to, body, setStatus);
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+    return;
+  }
+
   try {
     setStatus("Checking their key…");
     if (!(await checkPinBeforeSend(client, to))) {
@@ -1626,6 +1693,51 @@ async function doSend() {
     toast(err.message, "error");
   } finally {
     if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+/**
+ * Send with no identity attached (EPIC-014).
+ *
+ * Nothing here touches the signer: the point is that the message carries no
+ * sender. What it can carry is a *cost* — if the recipient's policy demands
+ * proof-of-work the relay answers 428 and the browser mines the solution,
+ * which at the difficulties people actually set is seconds of work. So it
+ * reports progress and stays cancellable; a frozen tab is how a user learns to
+ * distrust the feature.
+ */
+async function doSendAnonymous(to, body, setStatus) {
+  const cancel = new AbortController();
+  let bits = 0;
+  setStatus("Sending anonymously…");
+  try {
+    const relayUrl = relayUrlFor(S.identity);
+    const resolve = resolveOptionsForRelay(relayUrl);
+    await sendAnonymous(to, body, {
+      resolve,
+      // The recipient's relay is resolved from their document, not assumed to
+      // be ours — a stranger's home relay is usually somewhere else.
+      ...(resolve.scheme ? { scheme: resolve.scheme } : {}),
+      signal: cancel.signal,
+      onChallenge: ({ type, bits: demanded }) => {
+        bits = demanded;
+        if (type !== "pow") return;
+        setStatus(`${to} asks for proof of work (${bits} bits). Working…`);
+        if (bits > 20) {
+          toast(`${bits} bits is a big ask — this can take minutes in a browser`, "warning", 6000);
+        }
+      },
+      onSolveProgress: (attempts) => {
+        setStatus(`Proof of work (${bits} bits): ${attempts.toLocaleString()} attempts…`);
+      },
+    });
+    setStatus("✓ Sent anonymously", "ok");
+    if (q("#c-body")) q("#c-body").value = "";
+    toast("Anonymous message sent", "success");
+    setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+  } catch (error) {
+    setStatus(`✕ ${error.message}`, "err");
+    toast(error.message, "error");
   }
 }
 
@@ -2068,6 +2180,88 @@ async function checkPinBeforeSend(client, recipient) {
     await refreshContacts();
   }
   return true;
+}
+
+// ─── Inbox policy, anonymous & PoW (E15-T3) ──────────────────────────────────
+
+/** One-line summaries for the Settings rows. */
+function policySummary() {
+  const doc = S.policy.doc;
+  if (!doc) return { mode: S.policy.loading ? "…" : "—", anon: "—", anonOn: false };
+  const mode = INBOX_MODES.find(m => m.id === doc.mode)?.label ?? doc.mode;
+  const anon = doc.anonymous?.allow
+    ? (doc.anonymous.challenge === "pow"
+        ? `On · ${clampPowBits(doc.anonymous.pow_bits ?? 0)} bits`
+        : "On")
+    : "Off";
+  return { mode, anon, anonOn: Boolean(doc.anonymous?.allow) };
+}
+
+async function loadPolicy({ force = false } = {}) {
+  const P = S.policy;
+  if (P.loading || (P.loaded && !force)) return;
+  const client = clientFor(S.identity);
+  if (!client) return;
+  P.loading = true;
+  try {
+    const { policy, explicit } = await client.policy();
+    P.doc = policy;
+    P.explicit = explicit;
+    P.loaded = true;
+  } catch (error) {
+    console.warn("Policy read failed:", error.message);
+  } finally {
+    P.loading = false;
+    if (!R.sub) render();
+  }
+}
+
+function showPolicyPanel() {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  showPanel("Inbox", `<div id="policy-host"></div>`, async (close) => {
+    const host = q("#policy-host");
+    if (!host) return;
+    host.textContent = "Loading…";
+    await loadPolicy({ force: true });
+    const controls = PolicyControls({
+      policy: S.policy.doc ?? {},
+      explicit: S.policy.explicit,
+      onSave: async (document) => {
+        // One write of the whole document: mode and the anonymous block live
+        // together, and `setPolicy` is the same call `poweur policy set` makes.
+        await client.setPolicy(document.mode, document.anonymous);
+        await loadPolicy({ force: true });
+        S.anon.loaded = false;
+        toast("Inbox policy saved", "success");
+        close();
+      },
+    });
+    host.replaceChildren(controls.el);
+  });
+}
+
+/** Drain the anonymous queue — challenge-signed, so serialized like the rest. */
+function loadAnon({ force = false } = {}) {
+  const A = S.anon;
+  if (A.loading || (A.loaded && !force)) return Promise.resolve();
+  const client = clientFor(S.identity);
+  if (!client) return Promise.resolve();
+  A.loading = true;
+  return challengeSerial(async () => {
+    try {
+      // `GET /anon/{id}` drains like the inbox: keep what we have been handed.
+      mergeInto(A.messages, await client.anon());
+      A.loaded = true;
+      A.error = null;
+    } catch (error) {
+      A.error = `Could not read anonymous messages: ${error.message}`;
+    } finally {
+      A.loading = false;
+      if (R.page === "messages" && !R.sub) render();
+    }
+  });
 }
 
 // ─── Keys & devices (EPIC-011) ───────────────────────────────────────────────

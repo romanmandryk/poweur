@@ -1,6 +1,6 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
-- **Status:** in progress — T6, T1 and T2 done; T3–T5 open
+- **Status:** in progress — T6, T1, T2 and T3 done; T4–T5 open
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
@@ -245,22 +245,41 @@ tray with the intro, accepts, B's pin is asserted from the stored document, B re
 receives it — plus a simulated key swap that raises the blocking dialog, refuses the send,
 and goes through only after "Trust new key".
 
-### E15-T3 — Inbox policy, anonymous & PoW settings
+### E15-T3 — Inbox policy, anonymous & PoW settings — **done**
 
-- [ ] PolicyControls panel in Settings: choose mode (open / contacts_only /
-      contacts_and_requests) with plain-language descriptions of each
-- [ ] Anonymous block editor: allow toggle, challenge (none / pow), a **difficulty slider
-      in human terms** ("~1 s on a laptop, ~10 s on a phone" from the E14 measured table),
-      max-bytes / max-per-day; writes the `anonymous` object into `inbox-policy.json`
-- [ ] Distinguish **verified / payment** as visible-but-disabled ("coming soon") so the
-      vocabulary is discoverable
-- [ ] Anonymous tray in Messages: reads `GET /anon/{id}`, renders each message visibly
-      **unauthenticated** (no sender, no reply affordance), decrypts client-side
-- [ ] Wire `js/pow.js` into an anonymous **send** path (used by E15-T5 / EPIC-012 too):
-      solve with a progress indicator, warn above ~20 bits
+- [x] `js/components/policy-controls.js`: the mode picker with plain-language descriptions,
+      framework-free and app-shell-free like the other components. It edits **one**
+      document — mode and the `anonymous` block are saved together, because "open" plus
+      anonymous-denied and "open" plus anonymous-allowed-at-8-bits are different inboxes
+- [x] Anonymous block editor: allow toggle, challenge, difficulty slider, max-bytes /
+      max-per-day. Turning anonymous off writes **no** `anonymous` key at all rather than
+      `allow: false` — an absent block already means deny, everywhere
+- [x] **Difficulty in human terms.** The slider labels each stop with what the *sender's
+      browser* pays ("22 bits — about ~15 s on a laptop, ~40 s on a phone") and warns past
+      20 bits. The numbers are the E14 measured table with that document's own 5–10×
+      browser penalty applied: quoting the native Go timings to someone dialling a cost for
+      web senders understates it by an order of magnitude
+- [x] **verified / payment** are shown disabled and labelled "soon" — designed policy slots
+      the relay answers but does not enforce, so the vocabulary is discoverable without
+      promising a gate that is not there
+- [x] Anonymous tray in Messages: drains `GET /anon/{id}` and renders each message as a
+      different kind of object — no avatar, no sender line, no reply and no add-contact.
+      Decryption is client-side (the SDK's `anonQueue`)
+- [x] Anonymous **send** from compose, behind a toggle that says plainly what it costs the
+      reader (no sender, no reply). The PoW is solved in the page with attempt-count
+      progress and a warning over 20 bits
 
-**Acceptance:** a user enables anonymous+PoW from Settings; an anonymous message solved in
-the browser appears in the anonymous tray and nowhere else; the policy file round-trips.
+**Landed in `@poweur/client`:** `sendAnonymous` gained `onSolveProgress` and `signal`. It
+already reported the challenge, but not the mining, so a 24-bit challenge was a tab that
+sat still for a minute with no way to stop it — the failure mode that teaches people to
+distrust the feature. Covered in `test/messaging-relay.test.ts` (progress across chunks at
+20 bits; abort at 26).
+
+**Acceptance:** met — `test/e2e/policy.spec.js`. A user sets mode + anonymous + PoW from
+Settings; the Settings rows and the stored document both reflect it; a second browser
+sends anonymously, solving the proof-of-work *in the page*; the message appears in the
+anonymous tray with no reply affordance and the signed inbox stays empty. A second case
+asserts the default: an identity that never opted in refuses the same send, visibly.
 
 ### E15-T4 — Files explorer & sharing
 

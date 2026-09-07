@@ -59,8 +59,9 @@ retry:  same message + {"challenge_token": "…", "challenge_solution": "…"}
 Accepted messages land in a **dedicated anonymous queue** (`GET /anon/{identity}`,
 challenge-signed owner drain — same auth as the inbox), never the signed inbox or the
 contact-requests queue. Clients MUST render them visibly differently
-(`poweur anon` prints an `ANONYMOUS` marker and a trust warning; there is no reply
-affordance — there is nobody to reply to).
+(`poweur anon` prints an `ANONYMOUS` marker and a trust warning; the web app's
+**Anonymous** tray drops the avatar and sender line entirely and offers no reply or
+add-contact affordance — there is nobody to reply to or add).
 
 ## Proof-of-work (`sha256-lead0`)
 
@@ -81,7 +82,8 @@ responsiveness).
 | 26 | ~36 s | hostile-sender territory |
 
 Recipient dials are clamped into **[8, 30] bits**. Above ~20 bits, phone browsers get
-uncomfortable — UIs should say so on the slider.
+uncomfortable — UIs should say so on the slider. The web app's policy panel does: it
+labels each stop with browser-side seconds (the table above ×5–10) and warns past 20.
 
 ### Token mechanics
 

@@ -417,6 +417,13 @@ export interface AnonSendOptions {
   /** Solve a PoW challenge and retry. Default true. */
   solveChallenge?: boolean;
   onChallenge?: (challenge: { type: string; bits: number }) => void;
+  /**
+   * Attempts so far, between solver chunks. A 24-bit challenge is tens of
+   * seconds in a browser, so a UI that cannot show progress can only look
+   * frozen — and one that cannot `signal` an abort cannot be cancelled.
+   */
+  onSolveProgress?: (attempts: number) => void;
+  signal?: AbortSignal;
   clientFor?: (relayUrl: string) => RelayClient;
   /** Scheme to assume for the recipient's relay when resolving. */
   scheme?: "http" | "https";
@@ -481,7 +488,10 @@ export async function sendAnonymous(
     }
     options.onChallenge?.({ type, bits });
     body["challenge_token"] = token;
-    body["challenge_solution"] = await solvePow(token, bits);
+    body["challenge_solution"] = await solvePow(token, bits, {
+      ...(options.onSolveProgress ? { onProgress: options.onSolveProgress } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
     response = await post();
   }
 

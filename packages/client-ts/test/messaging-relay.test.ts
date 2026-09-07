@@ -191,6 +191,44 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     expect(queue.some((m) => m.plaintext === "solved for you")).toBe(true);
   }, 120_000);
 
+  it("reports solver progress and can be aborted mid-solve", async () => {
+    const target = await createTestIdentity(relay.baseUrl, "powprog");
+    await target.client.setPolicy(INBOX_OPEN, {
+      allow: true,
+      challenge: ANON_CHALLENGE_POW,
+      // High enough to take more than one solver chunk, so progress is real.
+      pow_bits: 20,
+    });
+
+    // Progress is what lets a browser show a spinner instead of freezing.
+    const attempts: number[] = [];
+    await sendAnonymous(target.identity, "worth the wait", {
+      resolve: localResolveOptions(relay.baseUrl),
+      targetRelayUrl: relay.baseUrl,
+      onSolveProgress: (count) => attempts.push(count),
+    });
+    expect(attempts.length).toBeGreaterThan(0);
+    expect(attempts.at(-1)).toBeGreaterThan(attempts[0] ?? 0);
+
+    // …and abort is what lets them change their mind about paying the cost.
+    // 26 bits so the solve cannot finish by luck before the abort lands.
+    const costly = await createTestIdentity(relay.baseUrl, "powstop");
+    await costly.client.setPolicy(INBOX_OPEN, {
+      allow: true,
+      challenge: ANON_CHALLENGE_POW,
+      pow_bits: 26,
+    });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+    await expect(
+      sendAnonymous(costly.identity, "never mind", {
+        resolve: localResolveOptions(relay.baseUrl),
+        targetRelayUrl: relay.baseUrl,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/aborted/);
+  }, 180_000);
+
   it("reports relay health", async () => {
     const health = await alice.client.identity.health();
     expect(health.status).toBeTruthy();

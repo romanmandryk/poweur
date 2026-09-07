@@ -1,15 +1,19 @@
 /**
  * @vitest-environment happy-dom
  *
- * The three shared components (E15-T1). They are the epic's real deliverable —
- * compose, add-contact, the share dialog and EPIC-012's public contact form all
- * consume them — so they are tested directly rather than through the shell.
+ * The shared components (E15-T1, plus PolicyControls in E15-T3). They are the
+ * epic's real deliverable — compose, add-contact, the share dialog, settings
+ * and EPIC-012's public contact form all consume them — so they are tested
+ * directly rather than through the shell.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { IdentityInput, isValidIdentity } from "../js/components/identity-input.js";
 import { AudiencePicker } from "../js/components/audience-picker.js";
 import { ProfileCard } from "../js/components/profile-card.js";
+import {
+  PolicyControls, INBOX_MODES, describePowBits, powCost, POW_UNCOMFORTABLE_BITS,
+} from "../js/components/policy-controls.js";
 import { avatarColor, el, handleOf } from "../js/components/dom.js";
 
 const entry = (identity, extra = {}) => ({
@@ -279,5 +283,87 @@ describe("dom helpers", () => {
   it("gives an identity a stable avatar colour", () => {
     expect(avatarColor("alice.poweur.net")).toBe(avatarColor("alice.poweur.net"));
     expect(handleOf("alice.poweur.net")).toBe("alice");
+  });
+});
+
+describe("PolicyControls", () => {
+  const save = () => Promise.resolve();
+
+  it("offers every mode the relay implements, and marks the current one", () => {
+    const controls = PolicyControls({ policy: { mode: "contacts_only" }, onSave: save });
+    const options = controls.el.querySelectorAll(".policy-mode");
+    expect(options).toHaveLength(INBOX_MODES.length);
+    const selected = controls.el.querySelector(".policy-mode.selected");
+    expect(selected.dataset.mode).toBe("contacts_only");
+    expect(selected.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("writes no anonymous block at all when anonymous is off", () => {
+    const controls = PolicyControls({ policy: { mode: "open" }, onSave: save });
+    // An absent block *is* deny — writing `allow: false` would say the same
+    // thing in a way the relay has to interpret.
+    expect(controls.value()).toEqual({ version: 1, mode: "open" });
+  });
+
+  it("keeps the difficulty dial out of the document unless the challenge is pow", () => {
+    const controls = PolicyControls({
+      policy: { mode: "open", anonymous: { allow: true, challenge: "none", pow_bits: 22 } },
+      onSave: save,
+    });
+    expect(controls.value().anonymous).toEqual({
+      allow: true, challenge: "none", max_bytes: 4096, max_per_day: 20,
+    });
+
+    controls.el.querySelector('[data-challenge="pow"]').click();
+    expect(controls.value().anonymous.pow_bits).toBe(22);
+  });
+
+  it("shows the two designed-but-unenforced challenges as disabled", () => {
+    const controls = PolicyControls({
+      policy: { mode: "open", anonymous: { allow: true } }, onSave: save,
+    });
+    expect(controls.el.querySelector('[data-challenge="verified"]').disabled).toBe(true);
+    expect(controls.el.querySelector('[data-challenge="payment"]').disabled).toBe(true);
+    expect(controls.el.querySelector('[data-challenge="pow"]').disabled).toBe(false);
+  });
+
+  it("describes the difficulty in time, and warns once a phone would suffer", () => {
+    const controls = PolicyControls({
+      policy: { mode: "open", anonymous: { allow: true, challenge: "pow", pow_bits: 16 } },
+      onSave: save,
+    });
+    const slider = controls.el.querySelector("#policy-pow-bits");
+    const warning = controls.el.querySelector("#policy-bits-warning");
+    expect(controls.el.querySelector("#policy-bits-readout").textContent).toContain("16 bits");
+    expect(warning.hidden).toBe(true);
+
+    slider.value = "24";
+    slider.dispatchEvent(new Event("input"));
+    expect(controls.el.querySelector("#policy-bits-readout").textContent).toContain("24 bits");
+    expect(warning.hidden).toBe(false);
+    expect(controls.value().anonymous.pow_bits).toBe(24);
+  });
+
+  it("quotes browser cost, which is what the sender actually pays", () => {
+    // The measured table is native Go; a browser is 5–10x slower, and the
+    // person paying is on a browser.
+    expect(powCost(16).phone).toBe("~1 s");
+    expect(powCost(21).bits).toBe(20);
+    expect(describePowBits(20)).toMatch(/laptop.*phone/);
+    expect(POW_UNCOMFORTABLE_BITS).toBe(20);
+  });
+
+  it("hands the caller one document and reports a failed save", async () => {
+    const saves = [];
+    const controls = PolicyControls({
+      policy: { mode: "open" },
+      onSave: (document) => { saves.push(document); return Promise.reject(new Error("relay said no")); },
+    });
+    controls.el.querySelector('[data-mode="contacts_and_requests"]').click();
+    controls.el.querySelector("#policy-save").click();
+    await settle();
+
+    expect(saves).toEqual([{ version: 1, mode: "contacts_and_requests" }]);
+    expect(controls.el.querySelector(".idin-status").textContent).toBe("relay said no");
   });
 });

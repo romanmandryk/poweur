@@ -11,7 +11,7 @@
 |------|--------|-------|
 | E07-T1 Spec + schemas | **done** | [`apps/docs/docs/trust/contacts.md`](../apps/docs/docs/trust/contacts.md); formats in `packages/identity` (`contacts.go`, `inboxpolicy.go`), schemas + PCP-0004; `sys.contact.*` are envelope-level types bound into the message signature (`CanonicalMessageTyped`) since EPIC-009 typed payloads haven't landed |
 | E07-T2 Relay enforcement | **done** | Policy evaluated in `handleMessagesPost` for local + forwarded senders (`TestPolicyEnforcedOnForwardedCrossRelay`); requests queue (`GET /requests/{identity}`, memory-only until EPIC-009) with one-slot dedup + 7-day cooldown; uniform `policy_rejected` (blocks not observable); default without a policy file = `open` for compatibility — clients set `contacts_and_requests` |
-| E07-T3 Contact UX | **partial** | CLI shipped: `contacts ls/add/request/accept/block/rm`, `requests`, `policy show/set`; full request→accept→chat covered by `TestINT_CONTACTS_01`. **Deferred → [EPIC-015](EPIC-015-web-app-ux.md):** web app contacts/requests UI + profile cards; `poweur send` auto-prompt to send a request (the relay's rejection hint covers it) |
+| E07-T3 Contact UX | **done** | CLI shipped: `contacts ls/add/request/accept/block/rm`, `requests`, `policy show/set`; full request→accept→chat covered by `TestINT_CONTACTS_01`. Web app shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T2/T3: contacts with profile cards and states, requests tray, policy panel. **Open:** tray badge counts; `poweur send` auto-prompt to send a request (the relay's rejection hint covers it) |
 | E07-T4 Key pinning | **done** (fingerprint format open) | Pin at add/request/accept; send-time compare with rotation-statement awareness (`previous_keys`) and `--accept-new-key` override; key-swap covered by `TestINT_CONTACTS_02`. **Open:** short-auth-string fingerprint display format (full keys printed today). The web blocking dialog landed with [EPIC-015](EPIC-015-web-app-ux.md) E15-T2 |
 | E07-T5 Abuse pressure | **open** | Only `sys.abuse.report` registry reservation done; per-sender-relay metering, blocklists design doc, block export await a follow-up (PoW primitive comes from EPIC-014) |
 
@@ -95,8 +95,10 @@ this epic turns verified identity into *usable trust*.
 - [x] CLI: `poweur contacts ls/add/request/accept/block/rm`, `poweur requests`, `poweur
       policy show/set` (send-to-non-contact prompt deferred — the relay's rejection hint
       tells the sender to request)
-- [ ] **Deferred:** web app (`apps/web/js/app.js`): contacts list with profile cards (E06-T2), requests
-      inbox with accept/block, badge counts; message composer constrained by policy errors
+- [x] Web app: contacts list with profile cards, requests tray with accept/block, and the
+      policy panel — shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T2/T3.
+      **Still open:** unread badge counts on the trays, and a composer that reads a policy
+      rejection back into the UI (it surfaces the relay's error text today)
 - [x] CLI writes/reads `contacts.json` through the normal file API so contacts sync
       across devices for free (EPIC-004)
 

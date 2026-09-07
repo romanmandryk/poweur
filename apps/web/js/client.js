@@ -62,6 +62,15 @@ export function identityApiFor(relayUrl) {
   return new IdentityApi(relayUrl);
 }
 
+/**
+ * Resolve options for a call with no signer behind it — the anonymous send
+ * path (E15-T3), which resolves the *recipient's* relay and encryption key
+ * without ever touching our own keys.
+ */
+export function resolveOptionsForRelay(relayUrl) {
+  return resolveOptions(relayUrl);
+}
+
 /** `poweur identity lookup`, resolved web-first with the relay as a fallback host. */
 export function lookup(identity, relayUrl) {
   return resolveIdentity(identity, resolveOptions(relayUrl));

@@ -130,14 +130,20 @@ proof-of-work:
 ```ts
 import { sendAnonymous } from "@poweur/client";
 
+const cancel = new AbortController();
+
 await sendAnonymous("alice.poweur.net", "hello stranger", {
   onChallenge: ({ bits }) => console.log(`solving ${bits} bits…`),
+  onSolveProgress: (attempts) => console.log(`${attempts} hashes…`),
+  signal: cancel.signal,
 });
 ```
 
 The solver yields to the event loop between chunks, so a browser tab stays
 responsive. Expect roughly 2^bits hashes: JavaScript runs 5–10× slower than the
-Go solver, so warn users above ~20 bits.
+Go solver, so warn users above ~20 bits. At those difficulties a UI needs both
+of the last two options — `onSolveProgress` to show that work is happening, and
+`signal` so the user can stop paying.
 
 ## Browser vs Node
 

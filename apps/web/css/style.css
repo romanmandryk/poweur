@@ -1370,3 +1370,70 @@ input, textarea, select { font-family: inherit; }
 }
 .panel-actions .btn-primary { background: var(--accent); color: #fff; }
 .panel-actions .btn-danger  { background: rgba(255,59,48,.12); color: var(--red); }
+
+/* ─── E15-T3: inbox policy, anonymous & proof-of-work ─────────────────────── */
+
+.policy-modes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.policy-mode {
+  text-align: left;
+  background: var(--surface-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--t1);
+  min-height: 44px;
+}
+.policy-mode.selected { border-color: var(--accent); background: var(--accent-light); }
+.policy-mode-label { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.policy-mode-detail { line-height: 1.35; }
+
+.policy-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  cursor: pointer;
+  min-height: 44px;
+}
+.policy-check { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.policy-toggle-label { font-size: 15px; font-weight: 600; }
+.policy-toggle-detail { line-height: 1.35; }
+
+.policy-challenges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.policy-challenge {
+  border: 1px solid var(--sep);
+  background: var(--surface-2);
+  color: var(--t1);
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 36px;
+}
+.policy-challenge.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+.policy-challenge:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The dial people actually reason about is time, so the readout is the label
+   and the bits are the footnote. */
+.policy-slider { width: 100%; accent-color: var(--accent); height: 32px; }
+.policy-bits-readout { color: var(--t1); font-weight: 600; margin-bottom: 4px; }
+
+/* Anonymous messages must not look like conversations: no avatar, no sender,
+   nothing to tap. */
+.anon-explainer {
+  padding: 12px 16px;
+  color: var(--t2);
+  background: rgba(255,149,0,.08);
+  border-bottom: 1px solid var(--sep);
+  margin: 0;
+}
+.anon-row {
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--sep);
+}
+.anon-row:last-child { border-bottom: none; }
+.anon-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.anon-body { font-size: 15px; color: var(--t1); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.compose-anon { border-top: 1px solid var(--sep); margin-top: 4px; }
