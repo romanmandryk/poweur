@@ -1,0 +1,56 @@
+[
+  {
+    "name": "accepted",
+    "raw": {
+      "version": 1,
+      "contacts": [
+        {
+          "identity": "bob.example.org",
+          "state": "accepted",
+          "pinned_key": "ed25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "petname": "Bob",
+          "added_at": "2026-01-15T09:30:00Z"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "empty",
+    "raw": {
+      "version": 1,
+      "contacts": []
+    },
+    "valid": true
+  },
+  {
+    "name": "bad-state",
+    "raw": {
+      "version": 1,
+      "contacts": [
+        {
+          "identity": "bob.example.org",
+          "state": "pending"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "duplicate",
+    "raw": {
+      "version": 1,
+      "contacts": [
+        {
+          "identity": "bob.example.org",
+          "state": "accepted"
+        },
+        {
+          "identity": "BOB.example.org",
+          "state": "blocked"
+        }
+      ]
+    },
+    "valid": false
+  }
+]

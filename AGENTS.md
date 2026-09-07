@@ -44,6 +44,37 @@ Hosted-identity path (web identity, no DNS token):
 cd apps/integration && go test -run TestINT_HOSTED -count=1 -v
 ```
 
+### TypeScript client tests (`packages/client-ts`)
+
+`@poweur/client` is the published TS/JS implementation of the protocol. It has
+Vitest unit tests **plus** suites that spawn a real Go relay (`go run`), same
+spirit as the CLI integration tests, **plus** a Go↔TS interop suite that drives
+the real `poweur` binary as a subprocess against a shared `~/.poweur` tree.
+
+```bash
+pnpm client:build
+pnpm client:test        # unit + conformance + live-relay + Go↔TS interop
+pnpm client:typecheck
+```
+
+**Protocol changes must regenerate the conformance vectors in the same change
+set.** Go stays canonical; the TS client conforms to it via fixtures generated
+by three Go tests, each living beside the code it pins:
+
+| Generator | Pins |
+|-----------|------|
+| `packages/identity/vectors_test.go` | identity documents, grants, groups, PoW, names, `poweur-sys` docs |
+| `apps/api/internal/crypto/vectors_test.go` | every canonical signing string |
+| `apps/cli/internal/crypto/vectors_test.go` | message encryption (X25519 + HKDF + ChaCha20-Poly1305) |
+
+```bash
+pnpm vectors    # regenerate all of them into packages/identity/testdata/vectors/
+```
+
+A canonical string changed in Go without a matching TypeScript change turns CI
+red. Do not "fix" that by editing the fixture — change `packages/client-ts` to
+match Go, or reconsider the protocol change.
+
 ### Web client tests (Vitest + Playwright)
 
 `apps/web` tests spawn a **real Go relay** (`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR`), same spirit as CLI integration tests.
@@ -76,6 +107,8 @@ Run the slice you touched **and** `apps/integration` (and `apps/web` tests if th
 | Sessions | Short-lived; memory-only until EPIC-009 |
 | Storage | Durable identity docs under `POWEUR_DATA/identities/.../poweur-sys/public/id.json` |
 | SSRF | Well-known fetch: no redirects, size/time caps, no private IPs unless test flag |
+| Two implementations | Go is canonical; `packages/client-ts` conforms via generated vectors |
+| Shared CLI state | Both CLIs read/write `~/.poweur` (`config.toml`, `keys/`, `sessions/`, `pending/`) — never fork the format |
 
 ## Epics and deferrals
 
@@ -96,7 +129,8 @@ apps/api          Go relay
 apps/cli          Go CLI
 apps/web          Vanilla JS client (served at /app/)
 apps/integration  In-process E2E tests
-packages/identity Shared identity document + resolver
+packages/identity Shared identity document + resolver (Go, canonical)
+packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)
 epics/            Roadmap / task tracking
 ```
 

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  go:
+    name: Go (relay, CLI, identity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/api/go.sum
+            apps/cli/go.sum
+            apps/integration/go.sum
+            packages/identity/go.sum
+
+      - name: Unit tests
+        run: |
+          go test ./packages/identity/...
+          go test ./apps/api/...
+          go test ./apps/cli/...
+
+      - name: Integration tests (real in-process relays)
+        working-directory: apps/integration
+        run: go test ./... -count=1
+
+  client-ts:
+    name: "@poweur/client"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/api/go.sum
+            packages/identity/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter @poweur/client
+
+      # Go stays canonical: regenerate the conformance vectors from the Go
+      # implementation before the TypeScript suite consumes them. A canonical
+      # string changed in Go without a matching TS change fails the next step.
+      - name: Regenerate conformance vectors
+        run: pnpm vectors
+
+      # The deterministic vectors must round-trip byte-for-byte. encryption.json
+      # is excluded on purpose: every seal uses a fresh ephemeral key and nonce,
+      # so its bytes change on every run by design.
+      - name: Deterministic vectors are reproducible
+        run: |
+          git diff --exit-code -- \
+            packages/identity/testdata/vectors/canonical.json \
+            packages/identity/testdata/vectors/documents.json \
+            packages/identity/testdata/vectors/grant-paths.json \
+            packages/identity/testdata/vectors/grants.json \
+            packages/identity/testdata/vectors/groups.json \
+            packages/identity/testdata/vectors/names.json \
+            packages/identity/testdata/vectors/pow.json \
+            packages/identity/testdata/vectors/pow-clamp.json \
+            packages/identity/testdata/vectors/contacts.json \
+            packages/identity/testdata/vectors/inbox-policies.json
+
+      - run: pnpm client:typecheck
+      - run: pnpm client:build
+
+      # The suite spawns a real Go relay (`go run`) for the integration files.
+      - run: pnpm client:test
+
+      - name: Built output imports cleanly from plain Node ESM
+        run: |
+          node --input-type=module -e "
+            import { PoweurClient, solvePow, PROTOCOL_VERSION } from './packages/client-ts/dist/index.js';
+            if (typeof PoweurClient !== 'function' || typeof solvePow !== 'function') process.exit(1);
+            console.log('protocol v' + PROTOCOL_VERSION);
+          "
+
+      - name: CLI runs from the built output
+        run: node packages/client-ts/dist/cli/bin.js version

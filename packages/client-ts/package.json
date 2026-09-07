@@ -1,0 +1,58 @@
+{
+  "name": "@poweur/client",
+  "version": "0.1.0",
+  "description": "Poweur protocol client — identity, messaging, files, sync, shares and proof-of-work for browser, Node, Bun and Deno.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "poweur": "./dist/cli/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./crypto": "./dist/crypto/index.js",
+    "./canonical": "./dist/canonical.js",
+    "./resolve": "./dist/resolve.js",
+    "./identity": "./dist/identity.js",
+    "./messages": "./dist/messages.js",
+    "./files": "./dist/files.js",
+    "./sync": "./dist/sync.js",
+    "./shares": "./dist/shares.js",
+    "./contacts": "./dist/contacts.js",
+    "./policy": "./dist/policy.js",
+    "./pow": "./dist/pow.js",
+    "./node": "./dist/node/index.js",
+    "./browser": "./dist/browser/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/postbuild.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run clean && pnpm run build"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.1.3",
+    "@noble/curves": "^1.7.0",
+    "@noble/hashes": "^1.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["poweur", "identity", "ed25519", "e2ee", "webdav", "messaging"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

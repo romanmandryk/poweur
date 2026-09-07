@@ -1,0 +1,51 @@
+[
+  {
+    "name": "open",
+    "raw": {
+      "version": 1,
+      "mode": "open"
+    },
+    "valid": true
+  },
+  {
+    "name": "contacts-only",
+    "raw": {
+      "version": 1,
+      "mode": "contacts_only"
+    },
+    "valid": true
+  },
+  {
+    "name": "anon-pow",
+    "raw": {
+      "version": 1,
+      "mode": "contacts_and_requests",
+      "anonymous": {
+        "allow": true,
+        "challenge": "pow",
+        "pow_bits": 18
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "bad-mode",
+    "raw": {
+      "version": 1,
+      "mode": "everyone"
+    },
+    "valid": false
+  },
+  {
+    "name": "bad-challenge",
+    "raw": {
+      "version": 1,
+      "mode": "open",
+      "anonymous": {
+        "allow": true,
+        "challenge": "captcha"
+      }
+    },
+    "valid": false
+  }
+]

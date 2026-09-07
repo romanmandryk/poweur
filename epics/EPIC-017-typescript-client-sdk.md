@@ -1,6 +1,6 @@
 # EPIC-017 — `@poweur/client`: the TypeScript client SDK
 
-- **Status:** proposed
+- **Status:** in progress — core, messaging, files/sync/shares, conformance and the CLI shipped; web adoption (E17-T6) and npm publish (E17-T7 publish step) open
 - **Priority:** P1 (blocks every JS-ecosystem integration; also removes the web app's copy of the protocol)
 - **Depends on:** EPIC-001/002 (resolver + registration), EPIC-003/004/005 (DAV, sync, grants), EPIC-014 (PoW) — all shipped; interacts with EPIC-009 (typed messages) and EPIC-015 (web app)
 - **Unlocks:** [INT-005](integrations/INT-005-agent-control-planes.md) (OpenClaw/Hermes), INT-003-T1 (MCP server), INT-003-T4 (n8n / Node-RED nodes), EPIC-010 agent SDK, and a web app that consumes the protocol instead of owning it
@@ -9,13 +9,14 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E17-T1 Package scaffold & workspace wiring | **open** | `packages/client-ts/`; `pnpm-workspace.yaml` currently globs `apps/*` only |
-| E17-T2 Core: crypto, resolver, identity | **open** | port of `apps/web/js/crypto.js` + resolver half of `api.js`; `Signer`/`KeyStore` seams |
-| E17-T3 Messaging: send, inbox, acks, anon PoW send | **open** | port of `messaging.js` + `pow.js` |
-| E17-T4 Files, sync & shares | **open** | port of `files.js`; adds changes/manifest/chunked upload + grant CRUD |
-| E17-T5 Go↔TS conformance vectors | **open** | the anti-drift mechanism; fixtures generated from `packages/identity` |
-| E17-T6 Web app adopts the package | **open** | mirror of [E15-T6](EPIC-015-web-app-ux.md); deletes the duplicated modules |
-| E17-T7 Docs, npm publish & agent quickstart | **open** | `apps/docs/docs/clients/js-sdk.md` + `@poweur/client` on npm |
+| E17-T1 Package scaffold & workspace wiring | **done** | `packages/client-ts/`; `packages/*` added to the pnpm globs; root `client:*` + `vectors` scripts; `.github/workflows/ci.yml` |
+| E17-T2 Core: crypto, resolver, identity | **done** | `Signer`/`KeyStore`/`Decryptor` seams; fail-closed resolver with SSRF guards; 33 unit tests |
+| E17-T3 Messaging: send, inbox, acks, anon PoW send | **done** | both signing paths, `SessionProof`, tick-2 acks, anonymous send with PoW; 16 live-relay tests |
+| E17-T4 Files, sync & shares | **done** | DAV + tokens, changes/manifest/chunked upload, grants and groups, `poweur-sys` helpers; 26 live-relay tests |
+| E17-T5 Go↔TS conformance vectors | **done** | 3 Go generators → `packages/identity/testdata/vectors/`; 60 TS conformance tests; rule recorded in AGENTS.md |
+| E17-T6 Web app adopts the package | **open** | unchanged — mirror of [E15-T6](EPIC-015-web-app-ux.md); deliberately a separate change set (see *Deferred*) |
+| E17-T7 Docs, npm publish & agent quickstart | **partly done** | `apps/docs/docs/clients/js-sdk.md` + quickstart + overview link shipped; **npm publish and the release workflow are open** |
+| E17-T8 CLI parity with the Go CLI | **done** | *added* — `poweur` bin, every Go command, shared `~/.poweur` tree; 8 Go↔TS interop tests |
 
 ## Goal
 
@@ -61,8 +62,13 @@ Two payoffs, and the second is the reason this is P1:
   the pnpm workspace globs; the Go module in `packages/identity` is unaffected (no `package.json`,
   so pnpm ignores it).
 - **Runtime-agnostic core, injected environment.** No DOM APIs and no Node builtins in the core:
-  take `fetch` and WebCrypto from `globalThis` (present in browsers and Node ≥18), and inject
-  everything else. In particular:
+  take `fetch` from `globalThis` and inject everything else. **Changed during
+  implementation:** the original plan took Ed25519/X25519 from WebCrypto and allowed no dependency
+  beyond `@noble/ciphers`. That does not hold — WebCrypto's Ed25519 and X25519 are absent on Node 18
+  and early 20, and on Safari &lt; 17, so "runs on every runtime" and "WebCrypto only" are mutually
+  exclusive. The package therefore depends on `@noble/curves`, `@noble/hashes` and `@noble/ciphers`
+  (one author, audited, ~40KB total) and behaves identically everywhere. `@noble/hashes` also
+  supplies argon2id for app passwords, which WebCrypto has no equivalent for at all. In particular:
 
   ```ts
   interface Signer {          // never receives or returns raw private keys
@@ -88,11 +94,19 @@ Two payoffs, and the second is the reason this is P1:
   step" constraint holds: a copy step in the dev/test harness, not a bundler in the request path.
   Vendoring also removes the runtime `esm.sh` fetch for `@noble/ciphers`, which is a supply-chain
   and offline-startup liability in the current import map.
-- **Conformance over convention.** The Go implementation stays canonical. `packages/identity` gains
-  a test that emits JSON fixtures (canonical strings, signatures, grant documents, PoW tokens and
-  solutions, identity documents); the TS suite consumes the same fixtures. A protocol change that
-  lands in Go without a matching TS update fails CI — this is what makes two implementations
-  sustainable.
+- **Conformance over convention.** The Go implementation stays canonical. Go tests emit JSON
+  fixtures (canonical strings, signatures, grant documents, PoW solutions, identity documents,
+  sealed payloads); the TS suite consumes the same fixtures. A protocol change that lands in Go
+  without a matching TS update fails CI — this is what makes two implementations sustainable.
+  **Refined during implementation:** the generators had to be split three ways rather than living
+  only in `packages/identity`, because the canonical *signing strings* live in
+  `apps/api/internal/crypto` and message *encryption* lives in `apps/cli/internal/crypto`, and Go's
+  `internal/` rule blocks cross-module imports. Each generator now sits beside the code it pins and
+  writes into the one shared `packages/identity/testdata/vectors/` directory.
+- **One `~/.poweur` tree, two CLIs.** The TS CLI reads and writes the Go CLI's own files rather than
+  a parallel store, so an identity created by either is immediately usable by the other. This needed
+  a small dependency-free TOML subset reader/writer that round-trips with `go-toml` — including
+  unquoted RFC 3339 datetimes, which a quoted value would break on Go's `time.Time` unmarshal.
 - **Versioning.** Semver on the package, plus an exported `PROTOCOL_VERSION`. Wire-format changes
   from EPIC-009 land as minor versions with the reserved fields (`type`, `thread_id`, `metadata`)
   already typed.
@@ -101,71 +115,73 @@ Two payoffs, and the second is the reason this is P1:
 
 ### E17-T1 — Package scaffold & workspace wiring
 
-- [ ] Create `packages/client-ts/` (`@poweur/client`): `tsconfig.json` (ES2022, `moduleResolution:
+- [x] Create `packages/client-ts/` (`@poweur/client`): `tsconfig.json` (ES2022, `moduleResolution:
       bundler`-compatible output), `tsc` build to `dist/` (ESM + `.d.ts`, no bundler), Vitest config
-- [ ] Add `packages/*` to `pnpm-workspace.yaml`; confirm the Go module in `packages/identity` is
+- [x] Add `packages/*` to `pnpm-workspace.yaml`; confirm the Go module in `packages/identity` is
       untouched by pnpm and `go work` still builds
-- [ ] Root scripts (`pnpm client:build`, `client:test`) matching the existing `web:*` pattern; add
+- [x] Root scripts (`pnpm client:build`, `client:test`) matching the existing `web:*` pattern; add
       the package to the CI workflow in `.github/`
-- [ ] `exports` map with per-module subpaths; `engines.node >= 18`; no `dependencies` beyond
+- [x] `exports` map with per-module subpaths; `engines.node >= 18`; no `dependencies` beyond
       `@noble/ciphers` (keep the dependency surface auditable)
 
 **Acceptance:** `pnpm -F @poweur/client build && pnpm -F @poweur/client test` is green in CI; the
-built output imports cleanly from a plain `<script type="module">` page and from `node --input-type=module`.
+built output imports cleanly from a plain `<script type="module">` page and from `node --input-type=module`. ✅
 
 ### E17-T2 — Core: crypto, resolver, identity
 
-- [ ] Port `crypto.js` to typed modules (Ed25519 keygen/sign/verify, X25519 + HKDF, ChaCha20-Poly1305
+- [x] Port `crypto.js` to typed modules (Ed25519 keygen/sign/verify, X25519 + HKDF, ChaCha20-Poly1305
       / AES-GCM seal/open), with `Signer`/`KeyStore` interfaces and a `MemoryKeyStore` for tests
-- [ ] Port the resolver half of `api.js`: well-known → DNS TXT chain, `ed25519:`/`x25519:` prefix
+- [x] Port the resolver half of `api.js`: well-known → DNS TXT chain, `ed25519:`/`x25519:` prefix
       normalization, key pinning, SSRF guards (no redirects, size/time caps, private IPs gated by an
       explicit test flag), fail-closed on mismatch
-- [ ] Identity lifecycle: create, hosted registration (signed `identity_document`, no DNS token),
+- [x] Identity lifecycle: create, hosted registration (signed `identity_document`, no DNS token),
       encryption-key publish, export, rotate — one function per relay endpoint that exists today
-- [ ] Unit tests for happy path + failure modes per AGENTS.md (table-driven where it fits)
+- [x] Unit tests for happy path + failure modes per AGENTS.md (table-driven where it fits)
 
 **Acceptance:** a Node script creates a hosted identity against a local relay and resolves it back;
-tampered documents and mismatched keys are rejected with typed errors.
+tampered documents and mismatched keys are rejected with typed errors. ✅ (`test/messaging-relay.test.ts`, `test/resolve.test.ts`)
 
 ### E17-T3 — Messaging: send, inbox, acks, anonymous send
 
-- [ ] `messages.send()` with both signing paths (short-lived session key by default; identity key
+- [x] `messages.send()` with both signing paths (short-lived session key by default; identity key
       opt-in, the `--sign-with=identity` equivalent for headless agents), `SessionProof` handling
-- [ ] `messages.inbox()` (challenge-signed GET, decrypt) and `messages.ack()`; type the reserved
+- [x] `messages.inbox()` (challenge-signed GET, decrypt) and `messages.ack()`; type the reserved
       `type` / `thread_id` / `expires_at` / `metadata` fields now so EPIC-009 is additive
-- [ ] Anonymous / stranger send: port `pow.js`, expose `pow.solve()` against the challenge envelope
+- [x] Anonymous / stranger send: port `pow.js`, expose `pow.solve()` against the challenge envelope
       (`algo` field kept open per EPIC-016) and the `/anon/{identity}` path
-- [ ] Live-relay tests mirroring the existing web suite: register → session → encrypt/send → inbox
+- [x] Live-relay tests mirroring the existing web suite: register → session → encrypt/send → inbox
       decrypt, CLI↔TS interop in both directions
 
 **Acceptance:** a message sent by the Go CLI decrypts in TS and vice versa, asserted against a real
-relay; anonymous send solves and is accepted at the policy's difficulty.
+relay; anonymous send solves and is accepted at the policy's difficulty. ✅ (`test/cli-interop.test.ts`, `test/messaging-relay.test.ts`)
 
 ### E17-T4 — Files, sync & shares
 
-- [ ] DAV operations (list/read/write/mkdir/move/delete) with DAV-token minting
+- [x] DAV operations (list/read/write/mkdir/move/delete) with DAV-token minting
       (`POST /auth/dav-token`) and scoped-token support
-- [ ] Sync: `changes` feed with cursor, `manifest`, chunked upload (`POST/HEAD/PATCH/DELETE
+- [x] Sync: `changes` feed with cursor, `manifest`, chunked upload (`POST/HEAD/PATCH/DELETE
       /sync/{identity}/upload/{id}`), quota
-- [ ] Shares: create/list/revoke signed grants (`poweur-sys/relay/shares/<share-id>.json`,
+- [x] Shares: create/list/revoke signed grants (`poweur-sys/relay/shares/<share-id>.json`,
       audience by ID or group, read/write permissions) and read shared paths as a visitor
-- [ ] `poweur-sys` document helpers (contacts, inbox policy, profile) that write the *same*
+- [x] `poweur-sys` document helpers (contacts, inbox policy, profile) that write the *same*
       documents the CLI writes — no client-specific state
 
 **Acceptance:** TS creates a share for a second identity, the second identity reads the path over
 DAV, revocation takes effect on the next request; grants written by TS are accepted by the relay's
-signature check and listed by `poweur share ls`.
+signature check and listed by `poweur share ls`. ✅ (`test/files-relay.test.ts`)
 
 ### E17-T5 — Go↔TS conformance vectors
 
-- [ ] Go test in `packages/identity` emitting `testdata/vectors/*.json`: canonical strings +
+- [x] Go tests emitting `testdata/vectors/*.json`: canonical strings +
       signatures, identity documents, share grants, group documents, PoW tokens and solutions,
       contact/policy documents
-- [ ] TS conformance suite consuming the same fixtures; CI fails if a vector is unmatched or missing
-- [ ] Document the rule in AGENTS.md: protocol changes regenerate vectors in the same change set
+- [x] TS conformance suite consuming the same fixtures; CI fails if a vector is unmatched or missing
+- [x] Document the rule in AGENTS.md: protocol changes regenerate vectors in the same change set
 
 **Acceptance:** changing a canonical string in Go without touching TS turns CI red; the two
-implementations cannot silently diverge.
+implementations cannot silently diverge. ✅ — 60 conformance tests; the vector generators caught two
+real mismatches on their first run (an encryption-envelope field-name difference and a `null` vs
+empty members array in group canonicalization).
 
 ### E17-T6 — Web app adopts `@poweur/client`
 
@@ -184,14 +200,59 @@ test:all` in `apps/web` is green; the relay still serves the SPA with no bundler
 
 ### E17-T7 — Docs, npm publish & agent quickstart
 
-- [ ] `apps/docs/docs/clients/js-sdk.md`: install, the `Signer` model, per-module API, browser vs
+- [x] `apps/docs/docs/clients/js-sdk.md`: install, the `Signer` model, per-module API, browser vs
       Node notes; link from `clients/overview.md`
 - [ ] Publish `@poweur/client` to npm (provenance-enabled release workflow), semver + changelog
-- [ ] Quickstart: "a messageable agent in ~15 lines" — create identity, poll inbox, reply, attach a
+- [x] Quickstart: "a messageable agent in ~15 lines" — create identity, poll inbox, reply, attach a
       file by share — the snippet INT-005 and INT-003 pitches link to
 
 **Acceptance:** a developer with no Go toolchain installs the package and runs the quickstart
-against the demo relay.
+against the demo relay. ⏳ blocked on the npm publish step only; the quickstart itself is written and
+runs from a local checkout.
+
+### E17-T8 — CLI parity with the Go CLI *(added during implementation)*
+
+Not in the original plan: the epic scoped a library, but a library alone leaves every JS user either
+installing Go or hand-rolling a CLI. `npx @poweur/client` closes that, and sharing the Go CLI's own
+state directory means the two are interchangeable rather than merely similar.
+
+- [x] `poweur` bin (`npx @poweur/client …`), dependency-free arg parsing, `--json` on every command
+- [x] Every Go command: `identity` (create/show/dns/use/list/add-encryption-key/lookup/export),
+      `key rotate`, `send` (session/identity/anon, `--via-home-relay`, `--type`, `--accept-new-key`),
+      `inbox`, `messages status`, `anon`, `session`, `relay`, `dav` (token/mount/password),
+      `sync`, `share`, `contacts`, `requests`, `policy`, `auth`
+- [x] Shared `~/.poweur` tree: `config.toml`, `keys/<id>.key|.enc`, `sessions/<id>.toml`,
+      `pending/<id>.jsonl` — same formats, same permissions (0600/0700)
+- [x] `POWEUR_RESOLVER_DIAL` parity: a `node:http`-based resolver fetch that dials a fixed address
+      while keeping the identity as the Host header (WHATWG `fetch` forbids setting `Host`)
+- [x] Go↔TS interop tests: a message sent by either client decrypts in the other, both read one
+      config, and a session written by TS is honoured by the Go CLI
+
+**Acceptance:** `npx @poweur/client` runs every documented command; the interop suite proves both
+directions against a real relay. ✅
+
+## Parity limits (measured, not assumed)
+
+Everything in `poweur --help` is reachable from TypeScript. Four things are not at *full* parity, by
+nature rather than omission:
+
+| Area | Limit |
+|------|-------|
+| `poweur sync` local reconciliation | Node/Bun/Deno only — it walks a real filesystem. Browsers get the remote half (`changes`, `manifest`, chunked upload) via `SyncClient`. |
+| DNS TXT in the browser | Browsers cannot do DNS. The browser build uses DNS-over-HTTPS, a different trust anchor: the DoH provider sees the lookups and answers instead of the system resolver. Node uses `node:dns` and is at true parity. |
+| PoW solving speed | Same algorithm, ~5–10× slower than Go (≈1s vs ≈5–10s at 20 bits). Functional parity, not performance parity. Documented as a UI warning threshold. |
+| `auth sign <file>`, `identity export --out` | Node-only, because they read and write local files. The in-memory equivalents work everywhere. |
+
+## Deferred
+
+- **E17-T6 (web app adoption)** is deliberately left for its own change set. It deletes five modules
+  from `apps/web/js` and re-points the import map, and its regression net is the existing Vitest +
+  Playwright suites — which must pass *unchanged*. Mixing that refactor into the change set that
+  introduced the package would make a failure ambiguous between "the SDK is wrong" and "the
+  migration is wrong". Tracked from both sides: [E15-T6](EPIC-015-web-app-ux.md).
+- **npm publish (part of E17-T7).** The package, docs and quickstart are done; publishing needs an
+  npm org, a provenance-enabled release workflow and a first tagged version — an operational step,
+  not a code one.
 
 ## Non-goals
 

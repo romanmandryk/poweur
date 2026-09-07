@@ -8,7 +8,12 @@
     "web:dev": "pnpm --filter @poweur/web dev",
     "web:test": "pnpm --filter @poweur/web test",
     "web:test:e2e": "pnpm --filter @poweur/web test:e2e",
-    "web:test:all": "pnpm --filter @poweur/web test:all"
+    "web:test:all": "pnpm --filter @poweur/web test:all",
+    "client": "pnpm --filter @poweur/client build",
+    "client:build": "pnpm --filter @poweur/client build",
+    "client:test": "pnpm --filter @poweur/client test",
+    "client:typecheck": "pnpm --filter @poweur/client typecheck",
+    "vectors": "cd packages/identity && go test ./... -run TestVectors && cd ../../apps/api && go test ./internal/crypto/... -run TestVectors && cd ../cli && go test ./internal/crypto/... -run TestVectors"
   },
   "devDependencies": {},
   "engines": {

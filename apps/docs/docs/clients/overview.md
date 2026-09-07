@@ -91,3 +91,19 @@ Advanced users and automated systems can interact directly with the [Relay HTTP 
 - [Identity Model](/protocol/identity-model)
 - [Interoperability](/protocol/interoperability)
 - [Security Model](/security/model)
+
+## JavaScript / TypeScript
+
+`@poweur/client` is the protocol as a published npm package — identity,
+messaging, files, sync, shares and proof-of-work — for the browser, Node ≥18,
+Bun and Deno. It also ships a `poweur` CLI that reads and writes the same
+`~/.poweur` tree as the Go one, so the two are interchangeable against a single
+identity.
+
+```bash
+npx @poweur/client inbox
+```
+
+Every JavaScript-ecosystem integration (agent gateways, an MCP server, n8n and
+Node-RED nodes) is a thin adapter over it rather than a re-implementation of
+canonical signing. See the [JavaScript / TypeScript SDK](/clients/js-sdk).

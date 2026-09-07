@@ -1,0 +1,264 @@
+/**
+ * Wire types. These mirror the Go structs the relay serves and accepts;
+ * field names are the JSON names, not Go names, so a value can go straight
+ * onto the wire.
+ */
+
+/** Bumped when the wire format changes; exported for capability negotiation. */
+export const PROTOCOL_VERSION = 1;
+
+export interface EncryptionMeta {
+  alg: string;
+  ephemeral_public_key: string;
+  nonce: string;
+}
+
+/** AEAD identifier for the one scheme v1 defines. */
+export const ENCRYPTION_ALG = "x25519-chacha20-poly1305";
+
+/**
+ * Self-contained proof that a session key was authorized by an identity, so
+ * a relay that never issued the session can still verify a message.
+ */
+export interface SessionProof {
+  session_public_key: string;
+  issued_at: string;
+  expires_at: string;
+  nonce: string;
+  identity_signature: string;
+}
+
+export interface Message {
+  id: string;
+  sender: string;
+  recipient: string;
+  timestamp: string;
+  payload: string;
+  signature: string;
+  /** Envelope-level type (`sys.contact.*`); bound into the signature. */
+  type?: string;
+  session_id?: string;
+  session_proof?: SessionProof;
+  encryption?: EncryptionMeta;
+  /**
+   * Reserved by EPIC-009, typed now so adding them is a minor version.
+   * The relay ignores unknown fields today.
+   */
+  thread_id?: string;
+  expires_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** A message from the inbox, with the decrypt attempt folded in. */
+export interface InboxMessage extends Message {
+  plaintext: string | null;
+  decryptError?: string;
+}
+
+export const ACK_TYPE_DELIVERY = "ack";
+export const ACK_STATE_DELIVERED_CLIENT = "delivered_client";
+
+export interface Ack {
+  type: string;
+  id: string;
+  message_id: string;
+  state: string;
+  sender: string;
+  recipient: string;
+  timestamp: string;
+  signature: string;
+  session_id?: string;
+  session_proof?: SessionProof;
+}
+
+export interface InboxResponse {
+  messages: Message[];
+  acks: Ack[];
+}
+
+export interface PreviousKey {
+  public_key: string;
+  valid_until?: string;
+}
+
+export interface IdentityDocument {
+  version: number;
+  identity: string;
+  public_key: string;
+  encryption_public_key?: string;
+  relay: string;
+  capabilities?: string[];
+  previous_keys?: PreviousKey[];
+  moved_to?: string;
+  updated_at: string;
+  signature?: string;
+}
+
+export type ResolveSource = "web" | "dns" | "both";
+
+export interface ResolveResult {
+  document: IdentityDocument;
+  source: ResolveSource;
+}
+
+export interface IdentityResponse {
+  identity: string;
+  public_key: string;
+  encryption_public_key?: string;
+  relay: string;
+  created_at?: string;
+  identity_document?: IdentityDocument | string;
+}
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+  storage?: {
+    configured: boolean;
+    path?: string;
+    writable: boolean;
+    free_bytes?: number;
+    error?: string;
+  };
+}
+
+export interface DavTokenResponse {
+  token: string;
+  identity: string;
+  audience: string;
+  scope: string;
+  expires_at: string;
+}
+
+export interface ShareAudience {
+  id?: string;
+  group?: string;
+}
+
+export const PERM_READ = "read";
+export const PERM_WRITE = "write";
+
+export interface ShareGrant {
+  share_id: string;
+  owner: string;
+  path: string;
+  audience: ShareAudience[];
+  permissions: string[];
+  created_at: string;
+  expires_at?: string;
+  signature: string;
+}
+
+export interface ShareGroup {
+  group: string;
+  owner: string;
+  members: string[];
+  updated_at: string;
+  signature: string;
+}
+
+export const CONTACT_REQUESTED = "requested";
+export const CONTACT_ACCEPTED = "accepted";
+export const CONTACT_BLOCKED = "blocked";
+
+export type ContactState =
+  | typeof CONTACT_REQUESTED
+  | typeof CONTACT_ACCEPTED
+  | typeof CONTACT_BLOCKED;
+
+export interface Contact {
+  identity: string;
+  state: ContactState;
+  pinned_key?: string;
+  petname?: string;
+  tags?: string[];
+  added_at?: string;
+  source?: string;
+}
+
+export interface ContactsFile {
+  version: number;
+  contacts: Contact[];
+}
+
+export const INBOX_OPEN = "open";
+export const INBOX_CONTACTS_ONLY = "contacts_only";
+export const INBOX_CONTACTS_AND_REQUESTS = "contacts_and_requests";
+export const DEFAULT_INBOX_MODE = INBOX_OPEN;
+
+export type InboxMode =
+  | typeof INBOX_OPEN
+  | typeof INBOX_CONTACTS_ONLY
+  | typeof INBOX_CONTACTS_AND_REQUESTS;
+
+export const ANON_CHALLENGE_NONE = "none";
+export const ANON_CHALLENGE_POW = "pow";
+export const ANON_CHALLENGE_VERIFIED = "verified";
+export const ANON_CHALLENGE_PAYMENT = "payment";
+
+export interface AnonymousPolicy {
+  allow: boolean;
+  challenge?: string;
+  pow_bits?: number;
+  max_bytes?: number;
+  max_per_day?: number;
+}
+
+export interface InboxPolicy {
+  version: number;
+  mode: InboxMode;
+  anonymous?: AnonymousPolicy;
+}
+
+/** System message types the relay routes on (EPIC-007). */
+export const MSG_TYPE_CONTACT_REQUEST = "sys.contact.request";
+export const MSG_TYPE_CONTACT_ACCEPT = "sys.contact.accept";
+export const MSG_TYPE_CONTACT_BLOCK = "sys.contact.block";
+
+export interface ContactRequestEntry {
+  id: string;
+  sender: string;
+  recipient: string;
+  timestamp: string;
+  type?: string;
+  payload: string;
+}
+
+export interface AnonQueueMessage {
+  id: string;
+  timestamp: string;
+  payload: string;
+  encryption?: EncryptionMeta;
+}
+
+/** One entry in a DAV directory listing. */
+export interface DavEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size: number;
+  modified: string;
+  etag: string;
+}
+
+export interface QuotaResponse {
+  used_bytes: number;
+  quota_bytes: number;
+  provider?: string;
+  change_id?: string;
+}
+
+/** One line of the sync manifest / changes feed. */
+export interface SyncEntry {
+  path: string;
+  dir?: boolean;
+  size?: number;
+  sha?: string;
+  etag?: string;
+  modified?: string;
+  deleted?: boolean;
+}
+
+export interface SyncChange extends SyncEntry {
+  op?: string;
+}

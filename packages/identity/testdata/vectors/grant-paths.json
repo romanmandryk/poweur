@@ -1,0 +1,41 @@
+[
+  {
+    "input": "shared/a",
+    "path": "shared/a",
+    "error": false
+  },
+  {
+    "input": "/shared/a/b/",
+    "path": "shared/a/b",
+    "error": false
+  },
+  {
+    "input": "apps/notes/x",
+    "path": "apps/notes/x",
+    "error": false
+  },
+  {
+    "input": "shared",
+    "error": true
+  },
+  {
+    "input": "apps",
+    "error": true
+  },
+  {
+    "input": "private/secret",
+    "error": true
+  },
+  {
+    "input": "poweur-sys/relay",
+    "error": true
+  },
+  {
+    "input": "",
+    "error": true
+  },
+  {
+    "input": "shared/../etc",
+    "error": true
+  }
+]

@@ -51,6 +51,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'clients/overview',
         'clients/cli-reference',
+        'clients/js-sdk',
       ],
     },
     {

@@ -1,0 +1,26 @@
+[
+  {
+    "token": "poweur-vector-token-1",
+    "bits": 8,
+    "solution": "AAAAAAAAAqU",
+    "valid": true
+  },
+  {
+    "token": "poweur-vector-token-2",
+    "bits": 12,
+    "solution": "AAAAAAAAAU0",
+    "valid": true
+  },
+  {
+    "token": "poweur-vector-token-3",
+    "bits": 4,
+    "solution": "AAAAAAAAAAA",
+    "valid": true
+  },
+  {
+    "token": "poweur-vector-token-1",
+    "bits": 24,
+    "solution": "not-a-solution",
+    "valid": false
+  }
+]
