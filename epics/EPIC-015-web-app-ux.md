@@ -3,7 +3,10 @@
 - **Status:** proposed
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
-- **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components), adoption
+- **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
+  [EPIC-019](EPIC-019-mobile-app-capacitor.md) (the Capacitor shell wraps this UI), adoption
+- **Related:** [EPIC-018](EPIC-018-identity-onboarding-naming.md) owns identity claiming,
+  the launcher host and name policy — this epic assumes the user already has an ID
 
 ## Goal
 
@@ -40,6 +43,22 @@ audience picker, policy controls) that EPIC-012's contact-form/website work buil
   new protocol.
 
 ## Design direction
+
+### Two constraints that come from EPIC-019 — apply them from T1
+
+These cost almost nothing now and are a rewrite later. Both exist because the Capacitor
+shell ([EPIC-019](EPIC-019-mobile-app-capacitor.md)) wraps *this* UI verbatim.
+
+1. **Mobile-first, not a responsive pass at the end.** A wrapped web app feels native or
+   doesn't based on the layout it wraps. Treat touch targets, safe areas, one-handed reach
+   and the bottom nav as inputs to T1's information architecture, not as T5 polish. The
+   accessibility/responsive bullet stays in T5, but it must be a *check*, not the first time
+   a small screen is considered.
+2. **No `window.location.origin` for relay calls.** `doCreateIdentity` currently does
+   `const relayUrl = window.location.origin` — correct for a relay-served SPA, fatal for a
+   shell running on `capacitor://localhost`. The relay base URL must come from the active
+   identity record / config. This also lets one client hold identities on **several relays**,
+   which the relay's permissive CORS already allows.
 
 - **Five primary destinations** (bottom nav / sidebar), replacing the current
   main/launcher/settings triad:
@@ -81,9 +100,13 @@ audience picker, policy controls) that EPIC-012's contact-form/website work buil
       unit tests (Vitest, DOM via jsdom/happy-dom as the suite already uses)
 - [ ] Resolver helper in `js/api.js`: fetch + cache `profile.json` / `capabilities.json`
       for an ID (EPIC-006 well-known), used by ProfileCard and IdentityInput
+- [ ] **Relay base URL from the identity record, not `location.origin`** (constraint 2 above);
+      add a unit test that fails if any module derives a relay URL from `location.origin`
+- [ ] **Mobile-first layout** for the destination shell and panel system (constraint 1 above)
 
 **Acceptance:** the five destinations render and route; components have unit tests; no
-regression in the existing messaging/identity Playwright e2e.
+regression in the existing messaging/identity Playwright e2e; the origin-independence test
+is green and the shell is usable at a 375px viewport.
 
 ### E15-T2 — Contacts & requests
 
@@ -149,7 +172,9 @@ access stops.
 - [ ] Capabilities are shown read-only on the profile (what this identity speaks)
 - [ ] **First-run onboarding** after a fresh registration: a 2–3 step, fully skippable flow
       — set inbox policy, optionally set display name/avatar, a one-line "you're set" — so a
-      new user lands in a configured app, not an empty inbox
+      new user lands in a configured app, not an empty inbox. Picks up *after*
+      [EPIC-018](EPIC-018-identity-onboarding-naming.md)'s claim flow hands off to the
+      identity's own origin; the two must join without a second credential prompt
 - [ ] Empty states across all destinations (no contacts / no files / no messages) with the
       obvious next action
 - [ ] Accessibility + responsive pass (keyboard nav, focus traps in dialogs, mobile
@@ -183,6 +208,13 @@ test:all` is green; the relay serves the SPA exactly as before.
 
 ## Forward-looking (prepare for, don't build)
 
+- **EPIC-019 (mobile shell):** beyond the two constraints, keep native-capable seams thin —
+  key custody already discriminates on the stored `kdf` field, so a third (`native`)
+  implementation should need no UI change. The shell also holds **many identities across many
+  relays** (E19-T7), which the web app structurally cannot (`localStorage` is per-origin, so
+  `alice.r1.com/app/` cannot see an identity stored by `alice.r2.com`). Keep identity-scoped
+  state keyed by identity rather than global, so the same modules work under both.
+
 - **EPIC-012 (identity websites / contact forms):** IdentityInput, ProfileCard and the anon
   PoW send path are the exact pieces a public contact form needs — keep them free of
   app-shell dependencies so they can be embedded standalone.
@@ -203,3 +235,8 @@ test:all` is green; the relay serves the SPA exactly as before.
   backend.
 - Group **identities** (addressable groups) remain EPIC-005 T5; the AudiencePicker uses
   owner-local groups only.
+- **Identity claiming, the launcher host, name policy and credential scope are EPIC-018.**
+  This epic assumes an identity exists. The one new relay endpoint the flow needs
+  (`GET /hosted/availability`) lives there, keeping the "no new relay endpoints" rule intact.
+- **The mobile shell is EPIC-019.** This epic only owes it the two constraints above — no
+  Capacitor plugins, no native code, no shell-specific screens here.

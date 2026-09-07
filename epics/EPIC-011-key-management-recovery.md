@@ -2,12 +2,40 @@
 
 - **Status:** proposed
 - **Priority:** P0 (a primary identity that can be permanently lost is not a primary identity)
-- **Depends on:** EPIC-001 (rotation statements, E01-T5), EPIC-002 (durable storage); interacts with EPIC-004 (device registry), EPIC-007 (contacts — for social recovery), EPIC-008 (Poweur as recovery anchor for other services)
+- **Depends on:** EPIC-001 (rotation statements, E01-T5), EPIC-002 (durable storage); interacts with EPIC-004 (device registry), EPIC-007 (contacts — for social recovery), EPIC-008 (Poweur as recovery anchor for other services), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (credential scope / rpId, E18-T4)
+- **Unlocks (also):** [EPIC-019](EPIC-019-mobile-app-capacitor.md) E19-T8 — the mobile shell's "bring an existing identity over" reuses E11-T3's ceremony rather than inventing its own
 - **Unlocks:** trustworthy "Poweur ID as your primary identity" positioning
 
 > **Inbound from EPIC-001:** E01-T5 is **done** — rotation uses `previous_keys` +
 > `identity-rotation` canonical string (`POST /identities/{id}/rotate`, `poweur key rotate`).
 > Wire E11-T2 seed rotation to that same format — do not invent a second protocol.
+
+> **Inbound from [EPIC-019](EPIC-019-mobile-app-capacitor.md) (E19-T8):** the X25519
+> **encryption key must be copied to every device** — it cannot be per-device. Senders encrypt
+> to the identity's `encryption_public_key` (`resolveRecipientEncKey`,
+> `apps/web/js/messaging.js`), and `SessionCreateRequest` delegates **signing only** — it
+> carries no encryption key. So per-device *signing* keys are achievable here, but per-device
+> *encryption* keys would require senders to encrypt N times: a protocol change, out of scope
+> for this epic. **This is why the seed model is the right shape** — one seed, N wrappings,
+> copied whole to each device (E11-T3) rather than split per device. Record the constraint in
+> E11-T1's spec so it is not rediscovered.
+
+## Progress
+
+| Task | Status | Ships in | Notes |
+|------|--------|----------|-------|
+| E11-T1 Seed, multi-enrollment, recovery kit | open | **v1** | the core; everything else builds on it |
+| E11-T2 Recovery-master role & elevated ops | open | v1 | policy enforcement + kill-lost-device |
+| E11-T3 Enrollment ceremony (code+PAKE / QR) | open | v1 | synced-passkey shortcut deferrable |
+| E11-T4 CLI/bot key storage hardening | open | v1 | independent of T1–T3, can run in parallel |
+| E11-T5 Social recovery | open | later | design doc gates implementation |
+| E11-T6 Poweur ID as recovery anchor | open | later | needs EPIC-008 |
+| E11-T7 Security review & drills | open | v1 (review) | review **before** T3 ships, drills ongoing |
+
+**Implementation order:** T1 → (T2 ‖ T3) → T7 review → T4 any time. T5/T6 are separate
+phases and must not block v1. Within T1, build in this order: seed derivation and schemas →
+relay keystore endpoints → multi-passkey enrollment in the web client → recovery kit →
+inventory UI.
 
 ## Goal
 
@@ -42,6 +70,30 @@ Key observations driving the design:
    *never lose the ability to produce one Ed25519 signature* — everything else re-derives.
 3. **The CLI stores root keys in plaintext.** Acceptable for bots on hardened hosts, not for
    humans; needs at-rest encryption regardless of recovery work.
+4. **The synced keystore is circular unless it has its own bootstrap read.** Reading anything
+   under `poweur-sys/` means minting a DAV token, which means signing the canonical
+   `dav-token` string **with the identity key** (`apps/web/js/files.js`). The keystore exists
+   to *recover* that key. So a synced keystore is a fine **backup and multi-device sync**
+   mechanism for a client that is already unlocked, but it is **not** by itself an answer to
+   "I cleared site data" — that needs a read path authenticated by something other than the
+   identity key. See E11-T1 below; do not describe the synced copy as cleared-site-data
+   recovery without it.
+
+**Status of `poweur-sys/private/keystore/`:** design-only — it appears in this epic and nowhere
+else (not in `apps/api`, not in `apps/docs`, not in the EPIC-006 path registry). Reviewed and
+**split**, because one path was carrying two things with incompatible access models:
+
+| What | Where it goes | Auth to read | Why |
+|---|---|---|---|
+| **Wrapped seed copies** (ciphertext, one per enrollment) | relay-managed store behind `/identities/{id}/keystore` — **not** a DAV path | **WebAuthn assertion** | must be readable *before* you hold the identity key, or it cannot answer "I cleared site data"; must not be deletable from the E15-T4 file explorer |
+| **Enrollment policy / metadata** (ids, kinds, roles, labels, timestamps — no ciphertext) | `poweur-sys/private/keystore/policy.json` | DAV token (identity key) | no circularity — you are already unlocked when managing devices; syncs via EPIC-004 for free |
+
+Keeping the wrapped seeds in the DAV tree was rejected on three counts: it needs a read path
+the identity key cannot provide, E15-T4 gives users a delete button over that tree, and two
+auth models on one path is precisely the confusion that prompted this review.
+
+**Already satisfied by shipped code:** `apps/web/js/passkey.js` sets `residentKey: "required"`,
+so the discoverable-credential requirement of the bootstrap read needs no client change.
 
 ## Design direction
 
@@ -51,18 +103,85 @@ Key observations driving the design:
   strings (`poweur/v1/sign`, `poweur/v1/enc`). One seed = one recovery artifact. (Migration:
   existing identities keep their independent keys; the seed model applies at next rotation via
   E01-T5 — write the migration path explicitly.)
-- A **keystore** of wrapped seed copies, one per enrolled authenticator/device, stored in
-  `poweur-sys/private/keystore/` so it syncs through the relay (EPIC-002 durable storage,
-  EPIC-004 sync): `{enrollment_id, kind: passkey|hardware-key|cli-passphrase|recovery-kit,
-  wrap: prf|pin|passphrase, wrapped_seed, created_at, role}`. The relay only ever sees
-  ciphertext — wrapping keys never leave authenticators/devices.
-- A signed **enrollment policy** file (`poweur-sys/private/keystore/policy.json`, signed by the
-  identity key) records each enrollment's role: `device` (default) or `recovery-master`.
-  Clients enforce: enrollments with role `device` may add devices but not remove others;
-  `recovery-master` (your YubiKey/Titan) may **remove any enrollment, rotate the seed, and
-  revoke all sessions** — the "I lost my phone, kill it" path. Hardware-backed roaming
-  authenticators are recommended (and flagged in UI) for this role because they're offline,
-  phishing-resistant and PRF-capable.
+- A **keystore** of wrapped seed copies, one per enrolled authenticator/device, held by the
+  relay as opaque ciphertext (see the split table above) and addressed by the endpoints in
+  E11-T1. The relay only ever sees ciphertext — wrapping keys never leave authenticators.
+- A signed **enrollment policy** (`poweur-sys/private/keystore/policy.json`, metadata only)
+  records each enrollment's role: `device` (default) or `recovery-master`. Clients enforce:
+  `device` enrollments may add devices but not remove others; `recovery-master` (your
+  YubiKey/Titan) may **remove any enrollment, rotate the seed, and revoke all sessions** — the
+  "I lost my phone, kill it" path. Hardware-backed roaming authenticators are recommended (and
+  flagged in UI) for this role because they're offline, phishing-resistant and PRF-capable.
+
+### Concrete formats (normative — implement these, don't re-derive them)
+
+**Seed derivation.** 32 random bytes, HKDF-SHA256, empty salt, distinct info strings:
+
+```
+seed          := 32 random bytes
+signing key   := HKDF-SHA256(ikm=seed, salt="", info="poweur/v1/sign",  L=32) → Ed25519 seed
+encryption key:= HKDF-SHA256(ikm=seed, salt="", info="poweur/v1/enc",   L=32) → X25519 scalar, clamped per RFC 7748
+vault key     := HKDF-SHA256(ikm=seed, salt="", info="poweur/v1/vault", L=32)   (E11-T6)
+```
+
+**Wrapping is unchanged from shipped code** — `wrapKeysAES`/`unwrapKeysAES`
+(`apps/web/js/crypto.js`): HKDF-SHA256 over the wrapping secret with salt
+`poweur-key-wrapping-v1`, then AES-256-GCM. The PRF salt stays `poweur-prf-v1`; each
+authenticator yields a different PRF output for the same salt, which is exactly what
+multi-enrollment needs — **no change to the salt for multi-passkey support.**
+
+**Keystore entry** (relay-held, ciphertext):
+
+```json
+{
+  "version": 1,
+  "enrollment_id": "<base64url, 16 random bytes>",
+  "kind": "passkey | hardware-key | cli-passphrase | recovery-kit | native",
+  "wrap": "prf | pin | passphrase | native",
+  "payload": "seed | legacy-keypair",
+  "credential_id": "<base64url>",
+  "credential_public_key": "<COSE key, base64url>",
+  "wrapped": { "iv": "<b64url>", "ciphertext": "<b64url>", "salt": "<b64url, pin/passphrase only>" },
+  "label": "MacBook Pro",
+  "created_at": "<RFC3339>",
+  "last_used_at": "<RFC3339>"
+}
+```
+
+> **New relay requirement:** `credential_public_key` must be stored at enrollment. The relay
+> does not persist WebAuthn credentials today (the passkey is purely client-side), but it
+> cannot verify a bootstrap assertion without them. This is the one genuinely new thing the
+> relay learns; note it in the privacy section of the spec.
+
+**`policy.json`** (DAV tree, metadata only, signed by the identity key over canonical JSON —
+reuse the EPIC-001 canonicalization, do not invent a second one):
+
+```json
+{
+  "version": 1,
+  "identity": "alice.poweur.net",
+  "enrollments": [
+    { "enrollment_id": "…", "kind": "passkey", "role": "device",
+      "label": "MacBook Pro", "created_at": "…" }
+  ],
+  "updated_at": "<RFC3339>",
+  "signature": "<base64url ed25519>"
+}
+```
+
+**Endpoints** (following the shipped `/identities/{identity}/rotate` and `/auth/challenge`
+patterns):
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `PUT /identities/{identity}/keystore` | identity-key signature (client is unlocked) | add/replace an enrollment's wrapped copy + credential public key |
+| `POST /identities/{identity}/keystore/fetch` | **WebAuthn assertion** over a `GET /auth/challenge` nonce | bootstrap read — returns ciphertext entries only |
+| `DELETE /identities/{identity}/keystore/{enrollment_id}` | identity-key signature, `recovery-master` role enforced client-side and re-checked against `policy.json` | enrollment removal |
+
+Writes are identity-key-authenticated because you are unlocked when enrolling; reads are
+assertion-authenticated because bootstrap is the whole point. `fetch` must not reveal
+credential IDs to an unverified caller (discoverable credentials — already satisfied client-side).
+
 - **Recovery kit** = the seed as a BIP39 mnemonic (24 words) + identity name + relay, rendered
   as a printable PDF. Standard, offline, vendor-free. The kit is itself just another
   "enrollment" (kind `recovery-kit`) recorded in the policy so the UI can nag if none exists.
@@ -76,32 +195,67 @@ Key observations driving the design:
 
 ### E11-T1 — Key management v1: seed, multi-enrollment, recovery kit (the "good enough" core)
 
-The recommended starting point — comprehensive enough to be trustworthy, simple enough to ship
-as one coherent unit. No protocol changes, no relay-side crypto: it's client logic plus the
-synced keystore convention.
+The starting point — comprehensive enough to be trustworthy, simple enough to ship as one
+coherent unit. All formats are fixed above; this task is implementation, not design.
 
-- [ ] Spec `apps/docs/docs/security/key-management.md`: master-seed derivation (HKDF),
-      keystore + policy file formats (PCP, EPIC-006 registry), enrollment/removal flows,
-      migration for existing two-key identities
-- [ ] Web client: enroll **multiple passkeys** for one identity (re-wrap the seed under each
-      authenticator's PRF output; fix the single-`credentialId` assumption in
-      `apps/web/js/passkey.js` and the localStorage schema in `app.js`)
-- [ ] Move wrapped keystore to `poweur-sys/private/keystore/` via the relay (localStorage
-      becomes a cache, not the only copy — survives cleared site data)
-- [ ] Recovery kit: generate BIP39 mnemonic at registration (or on demand), printable PDF +
-      "verify your kit" re-entry check; restore flow: mnemonic → seed → keys → new device
-      enrolled, all sessions optionally revoked
-- [ ] Key inventory UI ("Keys & devices" panel in web app + `poweur keys ls` in CLI): every
-      enrollment, kind, role, created/last-used, with remove buttons (policy-gated) —
-      merges the session list and (later) device registry view from E04-T6
-- [ ] Enrollment removal: re-encrypt nothing (seed unchanged) but delete the wrapped copy,
-      revoke the enrollment's sessions/tokens, and append a signed policy update — document
-      that removal without rotation does NOT protect against an attacker who already extracted
-      the seed (that's what rotation is for)
+**Build order:** schemas + seed derivation → relay endpoints → multi-passkey web client →
+recovery kit → inventory UI.
+
+- [ ] Spec `apps/docs/docs/security/key-management.md` from the normative formats above:
+      derivation, keystore entry, `policy.json`, the three endpoints, and the privacy note
+      that the relay now stores WebAuthn credential public keys. Register
+      `poweur-sys/private/keystore/policy.json` in the EPIC-006 path registry
+- [ ] Record the **encryption-key-is-shared** constraint from the E19-T8 inbound note above:
+      per-device *signing* keys are in scope, per-device *encryption* keys are not, and the
+      reason (senders encrypt to one `encryption_public_key`) belongs in the spec so the
+      question is settled once
+- [ ] Seed derivation in `@poweur/client` (EPIC-017) so web, CLI and the mobile shell share one
+      implementation — **not** three copies. Vector tests: fixed seed → fixed Ed25519/X25519
+      public keys, checked in as fixtures
+- [ ] Relay: `PUT /identities/{id}/keystore`, `POST …/keystore/fetch`,
+      `DELETE …/keystore/{enrollment_id}` with the auth model in the table above; persist
+      `credential_public_key`; verify assertions against it; rate-limit `fetch` per identity
+- [ ] Web client: enroll **multiple passkeys** per identity — re-wrap the seed under each
+      authenticator's PRF output. Fix the single-`credentialId` assumption in
+      `apps/web/js/passkey.js` and the `encryptedKeys`/`credentialId` shape in
+      `apps/web/js/storage.js` (today's record holds exactly one of each); localStorage becomes
+      a cache of the enrollment that unlocked this browser
+- [ ] Recovery kit: BIP39 24-word mnemonic of the seed + identity + relay, printable PDF, plus
+      a "verify your kit" re-entry check. Restore flow: mnemonic → seed → keys → new enrollment
+      registered, sessions optionally revoked
+- [ ] Key inventory UI ("Keys & devices" in the web app + `poweur keys ls`): every enrollment,
+      kind, role, label, created/last-used, with policy-gated remove buttons — merges the
+      session list and (later) the E04-T6 device registry view
+- [ ] Enrollment removal: delete the wrapped copy and the credential public key, revoke that
+      enrollment's sessions/tokens, append a signed `policy.json` update. **Document that
+      removal without rotation does not protect against an attacker who already extracted the
+      seed** — that is what E11-T2 rotation is for
+
+#### Migration for existing identities (must not strand anyone)
+
+Identities registered today have two **independent** keys that are not seed-derived, so they
+cannot produce a 24-word kit. Do not force a rotation to fix this.
+
+- [ ] Support `payload: "legacy-keypair"` keystore entries — the wrapped blob holds both JWKs
+      instead of a seed. Every flow except the recovery kit works unchanged for these:
+      multi-enrollment, bootstrap fetch, removal, inventory
+- [ ] Offer (never force) **rotate-to-seed**: generate a seed, derive new keys, publish via the
+      **shipped** E01-T5 rotation (`POST /identities/{id}/rotate`, `previous_keys` +
+      `identity-rotation` canonical string) and `POST /identities/{id}/encryption-key` — do not
+      invent a second rotation protocol
+- [ ] The recovery kit is offered only for seed-based identities; legacy identities see a
+      "rotate to enable a recovery kit" prompt explaining the tradeoff (contacts re-pin keys,
+      EPIC-007 T4)
+- [ ] Integration coverage in `apps/integration/`: a legacy identity enrolls a second
+      authenticator, does a bootstrap fetch, then rotates to seed and produces a valid kit
 
 **Acceptance:** register on laptop → enroll phone passkey + YubiKey → clear laptop site data →
 recover via any of: phone, YubiKey, or paper mnemonic; inventory shows all enrollments;
-integration test covers mnemonic round-trip.
+integration test covers mnemonic round-trip. Specifically assert the circularity is broken:
+after clearing site data the laptop fetches the keystore with **only** a WebAuthn assertion
+(no identity-key signature available), and a caller without an enrolled authenticator gets
+nothing — including no credential IDs. A legacy two-key identity passes every case except the
+kit, and passes that too after opting into rotation.
 
 ### E11-T2 — Recovery-master role & elevated operations
 
@@ -123,18 +277,71 @@ key-change warnings.
 
 ### E11-T3 — New-device enrollment ceremony (no seed typing)
 
-Enrolling device B shouldn't require the paper kit if device A is at hand.
+Enrolling device B shouldn't require the paper kit if device A is at hand. **QR is not
+sufficient on its own:** the common phone-browser → laptop-browser case has no usable camera
+(denied permission, no camera, or a desktop that cannot scan), and email is explicitly off the
+table. Ship **two transports plus one optimisation**, sharing a single enrollment state machine.
 
-- [ ] Cross-device flow: B shows QR (ephemeral X25519 pubkey + challenge), A scans, user
-      approves on A (passkey prompt), A sends the seed wrapped to B's ephemeral key through
-      the relay (`sys.enroll.offer` typed message to self), B unwraps, creates its own
-      passkey wrapping, registers enrollment
-- [ ] Abuse hardening: short expiry, code confirmation displayed on both screens (SAS),
-      enrollment notification to all existing devices
-- [ ] CLI variant: `poweur keys enroll` prints the offer URI for headless boxes
+#### Transport 1 — short code + PAKE (default; no camera, any direction)
 
-**Acceptance:** phone-to-laptop enrollment in under a minute in the demo; MITM test (wrong SAS)
-fails closed.
+- [ ] The **new** device displays a 6–9 digit code; the user types it on the **trusted**
+      device (which already holds the identity and is where the biometric prompt belongs)
+- [ ] Establish the channel with a **PAKE (SPAKE2 or CPace)** using the code as the password,
+      over a relay rendezvous. **Not** a KDF over the code: the relay holds the blob and could
+      brute-force a short code offline. A PAKE makes guessing online-only — one attempt per
+      session, fail closed — which is what makes 6 digits safe
+- [ ] One guess per rendezvous, short TTL, single-use; a wrong code destroys the rendezvous
+      rather than allowing a retry
+- [ ] Relay is a **blind rendezvous**: it sees PAKE messages and ciphertext, never the code,
+      the seed, or a brute-forceable transcript
+- [ ] **Library risk is real** — JS PAKE implementations are less mature than the primitives
+      around them. Pin one reviewed implementation, record the choice and version in the spec,
+      and make it explicit scope for the E11-T7 security review. Do **not** hand-roll SPAKE2,
+      and do not fall back to a non-PAKE scheme if the library proves unusable — reduce to
+      Transport 2 and say so
+
+#### Transport 2 — QR (retained; fastest where a camera exists)
+
+- [ ] New device shows a QR (ephemeral X25519 pubkey + challenge); the trusted device scans,
+      the user approves with a passkey prompt, and the seed travels wrapped to the ephemeral
+      key via `sys.enroll.offer` (typed message to self)
+- [ ] Offer QR and code side by side, always — never make the code a hidden fallback behind a
+      camera-permission failure, since the user may have declined the prompt already
+
+#### Optimisation — synced passkey, zero ceremony
+
+- [ ] Where the passkey provider syncs (iCloud Keychain, Google Password Manager, 1Password)
+      **and** the rpId matches (E18-T4), no ceremony is needed: the new browser does a WebAuthn
+      assertion for the already-enrolled credential, gets the same PRF output, and unwraps the
+      entry it fetches from the relay keystore
+- [ ] Uses the **bootstrap read endpoint from E11-T1** (`POST /identities/{id}/keystore/fetch`,
+      assertion-gated, discoverable credentials) — specified there, not here. Note this is the
+      relay-held store, **not** `poweur-sys/private/keystore/`, which holds metadata only
+- [ ] **This path is an optimisation and may be deferred.** Recovery does not depend on it:
+      Transport 1 carries the seed from the other device, and the recovery kit covers the
+      no-other-device case. Ship it when the zero-ceremony UX is worth the endpoint's cost, and
+      cut it without touching the rest of the epic if it isn't
+- [ ] Detect and offer this path first, but **never depend on it** — it fails across passkey
+      ecosystems (iPhone → Windows/Chrome) and across relays (`alice.r1.com` vs `alice.r2.com`
+      are different RPs, hence different credentials). Falling back to Transport 1 must be one
+      click, not a dead end
+
+#### Shared hardening (all transports)
+
+- [ ] Short expiry; **number matching** shown on both screens as the confirmation step
+      (replaces the SAS wording — same function, the interaction users already know)
+- [ ] Number matching is a **confirmation, never a transport.** A standalone "approve on your
+      other device" prompt is an MFA-fatigue surface: the identity name is public, so anyone
+      could trigger prompts. Approval is only ever offered inside a ceremony the user started
+- [ ] Enrollment notification to **all** existing devices, including the device fingerprint
+      and transport used, so an unexpected enrollment is visible after the fact
+- [ ] CLI variant: `poweur keys enroll` prints the offer URI **and** the numeric code for
+      headless boxes
+
+**Acceptance:** phone-to-laptop enrollment completes in under a minute **with the camera
+denied**, using the typed code; the QR path still works where a camera exists; the synced-passkey
+path enrolls a second browser in the same ecosystem with no ceremony; MITM test (wrong code /
+wrong number match) fails closed and burns the rendezvous; all pre-existing devices are notified.
 
 ### E11-T4 — CLI/bot key storage hardening
 
@@ -196,9 +403,32 @@ entirely absent; vault entries survive device loss via E11-T1 recovery.
 - [ ] Commission/perform a focused review of the seed-derivation, wrapping and ceremony
       designs before E11-T5 ships (external eyes on crypto choices: HKDF info strings, PRF
       salt versioning — `poweur-prf-v1` exists, SLIP-0039 parameters)
+- [ ] **Explicitly in scope: E11-T3's PAKE choice, its library and version**, the rendezvous
+      fail-closed behaviour, and the assertion-gated keystore endpoint. These are the newest
+      and least battle-tested pieces in the epic — review them before the ceremony ships, not
+      alongside E11-T5
 - [ ] Codify the recovery scenarios as permanent integration fixtures: lost-one-device,
       lost-all-devices-have-kit, lost-everything-social, stolen-device-kill, compromised-seed
       rotation — these are the product's most load-bearing promises, they get CI coverage
 - [ ] User-facing docs: "How not to lose your Poweur ID" one-pager, surfaced during onboarding
 
 **Acceptance:** all five drills green in CI; review findings triaged into issues.
+
+## Non-goals
+
+- **No per-device encryption keys** — see the E19-T8 inbound note; senders encrypt to one
+  `encryption_public_key`, so changing this is a protocol change owned elsewhere.
+- **No relay-side plaintext, ever.** The relay stores wrapped blobs and credential public keys.
+  If a design step needs the relay to unwrap something, the step is wrong.
+- **No email or phone recovery channel**, at any phase. That is the point of the epic.
+- **No custodial or vendor escrow** fallback.
+- **No new rotation protocol** — E01-T5 shipped; seed rotation reuses it.
+
+## Open questions (resolve during T1, don't block on them)
+
+- **PAKE library choice** for E11-T3 Transport 1 — pin one reviewed implementation and version;
+  explicit scope for E11-T7.
+- **`fetch` rate-limit shape** — per identity, per IP, or both. It is an availability tradeoff:
+  too tight and a user with a flaky connection cannot recover.
+- **Kit format versioning** — BIP39 encodes the seed but not the identity or relay; decide
+  whether the printed kit carries them as text only (simplest) or in a versioned envelope.

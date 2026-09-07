@@ -43,6 +43,8 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | proposed | E03, E04, E05, E06, E07, E14 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
+| [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | proposed | E02, E01, E14 |
+| [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | proposed | E15, E17, E18 |
 
 ## Integration epics (`integrations/`)
 
@@ -82,7 +84,9 @@ EPIC-001 ──► EPIC-008 (sign-in)         EPIC-002/003 ──► EPIC-009 (m
 
 EPIC-001/002 ──► EPIC-011 (key management & recovery)
                    ├─ uses EPIC-005 shares + EPIC-007 contacts (social recovery)
-                   └─ feeds EPIC-008 (Poweur as recovery anchor for other services)
+                   ├─ feeds EPIC-008 (Poweur as recovery anchor for other services)
+                   └─ E11-T3's enrollment ceremony (code+PAKE / QR / synced passkey)
+                      is what EPIC-019's E19-T8 reuses to bring an ID to a phone
 
 EPIC-003 + EPIC-007/009 ──► EPIC-012 (identity websites; design notes)
 
@@ -105,6 +109,16 @@ EPIC-003/004/005/006/007/014 ──► EPIC-015 (web app UX: the whole product s
                    ├─ absorbs the deferred "web UX" items of E05/E07/E14
                    └─ its reusable components (IdentityInput, ProfileCard, anon PoW send)
                       feed EPIC-012 identity websites / contact forms
+
+EPIC-002/001/014 ──► EPIC-018 (onboarding: launcher host, name policy, credential scope)
+                   ├─ owns identity *claiming*; E015 assumes an ID already exists
+                   └─ hands off to E015's first-run onboarding on the identity's origin
+
+EPIC-015 + EPIC-017 + EPIC-018 ──► EPIC-019 (Capacitor mobile shell)
+                   ├─ wraps E015's UI verbatim — hence E015's mobile-first +
+                   │  no-`location.origin` constraints
+                   └─ `kdf:"native"` key custody frees the store build from
+                      associated-domains, so self-hosters need no fork
 ```
 
 ## Architecture deltas at a glance
