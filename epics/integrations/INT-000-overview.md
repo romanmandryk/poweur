@@ -64,6 +64,7 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 | INT-002 | Payments — crypto & conventional | [INT-002-payments.md](INT-002-payments.md) |
 | INT-003 | Open-source AI tools & agent frameworks | [INT-003-ai-agents.md](INT-003-ai-agents.md) |
 | INT-004 | Collaboration, productivity & federation tools | [INT-004-collaboration-tools.md](INT-004-collaboration-tools.md) |
+| INT-005 | Agent control planes (OpenClaw, Hermes) | [INT-005-agent-control-planes.md](INT-005-agent-control-planes.md) |
 
 ## Cross-cutting prerequisite tasks (Poweur side)
 

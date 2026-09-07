@@ -2,7 +2,7 @@
 
 - **Status:** proposed
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
-- **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW)
+- **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components), adoption
 
 ## Goal
@@ -158,6 +158,28 @@ access stops.
 **Acceptance:** a brand-new identity, created in the web app, completes onboarding and can
 message, add a contact, set a policy, upload and share a file — all without the CLI;
 Playwright covers the fresh-user happy path end to end.
+
+### E15-T6 — Import `@poweur/client` instead of owning the protocol
+
+*Paired with [E17-T6](EPIC-017-typescript-client-sdk.md) — same work, tracked from both sides.
+Sequence it **first** if EPIC-017 has landed (every screen below is then written against the
+package), otherwise last, as a refactor behind the existing test suites.*
+
+- [ ] Add `@poweur/client` as a `workspace:*` dependency of `@poweur/web`; vendor the built ESM
+      into the served static tree and add the import-map entry in `index.html`
+      (`"@poweur/client": "/app/vendor/poweur-client/index.js"`) — no bundler, per the constraint above
+- [ ] Drop the `esm.sh` import-map entry for `@noble/ciphers`: the dependency arrives vendored with
+      the client, removing a CDN fetch from first paint and from offline/self-hosted installs
+- [ ] Delete the duplicated protocol modules (`js/crypto.js`, the protocol half of `js/api.js`,
+      `js/messaging.js`, `js/files.js`, `js/pow.js`); `js/app.js` keeps only UI
+- [ ] Keep `js/passkey.js` + `js/storage.js` and expose them as the browser `Signer`/`KeyStore`
+      implementation the package expects — passkey/PIN gating stays a web-app concern and raw keys
+      never cross the package boundary
+- [ ] Existing Vitest + Playwright suites pass **unchanged** — they are the regression net for this
+      refactor; do not rewrite them in the same PR
+
+**Acceptance:** `apps/web` contains no canonical strings, signing or crypto of its own; `pnpm
+test:all` is green; the relay serves the SPA exactly as before.
 
 ## Forward-looking (prepare for, don't build)
 

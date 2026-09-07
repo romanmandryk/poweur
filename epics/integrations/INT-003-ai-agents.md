@@ -1,7 +1,8 @@
 # INT-003 — Open-source AI tools & agent framework integrations
 
 - **Status:** proposed
-- **Poweur prerequisites:** EPIC-004 (changes feed), EPIC-005 (shared folders), EPIC-008 (scoped grants), EPIC-009 (typed messages, push), EPIC-010 (agent SDK)
+- **Poweur prerequisites:** EPIC-004 (changes feed), EPIC-005 (shared folders), EPIC-008 (scoped grants), EPIC-009 (typed messages, push), EPIC-010 (agent SDK), [EPIC-017](../EPIC-017-typescript-client-sdk.md) (`@poweur/client` — the TS/JS deliverables below build on it)
+- **Sibling:** [INT-005](INT-005-agent-control-planes.md) covers personal **agent control planes** (OpenClaw, Hermes), whose integration shape is a channel plugin rather than a toolkit
 - **Goal:** make Poweur the **collaboration fabric for AI**: agents and assistants get real,
   verifiable identities; users hand work to agents (their own or other people's) by sharing a
   folder or sending a message; results land back in the requester's home. The pattern every
@@ -136,10 +137,10 @@ easy cultural fit.
 
 ## Tasks
 
-- [ ] **INT-003-T1** Poweur MCP server (reference implementation, ships with the agent SDK)
+- [ ] **INT-003-T1** Poweur MCP server (reference implementation, ships with the agent SDK; built on `@poweur/client`, EPIC-017)
 - [ ] **INT-003-T2** LangChain toolkit + LlamaIndex reader, published to PyPI/npm with docs PRs upstream
 - [ ] **INT-003-T3** Open WebUI: OIDC sign-in tutorial → storage backend PR → conversation-share PoC
-- [ ] **INT-003-T4** n8n community node pack (triggers + actions), then Node-RED port
+- [ ] **INT-003-T4** n8n community node pack (triggers + actions), then Node-RED port — both on `@poweur/client` (EPIC-017)
 - [ ] **INT-003-T5** OpenHands shared-folder task pickup PoC (the flagship demo: delegate a
       coding task to a colleague's agent, get a patch back)
 - [ ] **INT-003-T6** CrewAI/AutoGen transport adapters PoC (cross-org crew demo)
