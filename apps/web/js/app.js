@@ -12,6 +12,7 @@
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
+  SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
 } from "@poweur/client";
 
 import {
@@ -38,6 +39,7 @@ import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./cli
 import { resolveProfile, clearProfileCache } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
 import { PolicyControls, INBOX_MODES, describePowBits } from "./components/policy-controls.js";
+import { AudiencePicker } from "./components/audience-picker.js";
 import { ProfileCard } from "./components/profile-card.js";
 import {
   listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
@@ -80,7 +82,16 @@ const S = {
   requests: { incoming: [], loading: false, loaded: false, error: null },
   anon: { messages: [], loading: false, loaded: false, error: null },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
-  files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false },
+  files: {
+    dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
+    /** null = our own tree; an identity = browsing what they shared with us. */
+    owner: null,
+    /** True while choosing whose shared tree to open. */
+    picking: false,
+    grants: [], grantsLoaded: false,
+    /** Changes-feed cursor for the auto-refresh (EPIC-004). */
+    cursor: "", polling: false,
+  },
 };
 
 /**
@@ -940,10 +951,29 @@ function renderCompose() {
 
 // ─── Files destination ────────────────────────────────────────────────────────
 
+/** A path a grant may cover: under a shareable root, and not the root itself. */
+function isShareablePath(path) {
+  const top = String(path ?? "").split("/")[0];
+  return SHARE_ROOTS.includes(top) && path.includes("/");
+}
+
+/** Grants covering exactly this path (what the "Shared" badge reports). */
+function grantsForPath(path) {
+  return S.files.grants.filter(g => g.path === path && !grantExpired(g));
+}
+
+function describeAudience(grant) {
+  return grant.audience
+    .map(entry => entry.id || `group:${entry.group}`)
+    .join(", ");
+}
+
 function renderFilesDestination() {
   const F = S.files;
   const crumbs = F.path ? F.path.split("/") : [];
   const atRoot = !F.path;
+  const visiting = Boolean(F.owner);
+  const picking = F.picking && !visiting;
   const quota = F.quota;
   const quotaPct = quota?.quota_bytes > 0
     ? Math.min(100, Math.round((quota.used_bytes / quota.quota_bytes) * 100))
@@ -952,14 +982,34 @@ function renderFilesDestination() {
   return `
     <div class="dest-header">
       <h1 class="dest-title">Files</h1>
+      ${atRoot && !visiting ? `
+        <button class="btn btn-sm" id="btn-shares" title="Shares you have made">🔗</button>` : ""}
       ${atRoot ? "" : `
-        <button class="btn btn-sm" id="btn-new-folder" title="New folder" aria-label="New folder">📁+</button>
+        ${visiting ? "" : `
+          <button class="btn btn-sm" id="btn-new-folder" title="New folder" aria-label="New folder">📁+</button>`}
         <label class="btn btn-sm" for="ff-upload" style="cursor:pointer" title="Upload">⬆️
           <input id="ff-upload" type="file" multiple style="display:none" />
         </label>`}
     </div>
 
-    ${quota ? `
+    <div class="dest-toolbar file-sources" role="tablist" aria-label="Which files">
+      <button class="tray-tab${visiting ? "" : " active"}" id="btn-files-mine"
+              role="tab" aria-selected="${!visiting}">My files</button>
+      <button class="tray-tab${visiting || picking ? " active" : ""}" id="btn-files-shared"
+              role="tab" aria-selected="${visiting || picking}">Shared with me</button>
+    </div>
+
+    ${picking ? renderOwnerPicker() : ""}
+
+    ${visiting ? `
+      <div class="visitor-banner small">
+        Browsing <strong>${esc(F.owner)}</strong>. You see only what they granted you;
+        writing works where they allowed it.
+        <button class="link-btn" id="btn-leave-owner">Leave</button>
+      </div>` : ""}
+
+    ${picking ? "" : `
+    ${quota && !visiting ? `
       <div class="quota-bar">
         <div class="small muted quota-line">
           <span>${formatBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${formatBytes(quota.quota_bytes)}` : ""} used</span>
@@ -979,7 +1029,10 @@ function renderFilesDestination() {
     </nav>
 
     ${F.loading ? `<p class="muted small" style="padding:16px">Loading…</p>` : `
-      ${F.entries.length === 0
+      ${F.entries.length === 0 && visiting
+        ? emptyState("🔒", "Nothing shared here",
+            `${F.owner} has not granted you anything under this folder, or the grant was revoked.`)
+        : F.entries.length === 0
         ? emptyState("📂", atRoot ? "No roots yet" : "Empty folder",
             atRoot ? "Your storage roots appear once the relay provisions them."
                    : "Upload a file or create a folder to get started.")
@@ -993,15 +1046,59 @@ function renderFilesDestination() {
                      role="button" tabindex="0" style="cursor:pointer">
                   <div class="conv-name">${esc(e.name)}
                     ${rootInfo ? `<span class="chip" style="margin-left:6px">${esc(rootInfo.badge)}</span>` : ""}
+                    ${grantsForPath(e.path).length
+                      ? `<span class="chip chip-accent" style="margin-left:6px">Shared</span>` : ""}
                   </div>
                   <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : formatBytes(e.size)}</div>
                 </div>
-                ${atRoot ? "" : `
+                ${atRoot || visiting ? "" : `
+                  ${isShareablePath(e.path) ? `
+                    <button class="btn btn-sm" data-share="${esc(e.path)}"
+                            aria-label="Share ${esc(e.name)}">🔗</button>` : ""}
                   <button class="btn btn-sm" data-rename="${esc(e.path)}" aria-label="Rename ${esc(e.name)}">✏️</button>
                   <button class="btn btn-sm" data-delete="${esc(e.path)}" aria-label="Delete ${esc(e.name)}">🗑</button>`}
               </div>`;
             }).join("")}
-          </div>`}`}`;
+          </div>`}`}`}`;
+}
+
+/**
+ * Whose shared files to open.
+ *
+ * There is no "shares granted to me" endpoint — grants live in the *owner's*
+ * tree and only they can list them (EPIC-005's offer/accept flow is what will
+ * change that). So the visitor names the owner, exactly as the CLI does, and
+ * the relay's grant engine decides what they can see: a visitor may traverse
+ * the ancestors of anything granted to them, and listings filter out
+ * everything else, so an owner who shared nothing simply looks empty.
+ */
+function renderOwnerPicker() {
+  const contacts = S.contacts.list.filter(c => c.state === "accepted");
+  return `
+    <div class="owner-picker">
+      <p class="muted small">
+        Open someone's tree to see what they have shared with you.
+      </p>
+      ${slot("owner-picker-input", () => IdentityInput({
+        resolve: resolveForComponents,
+        contacts: S.contacts.list,
+        label: "Whose files?",
+        preview: false,
+        onSubmit: (identity) => openOwnerTree(identity),
+      }).el)}
+      ${contacts.length ? `
+        <div class="section-label">Contacts</div>
+        <div class="conv-list">
+          ${contacts.map(c => `
+            <div class="conv-row" data-open-owner="${esc(c.identity)}" role="button" tabindex="0">
+              ${avatarHtml(c.identity, "md")}
+              <div class="conv-info">
+                <div class="conv-name">${esc(c.petname || idHandle(c.identity))}</div>
+                <div class="conv-preview">${esc(c.identity)}</div>
+              </div>
+            </div>`).join("")}
+        </div>` : `<p class="muted small">No contacts yet — type an identity above.</p>`}
+    </div>`;
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
@@ -1142,10 +1239,37 @@ function attachEvents() {
   q("#btn-send-msg")?.addEventListener("click", doSend);
 
   // Files
-  if (R.page === "files" && !R.sub && getUnlockedKeys() && !S.files.loaded) {
-    S.files.loaded = true;
-    loadFiles(S.files.path);
+  if (R.page === "files" && !R.sub && getUnlockedKeys()) {
+    if (!S.files.loaded) {
+      S.files.loaded = true;
+      loadFiles(S.files.path);
+    }
+    loadContacts();      // the owner picker and the share dialog both need them
+    pollChanges();       // no-op if a loop is already running
   }
+  q("#btn-files-mine")?.addEventListener("click", () => {
+    if (!S.files.owner && !S.files.picking) return;
+    setFilesOwner(null);
+    S.files.picking = false;
+    loadFiles("");
+  });
+  q("#btn-files-shared")?.addEventListener("click", () => {
+    if (S.files.owner) return;
+    S.files.picking = true;
+    render();
+  });
+  q("#btn-leave-owner")?.addEventListener("click", () => {
+    setFilesOwner(null);
+    S.files.picking = true;
+    render();
+  });
+  qAll("[data-open-owner]").forEach(row =>
+    row.addEventListener("click", () => openOwnerTree(row.dataset.openOwner)));
+  q("#btn-shares")?.addEventListener("click", showSharesPanel);
+  qAll("[data-share]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    showSharePanel(b.dataset.share);
+  }));
   qAll("[data-nav-path]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.navPath)));
   qAll("[data-open-dir]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.openDir)));
   qAll("[data-download]").forEach(b => b.addEventListener("click", () => doDownloadEntry(b.dataset.download)));
@@ -1189,7 +1313,10 @@ function switchIdentity(identity) {
   S.requests = { incoming: [], loading: false, loaded: false, error: null };
   S.anon = { messages: [], loading: false, loaded: false, error: null };
   S.policy = { doc: null, explicit: false, loading: false, loaded: false };
-  S.files = { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false };
+  S.files = {
+    dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
+    owner: null, picking: false, grants: [], grantsLoaded: false, cursor: "", polling: false,
+  };
 }
 
 function closeDropdownOnce() {
@@ -1752,11 +1879,50 @@ async function dav() {
   const client = clientFor(S.identity);
   if (!client) { toast("Unlock your identity first", "warning"); return null; }
   if (S.files.dav && S.files.davExp > Date.now() + 60_000) return S.files.dav;
-  const connected = await client.dav({ force: true });
+  const owner = S.files.owner;
+  const connected = await client.dav(owner
+    // A visitor asks for `dav:full` and lets the grant engine decide: the
+    // token scope is not the permission, the owner's signed grant is, and a
+    // read-scoped token would refuse a write the owner *did* allow.
+    ? { audience: owner, scope: "dav:full", force: true }
+    : { force: true });
   S.files.dav = connected;
   // Tokens are short-lived; re-mint a minute before the relay stops honouring one.
   S.files.davExp = Date.now() + 55 * 60_000;
   return connected;
+}
+
+/**
+ * A `SyncClient` over whichever tree is open — chunked upload + changes feed.
+ *
+ * Built from the cached DAV token rather than `client.sync()`, which would
+ * mint a fresh one: `clientFor()` returns a new `PoweurClient` each call, so
+ * its own token cache is empty every time, and the changes poll would sign a
+ * new token every five seconds.
+ */
+async function syncFor() {
+  const client = clientFor(S.identity);
+  const davClient = await dav();
+  if (!client || !davClient) return null;
+  return new SyncClient(client.relay, davClient.identity, davClient.token);
+}
+
+/** Switch between our tree and someone else's; everything cached is per-tree. */
+function setFilesOwner(owner) {
+  S.files.owner = owner;
+  S.files.picking = !owner && S.files.picking;
+  S.files.dav = null;
+  S.files.davExp = 0;
+  S.files.path = "";
+  S.files.entries = [];
+  S.files.quota = null;
+  S.files.cursor = "";
+}
+
+function openOwnerTree(identity) {
+  setFilesOwner(identity.trim().toLowerCase());
+  S.files.picking = false;
+  loadFiles("");
 }
 
 async function loadFiles(path) {
@@ -1772,6 +1938,7 @@ async function loadFiles(path) {
     S.files.path = path;
     S.files.entries = entries;
     S.files.quota = quota;
+    if (!S.files.owner) loadGrants();
   } catch (err) {
     toast(err.message, "error");
   } finally {
@@ -1786,17 +1953,37 @@ async function doUploadFiles(fileList) {
   try {
     const client = await dav();
     if (!client) return;
+    let sync = null;
     setLoading(true, `Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
     for (const f of files) {
-      await client.write(`${S.files.path}/${f.name}`, f);
+      const path = `${S.files.path}/${f.name}`;
+      if (f.size >= DEFAULT_CHUNK_THRESHOLD) {
+        // Above the threshold a single PUT is one all-or-nothing request over
+        // whatever connection a phone happens to have; the resumable endpoint
+        // (E04/E14) uploads in chunks the relay can pick up again.
+        setLoading(true, `Uploading ${f.name} in chunks…`);
+        sync ??= await syncFor();
+        await sync.uploadChunked(path, new Uint8Array(await f.arrayBuffer()));
+      } else {
+        await client.write(path, f);
+      }
     }
     setLoading(false);
     toast(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}`, "success");
     await loadFiles(S.files.path);
   } catch (err) {
     setLoading(false);
-    toast(err.status === 507 ? "Storage quota exceeded" : err.message, "error");
+    toast(uploadErrorMessage(err), "error");
   }
+}
+
+/** Say which of the two "no" answers this was. */
+function uploadErrorMessage(error) {
+  if (error.status === 507) return "Storage quota exceeded";
+  if (error.status === 403 && S.files.owner) {
+    return `${S.files.owner} granted you read-only access here`;
+  }
+  return error.message;
 }
 
 async function doDownloadEntry(path) {
@@ -1851,6 +2038,183 @@ async function doDeleteEntry(path) {
     await loadFiles(S.files.path);
   } catch (err) {
     toast(err.message, "error");
+  }
+}
+
+// ─── Sharing (EPIC-005) ──────────────────────────────────────────────────────
+
+async function loadGrants({ force = false } = {}) {
+  const F = S.files;
+  if (F.grantsLoaded && !force) return;
+  const client = clientFor(S.identity);
+  if (!client || F.owner) return;
+  try {
+    const shares = await client.shares();
+    F.grants = await shares.list();
+    F.grantsLoaded = true;
+    if (R.page === "files" && !R.sub) render();
+  } catch (error) {
+    console.warn("Share list failed:", error.message);
+  }
+}
+
+/**
+ * Grant access to one path.
+ *
+ * The grant is signed *here*, with the identity key, and stored in our own
+ * tree — the relay verifies that signature before honouring it, so a relay
+ * that rewrote the file could not widen the audience. That is why this dialog
+ * cannot be a server call.
+ */
+function showSharePanel(path) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  let audience = [];
+  const existing = grantsForPath(path);
+
+  showPanel(`Share ${path.split("/").pop()}`, `
+    <p class="muted small" style="margin-bottom:4px">/${esc(path)}</p>
+    ${existing.length ? `
+      <p class="small">Already shared with ${esc(existing.map(describeAudience).join("; "))}.</p>` : ""}
+    <div id="share-audience"></div>
+    <div class="section-label mt-md">They may</div>
+    <div class="policy-challenges" id="share-perms">
+      <button class="chip policy-challenge selected" data-perm="read">Read</button>
+      <button class="chip policy-challenge" data-perm="rw">Read and write</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="share-expiry">Stop working on (optional)</label>
+      <input id="share-expiry" class="input" type="date" />
+    </div>
+    <button class="btn btn-primary mt-md" id="btn-share-go" disabled>Share</button>`,
+  (close) => {
+    let permissions = "read";
+    const go = q("#btn-share-go");
+    const picker = AudiencePicker({
+      resolve: resolveForComponents,
+      contacts: S.contacts.list,
+      groups: [],
+      onChange: (selection) => {
+        audience = selection;
+        if (go) go.disabled = selection.length === 0;
+      },
+    });
+    q("#share-audience")?.replaceChildren(picker.el);
+
+    qAll("#share-perms [data-perm]").forEach(button => button.addEventListener("click", () => {
+      permissions = button.dataset.perm;
+      qAll("#share-perms [data-perm]").forEach(b => b.classList.toggle("selected", b === button));
+    }));
+
+    go?.addEventListener("click", async () => {
+      const expiry = q("#share-expiry")?.value;
+      close();
+      setLoading(true, "Signing the grant…");
+      try {
+        const shares = await client.shares();
+        await shares.add(client.signer, path, {
+          with: audience,
+          permissions,
+          // A date input gives a day; the grant wants an instant, and the end
+          // of the chosen day is what "until the 5th" means to a person.
+          ...(expiry ? { expiresAt: `${expiry}T23:59:59Z` } : {}),
+        });
+        toast(`Shared /${path} with ${audience.length} ${audience.length === 1 ? "person" : "people"}`, "success");
+        await loadGrants({ force: true });
+      } catch (error) {
+        toast(error.message, "error");
+      } finally {
+        setLoading(false);
+        render();
+      }
+    });
+  });
+}
+
+/** Everything we have shared, and the one button that takes it back. */
+function showSharesPanel() {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  const body = () => {
+    const grants = S.files.grants;
+    if (!grants.length) {
+      return `<p class="muted small">You have not shared anything yet. Open a folder under
+              /shared or /apps and tap 🔗.</p>`;
+    }
+    return grants.map(grant => `
+      <div class="share-row">
+        <div class="share-row-body">
+          <div class="share-path mono small">/${esc(grant.path)}</div>
+          <div class="muted small">${esc(describeAudience(grant))}</div>
+          <div class="small">
+            <span class="chip ${grantAllowsWrite(grant) ? "chip-orange" : "chip-accent"}">
+              ${grantAllowsWrite(grant) ? "read + write" : "read"}</span>
+            ${grant.expires_at ? `<span class="chip ${grantExpired(grant) ? "chip-red" : ""}">
+              ${grantExpired(grant) ? "expired" : `until ${esc(grant.expires_at.slice(0, 10))}`}</span>` : ""}
+          </div>
+        </div>
+        <button class="btn btn-sm" data-revoke="${esc(grant.share_id)}">Revoke</button>
+      </div>`).join("");
+  };
+
+  showPanel("Shared by you", `<div id="shares-list">${body()}</div>`, (close) => {
+    const wire = () => qAll("#shares-list [data-revoke]").forEach(button =>
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const shares = await client.shares();
+          // Revocation is a file delete: the relay reloads grants per request,
+          // so the next thing the grantee tries is already refused.
+          await shares.revoke(button.dataset.revoke);
+          await loadGrants({ force: true });
+          const list = q("#shares-list");
+          if (list) { list.innerHTML = body(); wire(); }
+          toast("Access revoked", "success");
+          render();
+        } catch (error) {
+          button.disabled = false;
+          toast(error.message, "error");
+        }
+      }));
+    wire();
+  });
+}
+
+/**
+ * Live-update the open folder from the changes feed (EPIC-004 E04-T5).
+ *
+ * Polling, not pushing: the relay has no change socket yet (EPIC-009). The
+ * loop runs only while the Files destination is on screen, and only reloads
+ * when a change actually touches the folder being looked at — a feed full of
+ * someone else's uploads should not make the list flicker.
+ */
+async function pollChanges() {
+  const F = S.files;
+  if (F.polling) return;
+  F.polling = true;
+  try {
+    while (R.page === "files" && !R.sub && getUnlockedKeys()) {
+      const sync = await syncFor();
+      if (!sync) break;
+      const { changes, cursor, fullResync } = await sync.changes(F.cursor);
+      F.cursor = fullResync ? "" : cursor;
+      const prefix = F.path ? `${F.path}/` : "";
+      const touched = changes.some(change => {
+        const path = change.path ?? "";
+        if (!path.startsWith(prefix)) return false;
+        // Only this folder's own entries — a change deep inside a subfolder
+        // does not change what this listing shows.
+        return !path.slice(prefix.length).includes("/");
+      });
+      if (touched && !F.loading) await loadFiles(F.path);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  } catch (error) {
+    console.warn("Changes feed stopped:", error.message);
+  } finally {
+    F.polling = false;
   }
 }
 

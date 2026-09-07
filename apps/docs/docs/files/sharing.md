@@ -137,6 +137,22 @@ owner's relay (`poweur dav token --audience alice.poweur.net --scope dav:full --
 and the grant engine does the rest — including cross-relay recipients, whose keys the
 owner's relay verifies through the resolver chain.
 
+## Web app
+
+**Files → 🔗** on any folder or file under `/shared` or `/apps` opens the share dialog:
+audience (contacts, groups or a typed identity), read or read-write, optional expiry. The
+grant is signed **in the browser** with the identity key and PUT into the owner's own tree,
+so the same relay-cannot-forge-it property holds; **Files → 🔗** at the root lists every
+grant with a Revoke button, which deletes the document.
+
+**Files → Shared with me** is the recipient side: name an owner and browse their tree with
+a visitor token minted at `dav:full` — the scope is not the permission, the owner's signed
+grant is, so a read-only token would refuse a write the owner actually allowed. Because
+read covers the ancestors of a granted path and listings filter siblings, an owner who
+shared one folder shows exactly that folder and nothing else. There is no "shares granted
+to me" listing: grants live in the owner's `poweur-sys`, which only they can read, and
+changing that is the `sys.share.offer` work below.
+
 ## Threat notes
 
 - **Forged grants:** files in `poweur-sys/relay/shares/` signed by anyone but the owner
@@ -153,7 +169,8 @@ owner's relay verifies through the resolver chain.
 ## Deferred (tracked in EPIC-005)
 
 - `sys.share.offer` / accept / revoked notification messages and recipient-side
-  `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages).
-- Web app share dialog and received-shares view.
+  `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages). Until then a
+  recipient has to be told *who* shared with them out of band — the web app's
+  "Shared with me" asks for the owner by name for exactly this reason.
 - Public-link (capability URL) shares — E05-T4.
 - Group identities — E05-T5 (design only).

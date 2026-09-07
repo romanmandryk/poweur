@@ -1,6 +1,6 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
-- **Status:** in progress — T6, T1, T2 and T3 done; T4–T5 open
+- **Status:** in progress — T6, T1, T2, T3 and T4 done; T5 open
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
@@ -281,27 +281,47 @@ sends anonymously, solving the proof-of-work *in the page*; the message appears 
 anonymous tray with no reply affordance and the signed inbox stays empty. A second case
 asserts the default: an identity that never opted in refuses the same send, visibly.
 
-### E15-T4 — Files explorer & sharing
+### E15-T4 — Files explorer & sharing — **done**
 
-- [ ] Promote `js/files.js` to a first-class Files destination: breadcrumb navigation, the
-      layout roots (public / shared / private / apps) with audience badges (reuse E03-T5
-      styling), upload (chunked via the E14/E04 upload endpoint for large files),
-      download, mkdir, rename, delete, quota display
-- [ ] **Share dialog** on any file/folder: AudiencePicker (contacts + groups + typed IDs) +
-      read/read-write toggle + optional expiry → writes a signed grant to
-      `poweur-sys/relay/shares/` (EPIC-005). Client signs with the identity key (reuse
-      `js/crypto.js` sign), matching `poweur share add`
-- [ ] "Shared with" indicator on shared items; a **share management** view to list/revoke
-      grants (`poweur-sys/relay/shares/` listing via the sync manifest, like `share ls`)
-- [ ] Received-shares view: shares granted **to** the user (v1: access an owner's tree
-      directly with a visitor DAV token, as the CLI does; a mounted `/shared/<owner>/` view
-      arrives with EPIC-005's offer/accept flow)
-- [ ] Changes-feed auto-refresh (EPIC-004): poll `GET /sync/{id}/changes` and live-update
-      the current folder — closes the E04-T5 "web auto-refresh" open item
+- [x] Files destination with breadcrumbs, root badges, download, mkdir, rename, delete and
+      quota — most of this landed with T1's promotion; T4 adds **chunked upload** above the
+      SDK's 64 MB threshold, because a single PUT of a large file over a phone connection
+      is one all-or-nothing request
+- [x] **Share dialog** on any file/folder under a shareable root: AudiencePicker (its first
+      consumer, as planned) + read / read-write + optional expiry → a grant signed **in the
+      browser** with the identity key and PUT into our own tree. Only paths under `/shared`
+      and `/apps` offer it, and never the roots themselves — the same rule
+      `normalizeGrantPath` enforces, applied before the button appears rather than as an
+      error after
+- [x] "Shared" chip on granted rows; a **Shared by you** panel listing every grant with its
+      audience, permissions and expiry, and a Revoke that deletes the document
+- [x] Received shares: a **Shared with me** source that opens an owner's tree with a
+      visitor token. The token is minted `dav:full` deliberately — the scope is not the
+      permission, the owner's signed grant is, and a read-scoped token would refuse a write
+      the owner *did* allow
+- [x] Changes-feed auto-refresh: a 5 s poll of `GET /sync/{id}/changes` while Files is on
+      screen, reloading only when a change touches the folder being looked at. Closes the
+      E04-T5 "web auto-refresh" open item
 
-**Acceptance:** Playwright flow — user shares a folder with a contact by picking them from
-the audience picker; the grantee (second browser) reads and writes it; owner revokes and
-access stops.
+**There is no "shares granted to me" listing, so the visitor names the owner.** Grants live
+in the owner's `poweur-sys`, which only they can read; EPIC-005's `sys.share.offer` is what
+will let a recipient discover shares. What makes naming the owner enough is the grant
+engine: read covers the *ancestors* of a granted path and listings filter siblings, so an
+owner who shared one folder shows exactly that folder to that visitor and nothing else.
+
+**Found and fixed here:** `AudiencePicker` rendered a literal "000" above its input when it
+had no contacts and no groups — `groups.length && node` is `0`, not `false`, and `0` is a
+legitimate text child. It had never been rendered empty before, since T1 built it without a
+consumer. Pinned by a unit test.
+
+**Also:** the changes poll builds its `SyncClient` from the cached DAV token rather than
+`client.sync()`. `clientFor()` returns a fresh `PoweurClient` per call, so its internal
+token cache is always empty and the poll would have signed a new token every five seconds.
+
+**Acceptance:** met — `test/e2e/sharing.spec.js`. The owner shares a folder by picking the
+grantee in the audience picker; the grantee opens their tree, reads the file and writes a
+new one; the owner revokes and the grantee's next request is refused. A second case asserts
+the changes feed: a file written behind the UI's back appears with no click.
 
 ### E15-T5 — Profile, first-run onboarding & polish
 

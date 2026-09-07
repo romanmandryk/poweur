@@ -1437,3 +1437,31 @@ input, textarea, select { font-family: inherit; }
 .anon-body { font-size: 15px; color: var(--t1); overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .compose-anon { border-top: 1px solid var(--sep); margin-top: 4px; }
+
+/* ─── E15-T4: sharing and visitor trees ───────────────────────────────────── */
+
+.file-sources { display: flex; gap: 8px; }
+.file-sources .tray-tab { flex: 1; }
+
+.visitor-banner {
+  padding: 10px 16px;
+  background: var(--accent-light);
+  color: var(--t1);
+  border-bottom: 1px solid var(--sep);
+  line-height: 1.4;
+}
+.visitor-banner .link-btn { margin-left: 6px; }
+
+.owner-picker { padding: 0 16px 16px; }
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sep);
+}
+.share-row:last-child { border-bottom: none; }
+.share-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.share-path { overflow-wrap: anywhere; font-weight: 600; }
+.share-row .btn { background: var(--surface-2); color: var(--red); min-height: 40px; flex-shrink: 0; }

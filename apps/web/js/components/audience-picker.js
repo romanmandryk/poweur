@@ -43,9 +43,11 @@ export function AudiencePicker({
 
   const root = el("div", { class: "audience-picker" }, [
     chips,
-    groups.length && el("div", { class: "section-label", text: "Groups" }),
-    groups.length && groupList,
-    contacts.length && el("div", { class: "section-label", text: "Contacts" }),
+    // `length &&` yields 0, not false, and 0 is a legitimate text child — an
+    // empty picker rendered a literal "000" before these were made boolean.
+    groups.length > 0 && el("div", { class: "section-label", text: "Groups" }),
+    groups.length > 0 && groupList,
+    contacts.length > 0 && el("div", { class: "section-label", text: "Contacts" }),
     contacts.length ? contactList : el("p", { class: "muted small", text: "No contacts yet — type an identity below." }),
     identityInput.el,
   ]);

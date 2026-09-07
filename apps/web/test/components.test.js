@@ -286,6 +286,16 @@ describe("dom helpers", () => {
   });
 });
 
+describe("AudiencePicker with nothing to pick from", () => {
+  it("renders no stray text when there are no contacts and no groups", () => {
+    const picker = AudiencePicker({ resolve: resolveOk, contacts: [], groups: [] });
+    // `contacts.length && node` is 0 when empty, and 0 is a valid text child:
+    // the picker used to render a literal "000" above the input.
+    expect(picker.el.textContent).not.toMatch(/0/);
+    expect(picker.el.textContent).toContain("No contacts yet");
+  });
+});
+
 describe("PolicyControls", () => {
   const save = () => Promise.resolve();
 
