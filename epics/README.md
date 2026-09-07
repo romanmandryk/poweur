@@ -39,8 +39,8 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | proposed | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
 | [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (CI gates, metrics, Grafana, federated ecosystem metrics) | Infra / Ops | proposed | E02 |
-| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web page → E12, stranger gate → E07-T5) | E06, E07 |
-| [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | proposed | E03, E04, E05, E06, E07, E14 |
+| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web app shipped with E15-T3; public contact page → E12, stranger gate → E07-T5) | E06, E07 |
+| [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | **complete** (T1–T6) | E03, E04, E05, E06, E07, E14 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | proposed | E02, E01, E14 |
