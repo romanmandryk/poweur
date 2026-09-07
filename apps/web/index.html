@@ -9,14 +9,21 @@
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
   <title>Poweur ID</title>
   <link rel="stylesheet" href="css/style.css" />
-  <!-- The protocol lives in @poweur/client, vendored into /app/vendor by
+  <!-- The protocol lives in @poweur/client, vendored into ./vendor by
        `pnpm vendor`. No bundler and no CDN: the app is self-contained, which is
-       what offline and self-hosted installs need (EPIC-015 E15-T6). -->
+       what offline and self-hosted installs need (EPIC-015 E15-T6).
+
+       Paths are relative to the document base, not absolute. The relay serves
+       this page at /app/ (and redirects /app to /app/), a plain static server
+       serves it at /, and EPIC-019's Capacitor shell serves it from
+       capacitor://localhost/ — an absolute "/app/…" would only work in the
+       first of those, which is the same coupling E15-T1 removes from relay
+       URLs. -->
   <script type="importmap">
   {
     "imports": {
-      "@poweur/client": "/app/vendor/poweur-client/index.js",
-      "@poweur/client/browser": "/app/vendor/poweur-client/browser/index.js"
+      "@poweur/client": "./vendor/poweur-client/index.js",
+      "@poweur/client/browser": "./vendor/poweur-client/browser/index.js"
     }
   }
   </script>

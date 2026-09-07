@@ -90,3 +90,34 @@ jobs:
 
       - name: CLI runs from the built output
         run: node packages/client-ts/dist/cli/bin.js version
+
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/api/go.sum
+            packages/identity/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The SPA loads @poweur/client from a committed copy of the package's ESM
+      # (no bundler). A change to the package that skipped the vendor step ships
+      # a stale protocol to browsers, so rebuild and diff rather than trust it.
+      - run: pnpm client:build
+      - run: pnpm web:vendor:check
+
+      # Both suites spawn a real Go relay (`go run`).
+      - run: pnpm web:test
+      - run: pnpm web:test:e2e

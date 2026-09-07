@@ -1,6 +1,6 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
-- **Status:** proposed
+- **Status:** in progress — T6 and T1 done; T2–T5 open
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
@@ -21,11 +21,12 @@ audience picker, policy controls) that EPIC-012's contact-form/website work buil
 
 ## Background (current web app — what exists, what's missing)
 
-- SPA in `apps/web/` (vanilla JS, no framework — keep it). `js/app.js` (~1500 lines) is the
-  controller: three top-level pages **main | launcher | settings** and full-screen
-  sub-pages **add-id | new-id | unlock | compose**, a bottom nav, a slide-up panel system
-  (`#panel-root`/`#panel-backdrop`), and hand-rolled SVG icons. Tested with Vitest
-  (unit + live-relay) and Playwright (e2e).
+- SPA in `apps/web/` (vanilla JS, no framework — keep it). `js/app.js` is the controller.
+  *As of E15-T1* it routes five destinations (**messages | contacts | files | launcher |
+  settings**) plus full-screen sub-pages **add-id | unlock | compose**, over the existing
+  bottom nav and slide-up panel system (`#panel-root`/`#panel-backdrop`). The protocol lives
+  in `@poweur/client` (E15-T6); `js/vault.js` holds key custody and `js/client.js` builds the
+  one client every screen uses. Tested with Vitest (unit + live-relay) and Playwright (e2e).
 - **Shipped modules with UI:** identity create/import/unlock (passkey + PIN,
   `js/passkey.js`/`js/crypto.js`), messaging compose + inbox (`js/messaging.js`), a file
   browser (`js/files.js` — list/upload/download/mkdir/rename/delete against DAV) reachable
@@ -91,22 +92,63 @@ shell ([EPIC-019](EPIC-019-mobile-app-capacitor.md)) wraps *this* UI verbatim.
 
 ## Tasks
 
-### E15-T1 — Information architecture & shared components
+### E15-T1 — Information architecture & shared components — **done**
 
-- [ ] Refactor `app.js` navigation to the five destinations; migrate existing
-      main/compose/settings content without regressing messaging or identity flows
-- [ ] Build `js/components/identity-input.js` (type/search/validate/resolve, contacts
+- [x] Refactor `app.js` navigation to the five destinations; migrate existing
+      main/compose/settings content without regressing messaging or identity flows.
+      Files is promoted from a sub-page to a destination; Messages gains the
+      inbox/requests/anonymous tray shell (inbox live, the other two empty states for
+      T2/T3); Contacts reads `contacts.json` through the SDK read-only, with requests,
+      accept/block and key-pinning left to T2
+- [x] Build `js/components/identity-input.js` (type/search/validate/resolve, contacts
       autocomplete), `audience-picker.js`, `profile-card.js` as framework-free modules with
-      unit tests (Vitest, DOM via jsdom/happy-dom as the suite already uses)
-- [ ] Resolver helper in `js/api.js`: fetch + cache `profile.json` / `capabilities.json`
-      for an ID (EPIC-006 well-known), used by ProfileCard and IdentityInput
-- [ ] **Relay base URL from the identity record, not `location.origin`** (constraint 2 above);
-      add a unit test that fails if any module derives a relay URL from `location.origin`
-- [ ] **Mobile-first layout** for the destination shell and panel system (constraint 1 above)
+      unit tests (21 tests, happy-dom). They build **DOM, not HTML strings** — they take
+      user-typed identities and remote profile text, and a template literal is how an
+      injection lands; `js/components/dom.js` sets text through the DOM API so escaping is
+      not something a caller can forget. No app-shell imports either, so EPIC-012 can embed
+      them in a public contact form
+- [x] Resolver helper for `profile.json` / `capabilities.json` (EPIC-006 well-known),
+      cached and request-coalesced, used by ProfileCard and IdentityInput. It lives in the
+      new `js/profiles.js` rather than `js/api.js` — E15-T6 deleted that file
+- [x] **Relay base URL from the identity record, not `location.origin`** — landed with
+      E15-T6. `test/origin.test.js` fails if any module but `storage.js` reads the origin,
+      and pins it to the single documented `defaultRelayUrl()` seam
+- [x] **Mobile-first layout** for the destination shell and panel system: five tabs fit
+      375px, every nav tab and row clears the 44px touch floor, safe-area insets were
+      already in place
 
-**Acceptance:** the five destinations render and route; components have unit tests; no
-regression in the existing messaging/identity Playwright e2e; the origin-independence test
-is green and the shell is usable at a 375px viewport.
+**Also landed here — the import map is relative, not `/app/…`.** The path in E15-T6's
+bullet was absolute, which works only when the relay serves the SPA at `/app/`. A static
+dev server mounts it at `/` and EPIC-019's shell at `capacitor://localhost/`, so
+`./vendor/poweur-client/index.js` is the portable form — the same coupling constraint 2
+removes from relay URLs.
+
+**Deferred with reasons (not dropped):**
+
+- Requests and anonymous trays render empty states only — the data paths are E15-T2/T3.
+- Contacts is read-only; `sys.contact.request`, accept/block and the pinned-key dialog are
+  E15-T2.
+- `AudiencePicker` is built and unit-tested but has no consumer until the share dialog in
+  E15-T4, so the shell does not import it yet.
+- Profile presentation degrades to the identity document. `/.well-known/poweur/profile.json`
+  is **Host-routed** and a browser cannot set Host, so on a shared dev relay another
+  identity's `poweur-sys/public` is unreachable; there is no non-Host path for it and adding
+  one is EPIC-006's call, not this epic's. Capabilities still surface, because the identity
+  document carries them.
+
+**EPIC-011 dependency is mocked, visibly.** `js/keystore-mock.js` supplies the "Keys &
+devices" surface E11-T1 will own. This browser's own enrollment is **real** (kind, wrap and
+creation time come from the identity record); every other row is flagged `mock` in the UI,
+and every write throws `KeystoreUnavailable` naming E11-T1 rather than faking success — a
+mock that silently "removes" a device is worse than no mock. The recovery-kit row states
+plainly that web-created identities are `legacy-keypair` and need E11's opt-in rotate-to-seed
+first. Swapping in the real implementation is a change of function bodies, not of shape.
+
+**Acceptance:** met. The five destinations render and route (`test/e2e/destinations.spec.js`
+at a 375px viewport, including a no-horizontal-scroll and a 44px touch-target check);
+components have unit tests (`test/components.test.js`, `test/profiles.test.js`,
+`test/keystore-mock.test.js`); `test/e2e/hosted.spec.js` is unchanged and green; the
+origin-independence test passes.
 
 ### E15-T2 — Contacts & requests
 

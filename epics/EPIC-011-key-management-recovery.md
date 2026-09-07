@@ -13,7 +13,7 @@
 > **Inbound from [EPIC-019](EPIC-019-mobile-app-capacitor.md) (E19-T8):** the X25519
 > **encryption key must be copied to every device** — it cannot be per-device. Senders encrypt
 > to the identity's `encryption_public_key` (`resolveRecipientEncKey`,
-> `apps/web/js/messaging.js`), and `SessionCreateRequest` delegates **signing only** — it
+> `packages/client-ts/src/messages.ts`), and `SessionCreateRequest` delegates **signing only** — it
 > carries no encryption key. So per-device *signing* keys are achievable here, but per-device
 > *encryption* keys would require senders to encrypt N times: a protocol change, out of scope
 > for this epic. **This is why the seed model is the right shape** — one seed, N wrappings,
@@ -21,6 +21,21 @@
 > E11-T1's spec so it is not rediscovered.
 
 ## Progress
+
+> **Inbound from [EPIC-015](EPIC-015-web-app-ux.md) (E15-T1):** the web app's
+> **"Keys & devices"** and **"Recovery kit"** surfaces exist now, backed by
+> `apps/web/js/keystore-mock.js`. This browser's own enrollment is real (kind, wrap and
+> creation time read from the identity record); every other row is flagged `mock` in the UI
+> and every write throws `KeystoreUnavailable` naming E11-T1 rather than faking success.
+> The mock's shapes are the ones specified below, so landing T1 means replacing function
+> bodies with the relay calls — `listEnrollments`, `enrollAuthenticator`,
+> `removeEnrollment`, `generateRecoveryKit`, `keystoreAvailable` — and deleting the file.
+> `apps/web/test/keystore-mock.test.js` pins the contract in the meantime.
+>
+> Note also that identities created by the web app are `legacy-keypair`: it generates two
+> independent WebCrypto keys, so the migration path below is the *normal* case for web
+> users, not an edge case. `apps/web/js/vault.js` already converts both directions between
+> WebCrypto JWKs and the SDK's raw key bytes, so `identityKeysFromSeed` plugs straight in.
 
 | Task | Status | Ships in | Notes |
 |------|--------|----------|-------|
@@ -51,7 +66,7 @@ instead of an email address being the thing that recovers your Poweur ID.
 
 | Key / credential | Type | Where it lives today | Protection | Lifetime |
 |---|---|---|---|---|
-| Identity signing key | Ed25519 | CLI: `keys_dir/<id>.key` (`apps/cli/internal/identity/keys.go`); Web: JWK in localStorage | CLI: **plaintext base64, file mode 0600**; Web: AES-wrapped | permanent |
+| Identity signing key | Ed25519 | CLI: `keys_dir/<id>.key` (`apps/cli/internal/identity/keys.go`); Web: JWK in localStorage, signed inside WebCrypto (`apps/web/js/vault.js`) | CLI: **plaintext base64, file mode 0600**; Web: AES-wrapped | permanent |
 | Encryption key | X25519 | CLI: `keys_dir/<id>.enc`; Web: JWK in localStorage | same as above | permanent |
 | Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/js/passkey.js`); **exactly one credential supported**; PIN/PBKDF2 fallback when PRF unavailable |
 | Session keys | Ed25519 | client memory/disk + relay session store | identity-signed `SessionProof`, ≤ 24 h TTL (`apps/api/internal/relay/sessions.go`) | hours |
@@ -72,7 +87,7 @@ Key observations driving the design:
    humans; needs at-rest encryption regardless of recovery work.
 4. **The synced keystore is circular unless it has its own bootstrap read.** Reading anything
    under `poweur-sys/` means minting a DAV token, which means signing the canonical
-   `dav-token` string **with the identity key** (`apps/web/js/files.js`). The keystore exists
+   `dav-token` string **with the identity key** (`packages/client-ts/src/files.ts`). The keystore exists
    to *recover* that key. So a synced keystore is a fine **backup and multi-device sync**
    mechanism for a client that is already unlocked, but it is **not** by itself an answer to
    "I cleared site data" — that needs a read path authenticated by something other than the
@@ -125,7 +140,7 @@ vault key     := HKDF-SHA256(ikm=seed, salt="", info="poweur/v1/vault", L=32)   
 ```
 
 **Wrapping is unchanged from shipped code** — `wrapKeysAES`/`unwrapKeysAES`
-(`apps/web/js/crypto.js`): HKDF-SHA256 over the wrapping secret with salt
+(now `apps/web/js/vault.js`, unchanged in format): HKDF-SHA256 over the wrapping secret with salt
 `poweur-key-wrapping-v1`, then AES-256-GCM. The PRF salt stays `poweur-prf-v1`; each
 authenticator yields a different PRF output for the same salt, which is exactly what
 multi-enrollment needs — **no change to the salt for multi-passkey support.**

@@ -120,7 +120,7 @@ behavior); v2 design doc merged.
 - [ ] Read receipts as a third tick (`AckState` extension — the `State` field was reserved for
       exactly this), per-contact opt-out in inbox policy
 - [ ] Outbox with retry/backoff in CLI and web (currently sends fail hard; see error paths in
-      `apps/web/js/api.js`) — queued-while-offline UX
+      `packages/client-ts/src/http.ts`) — queued-while-offline UX
 - [ ] Message expiry honored (`expires_at`): relay refuses delivery after expiry, clients
       render countdown for ephemeral messages
 

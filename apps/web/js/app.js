@@ -5,8 +5,8 @@
  * custody in `js/vault.js`, and every relay call is made through the
  * `PoweurClient` that `js/client.js` builds for the active identity.
  *
- * Three top-level pages: main | launcher | settings
- * Sub-pages (full-screen, back button): add-id | new-id | unlock | compose
+ * Five destinations (E15-T1): messages | contacts | files | launcher | settings
+ * Sub-pages (full-screen, back button): add-id | unlock | compose
  */
 
 import {
@@ -34,11 +34,22 @@ import {
 
 import { clientFor, identityApiFor, lookup } from "./client.js";
 
+import { resolveProfile, clearProfileCache } from "./profiles.js";
+import { IdentityInput } from "./components/identity-input.js";
+import { ProfileCard } from "./components/profile-card.js";
+import {
+  listEnrollments, keystoreAvailable, recoveryKitEligibility,
+  enrollAuthenticator, generateRecoveryKit, removeEnrollment,
+} from "./keystore-mock.js";
+
 // ─── Router & State ───────────────────────────────────────────────────────────
 
+/** The five primary destinations, in nav order. */
+const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"];
+
 const R = {
-  page: "main",          // main | launcher | settings
-  sub: null,             // null | add-id | new-id | unlock | compose
+  page: "messages",      // messages | contacts | files | launcher | settings
+  sub: null,             // null | add-id | unlock | compose
   params: {},
   go(page, params = {}) {
     this.page = page; this.sub = null; this.params = params;
@@ -60,8 +71,36 @@ const S = {
   messages: [],
   acks: [],
   dropdownOpen: false,
-  files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false },
+  /** Messages destination: inbox | requests | anonymous, as distinct trays. */
+  tray: "inbox",
+  contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
+  files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false },
 };
+
+/**
+ * Components build DOM, the shell builds HTML strings. `mount()` bridges the
+ * two: render an empty slot in the markup, then attach the live component to
+ * it after the string lands. Kept in one place so the pattern is obvious.
+ */
+const pendingMounts = [];
+
+function slot(id, build) {
+  pendingMounts.push({ id, build });
+  return `<div id="${id}"></div>`;
+}
+
+function flushMounts() {
+  const queued = pendingMounts.splice(0, pendingMounts.length);
+  for (const { id, build } of queued) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    const node = build();
+    if (node) host.replaceChildren(node);
+  }
+}
+
+/** Resolve an identity for the components — the profile helper, curried. */
+const resolveForComponents = (identity) => resolveProfile(identity, relayUrlFor(S.identity));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,8 +139,13 @@ const svgChevron = (cls="") => `<svg class="${cls}" viewBox="0 0 12 8" width="12
 const svgCheck = `<svg viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="12"><path d="M1 7l5 5L17 1"/></svg>`;
 const svgPlus = `<svg viewBox="0 0 18 18" fill="currentColor" width="16" height="16"><path d="M9 1a1 1 0 011 1v6h6a1 1 0 110 2h-6v6a1 1 0 11-2 0v-6H2a1 1 0 110-2h6V2a1 1 0 011-1z"/></svg>`;
 
-const iconHome = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>`;
-const iconHomeFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.1L3 10.5V21h6v-5h6v5h6V10.5L12 2.1z"/></svg>`;
+const iconChat = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-9 8.3 9.1 9.1 0 01-3.9-.8L3 20.5l1.6-4.6A8.3 8.3 0 013.5 11 8.4 8.4 0 0112 3a8.4 8.4 0 019 8.5z"/></svg>`;
+const iconChatFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a8.4 8.4 0 00-8.5 8.5c0 1.7.5 3.3 1.4 4.6L3 20.5l4.6-1.5c1.3.7 2.8 1.1 4.4 1.1a8.4 8.4 0 009-8.6A8.4 8.4 0 0012 3z"/></svg>`;
+const iconPeople = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><path d="M16.5 5.2a3.2 3.2 0 010 5.9M18 14.4a6.5 6.5 0 013.5 5.6"/></svg>`;
+const iconPeopleFill = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="8" r="3.6"/><path d="M2 20.5a7 7 0 0114 0z"/><path d="M16.4 4.8a3.4 3.4 0 010 6.4 3.2 3.2 0 000-6.4zM17.6 13.6a7 7 0 014.4 6.9h-3.6a8.4 8.4 0 00-2.6-6.3z"/></svg>`;
+const iconFolder = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 014.5 6h4l2 2.5h7A1.5 1.5 0 0119 10v7a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 013 17z"/></svg>`;
+const iconFolderFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 7.2A1.7 1.7 0 014.7 5.5h3.8L11 8.3h6.3A1.7 1.7 0 0119 10v7.3a1.7 1.7 0 01-1.7 1.7H4.7A1.7 1.7 0 013 17.3z"/></svg>`;
+
 const iconRocket = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2s-5 2.5-5 9a7 7 0 0014 0c0-6.5-5-9-5-9z"/><circle cx="12" cy="11" r="2"/><path d="M9 21l3-3 3 3"/><path d="M7 14l-3 3M17 14l3 3"/></svg>`;
 const iconRocketFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C12 2 7 4.5 7 11a7 7 0 0010 6.32V21l-3-3-3 3v-3.68A7 7 0 0017 11c0-6.5-5-9-5-9zm0 11a2 2 0 110-4 2 2 0 010 4z"/><path d="M7 14L4 17M17 14l3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>`;
 const iconGear = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06A1.65 1.65 0 0015 19.4a1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`;
@@ -121,6 +165,7 @@ function render() {
       <div class="page-content" id="page-content">${renderPage()}</div>
       ${renderBottomNav()}`;
   }
+  flushMounts();
   attachEvents();
 }
 
@@ -174,42 +219,51 @@ function renderDropdown(ids) {
     </div>`;
 }
 
+const NAV = [
+  { page: "messages", label: "Messages", icon: iconChat,   iconFill: iconChatFill },
+  { page: "contacts", label: "Contacts", icon: iconPeople, iconFill: iconPeopleFill },
+  { page: "files",    label: "Files",    icon: iconFolder, iconFill: iconFolderFill },
+  { page: "launcher", label: "Apps",     icon: iconRocket, iconFill: iconRocketFill },
+  { page: "settings", label: "Settings", icon: iconGear,   iconFill: iconGearFill },
+];
+
 function renderBottomNav() {
-  const p = R.page;
   return `
-    <nav class="bottom-nav">
-      <button class="nav-tab${p==="main"?" active":""}" data-page="main">
-        ${p==="main" ? iconHomeFill : iconHome}
-        <span>Main</span>
-      </button>
-      <button class="nav-tab${p==="launcher"?" active":""}" data-page="launcher">
-        ${p==="launcher" ? iconRocketFill : iconRocket}
-        <span>Launcher</span>
-      </button>
-      <button class="nav-tab${p==="settings"?" active":""}" data-page="settings">
-        ${p==="settings" ? iconGearFill : iconGear}
-        <span>Settings</span>
-      </button>
+    <nav class="bottom-nav" role="tablist" aria-label="Primary">
+      ${NAV.map(({ page, label, icon, iconFill }) => `
+        <button class="nav-tab${R.page === page ? " active" : ""}" data-page="${page}"
+                role="tab" aria-selected="${R.page === page}" aria-label="${label}">
+          ${R.page === page ? iconFill : icon}
+          <span>${label}</span>
+        </button>`).join("")}
     </nav>`;
 }
 
 // ─── Top-level pages ──────────────────────────────────────────────────────────
 
 function renderPage() {
+  // Every destination but the launcher needs an identity first; the launcher
+  // is where you make one, so it stays reachable.
+  if (!S.identity && R.page !== "launcher") return renderWelcome();
+  if (!getUnlockedKeys() && R.page !== "launcher" && R.page !== "settings") return renderLocked();
+
   switch (R.page) {
+    case "contacts": return renderContacts();
+    case "files":    return renderFilesDestination();
     case "launcher": return renderLauncher();
     case "settings": return renderSettings();
-    default:         return renderMain();
+    default:         return renderMessages();
   }
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Messages destination ─────────────────────────────────────────────────────
 
-function renderMain() {
-  if (!S.identity) return renderWelcome();
-  if (!getUnlockedKeys()) return renderLockedMain();
-  return renderMessagingMain();
-}
+/** The Messages trays. Requests and anonymous are wired up in T2/T3. */
+const TRAYS = [
+  { id: "inbox",     label: "Inbox" },
+  { id: "requests",  label: "Requests" },
+  { id: "anonymous", label: "Anonymous" },
+];
 
 function renderWelcome() {
   return `
@@ -223,7 +277,8 @@ function renderWelcome() {
     </div>`;
 }
 
-function renderLockedMain() {
+/** Shown on any destination that needs keys, so unlocking is one tap from anywhere. */
+function renderLocked() {
   const rec = loadIdentityRecord(S.identity);
   return `
     <div class="unlock-wrap">
@@ -239,39 +294,59 @@ function renderLockedMain() {
     </div>`;
 }
 
-function renderMessagingMain() {
-  const convs = buildConversations();
+function renderMessages() {
   return `
-    ${convs.length ? `
-      <div class="section-label">Messages</div>
-      <div class="conv-list">
-        ${convs.map(c => `
-          <div class="conv-row" data-compose-to="${esc(c.contact)}">
-            ${avatarHtml(c.contact, "md")}
-            <div class="conv-info">
-              <div class="conv-name">${esc(idHandle(c.contact))}</div>
-              <div class="conv-preview">🔒 Encrypted message</div>
-            </div>
-            <div class="conv-meta">
-              <span class="conv-time">${fmtRelative(c.lastMsg.timestamp)}</span>
-              ${c.unread ? `<span class="conv-badge">${c.unread}</span>` : ""}
-            </div>
-          </div>`).join("")}
-      </div>
-    ` : `
-      <div class="section-label">Messages</div>
-      <div class="empty-conv">
-        <div class="empty-conv-icon">💬</div>
-        <p>No messages yet.<br>Tap ✏️ to send your first.</p>
-      </div>
-    `}
-
-    <div class="section-label" style="margin-top:8px">More features</div>
-    <div class="feature-grid">
-      ${renderFeatureCards()}
+    <div class="dest-header">
+      <h1 class="dest-title">Messages</h1>
     </div>
+    <div class="tray-bar" role="tablist" aria-label="Message trays">
+      ${TRAYS.map(t => `
+        <button class="tray-tab${S.tray === t.id ? " active" : ""}" data-tray="${t.id}"
+                role="tab" aria-selected="${S.tray === t.id}">${t.label}</button>`).join("")}
+    </div>
+    ${renderTray()}
+    <button class="fab" id="btn-compose" title="New message" aria-label="New message">✏️</button>`;
+}
 
-    <button class="fab" id="btn-compose" title="New message">✏️</button>`;
+function renderTray() {
+  if (S.tray === "requests") {
+    return emptyState("🤝", "No contact requests",
+      "Requests to connect land here. Accepting one lets you message each other.");
+  }
+  if (S.tray === "anonymous") {
+    return emptyState("🎭", "No anonymous messages",
+      "Turn on anonymous messages in Settings to let strangers reach you behind a proof-of-work cost.");
+  }
+
+  const conversations = buildConversations();
+  if (!conversations.length) {
+    return emptyState("💬", "No messages yet", "Tap ✏️ to send your first.");
+  }
+  return `
+    <div class="conv-list">
+      ${conversations.map(c => `
+        <div class="conv-row" data-compose-to="${esc(c.contact)}" role="button" tabindex="0">
+          ${avatarHtml(c.contact, "md")}
+          <div class="conv-info">
+            <div class="conv-name">${esc(idHandle(c.contact))}</div>
+            <div class="conv-preview">${esc(c.preview)}</div>
+          </div>
+          <div class="conv-meta">
+            <span class="conv-time">${fmtRelative(c.lastMsg.timestamp)}</span>
+            ${c.unread ? `<span class="conv-badge">${c.unread}</span>` : ""}
+          </div>
+        </div>`).join("")}
+    </div>`;
+}
+
+function emptyState(icon, title, body, actionHtml = "") {
+  return `
+    <div class="empty-state">
+      <div class="empty-state-icon">${icon}</div>
+      <h2 class="empty-state-title">${esc(title)}</h2>
+      <p class="empty-state-body">${esc(body)}</p>
+      ${actionHtml}
+    </div>`;
 }
 
 function buildConversations() {
@@ -283,31 +358,56 @@ function buildConversations() {
     byContact[contact].push(m);
   }
   return Object.entries(byContact)
-    .map(([contact, msgs]) => ({ contact, lastMsg: msgs.at(-1), unread: msgs.length }))
+    .map(([contact, msgs]) => {
+      const lastMsg = msgs.at(-1);
+      return {
+        contact,
+        lastMsg,
+        unread: msgs.length,
+        // The SDK decrypts in place, so show the message rather than a padlock
+        // when we could actually read it.
+        preview: lastMsg.plaintext ?? "🔒 Could not decrypt",
+      };
+    })
     .sort((a, b) => new Date(b.lastMsg.timestamp) - new Date(a.lastMsg.timestamp));
 }
 
-function renderFeatureCards() {
-  const features = [
-    { icon: "📁", name: "Files",        desc: "Your home filesystem", id: "feature-files" },
-    { icon: "📞", name: "Voice calls",  desc: "Crystal-clear encrypted calls" },
-    { icon: "🎥", name: "Video",        desc: "Face-to-face, end-to-end" },
-    { icon: "👥", name: "Groups",       desc: "Encrypted group messaging" },
-    { icon: "🔍", name: "Discover",     desc: "Find people by identity" },
-    { icon: "💎", name: "Wallet",       desc: "Identity-native payments" },
-  ];
-  return features.map(f => f.id ? `
-    <button class="feature-card active-card" id="${f.id}">
-      <span class="feature-icon">${f.icon}</span>
-      <span class="feature-name">${f.name}</span>
-      <span class="feature-desc">${f.desc}</span>
-    </button>` : `
-    <div class="feature-card coming-soon">
-      <span class="feature-icon">${f.icon}</span>
-      <span class="feature-name">${f.name}</span>
-      <span class="feature-desc">${f.desc}</span>
-      <span class="soon-badge">Soon</span>
-    </div>`).join("");
+// ─── Contacts destination ─────────────────────────────────────────────────────
+
+function renderContacts() {
+  const C = S.contacts;
+  const filtered = C.list.filter(c => {
+    const needle = C.filter.trim().toLowerCase();
+    return !needle || `${c.identity} ${c.petname ?? ""}`.toLowerCase().includes(needle);
+  });
+
+  return `
+    <div class="dest-header">
+      <h1 class="dest-title">Contacts</h1>
+      <button class="btn btn-sm btn-primary" id="btn-add-contact">${svgPlus} Add</button>
+    </div>
+    ${C.list.length ? `
+      <div class="dest-toolbar">
+        <input id="contacts-filter" class="input" type="search" placeholder="Search contacts"
+               value="${esc(C.filter)}" autocomplete="off" aria-label="Search contacts" />
+      </div>` : ""}
+    ${C.loading ? `<p class="muted small" style="padding:16px">Loading contacts…</p>` : ""}
+    ${C.error ? `<p class="small val-warn" style="padding:16px">${esc(C.error)}</p>` : ""}
+    ${!C.loading && !C.list.length ? emptyState(
+      "👥", "No contacts yet",
+      "Add someone by their Poweur ID and you can message them without either of you sharing a phone number.",
+      `<button class="btn btn-primary" id="btn-add-contact-empty">Add a contact</button>`) : ""}
+    ${filtered.length ? `
+      <div class="conv-list">
+        ${filtered.map(c => slot(`contact-${encodeURIComponent(c.identity)}`, () =>
+          ProfileCard({
+            identity: c.identity,
+            resolve: resolveForComponents,
+            compact: true,
+            action: { label: "Message", onSelect: (id) => R.push("compose", { to: id }) },
+          }).el)).join("")}
+      </div>` : ""}
+    ${C.list.length && !filtered.length ? `<p class="muted small" style="padding:16px">No contact matches “${esc(C.filter)}”.</p>` : ""}`;
 }
 
 // ─── Launcher page ────────────────────────────────────────────────────────────
@@ -405,6 +505,9 @@ function renderSettings() {
   const sessOk = sessionIsValid(sess);
 
   return `
+    <div class="dest-header">
+      <h1 class="dest-title">Settings</h1>
+    </div>
     ${rec ? `
       <div class="settings-id-card">
         ${avatarHtml(S.identity, "lg")}
@@ -436,6 +539,40 @@ function renderSettings() {
           <span class="settings-row-label">Identity keys</span>
           <span class="settings-row-arrow">›</span>
         </div>` : ""}
+      </div>
+    </div>
+
+    ${rec ? `
+    <div class="settings-group">
+      <div class="settings-group-label">Security</div>
+      <div class="settings-rows">
+        <div class="settings-row" id="row-keys-devices">
+          <span class="settings-row-icon">📱</span>
+          <span class="settings-row-label">Keys &amp; devices</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
+        <div class="settings-row" id="row-recovery-kit">
+          <span class="settings-row-icon">🧾</span>
+          <span class="settings-row-label">Recovery kit</span>
+          <span class="settings-row-value val-warn">Not set up</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
+      </div>
+    </div>` : ""}
+
+    <div class="settings-group">
+      <div class="settings-group-label">Inbox</div>
+      <div class="settings-rows">
+        <div class="settings-row no-action">
+          <span class="settings-row-icon">🛡️</span>
+          <span class="settings-row-label">Who can message you</span>
+          <span class="settings-row-value muted">Soon</span>
+        </div>
+        <div class="settings-row no-action">
+          <span class="settings-row-icon">🎭</span>
+          <span class="settings-row-label">Anonymous &amp; proof-of-work</span>
+          <span class="settings-row-value muted">Soon</span>
+        </div>
       </div>
     </div>
 
@@ -510,7 +647,6 @@ function renderSubPage() {
     case "add-id":  return renderAddId();
     case "unlock":  return renderUnlock();
     case "compose": return renderCompose();
-    case "files":   return renderFiles();
     default:        return renderAddId();
   }
 }
@@ -594,6 +730,9 @@ function renderUnlock() {
 
 // Compose ─────────────────────────────────────────────────────────────────────
 
+/** The live IdentityInput on the compose page, so doSend can read it. */
+let composeInput = null;
+
 function renderCompose() {
   const preset = R.params.to || "";
   return `
@@ -604,9 +743,16 @@ function renderCompose() {
       </div>
       <div class="sub-body compose-body">
         <div class="form-group">
-          <label class="form-label" for="c-to">To</label>
-          <input id="c-to" class="input" type="text" placeholder="alice.poweur.net"
-            value="${esc(preset)}" autocomplete="off" spellcheck="false" />
+          ${slot("c-to-slot", () => {
+            composeInput = IdentityInput({
+              resolve: resolveForComponents,
+              contacts: S.contacts.list,
+              value: preset,
+              label: "To",
+              onSubmit: () => q("#c-body")?.focus(),
+            });
+            return composeInput.el;
+          })}
         </div>
         <div class="form-group" style="flex:1">
           <label class="form-label" for="c-body">Message</label>
@@ -620,9 +766,9 @@ function renderCompose() {
     </div>`;
 }
 
-// Files ───────────────────────────────────────────────────────────────────────
+// ─── Files destination ────────────────────────────────────────────────────────
 
-function renderFiles() {
+function renderFilesDestination() {
   const F = S.files;
   const crumbs = F.path ? F.path.split("/") : [];
   const atRoot = !F.path;
@@ -630,56 +776,60 @@ function renderFiles() {
   const quotaPct = quota?.quota_bytes > 0
     ? Math.min(100, Math.round((quota.used_bytes / quota.quota_bytes) * 100))
     : 0;
+
   return `
-    <div class="sub-page">
-      <div class="sub-header">
-        <button class="btn-back" id="btn-back">${svgBack}</button>
-        <span class="sub-title">Files</span>
-        <span style="flex:1"></span>
-        ${atRoot ? "" : `
-          <button class="btn btn-sm" id="btn-new-folder" title="New folder">📁+</button>
-          <label class="btn btn-sm" for="ff-upload" style="cursor:pointer" title="Upload">⬆️
-            <input id="ff-upload" type="file" multiple style="display:none" />
-          </label>`}
-      </div>
-      <div class="sub-body">
-        ${quota ? `
-          <div class="small muted" style="display:flex;justify-content:space-between;margin-bottom:6px">
-            <span>${formatBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${formatBytes(quota.quota_bytes)}` : ""} used</span>
-            <span>${esc(quota.provider)}</span>
-          </div>
-          ${quota.quota_bytes > 0 ? `
-          <div style="height:4px;border-radius:2px;background:var(--border,#ddd);margin-bottom:14px">
-            <div style="height:100%;width:${quotaPct}%;border-radius:2px;background:${quotaPct > 90 ? "#FF3B30" : "#34C759"}"></div>
-          </div>` : ""}` : ""}
-        <div class="small" style="margin-bottom:10px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-          <button class="link-btn" data-nav-path="" style="font-weight:600">home</button>
-          ${crumbs.map((c, i) => `
-            <span class="muted">/</span>
-            <button class="link-btn" data-nav-path="${esc(crumbs.slice(0, i + 1).join("/"))}">${esc(c)}</button>`).join("")}
+    <div class="dest-header">
+      <h1 class="dest-title">Files</h1>
+      ${atRoot ? "" : `
+        <button class="btn btn-sm" id="btn-new-folder" title="New folder" aria-label="New folder">📁+</button>
+        <label class="btn btn-sm" for="ff-upload" style="cursor:pointer" title="Upload">⬆️
+          <input id="ff-upload" type="file" multiple style="display:none" />
+        </label>`}
+    </div>
+
+    ${quota ? `
+      <div class="quota-bar">
+        <div class="small muted quota-line">
+          <span>${formatBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${formatBytes(quota.quota_bytes)}` : ""} used</span>
+          <span>${esc(quota.provider ?? "")}</span>
         </div>
-        ${F.loading ? `<p class="muted small">Loading…</p>` : `
-        <div class="conv-list">
-          ${F.entries.length === 0 ? `<p class="muted small" style="padding:12px">Empty folder</p>` : ""}
-          ${F.entries.map(e => {
-            const rootInfo = atRoot ? ROOT_INFO[e.name] : null;
-            return `
-            <div class="conv-row" style="align-items:center">
-              <div style="font-size:22px;width:36px;text-align:center">${e.dir ? "📁" : "📄"}</div>
-              <div class="conv-info" ${e.dir ? `data-open-dir="${esc(e.path)}"` : `data-download="${esc(e.path)}"`} style="cursor:pointer">
-                <div class="conv-name">${esc(e.name)}
-                  ${rootInfo ? `<span class="chip" style="margin-left:6px">${esc(rootInfo.badge)}</span>` : ""}
+        ${quota.quota_bytes > 0 ? `
+          <div class="quota-track" role="progressbar" aria-valuenow="${quotaPct}" aria-valuemin="0" aria-valuemax="100">
+            <div class="quota-fill" style="width:${quotaPct}%;background:${quotaPct > 90 ? "var(--red)" : "var(--green)"}"></div>
+          </div>` : ""}
+      </div>` : ""}
+
+    <nav class="breadcrumbs small" aria-label="Folder path">
+      <button class="link-btn" data-nav-path="" style="font-weight:600">home</button>
+      ${crumbs.map((c, i) => `
+        <span class="muted">/</span>
+        <button class="link-btn" data-nav-path="${esc(crumbs.slice(0, i + 1).join("/"))}">${esc(c)}</button>`).join("")}
+    </nav>
+
+    ${F.loading ? `<p class="muted small" style="padding:16px">Loading…</p>` : `
+      ${F.entries.length === 0
+        ? emptyState("📂", atRoot ? "No roots yet" : "Empty folder",
+            atRoot ? "Your storage roots appear once the relay provisions them."
+                   : "Upload a file or create a folder to get started.")
+        : `<div class="conv-list">
+            ${F.entries.map(e => {
+              const rootInfo = atRoot ? ROOT_INFO[e.name] : null;
+              return `
+              <div class="conv-row" style="align-items:center">
+                <div class="file-icon">${e.dir ? "📁" : "📄"}</div>
+                <div class="conv-info" ${e.dir ? `data-open-dir="${esc(e.path)}"` : `data-download="${esc(e.path)}"`}
+                     role="button" tabindex="0" style="cursor:pointer">
+                  <div class="conv-name">${esc(e.name)}
+                    ${rootInfo ? `<span class="chip" style="margin-left:6px">${esc(rootInfo.badge)}</span>` : ""}
+                  </div>
+                  <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : formatBytes(e.size)}</div>
                 </div>
-                <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : formatBytes(e.size)}</div>
-              </div>
-              ${atRoot ? "" : `
-                <button class="btn btn-sm" data-rename="${esc(e.path)}" title="Rename">✏️</button>
-                <button class="btn btn-sm" data-delete="${esc(e.path)}" title="Delete">🗑</button>`}
-            </div>`;
-          }).join("")}
-        </div>`}
-      </div>
-    </div>`;
+                ${atRoot ? "" : `
+                  <button class="btn btn-sm" data-rename="${esc(e.path)}" aria-label="Rename ${esc(e.name)}">✏️</button>
+                  <button class="btn btn-sm" data-delete="${esc(e.path)}" aria-label="Delete ${esc(e.name)}">🗑</button>`}
+              </div>`;
+            }).join("")}
+          </div>`}`}`;
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
@@ -706,10 +856,7 @@ function attachEvents() {
     S.dropdownOpen = false;
     const id = btn.dataset.switch;
     if (id === S.identity) { render(); return; }
-    clearUnlockedKeys();
-    S.identity = id;
-    setActiveIdentity(id);
-    S.messages = []; S.acks = [];
+    switchIdentity(id);
     R.push("unlock");
   }));
 
@@ -718,6 +865,28 @@ function attachEvents() {
     S.dropdownOpen = false;
     R.go(t.dataset.page);
   }));
+
+  // Message trays
+  qAll(".tray-tab[data-tray]").forEach(t => t.addEventListener("click", () => {
+    S.tray = t.dataset.tray;
+    render();
+  }));
+
+  // Contacts
+  q("#btn-add-contact")?.addEventListener("click", showAddContactPanel);
+  q("#btn-add-contact-empty")?.addEventListener("click", showAddContactPanel);
+  const contactsFilter = q("#contacts-filter");
+  if (contactsFilter) {
+    contactsFilter.addEventListener("input", () => {
+      S.contacts.filter = contactsFilter.value;
+      const caret = contactsFilter.selectionStart;
+      render();
+      const next = q("#contacts-filter");
+      next?.focus();
+      next?.setSelectionRange(caret, caret);
+    });
+  }
+  if (R.page === "contacts" && !R.sub && getUnlockedKeys()) loadContacts();
 
   // Back button (sub-pages)
   q("#btn-back")?.addEventListener("click", () => {
@@ -737,8 +906,8 @@ function attachEvents() {
   qAll(".conv-row[data-compose-to]").forEach(r =>
     r.addEventListener("click", () => R.push("compose", { to: r.dataset.composeTo })));
 
-  // Load inbox when unlocked and on main
-  if (R.page === "main" && !R.sub && getUnlockedKeys()) {
+  // Load inbox when unlocked and on the Messages destination
+  if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
     loadInbox();
   }
 
@@ -768,7 +937,10 @@ function attachEvents() {
   q("#btn-send-msg")?.addEventListener("click", doSend);
 
   // Files
-  q("#feature-files")?.addEventListener("click", () => openFiles(""));
+  if (R.page === "files" && !R.sub && getUnlockedKeys() && !S.files.loaded) {
+    S.files.loaded = true;
+    loadFiles(S.files.path);
+  }
   qAll("[data-nav-path]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.navPath)));
   qAll("[data-open-dir]").forEach(b => b.addEventListener("click", () => loadFiles(b.dataset.openDir)));
   qAll("[data-download]").forEach(b => b.addEventListener("click", () => doDownloadEntry(b.dataset.download)));
@@ -785,8 +957,28 @@ function attachEvents() {
   q("#row-lookup")?.addEventListener("click", showLookupPanel);
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
+  q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
+  q("#row-recovery-kit")?.addEventListener("click", showRecoveryKitPanel);
   q("#row-rotate-enc")?.addEventListener("click", doRotateEncKey);
   q("#row-remove-id")?.addEventListener("click", doRemoveIdentity);
+}
+
+/**
+ * Make `identity` active and drop everything scoped to the previous one.
+ *
+ * State is keyed by identity (E15-T1) precisely so this is a reset rather than
+ * a merge: messages, contacts, the DAV token and the profile cache all belong
+ * to whoever was signed in.
+ */
+function switchIdentity(identity) {
+  clearUnlockedKeys();
+  clearProfileCache();
+  S.identity = identity;
+  setActiveIdentity(identity);
+  S.messages = [];
+  S.acks = [];
+  S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
+  S.files = { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false };
 }
 
 function closeDropdownOnce() {
@@ -809,9 +1001,7 @@ async function doSignInWithPasskey() {
     return;
   }
 
-  clearUnlockedKeys();
-  S.identity = fqdn;
-  setActiveIdentity(fqdn);
+  switchIdentity(fqdn);
   R.push("unlock");
 }
 
@@ -942,7 +1132,7 @@ async function doCreateIdentity() {
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
-    R.sub = null; R.page = "main"; R.params = {};
+    R.sub = null; R.page = "messages"; R.params = {};
     render(); // attachEvents starts the inbox fetch
 
   } catch (err) {
@@ -981,7 +1171,7 @@ function loadInbox() {
       const { messages, acks } = await client.inboxAndAck();
       S.messages = messages;
       S.acks     = acks;
-      if (R.page === "main" && !R.sub) render();
+      if (R.page === "messages" && !R.sub) render();
     } catch (e) {
       console.warn("Inbox error:", e.message);
     } finally {
@@ -992,7 +1182,9 @@ function loadInbox() {
 }
 
 async function doSend() {
-  const to   = q("#c-to")?.value.trim();
+  // The component may still be debouncing a lookup; take the raw text so a
+  // fast typist is never told "enter a recipient" for something they typed.
+  const to   = composeInput?.raw() ?? "";
   const body = q("#c-body")?.value.trim();
   const statusEl = q("#c-status");
   const sendBtn  = q("#btn-send-msg");
@@ -1012,7 +1204,7 @@ async function doSend() {
     setStatus("✓ Sent", "ok");
     if (q("#c-body")) q("#c-body").value = "";
     toast("Message sent!", "success");
-    setTimeout(() => { R.sub = null; R.page = "main"; render(); }, 1200);
+    setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
   } catch (err) {
     setStatus(`✕ ${err.message}`, "err");
     toast(err.message, "error");
@@ -1037,15 +1229,6 @@ async function dav() {
   // Tokens are short-lived; re-mint a minute before the relay stops honouring one.
   S.files.davExp = Date.now() + 55 * 60_000;
   return connected;
-}
-
-async function openFiles(path) {
-  if (!getUnlockedKeys()) { R.push("unlock"); return; }
-  S.files.path = path;
-  S.files.entries = [];
-  S.files.loading = true;
-  R.push("files");
-  await loadFiles(path);
 }
 
 async function loadFiles(path) {
@@ -1140,6 +1323,167 @@ async function doDeleteEntry(path) {
     await loadFiles(S.files.path);
   } catch (err) {
     toast(err.message, "error");
+  }
+}
+
+// ─── Contacts actions ─────────────────────────────────────────────────────────
+
+/**
+ * Read `poweur-sys/relay/contacts.json` through the SDK.
+ *
+ * Read-only in T1 — requests, accept/block and key-pinning are E15-T2. Loading
+ * it here is what makes the Contacts destination real rather than a stub, and
+ * gives IdentityInput something to autocomplete against.
+ */
+async function loadContacts({ force = false } = {}) {
+  const C = S.contacts;
+  if (C.loading || (C.loaded && !force)) return;
+  const client = clientFor(S.identity);
+  if (!client) return;
+
+  C.loading = true;
+  C.error = null;
+  try {
+    const contacts = await client.contacts();
+    const file = await contacts.load();
+    C.list = (file.contacts ?? []).map(entry => ({
+      identity: entry.identity,
+      petname: entry.petname ?? null,
+      state: entry.state ?? "accepted",
+      pinnedKey: entry.public_key ?? null,
+    }));
+    C.loaded = true;
+  } catch (error) {
+    C.error = `Could not read contacts: ${error.message}`;
+  } finally {
+    C.loading = false;
+    if (R.page === "contacts" && !R.sub) render();
+  }
+}
+
+function showAddContactPanel() {
+  let picked = null;
+  showPanel("Add a contact", `
+    <p class="muted small" style="margin-bottom:12px">
+      Type a Poweur ID. We resolve it first, so a typo fails here rather than silently later.
+    </p>
+    <div id="add-contact-input"></div>
+    <button class="btn btn-primary mt-md" id="btn-add-contact-go" disabled>Message them</button>
+    <p class="muted small" style="margin-top:10px">
+      Sending a contact <em>request</em> arrives with EPIC-015 E15-T2; for now this opens a message.
+    </p>`,
+  () => {
+    const host = q("#add-contact-input");
+    const go = q("#btn-add-contact-go");
+    const input = IdentityInput({
+      resolve: resolveForComponents,
+      contacts: S.contacts.list,
+      label: "Identity",
+      onChange: (result) => { picked = result; if (go) go.disabled = !result; },
+      onSubmit: () => go?.click(),
+    });
+    host?.replaceChildren(input.el);
+    input.focus();
+    go?.addEventListener("click", () => {
+      if (!picked) return;
+      closePanel();
+      R.push("compose", { to: picked.identity });
+    });
+  });
+}
+
+// ─── Keys & devices (EPIC-011 surface, mocked until E11-T1 lands) ─────────────
+
+const ENROLLMENT_KIND_LABEL = {
+  "passkey": "Passkey",
+  "hardware-key": "Hardware key",
+  "cli-passphrase": "CLI passphrase",
+  "recovery-kit": "Recovery kit",
+  "native": "Native keystore",
+};
+
+const ENROLLMENT_WRAP_LABEL = {
+  prf: "passkey (PRF)",
+  pin: "PIN",
+  passphrase: "passphrase",
+  native: "the OS keystore",
+};
+
+async function showKeysAndDevicesPanel() {
+  const identity = S.identity;
+  const enrollments = await listEnrollments(identity);
+  const live = keystoreAvailable();
+
+  showPanel("Keys & devices", `
+    ${live ? "" : `
+      <div class="notice notice-info">
+        <strong>Preview.</strong> The relay keystore that holds your other devices is
+        <a href="https://github.com/poweur" onclick="return false">EPIC-011 E11-T1</a> and has not
+        shipped. Your own enrollment below is real; anything marked <em>mock</em> is placeholder
+        data, and enrolling or removing a device is disabled rather than faked.
+      </div>`}
+    <div class="enrollment-list">
+      ${enrollments.map(e => `
+        <div class="enrollment-row">
+          <span class="enrollment-icon">${e.kind === "hardware-key" ? "🔐" : e.kind === "recovery-kit" ? "🧾" : "📱"}</span>
+          <div class="enrollment-body">
+            <div class="enrollment-label">
+              ${esc(e.label)}
+              ${e.current ? `<span class="chip chip-green">this device</span>` : ""}
+              ${e.mock ? `<span class="chip chip-orange">mock</span>` : ""}
+            </div>
+            <div class="enrollment-meta small muted">
+              ${esc(ENROLLMENT_KIND_LABEL[e.kind] ?? e.kind)}
+              · unlocked by ${esc(ENROLLMENT_WRAP_LABEL[e.wrap] ?? e.wrap)}
+              · ${esc(e.role)}
+              ${e.created_at ? ` · added ${esc(fmtTime(e.created_at))}` : ""}
+            </div>
+          </div>
+          <button class="btn btn-sm" data-remove-enrollment="${esc(e.enrollment_id)}"
+                  ${e.current ? "disabled" : ""} aria-label="Remove ${esc(e.label)}">Remove</button>
+        </div>`).join("")}
+    </div>
+    <button class="btn btn-primary mt-md" id="btn-enroll-device" style="width:100%">Add a device</button>`,
+  () => {
+    q("#btn-enroll-device")?.addEventListener("click", () => runKeystoreOp(enrollAuthenticator));
+    qAll("[data-remove-enrollment]").forEach(button =>
+      button.addEventListener("click", () => runKeystoreOp(removeEnrollment)));
+  });
+}
+
+function showRecoveryKitPanel() {
+  const { eligible, reason } = recoveryKitEligibility(S.identity);
+  showPanel("Recovery kit", `
+    <p class="muted small" style="margin-bottom:12px">
+      A recovery kit is your identity's master seed written as 24 words. With it you can rebuild
+      this identity on a new device with no relay, no email and nothing else to remember.
+    </p>
+    ${eligible ? `
+      <div class="notice notice-info">Generating a kit needs EPIC-011 E11-T1, which has not shipped.</div>
+    ` : `
+      <div class="notice notice-warn">
+        <strong>Not available for this identity.</strong>
+        ${reason === "legacy-keypair" ? `
+          It was created with two independent keys rather than from a single seed, so there is no
+          seed to write down. EPIC-011 offers a one-time <em>rotate to seed</em> for identities like
+          this — it is never forced, because your contacts have to re-pin your key afterwards.`
+        : `No local record for this identity.`}
+      </div>`}
+    <button class="btn btn-primary mt-md" id="btn-gen-kit" style="width:100%" ${eligible ? "" : "disabled"}>
+      Generate recovery kit
+    </button>`,
+  () => {
+    q("#btn-gen-kit")?.addEventListener("click", () => runKeystoreOp(generateRecoveryKit));
+  });
+}
+
+/** Every keystore write throws until E11-T1 lands; say so plainly. */
+async function runKeystoreOp(operation) {
+  try {
+    await operation();
+    render();
+  } catch (error) {
+    toast(error.message, "warning", 6000);
   }
 }
 
@@ -1335,14 +1679,12 @@ function doRemoveIdentity() {
     </div>`,
   () => {
     q("#panel-confirm-remove")?.addEventListener("click", () => {
-      removeIdentity(S.identity);
-      clearUnlockedKeys();
-      removeSessionRecord(S.identity);
-      S.identity = listIdentities()[0] || null;
-      setActiveIdentity(S.identity);
-      S.messages = []; S.acks = [];
+      const removed = S.identity;
+      removeIdentity(removed);
+      removeSessionRecord(removed);
+      switchIdentity(listIdentities()[0] || null);
       closePanel();
-      R.go("main");
+      R.go("messages");
       toast("Identity removed from device", "info");
     });
     q("#panel-cancel-remove")?.addEventListener("click", closePanel);
@@ -1451,13 +1793,13 @@ function boot() {
   if (parseCreateHash()) {
     R.page = "launcher";
   } else if (!S.identity) {
-    R.page = "main";
+    R.page = "messages";
   } else if (!getUnlockedKeys() && !sessionIsValid(loadSessionRecord(S.identity))) {
     // Auto-push unlock only if session is gone; otherwise session key in
     // sessionStorage lets us reload without re-auth.
     R.push("unlock");
   } else {
-    R.page = "main";
+    R.page = "messages";
   }
 
   render();

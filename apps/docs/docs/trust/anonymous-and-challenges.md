@@ -66,7 +66,7 @@ affordance — there is nobody to reply to).
 
 Find an ASCII `solution` such that `sha256(token + "." + solution)` has at least
 `bits` leading zero bits. Reference implementations: `packages/identity/pow.go`
-(solve + verify) and `apps/web/js/pow.js` (browser solve, chunked for UI
+(solve + verify) and `packages/client-ts/src/pow.ts` (browser solve, chunked for UI
 responsiveness).
 
 **Measured cost** (Go, single Apple-Silicon core; browser JS is ~5–10× slower):

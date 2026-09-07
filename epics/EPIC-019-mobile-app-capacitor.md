@@ -55,7 +55,7 @@ across relays.
 This was the open question that motivated the epic, and the answer falls out of how keys are
 already stored. The passkey is **not** the identity key: PRF output derives an AES key that
 wraps the Ed25519/X25519 keys (`wrapKeysAES`,
-[`apps/web/js/crypto.js:190`](../apps/web/js/crypto.js)), and the stored record already
+[`apps/web/js/vault.js`](../apps/web/js/vault.js)), and the stored record already
 carries a `kdf` discriminator (`"prf" | "pbkdf2"`). The passkey is a **lock, not the key** —
 so nothing binds an identity to a domain. Two independent consequences:
 
@@ -260,7 +260,7 @@ relay offline leaves the other fully functional.
 - [ ] Show the receiving device's fingerprint on the sending device before the user confirms,
       so the QR channel is authenticated rather than trusted blindly
 - [ ] **Protocol constraint to record:** senders encrypt to the identity's
-      `encryption_public_key` (`resolveRecipientEncKey`, `apps/web/js/messaging.js`) and
+      `encryption_public_key` (`packages/client-ts/src/messages.ts`) and
       `SessionCreateRequest` delegates **signing only** — it carries no encryption key. So
       the X25519 key must be *copied* to every device. EPIC-011's multi-key enrollment can
       give each device a distinct **signing** key, but per-device **encryption** keys need a

@@ -132,7 +132,7 @@ tests prove private-range fetches are refused.
 
 ### E01-T4 — Web client & CLI use the resolver chain — DONE
 
-- [x] `apps/web/js/api.js`: resolve recipient keys via well-known with DNS-over-HTTPS TXT as
+- [x] `apps/web/js/api.js` (since E15-T6: `packages/client-ts/src/resolve.ts` + `dohTxtResolver`): resolve recipient keys via well-known with DNS-over-HTTPS TXT as
       fallback (browser can't do raw DNS); document the trade-off
 - [x] CLI `poweur identity lookup <identity>` command prints the full resolution result (source used,
       keys, relay, capabilities) — extends the existing DNS status output

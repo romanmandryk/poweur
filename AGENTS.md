@@ -81,15 +81,27 @@ match Go, or reconsider the protocol change.
 
 ```bash
 cd apps/web && pnpm install   # postinstall downloads Chromium for Playwright
-pnpm test          # Vitest: crypto/storage unit + hosted/messaging vs live relay
-pnpm test:e2e      # Playwright: hosted create UI + messaging protocol smoke
+pnpm test          # Vitest: vault/storage/components unit + live-relay
+pnpm test:e2e      # Playwright: destinations at 375px, hosted create UI, protocol smoke
 pnpm test:all
 # If e2e says browser executable missing: pnpm exec playwright install chromium
 ```
 
+**The web app has no bundler**: it imports `@poweur/client` through an import map that
+points at `apps/web/vendor/`, a committed copy of the package's ESM (prod mounts `apps/web`
+straight from the checkout, so it has to be in git). **Any change to `packages/client-ts`
+must be re-vendored in the same change set:**
+
+```bash
+pnpm client:build && pnpm web:vendor    # refresh apps/web/vendor/
+pnpm web:vendor:check                   # fails when it is stale (also asserted in Vitest)
+```
+
 Web Vitest mirrors CLI unit tests (`encrypt/decrypt`, identity persistence, session send,
 identity-signed send, invalid `--sign-with`) plus CLI↔relay messaging (register → session
-→ encrypt/send → inbox decrypt) via `js/messaging.js` against a real `go run` relay.
+→ encrypt/send → inbox decrypt) driven through the app's own modules (`js/client.js`,
+`js/vault.js`) against a real `go run` relay. The protocol itself lives in
+`@poweur/client` and is tested there; `apps/web` tests the browser key-custody seam.
 
 If a feature cannot be asserted in unit tests alone (Host routing, restart/`POWEUR_DATA`, E2E encrypt/send/inbox), write an integration test.
 

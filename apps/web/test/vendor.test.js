@@ -54,9 +54,13 @@ describe("vendored @poweur/client", () => {
     }
   });
 
-  it("is wired into index.html and the esm.sh CDN entry is gone", () => {
+  it("is wired into index.html relative to the document base, with no CDN", () => {
     const html = readFileSync(join(WEB_DIR, "index.html"), "utf8");
-    expect(html).toContain('"@poweur/client": "/app/vendor/poweur-client/index.js"');
+    expect(html).toContain('"@poweur/client": "./vendor/poweur-client/index.js"');
     expect(html).not.toContain("esm.sh");
+    // Absolute "/app/…" would bind the app to one mount point; the relay serves
+    // it at /app/, a static server at /, and the EPIC-019 shell at
+    // capacitor://localhost/.
+    expect(html).not.toContain('"/app/vendor');
   });
 });
