@@ -204,6 +204,23 @@ export interface AnonymousPolicy {
   max_per_day?: number;
 }
 
+/** One labeled URL on a profile. */
+export interface ProfileLink {
+  label?: string;
+  url: string;
+}
+
+/** `poweur-sys/public/profile.json` (identity.Profile). */
+export interface Profile {
+  version: number;
+  display_name?: string;
+  /** A path into the identity's own /public root — never an external URL. */
+  avatar?: string;
+  bio?: string;
+  links?: ProfileLink[];
+  locale?: string;
+}
+
 export interface InboxPolicy {
   version: number;
   mode: InboxMode;

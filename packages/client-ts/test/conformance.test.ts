@@ -41,6 +41,7 @@ import {
   validateHostedHandle,
 } from "../src/names.js";
 import { validateInboxPolicy } from "../src/policy.js";
+import { validateProfile } from "../src/profile.js";
 import { checkPow, clampPowBits } from "../src/pow.js";
 import { verifyGrantSignature, verifyGroupSignature } from "../src/shares.js";
 import type {
@@ -48,6 +49,7 @@ import type {
   EncryptionMeta,
   IdentityDocument,
   InboxPolicy,
+  Profile,
   ShareGrant,
   ShareGroup,
 } from "../src/types.js";
@@ -290,6 +292,18 @@ describe("poweur-sys documents match Go", () => {
       let valid = true;
       try {
         validateContactsFile(vector.raw as ContactsFile);
+      } catch {
+        valid = false;
+      }
+      expect(valid, vector.name).toBe(vector.valid);
+    }
+  });
+
+  it("accepts and rejects the same profile.json documents", () => {
+    for (const vector of loadVectors<SysDocVector[]>("profiles")) {
+      let valid = true;
+      try {
+        validateProfile(vector.raw as Profile);
       } catch {
         valid = false;
       }

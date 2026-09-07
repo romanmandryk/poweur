@@ -338,4 +338,26 @@ func TestVectors_SysDocs(t *testing.T) {
 		policies = append(policies, sysDocVector{entry.name, json.RawMessage(entry.raw), err == nil})
 	}
 	WriteVectors(t, vectorsDir, "inbox-policies", policies)
+
+	// profile.json is owner-written and relay-validated, and the web app
+	// (EPIC-015 E15-T5) is the first thing to write one from a browser — so
+	// the TS validator has to refuse exactly what Go refuses, especially the
+	// avatar rule, which is what keeps a profile from pointing at an
+	// off-tree URL.
+	profiles := []sysDocVector{}
+	for _, entry := range []struct {
+		name string
+		raw  string
+	}{
+		{"full", `{"version":1,"display_name":"Alice","avatar":"public/avatar.png","bio":"builder","links":[{"label":"site","url":"https://example.org"}],"locale":"en"}`},
+		{"empty", `{"version":1}`},
+		{"avatar-off-tree", `{"version":1,"avatar":"https://cdn.example.org/a.png"}`},
+		{"avatar-outside-public", `{"version":1,"avatar":"private/avatar.png"}`},
+		{"link-without-url", `{"version":1,"links":[{"label":"site"}]}`},
+		{"bad-version", `{"version":2}`},
+	} {
+		_, err := ParseProfile([]byte(entry.raw))
+		profiles = append(profiles, sysDocVector{entry.name, json.RawMessage(entry.raw), err == nil})
+	}
+	WriteVectors(t, vectorsDir, "profiles", profiles)
 }

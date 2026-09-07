@@ -1,6 +1,6 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
-- **Status:** in progress — T6, T1, T2, T3 and T4 done; T5 open
+- **Status:** complete — T1–T6 done
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
@@ -323,25 +323,55 @@ grantee in the audience picker; the grantee opens their tree, reads the file and
 new one; the owner revokes and the grantee's next request is refused. A second case asserts
 the changes feed: a file written behind the UI's back appears with no click.
 
-### E15-T5 — Profile, first-run onboarding & polish
+### E15-T5 — Profile, first-run onboarding & polish — **done**
 
-- [ ] Profile editor in Settings: display name, avatar (upload into `/public`, referenced as
-      a tree path per EPIC-006), bio, links → writes `poweur-sys/public/profile.json`;
-      ProfileCard renders it everywhere a contact appears
-- [ ] Capabilities are shown read-only on the profile (what this identity speaks)
-- [ ] **First-run onboarding** after a fresh registration: a 2–3 step, fully skippable flow
-      — set inbox policy, optionally set display name/avatar, a one-line "you're set" — so a
-      new user lands in a configured app, not an empty inbox. Picks up *after*
-      [EPIC-018](EPIC-018-identity-onboarding-naming.md)'s claim flow hands off to the
-      identity's own origin; the two must join without a second credential prompt
-- [ ] Empty states across all destinations (no contacts / no files / no messages) with the
-      obvious next action
-- [ ] Accessibility + responsive pass (keyboard nav, focus traps in dialogs, mobile
-      layout), dark/light parity, and a docs update (`apps/docs/docs/web/` walkthrough)
+- [x] Profile editor in Settings: display name, avatar, bio and a link →
+      `poweur-sys/public/profile.json`. The avatar is uploaded into `/public` first and
+      referenced as a **tree path**, which is the schema's rule and the reason a profile
+      can never point at a third party's server. Saving primes the resolver cache, so the
+      new name appears on cards immediately rather than after the Host-routed fetch that
+      cannot succeed on a shared dev relay
+- [x] Capabilities shown read-only on the profile panel — what this identity speaks, not a
+      preference
+- [x] **First-run onboarding**: three skippable steps (policy → profile → done) after a
+      fresh registration. Skipping writes **nothing** — no policy document, no empty
+      profile — so "skipped" and "chose the default" stay distinguishable, which matters
+      because the relay treats an absent policy as `open`
+- [x] Empty states on every destination and tray, each naming the next action
+- [x] Accessibility pass: the slide-up panel is a real dialog (focus moves in, Tab is
+      trapped, Escape closes, focus returns to the control that opened it — by id, since
+      the shell re-renders from strings and a node reference would be detached); settings
+      rows are focusable and answer Enter/Space; every `role="button"` row does too
+- [x] Docs: [`apps/docs/docs/web/walkthrough.md`](../apps/docs/docs/web/walkthrough.md),
+      wired into the sidebar along with the Trust and Sharing pages, which existed but were
+      unreachable from it
 
-**Acceptance:** a brand-new identity, created in the web app, completes onboarding and can
-message, add a contact, set a policy, upload and share a file — all without the CLI;
-Playwright covers the fresh-user happy path end to end.
+**Landed in `@poweur/client`:** `profile.ts` (`validateProfile`, `readProfile`,
+`writeProfile`, `PoweurClient.profile()/setProfile()`), mirroring `identity/profile.go`.
+Go emits new `profiles` vectors (`packages/identity/vectors_test.go`) and the TS
+conformance suite asserts it accepts and rejects exactly the same documents — the avatar
+rule especially, since the browser is the first thing to write one of these.
+
+**Found by the acceptance test: the contact handshake never completed.** Alice requests,
+Bob accepts — and Alice's own `contacts.json` still said `requested`, so her policy
+refused Bob's first message and neither side could see why. Under `contacts_and_requests`
+the relay routes `sys.contact.accept` into the *requests queue*, so the app now drains
+that queue on the Messages destination (not only on the Requests tray) and promotes a
+contact we ourselves asked for — but only while the key we pinned at request time is
+still theirs. This is EPIC-007's "auto-pin-on-accept lands with the web UX pass".
+
+**Two more bugs the pass turned up:** a `render()` in a loader's `.then()` re-ran
+`attachEvents`, which called the loader, which resolved immediately — a render loop that
+starved the page (loaders now repaint themselves and mark themselves loaded even on
+failure). And the requests queue was guarded by a `loaded` flag, which is right for a
+document read and wrong for a *drain*: an acceptance fetched once and never again is a
+handshake that never finishes. It is throttled instead.
+
+**Acceptance:** met — `test/e2e/onboarding.spec.js`. A brand-new identity completes
+onboarding, then, entirely through the UI: adds a contact by typed name, has it accepted
+on the other side, exchanges a message, uploads a file and shares it, and the grantee sees
+exactly that file. Two further cases cover skipping (nothing written) and keyboard use of
+the dialogs.
 
 ### E15-T6 — Import `@poweur/client` instead of owning the protocol — **done**
 

@@ -15,6 +15,7 @@ import { IdentityApi } from "./identity.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
+import { readProfile, writeProfile } from "./profile.js";
 import { MemorySessionStore, SessionManager } from "./session.js";
 import { Shares } from "./shares.js";
 import { SyncClient } from "./sync.js";
@@ -168,6 +169,13 @@ export class PoweurClient {
     }
     async setPolicy(mode, anonymous) {
         return writeInboxPolicy(await this.dav(), mode, anonymous);
+    }
+    /** Our own public profile document, and whether one has been written. */
+    async profile() {
+        return readProfile(await this.dav());
+    }
+    async setProfile(profile) {
+        return writeProfile(await this.dav(), profile);
     }
     /** Drain the anonymous queue. */
     anon() {

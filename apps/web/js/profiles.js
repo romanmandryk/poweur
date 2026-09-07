@@ -122,6 +122,31 @@ function capabilitiesFromDocument(document) {
   return Object.keys(features).length ? { version: 1, features } : null;
 }
 
+/**
+ * Seed the cache with a profile we just wrote ourselves.
+ *
+ * Our own profile does not need the well-known route — we read and write it
+ * over DAV — but every card asks *this* module, and on a shared dev relay the
+ * Host-routed fetch would answer null and blank the name the user just saved.
+ */
+export function primeProfile(identity, profile, relayUrl) {
+  const name = String(identity || "").trim().toLowerCase();
+  if (!name) return null;
+  const scheme = resolveOptionsFor(relayUrl).scheme ?? "https";
+  const existing = cache.get(name)?.entry ?? {};
+  const entry = {
+    ...existing,
+    identity: name,
+    profile,
+    displayName: profile?.display_name || null,
+    bio: profile?.bio || null,
+    links: Array.isArray(profile?.links) ? profile.links : [],
+    avatar: avatarUrl(name, profile?.avatar, { scheme }),
+  };
+  cache.set(name, { entry, expiresAt: Date.now() + TTL_MS });
+  return entry;
+}
+
 /** A cache hit, or null — for synchronous first paint before the fetch lands. */
 export function cachedProfile(identity) {
   const entry = cache.get(String(identity || "").trim().toLowerCase());

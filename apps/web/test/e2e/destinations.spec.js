@@ -120,6 +120,10 @@ async function createIdentity(page, relay) {
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");
   await page.click("#btn-pin-ok");
+  await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
+  // First run lands in the setup flow (E15-T5); these specs test what comes
+  // after it, and onboarding has its own coverage.
+  await page.click("#btn-onboard-skip");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
   return `${handle}.poweur.net`;
 }
@@ -170,8 +174,15 @@ test.describe("five destinations at 375px", () => {
     await stubPasskeys(page);
     await createIdentity(page, relay);
 
-    for (const tab of await page.locator(".nav-tab").all()) {
-      const box = await tab.boundingBox();
+    // Measured in one pass: the shell re-renders from strings whenever a
+    // background read lands, so a node measured across that swap is detached.
+    const boxes = await page.$$eval(".nav-tab", (tabs) =>
+      tabs.map((tab) => {
+        const rect = tab.getBoundingClientRect();
+        return { height: rect.height, width: rect.width };
+      }));
+    expect(boxes).toHaveLength(5);
+    for (const box of boxes) {
       expect(box.height, "tab height").toBeGreaterThanOrEqual(44);
       expect(box.width, "tab width").toBeGreaterThanOrEqual(44);
     }

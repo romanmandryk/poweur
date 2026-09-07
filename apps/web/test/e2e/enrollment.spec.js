@@ -85,6 +85,10 @@ async function registerIdentity(page, relay, handle) {
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");
   await page.click("#btn-pin-ok");
+  await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
+  // First run lands in the setup flow (E15-T5); these specs test what comes
+  // after it, and onboarding has its own coverage.
+  await page.click("#btn-onboard-skip");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
   return `${handle}.poweur.net`;
 }

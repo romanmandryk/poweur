@@ -1465,3 +1465,32 @@ input, textarea, select { font-family: inherit; }
 .share-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .share-path { overflow-wrap: anywhere; font-weight: 600; }
 .share-row .btn { background: var(--surface-2); color: var(--red); min-height: 40px; flex-shrink: 0; }
+
+/* ─── E15-T5: profile and first-run ───────────────────────────────────────── */
+
+.pe-bio { min-height: 88px; resize: vertical; font-family: inherit; }
+.profile-editor .form-group { margin-bottom: 14px; }
+.profile-caps { margin-top: 18px; }
+
+.onboard-progress { display: flex; gap: 6px; margin-bottom: 20px; }
+.onboard-dot {
+  flex: 1;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--surface-3);
+}
+.onboard-dot.done { background: var(--accent); }
+.onboard-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.onboard-done { text-align: center; padding: 24px 0; }
+.onboard-footer { display: flex; gap: 8px; }
+.onboard-footer .btn { flex: 1; min-height: 44px; }
+.onboard-footer .btn:not(.btn-primary) { background: var(--surface-2); color: var(--t1); }
+/* "Skip" sits where the back chevron does, so it needs the width a word wants. */
+.onboard-skip {
+  width: auto;
+  padding: 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: auto;
+}
