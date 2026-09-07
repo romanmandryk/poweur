@@ -144,9 +144,9 @@ below for what that added.
 
 **Acceptance:** met. The five destinations render and route (`test/e2e/destinations.spec.js`
 at a 375px viewport, including a no-horizontal-scroll and a 44px touch-target check);
-components have unit tests (`test/components.test.js`, `test/profiles.test.js`,
-`test/keystore-mock.test.js`); `test/e2e/hosted.spec.js` is unchanged and green; the
-origin-independence test passes.
+components have unit tests (`test/components.test.js`, `test/profiles.test.js`, and — since
+the mock was replaced — `test/keystore.test.js` + `test/keystore-relay.test.js`);
+`test/e2e/hosted.spec.js` is unchanged and green; the origin-independence test passes.
 
 ### Keys, devices and recovery (EPIC-011's web surface) — **done**
 
