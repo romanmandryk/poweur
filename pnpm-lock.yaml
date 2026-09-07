@@ -54,9 +54,9 @@ importers:
 
   apps/web:
     dependencies:
-      '@noble/ciphers':
-        specifier: ^1.1.3
-        version: 1.3.0
+      '@poweur/client':
+        specifier: workspace:*
+        version: link:../../packages/client-ts
     devDependencies:
       '@playwright/test':
         specifier: ^1.52.0

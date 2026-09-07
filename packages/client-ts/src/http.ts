@@ -7,6 +7,17 @@ import { ChallengeRequiredError, RelayError } from "./errors.js";
 
 export type FetchLike = typeof globalThis.fetch;
 
+/**
+ * The ambient `fetch`, bound to its global.
+ *
+ * Browsers enforce the receiver: `const f = globalThis.fetch; f(url)` throws
+ * "Illegal invocation" in a page while working fine in Node. Every default
+ * fetch in this package therefore goes through here.
+ */
+export function defaultFetch(): FetchLike {
+  return globalThis.fetch.bind(globalThis);
+}
+
 export interface RelayClientOptions {
   fetch?: FetchLike;
   timeoutMs?: number;
@@ -45,7 +56,7 @@ export class RelayClient {
 
   constructor(relayUrl: string, options: RelayClientOptions = {}) {
     this.relayUrl = trimRelayUrl(relayUrl);
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#fetch = options.fetch ?? defaultFetch();
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#headers = options.headers ?? {};
   }

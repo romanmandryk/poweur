@@ -9,6 +9,8 @@
     "web:test": "pnpm --filter @poweur/web test",
     "web:test:e2e": "pnpm --filter @poweur/web test:e2e",
     "web:test:all": "pnpm --filter @poweur/web test:all",
+    "web:vendor": "pnpm --filter @poweur/web vendor",
+    "web:vendor:check": "pnpm --filter @poweur/web vendor:check",
     "client": "pnpm --filter @poweur/client build",
     "client:build": "pnpm --filter @poweur/client build",
     "client:test": "pnpm --filter @poweur/client test",

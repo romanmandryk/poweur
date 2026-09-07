@@ -9,7 +9,7 @@
  * wrapped with a user-supplied PIN via PBKDF2 (see crypto.js).
  */
 
-import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./crypto.js";
+import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./vault.js";
 
 const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
 
@@ -142,21 +142,6 @@ export async function wrapKeysWithPRF(prfOutput, signingJWK, encJWK) {
  */
 export async function unwrapKeysWithPRF(prfOutput, encryptedData) {
   return unwrapKeysAES(prfOutput, encryptedData);
-}
-
-// ─── Challenge Signing (for inbox auth) ──────────────────────────────────────
-
-/**
- * Sign a relay challenge string with the identity's signing key JWK.
- * Returns base64url signature.
- */
-export async function signChallenge(signingJWK, challenge) {
-  const key = await crypto.subtle.importKey(
-    "jwk", signingJWK, { name: "Ed25519" }, false, ["sign"]
-  );
-  const sig = await crypto.subtle.sign({ name: "Ed25519" }, key, new TextEncoder().encode(challenge));
-  const bytes = new Uint8Array(sig);
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // ─── Platform Support Detection ───────────────────────────────────────────────

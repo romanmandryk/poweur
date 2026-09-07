@@ -13,6 +13,7 @@
 import { parseDocument } from "./document.js";
 import { stripKeyPrefix, withEd25519Prefix, withX25519Prefix, rfc3339 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
+import { defaultFetch } from "./http.js";
 import { validateIdentityName } from "./names.js";
 import type { IdentityDocument, ResolveResult, ResolveSource } from "./types.js";
 
@@ -115,7 +116,7 @@ function assertPublicHost(identity: string, allowPrivate: boolean): void {
 }
 
 async function fetchWellKnown(url: string, opts: ResolveOptions): Promise<IdentityDocument> {
-  const doFetch = opts.fetch ?? globalThis.fetch;
+  const doFetch = opts.fetch ?? defaultFetch();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   let response: Response;

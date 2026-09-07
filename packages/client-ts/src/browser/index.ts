@@ -8,6 +8,7 @@
  * (`/.well-known/poweur/id.json`) needs none of this and is tried first.
  */
 
+import { defaultFetch } from "../http.js";
 import type { TxtResolver } from "../resolve.js";
 
 export const CLOUDFLARE_DOH = "https://cloudflare-dns.com/dns-query";
@@ -21,7 +22,7 @@ export interface DohOptions {
 /** A TXT resolver over DNS-over-HTTPS, for browsers and edge runtimes. */
 export function dohTxtResolver(options: DohOptions = {}): TxtResolver {
   const endpoint = options.url ?? CLOUDFLARE_DOH;
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = options.fetch ?? defaultFetch();
   return {
     async lookupTxt(name: string): Promise<string[]> {
       const response = await doFetch(

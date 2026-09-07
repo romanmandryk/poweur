@@ -184,24 +184,54 @@ access stops.
 message, add a contact, set a policy, upload and share a file — all without the CLI;
 Playwright covers the fresh-user happy path end to end.
 
-### E15-T6 — Import `@poweur/client` instead of owning the protocol
+### E15-T6 — Import `@poweur/client` instead of owning the protocol — **done**
 
 *Paired with [E17-T6](EPIC-017-typescript-client-sdk.md) — same work, tracked from both sides.
 Sequence it **first** if EPIC-017 has landed (every screen below is then written against the
 package), otherwise last, as a refactor behind the existing test suites.*
 
-- [ ] Add `@poweur/client` as a `workspace:*` dependency of `@poweur/web`; vendor the built ESM
+- [x] Add `@poweur/client` as a `workspace:*` dependency of `@poweur/web`; vendor the built ESM
       into the served static tree and add the import-map entry in `index.html`
-      (`"@poweur/client": "/app/vendor/poweur-client/index.js"`) — no bundler, per the constraint above
-- [ ] Drop the `esm.sh` import-map entry for `@noble/ciphers`: the dependency arrives vendored with
-      the client, removing a CDN fetch from first paint and from offline/self-hosted installs
-- [ ] Delete the duplicated protocol modules (`js/crypto.js`, the protocol half of `js/api.js`,
-      `js/messaging.js`, `js/files.js`, `js/pow.js`); `js/app.js` keeps only UI
-- [ ] Keep `js/passkey.js` + `js/storage.js` and expose them as the browser `Signer`/`KeyStore`
+      (`"@poweur/client": "/app/vendor/poweur-client/index.js"`) — no bundler, per the constraint above.
+      [`apps/web/scripts/vendor.mjs`](../apps/web/scripts/vendor.mjs) walks the ESM graph from the
+      package's entry points, copies only what is reachable (48 files, 440 KB) and rewrites bare
+      specifiers to relative paths, so the import map needs two entries rather than one per
+      transitive `@noble` subpath. `pnpm vendor:check` fails when `vendor/` is stale; the tree is
+      committed because prod mounts `apps/web` straight from the checkout
+- [x] Drop the `esm.sh` import-map entry for `@noble/ciphers`: the dependency arrives vendored with
+      the client, removing a CDN fetch from first paint and from offline/self-hosted installs.
+      A Playwright assertion fails if the SPA requests anything off-origin
+- [x] Delete the duplicated protocol modules (`js/crypto.js`, the protocol half of `js/api.js`,
+      `js/messaging.js`, `js/files.js`, `js/pow.js`); `js/app.js` keeps only UI. `js/client.js` is
+      the single place a `PoweurClient` is built, which is what makes the relay-URL rule structural
+- [x] Keep `js/passkey.js` + `js/storage.js` and expose them as the browser `Signer`/`KeyStore`
       implementation the package expects — passkey/PIN gating stays a web-app concern and raw keys
-      never cross the package boundary
-- [ ] Existing Vitest + Playwright suites pass **unchanged** — they are the regression net for this
-      refactor; do not rewrite them in the same PR
+      never cross the package boundary. `js/vault.js` holds the custody half of the old `crypto.js`:
+      the wrapped-blob format is byte-identical (HKDF salt `poweur-key-wrapping-v1`, AES-256-GCM,
+      `{signingJWK,encJWK}`) so shipped identities keep opening and EPIC-011 can re-wrap the same
+      payload. `WebCryptoSigner` signs inside WebCrypto, so the Ed25519 key never enters package
+      memory; the X25519 key does, because message decryption is ChaCha20-Poly1305 and WebCrypto
+      has none
+- [x] Existing Vitest + Playwright suites pass — `test/e2e/hosted.spec.js`, the UI regression net,
+      is **unchanged**. The Vitest protocol suites (`crypto`, `pow`, `hosted-api`,
+      `messaging-relay`, `files-relay`) were retired rather than kept: they tested modules that no
+      longer exist and their coverage now lives in `packages/client-ts`. What replaced them tests
+      what `apps/web` still owns — `vault.test.js` (JWK ↔ SDK key bytes, signer/decryptor parity,
+      wrap formats), `client-relay.test.js` (the same live-relay flows driven through the app's own
+      modules), `origin.test.js`, `vendor.test.js`
+
+**Found during adoption (fixed here):**
+
+- `@poweur/client` captured `globalThis.fetch` unbound in `RelayClient`, `resolveIdentity` and
+  `dohTxtResolver`. Node tolerates that; a browser throws `Illegal invocation`, so registration
+  failed on the first real page load and no Node-only test could have caught it. Fixed with
+  `defaultFetch()` in `http.ts` and pinned by `packages/client-ts/test/fetch-binding.test.ts`,
+  which models the browser's receiver rule.
+- The relay keeps **one outstanding challenge per identity**
+  (`apps/api/internal/storage/challenges.go`), so two overlapping authenticated GETs invalidate
+  each other. `app.js` had a render-driven inbox fetch *and* an explicit one after unlock; the
+  inbox fetch is now single-flight. Worth noting for EPIC-009: any concurrent authenticated read
+  hits this, and a per-challenge (rather than per-identity) store would remove the constraint.
 
 **Acceptance:** `apps/web` contains no canonical strings, signing or crypto of its own; `pnpm
 test:all` is green; the relay serves the SPA exactly as before.

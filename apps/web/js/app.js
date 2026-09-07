@@ -1,18 +1,17 @@
 /**
- * Poweur ID Web Client — SPA controller (complete rewrite)
+ * Poweur ID Web Client — SPA controller.
+ *
+ * UI only: the protocol lives in `@poweur/client` (EPIC-015 E15-T6), key
+ * custody in `js/vault.js`, and every relay call is made through the
+ * `PoweurClient` that `js/client.js` builds for the active identity.
  *
  * Three top-level pages: main | launcher | settings
  * Sub-pages (full-screen, back button): add-id | new-id | unlock | compose
  */
 
 import {
-  generateSigningKeypair, generateEncryptionKeypair, sign,
-  wrapKeysWithPin, unwrapKeysWithPin,
-  canonicalIdentityRegistration,
-  buildSignedIdentityDocument,
-  canonicalSessionRevocation,
-  now, randomNonce, toBase64url,
-} from "./crypto.js";
+  createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
+} from "@poweur/client";
 
 import {
   createPasskey, authenticatePasskey,
@@ -20,29 +19,20 @@ import {
 } from "./passkey.js";
 
 import {
+  generateIdentityJwks, generateEncryptionJwk, keyBytesFromJwks,
+  wrapKeysWithPin, unwrapKeysWithPin, toBase64url,
+} from "./vault.js";
+
+import {
   getConfig, saveConfig,
   saveIdentityRecord, loadIdentityRecord, listIdentities, removeIdentity,
   getActiveIdentity, setActiveIdentity,
-  saveSessionRecord, loadSessionRecord, removeSessionRecord, isSessionValid,
+  loadSessionRecord, removeSessionRecord,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
+  defaultRelayUrl, relayUrlFor,
 } from "./storage.js";
 
-import {
-  registerIdentity, updateEncryptionKey,
-  revokeSession, checkHealth, fetchRelayAddress,
-  lookupIdentity,
-} from "./api.js";
-
-import {
-  createSession as registerMessagingSession,
-  sendEncryptedMessage,
-  pullInbox,
-} from "./messaging.js";
-
-import {
-  ROOT_INFO, mintDavToken, listDir, uploadFile, downloadFile,
-  makeDir, moveEntry, deleteEntry, fetchQuota, fmtBytes,
-} from "./files.js";
+import { clientFor, identityApiFor, lookup } from "./client.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -70,7 +60,7 @@ const S = {
   messages: [],
   acks: [],
   dropdownOpen: false,
-  files: { token: null, tokenExp: 0, path: "", entries: [], quota: null, loading: false },
+  files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -412,7 +402,7 @@ function renderLauncher() {
 function renderSettings() {
   const rec = S.identity ? loadIdentityRecord(S.identity) : null;
   const sess = S.identity ? loadSessionRecord(S.identity) : null;
-  const sessOk = S.identity && isSessionValid(S.identity);
+  const sessOk = sessionIsValid(sess);
 
   return `
     ${rec ? `
@@ -655,7 +645,7 @@ function renderFiles() {
       <div class="sub-body">
         ${quota ? `
           <div class="small muted" style="display:flex;justify-content:space-between;margin-bottom:6px">
-            <span>${fmtBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${fmtBytes(quota.quota_bytes)}` : ""} used</span>
+            <span>${formatBytes(quota.used_bytes)}${quota.quota_bytes > 0 ? ` of ${formatBytes(quota.quota_bytes)}` : ""} used</span>
             <span>${esc(quota.provider)}</span>
           </div>
           ${quota.quota_bytes > 0 ? `
@@ -680,7 +670,7 @@ function renderFiles() {
                 <div class="conv-name">${esc(e.name)}
                   ${rootInfo ? `<span class="chip" style="margin-left:6px">${esc(rootInfo.badge)}</span>` : ""}
                 </div>
-                <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : fmtBytes(e.size)}</div>
+                <div class="conv-preview">${rootInfo ? esc(rootInfo.desc) : e.dir ? "folder" : formatBytes(e.size)}</div>
               </div>
               ${atRoot ? "" : `
                 <button class="btn btn-sm" data-rename="${esc(e.path)}" title="Rename">✏️</button>
@@ -847,16 +837,16 @@ async function doUnlock() {
 
     setUnlockedKeys(id, sigPriv, encPriv);
 
-    if (!isSessionValid(id)) {
+    if (!sessionIsValid(loadSessionRecord(id))) {
       setLoading(true, "Creating session…");
-      await createSession(id, sigPriv, rec.relay || S.config.relayUrl);
+      await ensureSession(id);
     }
 
     setLoading(false);
     toast("Unlocked", "success");
     R.sub = null; R.params = {};
-    render();
-    loadInbox();
+    render(); // attachEvents starts the inbox fetch
+
   } catch (err) {
     setLoading(false);
     toast(err.message, "error");
@@ -891,7 +881,9 @@ async function doCreateIdentity() {
 
   const handle   = step2.handle;
   const domain   = step2.domain;
-  const relayUrl = window.location.origin;
+  // A brand-new identity has no record yet, so this is the one moment the
+  // relay is not read from one — see storage.defaultRelayUrl().
+  const relayUrl = defaultRelayUrl();
   const provider = q("#ni-provider")?.value;
   const dnsToken = q("#ni-token")?.value.trim();
   const hosted = q("#ni-hosted")?.checked !== false;
@@ -906,13 +898,7 @@ async function doCreateIdentity() {
 
   setLoading(true, "Generating keys…");
   try {
-    const { publicKeyBytes: sigPub, privateKeyJWK: sigPriv } = await generateSigningKeypair();
-    const { publicKeyBytes: encPub, privateKeyJWK: encPriv } = await generateEncryptionKeypair();
-    const pubB64 = toBase64url(sigPub);
-    const encB64 = toBase64url(encPub);
-
-    setLoading(true, "Registering identity…");
-    const relayAddr = await fetchRelayAddress(relayUrl);
+    const { signingJWK: sigPriv, encJWK: encPriv, publicKey, encPublicKey } = await generateIdentityJwks();
 
     setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -930,33 +916,19 @@ async function doCreateIdentity() {
       setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv);
     }
-    const issuedAt = now();
-    const nonce    = randomNonce();
-    const canonical = canonicalIdentityRegistration(identity, pubB64, encB64, relayAddr, issuedAt, nonce);
-    const identitySignature = await sign(sigPriv, canonical);
 
-    const identityDocument = await buildSignedIdentityDocument(sigPriv, {
-      identity, publicKey: pubB64, encPublicKey: encB64, relay: relayAddr, updatedAt: issuedAt,
+    setLoading(true, "Registering identity…");
+    const created = await createIdentity(identityApiFor(relayUrl), identity, {
+      hosted,
+      keys: keyBytesFromJwks(identity, sigPriv, encPriv),
+      ...(hosted ? {} : { dnsProvider: provider, dnsToken }),
+      ...(q("#ni-invite")?.value.trim() ? { inviteCode: q("#ni-invite").value.trim() } : {}),
     });
 
-    const regReq = {
-      identity, public_key: pubB64, encryption_public_key: encB64,
-      issued_at: issuedAt, nonce, identity_signature: identitySignature,
-      identity_document: identityDocument,
-    };
-    if (!hosted) {
-      regReq.dns_provider = provider;
-      regReq.dns_token = dnsToken;
-    }
-    const invite = q("#ni-invite")?.value.trim();
-    if (invite) regReq.invite_code = invite;
-
-    await registerIdentity(relayUrl, regReq);
-
     saveIdentityRecord(identity, {
-      identity, publicKey: pubB64, encPublicKey: encB64,
+      identity, publicKey, encPublicKey,
       credentialId, encryptedKeys, relay: relayUrl,
-      userId, createdAt: issuedAt, supportsPRF,
+      userId, createdAt: created.document.updated_at, supportsPRF,
     });
     saveConfig({ ...S.config, relayUrl, parentDomain: domain, dnsProvider: provider });
     S.config = getConfig();
@@ -966,13 +938,13 @@ async function doCreateIdentity() {
     setActiveIdentity(identity);
 
     setLoading(true, "Creating session…");
-    await createSession(identity, sigPriv, relayUrl);
+    await ensureSession(identity);
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
     R.sub = null; R.page = "main"; R.params = {};
-    render();
-    loadInbox();
+    render(); // attachEvents starts the inbox fetch
+
   } catch (err) {
     setLoading(false);
     toast(err.message, "error", 8000);
@@ -980,23 +952,43 @@ async function doCreateIdentity() {
   }
 }
 
-async function createSession(identity, sigPriv, relayUrl) {
-  const sess = await registerMessagingSession(relayUrl, identity, sigPriv);
-  saveSessionRecord(identity, sess);
+/**
+ * Register (or reuse) a relay session. `SessionManager.ensure` re-registers
+ * only when the stored one is expired or bound to another relay.
+ */
+async function ensureSession(identity) {
+  const client = clientFor(identity);
+  if (!client) return null;
+  return client.sessions.ensure(client.signer);
 }
 
-async function loadInbox() {
-  const id = S.identity;
-  if (!id || !getUnlockedKeys()) return;
-  const rec      = loadIdentityRecord(id);
-  const relayUrl = rec?.relay || S.config.relayUrl;
-  const keys     = getUnlockedKeys();
-  try {
-    const { messages = [], acks = [] } = await pullInbox(relayUrl, id, keys.signingJWK);
-    S.messages = messages;
-    S.acks     = acks;
-    if (R.page === "main" && !R.sub) render();
-  } catch (e) { console.warn("Inbox error:", e.message); }
+/**
+ * Fetch the inbox, at most one request in flight.
+ *
+ * The relay keeps a single outstanding challenge per identity, so two
+ * overlapping authenticated GETs invalidate each other's signature. Rendering
+ * triggers a fetch (see attachEvents) and callers ask for one explicitly after
+ * unlocking, so without this guard those two collide every time.
+ */
+let inboxInFlight = null;
+
+function loadInbox() {
+  const client = clientFor(S.identity);
+  if (!client) return Promise.resolve();
+  inboxInFlight ??= (async () => {
+    try {
+      // The SDK decrypts and emits tick-2 receipts for what actually opened.
+      const { messages, acks } = await client.inboxAndAck();
+      S.messages = messages;
+      S.acks     = acks;
+      if (R.page === "main" && !R.sub) render();
+    } catch (e) {
+      console.warn("Inbox error:", e.message);
+    } finally {
+      inboxInFlight = null;
+    }
+  })();
+  return inboxInFlight;
 }
 
 async function doSend() {
@@ -1007,28 +999,16 @@ async function doSend() {
   if (!to)   return toast("Enter a recipient", "warning");
   if (!body) return toast("Enter a message", "warning");
 
-  const id       = S.identity;
-  const rec      = loadIdentityRecord(id);
-  const relayUrl = rec?.relay || S.config.relayUrl;
-  const sess     = loadSessionRecord(id);
-  const keys     = getUnlockedKeys();
-  if (!keys) return toast("Unlock your identity first", "warning");
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  const sess = loadSessionRecord(S.identity);
 
   sendBtn.disabled = true;
   const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
 
   try {
     setStatus("Sending…");
-    const signWith = sess?.sessionId ? "session" : "identity";
-    await sendEncryptedMessage({
-      relayUrl,
-      sender: id,
-      recipient: to,
-      plaintext: body,
-      identitySigningJWK: keys.signingJWK,
-      signWith,
-      session: sess,
-    });
+    await client.send(to, body, { signWith: sessionIsValid(sess) ? "session" : "identity" });
     setStatus("✓ Sent", "ok");
     if (q("#c-body")) q("#c-body").value = "";
     toast("Message sent!", "success");
@@ -1043,19 +1023,20 @@ async function doSend() {
 
 // ─── Files actions ────────────────────────────────────────────────────────────
 
-function filesRelayUrl() {
-  const rec = loadIdentityRecord(S.identity);
-  return rec?.relay || S.config.relayUrl;
-}
-
-async function ensureDavToken() {
-  const keys = getUnlockedKeys();
-  if (!keys) { toast("Unlock your identity first", "warning"); return null; }
-  if (S.files.token && S.files.tokenExp > Date.now() + 60_000) return S.files.token;
-  const tok = await mintDavToken(filesRelayUrl(), S.identity, keys.signingJWK);
-  S.files.token = tok.token;
-  S.files.tokenExp = new Date(tok.expires_at).getTime();
-  return tok.token;
+/**
+ * A `DavClient` for the active identity, cached on `S.files` because minting a
+ * token costs a signature. `PoweurClient.dav()` reuses its own token too, but
+ * the client itself is rebuilt per call, so the cache lives here.
+ */
+async function dav() {
+  const client = clientFor(S.identity);
+  if (!client) { toast("Unlock your identity first", "warning"); return null; }
+  if (S.files.dav && S.files.davExp > Date.now() + 60_000) return S.files.dav;
+  const connected = await client.dav({ force: true });
+  S.files.dav = connected;
+  // Tokens are short-lived; re-mint a minute before the relay stops honouring one.
+  S.files.davExp = Date.now() + 55 * 60_000;
+  return connected;
 }
 
 async function openFiles(path) {
@@ -1069,14 +1050,13 @@ async function openFiles(path) {
 
 async function loadFiles(path) {
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
+    const client = await dav();
+    if (!client) return;
     S.files.loading = true;
     render();
-    const relayUrl = filesRelayUrl();
     const [entries, quota] = await Promise.all([
-      listDir(relayUrl, S.identity, token, path),
-      fetchQuota(relayUrl, S.identity, token).catch(() => S.files.quota),
+      client.list(path),
+      client.quota().catch(() => S.files.quota),
     ]);
     S.files.path = path;
     S.files.entries = entries;
@@ -1093,12 +1073,11 @@ async function doUploadFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
-    const relayUrl = filesRelayUrl();
+    const client = await dav();
+    if (!client) return;
     setLoading(true, `Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`);
     for (const f of files) {
-      await uploadFile(relayUrl, S.identity, token, `${S.files.path}/${f.name}`, f);
+      await client.write(`${S.files.path}/${f.name}`, f);
     }
     setLoading(false);
     toast(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}`, "success");
@@ -1111,12 +1090,11 @@ async function doUploadFiles(fileList) {
 
 async function doDownloadEntry(path) {
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
-    const res = await downloadFile(filesRelayUrl(), S.identity, token, path);
-    const blob = await res.blob();
+    const client = await dav();
+    if (!client) return;
+    const bytes = await client.readBytes(path);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    a.href = URL.createObjectURL(new Blob([bytes]));
     a.download = path.split("/").pop();
     a.click();
     URL.revokeObjectURL(a.href);
@@ -1129,9 +1107,9 @@ async function doNewFolder() {
   const name = prompt("Folder name:");
   if (!name?.trim()) return;
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
-    await makeDir(filesRelayUrl(), S.identity, token, `${S.files.path}/${name.trim()}`);
+    const client = await dav();
+    if (!client) return;
+    await client.mkdir(`${S.files.path}/${name.trim()}`);
     await loadFiles(S.files.path);
   } catch (err) {
     toast(err.message, "error");
@@ -1144,9 +1122,9 @@ async function doRenameEntry(path) {
   if (!name?.trim() || name.trim() === oldName) return;
   const parent = path.split("/").slice(0, -1).join("/");
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
-    await moveEntry(filesRelayUrl(), S.identity, token, path, `${parent}/${name.trim()}`);
+    const client = await dav();
+    if (!client) return;
+    await client.move(path, `${parent}/${name.trim()}`);
     await loadFiles(S.files.path);
   } catch (err) {
     toast(err.message, "error");
@@ -1156,9 +1134,9 @@ async function doRenameEntry(path) {
 async function doDeleteEntry(path) {
   if (!confirm(`Delete ${path.split("/").pop()}?`)) return;
   try {
-    const token = await ensureDavToken();
-    if (!token) return;
-    await deleteEntry(filesRelayUrl(), S.identity, token, path);
+    const client = await dav();
+    if (!client) return;
+    await client.remove(path);
     await loadFiles(S.files.path);
   } catch (err) {
     toast(err.message, "error");
@@ -1200,8 +1178,7 @@ function showLookupPanel() {
       if (!id) return toast("Enter an identity", "warning");
       if (out) out.textContent = "Looking up…";
       try {
-        const relayUrl = S.config.relayUrl || window.location.origin;
-        const { source, document } = await lookupIdentity(id, { relayUrl });
+        const { source, document } = await lookup(id, relayUrlFor(S.identity));
         if (out) {
           out.textContent = [
             `identity: ${document.identity}`,
@@ -1236,7 +1213,7 @@ function showRelayPanel() {
       const url = q("#panel-relay-url").value.trim();
       const s = q("#panel-relay-status");
       s.textContent = "Testing…"; s.style.color = "var(--t2)";
-      try { await checkHealth(url); s.textContent = "✓ Connected"; s.style.color = "var(--green)"; }
+      try { await identityApiFor(url).health(); s.textContent = "✓ Connected"; s.style.color = "var(--green)"; }
       catch (e) { s.textContent = `✕ ${e.message}`; s.style.color = "var(--red)"; }
     });
     q("#panel-save-relay")?.addEventListener("click", () => {
@@ -1251,7 +1228,7 @@ function showRelayPanel() {
 
 function showSessionPanel() {
   const sess = loadSessionRecord(S.identity);
-  const valid = isSessionValid(S.identity);
+  const valid = sessionIsValid(sess);
   if (!sess) return;
   showPanel("Session", `
     <div class="kv-row"><span class="kv-label">Status</span>
@@ -1268,10 +1245,9 @@ function showSessionPanel() {
     q("#panel-refresh-sess")?.addEventListener("click", async () => {
       if (!getUnlockedKeys()) return toast("Unlock first", "warning");
       closePanel();
-      const rec = loadIdentityRecord(S.identity);
       setLoading(true, "Refreshing session…");
       try {
-        await createSession(S.identity, getUnlockedKeys().signingJWK, rec?.relay || S.config.relayUrl);
+        await clientFor(S.identity).sessions.refresh(clientFor(S.identity).signer);
         setLoading(false); toast("Session refreshed", "success"); render();
       } catch (e) { setLoading(false); toast(e.message, "error"); }
     });
@@ -1309,23 +1285,16 @@ function showDnsPanel() {
 }
 
 async function doRotateEncKey() {
-  if (!getUnlockedKeys()) return toast("Unlock your identity first", "warning");
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
   const id  = S.identity;
   const rec = loadIdentityRecord(id);
-  const relayUrl = rec?.relay || S.config.relayUrl;
   const keys = getUnlockedKeys();
 
   setLoading(true, "Rotating encryption key…");
   try {
-    const { publicKeyBytes, privateKeyJWK: encPrivNew } = await generateEncryptionKeypair();
-    const encPubB64 = toBase64url(publicKeyBytes);
-    const issuedAt = now(); const nonce = randomNonce();
-    const canonical = ["identity-encryption-key", id, encPubB64, issuedAt, nonce].join("\n");
-    const signature = await sign(keys.signingJWK, canonical);
-
-    await updateEncryptionKey(relayUrl, id, {
-      encryption_public_key: encPubB64, issued_at: issuedAt, nonce, identity_signature: signature,
-    });
+    const { encJWK: encPrivNew, encPublicKey } = await generateEncryptionJwk();
+    await client.identity.publishEncryptionKey(client.signer, encPublicKey);
 
     let encryptedKeys;
     if (rec.supportsPRF !== false) {
@@ -1339,27 +1308,19 @@ async function doRotateEncKey() {
       encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew);
     }
 
-    saveIdentityRecord(id, { ...rec, encPublicKey: encPubB64, encryptedKeys });
+    saveIdentityRecord(id, { ...rec, encPublicKey, encryptedKeys });
     setUnlockedKeys(id, keys.signingJWK, encPrivNew);
     setLoading(false); toast("Encryption key rotated", "success"); render();
   } catch (e) { setLoading(false); toast(e.message, "error"); }
 }
 
 async function doRevokeSession() {
-  const id   = S.identity;
-  const rec  = loadIdentityRecord(id);
-  const relayUrl = rec?.relay || S.config.relayUrl;
-  const sess = loadSessionRecord(id);
-  const keys = getUnlockedKeys();
-  if (!sess || !keys) return;
+  const client = clientFor(S.identity);
+  if (!client || !loadSessionRecord(S.identity)) return;
 
   setLoading(true, "Revoking session…");
   try {
-    const issuedAt = now(); const nonce = randomNonce();
-    const canonical = canonicalSessionRevocation(id, sess.sessionId, issuedAt, nonce);
-    const signature = await sign(keys.signingJWK, canonical);
-    await revokeSession(relayUrl, sess.sessionId, { identity: id, session_id: sess.sessionId, issued_at: issuedAt, nonce, identity_signature: signature });
-    removeSessionRecord(id);
+    await client.sessions.revoke(client.signer);
     setLoading(false); toast("Session revoked", "success"); render();
   } catch (e) { setLoading(false); toast(e.message, "error"); }
 }
@@ -1491,7 +1452,7 @@ function boot() {
     R.page = "launcher";
   } else if (!S.identity) {
     R.page = "main";
-  } else if (!getUnlockedKeys() && !isSessionValid(S.identity)) {
+  } else if (!getUnlockedKeys() && !sessionIsValid(loadSessionRecord(S.identity))) {
     // Auto-push unlock only if session is gone; otherwise session key in
     // sessionStorage lets us reload without re-auth.
     R.push("unlock");

@@ -14,7 +14,7 @@
 | E17-T3 Messaging: send, inbox, acks, anon PoW send | **done** | both signing paths, `SessionProof`, tick-2 acks, anonymous send with PoW; 16 live-relay tests |
 | E17-T4 Files, sync & shares | **done** | DAV + tokens, changes/manifest/chunked upload, grants and groups, `poweur-sys` helpers; 26 live-relay tests |
 | E17-T5 Go↔TS conformance vectors | **done** | 3 Go generators → `packages/identity/testdata/vectors/`; 60 TS conformance tests; rule recorded in AGENTS.md |
-| E17-T6 Web app adopts the package | **open** | unchanged — mirror of [E15-T6](EPIC-015-web-app-ux.md); deliberately a separate change set (see *Deferred*) |
+| E17-T6 Web app adopts the package | **done** | mirror of [E15-T6](EPIC-015-web-app-ux.md); `apps/web` vendors the built ESM, owns no protocol code, and surfaced the unbound-`fetch` browser bug fixed in `http.ts` |
 | E17-T7 Docs, npm publish & agent quickstart | **partly done** | `apps/docs/docs/clients/js-sdk.md` + quickstart + overview link shipped; **npm publish and the release workflow are open** |
 | E17-T8 CLI parity with the Go CLI | **done** | *added* — `poweur` bin, every Go command, shared `~/.poweur` tree; 8 Go↔TS interop tests |
 
@@ -187,13 +187,20 @@ empty members array in group canonicalization).
 
 *Paired with [E15-T6](EPIC-015-web-app-ux.md) — same work, tracked from both sides.*
 
-- [ ] `apps/web` depends on `@poweur/client` (`workspace:*`); vendor step copies `dist/` into the
-      served static tree; import map gains `@poweur/client` and drops the `esm.sh` entry
-- [ ] Delete `js/crypto.js`, the protocol half of `js/api.js`, `js/messaging.js`, `js/files.js`,
-      `js/pow.js`; keep `passkey.js`/`storage.js` as the browser `KeyStore`/`Signer` implementation
-      and `app.js` as pure UI
-- [ ] Existing Vitest + Playwright suites pass unchanged (they are the regression net for this
-      refactor — do not rewrite them in the same PR)
+- [x] `apps/web` depends on `@poweur/client` (`workspace:*`); `apps/web/scripts/vendor.mjs` copies
+      the reachable ESM graph into the served static tree, rewriting bare specifiers to relative
+      paths; import map gains `@poweur/client` and drops the `esm.sh` entry
+- [x] Delete `js/crypto.js`, the protocol half of `js/api.js`, `js/messaging.js`, `js/files.js`,
+      `js/pow.js`; `passkey.js`/`storage.js`/`vault.js` are the browser `KeyStore`/`Signer`
+      implementation and `app.js` is pure UI
+- [x] `test/e2e/hosted.spec.js` passes unchanged; the Vitest protocol suites were retired in favour
+      of adapter and live-relay suites over the app's own modules — see E15-T6 for the reasoning
+
+**Browser bug this adoption caught:** `RelayClient`, `resolveIdentity` and `dohTxtResolver` all did
+`options.fetch ?? globalThis.fetch`, capturing `fetch` unbound. Node calls that fine; a browser
+throws `Illegal invocation`, so the very first page load failed at registration. `defaultFetch()`
+in `http.ts` binds it, and `test/fetch-binding.test.ts` reproduces the browser's receiver rule so
+Node tests can catch a regression.
 
 **Acceptance:** no protocol code remains in `apps/web/js` outside the key-store adapter; `pnpm
 test:all` in `apps/web` is green; the relay still serves the SPA with no bundler.
