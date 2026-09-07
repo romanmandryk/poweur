@@ -131,6 +131,32 @@ describe("keystore ↔ real relay", () => {
     expect(entry.label).toBe("Laptop");
   });
 
+  it("lists enrollments from the identity key alone, with no ciphertext", async () => {
+    // The inventory screen runs while you are unlocked, so prompting an
+    // authenticator for it would be a prompt for nothing.
+    const { identity: listed, enrollments } = await api.list(signer, identity);
+
+    expect(listed).toBe(identity.toLowerCase());
+    expect(enrollments).toHaveLength(1);
+    const summary = enrollments[0]!;
+    expect(summary).toMatchObject({
+      enrollment_id: "enr-1",
+      kind: "passkey",
+      wrap: "prf",
+      payload: "seed",
+      label: "Laptop",
+      has_passkey: true,
+    });
+    // Neither the wrapped seed nor the credential id is in the listing.
+    expect(JSON.stringify(summary)).not.toContain(wrapped.ciphertext);
+    expect(JSON.stringify(summary)).not.toContain(auth.credentialId);
+  });
+
+  it("defaults the listed identity to the signer's own", async () => {
+    const { enrollments } = await api.list(signer);
+    expect(enrollments.map((e) => e.enrollment_id)).toContain("enr-1");
+  });
+
   it("rejects a replayed assertion", async () => {
     const assertion = await auth.assert(await challenge());
     await expect(api.fetch(identity, assertion, RP_ID)).resolves.toBeTruthy();

@@ -183,6 +183,14 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 				"", encStr, vectorTime, nonce),
 		},
 		{
+			Name: "keystore-list",
+			Inputs: map[string]any{
+				"identity": "alice.poweur.net",
+				"issued_at": vectorTime, "nonce": nonce,
+			},
+			Canonical: CanonicalKeystoreList("alice.poweur.net", vectorTime, nonce),
+		},
+		{
 			Name: "keystore-remove",
 			Inputs: map[string]any{
 				"identity": "alice.poweur.net", "enrollment_id": "enr-001",

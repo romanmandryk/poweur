@@ -1240,3 +1240,43 @@ input, textarea, select { font-family: inherit; }
    per-component, since EPIC-019 wraps this UI verbatim. */
 .settings-row, .conv-row, .option-card { min-height: 52px; }
 .btn-sm { min-height: 40px; }
+
+/* ─── EPIC-011: keys, devices and recovery ────────────────────────────────── */
+
+.steps { padding-left: 20px; margin-bottom: 14px; color: var(--t2); }
+.steps li { margin-bottom: 6px; }
+
+/* The six digits are compared by eye across two screens, so they need to be
+   unmistakable at arm's length and impossible to confuse digit-for-digit. */
+.sas-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-align: center;
+  margin: 10px 0 4px;
+}
+
+.rendezvous-code {
+  font-size: 15px;
+  word-break: break-all;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 8px 0;
+  user-select: all;
+}
+
+/* 24 words, numbered, in two columns — the layout people actually copy from. */
+.mnemonic {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 14px;
+  margin: 4px 0 2px 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+}
+.mnemonic-word { padding: 3px 0; }
+@media (min-width: 420px) {
+  .mnemonic { grid-template-columns: repeat(3, 1fr); }
+}

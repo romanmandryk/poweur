@@ -17,6 +17,7 @@ import {
   canonicalIdentityRegistration,
   canonicalIdentityRotation,
   canonicalKeystoreEnroll,
+  canonicalKeystoreList,
   canonicalKeystoreRemove,
   canonicalMessage,
   canonicalSessionRegistration,
@@ -130,6 +131,10 @@ describe("canonical signing strings match Go", () => {
           string(i, "identity"), string(i, "enrollment_id"), string(i, "kind"),
           string(i, "credential_id"), string(i, "wrapped_digest"),
           string(i, "issued_at"), string(i, "nonce"),
+        );
+      case "keystore-list":
+        return canonicalKeystoreList(
+          string(i, "identity"), string(i, "issued_at"), string(i, "nonce"),
         );
       case "keystore-remove":
         return canonicalKeystoreRemove(

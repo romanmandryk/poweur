@@ -9,8 +9,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 
-import "./helpers/webstorage.mjs";
-import { resetWebStorage } from "./helpers/webstorage.mjs";
+import "./helpers/browser-globals.mjs";
+import { resetWebStorage } from "./helpers/browser-globals.mjs";
 import { startRelay } from "./helpers/relay.mjs";
 import { createWebIdentity, unlock } from "./helpers/identity.mjs";
 

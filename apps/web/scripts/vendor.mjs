@@ -1,13 +1,18 @@
 /**
- * Vendor `@poweur/client` (and the `@noble/*` modules it reaches) into the
- * static tree the relay serves.
+ * Vendor `@poweur/client` and everything it reaches into the static tree the
+ * relay serves.
  *
  * The web app has no bundler and EPIC-015 keeps it that way, so this is a copy
  * step, not a build: every file that lands in `vendor/` is the same ESM the
  * package publishes. The one transformation is specifier rewriting — bare
  * specifiers (`@noble/hashes/sha2.js`) become relative paths, so the import map
- * in index.html needs a single entry for the package itself rather than one per
+ * in index.html needs one entry for the package itself rather than one per
  * transitive subpath.
+ *
+ * Resolution is **per importing package**, not global. `@scure/bip39` needs
+ * `@noble/hashes@2`, while `@poweur/client` is on `@noble/hashes@1`; resolving
+ * a bare specifier from the wrong place silently produces a tree that throws at
+ * first import. Two versions of one package therefore get two directories.
  *
  *   node scripts/vendor.mjs           # write vendor/
  *   node scripts/vendor.mjs --check   # fail if vendor/ is stale (CI)
@@ -24,58 +29,73 @@ const here = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = resolve(here, "..");
 const REPO_ROOT = resolve(WEB_DIR, "../..");
 const OUT_DIR = join(WEB_DIR, "vendor");
-const require = createRequire(join(REPO_ROOT, "packages/client-ts/package.json"));
+const CLIENT_DIR = join(REPO_ROOT, "packages/client-ts");
 
 const CHECK = process.argv.includes("--check");
 
-// ─── Package registry ─────────────────────────────────────────────────────────
+// ─── Package registry, keyed by resolved directory ───────────────────────────
 
-/**
- * A vendored package: where its ESM lives on disk, where it lands under
- * vendor/, and the `exports` map used to resolve bare subpath specifiers.
- */
-function pkg(name, rootDir, outName, exportsMap) {
-  return { name, rootDir, outName, exports: exportsMap };
+/** absolute package dir → { name, version, rootDir, outName, exports } */
+const packages = new Map();
+/** Output directory names already taken, so a second version gets its own. */
+const usedOutNames = new Set();
+
+function outNameFor(name, version) {
+  const base = name.replace(/^@/, "").replace(/\//g, "-");
+  if (!usedOutNames.has(base)) {
+    usedOutNames.add(base);
+    return base;
+  }
+  const versioned = `${base}@${version}`;
+  usedOutNames.add(versioned);
+  return versioned;
 }
 
-/** `@noble/*` packages do not export `./package.json`, so walk up from the main entry. */
-function nobleDir(name) {
-  let dir = dirname(require.resolve(name));
+/**
+ * Register a package directory. `rootDir` is where its ESM lives: `esm/` when
+ * the package ships dual CJS/ESM that way, otherwise the package root.
+ */
+function register(dir) {
+  const existing = packages.get(dir);
+  if (existing) return existing;
+
+  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  const rootDir = existsSync(join(dir, "esm")) ? join(dir, "esm") : dir;
+  const entry = {
+    name: manifest.name,
+    version: manifest.version,
+    dir,
+    rootDir,
+    exports: manifest.exports,
+    outName: outNameFor(manifest.name, manifest.version),
+    require: createRequire(join(dir, "package.json")),
+  };
+  packages.set(dir, entry);
+  return entry;
+}
+
+/** Walk up from a resolved file to the directory holding its package.json. */
+function packageRootOf(file) {
+  let dir = dirname(file);
   while (!existsSync(join(dir, "package.json"))) {
     const parent = dirname(dir);
-    if (parent === dir) throw new Error(`cannot locate package root for ${name}`);
+    if (parent === dir) throw new Error(`cannot locate a package root above ${file}`);
     dir = parent;
   }
   return dir;
 }
 
-function noblePkg(name, outName) {
-  const dir = nobleDir(name);
-  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-  return pkg(name, join(dir, "esm"), outName, manifest.exports);
+/**
+ * Resolve a bare package name from `importer`'s own node_modules, which is what
+ * makes nested versions work.
+ */
+function resolvePackage(importer, name) {
+  // Some packages (the @noble family) do not export "./package.json", so
+  // resolve the main entry and walk up from it.
+  return register(packageRootOf(importer.require.resolve(name)));
 }
 
-const PACKAGES = [
-  pkg(
-    "@poweur/client",
-    join(REPO_ROOT, "packages/client-ts/dist"),
-    "poweur-client",
-    JSON.parse(readFileSync(join(REPO_ROOT, "packages/client-ts/package.json"), "utf8")).exports,
-  ),
-  noblePkg("@noble/ciphers", "noble-ciphers"),
-  noblePkg("@noble/curves", "noble-curves"),
-  noblePkg("@noble/hashes", "noble-hashes"),
-];
-
-const byName = new Map(PACKAGES.map((p) => [p.name, p]));
-
-/** Entry points the app is allowed to import. Everything else arrives transitively. */
-const ENTRIES = [
-  ["@poweur/client", "."],
-  ["@poweur/client", "./browser"],
-];
-
-// ─── Resolution ───────────────────────────────────────────────────────────────
+// ─── Subpath resolution ──────────────────────────────────────────────────────
 
 /** Pick the browser-facing target from an `exports` entry, ignoring `node`. */
 function pickCondition(value) {
@@ -91,8 +111,8 @@ function pickCondition(value) {
 }
 
 /**
- * Resolve `subpath` inside a package to a file under its ESM root.
- * Packages disagree about whether subpaths carry `.js`, so try both spellings.
+ * Resolve `subpath` inside a package to a file under its ESM root. Packages
+ * disagree about whether subpaths carry `.js`, so try both spellings.
  */
 function resolveSubpath(target, subpath) {
   const candidates = [subpath];
@@ -100,21 +120,20 @@ function resolveSubpath(target, subpath) {
   else if (subpath !== ".") candidates.push(`${subpath}.js`);
 
   for (const candidate of candidates) {
-    const entry = target.exports?.[candidate];
-    const picked = entry ? pickCondition(entry) : null;
+    const picked = target.exports?.[candidate] ? pickCondition(target.exports[candidate]) : null;
     if (!picked) continue;
-    // exports targets are relative to the package root; our root is esm/ for
-    // noble, dist/ for the client — strip whichever prefix the map used.
-    const abs = resolve(target.rootDir, "..", picked.replace(/^\.\//, ""));
-    const fromRoot = relative(target.rootDir, abs);
-    if (!fromRoot.startsWith("..") && existsSync(abs)) return fromRoot.split(sep).join("/");
-    // The map pointed outside our ESM root (a CJS twin); fall back to the same
-    // basename under the root.
+    const fromPackageRoot = resolve(target.dir, picked.replace(/^\.\//, ""));
+    const asRelative = relative(target.rootDir, fromPackageRoot);
+    if (!asRelative.startsWith("..") && existsSync(fromPackageRoot)) {
+      return asRelative.split(sep).join("/");
+    }
+    // The map pointed at the CJS twin outside our ESM root; take the same
+    // path under the root instead.
     const inRoot = join(target.rootDir, picked.replace(/^\.\//, ""));
     if (existsSync(inRoot)) return relative(target.rootDir, inRoot).split(sep).join("/");
   }
 
-  // No exports entry (or none that resolved): treat the subpath as a file path.
+  // No usable exports entry: treat the subpath as a plain file path.
   for (const candidate of candidates) {
     if (candidate === ".") continue;
     const abs = join(target.rootDir, candidate.replace(/^\.\//, ""));
@@ -122,7 +141,7 @@ function resolveSubpath(target, subpath) {
       return relative(target.rootDir, abs).split(sep).join("/");
     }
   }
-  throw new Error(`cannot resolve ${target.name}${subpath === "." ? "" : `/${subpath.slice(2)}`}`);
+  throw new Error(`cannot resolve ${target.name}${subpath === "." ? "" : subpath.slice(1)}`);
 }
 
 /** Split "@noble/hashes/sha2.js" into ["@noble/hashes", "./sha2.js"]. */
@@ -135,8 +154,7 @@ function splitBare(spec) {
 
 /** Resolve a relative specifier against the importing file, inside one package. */
 function resolveRelative(target, fromFile, spec) {
-  const base = posix.dirname(fromFile);
-  const joined = posix.normalize(posix.join(base, spec));
+  const joined = posix.normalize(posix.join(posix.dirname(fromFile), spec));
   const candidates = [joined];
   if (joined.endsWith(".ts")) candidates.push(`${joined.slice(0, -3)}.js`);
   if (!joined.endsWith(".js")) candidates.push(`${joined}.js`);
@@ -148,60 +166,64 @@ function resolveRelative(target, fromFile, spec) {
   throw new Error(`cannot resolve ${spec} from ${target.name}/${fromFile}`);
 }
 
-// ─── Graph walk ───────────────────────────────────────────────────────────────
+// ─── Graph walk ──────────────────────────────────────────────────────────────
 
 const SPECIFIER_RE = /(\bfrom\s*|\bimport\s*|\bexport\s*\*\s*from\s*|\bimport\()(["'])([^"']+)\2/g;
+const COMMENT_LINE_RE = /^\s*(\*|\/\/|\/\*)/;
 
-const emitted = new Map(); // "pkgName\0fileFromRoot" -> rewritten source
+const emitted = new Map(); // "<pkg dir>\0<file>" -> rewritten source
 const queue = [];
 
-function enqueue(pkgName, file) {
-  const key = `${pkgName}\0${file}`;
+function enqueue(pkg, file) {
+  const key = `${pkg.dir}\0${file}`;
   if (emitted.has(key)) return;
   emitted.set(key, null);
-  queue.push({ pkgName, file });
-}
-
-for (const [name, subpath] of ENTRIES) {
-  const target = byName.get(name);
-  enqueue(name, resolveSubpath(target, subpath));
+  queue.push({ pkg, file });
 }
 
 /** Where a vendored file lands, as a path under vendor/. */
-function outPath(pkgName, file) {
-  return posix.join(byName.get(pkgName).outName, file);
+function outPath(pkg, file) {
+  return posix.join(pkg.outName, file);
 }
 
 /** Rewrite one import specifier, enqueueing whatever it points at. */
-function rewriteSpecifier(pkgName, file, spec) {
-  const target = byName.get(pkgName);
+function rewriteSpecifier(pkg, file, spec) {
   let depPkg;
   let depFile;
   if (spec.startsWith(".")) {
-    depPkg = pkgName;
-    depFile = resolveRelative(target, file, spec);
-  } else if (byName.has(splitBare(spec)[0])) {
-    const [name, subpath] = splitBare(spec);
-    depPkg = name;
-    depFile = resolveSubpath(byName.get(name), subpath);
+    depPkg = pkg;
+    depFile = resolveRelative(pkg, file, spec);
   } else if (spec.startsWith("node:")) {
-    throw new Error(`${pkgName}/${file} imports ${spec} — not loadable in a browser`);
+    throw new Error(`${pkg.name}/${file} imports ${spec} — not loadable in a browser`);
   } else {
-    throw new Error(`${pkgName}/${file} imports unvendored package ${spec}`);
+    const [name, subpath] = splitBare(spec);
+    try {
+      depPkg = resolvePackage(pkg, name);
+    } catch (cause) {
+      throw new Error(`${pkg.name}/${file} imports ${spec}, which does not resolve: ${cause.message}`);
+    }
+    depFile = resolveSubpath(depPkg, subpath);
   }
 
   enqueue(depPkg, depFile);
-  const rel = posix.relative(posix.dirname(outPath(pkgName, file)), outPath(depPkg, depFile));
+  const rel = posix.relative(posix.dirname(outPath(pkg, file)), outPath(depPkg, depFile));
   return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
-const COMMENT_LINE_RE = /^\s*(\*|\/\/|\/\*)/;
+const client = register(CLIENT_DIR);
+// The client's ESM is its build output, not the package root.
+client.rootDir = join(CLIENT_DIR, "dist");
+
+/** Entry points the app is allowed to import; everything else arrives transitively. */
+for (const subpath of [".", "./browser"]) {
+  enqueue(client, resolveSubpath(client, subpath));
+}
 
 while (queue.length) {
-  const { pkgName, file } = queue.shift();
-  const source = readFileSync(join(byName.get(pkgName).rootDir, file), "utf8");
+  const { pkg, file } = queue.shift();
+  const source = readFileSync(join(pkg.rootDir, file), "utf8");
 
-  // Line-oriented, skipping comment lines: the package's own doc comments quote
+  // Line-oriented, skipping comment lines: the packages' own doc comments quote
   // specifiers as usage examples, and those must not be rewritten or followed.
   const rewritten = source
     .split("\n")
@@ -209,31 +231,37 @@ while (queue.length) {
       COMMENT_LINE_RE.test(line)
         ? line
         : line.replace(SPECIFIER_RE, (_match, head, quote, spec) =>
-            `${head}${quote}${rewriteSpecifier(pkgName, file, spec)}${quote}`),
+            `${head}${quote}${rewriteSpecifier(pkg, file, spec)}${quote}`),
     )
     .join("\n")
     // The .map files are not vendored, so the pragma would only produce 404s.
     .replace(/^\/\/# sourceMappingURL=.*$/gm, "");
 
-  emitted.set(`${pkgName}\0${file}`, rewritten);
+  emitted.set(`${pkg.dir}\0${file}`, rewritten);
 }
 
-// ─── Write / check ────────────────────────────────────────────────────────────
+// ─── Write / check ───────────────────────────────────────────────────────────
 
 const files = new Map(); // path under vendor/ -> contents
 for (const [key, contents] of emitted) {
-  const [pkgName, file] = key.split("\0");
-  files.set(outPath(pkgName, file), contents);
+  const [dir, file] = key.split("\0");
+  files.set(outPath(packages.get(dir), file), contents);
 }
-for (const [name, outName] of [["@poweur/client", "poweur-client"]]) {
-  const manifest = JSON.parse(
-    readFileSync(join(byName.get(name).rootDir, "..", "package.json"), "utf8"),
-  );
-  files.set(
-    posix.join(outName, "VENDORED.json"),
-    `${JSON.stringify({ name, version: manifest.version, generatedBy: "apps/web/scripts/vendor.mjs" }, null, 2)}\n`,
-  );
-}
+files.set(
+  posix.join(client.outName, "VENDORED.json"),
+  `${JSON.stringify(
+    {
+      name: client.name,
+      version: client.version,
+      generatedBy: "apps/web/scripts/vendor.mjs",
+      packages: [...packages.values()]
+        .map((p) => `${p.name}@${p.version}`)
+        .sort(),
+    },
+    null,
+    2,
+  )}\n`,
+);
 
 function listExisting(dir, prefix = "") {
   if (!existsSync(dir)) return [];

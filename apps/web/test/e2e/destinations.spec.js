@@ -18,19 +18,80 @@ const DESTINATIONS = [
   { page: "settings", title: "Settings" },
 ];
 
+/**
+ * Stand in for a platform authenticator.
+ *
+ * Headless Chromium has no real one, but a stub that returns nothing is not a
+ * useful stand-in either: without `getPublicKey()` the relay has nothing to
+ * verify, so the app declines to enroll and half of EPIC-011 goes untested.
+ * This one holds a real Ed25519 key and signs real assertions. It reports no
+ * PRF, so registration takes the PIN path — which is also the case worth
+ * covering, since a PIN-wrapped browser cannot bootstrap itself.
+ */
 async function stubPasskeys(page) {
   await page.addInitScript(() => {
-    const fakeId = crypto.getRandomValues(new Uint8Array(32));
-    class FakeCredential {
-      constructor() {
-        this.rawId = fakeId.buffer;
-        this.id = btoa(String.fromCharCode(...fakeId));
-        this.type = "public-key";
-      }
-      getClientExtensionResults() { return {}; } // no PRF → PIN path
-    }
-    navigator.credentials.create = async () => new FakeCredential();
-    navigator.credentials.get = async () => new FakeCredential();
+    const rawId = crypto.getRandomValues(new Uint8Array(32));
+    let keyPair = null;
+
+    const ensureKey = async () => {
+      keyPair ??= await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+      return keyPair;
+    };
+
+    const base = {
+      rawId: rawId.buffer,
+      id: btoa(String.fromCharCode(...rawId)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+      type: "public-key",
+      getClientExtensionResults: () => ({}), // no PRF → PIN path
+    };
+
+    navigator.credentials.create = async () => {
+      const pair = await ensureKey();
+      const spki = await crypto.subtle.exportKey("spki", pair.publicKey);
+      return {
+        ...base,
+        response: {
+          getPublicKey: () => spki,
+          getPublicKeyAlgorithm: () => -8, // COSE EdDSA
+        },
+      };
+    };
+
+    navigator.credentials.get = async (options) => {
+      const pair = await ensureKey();
+      const challenge = new Uint8Array(options.publicKey.challenge);
+      const b64url = (bytes) =>
+        btoa(String.fromCharCode(...new Uint8Array(bytes)))
+          .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+      const clientData = new TextEncoder().encode(JSON.stringify({
+        type: "webauthn.get",
+        challenge: b64url(challenge),
+        origin: window.location.origin,
+      }));
+      const rpHash = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(window.location.hostname)),
+      );
+      const authData = new Uint8Array(37);
+      authData.set(rpHash, 0);
+      authData[32] = 0x01 | 0x04;
+      authData[36] = 1;
+      const clientHash = new Uint8Array(await crypto.subtle.digest("SHA-256", clientData));
+      const signed = new Uint8Array(authData.length + clientHash.length);
+      signed.set(authData, 0);
+      signed.set(clientHash, authData.length);
+      const signature = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, signed);
+
+      return {
+        ...base,
+        response: {
+          clientDataJSON: clientData.buffer,
+          authenticatorData: authData.buffer,
+          signature,
+        },
+      };
+    };
+
     if (window.PublicKeyCredential) {
       PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
     }
@@ -160,7 +221,7 @@ test.describe("five destinations at 375px", () => {
     expect(names.join(" ")).toContain("private");
   });
 
-  test("Settings shows the EPIC-011 keys surface, honestly labelled", async ({ page }) => {
+  test("Settings lists this device from the relay keystore", async ({ page }) => {
     await stubPasskeys(page);
     const identity = await createIdentity(page, relay);
 
@@ -168,16 +229,38 @@ test.describe("five destinations at 375px", () => {
     await page.click("#row-keys-devices");
 
     const panel = page.locator("#panel-root");
-    await expect(panel).toContainText("Preview");
-    await expect(panel).toContainText("EPIC-011");
+    // Registration enrolls this browser, so the inventory is populated from
+    // the relay rather than from anything held locally.
     await expect(panel.locator(".enrollment-row")).toHaveCount(1);
     await expect(panel).toContainText("this device");
-    await expect(panel).toContainText("PIN"); // the wrap actually used
-
-    // The write path refuses rather than pretending.
-    await panel.locator("#btn-enroll-device").click();
-    await expect(page.locator("#toast-root")).toContainText("has not shipped yet");
+    await expect(panel).toContainText("PIN"); // the wrap this stubbed passkey used
+    // You cannot evict the device you are on.
+    await expect(panel.locator("[data-remove-enrollment]")).toBeDisabled();
 
     expect(identity).toContain(".poweur.net");
+  });
+
+  test("shows a real 24-word recovery kit and checks it back", async ({ page }) => {
+    await stubPasskeys(page);
+    await createIdentity(page, relay);
+
+    await page.click('.nav-tab[data-page="settings"]');
+    await page.click("#row-recovery-kit");
+
+    // The stubbed authenticator has no PRF, so registration fell back to a PIN.
+    // The identity is still seed-derived, so the kit itself is available.
+    const panel = page.locator("#panel-root");
+    await expect(panel.locator(".mnemonic-word")).toHaveCount(24);
+
+    // And the kit verifies against itself.
+    const words = await panel.locator(".mnemonic-word").allInnerTexts();
+    await panel.locator("#btn-verify-kit").click();
+    await panel.locator("#kit-input").fill(words.join(" "));
+    await panel.locator("#btn-check-kit").click();
+    await expect(panel.locator("#kit-result")).toContainText("That's your kit");
+
+    await panel.locator("#kit-input").fill(["abandon"].concat(words.slice(1)).join(" "));
+    await panel.locator("#btn-check-kit").click();
+    await expect(panel.locator("#kit-result")).toContainText("doesn't match");
   });
 });

@@ -11,7 +11,9 @@ import type { Decryptor, Signer } from "./crypto/keys.js";
 import { Contacts, fetchRequests } from "./contacts.js";
 import { DavClient, mintDavToken } from "./files.js";
 import { RelayClient, type RelayClientOptions } from "./http.js";
+import { EnrollApi } from "./enroll.js";
 import { IdentityApi } from "./identity.js";
+import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
 import type { ResolveOptions } from "./resolve.js";
@@ -42,6 +44,10 @@ export class PoweurClient {
   readonly signer: Signer;
   readonly decryptor: Decryptor | null;
   readonly identity: IdentityApi;
+  /** Wrapped seed copies, one per enrolled authenticator (EPIC-011 E11-T1). */
+  readonly keystore: KeystoreApi;
+  /** The new-device enrollment rendezvous (EPIC-011 E11-T3). */
+  readonly enroll: EnrollApi;
   readonly sessions: SessionManager;
   readonly messages: Messaging;
   readonly #resolveOptions: ResolveOptions;
@@ -54,6 +60,8 @@ export class PoweurClient {
     this.decryptor = decryptor ?? null;
     this.#resolveOptions = resolve ?? {};
     this.identity = new IdentityApi(this.relay);
+    this.keystore = new KeystoreApi(this.relay);
+    this.enroll = new EnrollApi(this.relay);
     this.sessions = new SessionManager(this.relay, sessionStore ?? new MemorySessionStore());
     this.messages = new Messaging({
       client: this.relay,

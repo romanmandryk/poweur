@@ -115,6 +115,10 @@ export function saveConfig(config) {
  *   relay: string,              // relay URL this identity lives on
  *   userId: string,             // base64url random bytes (WebAuthn user ID)
  *   createdAt: string,          // ISO timestamp
+ *   seedDerived: boolean,       // keys come from one master seed → a kit is possible
+ *   enrollmentId?: string,      // this browser's row in the relay keystore (EPIC-011)
+ *   credentialPublicKey?: string, // SPKI DER, base64url — what the relay verifies
+ *   credentialAlg?: number,     // COSE alg id for that key
  * }
  */
 export function saveIdentityRecord(identity, record) {
@@ -196,10 +200,12 @@ export function removeSessionRecord(identity) {
 // ─── Unlocked Keys (in-memory only) ──────────────────────────────────────────
 // Never persisted to any storage: cleared on reload, on lock, and on tab close.
 
-let _unlockedKeys = null; // { identity, signingJWK, encJWK }
+// The master seed rides along when there is one: the recovery kit is derived
+// from it, and it is the one secret that must never be written down by us.
+let _unlockedKeys = null; // { identity, signingJWK, encJWK, seed }
 
-export function setUnlockedKeys(identity, signingJWK, encJWK) {
-  _unlockedKeys = { identity, signingJWK, encJWK };
+export function setUnlockedKeys(identity, signingJWK, encJWK, seed = null) {
+  _unlockedKeys = { identity, signingJWK, encJWK, seed };
 }
 
 export function getUnlockedKeys() {

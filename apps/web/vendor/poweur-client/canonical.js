@@ -165,3 +165,38 @@ export function marshalCanonicalJSON(value) {
     const body = keys.map((k) => `${JSON.stringify(k)}:${marshalCanonicalJSON(record[k])}`);
     return `{${body.join(",")}}`;
 }
+/** PUT /identities/{id}/keystore (crypto.CanonicalKeystoreEnroll). */
+export function canonicalKeystoreEnroll(identity, enrollmentId, kind, credentialId, wrappedDigest, issuedAt, nonce) {
+    return [
+        "keystore-enroll",
+        identity,
+        enrollmentId,
+        kind,
+        credentialId,
+        wrappedDigest,
+        issuedAt,
+        nonce,
+    ].join("\n");
+}
+/**
+ * POST /identities/{id}/keystore/list (crypto.CanonicalKeystoreList).
+ *
+ * Metadata only: an owner enumerating their own devices has no need for the
+ * wrapped ciphertext, so this read is identity-signed rather than gated on a
+ * WebAuthn assertion the way `fetch` is.
+ */
+export function canonicalKeystoreList(identity, issuedAt, nonce) {
+    return ["keystore-list", identity, issuedAt, nonce].join("\n");
+}
+/** DELETE /identities/{id}/keystore/{enrollment} (crypto.CanonicalKeystoreRemove). */
+export function canonicalKeystoreRemove(identity, enrollmentId, issuedAt, nonce) {
+    return ["keystore-remove", identity, enrollmentId, issuedAt, nonce].join("\n");
+}
+/**
+ * Device-enrollment rendezvous actions (crypto.CanonicalEnrollAction).
+ * `action` is "enroll-fetch" or "enroll-deliver"; the rendezvous id is bound
+ * in so an approval cannot be redirected to a different offer.
+ */
+export function canonicalEnrollAction(action, identity, rendezvousId, issuedAt, nonce) {
+    return [action, identity, rendezvousId, issuedAt, nonce].join("\n");
+}

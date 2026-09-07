@@ -165,6 +165,16 @@
       "signature": "irWGv-0ic7vKNHAKH57h86UG_jo9QY1T5n5tB_9vILMbIeRZmgHOF1uC2gjuaeuvx9r8TDxduwZz9TMVTLXCCg"
     },
     {
+      "name": "keystore-list",
+      "inputs": {
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "keystore-list\nalice.poweur.net\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "f9Z3DAGkQA0FG5nnWnR5tvr4w9Jj_Yh7G_C1zditBFt_vTR_1JZAOzzIdQSlCXlBjatv40SRZtO0Npn9vjppBA"
+    },
+    {
       "name": "keystore-remove",
       "inputs": {
         "enrollment_id": "enr-001",

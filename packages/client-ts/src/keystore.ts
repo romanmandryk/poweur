@@ -15,7 +15,11 @@
  * authenticator or device.
  */
 
-import { canonicalKeystoreEnroll, canonicalKeystoreRemove } from "./canonical.js";
+import {
+  canonicalKeystoreEnroll,
+  canonicalKeystoreList,
+  canonicalKeystoreRemove,
+} from "./canonical.js";
 import { sha256Bytes } from "./crypto/index.js";
 import type { Signer } from "./crypto/keys.js";
 import { rfc3339, toBase64url, utf8 } from "./encoding.js";
@@ -56,6 +60,24 @@ export interface KeystoreEntry {
   wrapped: WrappedBlob;
   label?: string;
   role?: "device" | "recovery-master";
+  created_at: string;
+  last_used_at?: string;
+}
+
+/**
+ * One row of the inventory: everything needed to show a device, and no
+ * ciphertext. `has_passkey` stands in for the credential itself, which the
+ * listing deliberately withholds — an attacker who could enumerate credential
+ * ids would learn which authenticators to phish.
+ */
+export interface KeystoreSummary {
+  enrollment_id: string;
+  kind: KeystoreKind;
+  wrap: KeystoreWrap;
+  payload: KeystorePayload;
+  label?: string;
+  role?: "device" | "recovery-master";
+  has_passkey: boolean;
   created_at: string;
   last_used_at?: string;
 }
@@ -164,10 +186,50 @@ export class KeystoreApi {
   }
 
   /**
+   * The device inventory, identity-signed — the "Keys & devices" list.
+   *
+   * Metadata only, so it needs no authenticator prompt: you are already
+   * unlocked when you manage devices. `fetch` is the one that needs an
+   * assertion, because it runs when you are not.
+   */
+  async list(
+    signer: Signer,
+    identity: string = signer.identity,
+  ): Promise<{ identity: string; enrollments: KeystoreSummary[] }> {
+    const issuedAt = rfc3339();
+    const nonce = newNonce();
+    const canonical = canonicalKeystoreList(identity.toLowerCase(), issuedAt, nonce);
+    return this.#relay.request({
+      method: "POST",
+      path: `/identities/${encodeURIComponent(identity)}/keystore/list`,
+      body: {
+        issued_at: issuedAt,
+        nonce,
+        identity_signature: await signer.sign(canonical),
+      },
+    });
+  }
+
+  /**
+   * A fresh challenge for the authenticator to sign.
+   *
+   * Lives here because `fetch` is the one call in this package that cannot be
+   * made with a signer, so its caller has no other way to reach the relay.
+   * Single-use and consumed whatever the outcome: a failed attempt needs a new
+   * one.
+   */
+  async challenge(identity: string): Promise<string> {
+    const { challenge } = await this.#relay.request<{ challenge: string }>({
+      method: "GET",
+      path: `/auth/challenge?identity=${encodeURIComponent(identity)}`,
+    });
+    return challenge;
+  }
+
+  /**
    * Bootstrap read: fetch the wrapped copies with a WebAuthn assertion and no
-   * identity key. Obtain the challenge from `GET /auth/challenge` and sign it
-   * with the enrolled authenticator; the challenge is single-use, so a failed
-   * attempt needs a fresh one.
+   * identity key. Get the challenge from `challenge()` and sign it with the
+   * enrolled authenticator.
    */
   async fetch(
     identity: string,

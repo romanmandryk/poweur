@@ -6,11 +6,11 @@
  * holds a private key* is a web-app concern — passkey PRF or a PIN, wrapped
  * with AES-GCM in `localStorage`.
  *
- * The wrapped blob format is unchanged from the shipped client on purpose:
- * EPIC-011's multi-enrollment work re-wraps the same payload under additional
- * authenticators, and existing identities in existing browsers must keep
- * opening. HKDF salt `poweur-key-wrapping-v1`, AES-256-GCM, payload
- * `{"signingJWK":…,"encJWK":…}`.
+ * The wrapped blob format is the shipped one, extended additively: HKDF salt
+ * `poweur-key-wrapping-v1`, AES-256-GCM, payload
+ * `{"signingJWK":…,"encJWK":…,"seed":…}`. EPIC-011 re-wraps this same payload
+ * under each additional authenticator, and blobs written before `seed` existed
+ * still open — they simply have no kit (see `keystore.js`).
  *
  * Keys are stored as WebCrypto JWKs and signing happens inside WebCrypto, so
  * the raw Ed25519 private key never crosses into package code. The X25519 key
@@ -18,7 +18,12 @@
  * exception.
  */
 
-import { toBase64url, fromBase64, toBase64Std } from "@poweur/client";
+import {
+  toBase64url, fromBase64, toBase64Std,
+  crypto as sdkCrypto,
+} from "@poweur/client";
+
+const { newSeed, deriveSigningKey, deriveEncryptionKey } = sdkCrypto;
 
 const enc = new TextEncoder();
 
@@ -49,8 +54,41 @@ export async function generateIdentityJwks() {
   return {
     signingJWK,
     encJWK,
+    seed: null, // two independent keys: no seed, so no recovery kit
     publicKey: toBase64url(new Uint8Array(await crypto.subtle.exportKey("raw", signing.publicKey))),
     encPublicKey: toBase64url(new Uint8Array(await crypto.subtle.exportKey("raw", encryption.publicKey))),
+  };
+}
+
+/**
+ * Generate a **seed-derived** identity: one 32-byte secret, both keys derived
+ * from it (EPIC-011's normative HKDF), and the seed kept so a recovery kit can
+ * be produced later.
+ *
+ * This is what new identities use. The alternative — two independent keys —
+ * cannot produce a 24-word kit, which is why EPIC-011 has a migration path for
+ * everything registered before it.
+ */
+export async function generateSeedIdentityJwks() {
+  const seed = newSeed();
+  return { ...jwksFromSeed(seed), seed: toBase64url(seed) };
+}
+
+/** Derive both key JWKs and their public keys from a master seed. */
+export function jwksFromSeed(seed) {
+  const signing = deriveSigningKey(seed);
+  const encryption = deriveEncryptionKey(seed);
+  const { signingJWK, encJWK } = jwksFromKeyBytes({
+    signingPrivateKey: signing.privateKey,
+    signingPublicKey: signing.publicKey,
+    encryptionPrivateKey: encryption.privateKey,
+    encryptionPublicKey: encryption.publicKey,
+  });
+  return {
+    signingJWK,
+    encJWK,
+    publicKey: toBase64url(signing.publicKey),
+    encPublicKey: toBase64url(encryption.publicKey),
   };
 }
 
@@ -189,9 +227,9 @@ async function aesKeyFromPin(pin, salt) {
   );
 }
 
-async function seal(key, signingJWK, encJWK) {
+async function seal(key, signingJWK, encJWK, seed) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const payload = enc.encode(JSON.stringify({ signingJWK, encJWK }));
+  const payload = enc.encode(JSON.stringify({ signingJWK, encJWK, ...(seed ? { seed } : {}) }));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, payload);
   return { iv: toBase64url(iv), ciphertext: toBase64url(new Uint8Array(ciphertext)) };
 }
@@ -206,8 +244,8 @@ async function unseal(key, { iv, ciphertext }) {
 }
 
 /** Wrap under a 32-byte secret — the passkey PRF output. */
-export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK) {
-  return seal(await aesKeyFromSecret(secret32Bytes), signingJWK, encJWK);
+export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK, seed = null) {
+  return seal(await aesKeyFromSecret(secret32Bytes), signingJWK, encJWK, seed);
 }
 
 export async function unwrapKeysAES(secret32Bytes, wrapped) {
@@ -215,9 +253,9 @@ export async function unwrapKeysAES(secret32Bytes, wrapped) {
 }
 
 /** Wrap under a user PIN (PBKDF2) — the fallback when PRF is unavailable. */
-export async function wrapKeysWithPin(pin, signingJWK, encJWK) {
+export async function wrapKeysWithPin(pin, signingJWK, encJWK, seed = null) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const sealed = await seal(await aesKeyFromPin(pin, salt), signingJWK, encJWK);
+  const sealed = await seal(await aesKeyFromPin(pin, salt), signingJWK, encJWK, seed);
   return { ...sealed, salt: toBase64url(salt), kdf: "pbkdf2" };
 }
 

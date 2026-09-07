@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { startRelay } from "../helpers/relay.mjs";
 
-import "../helpers/webstorage.mjs";
+import "../helpers/browser-globals.mjs";
 import { createWebIdentity, unlock } from "../helpers/identity.mjs";
 import { clientFor } from "../../js/client.js";
 

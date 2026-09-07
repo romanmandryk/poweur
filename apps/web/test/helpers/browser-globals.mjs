@@ -1,10 +1,10 @@
 /**
- * Minimal Web Storage for Node test runs.
+ * The browser globals `apps/web`'s modules need, for Node test runs.
  *
- * `js/storage.js` is a browser module; the relay-backed suites need its real
- * behaviour but also need Node's real `fetch` to reach a real relay, so we
- * install just the two globals rather than switching the whole file to a DOM
- * environment.
+ * These suites want the real modules *and* Node's real `fetch` (they talk to a
+ * real relay), so switching the whole file to a DOM environment would trade one
+ * problem for another. Installing the two or three globals they actually touch
+ * is smaller and keeps the network real.
  */
 class MemoryStorage {
   #entries = new Map();
@@ -19,6 +19,13 @@ class MemoryStorage {
 
 if (!globalThis.localStorage) globalThis.localStorage = new MemoryStorage();
 if (!globalThis.sessionStorage) globalThis.sessionStorage = new MemoryStorage();
+
+// WebAuthn binds credentials to the page's host, so `rpId()` reads it. Node has
+// no page; stand in for one.
+if (!globalThis.location) {
+  globalThis.location = { hostname: "poweur.net", origin: "https://poweur.net" };
+}
+if (!globalThis.window) globalThis.window = globalThis;
 
 export function resetWebStorage() {
   globalThis.localStorage.clear();

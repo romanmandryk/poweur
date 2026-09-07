@@ -270,6 +270,21 @@ export function canonicalKeystoreEnroll(
   ].join("\n");
 }
 
+/**
+ * POST /identities/{id}/keystore/list (crypto.CanonicalKeystoreList).
+ *
+ * Metadata only: an owner enumerating their own devices has no need for the
+ * wrapped ciphertext, so this read is identity-signed rather than gated on a
+ * WebAuthn assertion the way `fetch` is.
+ */
+export function canonicalKeystoreList(
+  identity: string,
+  issuedAt: string,
+  nonce: string,
+): string {
+  return ["keystore-list", identity, issuedAt, nonce].join("\n");
+}
+
 /** DELETE /identities/{id}/keystore/{enrollment} (crypto.CanonicalKeystoreRemove). */
 export function canonicalKeystoreRemove(
   identity: string,

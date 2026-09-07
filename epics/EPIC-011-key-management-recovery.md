@@ -22,20 +22,34 @@
 
 ## Progress
 
-> **Inbound from [EPIC-015](EPIC-015-web-app-ux.md) (E15-T1):** the web app's
-> **"Keys & devices"** and **"Recovery kit"** surfaces exist now, backed by
-> `apps/web/js/keystore-mock.js`. This browser's own enrollment is real (kind, wrap and
-> creation time read from the identity record); every other row is flagged `mock` in the UI
-> and every write throws `KeystoreUnavailable` naming E11-T1 rather than faking success.
-> The mock's shapes are the ones specified below, so landing T1 means replacing function
-> bodies with the relay calls — `listEnrollments`, `enrollAuthenticator`,
-> `removeEnrollment`, `generateRecoveryKit`, `keystoreAvailable` — and deleting the file.
-> `apps/web/test/keystore-mock.test.js` pins the contract in the meantime.
+> **Web UI: shipped (EPIC-015).** The mock that stood in while T1 was in flight
+> (`apps/web/js/keystore-mock.js`) is deleted; `apps/web/js/keystore.js` calls the real
+> endpoints. What that added on the web side:
 >
-> Note also that identities created by the web app are `legacy-keypair`: it generates two
-> independent WebCrypto keys, so the migration path below is the *normal* case for web
-> users, not an edge case. `apps/web/js/vault.js` already converts both directions between
-> WebCrypto JWKs and the SDK's raw key bytes, so `identityKeysFromSeed` plugs straight in.
+> - **New identities are seed-derived.** `generateSeedIdentityJwks()` starts from one
+>   32-byte seed and derives both keys with the normative HKDF, so every identity registered
+>   from now on can produce a kit. The seed rides inside the same AES-GCM blob as the keys —
+>   additive, so pre-existing blobs still open and simply have no kit.
+> - **Registration enrolls the browser** in the relay keystore, which is what makes clearing
+>   site data survivable rather than fatal. `createPasskey` now captures
+>   `getPublicKey()`/`getPublicKeyAlgorithm()`; where a browser does not expose them (older
+>   Safari) the app declines to enroll and says so, rather than storing a copy no assertion
+>   could ever unlock.
+> - **Bootstrap recovery works**: signing in with an identity this browser holds nothing for
+>   fetches the wrapped seed with an assertion alone and re-wraps it under a fresh local
+>   passkey — a new enrollment, not a reused one. Covered against a real relay in
+>   `apps/web/test/keystore-relay.test.js`.
+> - **The T3 ceremony has both halves**, covered by a two-browser-context Playwright test
+>   that asserts the six digits match on both screens before approval.
+>
+> **Two gaps found and closed while adopting it:** `POST /keystore/list` was Go-only — the
+> relay verified `CanonicalKeystoreList` and `poweur keys ls` signed it, but there was no
+> vector, no `canonicalKeystoreList` in TypeScript and no `KeystoreApi.list()`, so no JS
+> client could enumerate devices. Added, with the vector and conformance case. `KeystoreApi`
+> also documented "obtain the challenge from `GET /auth/challenge`" while offering no way to
+> do so without a signer; `KeystoreApi.challenge()` closes that. `PoweurClient` now exposes
+> `.keystore` and `.enroll`, which E11 added as modules but never wired into the convenience
+> object.
 
 | Task | Status | Ships in | Notes |
 |------|--------|----------|-------|

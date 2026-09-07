@@ -136,19 +136,62 @@ removes from relay URLs.
   one is EPIC-006's call, not this epic's. Capabilities still surface, because the identity
   document carries them.
 
-**EPIC-011 dependency is mocked, visibly.** `js/keystore-mock.js` supplies the "Keys &
-devices" surface E11-T1 will own. This browser's own enrollment is **real** (kind, wrap and
-creation time come from the identity record); every other row is flagged `mock` in the UI,
-and every write throws `KeystoreUnavailable` naming E11-T1 rather than faking success — a
-mock that silently "removes" a device is worse than no mock. The recovery-kit row states
-plainly that web-created identities are `legacy-keypair` and need E11's opt-in rotate-to-seed
-first. Swapping in the real implementation is a change of function bodies, not of shape.
+**EPIC-011 dependency: mocked at first, now real.** T1 shipped `js/keystore-mock.js` while
+E11 was in flight — this browser's enrollment real, everything else flagged `mock`, every
+write refusing loudly rather than faking success. EPIC-011 landed on master and the mock is
+**deleted**; `js/keystore.js` calls the relay. See the *Keys, devices and recovery* section
+below for what that added.
 
 **Acceptance:** met. The five destinations render and route (`test/e2e/destinations.spec.js`
 at a 375px viewport, including a no-horizontal-scroll and a 44px touch-target check);
 components have unit tests (`test/components.test.js`, `test/profiles.test.js`,
 `test/keystore-mock.test.js`); `test/e2e/hosted.spec.js` is unchanged and green; the
 origin-independence test passes.
+
+### Keys, devices and recovery (EPIC-011's web surface) — **done**
+
+E11-T1–T4 landed on master; this is the UI over them, and it replaces the T1 mock.
+
+- [x] **Seed-derived identities.** `generateSeedIdentityJwks()` starts from one 32-byte seed
+      and derives both keys with EPIC-011's normative HKDF, so every identity registered from
+      now on can produce a recovery kit. The seed travels inside the existing AES-GCM blob
+      alongside the two JWKs — additive, so blobs written before it still open and simply have
+      no kit
+- [x] **Registration enrolls this browser** in the relay keystore. Without it an identity lives
+      in exactly one `localStorage` and clearing site data destroys it, which is the failure
+      EPIC-011 exists to remove. `createPasskey` captures `getPublicKey()` /
+      `getPublicKeyAlgorithm()`; where a browser does not expose them the app **declines to
+      enroll and says why**, rather than storing a copy no assertion could ever unlock
+- [x] **Keys & devices**: the real inventory over `POST /keystore/list`, marking this device,
+      showing role and wrap in plain language, with removal that revokes the device's sessions
+      and escalates to a recovery-master assertion only when the relay asks for one
+- [x] **Recovery kit**: 24 words from the master seed, with a type-it-back check verified
+      against the seed just rendered — so a kit that looks right but decodes to something else
+      fails now rather than in a year. Legacy identities are told plainly why they have none
+- [x] **Bootstrap recovery**: signing in with an identity this browser holds nothing for
+      fetches the wrapped seed with a WebAuthn assertion alone and re-wraps it under a fresh
+      local passkey — a **new** enrollment, since reusing the fetched one would overwrite a
+      copy another authenticator still needs
+- [x] **The E11-T3 ceremony, both halves.** The new device shows a request code and six digits;
+      the trusted device looks it up and shows the same six digits to compare before approving.
+      `test/e2e/enrollment.spec.js` drives two browser contexts and asserts the digits match
+
+**A note on what the user types.** The six digits are a *comparison*, not an address: the
+rendezvous id is 16 random bytes, so that is what moves between devices, exactly as
+`poweur key approve <rendezvous-id> --sas` does. The UI says "request code" for the id and
+keeps the six digits purely as the confirmation step, which is what makes the ceremony safe
+without a PAKE.
+
+**Gaps closed in `@poweur/client` on the way** (Go was ahead of TypeScript):
+`canonicalKeystoreList` + `KeystoreApi.list()` with a conformance vector — the relay verified
+`CanonicalKeystoreList` and the Go CLI signed it, but no JS client could enumerate devices;
+`KeystoreApi.challenge()`, which the bootstrap read documented needing but did not provide;
+and `.keystore` / `.enroll` accessors on `PoweurClient`.
+
+**Still open, and owned by EPIC-011:** rotate-to-seed for pre-EPIC-011 identities (offered,
+never forced — contacts re-pin), designating a recovery-master from the web app (E11-T2 has
+the enforcement; the UI to nominate one is not built), and QR as an alternative to typing the
+request code (E11-T3 Transport 2, unchecked there).
 
 ### E15-T2 — Contacts & requests
 

@@ -11,6 +11,7 @@
 
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
+  EnrollApi, RelayClient,
 } from "@poweur/client";
 
 import {
@@ -19,8 +20,8 @@ import {
 } from "./passkey.js";
 
 import {
-  generateIdentityJwks, generateEncryptionJwk, keyBytesFromJwks,
-  wrapKeysWithPin, unwrapKeysWithPin, toBase64url,
+  generateSeedIdentityJwks, generateEncryptionJwk, jwksFromSeed, keyBytesFromJwks,
+  publicKeyFromJwk, wrapKeysWithPin, unwrapKeysWithPin, toBase64url, fromBase64url,
 } from "./vault.js";
 
 import {
@@ -38,9 +39,10 @@ import { resolveProfile, clearProfileCache } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
 import { ProfileCard } from "./components/profile-card.js";
 import {
-  listEnrollments, keystoreAvailable, recoveryKitEligibility,
-  enrollAuthenticator, generateRecoveryKit, removeEnrollment,
-} from "./keystore-mock.js";
+  listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
+  recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
+  recoverFromKeystore, rewrap,
+} from "./keystore.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -554,7 +556,9 @@ function renderSettings() {
         <div class="settings-row" id="row-recovery-kit">
           <span class="settings-row-icon">🧾</span>
           <span class="settings-row-label">Recovery kit</span>
-          <span class="settings-row-value val-warn">Not set up</span>
+          <span class="settings-row-value ${rec.seedDerived ? "val-ok" : "val-warn"}">
+            ${rec.seedDerived ? "Available" : "Not available"}
+          </span>
           <span class="settings-row-arrow">›</span>
         </div>
       </div>
@@ -678,14 +682,14 @@ function renderAddId() {
             </div>
           </div>
 
-          <div class="option-card" style="opacity:.55;pointer-events:none;cursor:default">
+          <button class="option-card" id="opt-join-device">
             <div class="option-icon-wrap">📱</div>
             <div class="option-body">
-              <div class="option-title">Add new device(key) to existing ID</div>
-              <div class="option-desc">Transfer your identity from another device</div>
+              <div class="option-title">Add this device to an existing ID</div>
+              <div class="option-desc">Show a code, approve it on a device you already use</div>
             </div>
-            <span class="option-soon">Soon</span>
-          </div>
+            <span class="option-arrow">›</span>
+          </button>
 
           <button class="option-card" id="opt-create-new">
             <div class="option-icon-wrap">✨</div>
@@ -912,6 +916,7 @@ function attachEvents() {
   }
 
   // Add ID options
+  q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
   q("#btn-signin-passkey")?.addEventListener("click", doSignInWithPasskey);
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
   q("#opt-create-new")?.addEventListener("click", () => { R.sub = null; R.go("launcher"); });
@@ -995,10 +1000,11 @@ async function doSignInWithPasskey() {
   const fqdn = q("#signin-id-input")?.value.trim().toLowerCase();
   if (!fqdn) return toast("Enter your identity (e.g. alice.poweur.net)", "warning");
 
-  const rec = loadIdentityRecord(fqdn);
-  if (!rec) {
-    toast("Identity not found on this device. Use 'Add new ID' to create one.", "warning", 5000);
-    return;
+  if (!loadIdentityRecord(fqdn)) {
+    // Nothing stored here — but the relay may hold a copy this browser's
+    // passkey can open. That is the "I cleared site data" path, and it is the
+    // whole point of the keystore (EPIC-011 E11-T1).
+    return doRecoverFromKeystore(fqdn);
   }
 
   switchIdentity(fqdn);
@@ -1012,20 +1018,20 @@ async function doUnlock() {
 
   setLoading(true, "Authenticating…");
   try {
-    let sigPriv, encPriv;
+    let opened;
     if (rec.supportsPRF !== false && rec.encryptedKeys?.kdf === "prf") {
       const { prfOutput } = await authenticatePasskey(rec.credentialId);
       if (!prfOutput) throw new Error("PRF not available from this authenticator.");
-      ({ signingJWK: sigPriv, encJWK: encPriv } = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys));
+      opened = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys);
     } else {
       setLoading(false);
       const pin = await promptPin("Enter your PIN:");
       if (!pin) return;
       setLoading(true, "Unlocking…");
-      ({ signingJWK: sigPriv, encJWK: encPriv } = await unwrapKeysWithPin(pin, rec.encryptedKeys));
+      opened = await unwrapKeysWithPin(pin, rec.encryptedKeys);
     }
 
-    setUnlockedKeys(id, sigPriv, encPriv);
+    setUnlockedKeys(id, opened.signingJWK, opened.encJWK, opened.seed ?? null);
 
     if (!sessionIsValid(loadSessionRecord(id))) {
       setLoading(true, "Creating session…");
@@ -1041,6 +1047,207 @@ async function doUnlock() {
     setLoading(false);
     toast(err.message, "error");
   }
+}
+
+/**
+ * Restore an identity onto a browser that holds nothing for it.
+ *
+ * Authorized by a WebAuthn assertion alone: there is no identity key here to
+ * sign with, which is exactly the circularity the keystore endpoint breaks.
+ */
+async function doRecoverFromKeystore(identity) {
+  const relayUrl = defaultRelayUrl();
+  setLoading(true, "Looking for a stored copy…");
+  let recovered;
+  try {
+    recovered = await recoverFromKeystore(identity, { relayUrl });
+  } catch (error) {
+    setLoading(false);
+    toast(`Could not restore ${identity}: ${error.message}`, "error", 9000);
+    return;
+  }
+
+  setLoading(false);
+  try {
+    await adoptIdentity({
+      identity,
+      relayUrl,
+      signingJWK: recovered.signingJWK,
+      encJWK: recovered.encJWK,
+      seed: recovered.seed,
+      label: `${deviceLabel()} (restored)`,
+    });
+    toast(`${identity} restored on this device`, "success", 5000);
+  } catch (error) {
+    toast(error.message, "error", 9000);
+  }
+}
+
+/**
+ * Take ownership of key material this browser did not generate — from a
+ * keystore restore or a device-enrollment ceremony.
+ *
+ * Creates a local passkey to wrap it, stores the record, and registers the new
+ * enrollment so this browser becomes a recovery path in its own right rather
+ * than a copy that only works until its site data is cleared.
+ */
+async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
+  const support = await checkPasskeySupport();
+  if (!support.available) throw new Error(`Passkey unavailable: ${support.reason}`);
+
+  setLoading(true, "Creating a passkey on this device…");
+  const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
+  const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
+    await createPasskey(identity, userId);
+
+  let encryptedKeys;
+  if (supportsPRF) {
+    setLoading(true, "Securing keys…");
+    encryptedKeys = await rewrap({ prfOutput }, { signingJWK, encJWK, seed });
+  } else {
+    setLoading(false);
+    const pin = await promptPin("Set a PIN to protect your keys:", true);
+    if (!pin) throw new Error("Cancelled");
+    setLoading(true, "Securing keys…");
+    encryptedKeys = await rewrap({ pin }, { signingJWK, encJWK, seed });
+  }
+
+  saveIdentityRecord(identity, {
+    identity,
+    publicKey: publicKeyFromJwk(signingJWK),
+    encPublicKey: publicKeyFromJwk(encJWK),
+    credentialId, credentialPublicKey, credentialAlg,
+    encryptedKeys,
+    relay: relayUrl,
+    userId,
+    createdAt: new Date().toISOString(),
+    supportsPRF,
+    seedDerived: Boolean(seed),
+    // A fresh passkey is a fresh enrollment; reusing the restored one would
+    // overwrite a copy another authenticator still needs.
+    enrollmentId: null,
+  });
+
+  switchIdentity(identity);
+  setUnlockedKeys(identity, signingJWK, encJWK, seed);
+  S.config = getConfig();
+
+  setLoading(true, "Creating session…");
+  await ensureSession(identity);
+
+  setLoading(true, "Registering this device…");
+  await enrollThisBrowser(clientFor(identity), identity, { label }).catch((error) => {
+    console.warn("Keystore enrollment failed:", error.message);
+    toast("Restored, but this device is not backed up — see Settings → Keys & devices", "warning", 8000);
+  });
+
+  setLoading(false);
+  R.sub = null; R.page = "messages"; R.params = {};
+  render();
+}
+
+/**
+ * The joining half of the enrollment ceremony (E11-T3), run on the **new**
+ * device.
+ *
+ * This device generates the ephemeral keypair, so the six-digit code
+ * authenticates a public key and protects no secret — which is why the
+ * ceremony needs no PAKE. It polls until the other device approves.
+ */
+function showJoinDevicePanel() {
+  let session = null;
+  let joining = null;
+  let polling = null;
+  const relayUrl = defaultRelayUrl();
+  const enroll = new EnrollApi(new RelayClient(relayUrl));
+
+  const stop = () => { clearInterval(polling); polling = null; };
+
+  showPanel("Add this device", `
+    <p class="muted small" style="margin-bottom:12px">
+      Enter your identity. This device will show a code to type on a device you already use.
+    </p>
+    <div class="form-group">
+      <label class="form-label" for="join-identity">Your Poweur ID</label>
+      <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
+             autocomplete="off" spellcheck="false" inputmode="url" />
+    </div>
+    <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
+    <div id="join-state"></div>`,
+  () => {
+    q("#btn-join-start")?.addEventListener("click", async () => {
+      const identity = q("#join-identity")?.value.trim().toLowerCase();
+      if (!identity) return toast("Enter your identity", "warning");
+
+      setLoading(true, "Opening a secure channel…");
+      try {
+        // offer/claim/cancel are unauthenticated by necessity — this device has
+        // no key yet — so they need the endpoint, not a signer.
+        session = await enroll.offer(identity, deviceLabel());
+        joining = identity;
+        setLoading(false);
+
+        q("#join-state").innerHTML = `
+          <div class="notice notice-info" style="margin-top:14px">
+            <p>On a device you already use, open
+               <strong>Settings → Keys &amp; devices → Add a device</strong> and enter:</p>
+            <p class="rendezvous-code mono">${esc(session.rendezvousId)}</p>
+            <button class="btn btn-sm btn-ghost" id="btn-copy-rendezvous">Copy request code</button>
+            <p style="margin-top:14px">Then check it shows these six digits — they confirm it is
+               really this device:</p>
+            <p class="sas-code">${esc(session.sas)}</p>
+          </div>
+          <p class="small muted" id="join-wait">Waiting for approval…</p>`;
+        q("#btn-copy-rendezvous")?.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(session.rendezvousId);
+            toast("Request code copied", "success", 2000);
+          } catch {
+            toast("Copy failed — select the code and copy it manually", "warning");
+          }
+        });
+
+        polling = setInterval(async () => {
+          let seedBytes;
+          try {
+            seedBytes = await enroll.claim(identity, session);
+          } catch (error) {
+            stop();
+            toast(error.message, "error", 8000);
+            return;
+          }
+          if (!seedBytes) return;
+          stop();
+          closePanel();
+          try {
+            const derived = jwksFromSeed(seedBytes);
+            await adoptIdentity({
+              identity, relayUrl,
+              signingJWK: derived.signingJWK,
+              encJWK: derived.encJWK,
+              seed: toBase64url(seedBytes),
+              label: deviceLabel(),
+            });
+            toast(`${identity} is set up on this device`, "success", 5000);
+          } catch (error) {
+            toast(error.message, "error", 9000);
+          }
+        }, 2000);
+      } catch (error) {
+        setLoading(false);
+        toast(error.message, "error", 8000);
+      }
+    });
+  },
+  () => {
+    // Panel closed: free the rendezvous so the relay's per-identity cap does
+    // not fill with abandoned ceremonies.
+    stop();
+    if (session && joining) {
+      enroll.cancel(joining, session).catch(() => {});
+      session = null;
+    }
+  });
 }
 
 function doNextIdentityStep() {
@@ -1088,23 +1295,27 @@ async function doCreateIdentity() {
 
   setLoading(true, "Generating keys…");
   try {
-    const { signingJWK: sigPriv, encJWK: encPriv, publicKey, encPublicKey } = await generateIdentityJwks();
+    // Seed-derived from the start (EPIC-011): one secret behind both keys, so
+    // this identity can produce a 24-word recovery kit.
+    const { signingJWK: sigPriv, encJWK: encPriv, seed, publicKey, encPublicKey } =
+      await generateSeedIdentityJwks();
 
     setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF } = await createPasskey(identity, userId);
+    const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
+      await createPasskey(identity, userId);
 
     let encryptedKeys;
     if (supportsPRF) {
       setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPRF(prfOutput, sigPriv, encPriv);
+      encryptedKeys = await wrapKeysWithPRF(prfOutput, sigPriv, encPriv, seed);
     } else {
       // Drop overlay so the PIN sheet can receive clicks.
       setLoading(false);
       const pin = await promptPin("Set a PIN to protect your keys:", true);
       if (!pin) return;
       setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv);
+      encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv, seed);
     }
 
     setLoading(true, "Registering identity…");
@@ -1117,18 +1328,28 @@ async function doCreateIdentity() {
 
     saveIdentityRecord(identity, {
       identity, publicKey, encPublicKey,
-      credentialId, encryptedKeys, relay: relayUrl,
+      credentialId, credentialPublicKey, credentialAlg,
+      encryptedKeys, relay: relayUrl,
       userId, createdAt: created.document.updated_at, supportsPRF,
+      seedDerived: true,
     });
     saveConfig({ ...S.config, relayUrl, parentDomain: domain, dnsProvider: provider });
     S.config = getConfig();
 
-    setUnlockedKeys(identity, sigPriv, encPriv);
+    setUnlockedKeys(identity, sigPriv, encPriv, seed);
     S.identity = identity;
     setActiveIdentity(identity);
 
     setLoading(true, "Creating session…");
     await ensureSession(identity);
+
+    // Put a wrapped copy on the relay now. Without it this identity lives in
+    // exactly one localStorage, and clearing site data destroys it.
+    setLoading(true, "Registering this device…");
+    await enrollThisBrowser(clientFor(identity), identity).catch((error) => {
+      console.warn("Keystore enrollment failed:", error.message);
+      toast("Identity created, but this device is not backed up yet — see Settings → Keys & devices", "warning", 8000);
+    });
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
@@ -1392,7 +1613,7 @@ function showAddContactPanel() {
   });
 }
 
-// ─── Keys & devices (EPIC-011 surface, mocked until E11-T1 lands) ─────────────
+// ─── Keys & devices (EPIC-011) ───────────────────────────────────────────────
 
 const ENROLLMENT_KIND_LABEL = {
   "passkey": "Passkey",
@@ -1411,80 +1632,247 @@ const ENROLLMENT_WRAP_LABEL = {
 
 async function showKeysAndDevicesPanel() {
   const identity = S.identity;
-  const enrollments = await listEnrollments(identity);
-  const live = keystoreAvailable();
+  const client = clientFor(identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  setLoading(true, "Reading your devices…");
+  let enrollments;
+  try {
+    enrollments = await listEnrollments(client, identity);
+  } catch (error) {
+    setLoading(false);
+    return toast(`Could not read your devices: ${error.message}`, "error", 7000);
+  }
+  setLoading(false);
+
+  const record = loadIdentityRecord(identity);
+  const thisBrowserEnrolled = enrollments.some(e => e.current);
 
   showPanel("Keys & devices", `
-    ${live ? "" : `
-      <div class="notice notice-info">
-        <strong>Preview.</strong> The relay keystore that holds your other devices is
-        <a href="https://github.com/poweur" onclick="return false">EPIC-011 E11-T1</a> and has not
-        shipped. Your own enrollment below is real; anything marked <em>mock</em> is placeholder
-        data, and enrolling or removing a device is disabled rather than faked.
+    ${thisBrowserEnrolled ? "" : `
+      <div class="notice notice-warn">
+        <strong>This browser is not backed up.</strong> Its copy of your keys exists only here,
+        so clearing site data would destroy this identity. Registering it stores an encrypted
+        copy the relay cannot read.
+        <button class="btn btn-sm btn-primary" id="btn-enroll-this" style="margin-top:10px">
+          Back up this browser
+        </button>
       </div>`}
-    <div class="enrollment-list">
-      ${enrollments.map(e => `
-        <div class="enrollment-row">
-          <span class="enrollment-icon">${e.kind === "hardware-key" ? "🔐" : e.kind === "recovery-kit" ? "🧾" : "📱"}</span>
-          <div class="enrollment-body">
-            <div class="enrollment-label">
-              ${esc(e.label)}
-              ${e.current ? `<span class="chip chip-green">this device</span>` : ""}
-              ${e.mock ? `<span class="chip chip-orange">mock</span>` : ""}
+    ${enrollments.length ? `
+      <div class="enrollment-list">
+        ${enrollments.map(e => `
+          <div class="enrollment-row">
+            <span class="enrollment-icon">${e.kind === "hardware-key" ? "🔐" : e.kind === "recovery-kit" ? "🧾" : "📱"}</span>
+            <div class="enrollment-body">
+              <div class="enrollment-label">
+                ${esc(e.label || ENROLLMENT_KIND_LABEL[e.kind] || e.kind)}
+                ${e.current ? `<span class="chip chip-green">this device</span>` : ""}
+                ${e.role === "recovery-master" ? `<span class="chip chip-orange">recovery master</span>` : ""}
+              </div>
+              <div class="enrollment-meta small muted">
+                ${esc(ENROLLMENT_KIND_LABEL[e.kind] ?? e.kind)}
+                · unlocked by ${esc(ENROLLMENT_WRAP_LABEL[e.wrap] ?? e.wrap)}
+                ${e.payload === "legacy-keypair" ? " · pre-seed keys" : ""}
+                ${e.created_at ? ` · added ${esc(fmtTime(e.created_at))}` : ""}
+              </div>
             </div>
-            <div class="enrollment-meta small muted">
-              ${esc(ENROLLMENT_KIND_LABEL[e.kind] ?? e.kind)}
-              · unlocked by ${esc(ENROLLMENT_WRAP_LABEL[e.wrap] ?? e.wrap)}
-              · ${esc(e.role)}
-              ${e.created_at ? ` · added ${esc(fmtTime(e.created_at))}` : ""}
-            </div>
-          </div>
-          <button class="btn btn-sm" data-remove-enrollment="${esc(e.enrollment_id)}"
-                  ${e.current ? "disabled" : ""} aria-label="Remove ${esc(e.label)}">Remove</button>
-        </div>`).join("")}
-    </div>
-    <button class="btn btn-primary mt-md" id="btn-enroll-device" style="width:100%">Add a device</button>`,
+            <button class="btn btn-sm" data-remove-enrollment="${esc(e.enrollment_id)}"
+                    ${e.current ? "disabled" : ""} aria-label="Remove ${esc(e.label || e.enrollment_id)}">Remove</button>
+          </div>`).join("")}
+      </div>
+    ` : `<p class="muted small">No devices registered yet.</p>`}
+
+    <button class="btn btn-primary mt-md" id="btn-enroll-device" style="width:100%">Add a device</button>
+    <p class="muted small" style="margin-top:10px">
+      Removing a device stops it reading your stored keys and ends its sessions. It does not
+      protect against someone who already copied them — that needs a key rotation.
+    </p>`,
   () => {
-    q("#btn-enroll-device")?.addEventListener("click", () => runKeystoreOp(enrollAuthenticator));
+    q("#btn-enroll-this")?.addEventListener("click", async () => {
+      closePanel();
+      setLoading(true, "Backing up this browser…");
+      try {
+        const { canBootstrap } = await enrollThisBrowser(clientFor(identity), identity);
+        setLoading(false);
+        toast(canBootstrap
+          ? "This browser is backed up"
+          : "Backed up — but a PIN-wrapped browser cannot restore itself; keep your recovery kit",
+          canBootstrap ? "success" : "warning", canBootstrap ? 3500 : 8000);
+        showKeysAndDevicesPanel();
+      } catch (error) {
+        setLoading(false);
+        toast(error.message, "error", 8000);
+      }
+    });
+
+    q("#btn-enroll-device")?.addEventListener("click", () => {
+      closePanel();
+      showApproveDevicePanel();
+    });
+
     qAll("[data-remove-enrollment]").forEach(button =>
-      button.addEventListener("click", () => runKeystoreOp(removeEnrollment)));
+      button.addEventListener("click", async () => {
+        const id = button.dataset.removeEnrollment;
+        if (!confirm("Remove this device? It will lose access to your stored keys and its sessions end.")) return;
+        closePanel();
+        setLoading(true, "Removing device…");
+        try {
+          await removeEnrollment(clientFor(identity), identity, id);
+          setLoading(false);
+          toast("Device removed", "success");
+        } catch (error) {
+          setLoading(false);
+          toast(error.message, "error", 8000);
+        }
+        showKeysAndDevicesPanel();
+      }));
+
+    if (record && !record.seedDerived) {
+      // Say it here too: this is where someone comes looking for recovery.
+      q("#btn-enroll-device")?.insertAdjacentHTML("afterend",
+        `<p class="muted small" style="margin-top:10px">This identity predates recovery kits — see Settings → Recovery kit.</p>`);
+    }
   });
 }
 
+/**
+ * The approving half of the enrollment ceremony (E11-T3).
+ *
+ * The new device shows a six-digit code; the user types it here. The code
+ * authenticates the new device's ephemeral public key — it protects nothing,
+ * which is exactly why no PAKE is needed. Comparing the two codes *is* the
+ * authentication step, so the confirmation below is not a formality.
+ */
+function showApproveDevicePanel() {
+  const identity = S.identity;
+  showPanel("Add a device", `
+    <ol class="steps small">
+      <li>Open this app on the new device and choose <strong>Add this device</strong>.</li>
+      <li>It shows a <strong>request code</strong> and a six-digit number.</li>
+      <li>Enter the request code below, then check the six digits match before approving.</li>
+    </ol>
+    <div class="form-group">
+      <label class="form-label" for="enroll-rendezvous">Request code from the new device</label>
+      <input id="enroll-rendezvous" class="input mono" type="text"
+             autocomplete="off" spellcheck="false" placeholder="paste it here" />
+    </div>
+    <button class="btn btn-primary" id="btn-enroll-lookup" style="width:100%">Continue</button>
+    <div id="enroll-confirm"></div>`,
+  () => {
+    q("#btn-enroll-lookup")?.addEventListener("click", async () => {
+      const rendezvousId = q("#enroll-rendezvous")?.value.trim();
+      if (!rendezvousId) return toast("Enter the request code from the new device", "warning");
+
+      const client = clientFor(identity);
+      if (!client) return toast("Unlock your identity first", "warning");
+      const keys = getUnlockedKeys();
+      if (!keys?.seed) {
+        return toast("Only seed-based identities can hand their keys to a new device — see Recovery kit", "warning", 8000);
+      }
+
+      setLoading(true, "Finding the new device…");
+      try {
+        const pending = await client.enroll.pending(client.signer, identity, rendezvousId);
+        setLoading(false);
+        const host = q("#enroll-confirm");
+        host.innerHTML = `
+          <div class="notice notice-info" style="margin-top:14px">
+            <p>Confirm this matches the code on the new device:</p>
+            <p class="sas-code">${esc(pending.sas)}</p>
+            ${pending.label ? `<p class="small muted">${esc(pending.label)}</p>` : ""}
+          </div>
+          <button class="btn btn-primary" id="btn-enroll-approve" style="width:100%">
+            Codes match — send my keys
+          </button>`;
+        q("#btn-enroll-approve")?.addEventListener("click", async () => {
+          setLoading(true, "Sending keys…");
+          try {
+            await client.enroll.approve(client.signer, identity, pending, fromBase64url(keys.seed));
+            setLoading(false);
+            closePanel();
+            toast("The new device can now finish setting up", "success", 6000);
+          } catch (error) {
+            setLoading(false);
+            toast(error.message, "error", 8000);
+          }
+        });
+      } catch (error) {
+        setLoading(false);
+        toast(`No pending device for that request code: ${error.message}`, "error", 8000);
+      }
+    });
+  });
+}
+
+// ─── Recovery kit ─────────────────────────────────────────────────────────────
+
 function showRecoveryKitPanel() {
-  const { eligible, reason } = recoveryKitEligibility(S.identity);
-  showPanel("Recovery kit", `
-    <p class="muted small" style="margin-bottom:12px">
-      A recovery kit is your identity's master seed written as 24 words. With it you can rebuild
-      this identity on a new device with no relay, no email and nothing else to remember.
-    </p>
-    ${eligible ? `
-      <div class="notice notice-info">Generating a kit needs EPIC-011 E11-T1, which has not shipped.</div>
-    ` : `
+  const identity = S.identity;
+  const { eligible, reason } = recoveryKitEligibility(identity);
+  const keys = getUnlockedKeys();
+
+  if (!eligible) {
+    return showPanel("Recovery kit", `
+      <p class="muted small" style="margin-bottom:12px">
+        A recovery kit is your identity's master secret written as 24 words. With it you can
+        rebuild this identity anywhere — no relay, no email, nothing else to remember.
+      </p>
       <div class="notice notice-warn">
         <strong>Not available for this identity.</strong>
         ${reason === "legacy-keypair" ? `
-          It was created with two independent keys rather than from a single seed, so there is no
-          seed to write down. EPIC-011 offers a one-time <em>rotate to seed</em> for identities like
-          this — it is never forced, because your contacts have to re-pin your key afterwards.`
+          It was created with two independent keys rather than from a single seed, so there is
+          no seed to write down. Identities created from now on have one. Converting this one
+          means rotating your keys, which asks every contact to re-pin them — worth it for some
+          people, not for others, so it is offered rather than done for you.`
         : `No local record for this identity.`}
-      </div>`}
-    <button class="btn btn-primary mt-md" id="btn-gen-kit" style="width:100%" ${eligible ? "" : "disabled"}>
-      Generate recovery kit
-    </button>`,
-  () => {
-    q("#btn-gen-kit")?.addEventListener("click", () => runKeystoreOp(generateRecoveryKit));
-  });
-}
-
-/** Every keystore write throws until E11-T1 lands; say so plainly. */
-async function runKeystoreOp(operation) {
-  try {
-    await operation();
-    render();
-  } catch (error) {
-    toast(error.message, "warning", 6000);
+      </div>`);
   }
+
+  if (!keys?.seed) {
+    return showPanel("Recovery kit", `
+      <div class="notice notice-warn">Unlock this identity to see its recovery kit.</div>`);
+  }
+
+  const kit = buildRecoveryKit(identity, keys.seed);
+  const words = kit.mnemonic.split(" ");
+
+  showPanel("Recovery kit", `
+    <p class="muted small" style="margin-bottom:12px">
+      Write these 24 words down and keep them somewhere safe and offline. Anyone who has them
+      <strong>is</strong> you — and without them, losing every device loses this identity.
+    </p>
+    <ol class="mnemonic">
+      ${words.map(w => `<li class="mnemonic-word">${esc(w)}</li>`).join("")}
+    </ol>
+    <button class="btn btn-primary mt-md" id="btn-verify-kit" style="width:100%">
+      I've written it down — check it
+    </button>
+    <div id="kit-verify"></div>`,
+  () => {
+    q("#btn-verify-kit")?.addEventListener("click", () => {
+      const host = q("#kit-verify");
+      host.innerHTML = `
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label" for="kit-input">Type the 24 words back</label>
+          <textarea id="kit-input" class="compose-textarea" rows="4"
+                    placeholder="word1 word2 …" spellcheck="false"></textarea>
+        </div>
+        <button class="btn btn-primary" id="btn-check-kit" style="width:100%">Check</button>
+        <p id="kit-result" class="small" style="margin-top:10px;min-height:20px"></p>`;
+      q("#btn-check-kit")?.addEventListener("click", () => {
+        const result = q("#kit-result");
+        // Verified against the seed we just rendered, so a kit that "looks
+        // right" but decodes to something else is caught here, not in a year.
+        if (verifyRecoveryKit(q("#kit-input").value, keys.seed)) {
+          result.textContent = "✓ That's your kit. Store it somewhere safe.";
+          result.className = "small val-ok";
+        } else {
+          result.textContent = "✕ That doesn't match. Check the spelling and the order.";
+          result.className = "small val-warn";
+        }
+      });
+    });
+  });
 }
 
 // ─── Settings actions ─────────────────────────────────────────────────────────
@@ -1643,17 +2031,19 @@ async function doRotateEncKey() {
     let encryptedKeys;
     if (rec.supportsPRF !== false) {
       const { prfOutput } = await authenticatePasskey(rec.credentialId);
-      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew);
+      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
     } else {
       setLoading(false);
       const pin = await promptPin("Re-enter PIN to save new key:");
       if (!pin) return;
       setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew);
+      encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew, keys.seed);
     }
 
-    saveIdentityRecord(id, { ...rec, encPublicKey, encryptedKeys });
-    setUnlockedKeys(id, keys.signingJWK, encPrivNew);
+    // The encryption key no longer derives from the seed, so a kit rebuilt from
+    // it would restore the *old* one. Say so rather than hand out a stale kit.
+    saveIdentityRecord(id, { ...rec, encPublicKey, encryptedKeys, seedDerived: false });
+    setUnlockedKeys(id, keys.signingJWK, encPrivNew, keys.seed);
     setLoading(false); toast("Encryption key rotated", "success"); render();
   } catch (e) { setLoading(false); toast(e.message, "error"); }
 }
