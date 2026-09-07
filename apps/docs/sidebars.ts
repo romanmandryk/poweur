@@ -60,6 +60,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'security/model',
+        'security/key-management',
         'security/tls',
       ],
     },

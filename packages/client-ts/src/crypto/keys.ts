@@ -14,6 +14,8 @@ import {
   signBytes,
   x25519PublicKey,
 } from "./index.js";
+// Imported from the leaf module, not ./index.js, to keep this file acyclic.
+import { deriveEncryptionKey, deriveSigningKey } from "./seed.js";
 
 /** Which base64 flavour a signature is rendered in. */
 export type SignatureEncoding = "base64url" | "base64std";
@@ -129,6 +131,22 @@ export function generateIdentityKeys(identity: string): StoredIdentityKeys {
     identity,
     signingPrivateKey: signing.privateKey,
     encryptionPrivateKey: encryption.privateKey,
+  };
+}
+
+/**
+ * Reconstruct an identity's keys from its master seed (EPIC-011 E11-T1).
+ *
+ * This is the recovery path: given the 32 bytes behind a recovery kit or a
+ * keystore entry, the identity is whole again — no relay call, no network,
+ * nothing else to remember. Derivation is pinned to Go by
+ * `test/seed.test.ts`.
+ */
+export function identityKeysFromSeed(identity: string, seed: Uint8Array): StoredIdentityKeys {
+  return {
+    identity,
+    signingPrivateKey: deriveSigningKey(seed).privateKey,
+    encryptionPrivateKey: deriveEncryptionKey(seed).privateKey,
   };
 }
 

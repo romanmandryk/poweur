@@ -41,6 +41,7 @@ export {
   LocalSigner,
   MemoryKeyStore,
   generateIdentityKeys,
+  identityKeysFromSeed,
   signerFor,
   requireKeys,
   type Decryptor,

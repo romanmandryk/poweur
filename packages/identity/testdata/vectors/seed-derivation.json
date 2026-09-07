@@ -1,0 +1,40 @@
+{
+  "info": {
+    "encryption": "poweur/v1/enc",
+    "signing": "poweur/v1/sign",
+    "vault": "poweur/v1/vault"
+  },
+  "message": "poweur/v1/seed-vector",
+  "vectors": [
+    {
+      "name": "zeros",
+      "seed": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "signing_public_key": "ed25519:Ukf8UyirGGgdzWDjqgPkpiOK3ftAc8yygst1KmrZoLM",
+      "signing_private_seed": "VYDOB09QD7CqK-W71bWQbHGBfFuIYtmCGVxF4r6PF0c",
+      "encryption_public_key": "x25519:vlgj73luNxHXli354kGLWepoRj9ZbrmzcacNJS6KhRE",
+      "encryption_private_key": "YRbvA633l5u7JrTNjJnvyAlo6R0YRuuF5P8VuAnNmSw",
+      "vault_key": "HqH5ifh00TrPBhiDzGgK9tYy6Yj5aWQ6qtKNqwIn6Jc",
+      "signature": "jPwzFXKkVq9F324oc_a8l2w60mjbs0cN6MTZJ4PhJjItrweWsHXeTcFP6D5rEgeqnn1B4hnDSliW8aY-7W65AQ"
+    },
+    {
+      "name": "counter",
+      "seed": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+      "signing_public_key": "ed25519:dKI7cAz5mueBHliYB6NwHKduFx3rnew-J3AsvBzBMVo",
+      "signing_private_seed": "EdWUdpIJTvuAZzD5ZKNkdligqJurmSt4v-qOc8feUEg",
+      "encryption_public_key": "x25519:okVwBf6Nt7b1ehq4uI_Y1Jc4l7OfwjIpOJq5EMoFozs",
+      "encryption_private_key": "xIBVbkVzcZWgkBOfGQSWSrSX9snxwoki74ziygCeIfk",
+      "vault_key": "ttP49ybLlZTuwgAPcCBZhUAi_qLNqNKnom3TxvMZ3DQ",
+      "signature": "kIYiGTB60jZtzbj-OS3Y2lfHOoXeMOEgCAUveH2VDjHQUs6-zO8AQF4Q716EMKwST8t1azcENhpg2qhMdgKPDg"
+    },
+    {
+      "name": "ones",
+      "seed": "__________________________________________8",
+      "signing_public_key": "ed25519:PSBEYs7b1OoheWepPHRj31y3xdcv8_6gttxd4fWtof4",
+      "signing_private_seed": "QTgMtjGnRMP5H0XAmz6dnptykWlPcWQ2j9Bi5i8lPhU",
+      "encryption_public_key": "x25519:uKreX1X3KmGjy6bDE59fn6q2FpQL0vGE-p0wAFtaOD8",
+      "encryption_private_key": "G34yYDeuYkE42hjAreJZ6QLxUvnx6K8z2qokXBXm4WA",
+      "vault_key": "k1bQGZoIZZC8B39iUDLwxQNAUGSVyyH7CuaCkWeItAs",
+      "signature": "FsarASYDt8hPmE9kIlL4KVj_alBPNFh1VtuHdhwtpgkBTTf-NrbjRsa52IBnQpzBpnw_Dgo9gFZE3MIQEoPMAw"
+    }
+  ]
+}

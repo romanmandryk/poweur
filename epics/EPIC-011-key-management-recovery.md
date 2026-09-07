@@ -24,7 +24,7 @@
 
 | Task | Status | Ships in | Notes |
 |------|--------|----------|-------|
-| E11-T1 Seed, multi-enrollment, recovery kit | open | **v1** | the core; everything else builds on it |
+| E11-T1 Seed, multi-enrollment, recovery kit | **partial** | **v1** | seed derivation + CLI/SDK recovery **done**; relay endpoints, multi-passkey, kit, inventory open |
 | E11-T2 Recovery-master role & elevated ops | open | v1 | policy enforcement + kill-lost-device |
 | E11-T3 Enrollment ceremony (code+PAKE / QR) | open | v1 | synced-passkey shortcut deferrable |
 | E11-T4 CLI/bot key storage hardening | open | v1 | independent of T1–T3, can run in parallel |
@@ -182,9 +182,14 @@ Writes are identity-key-authenticated because you are unlocked when enrolling; r
 assertion-authenticated because bootstrap is the whole point. `fetch` must not reveal
 credential IDs to an unverified caller (discoverable credentials — already satisfied client-side).
 
-- **Recovery kit** = the seed as a BIP39 mnemonic (24 words) + identity name + relay, rendered
-  as a printable PDF. Standard, offline, vendor-free. The kit is itself just another
-  "enrollment" (kind `recovery-kit`) recorded in the policy so the UI can nag if none exists.
+- **Recovery kit** = the seed, encoded for whoever has to carry it. BIP39 (24 words) is an
+  *encoding of the same 32 bytes*, not a second secret; it earns its keep only where a human
+  transcribes by hand, because it adds a typo-catching checksum and avoids base64url's `l/I/1`
+  and `O/0` confusions. **The carrier is not part of the spec** — a printed card, a PDF, a text
+  file and a password-manager entry are equally valid, and the CLI simply prints the base64url
+  seed (`--from-seed`). Do not build a PDF generator as though it were the deliverable. The kit
+  is itself just another "enrollment" (kind `recovery-kit`) recorded in the policy so the UI can
+  nag if none exists.
 - **Social recovery (phase 2)** = Shamir shares (SLIP-0039) of the seed, each encrypted to a
   recovery contact's X25519 key and stored in *their* home; reassembly requires a public,
   time-delayed ceremony that every enrolled device and contact is notified of and the owner
@@ -201,17 +206,28 @@ coherent unit. All formats are fixed above; this task is implementation, not des
 **Build order:** schemas + seed derivation → relay endpoints → multi-passkey web client →
 recovery kit → inventory UI.
 
-- [ ] Spec `apps/docs/docs/security/key-management.md` from the normative formats above:
-      derivation, keystore entry, `policy.json`, the three endpoints, and the privacy note
-      that the relay now stores WebAuthn credential public keys. Register
+- [x] Spec [`apps/docs/docs/security/key-management.md`](../apps/docs/docs/security/key-management.md):
+      seed derivation (normative), the passkey-is-a-lock framing, seed recovery, kit encoding,
+      and the legacy-identity path. Also brought
+      [`clients/cli-reference.md`](../apps/docs/docs/clients/cli-reference.md) up to date — it
+      documented 18 of 33 commands; `key`, `contacts`, `requests`, `policy`, `anon`, `share`,
+      `sync` and `auth` were entirely missing
+- [ ] Extend that spec with the keystore entry, `policy.json`, the three endpoints, and the
+      privacy note that the relay now stores WebAuthn credential public keys. Register
       `poweur-sys/private/keystore/policy.json` in the EPIC-006 path registry
 - [ ] Record the **encryption-key-is-shared** constraint from the E19-T8 inbound note above:
       per-device *signing* keys are in scope, per-device *encryption* keys are not, and the
       reason (senders encrypt to one `encryption_public_key`) belongs in the spec so the
       question is settled once
-- [ ] Seed derivation in `@poweur/client` (EPIC-017) so web, CLI and the mobile shell share one
-      implementation — **not** three copies. Vector tests: fixed seed → fixed Ed25519/X25519
-      public keys, checked in as fixtures
+- [x] Seed derivation — canonical Go in [`packages/identity/seed.go`](../packages/identity/seed.go)
+      (`DeriveSigningKey` / `DeriveEncryptionKey` / `DeriveVaultKey`, `ParseSeed`/`EncodeSeed`),
+      conforming TS in [`packages/client-ts/src/crypto/seed.ts`](../packages/client-ts/src/crypto/seed.ts),
+      pinned by `testdata/vectors/seed-derivation.json` + `test/seed.test.ts` (22 tests). Vectors
+      sign a fixed message so derivation is checked end-to-end, not just byte equality
+- [x] `identityKeysFromSeed()` in the SDK and CLI seed support: `identity create --seed/--from-seed`,
+      `key recover <id> --seed`, `key derive --seed`. Live-relay coverage in
+      `packages/client-ts/test/seed-relay.test.ts` (6) and `apps/integration/seed_test.go`
+      (`TestINT_SEED_01`–`04`), including the full recovery drill and the wrong-seed negative
 - [ ] Relay: `PUT /identities/{id}/keystore`, `POST …/keystore/fetch`,
       `DELETE …/keystore/{enrollment_id}` with the auth model in the table above; persist
       `credential_public_key`; verify assertions against it; rate-limit `fetch` per identity
@@ -220,8 +236,11 @@ recovery kit → inventory UI.
       `apps/web/js/passkey.js` and the `encryptedKeys`/`credentialId` shape in
       `apps/web/js/storage.js` (today's record holds exactly one of each); localStorage becomes
       a cache of the enrollment that unlocked this browser
-- [ ] Recovery kit: BIP39 24-word mnemonic of the seed + identity + relay, printable PDF, plus
-      a "verify your kit" re-entry check. Restore flow: mnemonic → seed → keys → new enrollment
+- [ ] Recovery kit: BIP39 encode/decode of the seed (`@scure/bip39` in TS, a reviewed Go
+      wordlist package) exposed as an **encoding option**, not a document format — the CLI keeps
+      printing base64url, the web app renders words for hand-copying. Plus a "verify your kit"
+      re-entry check. The seed plumbing is done (`--from-seed` emits the raw seed); this is the
+      human-readable encoding on top, and adds a wordlist dependency on both sides Restore flow: mnemonic → seed → keys → new enrollment
       registered, sessions optionally revoked
 - [ ] Key inventory UI ("Keys & devices" in the web app + `poweur keys ls`): every enrollment,
       kind, role, label, created/last-used, with policy-gated remove buttons — merges the

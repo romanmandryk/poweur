@@ -122,8 +122,14 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
+	seedFlag := fs.String("seed", "", "derive keys from this base64url master seed (EPIC-011)")
+	fromSeed := fs.Bool("from-seed", false, "generate a master seed and derive keys from it")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true, "--from-seed": true})); err != nil {
+		return 1
+	}
+	if *seedFlag != "" && *fromSeed {
+		fmt.Fprintln(stderr, "use either --seed or --from-seed, not both")
 		return 1
 	}
 	_ = useIdentity
@@ -141,18 +147,50 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		identityValue = raw + "." + strings.TrimPrefix(*parentDomain, ".")
 	}
 
-	pub, priv, err := identity.GenerateKeypair()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	keyPath, err := identity.SavePrivateKey(identityValue, priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	// EPIC-011: one master seed derives both long-lived keys, so a recovery
+	// kit is 32 bytes rather than two independent keys. Without --seed or
+	// --from-seed the legacy path (independent random keys) is unchanged.
+	var seed []byte
+	switch {
+	case *seedFlag != "":
+		if seed, err = identity.ParseSeed(*seedFlag); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	case *fromSeed:
+		if seed, err = identity.NewSeed(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 
-	encPub, encPriv, err := identity.GenerateEncryptionKeypair()
+	var (
+		pub     ed25519.PublicKey
+		priv    ed25519.PrivateKey
+		encPub  []byte
+		encPriv []byte
+	)
+	if seed != nil {
+		if pub, priv, err = identity.KeypairFromSeed(seed); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if encPub, encPriv, err = identity.EncryptionKeypairFromSeed(seed); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	} else {
+		if pub, priv, err = identity.GenerateKeypair(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if encPub, encPriv, err = identity.GenerateEncryptionKeypair(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+
+	keyPath, err := identity.SavePrivateKey(identityValue, priv)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -250,6 +288,17 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		"relay":                 *relayURL,
 		"registered":            registered,
 		"hosted":                *hosted,
+		"seed_derived":          seed != nil,
+	}
+	// Echo the seed only when we generated it: with --seed the caller already
+	// has it, and reprinting secrets into shell history buys nothing. This is
+	// the user's only copy, so it also goes to stderr in human mode.
+	if *fromSeed {
+		output["seed"] = identity.FormatSeed(seed)
+		if !*jsonOut {
+			fmt.Fprintf(stderr, "master seed (store this — it is the only way to recover %s):\n  %s\n",
+				identityValue, identity.FormatSeed(seed))
+		}
 	}
 	if registered {
 		mode := "registered with relay"
@@ -1807,7 +1856,9 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--json]
+  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--json]
+  poweur key recover <identity> --seed <base64url> [--relay=...] [--parent-domain=...] [--json]
+  poweur key derive --seed <base64url> [--json]
   poweur identity show [--use-identity=...] [--json]
   poweur identity dns <identity> [--use-identity=...] [--json]
   poweur identity use <identity> [--json]
@@ -1957,11 +2008,131 @@ func runIdentityExport(args []string, stdout, stderr io.Writer) int {
 }
 
 func runKey(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "rotate" {
-		fmt.Fprintln(stderr, "usage: poweur key rotate [--use-identity <id>] [--grace 168h]")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: poweur key <rotate|recover|derive>")
 		return 1
 	}
-	return runKeyRotate(args[1:], stdout, stderr)
+	switch args[0] {
+	case "rotate":
+		return runKeyRotate(args[1:], stdout, stderr)
+	case "recover":
+		return runKeyRecover(args[1:], stdout, stderr)
+	case "derive":
+		return runKeyDerive(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "usage: poweur key <rotate|recover|derive>")
+		return 1
+	}
+}
+
+// runKeyRecover rebuilds an identity's key files from its master seed
+// (EPIC-011 E11-T1). Offline by design: no relay call, no network. The relay
+// already holds the public half, so restoring the private half locally is all
+// that is needed to use the identity again.
+func runKeyRecover(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("key recover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	seedFlag := fs.String("seed", "", "base64url master seed")
+	// Recovery usually happens on a machine with no config at all, so the
+	// relay cannot be assumed to already be known.
+	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "usage: poweur key recover <identity> --seed <base64url>")
+		return 1
+	}
+	identityValue := fs.Arg(0)
+	if *seedFlag == "" {
+		fmt.Fprintln(stderr, "--seed is required")
+		return 1
+	}
+	seed, err := identity.ParseSeed(*seedFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	keyPath, encKeyPath, err := identity.SaveKeysFromSeed(identityValue, seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	pub, _, err := identity.KeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encPub, _, err := identity.EncryptionKeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	cfg.Identity = identityValue
+	cfg.KeysDir = filepath.Dir(keyPath)
+	cfg.RelayURL = *relayURL
+	cfg.ParentDomain = *parentDomain
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	output := map[string]any{
+		"identity":              identityValue,
+		"public_key":            identity.PublicKeyString(pub),
+		"encryption_public_key": cryptoe2e.EncodePublicKey(encPub),
+		"key_path":              keyPath,
+		"encryption_key_path":   encKeyPath,
+		"relay":                 *relayURL,
+	}
+	return writeOutput(stdout, *jsonOut, output,
+		fmt.Sprintf("recovered keys for %s from seed\n", identityValue))
+}
+
+// runKeyDerive prints the public keys a seed derives without writing anything.
+// Lets a holder check a recovery kit against a published identity document
+// before trusting it — and gives tests a pure function to assert on.
+func runKeyDerive(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("key derive", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	seedFlag := fs.String("seed", "", "base64url master seed")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if *seedFlag == "" {
+		fmt.Fprintln(stderr, "--seed is required")
+		return 1
+	}
+	seed, err := identity.ParseSeed(*seedFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	pub, _, err := identity.KeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encPub, _, err := identity.EncryptionKeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	output := map[string]any{
+		"public_key":            identity.PublicKeyString(pub),
+		"encryption_public_key": cryptoe2e.EncodePublicKey(encPub),
+	}
+	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s\n%s\n",
+		identity.PublicKeyString(pub), cryptoe2e.EncodePublicKey(encPub)))
 }
 
 func runKeyRotate(args []string, stdout, stderr io.Writer) int {

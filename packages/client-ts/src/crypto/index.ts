@@ -250,3 +250,19 @@ export function decryptMessage(
 export function sha256Bytes(data: Uint8Array): Uint8Array {
   return sha256(data);
 }
+
+// ── Master-seed derivation (EPIC-011) ────────────────────────────────────────
+
+export {
+  SEED_LEN,
+  SEED_INFO_SIGNING,
+  SEED_INFO_ENCRYPTION,
+  SEED_INFO_VAULT,
+  newSeed,
+  deriveSeedKey,
+  deriveSigningKey,
+  deriveEncryptionKey,
+  deriveVaultKey,
+  type DerivedSigningKey,
+  type DerivedEncryptionKey,
+} from "./seed.js";
