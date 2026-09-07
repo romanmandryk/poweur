@@ -16,6 +16,8 @@ import {
   canonicalIdentityExport,
   canonicalIdentityRegistration,
   canonicalIdentityRotation,
+  canonicalKeystoreEnroll,
+  canonicalKeystoreRemove,
   canonicalMessage,
   canonicalSessionRegistration,
   canonicalSessionRevocation,
@@ -120,6 +122,18 @@ describe("canonical signing strings match Go", () => {
       case "dav-token":
         return canonicalDavToken(
           string(i, "identity"), string(i, "audience"), string(i, "scope"),
+          string(i, "issued_at"), string(i, "nonce"),
+        );
+      case "keystore-enroll":
+      case "keystore-enroll-no-credential":
+        return canonicalKeystoreEnroll(
+          string(i, "identity"), string(i, "enrollment_id"), string(i, "kind"),
+          string(i, "credential_id"), string(i, "wrapped_digest"),
+          string(i, "issued_at"), string(i, "nonce"),
+        );
+      case "keystore-remove":
+        return canonicalKeystoreRemove(
+          string(i, "identity"), string(i, "enrollment_id"),
           string(i, "issued_at"), string(i, "nonce"),
         );
       case "session-registration":

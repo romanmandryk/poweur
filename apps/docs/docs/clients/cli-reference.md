@@ -41,6 +41,7 @@ Individual settings can be overridden via environment variables:
 | Relay URL | `RELAY_URL` |
 | Identity subdomain | `IDENTITY` |
 | Keys directory | `KEYS_DIR` |
+| Key-file passphrase | `POWEUR_KEY_PASSPHRASE` |
 
 ## Global Flags
 
@@ -457,6 +458,109 @@ relay in `~/.poweur/config.toml` — so it works on a machine with no prior Powe
 Recovery is pure local key derivation, so it always "succeeds" — a wrong seed produces valid
 keys that simply are not this identity's. Verify with `poweur key derive` first, or the failure
 surfaces later as a rejected request from the relay.
+:::
+
+---
+
+### `poweur key kit --seed <seed-or-mnemonic>`
+
+Render a master seed as a recovery kit — 24 BIP39 words plus the base64url seed. Offline: it
+converts, it does not generate or store.
+
+```bash
+poweur key kit --seed "$(cat alice.seed)"
+```
+
+The mnemonic is an **encoding of the same 32 bytes**, not a second secret. It earns its keep
+only where a human copies the seed by hand: the checksum catches transcription slips, and the
+wordlist avoids the `l/I/1` and `O/0` confusions of base64url. The carrier is up to you — a
+printed card, a text file, a password-manager entry are all equally valid.
+
+Every `--seed` flag in the CLI accepts either encoding, so a pasted kit just works.
+
+---
+
+### `poweur key ls`
+
+The "Keys & devices" inventory: every enrollment registered for an identity, with kind, role,
+label and last-used time. Metadata only — listing devices needs no access to the wrapped seeds.
+
+```bash
+poweur key ls --json
+```
+
+An identity with no enrollments says so explicitly, and reminds you the seed is then the only
+way back.
+
+---
+
+### `poweur key enroll <identity>` / `key approve` / `key claim`
+
+Move an identity to a new device using a six-digit code — **no camera, no QR, no email**.
+
+On the new device:
+
+```bash
+poweur key enroll alice.poweur.net --relay https://relay.poweur.net --label "work laptop"
+```
+
+It prints a rendezvous id and a code. On a device that already holds the identity:
+
+```bash
+poweur key approve <rendezvous-id> --seed "$(cat alice.seed)" --sas 481920
+```
+
+Then back on the new device:
+
+```bash
+poweur key claim alice.poweur.net <rendezvous-id> --ephemeral-key <printed-key>
+```
+
+`key enroll --wait` collapses the last step by polling until approval.
+
+| Flag | Command | Description |
+|------|---------|-------------|
+| `--label <text>` | enroll | Device description shown to the approver |
+| `--wait` | enroll | Poll until approved, then install the keys |
+| `--seed <value>` | approve | Master seed; it lives only on your devices, never on the relay |
+| `--sas <digits>` | approve | Refuse to proceed unless the code matches |
+| `--ephemeral-key <b64url>` | claim | The private key printed by `key enroll` |
+
+:::caution
+**Comparing the code is the authentication step.** Pass `--sas` so a mismatch aborts; without it
+the CLI can only print the code and trust the operator to check. Approving without comparing
+hands the seed to whoever opened the rendezvous.
+:::
+
+The code authenticates the new device's *public* key rather than protecting a secret, so there
+is nothing to brute-force offline — see [Key management & recovery](/security/key-management).
+
+---
+
+### `poweur key protect` / `poweur key unprotect`
+
+Encrypt an identity's key files at rest with a passphrase (scrypt + AES-256-GCM), or decrypt
+them again. The CLI historically wrote plaintext base64 with mode `0600` — defensible for a bot
+on a hardened host, thin for a laptop.
+
+```bash
+export POWEUR_KEY_PASSPHRASE='…'
+poweur key protect
+```
+
+Encrypted and plaintext files are both readable; detection is by shape, so migration needs no
+rename or config change. Every command then loads keys transparently as long as
+`POWEUR_KEY_PASSPHRASE` is set — the unattended-agent path.
+
+| Flag | Description |
+|------|-------------|
+| `--passphrase <value>` | Passphrase (prefer the environment variable so it stays out of shell history) |
+| `--use-identity <subdomain>` | Identity whose keys to protect |
+| `--json` | Machine-readable output |
+
+:::caution
+Without the passphrase the keys cannot be loaded. Losing it is equivalent to losing the device —
+recover from the seed or another enrolled device.
 :::
 
 ---

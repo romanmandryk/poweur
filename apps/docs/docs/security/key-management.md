@@ -65,7 +65,7 @@ Because recovery is pure key derivation it always *succeeds* locally: a wrong se
 keys that simply are not this identity's. `poweur key derive` exists so you can compare against
 the published document before relying on it.
 
-### Encoding a seed for humans
+### Encoding a seed for humans (the recovery kit)
 
 The seed is 32 bytes; base64url is its storage form. A BIP39 24-word mnemonic is an alternative
 **encoding of those same bytes** — not a different secret. It is worth using only where a human
@@ -75,6 +75,118 @@ printed card, a PDF and a text file are all equally valid carriers.
 
 For CLI and automated use, the base64url seed is the right form — pipe it straight into a
 password manager or secrets store.
+
+## The keystore
+
+A seed you must transcribe is a recovery path of last resort. The everyday path is a **keystore**:
+one wrapped copy of the seed per enrolled authenticator, held by the relay as opaque ciphertext.
+
+```
+enrollment := { enrollment_id, kind, wrap, payload,
+                credential_id, credential_public_key, credential_alg,
+                wrapped: { iv, ciphertext, salt? },
+                label, role, created_at, last_used_at }
+```
+
+Wrapping is unchanged from the shipped code: HKDF-SHA256 over the wrapping secret with salt
+`poweur-key-wrapping-v1`, then AES-256-GCM. The secret comes from a passkey's PRF output
+(`poweur-prf-v1`), a PIN via PBKDF2, or a device's secure storage — `wrap` says which. Adding an
+authenticator is re-wrapping the same seed, never re-keying the identity.
+
+### Why writes and reads authenticate differently
+
+| Operation | Authenticated by | Because |
+|---|---|---|
+| Enroll, remove | identity key | you are unlocked when managing devices |
+| **Bootstrap read** | **WebAuthn assertion** | its purpose is recovering an identity whose key you no longer hold |
+
+Requiring the identity key for the read would be circular — that circularity is exactly what the
+endpoint exists to break. The gate is instead possession of an enrolled authenticator, which
+survives cleared site data.
+
+For the same reason the wrapped blobs live **outside** the DAV tree, in relay-managed storage:
+reading `poweur-sys/` needs a DAV token signed by the identity key, and a blob inside the user's
+file tree would be one misplaced delete away from destroying their recovery. Only enrollment
+*metadata* belongs in the tree.
+
+### What the relay learns, and what it cannot do
+
+Storing credential public keys is new — the passkey was previously client-side only — and the
+relay needs them to verify assertions. It gains the ability to *check* a signature, never to
+produce one, and never to unwrap a blob.
+
+Three properties the endpoints enforce:
+
+- **Single-use challenges.** Consumed on every attempt, so a captured assertion cannot be replayed.
+- **User verification required**, not mere presence: the read releases key material.
+- **No credential enumeration.** An unenrolled credential id and a bad signature return identical
+  responses. Because the web client already requests discoverable credentials
+  (`residentKey: "required"`), the relay never has to reveal credential ids to an unverified caller.
+
+Wire details are in the [Relay API reference](/relay/api-reference).
+
+### Removing an enrollment is not revocation
+
+Deleting a wrapped copy denies that authenticator the bootstrap read. It does **not** help
+against an attacker who already extracted the seed — for that, rotate. Removal and rotation
+answer different questions, and conflating them is the mistake this section exists to prevent.
+
+## Enrolling a new device
+
+The kit is the path of last resort. The everyday path is a ceremony between two devices, and it
+needs an **authentic** channel rather than a secret one:
+
+1. The new device generates an ephemeral X25519 keypair and opens a rendezvous.
+2. It shows a six-digit code derived from its own public key.
+3. The user types the rendezvous id on a device that already holds the seed, and compares the
+   code shown on both screens.
+4. That device seals the seed to the ephemeral key; the new device opens it and re-wraps it
+   under its own custody.
+
+**Comparing the code is the authentication step.** Skip it and the seed goes to whoever opened
+the rendezvous.
+
+### Why there is no PAKE
+
+An earlier draft of this design had the code protect the payload. That makes it a six-digit
+password: anyone holding the ciphertext — the relay included — could brute-force it offline,
+which is exactly the problem SPAKE2 and friends exist to solve. It would have forced a PAKE into
+the trusted path of every client, and no reviewed browser implementation of one exists.
+
+Having the *new* device generate the keypair dissolves the requirement. The code then
+authenticates a public key and encrypts nothing, so there is no offline target at all: forging
+it means finding a colliding six-digit code on the first and only try, against a single-use
+rendezvous. This is the numeric-comparison model used by Bluetooth pairing and Signal safety
+numbers.
+
+The lesson generalises: **a short code can authenticate a public key safely, but cannot protect
+a secret.** Which of the two you are doing decides whether you need a PAKE.
+
+### What the ceremony guarantees
+
+- The relay sees an ephemeral public key and a sealed blob, and can open neither.
+- Only the identity owner can approve: delivery is signed by the identity key, bound to that
+  specific rendezvous, so an approval cannot be redirected to another offer.
+- A rendezvous is single-use and expires in ten minutes; a claimed one is gone.
+- Offers are capped per identity, because the offer endpoint is necessarily unauthenticated and
+  the identity name is public.
+
+QR remains a valid transport for the same ceremony — it carries the ephemeral key instead of the
+user typing a code — but it is an optimisation, not the baseline. The typed code is what works
+when there is no camera, which is the common case for phone-to-laptop.
+
+## Key files at rest (CLI)
+
+The CLI wrote private keys as plaintext base64 with mode `0600`: defensible for a bot on a
+hardened host, thin for a laptop. `poweur key protect` wraps them with scrypt (N=32768) +
+AES-256-GCM, keyed by a passphrase from `POWEUR_KEY_PASSPHRASE`.
+
+Both formats stay readable — an encrypted file is JSON and begins with `{`, plaintext is bare
+base64 — so detection is by shape and migration needs no rename, no flag and no config change.
+Existing installs keep working and can opt in when they choose.
+
+The passphrase protects the key *file*, not the identity: losing it is equivalent to losing the
+device, and the answer is the same — recover from the seed or another enrolled device.
 
 ## Identities created before the seed model
 
@@ -93,4 +205,6 @@ random keys, so nothing changes for existing scripts.
 
 - [Security Model](/security/model) — overall threat model
 - [Web identity](/protocol/web-identity) — identity documents and key rotation
-- [CLI Reference](/clients/cli-reference) — `identity create`, `key derive`, `key recover`, `key rotate`
+- [CLI Reference](/clients/cli-reference) — `identity create`, `key derive`, `key recover`,
+  `key rotate`, `key kit`, `key ls`, `key enroll`/`approve`/`claim`, `key protect`
+- [Relay API reference](/relay/api-reference) — keystore and enrollment endpoints

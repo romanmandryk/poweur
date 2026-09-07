@@ -204,3 +204,137 @@ func TestINT_SEED_04_KeyDeriveMatchesPublishedDocument(t *testing.T) {
 			derived.EncryptionPublicKey, doc.EncryptionPublicKey)
 	}
 }
+
+// TestINT_SEED_05 is the paper-kit drill: recover using only the 24 words a
+// user could have written down, with the base64url seed discarded.
+func TestINT_SEED_05_RecoverFromMnemonic(t *testing.T) {
+	zone := newZone(t)
+	dataDir := t.TempDir()
+	ts, addr := newHostedRelay(t, zone, dataDir)
+	defer ts.Close()
+	relayURL := "http://" + addr
+	zone.SetHost("paperkit.poweur.net", addr)
+	zone.SetHost("mailer.poweur.net", addr)
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	home := t.TempDir()
+	senderHome := t.TempDir()
+
+	stdout, _ := runCLI(t, home,
+		"identity", "create", "paperkit.poweur.net",
+		"--hosted", "--from-seed", "--relay", relayURL, "--json",
+	)
+	var created struct {
+		Seed     string `json:"seed"`
+		Mnemonic string `json:"mnemonic"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("parse create output: %v\n%s", err, stdout)
+	}
+	if created.Mnemonic == "" {
+		t.Fatal("--from-seed must emit a mnemonic; a seed nobody can transcribe is a poor kit")
+	}
+	if got := len(strings.Fields(created.Mnemonic)); got != idpkg.MnemonicWords {
+		t.Fatalf("want %d words, got %d", idpkg.MnemonicWords, got)
+	}
+	// Both encodings must name the same secret.
+	fromWords, err := idpkg.MnemonicToSeed(created.Mnemonic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idpkg.EncodeSeed(fromWords) != created.Seed {
+		t.Fatal("mnemonic and seed disagree")
+	}
+
+	runCLI(t, senderHome, "identity", "create", "mailer.poweur.net",
+		"--hosted", "--relay", relayURL, "--json")
+	const note = "written on paper, recovered from paper"
+	runCLI(t, senderHome, "send", "paperkit.poweur.net", note)
+
+	// Recover with the words alone, on a machine that has never seen the seed.
+	freshHome := t.TempDir()
+	runCLI(t, freshHome, "key", "recover", "paperkit.poweur.net",
+		"--seed", created.Mnemonic, "--relay", relayURL, "--json")
+	assertDecryptedInbox(t, mustInbox(t, freshHome), "mailer.poweur.net", note)
+}
+
+// TestINT_SEED_06 covers `key kit`: an offline converter whose output restores
+// the same identity.
+func TestINT_SEED_06_KeyKitRoundTrips(t *testing.T) {
+	zone := newZone(t)
+	dataDir := t.TempDir()
+	ts, addr := newHostedRelay(t, zone, dataDir)
+	defer ts.Close()
+	relayURL := "http://" + addr
+	zone.SetHost("kitted.poweur.net", addr)
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	home := t.TempDir()
+	seed := createSeedIdentity(t, home, "kitted.poweur.net", relayURL)
+
+	stdout, _ := runCLI(t, home, "key", "kit", "--seed", seed, "--json")
+	var kit struct {
+		Identity string `json:"identity"`
+		Mnemonic string `json:"mnemonic"`
+		Seed     string `json:"seed"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &kit); err != nil {
+		t.Fatalf("parse kit: %v\n%s", err, stdout)
+	}
+	if kit.Seed != seed || kit.Identity != "kitted.poweur.net" {
+		t.Fatalf("unexpected kit: %+v", kit)
+	}
+
+	// The kit's words derive the key the relay published.
+	derived, _ := runCLI(t, t.TempDir(), "key", "derive", "--seed", kit.Mnemonic, "--json")
+	var out struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.Unmarshal([]byte(derived), &out); err != nil {
+		t.Fatal(err)
+	}
+	doc := fetchDoc(t, relayURL+"/identities/kitted.poweur.net")
+	if idpkg.NormalizePublicKeyKey(out.PublicKey) != idpkg.NormalizePublicKeyKey(doc.PublicKey) {
+		t.Fatalf("kit mnemonic derives %q, relay published %q", out.PublicKey, doc.PublicKey)
+	}
+}
+
+// TestINT_SEED_07 exercises the inventory: `key ls` against a real relay.
+func TestINT_SEED_07_KeyListShowsEnrollments(t *testing.T) {
+	zone := newZone(t)
+	dataDir := t.TempDir()
+	ts, addr := newHostedRelay(t, zone, dataDir)
+	defer ts.Close()
+	relayURL := "http://" + addr
+	zone.SetHost("inventory.poweur.net", addr)
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	home := t.TempDir()
+	createSeedIdentity(t, home, "inventory.poweur.net", relayURL)
+
+	// A fresh identity has no enrollments; the CLI must say so plainly rather
+	// than printing an empty table.
+	stdout, _ := runCLI(t, home, "key", "ls", "--relay", relayURL)
+	if !strings.Contains(stdout, "no enrollments") {
+		t.Fatalf("expected an explicit empty state, got: %s", stdout)
+	}
+	jsonOut, _ := runCLI(t, home, "key", "ls", "--relay", relayURL, "--json")
+	var listed struct {
+		Enrollments []map[string]any `json:"enrollments"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &listed); err != nil {
+		t.Fatalf("parse key ls: %v\n%s", err, jsonOut)
+	}
+	if len(listed.Enrollments) != 0 {
+		t.Fatalf("expected no enrollments, got %d", len(listed.Enrollments))
+	}
+}
+
+func mustInbox(t *testing.T, home string) string {
+	t.Helper()
+	out, _ := runCLI(t, home, "inbox")
+	return out
+}

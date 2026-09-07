@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -295,7 +296,18 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	// the user's only copy, so it also goes to stderr in human mode.
 	if *fromSeed {
 		output["seed"] = identity.FormatSeed(seed)
-		if !*jsonOut {
+		// The mnemonic ships alongside the raw seed: same 32 bytes, but
+		// checksummed and safe to copy by hand. Which one a user keeps is
+		// their choice; withholding either would make that choice for them.
+		if mnemonic, mErr := identity.SeedToMnemonic(seed); mErr == nil {
+			output["mnemonic"] = mnemonic
+			if !*jsonOut {
+				fmt.Fprintf(stderr,
+					"recovery kit for %s — store this; it is the only way back\n"+
+						"  seed:     %s\n  mnemonic: %s\n",
+					identityValue, identity.FormatSeed(seed), mnemonic)
+			}
+		} else if !*jsonOut {
 			fmt.Fprintf(stderr, "master seed (store this — it is the only way to recover %s):\n  %s\n",
 				identityValue, identity.FormatSeed(seed))
 		}
@@ -1857,8 +1869,14 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--json]
-  poweur key recover <identity> --seed <base64url> [--relay=...] [--parent-domain=...] [--json]
-  poweur key derive --seed <base64url> [--json]
+  poweur key recover <identity> --seed <base64url|mnemonic> [--relay=...] [--parent-domain=...] [--json]
+  poweur key derive --seed <base64url|mnemonic> [--json]
+  poweur key kit --seed <base64url|mnemonic> [--use-identity=...] [--json]
+  poweur key ls [--use-identity=...] [--relay=...] [--json]
+  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]
+  poweur key approve <rendezvous-id> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--json]
+  poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url> [--relay=...] [--json]
+  poweur key protect|unprotect [--use-identity=...] [--passphrase=...] [--json]
   poweur identity show [--use-identity=...] [--json]
   poweur identity dns <identity> [--use-identity=...] [--json]
   poweur identity use <identity> [--json]
@@ -2019,10 +2037,230 @@ func runKey(args []string, stdout, stderr io.Writer) int {
 		return runKeyRecover(args[1:], stdout, stderr)
 	case "derive":
 		return runKeyDerive(args[1:], stdout, stderr)
+	case "kit":
+		return runKeyKit(args[1:], stdout, stderr)
+	case "ls", "list":
+		return runKeyList(args[1:], stdout, stderr)
+	case "enroll":
+		return runKeyEnroll(args[1:], stdout, stderr)
+	case "approve":
+		return runKeyApprove(args[1:], stdout, stderr)
+	case "claim":
+		return runKeyClaim(args[1:], stdout, stderr)
+	case "protect":
+		return runKeyProtect(args[1:], stdout, stderr, true)
+	case "unprotect":
+		return runKeyProtect(args[1:], stdout, stderr, false)
 	default:
-		fmt.Fprintln(stderr, "usage: poweur key <rotate|recover|derive>")
+		fmt.Fprintln(stderr, "usage: poweur key <rotate|recover|derive|kit|ls|enroll|approve|claim|protect|unprotect>")
 		return 1
 	}
+}
+
+// runKeyProtect encrypts (or decrypts) an identity's key files at rest
+// (EPIC-011 E11-T4). The CLI historically wrote plaintext base64 with mode
+// 0600 — fine for a bot on a hardened host, thin for a laptop.
+func runKeyProtect(args []string, stdout, stderr io.Writer, protect bool) int {
+	verb := "protect"
+	if !protect {
+		verb = "unprotect"
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("key "+verb, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity whose keys to "+verb)
+	passphraseFlag := fs.String("passphrase", "", "passphrase (prefer "+identity.EnvKeyPassphrase+")")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" {
+		fmt.Fprintln(stderr, "identity not configured (run `poweur identity create` or pass --use-identity)")
+		return 1
+	}
+	passphrase := identity.Passphrase(*passphraseFlag)
+	if passphrase == "" {
+		fmt.Fprintf(stderr, "passphrase required: set %s or pass --passphrase\n", identity.EnvKeyPassphrase)
+		return 1
+	}
+	keysDir := cfg.KeysDir
+	if keysDir == "" {
+		if keysDir, err = config.KeysDir(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	changed := map[string]bool{}
+	for _, suffix := range []string{".key", ".enc"} {
+		path := filepath.Join(keysDir, identityValue+suffix)
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		var did bool
+		if protect {
+			did, err = identity.ProtectKeyFile(path, passphrase)
+		} else {
+			did, err = identity.UnprotectKeyFile(path, passphrase)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "%s %s: %v\n", verb, path, err)
+			return 1
+		}
+		changed[path] = did
+	}
+	if len(changed) == 0 {
+		fmt.Fprintf(stderr, "no key files found for %s in %s\n", identityValue, keysDir)
+		return 1
+	}
+	output := map[string]any{"identity": identityValue, "files": changed, "protected": protect}
+	human := fmt.Sprintf("%sed key files for %s\n", verb, identityValue)
+	if protect {
+		human += "keep the passphrase safe: without it these keys cannot be loaded\n"
+	}
+	return writeOutput(stdout, *jsonOut, output, human)
+}
+
+// runKeyKit renders a master seed as a recovery kit: 24 BIP39 words for paper
+// (checksummed, so a transcription slip is caught) plus the base64url seed for
+// machines. Offline — it converts, it does not generate or store.
+func runKeyKit(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("key kit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	seedFlag := fs.String("seed", "", "master seed (base64url or 24-word mnemonic)")
+	useIdentity := fs.String("use-identity", "", "identity the kit is for")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	if *seedFlag == "" {
+		fmt.Fprintln(stderr, "--seed is required")
+		return 1
+	}
+	seed, err := identity.ParseSeed(*seedFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	kit, err := identity.NewRecoveryKit(identityValue, cfg.RelayURL, seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	output := map[string]any{
+		"identity": kit.Identity,
+		"relay":    kit.Relay,
+		"mnemonic": kit.Mnemonic,
+		"seed":     kit.Seed,
+	}
+	human := fmt.Sprintf("Recovery kit for %s\n\nrelay:    %s\nseed:     %s\n\nmnemonic: %s\n\n"+
+		"Anyone holding this can act as %s. Store it offline.\n",
+		kit.Identity, kit.Relay, kit.Seed, kit.Mnemonic, kit.Identity)
+	return writeOutput(stdout, *jsonOut, output, human)
+}
+
+// runKeyList shows every enrollment registered for an identity — the CLI half
+// of the "Keys & devices" inventory. Metadata only: listing your devices needs
+// no access to the wrapped seed copies.
+func runKeyList(args []string, stdout, stderr io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fs := flag.NewFlagSet("key ls", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity to list")
+	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	if identityValue == "" || *relayURL == "" {
+		fmt.Fprintln(stderr, "identity and relay url required")
+		return 1
+	}
+	cfg.Identity = identityValue
+	_, _, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	if !ok {
+		return 1
+	}
+	issuedAt := time.Now().UTC().Format(time.RFC3339)
+	nonce := newAdminNonce()
+	// Canonical strings are built inline throughout this package; keep
+	// "keystore-list" in step with crypto.CanonicalKeystoreList on the relay.
+	canonical := strings.Join([]string{
+		"keystore-list", strings.ToLower(identityValue), issuedAt, nonce,
+	}, "\n")
+	payload, err := json.Marshal(map[string]any{
+		"issued_at":          issuedAt,
+		"nonce":              nonce,
+		"identity_signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(canonical))),
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	url := strings.TrimRight(*relayURL, "/") + "/identities/" + identityValue + "/keystore/list"
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpResp, err := (&http.Client{Timeout: 10 * time.Second}).Do(httpReq)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != http.StatusOK {
+		fmt.Fprintln(stderr, parseErrorResponse("keystore list failed", httpResp))
+		return 1
+	}
+	var resp struct {
+		Enrollments []map[string]any `json:"enrollments"`
+	}
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, map[string]any{"enrollments": resp.Enrollments}, "")
+	}
+	if len(resp.Enrollments) == 0 {
+		fmt.Fprintln(stdout, "no enrollments registered")
+		fmt.Fprintln(stdout, "this identity can only be recovered from its seed — keep the kit safe")
+		return 0
+	}
+	for _, e := range resp.Enrollments {
+		role, _ := e["role"].(string)
+		if role == "" {
+			role = "device"
+		}
+		label, _ := e["label"].(string)
+		if label == "" {
+			label = "(unlabelled)"
+		}
+		lastUsed, _ := e["last_used_at"].(string)
+		if lastUsed == "" {
+			lastUsed = "never"
+		}
+		fmt.Fprintf(stdout, "%-16s %-14s %-16s %-10s created=%v last-used=%s\n",
+			e["enrollment_id"], e["kind"], label, role, e["created_at"], lastUsed)
+	}
+	return 0
 }
 
 // runKeyRecover rebuilds an identity's key files from its master seed

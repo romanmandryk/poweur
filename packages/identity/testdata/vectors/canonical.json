@@ -137,6 +137,45 @@
       "signature": "2PTV9PzsUh5y8wpnUaIklvPt3swEbG4Rk90dEgs8cbmDZ-rmgvr2a4saGPFKJ9KlR2-L6o4CUfbWgfB00_oxCA"
     },
     {
+      "name": "keystore-enroll",
+      "inputs": {
+        "credential_id": "Y3JlZC0wMDE",
+        "enrollment_id": "enr-001",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "kind": "passkey",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "wrapped_digest": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+      },
+      "canonical": "keystore-enroll\nalice.poweur.net\nenr-001\npasskey\nY3JlZC0wMDE\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "i8tTfb7lDo741p3xsps22t-EMuxsy6DBGb82cnoYoOMAc8Hy-PjoxHCYpL7SHdqIE9J7LKllHc3NtRucW1glAg"
+    },
+    {
+      "name": "keystore-enroll-no-credential",
+      "inputs": {
+        "credential_id": "",
+        "enrollment_id": "enr-002",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "kind": "recovery-kit",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "wrapped_digest": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+      },
+      "canonical": "keystore-enroll\nalice.poweur.net\nenr-002\nrecovery-kit\n\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "irWGv-0ic7vKNHAKH57h86UG_jo9QY1T5n5tB_9vILMbIeRZmgHOF1uC2gjuaeuvx9r8TDxduwZz9TMVTLXCCg"
+    },
+    {
+      "name": "keystore-remove",
+      "inputs": {
+        "enrollment_id": "enr-001",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "keystore-remove\nalice.poweur.net\nenr-001\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "bNFb4ZujJ-n4y7Urkn842MntBzutO1pYs-EaqzXmzG0MB5QWYSmOISmns92DQtg_cYsMRZbSG04x0haDaniPCg"
+    },
+    {
       "name": "session-registration",
       "inputs": {
         "expires_at": "2026-01-16T09:30:00Z",

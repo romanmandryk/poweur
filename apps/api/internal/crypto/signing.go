@@ -292,3 +292,57 @@ func decodeAnyBase64(value string) ([]byte, error) {
 	}
 	return base64.StdEncoding.DecodeString(value)
 }
+
+// CanonicalKeystoreEnroll is signed by the identity key to authorize storing a
+// wrapped seed copy (EPIC-011 E11-T1). The digest binds the signature to the
+// exact ciphertext, so a relay cannot substitute a different blob under an
+// otherwise valid authorization.
+func CanonicalKeystoreEnroll(identity, enrollmentID, kind, credentialID, wrappedDigest, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"keystore-enroll",
+		identity,
+		enrollmentID,
+		kind,
+		credentialID,
+		wrappedDigest,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalKeystoreRemove is signed by the identity key to authorize deleting
+// an enrollment.
+func CanonicalKeystoreRemove(identity, enrollmentID, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"keystore-remove",
+		identity,
+		enrollmentID,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalKeystoreList is signed by the identity key to list enrollments.
+// The listing is metadata only — an owner enumerating their devices has no
+// need for the wrapped ciphertext.
+func CanonicalKeystoreList(identity, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		"keystore-list",
+		identity,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
+
+// CanonicalEnrollAction is signed by the identity key to fetch or approve a
+// device-enrollment rendezvous (EPIC-011 E11-T3). The rendezvous id is bound
+// in, so an approval for one offer cannot be replayed onto another.
+func CanonicalEnrollAction(action, identity, rendezvousID, issuedAt, nonce string) string {
+	return strings.Join([]string{
+		action,
+		identity,
+		rendezvousID,
+		issuedAt,
+		nonce,
+	}, "\n")
+}
