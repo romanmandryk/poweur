@@ -118,11 +118,14 @@ export class Contacts {
   /**
    * Write a contact in the given state. `accepted` pins the currently
    * resolved key; existing petnames and pins survive a re-write.
+   *
+   * `pin` forces the same TOFU pin for a non-accepted state — what an
+   * outbound request does, so the key you addressed is the key you keep.
    */
   async set(
     identity: string,
     state: ContactState,
-    options: { petname?: string } = {},
+    options: { petname?: string; pin?: boolean } = {},
   ): Promise<Contact> {
     const target = identity.trim().toLowerCase();
     const file = await this.load();
@@ -132,7 +135,7 @@ export class Contacts {
       state,
       added_at: existing?.added_at ?? rfc3339(),
     };
-    if (state === CONTACT_ACCEPTED) {
+    if (state === CONTACT_ACCEPTED || options.pin) {
       entry.pinned_key = await this.resolvePin(target);
     } else if (existing?.pinned_key) {
       entry.pinned_key = existing.pinned_key;

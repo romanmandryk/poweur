@@ -6,6 +6,7 @@
  * Everything it composes is usable standalone; this is convenience, not a
  * layer you have to go through.
  */
+import { PoweurError } from "./errors.js";
 import { Contacts, fetchRequests } from "./contacts.js";
 import { DavClient, mintDavToken } from "./files.js";
 import { RelayClient } from "./http.js";
@@ -17,6 +18,7 @@ import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
 import { MemorySessionStore, SessionManager } from "./session.js";
 import { Shares } from "./shares.js";
 import { SyncClient } from "./sync.js";
+import { CONTACT_ACCEPTED, CONTACT_BLOCKED, CONTACT_REQUESTED, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST, } from "./types.js";
 export class PoweurClient {
     relay;
     signer;
@@ -108,6 +110,58 @@ export class PoweurClient {
     }
     requests() {
         return fetchRequests(this.relay, this.signer);
+    }
+    /**
+     * Ask to be someone's contact: pin the key we resolved, record the intent
+     * as `requested`, then send the typed envelope the recipient's relay routes
+     * into their requests queue.
+     *
+     * The local write happens first on purpose — if the send fails (their
+     * policy, their relay), the intent is still on record and retryable, which
+     * is what `poweur contacts request` does too.
+     */
+    async requestContact(identity, options = {}) {
+        const target = identity.trim().toLowerCase();
+        const contacts = await this.contacts();
+        const existing = (await contacts.load()).contacts.find((c) => c.identity === target);
+        if (existing?.state === CONTACT_ACCEPTED) {
+            throw new PoweurError("invalid_argument", `${target} is already an accepted contact`);
+        }
+        const contact = await contacts.set(target, CONTACT_REQUESTED, {
+            pin: true,
+            ...(options.petname ? { petname: options.petname } : {}),
+        });
+        const result = await this.send(target, options.intro || "contact request", {
+            type: MSG_TYPE_CONTACT_REQUEST,
+        });
+        return { contact, result };
+    }
+    /**
+     * Accept someone: pin their current key (TOFU) and tell them, best-effort —
+     * `notified` is false when their own policy or relay refused the note, which
+     * must not undo an acceptance the user already made.
+     */
+    async acceptContact(identity, options = {}) {
+        const target = identity.trim().toLowerCase();
+        const contacts = await this.contacts();
+        const contact = await contacts.set(target, CONTACT_ACCEPTED, {
+            ...(options.petname ? { petname: options.petname } : {}),
+        });
+        try {
+            await this.send(target, "contact request accepted", { type: MSG_TYPE_CONTACT_ACCEPT });
+            return { contact, notified: true };
+        }
+        catch {
+            return { contact, notified: false };
+        }
+    }
+    /**
+     * Block someone. No message is sent: telling a sender they were blocked is
+     * information they can act on, and the relay enforces the state anyway.
+     */
+    async blockContact(identity) {
+        const contacts = await this.contacts();
+        return contacts.set(identity.trim().toLowerCase(), CONTACT_BLOCKED, {});
     }
     async policy() {
         return readInboxPolicy(await this.dav());

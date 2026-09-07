@@ -1125,6 +1125,12 @@ input, textarea, select { font-family: inherit; }
 .profile-card-caps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .profile-card-link { display: block; margin-top: 4px; }
 .profile-card-action { flex-shrink: 0; min-height: 44px; }
+.profile-card-action.btn-primary {
+  width: auto;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+}
 .id-avatar-img {
   width: 100%;
   height: 100%;
@@ -1280,3 +1286,87 @@ input, textarea, select { font-family: inherit; }
 @media (min-width: 420px) {
   .mnemonic { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ─── E15-T2: contacts, requests, key pinning ─────────────────────────────── */
+
+/* A contact row is a ProfileCard plus state; the card already owns the
+   left-hand layout, so this only adds the trailing column. */
+.contact-row,
+.request-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--sep);
+}
+.contact-row:last-child,
+.request-row:last-child { border-bottom: none; }
+.contact-row > div:first-child,
+.request-row > div:first-child { flex: 1; min-width: 0; }
+.contact-row .profile-card,
+.request-row .profile-card { border-bottom: none; }
+.contact-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.contact-more { width: 44px; height: 44px; font-size: 20px; line-height: 1; }
+
+/* Requests wrap on a 375px screen: the two actions sit under the person. */
+.request-row { flex-wrap: wrap; padding-bottom: 12px; }
+.request-intro {
+  flex-basis: 100%;
+  margin: 0 12px 8px 16px;
+  font-size: 14px;
+  color: var(--t2);
+  overflow-wrap: anywhere;
+}
+.request-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+.request-actions .btn-primary { width: auto; padding: 8px 16px; font-size: 14px; border-radius: var(--radius-sm); }
+.request-actions .btn { background: var(--surface-2); color: var(--t1); min-height: 40px; }
+.request-actions .btn-primary { background: var(--accent); color: #fff; }
+
+.tray-section-label {
+  padding: 14px 16px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* "Add" on a message from someone we hold no contact entry for. */
+.conv-add {
+  background: var(--surface-2);
+  color: var(--accent);
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.conv-add svg { width: 12px; height: 12px; }
+
+/* Panel action rows: side-by-side buttons that stay 44px tall. */
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.panel-actions .btn {
+  flex: 1 1 40%;
+  min-height: 44px;
+  background: var(--surface-2);
+  color: var(--t1);
+  padding: 12px 16px;
+  font-size: 15px;
+  width: auto;
+}
+.panel-actions .btn-primary { background: var(--accent); color: #fff; }
+.panel-actions .btn-danger  { background: rgba(255,59,48,.12); color: var(--red); }

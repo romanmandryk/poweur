@@ -165,6 +165,13 @@ relay; anonymous send solves and is accepted at the policy's difficulty. ✅ (`t
       audience by ID or group, read/write permissions) and read shared paths as a visitor
 - [x] `poweur-sys` document helpers (contacts, inbox policy, profile) that write the *same*
       documents the CLI writes — no client-specific state
+- [x] Contact *lifecycle* on `PoweurClient`: `requestContact` / `acceptContact` /
+      `blockContact` (added for EPIC-015 E15-T2). The document write and the typed
+      `sys.contact.*` envelope have to happen together and in order, and that composition
+      previously lived only in the TS CLI's command layer, where the web app could not
+      reach it. Both CLIs now call these, which also re-aligns a Go↔TS divergence: the Go
+      `contacts request` pinned the resolved key, the TS one did not
+      (`test/contacts-relay.test.ts`)
 
 **Acceptance:** TS creates a share for a second identity, the second identity reads the path over
 DAV, revocation takes effect on the next request; grants written by TS are accepted by the relay's

@@ -76,6 +76,7 @@ const S = {
   /** Messages destination: inbox | requests | anonymous, as distinct trays. */
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
+  requests: { incoming: [], loading: false, loaded: false, error: null },
   files: { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false },
 };
 
@@ -260,12 +261,24 @@ function renderPage() {
 
 // ─── Messages destination ─────────────────────────────────────────────────────
 
-/** The Messages trays. Requests and anonymous are wired up in T2/T3. */
+/** The Messages trays. The anonymous one is wired up in T3. */
 const TRAYS = [
   { id: "inbox",     label: "Inbox" },
   { id: "requests",  label: "Requests" },
   { id: "anonymous", label: "Anonymous" },
 ];
+
+const CONTACT_STATE_CHIP = {
+  accepted:  { label: "Contact",   cls: "chip-green"  },
+  requested: { label: "Requested", cls: "chip-orange" },
+  blocked:   { label: "Blocked",   cls: "chip-red"    },
+};
+
+/** The contact record for an identity, or null — the app's one lookup. */
+function contactFor(identity) {
+  const wanted = String(identity ?? "").toLowerCase();
+  return S.contacts.list.find(c => c.identity.toLowerCase() === wanted) ?? null;
+}
 
 function renderWelcome() {
   return `
@@ -311,10 +324,7 @@ function renderMessages() {
 }
 
 function renderTray() {
-  if (S.tray === "requests") {
-    return emptyState("🤝", "No contact requests",
-      "Requests to connect land here. Accepting one lets you message each other.");
-  }
+  if (S.tray === "requests") return renderRequestsTray();
   if (S.tray === "anonymous") {
     return emptyState("🎭", "No anonymous messages",
       "Turn on anonymous messages in Settings to let strangers reach you behind a proof-of-work cost.");
@@ -330,15 +340,95 @@ function renderTray() {
         <div class="conv-row" data-compose-to="${esc(c.contact)}" role="button" tabindex="0">
           ${avatarHtml(c.contact, "md")}
           <div class="conv-info">
-            <div class="conv-name">${esc(idHandle(c.contact))}</div>
+            <div class="conv-name">${esc(c.petname || idHandle(c.contact))}</div>
             <div class="conv-preview">${esc(c.preview)}</div>
           </div>
           <div class="conv-meta">
             <span class="conv-time">${fmtRelative(c.lastMsg.timestamp)}</span>
             ${c.unread ? `<span class="conv-badge">${c.unread}</span>` : ""}
+            ${c.stranger ? `
+              <button class="btn btn-sm conv-add" data-add-contact="${esc(c.contact)}"
+                      title="Add contact">${svgPlus} Add</button>` : ""}
           </div>
         </div>`).join("")}
     </div>`;
+}
+
+/**
+ * Incoming requests, from both places one can arrive.
+ *
+ * Under `contacts_and_requests` the relay parks a stranger's first
+ * `sys.contact.request` in the requests queue; under the default `open` policy
+ * the very same envelope is delivered to the inbox as a typed message. Showing
+ * only the queue would leave every default-policy user with an empty tray and
+ * a contact request buried among their conversations.
+ */
+function incomingRequests() {
+  const byRequester = new Map();
+  const add = (entry) => {
+    const state = contactFor(entry.sender)?.state;
+    if (state === "accepted" || state === "blocked") return;
+    const existing = byRequester.get(entry.sender);
+    if (!existing || new Date(entry.timestamp) > new Date(existing.timestamp)) {
+      byRequester.set(entry.sender, { ...existing, ...entry });
+    }
+  };
+  for (const entry of S.requests.incoming) {
+    add({ sender: entry.sender, timestamp: entry.timestamp, intro: null, queued: true });
+  }
+  for (const raw of S.messages) {
+    const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (m.type !== "sys.contact.request" || m.sender === S.identity) continue;
+    add({ sender: m.sender, timestamp: m.timestamp, intro: m.plaintext ?? null, queued: false });
+  }
+  return [...byRequester.values()].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+function renderRequestsTray() {
+  const incoming = incomingRequests();
+  const outgoing = S.contacts.list.filter(c => c.state === "requested");
+
+  if (!incoming.length && !outgoing.length) {
+    return `${S.requests.error ? `<p class="small val-warn" style="padding:16px">${esc(S.requests.error)}</p>` : ""}
+      ${emptyState("🤝", "No contact requests",
+        "Requests to connect land here. Accepting one lets you message each other.")}`;
+  }
+
+  return `
+    ${S.requests.error ? `<p class="small val-warn" style="padding:16px">${esc(S.requests.error)}</p>` : ""}
+    ${incoming.length ? `
+      <div class="tray-section-label">Waiting for you</div>
+      <div class="conv-list">
+        ${incoming.map(r => `
+          <div class="request-row">
+            ${slot(`req-${encodeURIComponent(r.sender)}`, () => ProfileCard({
+              identity: r.sender,
+              resolve: resolveForComponents,
+              compact: true,
+            }).el)}
+            ${r.intro ? `<p class="request-intro">${esc(r.intro)}</p>` : ""}
+            <div class="request-actions">
+              <button class="btn btn-sm btn-primary" data-accept-contact="${esc(r.sender)}">Accept</button>
+              <button class="btn btn-sm" data-block-contact="${esc(r.sender)}">Block</button>
+            </div>
+          </div>`).join("")}
+      </div>` : ""}
+    ${outgoing.length ? `
+      <div class="tray-section-label">Sent by you</div>
+      <div class="conv-list">
+        ${outgoing.map(c => `
+          <div class="request-row">
+            ${slot(`out-${encodeURIComponent(c.identity)}`, () => ProfileCard({
+              identity: c.identity,
+              resolve: resolveForComponents,
+              compact: true,
+            }).el)}
+            <div class="request-actions">
+              <span class="chip chip-orange">Requested</span>
+              <button class="btn btn-sm" data-cancel-request="${esc(c.identity)}">Cancel</button>
+            </div>
+          </div>`).join("")}
+      </div>` : ""}`;
 }
 
 function emptyState(icon, title, body, actionHtml = "") {
@@ -362,9 +452,14 @@ function buildConversations() {
   return Object.entries(byContact)
     .map(([contact, msgs]) => {
       const lastMsg = msgs.at(-1);
+      const known = contactFor(contact);
       return {
         contact,
         lastMsg,
+        petname: known?.petname ?? null,
+        // Someone we have no entry for at all: adding them is one tap from
+        // the message that made us want to.
+        stranger: !known,
         unread: msgs.length,
         // The SDK decrypts in place, so show the message rather than a padlock
         // when we could actually read it.
@@ -401,15 +496,37 @@ function renderContacts() {
       `<button class="btn btn-primary" id="btn-add-contact-empty">Add a contact</button>`) : ""}
     ${filtered.length ? `
       <div class="conv-list">
-        ${filtered.map(c => slot(`contact-${encodeURIComponent(c.identity)}`, () =>
-          ProfileCard({
-            identity: c.identity,
-            resolve: resolveForComponents,
-            compact: true,
-            action: { label: "Message", onSelect: (id) => R.push("compose", { to: id }) },
-          }).el)).join("")}
+        ${filtered.map(c => renderContactRow(c)).join("")}
       </div>` : ""}
     ${C.list.length && !filtered.length ? `<p class="muted small" style="padding:16px">No contact matches “${esc(C.filter)}”.</p>` : ""}`;
+}
+
+/**
+ * One contact: the person (ProfileCard), their state, and the action that
+ * state implies — with everything else behind the overflow, so the row stays
+ * inside a 375px viewport.
+ */
+function renderContactRow(contact) {
+  const chip = CONTACT_STATE_CHIP[contact.state] ?? CONTACT_STATE_CHIP.accepted;
+
+  // No button on the card itself: at 375px a name, an ID, a state chip and an
+  // action do not fit, and the row's own tap is the action people want
+  // (message them; the overflow holds everything else).
+  return `
+    <div class="contact-row" data-contact-open="${esc(contact.identity)}"
+         data-contact-state="${esc(contact.state)}" role="button" tabindex="0">
+      ${slot(`contact-${encodeURIComponent(contact.identity)}`, () => ProfileCard({
+        identity: contact.identity,
+        resolve: resolveForComponents,
+        compact: true,
+        cached: contact.petname ? { displayName: contact.petname, links: [] } : null,
+      }).el)}
+      <div class="contact-row-meta">
+        <span class="chip ${chip.cls}">${chip.label}</span>
+        <button class="btn-icon contact-more" data-contact-menu="${esc(contact.identity)}"
+                aria-label="More actions for ${esc(contact.identity)}">⋯</button>
+      </div>
+    </div>`;
 }
 
 // ─── Launcher page ────────────────────────────────────────────────────────────
@@ -877,8 +994,33 @@ function attachEvents() {
   }));
 
   // Contacts
-  q("#btn-add-contact")?.addEventListener("click", showAddContactPanel);
-  q("#btn-add-contact-empty")?.addEventListener("click", showAddContactPanel);
+  q("#btn-add-contact")?.addEventListener("click", () => showAddContactPanel());
+  q("#btn-add-contact-empty")?.addEventListener("click", () => showAddContactPanel());
+  qAll("[data-contact-menu]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    showContactPanel(b.dataset.contactMenu);
+  }));
+  qAll("[data-contact-open]").forEach(row => row.addEventListener("click", () => {
+    // Messaging a blocked contact is not the action they meant.
+    if (row.dataset.contactState === "blocked") showContactPanel(row.dataset.contactOpen);
+    else R.push("compose", { to: row.dataset.contactOpen });
+  }));
+  qAll("[data-accept-contact]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    doAcceptContact(b.dataset.acceptContact);
+  }));
+  qAll("[data-block-contact]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    doBlockContact(b.dataset.blockContact);
+  }));
+  qAll("[data-cancel-request]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    doRemoveContact(b.dataset.cancelRequest);
+  }));
+  qAll("[data-add-contact]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    doRequestContact(b.dataset.addContact);
+  }));
   const contactsFilter = q("#contacts-filter");
   if (contactsFilter) {
     contactsFilter.addEventListener("input", () => {
@@ -890,7 +1032,11 @@ function attachEvents() {
       next?.setSelectionRange(caret, caret);
     });
   }
-  if (R.page === "contacts" && !R.sub && getUnlockedKeys()) loadContacts();
+  if (!R.sub && getUnlockedKeys() && (R.page === "contacts" || R.page === "messages")) {
+    // Messages needs contacts too: the requests tray filters on contact state
+    // and the inbox marks strangers.
+    loadContacts();
+  }
 
   // Back button (sub-pages)
   q("#btn-back")?.addEventListener("click", () => {
@@ -913,6 +1059,7 @@ function attachEvents() {
   // Load inbox when unlocked and on the Messages destination
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
     loadInbox();
+    if (S.tray === "requests") loadRequests();
   }
 
   // Add ID options
@@ -983,6 +1130,7 @@ function switchIdentity(identity) {
   S.messages = [];
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
+  S.requests = { incoming: [], loading: false, loaded: false, error: null };
   S.files = { dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false };
 }
 
@@ -1383,22 +1531,64 @@ async function ensureSession(identity) {
  */
 let inboxInFlight = null;
 
+/**
+ * Fold a poll response into the message store.
+ *
+ * `GET /inbox` **drains**: the relay hands each message over exactly once and
+ * forgets it. A tray that rendered straight off the last response would
+ * therefore empty itself on the next render, so everything fetched is kept
+ * here instead — which is also the seam EPIC-009's push channel folds into.
+ * (Durability across reloads is EPIC-009's; this store lives for the session.)
+ */
+function messageKey(message) {
+  return message.id || `${message.sender}:${message.timestamp}`;
+}
+
+function mergeInto(store, incoming, key = (entry) => entry.id) {
+  const byKey = new Map(store.map(entry => [key(entry), entry]));
+  for (const entry of incoming ?? []) byKey.set(key(entry), entry);
+  store.length = 0;
+  store.push(...byKey.values());
+  store.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  return store;
+}
+
+function mergeMessages(incoming) {
+  const parsed = (incoming ?? []).map(m => (typeof m === "string" ? JSON.parse(m) : m));
+  mergeInto(S.messages, parsed, messageKey);
+}
+
+/**
+ * Run challenge-signed reads one at a time.
+ *
+ * Same constraint as the single-flight inbox above, across *different* calls:
+ * the inbox drain and the requests drain each fetch a challenge, and whichever
+ * lands second invalidates the first one's signature.
+ */
+let challengeChain = Promise.resolve();
+
+function challengeSerial(task) {
+  const next = challengeChain.then(task, task);
+  challengeChain = next.catch(() => {});
+  return next;
+}
+
 function loadInbox() {
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
-  inboxInFlight ??= (async () => {
+  inboxInFlight ??= challengeSerial(async () => {
     try {
       // The SDK decrypts and emits tick-2 receipts for what actually opened.
       const { messages, acks } = await client.inboxAndAck();
-      S.messages = messages;
-      S.acks     = acks;
+      mergeMessages(messages);
+      mergeInto(S.acks, acks);
       if (R.page === "messages" && !R.sub) render();
     } catch (e) {
       console.warn("Inbox error:", e.message);
     } finally {
       inboxInFlight = null;
     }
-  })();
+  });
   return inboxInFlight;
 }
 
@@ -1420,6 +1610,11 @@ async function doSend() {
   const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
 
   try {
+    setStatus("Checking their key…");
+    if (!(await checkPinBeforeSend(client, to))) {
+      setStatus("✕ Not sent — key not trusted", "err");
+      return;
+    }
     setStatus("Sending…");
     await client.send(to, body, { signWith: sessionIsValid(sess) ? "session" : "identity" });
     setStatus("✓ Sent", "ok");
@@ -1552,9 +1747,8 @@ async function doDeleteEntry(path) {
 /**
  * Read `poweur-sys/relay/contacts.json` through the SDK.
  *
- * Read-only in T1 — requests, accept/block and key-pinning are E15-T2. Loading
- * it here is what makes the Contacts destination real rather than a stub, and
- * gives IdentityInput something to autocomplete against.
+ * Every write below goes back through the same file API, so contacts sync
+ * across devices (and to the CLI) with no web-only state anywhere.
  */
 async function loadContacts({ force = false } = {}) {
   const C = S.contacts;
@@ -1571,46 +1765,309 @@ async function loadContacts({ force = false } = {}) {
       identity: entry.identity,
       petname: entry.petname ?? null,
       state: entry.state ?? "accepted",
-      pinnedKey: entry.public_key ?? null,
+      pinnedKey: entry.pinned_key ?? null,
     }));
     C.loaded = true;
   } catch (error) {
     C.error = `Could not read contacts: ${error.message}`;
   } finally {
     C.loading = false;
-    if (R.page === "contacts" && !R.sub) render();
+    if (!R.sub) render();
   }
 }
 
-function showAddContactPanel() {
+/**
+ * Drain the relay's pending contact-request queue.
+ *
+ * Serialized with the inbox fetch: the relay keeps one outstanding challenge
+ * per identity, so two overlapping challenge-signed GETs invalidate each
+ * other's signature.
+ */
+function loadRequests({ force = false } = {}) {
+  const Q = S.requests;
+  if (Q.loading || (Q.loaded && !force)) return Promise.resolve();
+  const client = clientFor(S.identity);
+  if (!client) return Promise.resolve();
+
+  Q.loading = true;
+  return challengeSerial(async () => {
+    try {
+      // `GET /requests/{id}` drains the same way the inbox does.
+      mergeInto(Q.incoming, await client.requests());
+      Q.loaded = true;
+      Q.error = null;
+    } catch (error) {
+      Q.error = `Could not read requests: ${error.message}`;
+    } finally {
+      Q.loading = false;
+      if (R.page === "messages" && !R.sub) render();
+    }
+  });
+}
+
+/** Refresh everything a contact write invalidates, then repaint. */
+async function refreshContacts() {
+  S.contacts.loaded = false;
+  await loadContacts({ force: true });
+  if (S.tray === "requests") await loadRequests({ force: true });
+}
+
+async function doRequestContact(identity, { intro, petname } = {}) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  setLoading(true, `Requesting ${identity}…`);
+  try {
+    await client.requestContact(identity, {
+      ...(intro ? { intro } : {}),
+      ...(petname ? { petname } : {}),
+    });
+    toast(`Contact request sent to ${identity}`, "success");
+    await refreshContacts();
+    return true;
+  } catch (error) {
+    toast(error.message, "error");
+    return false;
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+
+/**
+ * Accept (or unblock): pin their key now and tell them. `silent` is the
+ * unblock case — there is no request to answer, so no notification is due.
+ */
+async function doAcceptContact(identity, { silent = false, petname } = {}) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  setLoading(true, `Accepting ${identity}…`);
+  try {
+    if (silent) {
+      const contacts = await client.contacts();
+      await contacts.set(identity, "accepted", petname ? { petname } : {});
+      toast(`${identity} unblocked`, "success");
+    } else {
+      const { notified } = await client.acceptContact(identity, petname ? { petname } : {});
+      toast(notified
+        ? `${identity} is now a contact`
+        : `${identity} is now a contact — they could not be notified`,
+        notified ? "success" : "warning");
+    }
+    await refreshContacts();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+
+async function doBlockContact(identity) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  setLoading(true, `Blocking ${identity}…`);
+  try {
+    await client.blockContact(identity);
+    toast(`${identity} blocked`, "success");
+    await refreshContacts();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+
+async function doRemoveContact(identity) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  setLoading(true, `Removing ${identity}…`);
+  try {
+    const contacts = await client.contacts();
+    await contacts.remove(identity);
+    toast(`Removed ${identity}`, "success");
+    await refreshContacts();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    setLoading(false);
+    render();
+  }
+}
+
+async function doSetPetname(identity, petname) {
+  const client = clientFor(S.identity);
+  if (!client) return;
+  const existing = contactFor(identity);
+  try {
+    const contacts = await client.contacts();
+    await contacts.set(identity, existing?.state ?? "accepted", { petname });
+    await refreshContacts();
+    render();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+/** Everything you can do to one contact, off the row's overflow button. */
+function showContactPanel(identity) {
+  const contact = contactFor(identity);
+  if (!contact) return;
+  const chip = CONTACT_STATE_CHIP[contact.state] ?? CONTACT_STATE_CHIP.accepted;
+
+  showPanel(contact.petname || idHandle(identity), `
+    <div class="kv-row"><span class="kv-label">Identity</span>
+      <span class="kv-value mono small">${esc(identity)}</span></div>
+    <div class="kv-row"><span class="kv-label">State</span>
+      <span class="kv-value"><span class="chip ${chip.cls}">${chip.label}</span></span></div>
+    <div class="kv-row"><span class="kv-label">Pinned key</span>
+      <span class="kv-value mono small">${contact.pinnedKey ? esc(contact.pinnedKey) : "not pinned"}</span></div>
+
+    <div class="form-group mt-md">
+      <label class="form-label" for="cp-petname">Petname</label>
+      <input id="cp-petname" class="input" type="text" value="${esc(contact.petname ?? "")}"
+             placeholder="What you call them" autocomplete="off" />
+    </div>
+    <button class="btn btn-primary" id="cp-save-petname">Save petname</button>
+
+    <div class="panel-actions mt-md">
+      <button class="btn" id="cp-message">Message</button>
+      ${contact.state === "blocked"
+        ? `<button class="btn" id="cp-unblock">Unblock</button>`
+        : `<button class="btn" id="cp-block">Block</button>`}
+      <button class="btn btn-danger" id="cp-remove">Remove</button>
+    </div>`,
+  (close) => {
+    q("#cp-save-petname")?.addEventListener("click", () => {
+      const value = q("#cp-petname")?.value.trim() ?? "";
+      close();
+      doSetPetname(identity, value);
+    });
+    q("#cp-message")?.addEventListener("click", () => { close(); R.push("compose", { to: identity }); });
+    q("#cp-block")?.addEventListener("click", () => { close(); doBlockContact(identity); });
+    q("#cp-unblock")?.addEventListener("click", () => { close(); doAcceptContact(identity, { silent: true }); });
+    q("#cp-remove")?.addEventListener("click", () => { close(); doRemoveContact(identity); });
+  });
+}
+
+function showAddContactPanel(preset = "") {
   let picked = null;
   showPanel("Add a contact", `
     <p class="muted small" style="margin-bottom:12px">
-      Type a Poweur ID. We resolve it first, so a typo fails here rather than silently later.
+      Type a Poweur ID. We resolve it first, so a typo fails here rather than silently later —
+      and the key we resolve now is the one we pin.
     </p>
     <div id="add-contact-input"></div>
-    <button class="btn btn-primary mt-md" id="btn-add-contact-go" disabled>Message them</button>
-    <p class="muted small" style="margin-top:10px">
-      Sending a contact <em>request</em> arrives with EPIC-015 E15-T2; for now this opens a message.
-    </p>`,
-  () => {
+    <div class="form-group mt-md">
+      <label class="form-label" for="ac-intro">Say hello (optional)</label>
+      <input id="ac-intro" class="input" type="text" placeholder="contact request" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ac-petname">Petname (optional)</label>
+      <input id="ac-petname" class="input" type="text" placeholder="What you call them" autocomplete="off" />
+    </div>
+    <button class="btn btn-primary mt-md" id="btn-add-contact-go" disabled>Send request</button>
+    <button class="btn mt-sm" id="btn-add-contact-msg" disabled>Just message them</button>`,
+  (close) => {
     const host = q("#add-contact-input");
     const go = q("#btn-add-contact-go");
+    const msg = q("#btn-add-contact-msg");
     const input = IdentityInput({
       resolve: resolveForComponents,
       contacts: S.contacts.list,
+      value: preset,
       label: "Identity",
-      onChange: (result) => { picked = result; if (go) go.disabled = !result; },
+      onChange: (result) => {
+        picked = result;
+        if (go) go.disabled = !result;
+        if (msg) msg.disabled = !result;
+      },
       onSubmit: () => go?.click(),
     });
     host?.replaceChildren(input.el);
     input.focus();
     go?.addEventListener("click", () => {
       if (!picked) return;
-      closePanel();
+      const intro = q("#ac-intro")?.value.trim();
+      const petname = q("#ac-petname")?.value.trim();
+      close();
+      doRequestContact(picked.identity, { intro, petname });
+    });
+    msg?.addEventListener("click", () => {
+      if (!picked) return;
+      close();
       R.push("compose", { to: picked.identity });
     });
   });
+}
+
+/**
+ * The known-hosts moment (EPIC-007 E07-T4), as a dialog rather than a toast.
+ *
+ * A pinned contact whose key changed with no rotation statement is what a
+ * compromised relay or registrar looks like, so this blocks the send and makes
+ * the user say the new key is fine — the web twin of the CLI's
+ * `--accept-new-key`. Resolves true only on an explicit "trust".
+ */
+function showKeyMismatchDialog({ recipient, pinnedKey, resolvedKey }) {
+  return new Promise((resolve) => {
+    let trusted = false;
+    showPanel("Key changed", `
+      <p class="val-warn" style="font-weight:600;margin-bottom:8px">
+        ${esc(recipient)}'s key does not match the one you pinned.
+      </p>
+      <p class="muted small" style="margin-bottom:12px">
+        No rotation statement covers this change. It can mean a compromised relay or
+        registrar impersonating your contact. Verify with them out of band before you trust it.
+      </p>
+      <div class="kv-row"><span class="kv-label">Pinned</span>
+        <span class="kv-value mono small" id="km-pinned">${esc(pinnedKey ?? "")}</span></div>
+      <div class="kv-row"><span class="kv-label">Now</span>
+        <span class="kv-value mono small" id="km-resolved">${esc(resolvedKey ?? "")}</span></div>
+      <div class="panel-actions mt-md">
+        <button class="btn btn-primary" id="km-cancel">Don't send</button>
+        <button class="btn btn-danger" id="km-trust">Trust new key</button>
+      </div>`,
+    (close) => {
+      q("#km-cancel")?.addEventListener("click", () => close());
+      q("#km-trust")?.addEventListener("click", () => { trusted = true; close(); });
+    },
+    () => resolve(trusted));
+  });
+}
+
+/**
+ * Gate a send on the recipient's pin. Returns false only when the user was
+ * shown a mismatch and declined; every other failure fails *open*, because
+ * pinning is client-side defence in depth and not the security boundary.
+ */
+async function checkPinBeforeSend(client, recipient) {
+  let contacts, pin;
+  try {
+    contacts = await client.contacts();
+    pin = await contacts.checkPin(recipient);
+  } catch {
+    return true;
+  }
+  if (pin.status === "ok" || pin.status === "unpinned") return true;
+
+  if (pin.status === "rotated" && pin.resolvedKey) {
+    // Covered by a signed rotation (E01-T5): re-pin and say so, don't block.
+    await contacts.repin(recipient, pin.resolvedKey).catch(() => {});
+    toast(`${recipient} rotated their key — re-pinned`, "info");
+    await refreshContacts();
+    return true;
+  }
+
+  const trusted = await showKeyMismatchDialog({
+    recipient, pinnedKey: pin.pinnedKey, resolvedKey: pin.resolvedKey,
+  });
+  if (!trusted) return false;
+  if (pin.resolvedKey) {
+    await contacts.repin(recipient, pin.resolvedKey).catch(() => {});
+    await refreshContacts();
+  }
+  return true;
 }
 
 // ─── Keys & devices (EPIC-011) ───────────────────────────────────────────────

@@ -11,10 +11,6 @@ import { openClient } from "../../node/session-factory.js";
 import {
   ANON_CHALLENGE_POW,
   CONTACT_ACCEPTED,
-  CONTACT_BLOCKED,
-  CONTACT_REQUESTED,
-  MSG_TYPE_CONTACT_ACCEPT,
-  MSG_TYPE_CONTACT_REQUEST,
   type AnonymousPolicy,
   type InboxMode,
 } from "../../types.js";
@@ -62,7 +58,7 @@ export async function contactsCommand(argv: string[], streams: Streams): Promise
     }
     case "block": {
       const target = requirePositional(args, 0, "usage: poweur contacts block <identity>").toLowerCase();
-      await contacts.set(target, CONTACT_BLOCKED, {});
+      await client.blockContact(target);
       streams.stdout(`blocked ${target}\n`);
       return 0;
     }
@@ -80,28 +76,27 @@ export async function contactsCommand(argv: string[], streams: Streams): Promise
         0,
         "usage: poweur contacts request <identity> [<intro message>]",
       ).toLowerCase();
-      const intro = args.positional[1] ?? "contact request";
-      const file = await contacts.load();
-      const existing = file.contacts.find((c) => c.identity === target);
-      if (existing?.state === CONTACT_ACCEPTED) {
-        throw new UsageError(`${target} is already an accepted contact`);
+      try {
+        await client.requestContact(target, {
+          ...(args.positional[1] ? { intro: args.positional[1] } : {}),
+          ...(flagString(args, "petname") ? { petname: flagString(args, "petname") } : {}),
+        });
+      } catch (error) {
+        if (error instanceof PoweurError && error.code === "invalid_argument") {
+          throw new UsageError(error.message);
+        }
+        throw error;
       }
-      // Record the request locally first: if the send fails, the intent is
-      // still on record and can be retried.
-      await contacts.set(target, CONTACT_REQUESTED, {});
-      await client.send(target, intro, { type: MSG_TYPE_CONTACT_REQUEST });
       streams.stdout(`contact request sent to ${target}\n`);
       return 0;
     }
     case "accept": {
       const target = requirePositional(args, 0, "usage: poweur contacts accept <identity>").toLowerCase();
-      await contacts.set(target, CONTACT_ACCEPTED, {
+      const { notified } = await client.acceptContact(target, {
         ...(flagString(args, "petname") ? { petname: flagString(args, "petname") } : {}),
       });
       streams.stdout(`accepted ${target}\n`);
-      try {
-        await client.send(target, "contact request accepted", { type: MSG_TYPE_CONTACT_ACCEPT });
-      } catch {
+      if (!notified) {
         // Best-effort: their policy decides whether the notification lands.
         streams.stderr(
           "note: contact accepted locally, but the acceptance notification could not be sent\n",

@@ -1,6 +1,6 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
-- **Status:** in progress — T6 and T1 done; T2–T5 open
+- **Status:** in progress — T6, T1 and T2 done; T3–T5 open
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
@@ -193,22 +193,57 @@ never forced — contacts re-pin), designating a recovery-master from the web ap
 the enforcement; the UI to nominate one is not built), and QR as an alternative to typing the
 request code (E11-T3 Transport 2, unchecked there).
 
-### E15-T2 — Contacts & requests
+### E15-T2 — Contacts & requests — **done**
 
-- [ ] Contacts destination: list from `poweur-sys/relay/contacts.json` (via DAV) with
-      profile cards, states (accepted / requested / blocked), petnames, search/filter
-- [ ] **Add a contact** two ways: (a) IdentityInput (type or search a name) → sends
-      `sys.contact.request`; (b) one-tap **"Add contact"** on any received message / request
-- [ ] Requests tray: pending incoming (`GET /requests/{id}`) with **Accept / Block**;
-      pending outgoing shown as `requested`
-- [ ] Key-pinning UX (EPIC-007 E07-T4): on a pinned-key mismatch, a **blocking dialog**
-      showing both key fingerprints and requiring explicit "trust new key" (mirrors the
-      CLI's `--accept-new-key`); this closes the E07-T4 "web blocking dialog" open item
-- [ ] Writes go through the file API so contacts sync across devices
+- [x] Contacts destination: list from `poweur-sys/relay/contacts.json` (via DAV) with
+      profile cards, states (accepted / requested / blocked), petnames, search/filter.
+      The row's own tap messages them and an overflow panel holds petname, block/unblock
+      and remove — at 375px a name, an ID, a state chip *and* a button do not fit
+- [x] **Add a contact** two ways: (a) IdentityInput (type or search a name) → sends
+      `sys.contact.request` (with an optional intro and petname); (b) one-tap **"Add
+      contact"** on a message from someone we hold no entry for
+- [x] Requests tray: pending incoming with **Accept / Block**; pending outgoing shown as
+      `requested`, with a cancel
+- [x] Key-pinning UX (EPIC-007 E07-T4): on a pinned-key mismatch, a **blocking dialog**
+      showing both keys and requiring explicit "Trust new key" (the web twin of
+      `--accept-new-key`); a signed rotation re-pins silently and says so instead. Closes
+      the E07-T4 "web blocking dialog" open item
+- [x] Writes go through the file API (`@poweur/client`'s `Contacts`), so contacts sync
+      across devices and to the CLI
 
-**Acceptance:** Playwright flow — user A requests user B by typed name, B sees the request,
-accepts from the requests tray, both can then message; a simulated key swap raises the
-blocking dialog.
+**The requests tray reads two sources, because a request arrives two ways.** Under
+`contacts_and_requests` the relay parks a stranger's first `sys.contact.request` in the
+requests queue; under the default `open` policy the identical envelope is delivered to the
+inbox as a typed message. A tray that read only the queue would be empty for every
+default-policy user, with their contact request buried among conversations — so the tray
+merges the queue with inbox messages of that type, minus anyone already accepted or blocked.
+
+**Found and fixed here: the inbox list was losing messages.** `GET /inbox` and
+`GET /requests/{id}` both **drain** — the relay hands each entry over exactly once — and
+`app.js` assigned each poll response over `S.messages`. Any second render therefore emptied
+the list. Both now fold into a session-lived store keyed by message id, which is also the
+"render from a message store, not a poll response" seam this epic promised EPIC-009.
+Durability across reloads stays EPIC-009's (inbox persistence).
+
+**Also: challenge-signed reads are serialized.** The relay keeps one outstanding challenge
+per identity, so the inbox drain and the requests drain invalidated each other's signature
+when both ran from one render. E15-T6 noted this constraint; `challengeSerial()` in
+`app.js` is the general fix, replacing the inbox-only single-flight guard.
+
+**Landed in `@poweur/client` (E17), not the app:** `PoweurClient.requestContact()`,
+`acceptContact()` and `blockContact()`. The compose-two-things logic (write the contacts
+document, then send the typed envelope, in that order so a failed send leaves a retryable
+intent) existed only inside the TS CLI's command layer, where a browser cannot reach it.
+Both CLIs now call the same helpers, which also fixes a Go↔TS divergence: `poweur contacts
+request` in Go pinned the resolved key, the TS one did not. New tests:
+`packages/client-ts/test/contacts-relay.test.ts` (4 live-relay cases covering both policy
+routings, the re-request guard, and that a block sends nothing).
+
+**Acceptance:** met. `test/e2e/contacts.spec.js` drives two browser contexts — A requests B
+by typed name (the button unlocks only once the ID resolves), B sees it in the requests
+tray with the intro, accepts, B's pin is asserted from the stored document, B replies and A
+receives it — plus a simulated key swap that raises the blocking dialog, refuses the send,
+and goes through only after "Trust new key".
 
 ### E15-T3 — Inbox policy, anonymous & PoW settings
 
