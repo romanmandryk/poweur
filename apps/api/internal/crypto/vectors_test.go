@@ -163,6 +163,34 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 				"dav:rw:shared/project-x", vectorTime, nonce),
 		},
 		{
+			Name: "keystore-enroll",
+			Inputs: map[string]any{
+				"identity": "alice.poweur.net", "enrollment_id": "enr-001",
+				"kind": "passkey", "credential_id": "Y3JlZC0wMDE",
+				"wrapped_digest": encStr, "issued_at": vectorTime, "nonce": nonce,
+			},
+			Canonical: CanonicalKeystoreEnroll("alice.poweur.net", "enr-001", "passkey",
+				"Y3JlZC0wMDE", encStr, vectorTime, nonce),
+		},
+		{
+			Name: "keystore-enroll-no-credential",
+			Inputs: map[string]any{
+				"identity": "alice.poweur.net", "enrollment_id": "enr-002",
+				"kind": "recovery-kit", "credential_id": "",
+				"wrapped_digest": encStr, "issued_at": vectorTime, "nonce": nonce,
+			},
+			Canonical: CanonicalKeystoreEnroll("alice.poweur.net", "enr-002", "recovery-kit",
+				"", encStr, vectorTime, nonce),
+		},
+		{
+			Name: "keystore-remove",
+			Inputs: map[string]any{
+				"identity": "alice.poweur.net", "enrollment_id": "enr-001",
+				"issued_at": vectorTime, "nonce": nonce,
+			},
+			Canonical: CanonicalKeystoreRemove("alice.poweur.net", "enr-001", vectorTime, nonce),
+		},
+		{
 			Name: "session-registration",
 			Inputs: map[string]any{
 				"identity": "alice.poweur.net", "session_public_key": encStr,

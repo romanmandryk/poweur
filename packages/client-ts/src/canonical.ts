@@ -247,3 +247,50 @@ export function marshalCanonicalJSON(value: unknown): string {
   const body = keys.map((k) => `${JSON.stringify(k)}:${marshalCanonicalJSON(record[k])}`);
   return `{${body.join(",")}}`;
 }
+
+/** PUT /identities/{id}/keystore (crypto.CanonicalKeystoreEnroll). */
+export function canonicalKeystoreEnroll(
+  identity: string,
+  enrollmentId: string,
+  kind: string,
+  credentialId: string,
+  wrappedDigest: string,
+  issuedAt: string,
+  nonce: string,
+): string {
+  return [
+    "keystore-enroll",
+    identity,
+    enrollmentId,
+    kind,
+    credentialId,
+    wrappedDigest,
+    issuedAt,
+    nonce,
+  ].join("\n");
+}
+
+/** DELETE /identities/{id}/keystore/{enrollment} (crypto.CanonicalKeystoreRemove). */
+export function canonicalKeystoreRemove(
+  identity: string,
+  enrollmentId: string,
+  issuedAt: string,
+  nonce: string,
+): string {
+  return ["keystore-remove", identity, enrollmentId, issuedAt, nonce].join("\n");
+}
+
+/**
+ * Device-enrollment rendezvous actions (crypto.CanonicalEnrollAction).
+ * `action` is "enroll-fetch" or "enroll-deliver"; the rendezvous id is bound
+ * in so an approval cannot be redirected to a different offer.
+ */
+export function canonicalEnrollAction(
+  action: string,
+  identity: string,
+  rendezvousId: string,
+  issuedAt: string,
+  nonce: string,
+): string {
+  return [action, identity, rendezvousId, issuedAt, nonce].join("\n");
+}

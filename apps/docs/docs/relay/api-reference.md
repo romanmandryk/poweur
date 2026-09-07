@@ -38,6 +38,14 @@ The relay exposes two distinct surfaces and authenticates them differently:
 | `POST /identities/:identity/encryption-key` | owner-only / admin | DNS-token + identity-signed |
 | `POST /identities/:identity/export` | owner-only | identity-signed export envelope → `application/gzip` |
 | `POST /identities/:identity/rotate` | owner-only | old-key rotation signature + new signed document |
+| `PUT /identities/:identity/keystore` | owner-only | identity-signed enrollment |
+| `POST /identities/:identity/keystore/fetch` | **authenticator-only** | WebAuthn assertion — the one endpoint that does *not* require the identity key |
+| `DELETE /identities/:identity/keystore/:enrollment` | owner-only | identity-signed removal |
+| `POST /identities/:identity/keystore/list` | owner-only | identity-signed; metadata only |
+| `POST /identities/:identity/enroll/offer` | **open** | new device has no key yet; capped per identity |
+| `POST /identities/:identity/enroll/:rendezvous/fetch` | owner-only | identity-signed |
+| `POST /identities/:identity/enroll/:rendezvous/deliver` | owner-only | identity-signed |
+| `GET`/`DELETE /identities/:identity/enroll/:rendezvous` | bearer | rendezvous id; releases only ciphertext |
 
 ## At-least-one-local rule {#at-least-one-local-rule}
 
@@ -656,6 +664,214 @@ When `POWEUR_DATA` is set, includes storage health; `status` may be `degraded` i
 | Status | Meaning |
 |--------|---------|
 | `200 OK` | Relay is healthy (or degraded but still serving) |
+
+---
+
+## Keystore (EPIC-011)
+
+Wrapped copies of an identity's master seed, one per enrolled authenticator. The relay stores
+**ciphertext it cannot open** — wrapping secrets never leave the authenticator or device. See
+[Key management & recovery](/security/key-management).
+
+Writes are authenticated by the identity key; the read is authenticated by a WebAuthn assertion
+instead. That asymmetry is deliberate: the read exists to recover an identity whose key you no
+longer hold, so requiring that key would be circular.
+
+The wrapped blobs deliberately live **outside** the DAV tree. They need a read path the identity
+key cannot provide, and a blob inside the user's file tree would be one misplaced delete away
+from destroying their recovery.
+
+### PUT /identities/:identity/keystore
+
+Store or replace one enrollment. Signed with `keystore-enroll`:
+
+```
+keystore-enroll\n<identity>\n<enrollment_id>\n<kind>\n<credential_id>\n<wrapped_digest>\n<issued_at>\n<nonce>
+```
+
+`wrapped_digest` is the base64url SHA-256 of the raw `wrapped` JSON as sent. It binds the
+signature to the exact ciphertext, so a swapped blob under an otherwise valid authorization is
+rejected.
+
+```json
+{
+  "enrollment_id":         "enr-001",
+  "kind":                  "passkey",
+  "wrap":                  "prf",
+  "payload":               "seed",
+  "credential_id":         "<base64url>",
+  "credential_public_key": "<SPKI DER, base64url>",
+  "credential_alg":        -8,
+  "wrapped":               { "iv": "...", "ciphertext": "..." },
+  "label":                 "Laptop",
+  "role":                  "device",
+  "issued_at":             "2026-01-15T09:30:00Z",
+  "nonce":                 "...",
+  "identity_signature":    "..."
+}
+```
+
+| Field | Values |
+|-------|--------|
+| `kind` | `passkey` \| `hardware-key` \| `cli-passphrase` \| `recovery-kit` \| `native` |
+| `wrap` | `prf` \| `pin` \| `passphrase` \| `native` |
+| `payload` | `seed` \| `legacy-keypair` (identities predating the seed model) |
+| `credential_alg` | COSE id: `-7` ES256, `-8` EdDSA, `-257` RS256 |
+| `role` | `device` (default) \| `recovery-master` |
+
+`credential_public_key` is **SPKI DER**, exactly what WebAuthn's `getPublicKey()` returns — not
+raw COSE. This keeps assertion verification inside the standard library rather than adding a
+CBOR/COSE parser to the trusted path.
+
+`credential_id` and `credential_public_key` must be supplied together: a passkey enrollment the
+relay cannot verify could never satisfy the bootstrap read, so it is rejected rather than stored
+as a dead entry.
+
+**Responses:** `200` with `{enrollment_id, created_at}`; `400` invalid fields; `401` bad
+signature; `404` unknown identity.
+
+### POST /identities/:identity/keystore/fetch
+
+The bootstrap read. Obtain a challenge from `GET /auth/challenge?identity=...`, sign it with an
+enrolled authenticator, and post the assertion:
+
+```json
+{
+  "assertion": {
+    "credential_id":      "<base64url>",
+    "client_data_json":   "<base64url>",
+    "authenticator_data": "<base64url>",
+    "signature":          "<base64url>"
+  },
+  "rp_id": "poweur.net"
+}
+```
+
+Verified: `clientDataJSON.type` is `webauthn.get`; the challenge matches the relay-issued one;
+`rpIdHash` matches an acceptable relying-party id; the user-present **and user-verified** flags
+are set; and the signature verifies over `authenticatorData || SHA-256(clientDataJSON)`.
+
+Acceptable `rp_id` values are the identity itself or its registrable domain when hosted — a
+credential may legitimately be scoped to `poweur.net` while the request arrives at
+`alice.poweur.net` (see EPIC-018 E18-T4).
+
+**Responses:** `200` with `{identity, entries[]}` (ciphertext only); `401` for anything
+rejected; `404` unknown identity.
+
+:::note
+The challenge is **single-use and consumed on every attempt**, so a captured assertion cannot be
+replayed. An unenrolled credential id and a bad signature return byte-identical `401` responses:
+the caller must not learn which credentials are enrolled. Combined with discoverable credentials
+(the web client already sets `residentKey: "required"`), the relay never reveals credential ids
+to an unverified caller.
+:::
+
+### POST /identities/:identity/keystore/list
+
+Enumerate enrollments for the owner — the "Keys & devices" inventory. Signed with
+`keystore-list\n<identity>\n<issued_at>\n<nonce>`.
+
+Returns **metadata only**: `enrollment_id`, `kind`, `wrap`, `payload`, `label`, `role`,
+`has_passkey`, `created_at`, `last_used_at`. Listing your devices needs no access to the
+wrapped seed copies, so the ciphertext is not in the response at all.
+
+### DELETE /identities/:identity/keystore/:enrollment
+
+Remove an enrollment. Signed with `keystore-remove`:
+
+```
+keystore-remove\n<identity>\n<enrollment_id>\n<issued_at>\n<nonce>
+```
+
+**Responses:** `204`; `401` bad signature; `404` unknown identity or enrollment.
+
+Optional fields:
+
+| Field | Effect |
+|-------|--------|
+| `actor_assertion` | WebAuthn assertion proving the caller holds a `recovery-master` authenticator |
+| `rp_id` | Relying party the actor assertion was scoped to |
+| `allow_last` | Permit removing the final enrollment (refused by default) |
+| `revoke_sessions` | Also end the removed device's live sessions |
+
+**Recovery-master gating.** Once an identity has a `recovery-master` enrollment, every removal
+must carry `actor_assertion` from it. This is what makes the role enforceable rather than
+advisory: the identity key is shared by every device, so an identity signature alone says
+nothing about *which* device is asking — and without the extra proof a stolen phone could evict
+the very security key meant to revoke it.
+
+Removing the last enrollment returns `409 last_enrollment` unless `allow_last` is set. Silently
+stranding recovery is worse than an error the caller has to acknowledge.
+
+**Responses:** `204`, or `200` with `{enrollment_id, sessions_revoked}` when sessions were
+revoked; `401` bad signature; `403` recovery-master required; `404`; `409` last enrollment.
+
+:::caution
+Removal denies that authenticator the bootstrap read. It does **not** protect against an
+attacker who already extracted the seed — that is what rotation is for.
+:::
+
+---
+
+## Device enrollment ceremony (EPIC-011)
+
+Moving a seed to a new device needs an **authentic** channel, not a secret one. The new device
+generates an ephemeral X25519 keypair and displays a six-digit code derived from its public key;
+the user types that code on a device that already holds the identity, which seals the seed to
+the ephemeral key. See [Key management & recovery](/security/key-management).
+
+The relay is a blind letterbox throughout: it sees an ephemeral public key and a sealed blob,
+and can open neither.
+
+:::note Why there is no PAKE
+An earlier design had the code protect the payload, which would have made it a six-digit
+password — brute-forceable offline by anyone holding the ciphertext, hence the usual SPAKE2
+machinery. Having the *new* device generate the keypair removes the requirement entirely: the
+code authenticates a public key and encrypts nothing, so there is no offline target. Forging it
+means finding a colliding code on the first and only try. This is the numeric-comparison model
+used by Bluetooth pairing and Signal safety numbers, and it needs no exotic primitive — which
+matters, because no reviewed browser PAKE implementation exists.
+:::
+
+### POST /identities/:identity/enroll/offer
+
+Opened by the **new** device. Unauthenticated by necessity — it has no key yet — so offers are
+capped at 5 concurrent per identity (`429 too_many_offers`) and expire after 10 minutes.
+
+```json
+{ "ephemeral_public_key": "<32-byte x25519, base64url>", "label": "Firefox on Linux" }
+```
+
+Returns `201` with `{rendezvous_id, sas, expires_at}`. **Compute the SAS yourself** from the
+ephemeral key rather than trusting the relay's copy:
+
+```
+sas = SHA-256("poweur/v1/enroll-sas\n" + ephemeral_public_key)[0:4] as uint32 mod 10^6, zero-padded to 6
+```
+
+### POST /identities/:identity/enroll/:rendezvous/fetch
+
+The approving device asks what it is approving. Signed with
+`enroll-fetch\n<identity>\n<rendezvous_id>\n<issued_at>\n<nonce>` — the rendezvous id is bound in,
+so an approval cannot be redirected to a different offer. Returns the ephemeral public key, the
+SAS and the device label.
+
+### POST /identities/:identity/enroll/:rendezvous/deliver
+
+Posts the sealed seed. Signed with `enroll-deliver\n<identity>\n<rendezvous_id>\n<issued_at>\n<nonce>`.
+`sealed` is opaque to the relay. Delivering twice returns `409`.
+
+### GET /identities/:identity/enroll/:rendezvous
+
+Polled by the new device. Returns `{ready: false}` until approval, then `{ready: true, sealed}`
+**once** — the rendezvous is consumed, so a captured id cannot be replayed. The id acts as a
+bearer token, which is safe because it releases only ciphertext requiring the ephemeral private
+key that never left the new device.
+
+### DELETE /identities/:identity/enroll/:rendezvous
+
+Abandon an offer, freeing its slot. Without this a user who backed out would occupy one of the
+five slots until it expired.
 
 ---
 
