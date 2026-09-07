@@ -1,6 +1,6 @@
 # EPIC-014 — Anonymous messaging & sender challenges (proof-of-work)
 
-- **Status:** core complete (T1–T3 + CLI + registration gate shipped; web page + stranger-challenge seam open)
+- **Status:** core complete (T1–T3 + CLI + web app + registration gate shipped; public contact page + stranger-challenge seam open)
 - **Priority:** P2 (after EPIC-007 lands the inbox-policy surface it extends)
 - **Depends on:** EPIC-007 (inbox policy + requests queue), EPIC-006 (policy schema);
   feeds EPIC-012 (web contact forms), EPIC-002 (deferred PoW registration gate)
@@ -12,9 +12,9 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E14-T1 Spec | **done** | [`apps/docs/docs/trust/anonymous-and-challenges.md`](../apps/docs/docs/trust/anonymous-and-challenges.md) + PCP-0006; measured difficulty table committed (native: 16 bits ≈ 40 ms, 20 ≈ 0.6 s, 24 ≈ 9 s); coordinated with E07's schema (the `anonymous` block extends `inbox-policy.schema.json`) |
-| E14-T2 PoW primitive | **done** | `packages/identity/pow.go` (HMAC-sealed stateless tokens, purpose-bound, bit dial clamped [8, 30], cancellable solve, benchmark) + `apps/web/js/pow.js` (chunked WebCrypto solver, vitest-covered) |
+| E14-T2 PoW primitive | **done** | `packages/identity/pow.go` (HMAC-sealed stateless tokens, purpose-bound, bit dial clamped [8, 30], cancellable solve, benchmark) + the JS solver, since moved into `packages/client-ts/src/pow.ts` by E15-T6 (was `apps/web/js/pow.js`) |
 | E14-T3 Relay enforcement | **done** | Unsigned envelopes → opt-in check → 428 challenge → verified single-use solution → dedicated anon queue (`GET /anon/{identity}`); encrypt-only holds (ephemeral keys); size/daily caps + per-IP rate limit; load auto-raises the difficulty floor (+4 bits over 120 challenges/min); `verified`/`payment` return typed envelopes with 501 on attempts. Full rejection-path matrix in `anon_test.go`. **Open:** `stranger_challenge` gate for identified non-contacts (seam specified; lands with E07-T5) |
-| E14-T4 Client UX | **partial** | CLI shipped: `poweur send --anon` (auto-solve with progress), `poweur anon` (decrypting drain with ANONYMOUS marker + trust warning), `poweur policy set --anon-*`; `TestINT_ANON_01` end to end. **Deferred (EPIC-012):** web anon-send page + difficulty slider + anon-queue view |
+| E14-T4 Client UX | **done for CLI + web app** | CLI shipped: `poweur send --anon` (auto-solve with progress), `poweur anon` (decrypting drain with ANONYMOUS marker + trust warning), `poweur policy set --anon-*`; `TestINT_ANON_01` end to end. Web app shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T3: policy panel with the difficulty slider, anonymous tray, in-page solving on send. **Open (EPIC-012):** the same send from a public page with no identity |
 | E14-T5 Second consumers | **done** (E07 hook open) | `REGISTRATION_GATE=pow` + `REGISTRATION_POW_BITS` + `GET /auth/pow` + CLI auto-solve (`TestINT_ANON_02`) — **closes the EPIC-002 deferral**; PCP-0006 filed; E07-T5 contact-request PoW remains with EPIC-007 |
 
 ## Goal
@@ -114,7 +114,7 @@ and payment land as designed slots with stub enforcement.
       constant-time, allocation-light verify
 - [x] Difficulty in bits with a fixed window ([8, 30], constants in the package);
       benchmark test emitting the bits→duration table (feeds the spec)
-- [x] JS solver for the web app (`apps/web/js/pow.js`, WebCrypto sha256, chunked so the
+- [x] JS solver for the web app (now `packages/client-ts/src/pow.ts`; was `apps/web/js/pow.js` until E15-T6 — WebCrypto sha256, chunked so the
       UI stays responsive; Worker deferred with the web UI pass)
 - [x] Table-driven tests: solve/verify roundtrip across bit range, tamper (wrong
       recipient/bits/expiry), expiry, wrong-secret rejection
@@ -151,14 +151,21 @@ deferral gets a note pointing here once the primitive exists.
       difficulty/ETA, respects context cancel); `poweur inbox --anon` to read the anon
       queue; `poweur policy` subcommand to view/set the anonymous block of
       `inbox-policy.json` (write via DAV like `share`/`dav password`)
-- [ ] **Deferred (EPIC-012):** web app anon-queue view (visually distinct, no reply
-      affordance); settings panel for the policy block with a difficulty slider showing
-      human terms ("~1 s on a laptop, ~10 s on a phone")
-- [ ] **Partial:** anonymous *sending* page ties into EPIC-012's contact form — the JS
-      solver + form snippet EPIC-012 can embed (that epic owns the website shape)
+- [x] Web app anon-queue view (visually distinct, no reply affordance) and the settings
+      panel with the human-terms difficulty slider — shipped with
+      [EPIC-015](EPIC-015-web-app-ux.md) E15-T3, not EPIC-012. The slider quotes
+      *browser* seconds (the measured table ×5–10), since the sender is a browser
+- [x] Anonymous **sending** from the web app's compose screen, with in-page solving,
+      attempt-count progress and an abort — `sendAnonymous` gained `onSolveProgress` and
+      `signal` for it
+- [ ] **Still EPIC-012's:** the same send path on a *public* page with no signed-in
+      identity — the components are ready (they take no app-shell dependency); that epic
+      owns the website shape
 
 **Acceptance:** two-browser demo: recipient enables anon+PoW, visitor sends without any
 identity, message appears in the anon queue; slider changes measurably change solve time.
+✅ for the two-browser half (`apps/web/test/e2e/policy.spec.js`, E15-T3); the visitor
+there is signed in but sends unsigned, which is the same wire path.
 
 ### E14-T5 — Second consumers of the primitive (follow-through)
 

@@ -3,12 +3,12 @@ package identity
 import (
 	"crypto/ed25519"
 	"encoding/base64"
-	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/poweur/cli/internal/config"
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
+	idpkg "github.com/poweur/identity"
 )
 
 // GenerateKeypair returns a new Ed25519 signing keypair for long-lived identity signing.
@@ -55,22 +55,13 @@ func SaveEncryptionPrivateKey(identity string, privateKey []byte) (string, error
 	return path, nil
 }
 
+// LoadPrivateKey reads a signing key, transparently decrypting a
+// passphrase-protected file (EPIC-011 E11-T4). The passphrase comes from
+// POWEUR_KEY_PASSPHRASE; use LoadPrivateKeyWithPassphrase to supply one
+// directly.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	decoded, err := base64.RawStdEncoding.DecodeString(string(data))
-	if err != nil {
-		decoded, err = base64.StdEncoding.DecodeString(string(data))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(decoded) != ed25519.PrivateKeySize {
-		return nil, errors.New("invalid private key size")
-	}
-	return ed25519.PrivateKey(decoded), nil
+	priv, _, err := LoadPrivateKeyWithPassphrase(path, "")
+	return priv, err
 }
 
 // LoadEncryptionPrivateKey reads the X25519 private key for an identity.
@@ -79,21 +70,8 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 // key means the identity cannot decrypt inbound messages until one is
 // generated and published via `poweur identity add-encryption-key`.
 func LoadEncryptionPrivateKey(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	decoded, err := base64.RawStdEncoding.DecodeString(string(data))
-	if err != nil {
-		decoded, err = base64.StdEncoding.DecodeString(string(data))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(decoded) != 32 {
-		return nil, errors.New("invalid x25519 private key size")
-	}
-	return decoded, nil
+	key, _, err := LoadEncryptionPrivateKeyWithPassphrase(path, "")
+	return key, err
 }
 
 func KeyPath(keysDir, identity string) string {
@@ -107,4 +85,61 @@ func EncryptionKeyPath(keysDir, identity string) string {
 
 func PublicKeyString(publicKey ed25519.PublicKey) string {
 	return base64.RawURLEncoding.EncodeToString(publicKey)
+}
+
+// ── Master-seed derivation (EPIC-011 E11-T1) ─────────────────────────────────
+//
+// Derivation itself lives in packages/identity so the relay, the CLI and the
+// TypeScript client all agree; these are the CLI-shaped wrappers.
+
+// SeedLen is the length of a master seed in bytes.
+const SeedLen = idpkg.SeedLen
+
+// NewSeed returns a fresh random master seed.
+func NewSeed() ([]byte, error) { return idpkg.NewSeed() }
+
+// ParseSeed accepts either encoding of a master seed: unpadded base64url, or a
+// 24-word BIP39 recovery mnemonic. Every --seed flag therefore takes a pasted
+// recovery kit without a second option.
+func ParseSeed(encoded string) ([]byte, error) { return idpkg.ParseSeedOrMnemonic(encoded) }
+
+// SeedToMnemonic encodes a seed as a 24-word recovery mnemonic.
+func SeedToMnemonic(seed []byte) (string, error) { return idpkg.SeedToMnemonic(seed) }
+
+// NewRecoveryKit builds both encodings of a seed for one identity.
+func NewRecoveryKit(identity, relay string, seed []byte) (idpkg.RecoveryKit, error) {
+	return idpkg.NewRecoveryKit(identity, relay, seed)
+}
+
+// FormatSeed renders a master seed for display or storage.
+func FormatSeed(seed []byte) string { return idpkg.EncodeSeed(seed) }
+
+// KeypairFromSeed derives the identity's Ed25519 signing keypair.
+func KeypairFromSeed(seed []byte) (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	return idpkg.DeriveSigningKey(seed)
+}
+
+// EncryptionKeypairFromSeed derives the identity's X25519 encryption keypair.
+func EncryptionKeypairFromSeed(seed []byte) (publicKey, privateKey []byte, err error) {
+	return idpkg.DeriveEncryptionKey(seed)
+}
+
+// SaveKeysFromSeed derives both long-lived keys and writes them to the keys
+// directory — the recovery path, requiring nothing but the seed.
+func SaveKeysFromSeed(identity string, seed []byte) (keyPath, encKeyPath string, err error) {
+	_, priv, err := KeypairFromSeed(seed)
+	if err != nil {
+		return "", "", err
+	}
+	_, encPriv, err := EncryptionKeypairFromSeed(seed)
+	if err != nil {
+		return "", "", err
+	}
+	if keyPath, err = SavePrivateKey(identity, priv); err != nil {
+		return "", "", err
+	}
+	if encKeyPath, err = SaveEncryptionPrivateKey(identity, encPriv); err != nil {
+		return "", "", err
+	}
+	return keyPath, encKeyPath, nil
 }

@@ -1,0 +1,67 @@
+[
+  {
+    "identity": "alice.poweur.net",
+    "valid": true,
+    "hosted_valid": true,
+    "dir_name": "alice__poweur__net"
+  },
+  {
+    "identity": "a-b.example.org",
+    "valid": true,
+    "hosted_valid": true,
+    "dir_name": "a-b__example__org"
+  },
+  {
+    "identity": "bob.co.uk",
+    "valid": true,
+    "hosted_valid": true,
+    "dir_name": "bob__co__uk"
+  },
+  {
+    "identity": "ab.poweur.net",
+    "valid": true,
+    "hosted_valid": false,
+    "dir_name": "ab__poweur__net"
+  },
+  {
+    "identity": "www.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "dav.example.org",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "nodots",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "192.168.0.1",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "-bad.example.org",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "bad-.example.org",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "UPPER.Example.ORG",
+    "valid": true,
+    "hosted_valid": true,
+    "dir_name": "upper__example__org"
+  },
+  {
+    "identity": "",
+    "valid": false,
+    "hosted_valid": false
+  }
+]

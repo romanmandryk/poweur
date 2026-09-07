@@ -59,14 +59,15 @@ retry:  same message + {"challenge_token": "…", "challenge_solution": "…"}
 Accepted messages land in a **dedicated anonymous queue** (`GET /anon/{identity}`,
 challenge-signed owner drain — same auth as the inbox), never the signed inbox or the
 contact-requests queue. Clients MUST render them visibly differently
-(`poweur anon` prints an `ANONYMOUS` marker and a trust warning; there is no reply
-affordance — there is nobody to reply to).
+(`poweur anon` prints an `ANONYMOUS` marker and a trust warning; the web app's
+**Anonymous** tray drops the avatar and sender line entirely and offers no reply or
+add-contact affordance — there is nobody to reply to or add).
 
 ## Proof-of-work (`sha256-lead0`)
 
 Find an ASCII `solution` such that `sha256(token + "." + solution)` has at least
 `bits` leading zero bits. Reference implementations: `packages/identity/pow.go`
-(solve + verify) and `apps/web/js/pow.js` (browser solve, chunked for UI
+(solve + verify) and `packages/client-ts/src/pow.ts` (browser solve, chunked for UI
 responsiveness).
 
 **Measured cost** (Go, single Apple-Silicon core; browser JS is ~5–10× slower):
@@ -81,7 +82,8 @@ responsiveness).
 | 26 | ~36 s | hostile-sender territory |
 
 Recipient dials are clamped into **[8, 30] bits**. Above ~20 bits, phone browsers get
-uncomfortable — UIs should say so on the slider.
+uncomfortable — UIs should say so on the slider. The web app's policy panel does: it
+labels each stop with browser-side seconds (the table above ×5–10) and warns past 20.
 
 ### Token mechanics
 

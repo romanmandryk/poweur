@@ -54,7 +54,7 @@ reserved slot; this epic finishes PoW and payment only.
 - **The PoW primitive** is `packages/identity/pow.go`: `sha256-lead0`, difficulty in leading-zero
   **bits** (`PowMinBits=8`, `PowMaxBits=30`, `PowDefaultBits=16`), stateless HMAC-sealed token
   `{purpose, bits, expires_at, nonce}`, `SolvePow`/`VerifyPowSolution`. JS twin in
-  `apps/web/js/pow.js`. Spec + measured table in
+  `packages/client-ts/src/pow.ts` (the web app consumes it; `apps/web/js/pow.js` is gone). Spec + measured table in
   `apps/docs/docs/trust/anonymous-and-challenges.md`; PCP-0006 registers the envelope.
 - **The challenge envelope already carries `algo`** (`"sha256-lead0"`, `idpkg.PowAlgo`) and a
   typed `type` (`pow` | `verified` | `payment`) — the extension seam for a second algorithm and a
@@ -282,7 +282,7 @@ Poweur's cut lives.
 - [ ] Policy: add `pow_difficulty` (abstract level / target-time band) + optional `pow_algo`;
       keep `pow_bits` as an honored deprecated alias; relay config picks default algo + the
       level→params table; update `inbox-policy.schema.json` + `AnonymousPolicy` + validators
-- [ ] JS: `apps/web/js/pow.js` dispatches on `algo` from the envelope
+- [ ] JS: `packages/client-ts/src/pow.ts` dispatches on `algo` from the envelope
 - [ ] Tests: unknown-algo graceful render; alias migration; downgrade-attack rejection
 
 **Acceptance:** a recipient sets a single difficulty; the relay can change the default algorithm

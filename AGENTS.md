@@ -44,21 +44,64 @@ Hosted-identity path (web identity, no DNS token):
 cd apps/integration && go test -run TestINT_HOSTED -count=1 -v
 ```
 
+### TypeScript client tests (`packages/client-ts`)
+
+`@poweur/client` is the published TS/JS implementation of the protocol. It has
+Vitest unit tests **plus** suites that spawn a real Go relay (`go run`), same
+spirit as the CLI integration tests, **plus** a Go↔TS interop suite that drives
+the real `poweur` binary as a subprocess against a shared `~/.poweur` tree.
+
+```bash
+pnpm client:build
+pnpm client:test        # unit + conformance + live-relay + Go↔TS interop
+pnpm client:typecheck
+```
+
+**Protocol changes must regenerate the conformance vectors in the same change
+set.** Go stays canonical; the TS client conforms to it via fixtures generated
+by three Go tests, each living beside the code it pins:
+
+| Generator | Pins |
+|-----------|------|
+| `packages/identity/vectors_test.go` | identity documents, grants, groups, PoW, names, `poweur-sys` docs |
+| `apps/api/internal/crypto/vectors_test.go` | every canonical signing string |
+| `apps/cli/internal/crypto/vectors_test.go` | message encryption (X25519 + HKDF + ChaCha20-Poly1305) |
+
+```bash
+pnpm vectors    # regenerate all of them into packages/identity/testdata/vectors/
+```
+
+A canonical string changed in Go without a matching TypeScript change turns CI
+red. Do not "fix" that by editing the fixture — change `packages/client-ts` to
+match Go, or reconsider the protocol change.
+
 ### Web client tests (Vitest + Playwright)
 
 `apps/web` tests spawn a **real Go relay** (`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR`), same spirit as CLI integration tests.
 
 ```bash
 cd apps/web && pnpm install   # postinstall downloads Chromium for Playwright
-pnpm test          # Vitest: crypto/storage unit + hosted/messaging vs live relay
-pnpm test:e2e      # Playwright: hosted create UI + messaging protocol smoke
+pnpm test          # Vitest: vault/storage/components unit + live-relay
+pnpm test:e2e      # Playwright: destinations at 375px, hosted create UI, protocol smoke
 pnpm test:all
 # If e2e says browser executable missing: pnpm exec playwright install chromium
 ```
 
+**The web app has no bundler**: it imports `@poweur/client` through an import map that
+points at `apps/web/vendor/`, a committed copy of the package's ESM (prod mounts `apps/web`
+straight from the checkout, so it has to be in git). **Any change to `packages/client-ts`
+must be re-vendored in the same change set:**
+
+```bash
+pnpm client:build && pnpm web:vendor    # refresh apps/web/vendor/
+pnpm web:vendor:check                   # fails when it is stale (also asserted in Vitest)
+```
+
 Web Vitest mirrors CLI unit tests (`encrypt/decrypt`, identity persistence, session send,
 identity-signed send, invalid `--sign-with`) plus CLI↔relay messaging (register → session
-→ encrypt/send → inbox decrypt) via `js/messaging.js` against a real `go run` relay.
+→ encrypt/send → inbox decrypt) driven through the app's own modules (`js/client.js`,
+`js/vault.js`) against a real `go run` relay. The protocol itself lives in
+`@poweur/client` and is tested there; `apps/web` tests the browser key-custody seam.
 
 If a feature cannot be asserted in unit tests alone (Host routing, restart/`POWEUR_DATA`, E2E encrypt/send/inbox), write an integration test.
 
@@ -76,6 +119,8 @@ Run the slice you touched **and** `apps/integration` (and `apps/web` tests if th
 | Sessions | Short-lived; memory-only until EPIC-009 |
 | Storage | Durable identity docs under `POWEUR_DATA/identities/.../poweur-sys/public/id.json` |
 | SSRF | Well-known fetch: no redirects, size/time caps, no private IPs unless test flag |
+| Two implementations | Go is canonical; `packages/client-ts` conforms via generated vectors |
+| Shared CLI state | Both CLIs read/write `~/.poweur` (`config.toml`, `keys/`, `sessions/`, `pending/`) — never fork the format |
 
 ## Epics and deferrals
 
@@ -96,7 +141,8 @@ apps/api          Go relay
 apps/cli          Go CLI
 apps/web          Vanilla JS client (served at /app/)
 apps/integration  In-process E2E tests
-packages/identity Shared identity document + resolver
+packages/identity Shared identity document + resolver (Go, canonical)
+packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)
 epics/            Roadmap / task tracking
 ```
 

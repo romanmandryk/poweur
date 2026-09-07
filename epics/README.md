@@ -42,6 +42,9 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web page → E12, stranger gate → E07-T5) | E06, E07 |
 | [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | proposed | E03, E04, E05, E06, E07, E14 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
+| [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
+| [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | proposed | E02, E01, E14 |
+| [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | proposed | E15, E17, E18 |
 
 ## Integration epics (`integrations/`)
 
@@ -57,6 +60,7 @@ playbook.
 | [INT-002](integrations/INT-002-payments.md) | Payments — crypto & conventional (Lightning, BTCPay, Open Payments, Revolut/Wise handles, …) | E01, E06 |
 | [INT-003](integrations/INT-003-ai-agents.md) | AI tools & agent frameworks (MCP, Open WebUI, LangChain, n8n, OpenHands, …) | E04, E05, E09, E10 |
 | [INT-004](integrations/INT-004-collaboration-tools.md) | Collaboration & federation tools (Nextcloud, Matrix, Discourse, Joplin, Forgejo, …) | INT-000, E03, E05 |
+| [INT-005](integrations/INT-005-agent-control-planes.md) | Agent control planes (OpenClaw, Hermes & the gateway class) | E17, E09, E10, INT-000 |
 
 ## Dependency graph
 
@@ -80,7 +84,9 @@ EPIC-001 ──► EPIC-008 (sign-in)         EPIC-002/003 ──► EPIC-009 (m
 
 EPIC-001/002 ──► EPIC-011 (key management & recovery)
                    ├─ uses EPIC-005 shares + EPIC-007 contacts (social recovery)
-                   └─ feeds EPIC-008 (Poweur as recovery anchor for other services)
+                   ├─ feeds EPIC-008 (Poweur as recovery anchor for other services)
+                   └─ E11-T3's enrollment ceremony (code+PAKE / QR / synced passkey)
+                      is what EPIC-019's E19-T8 reuses to bring an ID to a phone
 
 EPIC-003 + EPIC-007/009 ──► EPIC-012 (identity websites; design notes)
 
@@ -88,6 +94,12 @@ EPIC-002 ──► EPIC-013 (deployment & observability; feeds every epic's ops 
 EPIC-006/007 ──► EPIC-014 (anon messaging + PoW challenges)
                    ├─ PoW primitive closes EPIC-002's deferred registration gate
                    └─ anon ingress feeds EPIC-012 contact forms
+
+EPIC-001/003/004/005/014 ──► EPIC-017 (@poweur/client TS SDK)
+                   ├─ EPIC-015 web app consumes it (E15-T6 / E17-T6)
+                   └─ unblocks INT-005 (control planes), INT-003-T1 (MCP), INT-003-T4 (n8n)
+
+EPIC-017 + EPIC-009/010 ──► INT-005 (OpenClaw / Hermes channel plugin + share-based handoff)
 
 EPIC-014 + INT-002 ──► EPIC-016 (sender-challenge v2: memory-hard PoW + pay-to-send)
                    ├─ fixes the sha256 GPU-vs-mobile asymmetry; algo made pluggable
@@ -97,6 +109,16 @@ EPIC-003/004/005/006/007/014 ──► EPIC-015 (web app UX: the whole product s
                    ├─ absorbs the deferred "web UX" items of E05/E07/E14
                    └─ its reusable components (IdentityInput, ProfileCard, anon PoW send)
                       feed EPIC-012 identity websites / contact forms
+
+EPIC-002/001/014 ──► EPIC-018 (onboarding: launcher host, name policy, credential scope)
+                   ├─ owns identity *claiming*; E015 assumes an ID already exists
+                   └─ hands off to E015's first-run onboarding on the identity's origin
+
+EPIC-015 + EPIC-017 + EPIC-018 ──► EPIC-019 (Capacitor mobile shell)
+                   ├─ wraps E015's UI verbatim — hence E015's mobile-first +
+                   │  no-`location.origin` constraints
+                   └─ `kdf:"native"` key custody frees the store build from
+                      associated-domains, so self-hosters need no fork
 ```
 
 ## Architecture deltas at a glance

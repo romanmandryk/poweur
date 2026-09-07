@@ -1,8 +1,18 @@
 /**
- * Persistence layer for the Poweur ID web client.
+ * Persistence for the Poweur ID web client.
  *
- * localStorage  — persists across sessions:  identity records, config
- * sessionStorage — cleared on tab close:      unlocked session keys
+ * localStorage   — identity records and app config, across sessions
+ * sessionStorage — the relay session, cleared when the tab closes
+ * memory         — unwrapped private keys, never written anywhere
+ *
+ * Two rules this module exists to enforce (EPIC-015 E15-T1):
+ *
+ * 1. **State is keyed by identity, not global.** One browser holds several
+ *    identities, and EPIC-019's shell holds them across several relays.
+ * 2. **A relay URL comes from the identity record.** `location.origin` is
+ *    right for a relay-served SPA and wrong for a Capacitor shell on
+ *    `capacitor://localhost`, so it appears exactly once in the app — in
+ *    `defaultRelayUrl()` below — and only as the seed for a *new* identity.
  */
 
 const IDENTITY_PREFIX = "poweur:identity:";
@@ -10,26 +20,77 @@ const ACTIVE_KEY = "poweur:active";
 const CONFIG_KEY = "poweur:config";
 const SESSION_PREFIX = "poweur:session:";
 
-// ─── Default Config ───────────────────────────────────────────────────────────
+// ─── Relay URLs ───────────────────────────────────────────────────────────────
+
+/**
+ * The relay to register a *new* identity with, when the user has not named one.
+ *
+ * The only place in the app that reads the page's origin. A relay serves this
+ * SPA under `/app/`, so its own origin is the sensible default for a fresh
+ * registration — but the moment an identity exists, `relayUrlFor()` takes over
+ * and the origin is never consulted again. `test/origin.test.js` enforces that.
+ */
+export function defaultRelayUrl() {
+  const configured = readConfigRaw().relayUrl;
+  if (configured) return configured;
+  return globalThis.location?.origin ?? "";
+}
+
+/**
+ * The relay this identity actually lives on. Identity records carry their own
+ * relay, so one client can hold identities across several relays.
+ */
+export function relayUrlFor(identity) {
+  const record = identity ? loadIdentityRecord(identity) : null;
+  return record?.relay || defaultRelayUrl();
+}
+
+/**
+ * Resolver options for a relay URL. A relay reachable over plain HTTP or on a
+ * private address is a local development or test relay, and the SDK's SSRF
+ * guard has to be told so explicitly — it is never relaxed by default.
+ */
+export function resolveOptionsFor(relayUrl) {
+  const options = { relayUrl };
+  let url;
+  try {
+    url = new URL(relayUrl);
+  } catch {
+    return options;
+  }
+  if (url.protocol === "http:") options.scheme = "http";
+  if (isPrivateHost(url.hostname)) options.allowPrivate = true;
+  return options;
+}
+
+function isPrivateHost(hostname) {
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (/^127\./.test(hostname) || hostname === "::1" || hostname === "[::1]") return true;
+  if (/^10\./.test(hostname) || /^192\.168\./.test(hostname)) return true;
+  return /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
-  relayUrl: typeof globalThis !== "undefined" && globalThis.location?.origin
-    ? globalThis.location.origin
-    : "",
+  relayUrl: "",
   parentDomain: "poweur.net",
   dnsProvider: "cloudflare",
   dnsToken: "",
 };
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-
-export function getConfig() {
+function readConfigRaw() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
-    return raw ? { ...DEFAULT_CONFIG, ...JSON.parse(raw) } : { ...DEFAULT_CONFIG };
+    return raw ? JSON.parse(raw) : {};
   } catch {
-    return { ...DEFAULT_CONFIG };
+    return {};
   }
+}
+
+export function getConfig() {
+  const stored = readConfigRaw();
+  return { ...DEFAULT_CONFIG, ...stored, relayUrl: stored.relayUrl || defaultRelayUrl() };
 }
 
 export function saveConfig(config) {
@@ -51,9 +112,13 @@ export function saveConfig(config) {
  *     ciphertext: string,
  *     salt?: string,            // only for pbkdf2
  *   },
- *   relay: string,              // relay URL used at registration time
+ *   relay: string,              // relay URL this identity lives on
  *   userId: string,             // base64url random bytes (WebAuthn user ID)
  *   createdAt: string,          // ISO timestamp
+ *   seedDerived: boolean,       // keys come from one master seed → a kit is possible
+ *   enrollmentId?: string,      // this browser's row in the relay keystore (EPIC-011)
+ *   credentialPublicKey?: string, // SPKI DER, base64url — what the relay verifies
+ *   credentialAlg?: number,     // COSE alg id for that key
  * }
  */
 export function saveIdentityRecord(identity, record) {
@@ -97,18 +162,28 @@ export function setActiveIdentity(identity) {
   }
 }
 
-// ─── Session (sessionStorage — ephemeral) ────────────────────────────────────
+// ─── Sessions ─────────────────────────────────────────────────────────────────
 
 /**
- * Session record shape:
- * {
- *   sessionId: string,
- *   sessionPublicKey: string,      // base64url
- *   sessionSigningJWK: object,     // Ed25519 private key JWK (in-memory only during tab)
- *   issuedAt: string,
- *   expiresAt: string,
- * }
+ * The SDK's `SessionStore` over `sessionStorage`: sessions die with the tab,
+ * which is the browser equivalent of the CLI's short-lived `~/.poweur/sessions`
+ * entries. The record shape is the SDK's `StoredSession`, so `SessionManager`
+ * owns registration, expiry and revocation instead of the app.
  */
+export class BrowserSessionStore {
+  async load(identity) {
+    return loadSessionRecord(identity);
+  }
+
+  async save(session) {
+    saveSessionRecord(session.identity, session);
+  }
+
+  async remove(identity) {
+    removeSessionRecord(identity);
+  }
+}
+
 export function saveSessionRecord(identity, record) {
   sessionStorage.setItem(SESSION_PREFIX + identity, JSON.stringify(record));
 }
@@ -122,21 +197,15 @@ export function removeSessionRecord(identity) {
   sessionStorage.removeItem(SESSION_PREFIX + identity);
 }
 
-/** Returns true if session exists and hasn't expired. */
-export function isSessionValid(identity) {
-  const rec = loadSessionRecord(identity);
-  if (!rec || !rec.expiresAt) return false;
-  return new Date(rec.expiresAt) > new Date();
-}
-
 // ─── Unlocked Keys (in-memory only) ──────────────────────────────────────────
-// These live only in JS memory — never persisted to any storage.
-// Stored on the module-level singleton below.
+// Never persisted to any storage: cleared on reload, on lock, and on tab close.
 
-let _unlockedKeys = null; // { signingJWK, encJWK, identity }
+// The master seed rides along when there is one: the recovery kit is derived
+// from it, and it is the one secret that must never be written down by us.
+let _unlockedKeys = null; // { identity, signingJWK, encJWK, seed }
 
-export function setUnlockedKeys(identity, signingJWK, encJWK) {
-  _unlockedKeys = { identity, signingJWK, encJWK };
+export function setUnlockedKeys(identity, signingJWK, encJWK, seed = null) {
+  _unlockedKeys = { identity, signingJWK, encJWK, seed };
 }
 
 export function getUnlockedKeys() {

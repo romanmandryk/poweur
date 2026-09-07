@@ -1,18 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { startRelay } from "../helpers/relay.mjs";
-import { createHostedIdentity } from "../../js/messaging.js";
-import {
-  mintDavToken,
-  listDir,
-  uploadFile,
-  downloadFile,
-  makeDir,
-} from "../../js/files.js";
+
+import "../helpers/browser-globals.mjs";
+import { createWebIdentity, unlock } from "../helpers/identity.mjs";
+import { clientFor } from "../../js/client.js";
 
 /**
  * Playwright smoke for WebDAV files (EPIC-003) — same protocol the SPA file
  * browser and `poweur dav` use: token mint, mkdir/put/propfind/get, and
  * public web serving via /pub with the .poweur-web-public marker.
+ *
+ * The /pub case lives here rather than in Vitest because it routes on the Host
+ * header, which Node's fetch strips and Playwright's request fixture does not.
  */
 test.describe("web ↔ relay files E2E", () => {
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
@@ -26,33 +25,39 @@ test.describe("web ↔ relay files E2E", () => {
     relay?.stop();
   });
 
+  async function davFor(identity) {
+    unlock(identity);
+    return clientFor(identity.identity).dav({ force: true });
+  }
+
   test("dav token, upload, list, download", async () => {
     const suffix = Date.now().toString(36);
-    const owner = await createHostedIdentity(relay.baseUrl, `e2efiles${suffix}.poweur.net`);
+    const owner = await createWebIdentity(relay.baseUrl, `e2efiles${suffix}.poweur.net`);
 
-    const tok = await mintDavToken(relay.baseUrl, owner.identity, owner.signingJWK);
-    expect(tok.scope).toBe("dav:full");
+    unlock(owner);
+    const client = clientFor(owner.identity);
+    const token = await client.davToken();
+    expect(token.scope).toBe("dav:full");
 
-    await makeDir(relay.baseUrl, owner.identity, tok.token, "private/e2e");
-    await uploadFile(relay.baseUrl, owner.identity, tok.token, "private/e2e/hello.txt", "hi from e2e");
+    const dav = await client.dav();
+    await dav.mkdir("private/e2e");
+    await dav.write("private/e2e/hello.txt", "hi from e2e");
 
-    const entries = await listDir(relay.baseUrl, owner.identity, tok.token, "private/e2e");
+    const entries = await dav.list("private/e2e");
     expect(entries.map((e) => e.name)).toContain("hello.txt");
 
-    const res = await downloadFile(relay.baseUrl, owner.identity, tok.token, "private/e2e/hello.txt");
-    expect(await res.text()).toBe("hi from e2e");
+    expect(await dav.readText("private/e2e/hello.txt")).toBe("hi from e2e");
   });
 
   test("public web serving via /pub with marker", async ({ request }) => {
     const suffix = Date.now().toString(36);
-    const owner = await createHostedIdentity(relay.baseUrl, `e2epub${suffix}.poweur.net`);
-    const tok = await mintDavToken(relay.baseUrl, owner.identity, owner.signingJWK);
+    const owner = await createWebIdentity(relay.baseUrl, `e2epub${suffix}.poweur.net`);
+    const dav = await davFor(owner);
 
-    await makeDir(relay.baseUrl, owner.identity, tok.token, "public/site");
-    await uploadFile(relay.baseUrl, owner.identity, tok.token, "public/site/index.html", "<h1>e2e pub</h1>");
+    await dav.mkdir("public/site");
+    await dav.write("public/site/index.html", "<h1>e2e pub</h1>");
 
     // /pub routes by Host header (vanity host): https://<identity>/pub/<path>.
-    // Node fetch strips Host, so use Playwright's request fixture.
     const pubGet = (path) =>
       request.get(`${relay.baseUrl}/pub/${path}`, { headers: { Host: owner.identity } });
 
@@ -60,7 +65,7 @@ test.describe("web ↔ relay files E2E", () => {
     const before = await pubGet("site/index.html");
     expect(before.status()).toBe(404);
 
-    await uploadFile(relay.baseUrl, owner.identity, tok.token, "public/site/.poweur-web-public", "");
+    await dav.write("public/site/.poweur-web-public", "");
 
     const after = await pubGet("site/index.html");
     expect(after.ok()).toBeTruthy();

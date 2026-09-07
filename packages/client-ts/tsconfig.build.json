@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The published build emits Node16 module resolution so the `exports` map
+    // resolves for both node and bundler consumers. `rootDir` lives here
+    // rather than in the base config so `typecheck` can also cover `test/`.
+    "moduleResolution": "node16",
+    "module": "node16",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

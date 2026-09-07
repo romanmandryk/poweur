@@ -51,6 +51,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'clients/overview',
         'clients/cli-reference',
+        'clients/js-sdk',
       ],
     },
     {
@@ -59,6 +60,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'security/model',
+        'security/key-management',
         'security/tls',
       ],
     },

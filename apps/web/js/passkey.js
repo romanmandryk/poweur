@@ -6,21 +6,41 @@
  * wrap the identity's Ed25519 + X25519 private keys stored in localStorage.
  *
  * Fallback: if the authenticator or browser does not support PRF, keys are
- * wrapped with a user-supplied PIN via PBKDF2 (see crypto.js).
+ * wrapped with a user-supplied PIN via PBKDF2 (see vault.js).
+ *
+ * Since EPIC-011 this module also produces the **assertions** the relay
+ * keystore verifies. That is the bootstrap path: after site data is cleared
+ * there is no identity key to sign with, so an assertion from an enrolled
+ * authenticator is the only thing that can authorize reading the wrapped seed
+ * back. Creation therefore has to capture the credential's public key too —
+ * the relay stores it and checks signatures against it.
  */
 
-import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./crypto.js";
+import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./vault.js";
 
 const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
 
 // ─── Passkey Creation ─────────────────────────────────────────────────────────
 
 /**
+ * The relying-party id the relay must be told to verify assertions against.
+ *
+ * WebAuthn binds a credential to the page's host, so this is the host and not
+ * a configured relay URL — the two differ whenever an identity is served from
+ * its own domain. (EPIC-018 E18-T4 owns what a Capacitor shell, which has no
+ * meaningful host, does instead.)
+ */
+export function rpId() {
+  return globalThis.location?.hostname ?? "";
+}
+
+/**
  * Create a passkey for an identity, requesting PRF output.
  *
  * @param {string} identity  — Full FQDN (alice.poweur.net)
  * @param {string} userId    — Stable user ID (base64url-encoded random bytes)
- * @returns {{ credentialId: string, prfOutput: Uint8Array|null, supportsPRF: boolean }}
+ * @returns {{ credentialId: string, prfOutput: Uint8Array|null, supportsPRF: boolean,
+ *            credentialPublicKey: string|null, credentialAlg: number|null }}
  */
 export async function createPasskey(identity, userId) {
   if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this browser.");
@@ -84,7 +104,23 @@ export async function createPasskey(identity, userId) {
   const prfFirst = extResults?.prf?.results?.first;
   const prfOutput = prfFirst ? new Uint8Array(prfFirst) : null;
 
-  return { credentialId, prfOutput, supportsPRF: prfOutput !== null };
+  // SPKI DER + COSE algorithm id, which is what the relay verifies assertions
+  // against. `getPublicKey()` is unavailable on older Safari; without it the
+  // credential still unlocks this browser, it just cannot be enrolled in the
+  // relay keystore — callers check for null rather than failing registration.
+  let credentialPublicKey = null;
+  let credentialAlg = null;
+  try {
+    const spki = credential.response.getPublicKey?.();
+    if (spki) {
+      credentialPublicKey = toBase64url(new Uint8Array(spki));
+      credentialAlg = credential.response.getPublicKeyAlgorithm?.() ?? null;
+    }
+  } catch {
+    /* leave null — see above */
+  }
+
+  return { credentialId, prfOutput, supportsPRF: prfOutput !== null, credentialPublicKey, credentialAlg };
 }
 
 // ─── Passkey Authentication ───────────────────────────────────────────────────
@@ -131,32 +167,63 @@ export async function authenticatePasskey(credentialId) {
  * Encrypt the identity's private key JWKs using the PRF output as key material.
  * Returns an object suitable for storage.
  */
-export async function wrapKeysWithPRF(prfOutput, signingJWK, encJWK) {
-  const wrapped = await wrapKeysAES(prfOutput, signingJWK, encJWK);
+export async function wrapKeysWithPRF(prfOutput, signingJWK, encJWK, seed = null) {
+  const wrapped = await wrapKeysAES(prfOutput, signingJWK, encJWK, seed);
   return { ...wrapped, kdf: "prf" };
 }
 
 /**
  * Decrypt previously PRF-wrapped keys.
- * Returns { signingJWK, encJWK }
+ * Returns { signingJWK, encJWK, seed? }
  */
 export async function unwrapKeysWithPRF(prfOutput, encryptedData) {
   return unwrapKeysAES(prfOutput, encryptedData);
 }
 
-// ─── Challenge Signing (for inbox auth) ──────────────────────────────────────
+// ─── Assertions (the relay keystore's auth) ──────────────────────────────────
 
 /**
- * Sign a relay challenge string with the identity's signing key JWK.
- * Returns base64url signature.
+ * Sign a relay challenge with an enrolled authenticator.
+ *
+ * Shaped exactly as `@poweur/client`'s `WebAuthnAssertion`. Pass no
+ * `credentialId` to let the platform offer any discoverable credential — which
+ * is the recovery case, where this browser has no record of which one to ask
+ * for. `residentKey: "required"` at creation is what makes that work.
+ *
+ * @returns {{ assertion: object, prfOutput: Uint8Array|null }}
  */
-export async function signChallenge(signingJWK, challenge) {
-  const key = await crypto.subtle.importKey(
-    "jwk", signingJWK, { name: "Ed25519" }, false, ["sign"]
-  );
-  const sig = await crypto.subtle.sign({ name: "Ed25519" }, key, new TextEncoder().encode(challenge));
-  const bytes = new Uint8Array(sig);
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export async function assertChallenge(challenge, { credentialId = null } = {}) {
+  if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this browser.");
+
+  const options = {
+    // The relay hashes the challenge string it issued; the browser signs over
+    // clientDataJSON, which carries it base64url-encoded.
+    challenge: new TextEncoder().encode(challenge),
+    userVerification: "required",
+    timeout: 120000,
+    extensions: { prf: { eval: { first: PRF_SALT } } },
+  };
+  if (credentialId) {
+    options.allowCredentials = [{ type: "public-key", id: fromBase64url(credentialId) }];
+  }
+
+  let credential;
+  try {
+    credential = await navigator.credentials.get({ publicKey: options });
+  } catch (err) {
+    throw new Error(`Passkey authentication failed: ${err.message}`);
+  }
+
+  const prfFirst = credential.getClientExtensionResults()?.prf?.results?.first;
+  return {
+    assertion: {
+      credential_id: toBase64url(new Uint8Array(credential.rawId)),
+      client_data_json: toBase64url(new Uint8Array(credential.response.clientDataJSON)),
+      authenticator_data: toBase64url(new Uint8Array(credential.response.authenticatorData)),
+      signature: toBase64url(new Uint8Array(credential.response.signature)),
+    },
+    prfOutput: prfFirst ? new Uint8Array(prfFirst) : null,
+  };
 }
 
 // ─── Platform Support Detection ───────────────────────────────────────────────

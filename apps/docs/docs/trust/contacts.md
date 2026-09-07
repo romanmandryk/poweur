@@ -63,6 +63,13 @@ any     ──recipient blocks───► blocked (silent)
 CLI: `poweur contacts request/accept/block/rm/ls`, `poweur requests`, `poweur policy
 show/set`.
 
+Web app (EPIC-015 E15-T2): **Contacts** lists the same document with its states and
+petnames; **Messages → Requests** merges the relay's request queue with contact requests
+that arrived in the inbox — under the default `open` policy the very same envelope is
+delivered as a normal typed message, so a tray that read only the queue would be empty
+for most users. Accept/Block act there, and a message from someone you hold no entry for
+carries a one-tap **Add**.
+
 ## Key pinning (the safety-number model)
 
 Accepting (or adding) a contact pins their current signing key in `contacts.json`. On
@@ -75,6 +82,9 @@ every `poweur send`, the resolved key is compared against the pin:
 - **Mismatch with no rotation statement** → **refuse to send**, print both key
   fingerprints, and require explicit `--accept-new-key` after out-of-band verification.
   This is what a compromised relay or registrar swapping a contact's key looks like.
+
+The web app runs the same three-way check before every send; the mismatch case is a
+blocking dialog showing both keys, and "Trust new key" is its `--accept-new-key`.
 
 Pinning is client-side defense-in-depth: it fails open when contacts are unreachable
 (the resolver chain still applies), and it fails **closed** on an actual mismatch.
@@ -92,9 +102,9 @@ Pinning is client-side defense-in-depth: it fails open when contacts are unreach
 
 ## Deferred (tracked in EPIC-007)
 
-- Web app contacts/requests UI and profile cards.
 - `sys.contact.*` client auto-processing (the accept notification is delivered but
-  clients handle it manually; auto-pin-on-accept lands with the web UX pass).
+  clients handle it manually — both clients pin on accept, neither acts on an inbound
+  `sys.contact.accept` by itself).
 - E07-T5 abuse pressure: per-sender-relay request metering, shared blocklists,
   `sys.abuse.report` handling (type reserved in the registry), PoW on requests from
   unknown relays (primitive from EPIC-014).

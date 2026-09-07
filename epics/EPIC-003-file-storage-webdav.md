@@ -13,7 +13,7 @@
 | E03-T2 WebDAV server | **done** | `/dav/{identity}/` + Host vanity; Class 2 in-mem locks; etags; quota 507 |
 | E03-T3 Auth bridge | **done** | `POST /auth/dav-token`, app passwords in `poweur-sys/relay/`, CLI `poweur dav` |
 | E03-T4 Cross-identity `/public` | **done** | Visitor tokens + access.log; integration `TestINT_DAV_02` |
-| E03-T5 Web file browser | **done** | `apps/web/js/files.js` + SPA panel; Vitest/Playwright coverage |
+| E03-T5 Web file browser | **done** | shipped as `apps/web/js/files.js` + a SPA panel; since E15-T6/T1 the DAV client is `packages/client-ts/src/files.ts` and the browser is a first-class Files destination. Vitest/Playwright coverage |
 | E03-T6 `/pub` web serving | **done** | `.poweur-web-public` marker; Host-routed `/pub/` |
 | E03-T7 E2EE design doc | **done** | [`apps/docs/docs/files/e2ee-design.md`](../apps/docs/docs/files/e2ee-design.md) |
 | E03-T8 Storage providers | **done** (relay-fs) | `StorageProvider` interface; `STORAGE_PROVIDER=relay-fs`; S3 deferred |

@@ -43,6 +43,8 @@ type Server struct {
 	powSecret  []byte
 	acks       *storage.AckStore
 	challenges *storage.ChallengeStore
+	keystore   *storage.KeystoreStore
+	rendezvous *storage.RendezvousStore
 	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
 	regGate    *RegistrationGate
@@ -80,6 +82,10 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		// Fall back to memory-only rather than crashing constructors used in tests.
 		store = storage.NewIdentityStore()
 	}
+	keystore, err := storage.OpenKeystoreStore(cfg.DataDir)
+	if err != nil {
+		keystore = storage.NewKeystoreStore()
+	}
 	s := &Server{
 		cfg:           cfg,
 		resolver:      resolver,
@@ -92,6 +98,8 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		powSecret:     newPowSecret(),
 		acks:          storage.NewAckStore(),
 		challenges:    storage.NewChallengeStore(),
+		keystore:      keystore,
+		rendezvous:    storage.NewRendezvousStore(),
 		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
 		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
 		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
@@ -160,6 +168,15 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
 	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
+	mux.HandleFunc("PUT /identities/{identity}/keystore", s.handleKeystorePut)
+	mux.HandleFunc("POST /identities/{identity}/keystore/list", s.handleKeystoreList)
+	mux.HandleFunc("POST /identities/{identity}/keystore/fetch", s.handleKeystoreFetch)
+	mux.HandleFunc("DELETE /identities/{identity}/keystore/{enrollment}", s.handleKeystoreDelete)
+	mux.HandleFunc("POST /identities/{identity}/enroll/offer", s.handleEnrollOffer)
+	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/fetch", s.handleEnrollFetch)
+	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/deliver", s.handleEnrollDeliver)
+	mux.HandleFunc("GET /identities/{identity}/enroll/{rendezvous}", s.handleEnrollClaim)
+	mux.HandleFunc("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)

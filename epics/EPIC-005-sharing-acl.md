@@ -11,7 +11,7 @@
 |------|--------|-------|
 | E05-T1 Sharing & permissions spec | **done** | [`apps/docs/docs/files/sharing.md`](../apps/docs/docs/files/sharing.md); grant/group canonical signing in `packages/identity/grants.go`; inheritance = whole-subtree, no per-file exceptions (documented why); mount model deferred with T3 |
 | E05-T2 Relay grant engine | **done** | `apps/api/internal/files/grants.go`: per-request verified snapshot (revocation immediate, no ≤60 s window — app-password pattern); enforced on DAV + changes + manifest + chunked upload; visitor writes journal `actor`; forged/replayed/malformed grants rejected loudly; extensive scenario matrix in `apps/api/internal/relay/shares_test.go` + cross-relay `TestINT_SHARE_01` |
-| E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest). **Deferred:** `sys.share.offer/accept/revoked` messages, recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages), web app share dialog + received-shares view → [EPIC-015](EPIC-015-web-app-ux.md) E15-T4, unaccepted-offer policy (EPIC-007) |
+| E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest); web share dialog, revoke view and received-shares browser shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. **Deferred:** `sys.share.offer/accept/revoked` messages and recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages) — until then a recipient must be told who shared with them; unaccepted-offer policy (EPIC-007) |
 | E05-T4 Public-link shares | **deferred** | not started; `link` audience field reserved in the grant format |
 | E05-T5 Group identities | **deferred** | owner-local groups shipped (same document format); addressable group identities not started |
 
@@ -101,8 +101,10 @@ revocation and expiry tests pass.
 - [x] CLI: `poweur share add <path> --with bob.example.org --perm rw`, `poweur share ls`,
       `poweur share revoke`, plus `poweur share group set/ls/remove` (`poweur shares`
       received-view deferred with the offer flow)
-- [ ] **Deferred:** web app share dialog on any file/folder (audience picker fed by contacts, EPIC-007),
-      received-shares view, "shared with" badges
+- [x] Web app share dialog on any file/folder (audience picker fed by contacts), a
+      received-shares view (name the owner, browse their tree with a visitor token) and
+      "Shared" badges — shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. The
+      received view has to *ask* who shared with them until the offer flow above exists
 - [ ] **Deferred (EPIC-007):** unaccepted-offer policy: offers expire after N days; offers from non-contacts follow
       EPIC-007 inbox policy (shares are spam vectors too)
 

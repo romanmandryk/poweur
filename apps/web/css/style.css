@@ -992,3 +992,476 @@ input, textarea, select { font-family: inherit; }
   background: var(--bg);
   flex-shrink: 0;
 }
+
+/* ─── E15-T1: destinations, shared components ─────────────────────────────── */
+
+/* Five tabs have to fit a 375px viewport without truncating, and every tap
+   target has to clear 44px. 375 / 5 = 75px per tab, so the label shrinks and
+   the icon does not. */
+.nav-tab { min-height: 52px; min-width: 44px; }
+.nav-tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .nav-tab { font-size: 9px; padding: 8px 2px; }
+  .nav-tab svg { width: 22px; height: 22px; }
+}
+
+/* Destination header — the in-page title, distinct from the app header */
+.dest-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 10px;
+}
+.dest-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  flex: 1;
+  min-width: 0;
+}
+.dest-toolbar { padding: 0 16px 12px; }
+
+/* `.btn-primary` is width:100% because the app's buttons are usually the only
+   thing on their row. Beside a title, or centred in an empty state, they have
+   to size to their label instead — otherwise the button takes the whole row
+   and squeezes the heading to nothing. */
+.dest-header .btn,
+.empty-state .btn { flex: 0 0 auto; width: auto; }
+.dest-header .btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
+
+/* Message trays */
+.tray-bar {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tray-bar::-webkit-scrollbar { display: none; }
+.tray-tab {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--t2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.tray-tab.active { background: var(--accent); color: #fff; }
+
+/* Empty states — every destination has one, with the obvious next action */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 44px 28px;
+  color: var(--t2);
+}
+.empty-state-icon { font-size: 40px; }
+.empty-state-title { font-size: 17px; font-weight: 700; color: var(--t1); }
+.empty-state-body { font-size: 14px; max-width: 30ch; }
+.empty-state .btn { margin-top: 6px; }
+
+/* Files */
+.quota-bar { padding: 0 16px 12px; }
+.quota-line { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.quota-track { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.quota-fill { height: 100%; border-radius: 2px; }
+.breadcrumbs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0 16px 10px;
+}
+.file-icon { font-size: 22px; width: 36px; text-align: center; flex-shrink: 0; }
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  padding: 6px 2px;
+  min-height: 32px;
+}
+
+/* ProfileCard */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--sep);
+  min-height: 60px;
+}
+.profile-card:last-child { border-bottom: none; }
+.profile-card:not(.compact) {
+  align-items: flex-start;
+  border-radius: var(--radius);
+  border-bottom: none;
+  box-shadow: var(--shadow);
+}
+.profile-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.profile-card-name { font-size: 16px; font-weight: 600; }
+.profile-card-id,
+.profile-card-domain {
+  font-size: 12px;
+  color: var(--t2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-card.compact .profile-card-domain { display: none; }
+.profile-card-bio { font-size: 14px; color: var(--t2); margin-top: 4px; }
+.profile-card-caps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.profile-card-link { display: block; margin-top: 4px; }
+.profile-card-action { flex-shrink: 0; min-height: 44px; }
+.profile-card-action.btn-primary {
+  width: auto;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+}
+.id-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  position: absolute;
+  inset: 0;
+}
+.id-avatar { position: relative; overflow: hidden; }
+
+/* IdentityInput */
+.idin { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.idin-suggestions {
+  list-style: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--surface);
+  border: 1px solid var(--sep);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.idin-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 48px;
+  cursor: pointer;
+}
+.idin-suggestion.active,
+.idin-suggestion:hover { background: var(--surface-2); }
+.idin-suggestion-name { font-weight: 600; font-size: 15px; }
+.idin-suggestion-id { margin-left: auto; }
+.idin-status { min-height: 18px; color: var(--t2); }
+.idin-preview:not(:empty) { margin-top: 8px; }
+
+/* AudiencePicker */
+.audience-picker { display: flex; flex-direction: column; gap: 10px; }
+.audience-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 34px; align-items: center; }
+.audience-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-size: 13px;
+}
+.audience-chip .id-avatar { width: 24px; height: 24px; font-size: 11px; }
+.audience-chip-x {
+  border: none;
+  background: none;
+  color: var(--t2);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  min-width: 28px;
+  min-height: 28px;
+}
+.audience-list, .audience-groups { display: flex; flex-direction: column; }
+.audience-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 4px;
+  border: none;
+  background: none;
+  text-align: left;
+  border-bottom: 1px solid var(--sep);
+  color: var(--t1);
+}
+.audience-row.picked { background: var(--accent-light); }
+.audience-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.audience-row-name { font-size: 15px; font-weight: 600; }
+.audience-row-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audience-row-tick { color: var(--accent); font-weight: 700; width: 20px; text-align: center; }
+.audience-group-icon { font-size: 20px; width: 36px; text-align: center; }
+
+/* Keys & devices (EPIC-011 preview) */
+.notice {
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.notice-info { background: var(--accent-light); color: var(--t1); }
+.notice-warn { background: rgba(255,149,0,.14); color: var(--t1); }
+.enrollment-list { display: flex; flex-direction: column; }
+.enrollment-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sep);
+  min-height: 60px;
+}
+.enrollment-row:last-child { border-bottom: none; }
+.enrollment-icon { font-size: 22px; width: 32px; text-align: center; }
+.enrollment-body { flex: 1; min-width: 0; }
+.enrollment-label { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.enrollment-meta { margin-top: 2px; }
+
+/* Touch targets: the mobile-first floor, applied everywhere rather than
+   per-component, since EPIC-019 wraps this UI verbatim. */
+.settings-row, .conv-row, .option-card { min-height: 52px; }
+.btn-sm { min-height: 40px; }
+
+/* ─── EPIC-011: keys, devices and recovery ────────────────────────────────── */
+
+.steps { padding-left: 20px; margin-bottom: 14px; color: var(--t2); }
+.steps li { margin-bottom: 6px; }
+
+/* The six digits are compared by eye across two screens, so they need to be
+   unmistakable at arm's length and impossible to confuse digit-for-digit. */
+.sas-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-align: center;
+  margin: 10px 0 4px;
+}
+
+.rendezvous-code {
+  font-size: 15px;
+  word-break: break-all;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 8px 0;
+  user-select: all;
+}
+
+/* 24 words, numbered, in two columns — the layout people actually copy from. */
+.mnemonic {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 14px;
+  margin: 4px 0 2px 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+}
+.mnemonic-word { padding: 3px 0; }
+@media (min-width: 420px) {
+  .mnemonic { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ─── E15-T2: contacts, requests, key pinning ─────────────────────────────── */
+
+/* A contact row is a ProfileCard plus state; the card already owns the
+   left-hand layout, so this only adds the trailing column. */
+.contact-row,
+.request-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--sep);
+}
+.contact-row:last-child,
+.request-row:last-child { border-bottom: none; }
+.contact-row > div:first-child,
+.request-row > div:first-child { flex: 1; min-width: 0; }
+.contact-row .profile-card,
+.request-row .profile-card { border-bottom: none; }
+.contact-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.contact-more { width: 44px; height: 44px; font-size: 20px; line-height: 1; }
+
+/* Requests wrap on a 375px screen: the two actions sit under the person. */
+.request-row { flex-wrap: wrap; padding-bottom: 12px; }
+.request-intro {
+  flex-basis: 100%;
+  margin: 0 12px 8px 16px;
+  font-size: 14px;
+  color: var(--t2);
+  overflow-wrap: anywhere;
+}
+.request-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+.request-actions .btn-primary { width: auto; padding: 8px 16px; font-size: 14px; border-radius: var(--radius-sm); }
+.request-actions .btn { background: var(--surface-2); color: var(--t1); min-height: 40px; }
+.request-actions .btn-primary { background: var(--accent); color: #fff; }
+
+.tray-section-label {
+  padding: 14px 16px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* "Add" on a message from someone we hold no contact entry for. */
+.conv-add {
+  background: var(--surface-2);
+  color: var(--accent);
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.conv-add svg { width: 12px; height: 12px; }
+
+/* Panel action rows: side-by-side buttons that stay 44px tall. */
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.panel-actions .btn {
+  flex: 1 1 40%;
+  min-height: 44px;
+  background: var(--surface-2);
+  color: var(--t1);
+  padding: 12px 16px;
+  font-size: 15px;
+  width: auto;
+}
+.panel-actions .btn-primary { background: var(--accent); color: #fff; }
+.panel-actions .btn-danger  { background: rgba(255,59,48,.12); color: var(--red); }
+
+/* ─── E15-T3: inbox policy, anonymous & proof-of-work ─────────────────────── */
+
+.policy-modes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.policy-mode {
+  text-align: left;
+  background: var(--surface-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--t1);
+  min-height: 44px;
+}
+.policy-mode.selected { border-color: var(--accent); background: var(--accent-light); }
+.policy-mode-label { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.policy-mode-detail { line-height: 1.35; }
+
+.policy-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  cursor: pointer;
+  min-height: 44px;
+}
+.policy-check { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.policy-toggle-label { font-size: 15px; font-weight: 600; }
+.policy-toggle-detail { line-height: 1.35; }
+
+.policy-challenges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.policy-challenge {
+  border: 1px solid var(--sep);
+  background: var(--surface-2);
+  color: var(--t1);
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 36px;
+}
+.policy-challenge.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+.policy-challenge:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The dial people actually reason about is time, so the readout is the label
+   and the bits are the footnote. */
+.policy-slider { width: 100%; accent-color: var(--accent); height: 32px; }
+.policy-bits-readout { color: var(--t1); font-weight: 600; margin-bottom: 4px; }
+
+/* Anonymous messages must not look like conversations: no avatar, no sender,
+   nothing to tap. */
+.anon-explainer {
+  padding: 12px 16px;
+  color: var(--t2);
+  background: rgba(255,149,0,.08);
+  border-bottom: 1px solid var(--sep);
+  margin: 0;
+}
+.anon-row {
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--sep);
+}
+.anon-row:last-child { border-bottom: none; }
+.anon-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.anon-body { font-size: 15px; color: var(--t1); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.compose-anon { border-top: 1px solid var(--sep); margin-top: 4px; }
+
+/* ─── E15-T4: sharing and visitor trees ───────────────────────────────────── */
+
+.file-sources { display: flex; gap: 8px; }
+.file-sources .tray-tab { flex: 1; }
+
+.visitor-banner {
+  padding: 10px 16px;
+  background: var(--accent-light);
+  color: var(--t1);
+  border-bottom: 1px solid var(--sep);
+  line-height: 1.4;
+}
+.visitor-banner .link-btn { margin-left: 6px; }
+
+.owner-picker { padding: 0 16px 16px; }
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sep);
+}
+.share-row:last-child { border-bottom: none; }
+.share-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.share-path { overflow-wrap: anywhere; font-weight: 600; }
+.share-row .btn { background: var(--surface-2); color: var(--red); min-height: 40px; flex-shrink: 0; }

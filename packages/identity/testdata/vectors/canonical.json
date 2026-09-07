@@ -1,0 +1,212 @@
+{
+  "public_key_base64url": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+  "seed_base64url": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+  "vectors": [
+    {
+      "name": "message-minimal",
+      "inputs": {
+        "payload": "Y2lwaGVydGV4dA",
+        "recipient": "bob.example.org",
+        "sender": "alice.poweur.net",
+        "timestamp": "2026-01-15T09:30:00Z"
+      },
+      "canonical": "alice.poweur.net\nbob.example.org\n2026-01-15T09:30:00Z\nY2lwaGVydGV4dA",
+      "signature": "QP4HDRbaIzXJLW0J4fk_ReNLZbtURBS0qZm5oTZWaRpNHqilMXJ4uaYcKBu3TGamFvYxsgaZBXRry6P57xLRAg"
+    },
+    {
+      "name": "message-session-encrypted",
+      "inputs": {
+        "encryption": {
+          "alg": "x25519-chacha20-poly1305",
+          "ephemeral_public_key": "ZXBoZW1lcmFsLXB1YmxpYy1rZXk",
+          "nonce": "bm9uY2UtMTIzNDU2Nzg"
+        },
+        "id": "msg_1768469400000_abcdefghi",
+        "payload": "Y2lwaGVydGV4dA",
+        "recipient": "bob.example.org",
+        "sender": "alice.poweur.net",
+        "session_id": "sess_0011",
+        "timestamp": "2026-01-15T09:30:00Z"
+      },
+      "canonical": "alice.poweur.net\nbob.example.org\n2026-01-15T09:30:00Z\nY2lwaGVydGV4dA\nid:msg_1768469400000_abcdefghi\nsession:sess_0011\nenc:x25519-chacha20-poly1305:ZXBoZW1lcmFsLXB1YmxpYy1rZXk:bm9uY2UtMTIzNDU2Nzg",
+      "signature": "QYPpg0kAA6mNlx6V_DOBIwBBiVtRJivs_Li3cqPffHKR9JI14OqJFE_lM6kZkQ8ZynXMYEQCBkidU-rWLX-ICw"
+    },
+    {
+      "name": "message-typed",
+      "inputs": {
+        "encryption": {
+          "alg": "x25519-chacha20-poly1305",
+          "ephemeral_public_key": "ZXBoZW1lcmFsLXB1YmxpYy1rZXk",
+          "nonce": "bm9uY2UtMTIzNDU2Nzg"
+        },
+        "id": "msg_1768469400000_abcdefghi",
+        "payload": "Y2lwaGVydGV4dA",
+        "recipient": "bob.example.org",
+        "sender": "alice.poweur.net",
+        "session_id": "",
+        "timestamp": "2026-01-15T09:30:00Z",
+        "type": "sys.contact.request"
+      },
+      "canonical": "alice.poweur.net\nbob.example.org\n2026-01-15T09:30:00Z\nY2lwaGVydGV4dA\nid:msg_1768469400000_abcdefghi\nenc:x25519-chacha20-poly1305:ZXBoZW1lcmFsLXB1YmxpYy1rZXk:bm9uY2UtMTIzNDU2Nzg\ntype:sys.contact.request",
+      "signature": "Pj3csqCEYOtoZSnYJw4jmIpkaT_sffU_yTu0mL9kRDE9jWH3lJvFZNtBlOP8WfoSB16CsfukoEiIWs0ZyjiJDQ"
+    },
+    {
+      "name": "ack",
+      "inputs": {
+        "id": "ack_1768469400000_jklmnopqr",
+        "message_id": "msg_1768469400000_abcdefghi",
+        "recipient": "alice.poweur.net",
+        "sender": "bob.example.org",
+        "session_id": "",
+        "state": "delivered_client",
+        "timestamp": "2026-01-15T09:30:00Z"
+      },
+      "canonical": "ack\nack_1768469400000_jklmnopqr\nmsg_1768469400000_abcdefghi\ndelivered_client\nbob.example.org\nalice.poweur.net\n2026-01-15T09:30:00Z",
+      "signature": "_9moPGUXkpTYNHkUxw1AgG3EpV942kLynTcEmdZx4DtVbXFik81HT16l1st-7Gw0hkwambYBvRf10P73HVHWAA"
+    },
+    {
+      "name": "ack-session",
+      "inputs": {
+        "id": "ack_1768469400000_jklmnopqr",
+        "message_id": "msg_1768469400000_abcdefghi",
+        "recipient": "alice.poweur.net",
+        "sender": "bob.example.org",
+        "session_id": "sess_0011",
+        "state": "delivered_client",
+        "timestamp": "2026-01-15T09:30:00Z"
+      },
+      "canonical": "ack\nack_1768469400000_jklmnopqr\nmsg_1768469400000_abcdefghi\ndelivered_client\nbob.example.org\nalice.poweur.net\n2026-01-15T09:30:00Z\nsession:sess_0011",
+      "signature": "jlcfSXdrCwWQmsCgJAzo7b1X1La30Tcl8AMTcJEYLS5FhoaJc2m0hxO73MEXMhakSlG7JAEh4w3nJrzpllHqDQ"
+    },
+    {
+      "name": "identity-registration",
+      "inputs": {
+        "encryption_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+        "relay_address": "poweur.net"
+      },
+      "canonical": "identity-registration\nalice.poweur.net\nebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\npoweur.net\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "6GsgYBoxZ7tQ27dkorkV1BcjCK2RUcM2c5pbt7xhyNRhkbr6XhyP1WB4DfeYN89aikz1EDo4L6V4Zw5AKfiUAg"
+    },
+    {
+      "name": "identity-export",
+      "inputs": {
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "identity-export\nalice.poweur.net\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "Nynj3Bf46Wy4FwH2DC4zbu7YCCSN2cF9Bft1QE94ikhwdBiHUYuct6goegf0tgxmCwLqXknwVH_XRb5Na3-iDw"
+    },
+    {
+      "name": "identity-rotation",
+      "inputs": {
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "new_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "old_public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ"
+      },
+      "canonical": "identity-rotation\nalice.poweur.net\nebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "vmcUcxOpgasLNLdHarvqpJXgE_NpvmecTPet7btAthMok4m1rsS3KD2XIqP7bOU6wcv2lVxkFf5oCDV_DFw0Bg"
+    },
+    {
+      "name": "identity-encryption-key",
+      "inputs": {
+        "encryption_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "identity-encryption-key\nalice.poweur.net\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "pDuE39hbfnsOVdix-H7kzCBdbJmKY3gqVQmcXCcjZktsUyHYFjNCHynsw7jdLKShK6l_5MfrmZP0DPH80CJ2Bw"
+    },
+    {
+      "name": "dav-token",
+      "inputs": {
+        "audience": "bob.example.org",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "scope": "dav:rw:shared/project-x"
+      },
+      "canonical": "dav-token\nalice.poweur.net\nbob.example.org\ndav:rw:shared/project-x\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "2PTV9PzsUh5y8wpnUaIklvPt3swEbG4Rk90dEgs8cbmDZ-rmgvr2a4saGPFKJ9KlR2-L6o4CUfbWgfB00_oxCA"
+    },
+    {
+      "name": "keystore-enroll",
+      "inputs": {
+        "credential_id": "Y3JlZC0wMDE",
+        "enrollment_id": "enr-001",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "kind": "passkey",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "wrapped_digest": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+      },
+      "canonical": "keystore-enroll\nalice.poweur.net\nenr-001\npasskey\nY3JlZC0wMDE\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "i8tTfb7lDo741p3xsps22t-EMuxsy6DBGb82cnoYoOMAc8Hy-PjoxHCYpL7SHdqIE9J7LKllHc3NtRucW1glAg"
+    },
+    {
+      "name": "keystore-enroll-no-credential",
+      "inputs": {
+        "credential_id": "",
+        "enrollment_id": "enr-002",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "kind": "recovery-kit",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "wrapped_digest": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+      },
+      "canonical": "keystore-enroll\nalice.poweur.net\nenr-002\nrecovery-kit\n\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "irWGv-0ic7vKNHAKH57h86UG_jo9QY1T5n5tB_9vILMbIeRZmgHOF1uC2gjuaeuvx9r8TDxduwZz9TMVTLXCCg"
+    },
+    {
+      "name": "keystore-list",
+      "inputs": {
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "keystore-list\nalice.poweur.net\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "f9Z3DAGkQA0FG5nnWnR5tvr4w9Jj_Yh7G_C1zditBFt_vTR_1JZAOzzIdQSlCXlBjatv40SRZtO0Npn9vjppBA"
+    },
+    {
+      "name": "keystore-remove",
+      "inputs": {
+        "enrollment_id": "enr-001",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
+      },
+      "canonical": "keystore-remove\nalice.poweur.net\nenr-001\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "bNFb4ZujJ-n4y7Urkn842MntBzutO1pYs-EaqzXmzG0MB5QWYSmOISmns92DQtg_cYsMRZbSG04x0haDaniPCg"
+    },
+    {
+      "name": "session-registration",
+      "inputs": {
+        "expires_at": "2026-01-16T09:30:00Z",
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "session_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+      },
+      "canonical": "session-registration\nalice.poweur.net\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\n2026-01-16T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "MfwdlXAgu62d5dkoI6f1wQ0Em-qI7hJL6gARByncMPU1H9mFhTEQBxed5j8YT7UVBG587AKh2bRpIw26Lp5-Aw"
+    },
+    {
+      "name": "session-revocation",
+      "inputs": {
+        "identity": "alice.poweur.net",
+        "issued_at": "2026-01-15T09:30:00Z",
+        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
+        "session_id": "sess_0011"
+      },
+      "canonical": "session-revocation\nalice.poweur.net\nsess_0011\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
+      "signature": "Rxo65bRLCWc7SmhlNwL29YGxChi4b4N0UQoexzPibj0envKM2myyAtKPqSrkUYroGjm98-NT4mYYnKzNC7_XCQ"
+    }
+  ]
+}
