@@ -64,6 +64,8 @@ test.describe("contacts, requests and key pinning", () => {
     // ── Bob sees it, in the requests tray rather than as a conversation ────
     const accept = await requestFrom(bobPage, aliceId);
     await expect(bobPage.locator(".request-intro")).toHaveText("hi, it's alice");
+    // The tray says how many are waiting, from any tray (E07-T3).
+    await expect(bobPage.locator('.tray-tab[data-tray="requests"] .tray-badge')).toHaveText("1");
 
     // The same stranger is one tap from being added in the inbox too.
     await bobPage.click('.tray-tab[data-tray="inbox"]');
@@ -101,6 +103,46 @@ test.describe("contacts, requests and key pinning", () => {
 
     await alice.close();
     await bob.close();
+  });
+
+  test("a queued contact request arrives by push, with nothing touched", async ({ browser }) => {
+    test.slow();
+    // Under contacts_and_requests the relay parks the request in its own
+    // queue, which the inbox notification never covers — so this is the case
+    // that would go silent if only inbox deliveries were pushed (E09-T2).
+    const readerCtx = await browser.newContext({ viewport: MOBILE });
+    const senderCtx = await browser.newContext({ viewport: MOBILE });
+    const reader = await readerCtx.newPage();
+    const sender = await senderCtx.newPage();
+    await stubPasskeys(reader);
+    await stubPasskeys(sender);
+
+    const suffix = Date.now().toString(36);
+    const readerId = await registerIdentity(reader, relay, `pqr${suffix}`);
+    await registerIdentity(sender, relay, `pqs${suffix}`);
+
+    await reader.evaluate(async () => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      await clientFor(getActiveIdentity()).setPolicy("contacts_and_requests");
+    });
+
+    // The reader sits on Messages and does nothing from here on.
+    await reader.click('.nav-tab[data-page="messages"]');
+    await expect(reader.locator(".empty-state-title")).toHaveText("No messages yet");
+
+    await sender.click('.nav-tab[data-page="contacts"]');
+    await sender.click("#btn-add-contact-empty");
+    await sender.fill(".idin input", readerId);
+    await expect(sender.locator("#btn-add-contact-go")).toBeEnabled({ timeout: 20_000 });
+    await sender.click("#btn-add-contact-go");
+
+    // No click on the reader's side: the badge appears on its own.
+    await expect(reader.locator('.tray-tab[data-tray="requests"] .tray-badge'))
+      .toHaveText("1", { timeout: 30_000 });
+
+    await readerCtx.close();
+    await senderCtx.close();
   });
 
   test("a swapped key blocks the send until it is explicitly trusted", async ({ page }) => {

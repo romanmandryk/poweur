@@ -9,6 +9,13 @@ services:
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
       # Hosted registration (set HOSTED_DOMAINS / REGISTRATION_GATE in .env.prod)
+      # Handle policy (EPIC-018). The package default is 3 so the test
+      # fixtures ("bob") keep working; production holds short handles back.
+      NAME_MIN_LEN: "6"
+      NAME_MAX_LEN: "24"
+      # NAME_RESERVED: extra names, CSV — adds to the built-in list
+      # NAME_BLOCKED_FILE: /data/blocked-terms.txt (one term per line)
+      # NAME_BLOCK_MODE: substring | exact
     volumes:
       - ./apps/web:/web:ro
       - poweur_data:/data

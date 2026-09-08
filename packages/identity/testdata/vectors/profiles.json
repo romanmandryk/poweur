@@ -1,0 +1,61 @@
+[
+  {
+    "name": "full",
+    "raw": {
+      "version": 1,
+      "display_name": "Alice",
+      "avatar": "public/avatar.png",
+      "bio": "builder",
+      "links": [
+        {
+          "label": "site",
+          "url": "https://example.org"
+        }
+      ],
+      "locale": "en"
+    },
+    "valid": true
+  },
+  {
+    "name": "empty",
+    "raw": {
+      "version": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "avatar-off-tree",
+    "raw": {
+      "version": 1,
+      "avatar": "https://cdn.example.org/a.png"
+    },
+    "valid": false
+  },
+  {
+    "name": "avatar-outside-public",
+    "raw": {
+      "version": 1,
+      "avatar": "private/avatar.png"
+    },
+    "valid": false
+  },
+  {
+    "name": "link-without-url",
+    "raw": {
+      "version": 1,
+      "links": [
+        {
+          "label": "site"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "bad-version",
+    "raw": {
+      "version": 2
+    },
+    "valid": false
+  }
+]

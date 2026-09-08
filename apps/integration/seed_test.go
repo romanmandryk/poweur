@@ -177,12 +177,12 @@ func TestINT_SEED_04_KeyDeriveMatchesPublishedDocument(t *testing.T) {
 	ts, addr := newHostedRelay(t, zone, dataDir)
 	defer ts.Close()
 	relayURL := "http://" + addr
-	zone.SetHost("verify.poweur.net", addr)
+	zone.SetHost("seedcheck.poweur.net", addr)
 	clipkg.ConfigureIdentityResolver("http", true, addr)
 	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
 
 	home := t.TempDir()
-	seed := createSeedIdentity(t, home, "verify.poweur.net", relayURL)
+	seed := createSeedIdentity(t, home, "seedcheck.poweur.net", relayURL)
 
 	stdout, _ := runCLI(t, t.TempDir(), "key", "derive", "--seed", seed, "--json")
 	var derived struct {
@@ -193,7 +193,7 @@ func TestINT_SEED_04_KeyDeriveMatchesPublishedDocument(t *testing.T) {
 		t.Fatalf("parse derive output: %v\n%s", err, stdout)
 	}
 
-	doc := fetchDoc(t, relayURL+"/identities/verify.poweur.net")
+	doc := fetchDoc(t, relayURL+"/identities/seedcheck.poweur.net")
 	if idpkg.NormalizePublicKeyKey(derived.PublicKey) != idpkg.NormalizePublicKeyKey(doc.PublicKey) {
 		t.Fatalf("derive printed %q, relay published %q", derived.PublicKey, doc.PublicKey)
 	}

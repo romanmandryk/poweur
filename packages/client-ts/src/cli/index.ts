@@ -15,6 +15,7 @@ import {
 import {
   anon,
   inbox,
+  listen,
   messagesStatus,
   relayCommand,
   send,
@@ -41,6 +42,7 @@ export const HELP = `Usage:
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur inbox [--use-identity=...] [--json]
+  poweur listen [--use-identity=...] [--json]
   poweur messages status [--id=<message-id>] [--use-identity=...] [--json]
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur session <status|refresh|revoke> [--use-identity=...] [--json]
@@ -78,6 +80,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
         return await keyRotate(rest.slice(1), streams);
       case "send": return await send(rest, streams);
       case "inbox": return await inbox(rest, streams);
+      case "listen": return await listen(rest, streams);
       case "messages":
         if (rest[0] !== "status") throw new UsageError("unknown messages subcommand (want status)");
         return await messagesStatus(rest.slice(1), streams);

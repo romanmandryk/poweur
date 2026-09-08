@@ -10,7 +10,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E06-T1 Normative spec + validation | **done** | [`apps/docs/docs/conventions/poweur-sys.md`](../apps/docs/docs/conventions/poweur-sys.md); JSON Schemas in `conventions/schemas/poweur-sys/` (CI-validated); enforced validators are Go (`packages/identity`), run on DAV PUT (`422 invalid_document`, `TestSysWriteValidation`); unknown files preserved; bootstrap = EnsureTree skeleton + registration-written `id.json` |
-| E06-T2 profile.json + capabilities.json | **partial** | Schemas + write validation shipped; `poweur-sys/public/*` now world-served via `/.well-known/poweur/` (no new endpoints). **Open:** CLI `poweur lookup` showing profile/capabilities; web profile card → [EPIC-015](EPIC-015-web-app-ux.md) E15-T5 |
+| E06-T2 profile.json + capabilities.json | **partial** | Schemas + write validation shipped; `poweur-sys/public/*` now world-served via `/.well-known/poweur/` (no new endpoints); web profile card + editor shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T5. **Open:** CLI `poweur lookup` showing profile/capabilities. (The Host-routed well-known path is *not* a gap: in production `https://bob.poweur.net/.well-known/poweur/profile.json` is what a browser fetches, Host set for it and CORS `*`. Only dev/e2e, where one relay hosts many identities that are not in DNS and the browser must use its IP, falls back to the identity document.) |
 | E06-T3 `/apps` namespace rules | **done** | [`apps/docs/docs/conventions/app-data.md`](../apps/docs/docs/conventions/app-data.md); `manifest.json` validated on write (app_id must match directory); shared-app-data = EPIC-005 share of an `/apps` subtree (`TestShareAppsSubtree` is the worked example) |
 | E06-T4 PCP process + registry | **done** | `conventions/README.md`, `pcp-0001-process.md`, `registry.json` (validated in CI incl. code-emitted `sys.*` types), seed PCPs 0002–0005 filed |
 | E06-T5 Tasks-domain dogfood | **deferred** | reference app + tasks PCP not started; `net.poweur.tasks` app-id reserved in the registry |
@@ -88,8 +88,12 @@ malformed `contacts.json` PUT.
 
 The human-facing and machine-facing "who am I" files.
 
-- [x] `profile.json` schema: display_name, avatar (path into `/public`), bio, links, locale
-      — **web client rendering deferred** (with EPIC-007's web contacts pass)
+- [x] `profile.json` schema: display_name, avatar (path into `/public`), bio, links, locale.
+      Web client rendering *and* editing shipped with
+      [EPIC-015](EPIC-015-web-app-ux.md) E15-T5 (ProfileCard everywhere a person appears;
+      the Settings editor writes the document and uploads the avatar into `/public`);
+      `@poweur/client`'s `profile.ts` conforms to `identity/profile.go` through new
+      `profiles` vectors
 - [x] `capabilities.json` schema: supported protocol features + endpoint hints
       (messaging version, files/DAV, sync, sign-in) — supersedes the `_poweur-caps` TXT
       sketch in `apps/docs/docs/future/capabilities.md` for web-resolved identities; keep TXT

@@ -109,3 +109,10 @@ field (`poweur relay set`). Export: `POST /identities/{id}/export` / `poweur ide
 - [DNS Records](/protocol/dns-records)
 - [DNS Management](/relay/dns-management)
 - EPIC-001 / EPIC-002
+
+## Credential scope for hosted identities
+
+A hosted identity's passkey is scoped to the registrable domain of its home
+(`alice.poweur.net` → `poweur.net`), so the launcher host and the identity's own origin share
+one credential. See [credential scope](/security/key-management#credential-scope-rpid) for
+what that trades away and why existing credentials are unaffected.

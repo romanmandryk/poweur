@@ -34,17 +34,17 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | core complete (lookup UX, tasks dogfood open) | E03 |
 | [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | core complete (web UX, T5 open) | E03, E06 |
 | [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | proposed | E01 |
-| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | proposed | E02, E03 |
+| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | in progress (T1 spool + T2 push done; typed messages, attachments, groups open) | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | proposed | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
 | [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (CI gates, metrics, Grafana, federated ecosystem metrics) | Infra / Ops | proposed | E02 |
-| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web page → E12, stranger gate → E07-T5) | E06, E07 |
-| [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | proposed | E03, E04, E05, E06, E07, E14 |
+| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web app shipped with E15-T3; public contact page → E12, stranger gate → E07-T5) | E06, E07 |
+| [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | in progress (T1–T6 done; T7–T12 open — host-aware front doors, desktop/tablet layout) | E03, E04, E05, E06, E07, E14, E18 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
-| [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | proposed | E02, E01, E14 |
-| [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | proposed | E15, E17, E18 |
+| [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
+| [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
 
 ## Integration epics (`integrations/`)
 

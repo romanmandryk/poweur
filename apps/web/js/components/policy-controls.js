@@ -74,8 +74,11 @@ export function describePowBits(bits) {
  * @param {{mode?: string, anonymous?: object}} [options.policy]  current document
  * @param {boolean} [options.explicit]   false when the relay default is standing in
  * @param {(policy: object) => Promise<void>|void} options.onSave
+ * @param {boolean} [options.showSave]  false when the host supplies the button
+ *   (the onboarding flow already has a "Continue" and two of them is one too
+ *   many — it calls `save()` instead)
  */
-export function PolicyControls({ policy = {}, explicit = true, onSave } = {}) {
+export function PolicyControls({ policy = {}, explicit = true, onSave, showSave = true } = {}) {
   const state = {
     mode: policy.mode || "open",
     allow: Boolean(policy.anonymous?.allow),
@@ -101,7 +104,8 @@ export function PolicyControls({ policy = {}, explicit = true, onSave } = {}) {
   });
 
   const save = el("button", { class: "btn btn-primary mt-md", id: "policy-save", text: "Save" });
-  save.addEventListener("click", async () => {
+
+  async function submit() {
     save.disabled = true;
     status.textContent = "Saving…";
     status.className = "idin-status small";
@@ -109,13 +113,16 @@ export function PolicyControls({ policy = {}, explicit = true, onSave } = {}) {
       await onSave(toDocument());
       status.textContent = "Saved";
       status.className = "idin-status small val-ok";
+      return true;
     } catch (error) {
       status.textContent = error.message;
       status.className = "idin-status small val-warn";
+      return false;
     } finally {
       save.disabled = false;
     }
-  });
+  }
+  save.addEventListener("click", submit);
 
   const root = el("div", { class: "policy-controls" }, [
     !explicit && el("p", {
@@ -134,7 +141,7 @@ export function PolicyControls({ policy = {}, explicit = true, onSave } = {}) {
       ]),
     ]),
     anonBody,
-    save,
+    showSave && save,
     status,
   ]);
 
@@ -247,5 +254,5 @@ export function PolicyControls({ policy = {}, explicit = true, onSave } = {}) {
   renderModes();
   renderAnon();
 
-  return { el: root, value: toDocument, state };
+  return { el: root, value: toDocument, save: submit, state };
 }

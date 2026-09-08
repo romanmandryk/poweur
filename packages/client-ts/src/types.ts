@@ -74,6 +74,11 @@ export interface Ack {
 export interface InboxResponse {
   messages: Message[];
   acks: Ack[];
+  /** Present on a `?since=` pickup: acknowledge it with `consume`. */
+  cursor?: string;
+  ack_cursor?: string;
+  /** How many messages are still spooled after this read. */
+  pending?: number;
 }
 
 export interface PreviousKey {
@@ -202,6 +207,47 @@ export interface AnonymousPolicy {
   pow_bits?: number;
   max_bytes?: number;
   max_per_day?: number;
+}
+
+/** Why a handle is (un)available — the relay's `reason` vocabulary. */
+export type HandleReason =
+  | "available"
+  | "taken"
+  | "reserved"
+  | "blocked"
+  | "too_short"
+  | "too_long"
+  | "charset"
+  | "hyphen"
+  | "punycode"
+  | "domain_not_hosted"
+  | "invalid";
+
+/** `GET /hosted/availability` (EPIC-018 E18-T2). */
+export interface HandleAvailability {
+  handle: string;
+  identity: string;
+  available: boolean;
+  reason: HandleReason;
+  message: string;
+  policy: { min_len: number; max_len: number; charset: string };
+}
+
+/** One labeled URL on a profile. */
+export interface ProfileLink {
+  label?: string;
+  url: string;
+}
+
+/** `poweur-sys/public/profile.json` (identity.Profile). */
+export interface Profile {
+  version: number;
+  display_name?: string;
+  /** A path into the identity's own /public root — never an external URL. */
+  avatar?: string;
+  bio?: string;
+  links?: ProfileLink[];
+  locale?: string;
 }
 
 export interface InboxPolicy {

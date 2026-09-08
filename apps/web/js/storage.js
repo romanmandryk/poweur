@@ -33,7 +33,17 @@ const SESSION_PREFIX = "poweur:session:";
 export function defaultRelayUrl() {
   const configured = readConfigRaw().relayUrl;
   if (configured) return configured;
-  return globalThis.location?.origin ?? "";
+  // Only a web origin can stand in for a relay. A shell runs on
+  // `capacitor://localhost`, which is not one — returning it produced an app
+  // that tried to register against itself, with no way to say otherwise
+  // because Settings needs an identity first. Empty means "ask" (EPIC-019).
+  const origin = globalThis.location?.origin ?? "";
+  return /^https?:$/.test(globalThis.location?.protocol ?? "") ? origin : "";
+}
+
+/** True when a relay is known without asking the user (EPIC-019 E19-T1). */
+export function hasRelayUrl() {
+  return Boolean(defaultRelayUrl());
 }
 
 /**
@@ -203,6 +213,19 @@ export function removeSessionRecord(identity) {
 // The master seed rides along when there is one: the recovery kit is derived
 // from it, and it is the one secret that must never be written down by us.
 let _unlockedKeys = null; // { identity, signingJWK, encJWK, seed }
+
+/**
+ * The rp.id a stored credential was created with (EPIC-018 E18-T4).
+ *
+ * Records written before this existed were minted with the page host and must
+ * keep being asserted against it — reading the registrable domain for them
+ * would silently stop finding their credential.
+ */
+export function rpIdFor(identity) {
+  const record = loadIdentityRecord(identity);
+  if (record?.rpId) return record.rpId;
+  return globalThis.location?.hostname ?? "";
+}
 
 export function setUnlockedKeys(identity, signingJWK, encJWK, seed = null) {
   _unlockedKeys = { identity, signingJWK, encJWK, seed };

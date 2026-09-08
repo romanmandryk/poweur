@@ -54,12 +54,12 @@ func TestSessionStoreGetDeleteListPrune(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	now := time.Now().UTC()
 	s.Put(Session{
-		ID:         "s1",
-		Identity:   "a.test",
-		PublicKey:  "k",
+		ID:             "s1",
+		Identity:       "a.test",
+		PublicKey:      "k",
 		PublicKeyBytes: pub,
-		IssuedAt:   now,
-		ExpiresAt:  now.Add(time.Hour),
+		IssuedAt:       now,
+		ExpiresAt:      now.Add(time.Hour),
 	})
 	if s2, ok := s.Get("s1"); !ok || s2.ID != "s1" {
 		t.Fatal("get")
@@ -78,12 +78,12 @@ func TestSessionStoreExpiredGet(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	now := time.Now().UTC()
 	s.Put(Session{
-		ID:            "s2",
-		Identity:      "a.test",
-		PublicKey:     "k",
+		ID:             "s2",
+		Identity:       "a.test",
+		PublicKey:      "k",
 		PublicKeyBytes: pub,
-		IssuedAt:      now,
-		ExpiresAt:     now.Add(-time.Second),
+		IssuedAt:       now,
+		ExpiresAt:      now.Add(-time.Second),
 	})
 	if _, ok := s.Get("s2"); ok {
 		t.Fatal("expired session should be gone")
@@ -95,12 +95,12 @@ func TestSessionStorePrune(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	now := time.Now().UTC()
 	s.Put(Session{
-		ID:            "sx",
-		Identity:      "a.test",
-		PublicKey:     "k",
+		ID:             "sx",
+		Identity:       "a.test",
+		PublicKey:      "k",
 		PublicKeyBytes: pub,
-		IssuedAt:      now,
-		ExpiresAt:     now.Add(-time.Hour),
+		IssuedAt:       now,
+		ExpiresAt:      now.Add(-time.Hour),
 	})
 	s.Prune()
 	if len(s.sessions) != 0 {

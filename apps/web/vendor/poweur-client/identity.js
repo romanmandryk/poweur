@@ -11,7 +11,7 @@ import { generateIdentityKeys, signerFor } from "./crypto/keys.js";
 import { x25519PublicKey, ed25519PublicKey } from "./crypto/index.js";
 import { newDocument, signDocument } from "./document.js";
 import { rfc3339, stripKeyPrefix, toBase64url } from "./encoding.js";
-import { PoweurError } from "./errors.js";
+import { PoweurError, RelayError } from "./errors.js";
 import { newNonce } from "./ids.js";
 import { RelayClient } from "./http.js";
 import { solvePow } from "./pow.js";
@@ -23,6 +23,22 @@ export class IdentityApi {
     }
     health() {
         return this.client.request({ method: "GET", path: "/health" });
+    }
+    /**
+     * Can this handle be claimed here (EPIC-018 E18-T2)?
+     *
+     * Called before the passkey ceremony, not after: the relay's answer carries
+     * a `reason` and the policy it applied, so a client can say *why* a name is
+     * unavailable and validate the next attempt inline.
+     */
+    availability(handle, domain) {
+        const query = new URLSearchParams({ handle });
+        if (domain)
+            query.set("domain", domain);
+        return this.client.request({
+            method: "GET",
+            path: `/hosted/availability?${query.toString()}`,
+        });
     }
     /**
      * The relay's canonical address (host[:port]). Registration signatures bind
@@ -51,8 +67,14 @@ export class IdentityApi {
             path: `/identities/${encodeURIComponent(identity)}`,
         });
     }
-    /** Fetch and solve the relay's registration challenge (REGISTRATION_GATE=pow). */
-    async solveRegistrationChallenge() {
+    /**
+     * Fetch and solve the relay's registration challenge (REGISTRATION_GATE=pow).
+     *
+     * The callbacks exist because this runs in front of a person waiting to sign
+     * up: at the difficulties an operator actually sets, a silent solve is a
+     * signup screen that looks broken.
+     */
+    async solveRegistrationChallenge(options = {}) {
         const challenge = await this.client.request({
             method: "GET",
             path: "/auth/pow?purpose=registration",
@@ -60,7 +82,12 @@ export class IdentityApi {
         if (!challenge.token) {
             throw new PoweurError("relay_error", "malformed registration challenge");
         }
-        return { token: challenge.token, solution: await solvePow(challenge.token, challenge.bits) };
+        options.onChallenge?.({ bits: challenge.bits });
+        const solution = await solvePow(challenge.token, challenge.bits, {
+            ...(options.onSolveProgress ? { onProgress: options.onSolveProgress } : {}),
+            ...(options.signal ? { signal: options.signal } : {}),
+        });
+        return { token: challenge.token, solution };
     }
     /** Publish or rotate an identity's X25519 encryption key. */
     async publishEncryptionKey(signer, encryptionPublicKey, options = {}) {
@@ -168,11 +195,19 @@ export async function createIdentity(api, identity, options = {}) {
         response = await api.register(request);
     }
     catch (error) {
+        // Branch on the relay's *code*, not its prose: the message a relay sends
+        // is human-facing ("hosted registration requires a solved proof-of-work
+        // challenge"), so matching on "pow_required" in it never fired against a
+        // real relay and the auto-solve silently did nothing.
+        const relayCode = error instanceof RelayError ? error.relayCode : undefined;
         const message = error instanceof Error ? error.message : String(error);
-        const gated = message.includes("pow_required");
+        const gated = relayCode === "pow_required" || message.includes("pow_required");
         if (!gated || options.solveRegistrationPow === false)
             throw error;
-        const { token, solution } = await api.solveRegistrationChallenge();
+        const { token, solution } = await api.solveRegistrationChallenge({
+            ...(options.onRegistrationChallenge ? { onChallenge: options.onRegistrationChallenge } : {}),
+            ...(options.onRegistrationProgress ? { onSolveProgress: options.onRegistrationProgress } : {}),
+        });
         response = await api.register({ ...request, pow_token: token, pow_solution: solution });
     }
     return { identity, keys, publicKey, encryptionPublicKey, document, response };

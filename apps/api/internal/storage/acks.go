@@ -1,6 +1,10 @@
 package storage
 
-import "sync"
+import (
+	"path/filepath"
+	"strings"
+	"time"
+)
 
 // StoredAck mirrors the on-wire Ack envelope. Acks are keyed in the
 // AckStore by the ack's `recipient` (== the original message sender),
@@ -18,38 +22,53 @@ type StoredAck struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// AckStore is the in-memory queue of pending acks per identity. It mirrors
-// InboxStore exactly: acks are appended on receipt and drained when the
-// addressed identity polls. Like the inbox, acks are ephemeral and lost on
-// relay restart — clients are expected to fall back to message-level retry
-// or operator-driven re-sync if state is critical.
+// AckStore queues pending acks per identity. It mirrors InboxStore exactly,
+// including durability (EPIC-009 E09-T1) — a receipt that vanishes on restart
+// leaves a sender staring at one tick for a message that did arrive.
 type AckStore struct {
-	mu   sync.Mutex
-	acks map[string][]StoredAck
+	spool *spool[StoredAck]
 }
 
+// NewAckStore returns a memory-only queue (tests, relays without POWEUR_DATA).
 func NewAckStore() *AckStore {
-	return &AckStore{acks: make(map[string][]StoredAck)}
+	s, _ := newSpool[StoredAck]("")
+	return &AckStore{spool: s}
+}
+
+// OpenAckStore spools under dataDir/spool/acks.
+func OpenAckStore(dataDir string) (*AckStore, error) {
+	dir := ""
+	if strings.TrimSpace(dataDir) != "" {
+		dir = filepath.Join(dataDir, "spool", "acks")
+	}
+	s, err := newSpool[StoredAck](dir)
+	if err != nil {
+		return nil, err
+	}
+	return &AckStore{spool: s}, nil
 }
 
 // Add appends ack to the identity's queue. When max > 0 and the queue is
 // already at capacity the oldest ack is dropped to make room — acks are
 // delivery receipts and it is better to surface recent ones than old ones.
 func (s *AckStore) Add(identity string, ack StoredAck, max int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if max > 0 && len(s.acks[identity]) >= max {
-		s.acks[identity] = s.acks[identity][1:]
-	}
-	s.acks[identity] = append(s.acks[identity], ack)
+	s.spool.add(identity, ack, max, true)
 }
 
 func (s *AckStore) Drain(identity string) []StoredAck {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	acks := s.acks[identity]
-	if len(acks) > 0 {
-		s.acks[identity] = nil
-	}
-	return acks
+	return s.spool.drain(identity)
+}
+
+// Since / Consume mirror the inbox: read without forgetting, forget on the
+// client's word.
+func (s *AckStore) Since(identity, cursor string) ([]StoredAck, string) {
+	return s.spool.since(identity, cursor)
+}
+
+func (s *AckStore) Consume(identity, cursor string) int {
+	return s.spool.consume(identity, cursor)
+}
+
+func (s *AckStore) Expire(before time.Time) []ExpiredEntry[StoredAck] {
+	return s.spool.expire(before)
 }

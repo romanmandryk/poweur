@@ -120,6 +120,10 @@ async function createIdentity(page, relay) {
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");
   await page.click("#btn-pin-ok");
+  await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
+  // First run lands in the setup flow (E15-T5); these specs test what comes
+  // after it, and onboarding has its own coverage.
+  await page.click("#btn-onboard-skip");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
   return `${handle}.poweur.net`;
 }
@@ -170,11 +174,26 @@ test.describe("five destinations at 375px", () => {
     await stubPasskeys(page);
     await createIdentity(page, relay);
 
-    for (const tab of await page.locator(".nav-tab").all()) {
-      const box = await tab.boundingBox();
-      expect(box.height, "tab height").toBeGreaterThanOrEqual(44);
-      expect(box.width, "tab width").toBeGreaterThanOrEqual(44);
-    }
+    // Measured in one pass, and only once the shell has settled: it re-renders
+    // from strings whenever a background read lands, so a measurement taken
+    // across that swap sees detached nodes or a half-built nav. Under a full
+    // suite — several relays, slower registration — that window is wide enough
+    // to hit, which is what made this flake.
+    const measure = () => page.$$eval(".nav-tab", (tabs) =>
+      tabs.map((tab) => {
+        const rect = tab.getBoundingClientRect();
+        return { height: rect.height, width: rect.width };
+      }));
+    // The whole check polls, not just the wait for five tabs: a measurement
+    // taken while the shell is mid-render sees a nav that is present but not
+    // yet laid out, and asserting on that once made this test flake under a
+    // full-suite load rather than report a real regression.
+    await expect
+      .poll(async () => {
+        const boxes = await measure();
+        return boxes.length === 5 && boxes.every((box) => box.height >= 44 && box.width >= 44);
+      }, { message: "the bottom nav never settled at five tabs of at least 44px" })
+      .toBe(true);
   });
 
   test("Messages shows three trays and switches between them", async ({ page }) => {
@@ -190,6 +209,10 @@ test.describe("five destinations at 375px", () => {
 
     await page.click('.tray-tab[data-tray="anonymous"]');
     await expect(page.locator(".empty-state-title")).toHaveText("No anonymous messages");
+
+    // No badges when nothing is waiting: a badge that never clears teaches
+    // people to ignore badges (E07-T3).
+    await expect(page.locator(".tray-badge")).toHaveCount(0);
   });
 
   test("Contacts offers the identity input, which rejects a typo", async ({ page }) => {

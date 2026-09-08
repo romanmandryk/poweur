@@ -167,7 +167,7 @@ func (s *Server) authChallengeSignedGet(w http.ResponseWriter, r *http.Request) 
 	}
 	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
-	challenge, ok := s.challenges.Consume(identity)
+	challenge, ok := s.consumeChallenge(identity, r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge missing or expired")
 		return "", false

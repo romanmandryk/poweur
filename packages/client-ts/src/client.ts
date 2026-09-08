@@ -17,6 +17,7 @@ import { IdentityApi } from "./identity.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
+import { readProfile, writeProfile } from "./profile.js";
 import type { ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
 import { Shares } from "./shares.js";
@@ -34,6 +35,7 @@ import {
   type InboxMessage,
   type InboxMode,
   type InboxPolicy,
+  type Profile,
 } from "./types.js";
 
 export interface PoweurClientOptions extends RelayClientOptions {
@@ -212,6 +214,15 @@ export class PoweurClient {
 
   async setPolicy(mode: InboxMode, anonymous?: AnonymousPolicy): Promise<InboxPolicy> {
     return writeInboxPolicy(await this.dav(), mode, anonymous);
+  }
+
+  /** Our own public profile document, and whether one has been written. */
+  async profile(): Promise<{ profile: Profile; explicit: boolean }> {
+    return readProfile(await this.dav());
+  }
+
+  async setProfile(profile: Profile): Promise<Profile> {
+    return writeProfile(await this.dav(), profile);
   }
 
   /** Drain the anonymous queue. */

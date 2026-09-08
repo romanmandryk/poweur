@@ -25,8 +25,8 @@ type Session struct {
 }
 
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]Session
+	mu         sync.RWMutex
+	sessions   map[string]Session
 	byIdentity map[string]map[string]struct{}
 }
 

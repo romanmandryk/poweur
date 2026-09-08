@@ -6,13 +6,14 @@
  * `PoweurClient` that `js/client.js` builds for the active identity.
  *
  * Five destinations (E15-T1): messages | contacts | files | launcher | settings
- * Sub-pages (full-screen, back button): add-id | unlock | compose
+ * Sub-pages (full-screen, back button): add-id | unlock | compose | onboarding
  */
 
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
+  streamForever,
 } from "@poweur/client";
 
 import {
@@ -29,14 +30,14 @@ import {
   getConfig, saveConfig,
   saveIdentityRecord, loadIdentityRecord, listIdentities, removeIdentity,
   getActiveIdentity, setActiveIdentity,
-  loadSessionRecord, removeSessionRecord,
+  loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
-  defaultRelayUrl, relayUrlFor,
+  defaultRelayUrl, hasRelayUrl, relayUrlFor,
 } from "./storage.js";
 
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
 
-import { resolveProfile, clearProfileCache } from "./profiles.js";
+import { resolveProfile, clearProfileCache, primeProfile } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
 import { PolicyControls, INBOX_MODES, describePowBits } from "./components/policy-controls.js";
 import { AudiencePicker } from "./components/audience-picker.js";
@@ -79,9 +80,12 @@ const S = {
   /** Messages destination: inbox | requests | anonymous, as distinct trays. */
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
-  requests: { incoming: [], loading: false, loaded: false, error: null },
-  anon: { messages: [], loading: false, loaded: false, error: null },
+  requests: { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
+  anon: { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
+  profile: { doc: null, explicit: false, loaded: false, loading: false },
+  /** null unless the first-run flow is on screen. */
+  onboard: null,
   files: {
     dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
     /** null = our own tree; an identity = browsing what they shared with us. */
@@ -288,6 +292,21 @@ const CONTACT_STATE_CHIP = {
   blocked:   { label: "Blocked",   cls: "chip-red"    },
 };
 
+/**
+ * How many things are waiting in a tray.
+ *
+ * Only the trays where a count is unambiguous: a request and an anonymous
+ * message are both "something addressed to you that you have not dealt with".
+ * The inbox gets no badge, because the app has no read state and a number
+ * there would be counting messages held, not messages unread — a badge that
+ * never clears teaches people to ignore badges.
+ */
+function trayCount(tray) {
+  if (tray === "requests") return incomingRequests().length;
+  if (tray === "anonymous") return S.anon.messages.length;
+  return 0;
+}
+
 /** The contact record for an identity, or null — the app's one lookup. */
 function contactFor(identity) {
   const wanted = String(identity ?? "").toLowerCase();
@@ -329,9 +348,15 @@ function renderMessages() {
       <h1 class="dest-title">Messages</h1>
     </div>
     <div class="tray-bar" role="tablist" aria-label="Message trays">
-      ${TRAYS.map(t => `
+      ${TRAYS.map(t => {
+        const waiting = trayCount(t.id);
+        return `
         <button class="tray-tab${S.tray === t.id ? " active" : ""}" data-tray="${t.id}"
-                role="tab" aria-selected="${S.tray === t.id}">${t.label}</button>`).join("")}
+                role="tab" aria-selected="${S.tray === t.id}"
+                ${waiting ? `aria-label="${esc(t.label)}, ${waiting} waiting"` : ""}>${t.label}${
+          waiting ? `<span class="tray-badge">${waiting > 99 ? "99+" : waiting}</span>` : ""
+        }</button>`;
+      }).join("")}
     </div>
     ${renderTray()}
     <button class="fab" id="btn-compose" title="New message" aria-label="New message">✏️</button>`;
@@ -385,6 +410,9 @@ function incomingRequests() {
     }
   };
   for (const entry of S.requests.incoming) {
+    // The queue also carries `sys.contact.accept` answers to requests we sent;
+    // those are handled in the background, not shown as someone asking.
+    if (entry.type && entry.type !== "sys.contact.request") continue;
     add({ sender: entry.sender, timestamp: entry.timestamp, intro: null, queued: true });
   }
   for (const raw of S.messages) {
@@ -644,11 +672,15 @@ function renderLauncher() {
       <div class="form-card">
         <div class="form-group">
           <label class="form-label" for="ni-handle">Handle</label>
-          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
+          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false"
+                 autocapitalize="none" autocorrect="off"
+                 aria-describedby="ni-availability" />
+          <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}" autocomplete="off" />
+          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}"
+                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
         </div>
         <div class="form-group">
           <label class="form-label" style="display:flex;align-items:center;gap:8px">
@@ -697,13 +729,19 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Account</div>
       <div class="settings-rows">
-        <div class="settings-row" id="row-switch-id">
+        <div class="settings-row" role="button" tabindex="0" id="row-switch-id">
           <span class="settings-row-icon">🔄</span>
           <span class="settings-row-label">Switch / Add identity</span>
           <span class="settings-row-arrow">›</span>
         </div>
         ${rec ? `
-        <div class="settings-row" id="row-identity-keys">
+        <div class="settings-row" role="button" tabindex="0" id="row-profile">
+          <span class="settings-row-icon">🪞</span>
+          <span class="settings-row-label">Your profile</span>
+          <span class="settings-row-value truncate">${esc(S.profile.doc?.display_name ?? (S.profile.loaded ? "Not set" : "…"))}</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
+        <div class="settings-row" role="button" tabindex="0" id="row-identity-keys">
           <span class="settings-row-icon">🪪</span>
           <span class="settings-row-label">Identity keys</span>
           <span class="settings-row-arrow">›</span>
@@ -715,12 +753,12 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Security</div>
       <div class="settings-rows">
-        <div class="settings-row" id="row-keys-devices">
+        <div class="settings-row" role="button" tabindex="0" id="row-keys-devices">
           <span class="settings-row-icon">📱</span>
           <span class="settings-row-label">Keys &amp; devices</span>
           <span class="settings-row-arrow">›</span>
         </div>
-        <div class="settings-row" id="row-recovery-kit">
+        <div class="settings-row" role="button" tabindex="0" id="row-recovery-kit">
           <span class="settings-row-icon">🧾</span>
           <span class="settings-row-label">Recovery kit</span>
           <span class="settings-row-value ${rec.seedDerived ? "val-ok" : "val-warn"}">
@@ -734,13 +772,13 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Inbox</div>
       <div class="settings-rows">
-        <div class="settings-row" id="row-policy">
+        <div class="settings-row" role="button" tabindex="0" id="row-policy">
           <span class="settings-row-icon">🛡️</span>
           <span class="settings-row-label">Who can message you</span>
           <span class="settings-row-value">${esc(policySummary().mode)}</span>
           <span class="settings-row-arrow">›</span>
         </div>
-        <div class="settings-row" id="row-policy-anon">
+        <div class="settings-row" role="button" tabindex="0" id="row-policy-anon">
           <span class="settings-row-icon">🎭</span>
           <span class="settings-row-label">Anonymous &amp; proof-of-work</span>
           <span class="settings-row-value ${policySummary().anonOn ? "val-ok" : "muted"}">${esc(policySummary().anon)}</span>
@@ -752,13 +790,13 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Network</div>
       <div class="settings-rows">
-        <div class="settings-row" id="row-relay">
+        <div class="settings-row" role="button" tabindex="0" id="row-relay">
           <span class="settings-row-icon">🔗</span>
           <span class="settings-row-label">Relay URL</span>
           <span class="settings-row-value truncate">${esc(S.config.relayUrl)}</span>
           <span class="settings-row-arrow">›</span>
         </div>
-        <div class="settings-row" id="row-lookup">
+        <div class="settings-row" role="button" tabindex="0" id="row-lookup">
           <span class="settings-row-icon">🔎</span>
           <span class="settings-row-label">Lookup identity</span>
           <span class="settings-row-arrow">›</span>
@@ -769,25 +807,25 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Advanced</div>
       <div class="settings-rows">
-        <div class="settings-row${sess ? "" : " no-action"}" id="row-session">
+        <div class="settings-row${sess ? "" : " no-action"}" ${sess ? `role="button" tabindex="0"` : ""} id="row-session">
           <span class="settings-row-icon">🔑</span>
           <span class="settings-row-label">Session</span>
           <span class="settings-row-value ${sessOk ? "val-ok" : "val-warn"}">${sessOk ? "Active" : "None"}</span>
           ${sess ? `<span class="settings-row-arrow">›</span>` : ""}
         </div>
-        <div class="settings-row" id="row-dns">
+        <div class="settings-row" role="button" tabindex="0" id="row-dns">
           <span class="settings-row-icon">🌐</span>
           <span class="settings-row-label">DNS provider</span>
           <span class="settings-row-value">${esc(S.config.dnsProvider || "Cloudflare")}</span>
           <span class="settings-row-arrow">›</span>
         </div>
         ${rec ? `
-        <div class="settings-row" id="row-rotate-enc">
+        <div class="settings-row" role="button" tabindex="0" id="row-rotate-enc">
           <span class="settings-row-icon">🔄</span>
           <span class="settings-row-label">Rotate encryption key</span>
           <span class="settings-row-arrow">›</span>
         </div>
-        <div class="settings-row" id="row-remove-id">
+        <div class="settings-row" role="button" tabindex="0" id="row-remove-id">
           <span class="settings-row-icon">🗑️</span>
           <span class="settings-row-label" style="color:var(--red)">Remove this identity</span>
           <span class="settings-row-arrow">›</span>
@@ -820,6 +858,7 @@ function renderSubPage() {
     case "add-id":  return renderAddId();
     case "unlock":  return renderUnlock();
     case "compose": return renderCompose();
+    case "onboarding": return renderOnboarding();
     default:        return renderAddId();
   }
 }
@@ -835,6 +874,7 @@ function renderAddId() {
       </div>
       <div class="sub-body">
         <p class="muted small" style="margin-bottom:20px">Connect or create a Poweur ID identity on this device.</p>
+        ${renderRelayPrompt()}
         <div class="option-list">
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
@@ -846,6 +886,7 @@ function renderAddId() {
             </div>
             <div class="option-inline-form">
               <input id="signin-id-input" class="input" type="text" placeholder="alice.poweur.net"
+                autocapitalize="none" autocorrect="off"
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
@@ -871,6 +912,76 @@ function renderAddId() {
         </div>
       </div>
     </div>`;
+}
+
+/**
+ * Ask which relay to talk to, when nothing else can answer.
+ *
+ * A relay-served SPA knows: it is *on* the relay. A shell is not on anything —
+ * it runs from its own bundle — so the first question it has to ask is where
+ * the user's identity lives. Every option below this needs the answer, which
+ * is why it sits above them rather than inside one of them.
+ */
+function renderRelayPrompt() {
+  if (hasRelayUrl()) return "";
+  return `
+    <div class="form-card relay-prompt">
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label" for="setup-relay">Relay</label>
+        <p class="muted small" style="margin-bottom:6px">
+          The server your identity lives on. Your own, or the one that invited you.
+        </p>
+        <input id="setup-relay" class="input" type="url" inputmode="url" autocapitalize="none" autocorrect="off"
+               placeholder="https://poweur.net" autocomplete="off" spellcheck="false" />
+        <p class="idin-status small" id="setup-relay-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>`;
+}
+
+/**
+ * Save the typed relay once it answers, so the options below light up.
+ *
+ * It is checked rather than taken on faith: a typo here would otherwise
+ * surface as an unexplained failure three screens later, during registration.
+ */
+function attachRelayPrompt() {
+  const input = q("#setup-relay");
+  const status = q("#setup-relay-status");
+  if (!input || !status) return;
+
+  let timer = null;
+  const check = async () => {
+    const raw = input.value.trim();
+    if (!raw) { status.textContent = ""; return; }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    status.textContent = "Checking…";
+    status.className = "idin-status small";
+    try {
+      const health = await fetch(new URL("/health", url).toString(), {
+        headers: { Accept: "application/json" },
+      }).then(r => (r.ok ? r.json() : null));
+      if (!health?.status) throw new Error("that does not look like a relay");
+      saveConfig({ ...getConfig(), relayUrl: url.replace(/\/$/, "") });
+      S.config = getConfig();
+      status.textContent = `Connected to ${new URL(url).host}`;
+      status.className = "idin-status small val-ok";
+      render();
+    } catch (error) {
+      status.textContent = `Could not reach ${url} — ${error.message}`;
+      status.className = "idin-status small val-warn";
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(check, 600);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    clearTimeout(timer);
+    check();
+  });
+  input.focus();
 }
 
 // Unlock ───────────────────────────────────────────────────────────────────────
@@ -947,6 +1058,122 @@ function renderCompose() {
         <button class="btn btn-primary" id="btn-send-msg">Send →</button>
       </div>
     </div>`;
+}
+
+// Onboarding ──────────────────────────────────────────────────────────────────
+
+const ONBOARD_STEPS = 3;
+
+/**
+ * First run, three skippable steps.
+ *
+ * The one question worth interrupting for is the inbox policy: it is the only
+ * setting whose default (anyone may message you) is a decision the user never
+ * knowingly made, and nobody goes looking for it in Settings before the first
+ * unwanted message arrives.
+ */
+function renderOnboarding() {
+  const step = S.onboard?.step ?? 1;
+  return `
+    <div class="sub-page">
+      <div class="sub-header">
+        <span class="sub-title">Set up ${esc(idHandle(S.identity))}</span>
+        <button class="btn-back onboard-skip" id="btn-onboard-skip"
+                aria-label="Skip setup">Skip</button>
+      </div>
+      <div class="sub-body">
+        <div class="onboard-progress" role="progressbar" aria-valuemin="1"
+             aria-valuemax="${ONBOARD_STEPS}" aria-valuenow="${step}">
+          ${Array.from({ length: ONBOARD_STEPS }, (_, i) =>
+            `<span class="onboard-dot${i < step ? " done" : ""}"></span>`).join("")}
+        </div>
+        ${step === 1 ? `
+          <h2 class="onboard-title">Who can message you?</h2>
+          <p class="muted small">You can change this any time in Settings.</p>
+          <div id="onboard-policy"></div>` : ""}
+        ${step === 2 ? `
+          <h2 class="onboard-title">How should people see you?</h2>
+          <p class="muted small">Optional, and public — this is what anyone who looks you up reads.</p>
+          <div id="onboard-profile"></div>` : ""}
+        ${step === 3 ? `
+          <div class="onboard-done">
+            <div class="empty-state-icon">🎉</div>
+            <h2 class="onboard-title">You're set</h2>
+            <p class="muted">
+              ${esc(S.identity)} can send and receive encrypted messages, keep files, and
+              share them. Add someone from Contacts to get started.
+            </p>
+          </div>` : ""}
+      </div>
+      <div class="sub-footer onboard-footer">
+        ${step > 1 ? `<button class="btn" id="btn-onboard-back">Back</button>` : ""}
+        <button class="btn btn-primary" id="btn-onboard-next">
+          ${step === ONBOARD_STEPS ? "Start using Poweur" : "Continue"}
+        </button>
+      </div>
+    </div>`;
+}
+
+/** The onboarding steps mount live components, so wiring lives with them. */
+function attachOnboardingEvents() {
+  const step = S.onboard?.step ?? 1;
+  const client = clientFor(S.identity);
+
+  q("#btn-onboard-skip")?.addEventListener("click", finishOnboarding);
+  q("#btn-onboard-back")?.addEventListener("click", () => {
+    S.onboard.step = Math.max(1, step - 1);
+    render();
+  });
+  q("#btn-onboard-next")?.addEventListener("click", async () => {
+    if (step >= ONBOARD_STEPS) return finishOnboarding();
+    // Continue saves this step's answers, then moves on. A step whose save
+    // fails stays put with the error next to the field, rather than silently
+    // advancing past a choice that was never written.
+    if (!(await (S.onboard.pending?.() ?? Promise.resolve(true)))) return;
+    S.onboard.step = step + 1;
+    render();
+  });
+
+  S.onboard.pending = null;
+
+  if (step === 1 && client) {
+    const host = q("#onboard-policy");
+    if (!host) return;
+    // Recommended, not imposed: the flow opens on the mode the docs call the
+    // human default, and Skip leaves the relay's default in place.
+    const controls = PolicyControls({
+      policy: S.policy.doc ?? { version: 1, mode: "contacts_and_requests" },
+      explicit: S.policy.explicit,
+      showSave: false,
+      onSave: async (document) => {
+        await client.setPolicy(document.mode, document.anonymous);
+        await loadPolicy({ force: true });
+      },
+    });
+    host.replaceChildren(controls.el);
+    S.onboard.pending = controls.save;
+  }
+
+  if (step === 2 && client) {
+    const host = q("#onboard-profile");
+    if (!host) return;
+    const editor = ProfileEditor({ profile: S.profile.doc, showSave: false });
+    host.replaceChildren(editor);
+    // Nothing typed is nothing to write — an empty profile document would say
+    // "this person set a profile" when they skipped past it.
+    S.onboard.pending = async () => {
+      const typed = q("#pe-name")?.value.trim() || q("#pe-bio")?.value.trim()
+        || q("#pe-avatar")?.files?.length;
+      return typed ? editor.save() : true;
+    };
+  }
+}
+
+function finishOnboarding() {
+  S.onboard = null;
+  R.sub = null;
+  R.page = "messages";
+  render();
 }
 
 // ─── Files destination ────────────────────────────────────────────────────────
@@ -1106,6 +1333,14 @@ function renderOwnerPicker() {
 function attachEvents() {
   q("#btn-theme")?.addEventListener("click", toggleTheme);
 
+  // A div with role="button" is a button to a screen reader and a dead end to
+  // a keyboard unless it answers Enter and Space itself.
+  qAll('[role="button"][tabindex="0"]').forEach(row => row.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    row.click();
+  }));
+
   // Identity pill / dropdown
   q("#id-pill")?.addEventListener("click", e => {
     e.stopPropagation();
@@ -1204,15 +1439,25 @@ function attachEvents() {
   qAll(".conv-row[data-compose-to]").forEach(r =>
     r.addEventListener("click", () => R.push("compose", { to: r.dataset.composeTo })));
 
+  // A push stream costs one connection and saves every poll after it.
+  if (getUnlockedKeys()) startEventStream();
+
   // Load inbox when unlocked and on the Messages destination
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
     loadInbox();
-    if (S.tray === "requests") loadRequests();
-    if (S.tray === "anonymous") { loadPolicy(); loadAnon(); }
+    // Always, not only on the Requests tray: an accept to a request *we* sent
+    // arrives here, and the handshake only completes once we have read it.
+    loadRequests();
+    // The anonymous queue is drained here too, so its badge is honest before
+    // the tray is opened — but only for the few who turned anonymous on, so
+    // everyone else pays nothing for a queue that is always empty.
+    loadPolicy();
+    if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon();
   }
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
   // Add ID options
+  attachRelayPrompt();
   q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
   q("#btn-signin-passkey")?.addEventListener("click", doSignInWithPasskey);
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
@@ -1221,6 +1466,7 @@ function attachEvents() {
   // Launcher step 1 → hosted stays here; DNS mode redirects to identity host
   q("#btn-next-id")?.addEventListener("click", doNextIdentityStep);
   q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doNextIdentityStep(); });
+  attachAvailabilityCheck();
 
   // Launcher step 2 → create identity + toggle DNS fields
   q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
@@ -1237,6 +1483,9 @@ function attachEvents() {
 
   // Compose send
   q("#btn-send-msg")?.addEventListener("click", doSend);
+
+  // First-run flow
+  if (R.sub === "onboarding") attachOnboardingEvents();
 
   // Files
   if (R.page === "files" && !R.sub && getUnlockedKeys()) {
@@ -1286,10 +1535,14 @@ function attachEvents() {
   q("#row-lookup")?.addEventListener("click", showLookupPanel);
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
+  q("#row-profile")?.addEventListener("click", showProfilePanel);
   q("#row-policy")?.addEventListener("click", showPolicyPanel);
   q("#row-policy-anon")?.addEventListener("click", showPolicyPanel);
   q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
-  if (R.page === "settings" && !R.sub && getUnlockedKeys()) loadPolicy();
+  if (R.page === "settings" && !R.sub && getUnlockedKeys()) {
+    loadPolicy();
+    loadProfile();
+  }
   q("#row-recovery-kit")?.addEventListener("click", showRecoveryKitPanel);
   q("#row-rotate-enc")?.addEventListener("click", doRotateEncKey);
   q("#row-remove-id")?.addEventListener("click", doRemoveIdentity);
@@ -1303,6 +1556,7 @@ function attachEvents() {
  * to whoever was signed in.
  */
 function switchIdentity(identity) {
+  stopEventStream();
   clearUnlockedKeys();
   clearProfileCache();
   S.identity = identity;
@@ -1310,9 +1564,10 @@ function switchIdentity(identity) {
   S.messages = [];
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
-  S.requests = { incoming: [], loading: false, loaded: false, error: null };
-  S.anon = { messages: [], loading: false, loaded: false, error: null };
+  S.requests = { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
+  S.anon = { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.policy = { doc: null, explicit: false, loading: false, loaded: false };
+  S.profile = { doc: null, explicit: false, loaded: false, loading: false };
   S.files = {
     dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
     owner: null, picking: false, grants: [], grantsLoaded: false, cursor: "", polling: false,
@@ -1353,7 +1608,7 @@ async function doUnlock() {
   try {
     let opened;
     if (rec.supportsPRF !== false && rec.encryptedKeys?.kdf === "prf") {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
       if (!prfOutput) throw new Error("PRF not available from this authenticator.");
       opened = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys);
     } else {
@@ -1425,13 +1680,20 @@ async function doRecoverFromKeystore(identity) {
  * than a copy that only works until its site data is cleared.
  */
 async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
+  // Same rule as creation: no authenticator means a PIN, not a refusal. This
+  // is the path a shell takes after a device-enrollment ceremony, and turning
+  // it away would mean an identity could be joined on a browser but not on a
+  // phone (EPIC-019).
   const support = await checkPasskeySupport();
-  if (!support.available) throw new Error(`Passkey unavailable: ${support.reason}`);
 
-  setLoading(true, "Creating a passkey on this device…");
   const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-  const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
-    await createPasskey(identity, userId);
+  let credentialId = "", prfOutput = null, supportsPRF = false;
+  let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
+  if (support.available) {
+    setLoading(true, "Creating a passkey on this device…");
+    ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+      await createPasskey(identity, userId));
+  }
 
   let encryptedKeys;
   if (supportsPRF) {
@@ -1449,7 +1711,7 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
     identity,
     publicKey: publicKeyFromJwk(signingJWK),
     encPublicKey: publicKeyFromJwk(encJWK),
-    credentialId, credentialPublicKey, credentialAlg,
+    credentialId, credentialPublicKey, credentialAlg, rpId: credentialScope,
     encryptedKeys,
     relay: relayUrl,
     userId,
@@ -1503,6 +1765,7 @@ function showJoinDevicePanel() {
     <div class="form-group">
       <label class="form-label" for="join-identity">Your Poweur ID</label>
       <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
+             autocapitalize="none" autocorrect="off"
              autocomplete="off" spellcheck="false" inputmode="url" />
     </div>
     <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
@@ -1583,6 +1846,73 @@ function showJoinDevicePanel() {
   });
 }
 
+/**
+ * Check the handle against the relay as the user types (EPIC-018 E18-T3).
+ *
+ * The whole reason this endpoint exists is ordering: without it, "that name is
+ * taken" arrives *after* a WebAuthn ceremony the user cannot get back. So the
+ * Next button stays disabled until the relay has said yes, and the reason for
+ * every no is shown under the field in the relay's own words — its policy is
+ * deployment configuration this client cannot know.
+ */
+const AVAILABILITY_DEBOUNCE_MS = 350;
+let availabilityToken = 0;
+
+function attachAvailabilityCheck() {
+  const input = q("#ni-handle");
+  const status = q("#ni-availability");
+  const next = q("#btn-next-id");
+  if (!input || !status || !next) return;
+
+  let timer = null;
+  const setStatus = (text, cls = "") => {
+    status.textContent = text;
+    status.className = `idin-status small ${cls}`;
+  };
+
+  const check = async () => {
+    const handle = input.value.trim().toLowerCase();
+    const domain = q("#ni-domain")?.value.trim().toLowerCase() || "";
+    const hosted = q("#ni-hosted-step1")?.checked !== false;
+    const token = ++availabilityToken;
+
+    // Self-hosted names are not this relay's to give out.
+    if (!hosted || !handle) {
+      next.disabled = false;
+      setStatus("");
+      return;
+    }
+    next.disabled = true;
+    setStatus("Checking…");
+    try {
+      const verdict = await identityApiFor(defaultRelayUrl()).availability(handle, domain);
+      if (token !== availabilityToken) return; // a later keystroke won
+      next.disabled = !verdict.available;
+      setStatus(
+        verdict.available ? `${verdict.identity} is available` : verdict.message,
+        verdict.available ? "val-ok" : "val-warn",
+      );
+    } catch (error) {
+      if (token !== availabilityToken) return;
+      // A relay that cannot answer must not block the flow — registration
+      // itself is still the authority, and it will refuse if this would have.
+      next.disabled = false;
+      setStatus("");
+      console.warn("Availability check failed:", error.message);
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    next.disabled = true;
+    setStatus("");
+    timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS);
+  });
+  q("#ni-domain")?.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS); });
+  q("#ni-hosted-step1")?.addEventListener("change", check);
+  if (input.value.trim()) check();
+}
+
 function doNextIdentityStep() {
   const handle = q("#ni-handle")?.value.trim().toLowerCase();
   const domain = q("#ni-domain")?.value.trim().toLowerCase();
@@ -1605,6 +1935,64 @@ function doRedirectToIdentityDomain() {
   doNextIdentityStep();
 }
 
+/**
+ * Move a freshly claimed identity from the launcher host to its own origin.
+ *
+ * Storage is per-origin, so the record has to travel. It goes in the URL
+ * *fragment*, which browsers never send to a server, and what it carries is
+ * the same AES-GCM blob localStorage held — the wrapping secret comes from the
+ * passkey and is not in it. The passkey itself needs no second ceremony: E18-T4
+ * scoped it to the registrable domain both hosts share.
+ *
+ * Returns false when there is nothing to hand off (self-hosted flow, an
+ * unknown launcher host, or the app is already on the identity's origin), and
+ * the caller carries on where it is.
+ */
+async function handOffToIdentityOrigin(identity) {
+  const record = loadIdentityRecord(identity);
+  const host = globalThis.location?.hostname ?? "";
+  if (!record || !host || host === identity) return false;
+
+  let launcherHost = "";
+  try {
+    const root = await fetch(new URL("/", relayUrlFor(identity)).toString(), {
+      headers: { Accept: "application/json" },
+    }).then(r => (r.ok ? r.json() : null));
+    launcherHost = String(root?.launcher_host ?? "").toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!launcherHost || launcherHost !== host.toLowerCase()) return false;
+
+  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
+  setLoading(true, `Taking you to ${identity}…`);
+  globalThis.location.href = `https://${identity}/app/#claim=${payload}`;
+  return true;
+}
+
+/**
+ * The receiving half: adopt an identity handed over by the launcher.
+ *
+ * The fragment is cleared immediately — it has served its purpose, and leaving
+ * a wrapped key blob in the address bar and in history is needless exposure.
+ */
+function adoptHandOff() {
+  const hash = globalThis.location?.hash ?? "";
+  if (!hash.startsWith("#claim=")) return false;
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(fromBase64url(hash.slice("#claim=".length))));
+    if (!decoded?.identity || !decoded?.record) return false;
+    saveIdentityRecord(decoded.identity, decoded.record);
+    setActiveIdentity(decoded.identity);
+    S.identity = decoded.identity;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+  }
+}
+
 async function doCreateIdentity() {
   const step2 = parseCreateHash();
   if (!step2) return;
@@ -1623,8 +2011,14 @@ async function doCreateIdentity() {
   const identity = `${handle}.${domain}`;
   if (loadIdentityRecord(identity)) return toast("Identity already exists on this device", "warning");
 
+  // A passkey is a lock, not the identity (EPIC-011). Where there is no
+  // authenticator to hold one, a PIN holds the same wrapped keys — so an
+  // absent authenticator changes *how* the keys are protected, not whether an
+  // identity can exist. That case is not exotic: a Capacitor shell runs on
+  // `capacitor://localhost`, which is not a secure http(s) origin, so WebAuthn
+  // is unavailable there by construction (EPIC-019, where the OS keystore
+  // eventually replaces the PIN).
   const support = await checkPasskeySupport();
-  if (!support.available) return toast(`Passkey unavailable: ${support.reason}`, "error", 7000);
 
   setLoading(true, "Generating keys…");
   try {
@@ -1633,10 +2027,18 @@ async function doCreateIdentity() {
     const { signingJWK: sigPriv, encJWK: encPriv, seed, publicKey, encPublicKey } =
       await generateSeedIdentityJwks();
 
-    setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
-      await createPasskey(identity, userId);
+    let credentialId = "", prfOutput = null, supportsPRF = false;
+    let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
+    if (support.available) {
+      setLoading(true, "Creating passkey…");
+      ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+        await createPasskey(identity, userId));
+    } else {
+      setLoading(false);
+      toast(`No passkey here (${support.reason}) — protecting your keys with a PIN instead`,
+        "info", 7000);
+    }
 
     let encryptedKeys;
     if (supportsPRF) {
@@ -1657,11 +2059,17 @@ async function doCreateIdentity() {
       keys: keyBytesFromJwks(identity, sigPriv, encPriv),
       ...(hosted ? {} : { dnsProvider: provider, dnsToken }),
       ...(q("#ni-invite")?.value.trim() ? { inviteCode: q("#ni-invite").value.trim() } : {}),
+      // A relay may gate signup behind proof-of-work (EPIC-014). Solving it
+      // silently is a signup screen that looks stuck, so say what is happening.
+      onRegistrationChallenge: ({ bits }) =>
+        setLoading(true, `This relay asks for proof of work (${bits} bits)…`),
+      onRegistrationProgress: (attempts) =>
+        setLoading(true, `Proof of work: ${attempts.toLocaleString()} attempts…`),
     });
 
     saveIdentityRecord(identity, {
       identity, publicKey, encPublicKey,
-      credentialId, credentialPublicKey, credentialAlg,
+      credentialId, credentialPublicKey, credentialAlg, rpId: credentialScope,
       encryptedKeys, relay: relayUrl,
       userId, createdAt: created.document.updated_at, supportsPRF,
       seedDerived: true,
@@ -1686,8 +2094,24 @@ async function doCreateIdentity() {
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
-    R.sub = null; R.page = "messages"; R.params = {};
-    render(); // attachEvents starts the inbox fetch
+
+    // The `#create=` hash has done its job. Left in place it makes the
+    // launcher reopen step 2 for a handle that already exists — including
+    // after a reload, which drops the user into a stale creation flow.
+    if (globalThis.location?.hash.startsWith("#create=")) {
+      history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+    }
+
+    // Claimed on the launcher host? The identity's own origin is where it
+    // lives, so hand it over rather than leaving the user on `id.…` with
+    // storage that the identity's own pages cannot read (EPIC-018 E18-T3).
+    if (await handOffToIdentityOrigin(identity)) return;
+
+    // A configured app beats an empty inbox: every step is skippable, but the
+    // policy question is one nobody thinks to go looking for in Settings.
+    S.onboard = { step: 1 };
+    R.page = "messages"; R.params = {};
+    R.push("onboarding");
 
   } catch (err) {
     setLoading(false);
@@ -1758,6 +2182,41 @@ function challengeSerial(task) {
   return next;
 }
 
+/**
+ * Hold the relay's push stream open while an identity is unlocked
+ * (EPIC-009 E09-T2).
+ *
+ * The stream never carries a message — it says "there is something", and the
+ * inbox fetch that follows is where delivery happens. That is what makes
+ * reconnecting free: a gap costs one extra read, not a lost message, so the
+ * polling that renders already do stays as the fallback.
+ */
+let streamAbort = null;
+
+function startEventStream() {
+  const client = clientFor(S.identity);
+  if (!client || streamAbort) return;
+  const identity = S.identity;
+  streamAbort = new AbortController();
+  streamForever(client.relay, client.signer, {
+    signal: streamAbort.signal,
+    onEvent: (event) => {
+      if (identity !== S.identity) return; // the user switched identities
+      if (event.type === "ready") return;  // nothing new by itself
+      // A queued contact request never reaches the inbox, so reading only
+      // that would leave the Requests tray silent until the user opened it.
+      if (event.type === "request") loadRequests({ force: true });
+      else loadInbox();
+    },
+    onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
+  }).catch(() => {});
+}
+
+function stopEventStream() {
+  streamAbort?.abort();
+  streamAbort = null;
+}
+
 function loadInbox() {
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
@@ -1768,6 +2227,7 @@ function loadInbox() {
       mergeMessages(messages);
       mergeInto(S.acks, acks);
       if (R.page === "messages" && !R.sub) render();
+      processContactAccepts().catch(e => console.warn("Accept processing failed:", e.message));
     } catch (e) {
       console.warn("Inbox error:", e.message);
     } finally {
@@ -2259,9 +2719,18 @@ async function loadContacts({ force = false } = {}) {
  * per identity, so two overlapping challenge-signed GETs invalidate each
  * other's signature.
  */
+const REQUEST_DRAIN_INTERVAL_MS = 2000;
+
 function loadRequests({ force = false } = {}) {
   const Q = S.requests;
-  if (Q.loading || (Q.loaded && !force)) return Promise.resolve();
+  // Unlike a document read, this is a *drain*: what matters is whether the
+  // queue has anything new, so "already loaded once" is not a reason to skip
+  // it — an acceptance we never re-fetch is a handshake that never completes.
+  // A short floor keeps a burst of renders from becoming a burst of requests.
+  if (Q.loading) return Promise.resolve();
+  if (!force && Q.fetchedAt && Date.now() - Q.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
+    return Promise.resolve();
+  }
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
 
@@ -2271,11 +2740,18 @@ function loadRequests({ force = false } = {}) {
       // `GET /requests/{id}` drains the same way the inbox does.
       mergeInto(Q.incoming, await client.requests());
       Q.loaded = true;
+      Q.fetchedAt = Date.now();
       Q.error = null;
+      processContactAccepts().catch(e => console.warn("Accept processing failed:", e.message));
     } catch (error) {
       Q.error = `Could not read requests: ${error.message}`;
     } finally {
       Q.loading = false;
+      Q.fetchedAt = Date.now();
+      // Repaint for the whole destination, not just this tray: the count is
+      // on the tray *bar*, which is visible from every tray. Repainting only
+      // when the Requests tray was open meant a request that arrived by push
+      // was fetched and then not shown.
       if (R.page === "messages" && !R.sub) render();
     }
   });
@@ -2286,6 +2762,49 @@ async function refreshContacts() {
   S.contacts.loaded = false;
   await loadContacts({ force: true });
   if (S.tray === "requests") await loadRequests({ force: true });
+}
+
+/**
+ * Complete the handshake when someone answers our request.
+ *
+ * Their relay let our `sys.contact.request` through and they accepted; without
+ * this, *our* contacts still say `requested`, so our own policy refuses their
+ * first message and the two sides sit in a stalemate neither can see. EPIC-007
+ * deferred this "auto-pin-on-accept" to the web pass.
+ *
+ * It promotes only someone we ourselves asked, and only while the key we
+ * pinned when we asked is still their key — an accept is not a reason to
+ * re-pin, it is a reason to finish what we started.
+ */
+async function processContactAccepts() {
+  const client = clientFor(S.identity);
+  if (!client) return;
+  await loadContacts();
+
+  // Under `contacts_and_requests` the relay routes an accept into the requests
+  // queue, not the inbox (it is the answer to a request, not a message); under
+  // `open` it lands in the inbox like anything else. Both, therefore.
+  const senders = new Set([...S.messages, ...S.requests.incoming]
+    .filter(entry => entry.type === "sys.contact.accept" && entry.sender !== S.identity)
+    .map(entry => entry.sender)
+    .filter(sender => contactFor(sender)?.state === "requested"));
+  if (!senders.size) return;
+
+  const contacts = await client.contacts();
+  let promoted = 0;
+  for (const sender of senders) {
+    const pin = await contacts.checkPin(sender).catch(() => null);
+    if (pin && pin.status !== "ok" && pin.status !== "unpinned") {
+      toast(`${sender} accepted, but their key changed — review it in Contacts`, "warning", 8000);
+      continue;
+    }
+    await contacts.set(sender, "accepted", {});
+    promoted += 1;
+  }
+  if (promoted) {
+    await refreshContacts();
+    render();
+  }
 }
 
 async function doRequestContact(identity, { intro, petname } = {}) {
@@ -2609,7 +3128,10 @@ function showPolicyPanel() {
 /** Drain the anonymous queue — challenge-signed, so serialized like the rest. */
 function loadAnon({ force = false } = {}) {
   const A = S.anon;
-  if (A.loading || (A.loaded && !force)) return Promise.resolve();
+  if (A.loading) return Promise.resolve();
+  if (!force && A.fetchedAt && Date.now() - A.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
+    return Promise.resolve();
+  }
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
   A.loading = true;
@@ -2623,7 +3145,163 @@ function loadAnon({ force = false } = {}) {
       A.error = `Could not read anonymous messages: ${error.message}`;
     } finally {
       A.loading = false;
+      A.fetchedAt = Date.now();
       if (R.page === "messages" && !R.sub) render();
+    }
+  });
+}
+
+// ─── Profile (EPIC-006 E06-T2) ───────────────────────────────────────────────
+
+/**
+ * Read our own profile document.
+ *
+ * Repaints itself when the answer lands, and never asks the caller to — a
+ * render() in the caller's `.then()` re-runs `attachEvents`, which calls this
+ * again, which resolves immediately once loaded: a render loop that starves
+ * the page. `loading` guards the same thing for the in-flight case.
+ */
+async function loadProfile({ force = false } = {}) {
+  const P = S.profile;
+  if (P.loading || (P.loaded && !force)) return P.doc;
+  const client = clientFor(S.identity);
+  if (!client) return null;
+  P.loading = true;
+  try {
+    const { profile, explicit } = await client.profile();
+    P.doc = profile;
+    P.explicit = explicit;
+  } catch (error) {
+    console.warn("Profile read failed:", error.message);
+  } finally {
+    // Loaded either way: a failed read that left this false would be retried
+    // on every render, which is the same loop by a slower route.
+    P.loaded = true;
+    P.loading = false;
+    if (!R.sub) render();
+  }
+  return P.doc;
+}
+
+/**
+ * The profile editor, as DOM so it can sit in a panel or in the onboarding
+ * flow without being rendered twice.
+ *
+ * `onSaved` is how the caller finds out; the editor owns the write because
+ * the avatar upload and the document write have to happen in that order —
+ * the document points at a tree path, so the bytes must exist first.
+ */
+function ProfileEditor({ profile, onSaved = () => {}, saveLabel = "Save profile", showSave = true }) {
+  const client = clientFor(S.identity);
+  const doc = profile ?? { version: 1 };
+  let avatarPath = doc.avatar ?? null;
+  let pendingAvatar = null;
+
+  const host = document.createElement("div");
+  host.className = "profile-editor";
+  host.innerHTML = `
+    <div class="form-group">
+      <label class="form-label" for="pe-name">Display name</label>
+      <input id="pe-name" class="input" type="text" maxlength="256"
+             value="${esc(doc.display_name ?? "")}" placeholder="${esc(idHandle(S.identity))}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="pe-bio">Bio</label>
+      <textarea id="pe-bio" class="input pe-bio" maxlength="4096"
+                placeholder="A line or two about you">${esc(doc.bio ?? "")}</textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="pe-avatar">Avatar</label>
+      <p class="muted small" style="margin-bottom:6px">
+        Stored in your own <code>/public</code> folder — a profile can never point at
+        someone else's server.
+      </p>
+      <input id="pe-avatar" class="input" type="file" accept="image/*" />
+      <p class="small" id="pe-avatar-current">${avatarPath ? `Current: ${esc(avatarPath)}` : ""}</p>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="pe-link-url">Link</label>
+      <input id="pe-link-label" class="input" type="text" placeholder="Label (optional)"
+             value="${esc(doc.links?.[0]?.label ?? "")}" />
+      <input id="pe-link-url" class="input mt-sm" type="url" placeholder="https://example.org"
+             value="${esc(doc.links?.[0]?.url ?? "")}" />
+    </div>
+    ${showSave ? `<button class="btn btn-primary mt-md" id="pe-save">${esc(saveLabel)}</button>` : ""}
+    <p class="idin-status small" id="pe-status" role="status" aria-live="polite"></p>`;
+
+  host.querySelector("#pe-avatar")?.addEventListener("change", (event) => {
+    pendingAvatar = event.target.files?.[0] ?? null;
+  });
+
+  async function submit() {
+    const status = host.querySelector("#pe-status");
+    const button = host.querySelector("#pe-save");
+    if (!client) { toast("Unlock your identity first", "warning"); return false; }
+    if (button) button.disabled = true;
+    status.className = "idin-status small";
+    try {
+      if (pendingAvatar) {
+        status.textContent = "Uploading avatar…";
+        const extension = (pendingAvatar.name.split(".").pop() || "png").toLowerCase().slice(0, 5);
+        const path = `public/avatar.${extension.replace(/[^a-z0-9]/g, "") || "png"}`;
+        const dav = await client.dav();
+        await dav.write(path, pendingAvatar);
+        avatarPath = path;
+      }
+      status.textContent = "Saving…";
+      const saved = await client.setProfile({
+        version: 1,
+        display_name: host.querySelector("#pe-name").value,
+        bio: host.querySelector("#pe-bio").value,
+        ...(avatarPath ? { avatar: avatarPath } : {}),
+        links: [{
+          label: host.querySelector("#pe-link-label").value,
+          url: host.querySelector("#pe-link-url").value,
+        }],
+      });
+      S.profile = { doc: saved, explicit: true, loaded: true };
+      // Everywhere a card shows us should show the new name immediately.
+      primeProfile(S.identity, saved, relayUrlFor(S.identity));
+      status.textContent = "Saved";
+      status.className = "idin-status small val-ok";
+      onSaved(saved);
+      return true;
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "idin-status small val-warn";
+      return false;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  host.querySelector("#pe-save")?.addEventListener("click", submit);
+  host.save = submit;
+  return host;
+}
+
+function showProfilePanel() {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  showPanel("Your profile", `<div id="profile-host">Loading…</div>`, async (close) => {
+    const doc = await loadProfile({ force: true });
+    const host = q("#profile-host");
+    if (!host) return;
+    host.replaceChildren(ProfileEditor({
+      profile: doc,
+      onSaved: () => { toast("Profile saved", "success"); close(); render(); },
+    }));
+
+    // Capabilities are read-only: what this identity speaks, not a preference.
+    const entry = await resolveForComponents(S.identity).catch(() => null);
+    const features = Object.keys(entry?.capabilities?.features ?? {});
+    if (features.length && q("#profile-host")) {
+      const caps = document.createElement("div");
+      caps.className = "profile-caps";
+      caps.innerHTML = `<div class="section-label">This identity speaks</div>
+        <div class="profile-card-caps">${features.map(f => `<span class="chip">${esc(f)}</span>`).join("")}</div>`;
+      host.append(caps);
     }
   });
 }
@@ -3045,7 +3723,7 @@ async function doRotateEncKey() {
 
     let encryptedKeys;
     if (rec.supportsPRF !== false) {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
       encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
     } else {
       setLoading(false);
@@ -3123,27 +3801,78 @@ function promptPin(label, confirm = false) {
 
 // ─── Bottom sheet panel ───────────────────────────────────────────────────────
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+  'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The slide-up panel, which is a modal dialog and has to behave like one:
+ * focus moves in, Tab stays inside, Escape closes, and focus goes back where
+ * it came from. Without that a keyboard user tabs into the page *behind* the
+ * panel — and every dialog in this app is a decision (share, block, trust a
+ * changed key), so losing the user's place in it is not cosmetic.
+ */
 function showPanel(title, bodyHtml, afterRender, onClose) {
   const backdrop = document.getElementById("panel-backdrop");
   const panel    = document.getElementById("panel-root");
+  // Remember *which* control opened this, not the node: the shell re-renders
+  // from strings, so any data the panel loads replaces the element that was
+  // focused, and a node reference would be detached by the time we close.
+  const returnToId = document.activeElement instanceof HTMLElement
+    ? document.activeElement.id
+    : "";
+
   panel.innerHTML = `
     <div class="panel-handle"></div>
     <div class="panel-header">
-      <span class="panel-title">${esc(title)}</span>
-      <button class="btn-icon" id="panel-close-btn">✕</button>
+      <span class="panel-title" id="panel-title">${esc(title)}</span>
+      <button class="btn-icon" id="panel-close-btn" aria-label="Close">✕</button>
     </div>
     <div class="panel-body">${bodyHtml}</div>`;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "panel-title");
   backdrop.classList.remove("hidden");
   panel.classList.remove("hidden");
 
+  const onKeydown = (event) => {
+    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = [...panel.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
+  };
+
   const close = () => {
+    document.removeEventListener("keydown", onKeydown, true);
     panel.classList.add("hidden");
     backdrop.classList.add("hidden");
+    panel.removeAttribute("role");
+    panel.removeAttribute("aria-modal");
+    // Back where it came from — or nowhere in particular, rather than parked
+    // on a control inside a panel the user can no longer see.
+    const returnTo = returnToId ? document.getElementById(returnToId) : null;
+    if (returnTo) returnTo.focus();
+    else if (panel.contains(document.activeElement)) document.activeElement.blur();
     onClose?.();
   };
+
+  document.addEventListener("keydown", onKeydown, true);
   backdrop.onclick = close;
   q("#panel-close-btn")?.addEventListener("click", close);
   afterRender?.(close);
+
+  // Focus the first thing worth typing into, else the close button — never
+  // nothing, which is what leaves the focus ring behind the backdrop.
+  const target = panel.querySelector("input:not([type=file]), textarea, .btn-primary")
+    ?? q("#panel-close-btn");
+  target?.focus();
 }
 
 function closePanel() {
@@ -3195,7 +3924,16 @@ function boot() {
   S.identity = getActiveIdentity();
   S.config   = getConfig();
 
-  if (parseCreateHash()) {
+  // A hand-off from the launcher arrives as a fragment and is adopted before
+  // anything else looks at storage (EPIC-018 E18-T3).
+  const handedOver = adoptHandOff();
+
+  if (handedOver) {
+    // Locked on arrival: the keys are wrapped, and the passkey that opens them
+    // works here because it is scoped to the domain both hosts share (E18-T4).
+    R.page = "messages";
+    R.push("unlock");
+  } else if (parseCreateHash()) {
     R.page = "launcher";
   } else if (!S.identity) {
     R.page = "messages";

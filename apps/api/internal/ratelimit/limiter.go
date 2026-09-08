@@ -19,11 +19,11 @@ import (
 // AFTER the per-sender check (i.e. one noisy sender is rejected on its own
 // quota before they get a chance to consume global budget).
 type Limiter struct {
-	mu       sync.Mutex
-	entries  map[string]*entry
-	limits   config.RateLimits
-	gLimits  config.GlobalRateLimits
-	global   entry
+	mu      sync.Mutex
+	entries map[string]*entry
+	limits  config.RateLimits
+	gLimits config.GlobalRateLimits
+	global  entry
 }
 
 type entry struct {
@@ -66,6 +66,18 @@ func NewLimiter(limits config.RateLimits, globalLimits config.GlobalRateLimits) 
 // bucket). On rejection the buckets are NOT credited back: a small
 // over-count under contention is acceptable and avoids a second pass.
 func (l *Limiter) Allow(identity string) Decision {
+	return l.AllowCost(identity, 1)
+}
+
+// AllowCost charges `cost` units instead of one, which is how a cheap-to-probe
+// endpoint gets a tighter cap than messages without a second limiter and a
+// second set of tunables: the availability lookup (EPIC-018 E18-T2) is an
+// enumeration oracle over registered identities, so it charges several units
+// per call and exhausts its bucket proportionally sooner.
+func (l *Limiter) AllowCost(identity string, cost int) Decision {
+	if cost < 1 {
+		cost = 1
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -82,15 +94,15 @@ func (l *Limiter) Allow(identity string) Decision {
 
 	rollWindows(e, now)
 
-	e.minuteCount++
+	e.minuteCount += cost
 	if e.minuteCount > l.limits.PerMinute {
 		return Decision{Allowed: false, Scope: "sender", Window: "minute", Limit: l.limits.PerMinute, ResetAt: e.minuteReset}
 	}
-	e.hourCount++
+	e.hourCount += cost
 	if e.hourCount > l.limits.PerHour {
 		return Decision{Allowed: false, Scope: "sender", Window: "hour", Limit: l.limits.PerHour, ResetAt: e.hourReset}
 	}
-	e.dayCount++
+	e.dayCount += cost
 	if e.dayCount > l.limits.PerDay {
 		return Decision{Allowed: false, Scope: "sender", Window: "day", Limit: l.limits.PerDay, ResetAt: e.dayReset}
 	}

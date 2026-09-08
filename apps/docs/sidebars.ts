@@ -41,6 +41,8 @@ const sidebars: SidebarsConfig = {
       items: [
         'files/storage-model',
         'files/webdav',
+        'files/sharing',
+        'files/sync-protocol',
         'files/e2ee-design',
       ],
     },
@@ -52,6 +54,24 @@ const sidebars: SidebarsConfig = {
         'clients/overview',
         'clients/cli-reference',
         'clients/js-sdk',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Trust & anti-spam',
+      collapsed: false,
+      items: [
+        'trust/contacts',
+        'trust/anonymous-and-challenges',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Web app',
+      collapsed: false,
+      items: [
+        'web/walkthrough',
+        'web/claim-your-id',
       ],
     },
     {

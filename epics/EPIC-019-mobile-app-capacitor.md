@@ -1,6 +1,6 @@
 # EPIC-019 — Mobile app: Capacitor shell over the web client
 
-- **Status:** proposed
+- **Status:** in progress — T1 done and **verified on an iOS simulator**, T2's JS half, T6 and T7 done; Android not generated
 - **Priority:** P2 (after EPIC-015 makes the web app worth wrapping; the decision itself is P1 because it constrains E15)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the UI being wrapped), [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (onboarding + credential scope), [EPIC-011](EPIC-011-key-management-recovery.md) (T8 key transfer)
 - **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), `requirements.md`'s mobile-app requirements
@@ -9,14 +9,23 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E19-T1 Shell + single-origin client | open | blocked on E15-T1 |
-| E19-T2 Native key custody (`kdf:"native"`) | open | the piece that frees self-hosters |
+| E19-T1 Shell + single-origin client | **done for iOS** | builds, installs and runs on an iOS 26.5 simulator: claim → PIN → unlock → push-driven request, against a local dev relay. Android platform not generated (no SDK here) |
+| E19-T2 Native key custody (`kdf:"native"`) | **partial** | JS half complete and tested (`apps/web/js/native.js`); the Keychain/Keystore plugin is specified, not written |
 | E19-T3 Optional passkey enrollment | open | hosted identities only |
 | E19-T4 Push & background sync | open | needs E09; hooks only until then |
 | E19-T5 Packaging, CI & release | open | |
-| E19-T6 Retire the native stubs | open | `apps/android`, `apps/ios` |
-| E19-T7 Multi-identity across relays | open | **the reason to install the app** |
+| E19-T6 Retire the native stubs | **done** | `apps/android` and `apps/ios` deleted; root scripts now point at `apps/mobile` |
+| E19-T7 Multi-identity across relays | **done** (in the code the shell wraps) | two relays, two identities, one origin — `apps/web/test/e2e/multi-relay.spec.js` |
 | E19-T8 Bringing an existing identity over | open | device-to-device; the relay cannot approve |
+
+**The shell's front door is specified in [E15-T7](EPIC-015-web-app-ux.md).** The web app is
+getting host-aware modes — `launcher` on the parent domain, `identity` on `bob.poweur.net` — and
+the shell is the third: `capacitor://localhost` is not a meaningful host, so it resolves to
+`shell` mode, asks for a relay first (the existing `renderRelayPrompt()`, which E15-T10 keeps for
+exactly this case) and then behaves like the launcher. The shell needs no screen of its own for
+it, which is the point: E15-T9's removal of free-text identity entry is scoped to the two
+browser doors, because in the shell the identity genuinely is not knowable from the URL. E15-T11's
+desktop layout leaves the phone breakpoint untouched, so it changes nothing the shell wraps.
 
 ## Goal
 
@@ -91,29 +100,66 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
 
 ## Tasks
 
-### E19-T1 — Shell scaffolding & single-origin client
+### E19-T1 — Shell scaffolding & single-origin client — **partial**
 
-- [ ] Capacitor project in `apps/mobile/` (replacing the `apps/android` / `apps/ios` stubs,
-      T6) with `ios/` and `android/` platform folders; web assets built from `apps/web`
-- [ ] Verify the app works with **no `window.location.origin` assumptions**: relay base URL
-      resolved from the active identity record; add a regression test in `apps/web` that
-      fails if a module reads `location.origin` for a relay call
-- [ ] Configure allowed navigation / CSP so the shell may reach arbitrary relay hosts (the
-      multi-relay property) without becoming an open web view
-- [ ] Deep links (`poweur://` + universal/app links) for sign-in approvals (EPIC-008) and
-      share targets
-- [ ] Splash/icon/theme parity with the web app's dark/light handling
+- [x] Capacitor project in `apps/mobile/` with an `ios/` platform folder (Capacitor 8 uses
+      SwiftPM, so there is no CocoaPods step). `pnpm stage` copies `apps/web` into `www/`
+      — a copy rather than a symlink, because `cap sync` follows it into the native project
+      and a symlink there builds an app that works on one developer's machine
+- [x] No `location.origin` assumptions — `test/origin.test.js` has enforced that since
+      E15-T1, and `test/e2e/multi-relay.spec.js` now proves the positive case
+- [x] Deep links: the `poweur://` scheme is registered in `Info.plist`. Universal links are
+      **deliberately not** here — they bind the app to the operator's domain, and E19-T3
+      owns that as an optional extra for hosted identities
+- [ ] **Android platform not generated** — needs an Android SDK, absent on this machine
+- [ ] Navigation allow-list / CSP review, splash and icons
 
-**Acceptance:** the shell runs on an iOS simulator and an Android emulator, connects to a
-local dev relay, and completes an existing identity's unlock + inbox load.
+**Acceptance:** met on iOS. The shell runs on an iOS 26.5 simulator against a local dev
+relay: it claims a handle (live availability answering from the relay), creates an
+identity, unlocks it after a relaunch, and receives a contact request **by push with
+nothing touched on the device**. Android remains ungenerated — that needs an SDK this
+machine does not have.
 
-### E19-T2 — Native key custody (`kdf: "native"`)
+### What running it on a device found
 
-- [ ] Capacitor plugin exposing biometric-gated secure storage (iOS Keychain with
-      `SecAccessControl` + LocalAuthentication; Android Keystore + `BiometricPrompt`)
-- [ ] Register it as a third `kdf` alongside `prf` / `pbkdf2` in the wrapped-key record;
-      `wrapKeysAES` / `unwrapKeysAES` are reused unchanged — only the 32-byte secret's
-      source differs
+Four defects, none of which any browser test could have caught, because each needs either
+a real safe area, a non-`http(s)` origin, or an authenticator that does not exist:
+
+1. **The header sat under the Dynamic Island.** It padded for `safe-area-inset-top` but
+   kept a fixed height, so the padding squeezed its contents up instead of moving them
+   down. Invisible at 375px in a browser, where the inset is zero.
+2. **A fresh install could reach no relay.** `defaultRelayUrl()` fell back to
+   `location.origin`, which in a shell is `capacitor://localhost` — so registration
+   addressed the app itself, and the only screen that sets a relay lives behind an
+   identity. A non-web origin now means "no relay", and the add-identity screen asks,
+   checking `/health` before saving.
+3. **Identity creation dead-ended.** WebAuthn needs a secure `http(s)` origin, so a shell
+   has no authenticator *by construction* — and the app refused rather than falling back.
+   It now takes the PIN path, which is exactly what E19-T2 says custody should be here
+   until the OS keystore lands. The same rule applies to the device-enrollment path,
+   which would otherwise let an identity be joined on a browser but not on a phone.
+4. **Every authenticated call was blocked before it left the browser.** The relay's CORS
+   allow-list was missing `X-Poweur-Challenge`, so the preflight failed for every
+   challenge-signed read. Nothing same-origin ever noticed — the web app is served *by*
+   the relay and sends no preflight — which is why a suite of 29 browser tests was green
+   while the shell could not read its own inbox. Pinned now by a preflight test that
+   asserts every protocol header, from a `capacitor://localhost` origin.
+
+Two smaller ones: iOS auto-capitalised handles (`autocapitalize="none"` on every identity
+field), and a queued contact request produced no push at all — the relay notified only on
+the inbox path, so a request waited silently until the app was opened.
+
+### E19-T2 — Native key custody (`kdf: "native"`) — **partial**
+
+- [ ] **The plugin itself is not written.** Its contract — four methods over iOS Keychain
+      (`SecAccessControl` + LocalAuthentication) and Android Keystore (`BiometricPrompt`) —
+      is specified at the bottom of `apps/web/js/native.js`. Writing Swift and Kotlin that
+      could not be compiled or run on this machine would have produced something that looks
+      finished and has never executed
+- [x] Registered as a third `kdf` alongside `prf` / `pbkdf2`: `wrapKeysAES` /
+      `unwrapKeysAES` are reused unchanged, and only where the 32 bytes come from differs.
+      Six unit tests cover the JS half against a fake plugin, including that the identity
+      keys are never handed to it and that one secret is kept per identity
 - [ ] Identity creation in the shell defaults to `native`, with `pbkdf2` PIN as the
       documented fallback where biometrics are unavailable or the user declines
 - [ ] **Tiered custody**, because background receive (T7) cannot prompt for biometrics:
@@ -130,9 +176,12 @@ local dev relay, and completes an existing identity's unlock + inbox load.
 - [ ] Session keys are minted while the identity is unlocked in the foreground and renewed
       before `ExpiresAt`; an expired session degrades to "unlock to refresh", never to a
       silent stop
-- [ ] Explicit failure handling: biometric enrollment changed, key invalidated by the OS,
-      device restored from backup — each needs a defined recovery path (re-enroll from
-      another device / seed per EPIC-011), not a crash
+- [x] Explicit failure handling for the case the OS actually produces: an invalidated key
+      reads back as *absent*, and the app says "add this device again, or use your recovery
+      kit" rather than "unlock failed". Tested. The remaining paths (enrolment changed vs
+      restored backup) are indistinguishable from JS and land in the same message
+- [ ] Tiered custody for background receive, and the biometric/`device` gate split beyond
+      the flag this seam already carries
 - [ ] **Self-hosted acceptance path:** the same store build registers and uses an identity on
       a relay serving a domain unrelated to `poweur.net`
 

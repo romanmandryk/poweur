@@ -52,6 +52,10 @@ export function IdentityInput({
     autocomplete: "off",
     spellcheck: "false",
     inputmode: "url",
+    // A phone keyboard capitalises the first letter by default; an identity
+    // typed as "Alice" is not what the user will end up addressing.
+    autocapitalize: "none",
+    autocorrect: "off",
     role: "combobox",
     "aria-expanded": "false",
     "aria-autocomplete": "list",

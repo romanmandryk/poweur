@@ -244,16 +244,59 @@ export class Messaging {
   async inbox(
     signer: Signer,
     decryptor?: Decryptor | null,
-  ): Promise<{ messages: InboxMessage[]; acks: Ack[] }> {
-    const raw = await this.fetchInbox(signer);
+    options: { since?: string } = {},
+  ): Promise<{ messages: InboxMessage[]; acks: Ack[]; cursor?: string; ackCursor?: string }> {
+    const raw = await this.fetchInbox(signer, options);
     const messages = decryptor
       ? await decryptInbox(decryptor, raw.messages ?? [])
       : (raw.messages ?? []).map((m) => ({ ...m, plaintext: null }));
-    return { messages, acks: raw.acks ?? [] };
+    return {
+      messages,
+      acks: raw.acks ?? [],
+      ...(raw.cursor !== undefined ? { cursor: raw.cursor } : {}),
+      ...(raw.ack_cursor !== undefined ? { ackCursor: raw.ack_cursor } : {}),
+    };
   }
 
-  /** The raw inbox payload, with the session-expiry retry already applied. */
-  async fetchInbox(signer: Signer): Promise<InboxResponse> {
+  /**
+   * Tell the relay we have everything through these cursors, so it can forget
+   * them (EPIC-009 E09-T1).
+   *
+   * Separate from the read on purpose: a pickup that deletes as it serves
+   * loses messages to a dropped connection, which is the failure the spool
+   * exists to end.
+   */
+  async consume(
+    signer: Signer,
+    cursors: { through: string; ackThrough?: string },
+  ): Promise<{ consumed: number; acks_consumed: number; pending: number }> {
+    const { challenge } = await this.client.request<{ challenge: string }>({
+      method: "GET",
+      path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
+    });
+    const signature = await signer.sign(challenge, "base64std");
+    return this.client.request({
+      method: "POST",
+      path: `/messages/${encodeURIComponent(signer.identity)}/consume`,
+      headers: {
+        "X-Poweur-Identity": signer.identity,
+        "X-Poweur-Challenge": challenge,
+        "X-Poweur-Signature": signature,
+      },
+      body: {
+        through: cursors.through,
+        ...(cursors.ackThrough ? { ack_through: cursors.ackThrough } : {}),
+      },
+    });
+  }
+
+  /**
+   * The raw inbox payload, with the session-expiry retry already applied.
+   *
+   * With `since`, the relay reads without forgetting and returns a cursor;
+   * without it, the original drain-on-read.
+   */
+  async fetchInbox(signer: Signer, options: { since?: string } = {}): Promise<InboxResponse> {
     const attempt = async (session: StoredSession | null): Promise<InboxResponse> => {
       const { challenge } = await this.client.request<{ challenge: string }>({
         method: "GET",
@@ -267,9 +310,12 @@ export class Messaging {
         "X-Poweur-Signature": signature,
       };
       if (session) headers["X-Poweur-Session-Id"] = session.sessionId;
+      const query = options.since === undefined
+        ? ""
+        : `?since=${encodeURIComponent(options.since)}`;
       return this.client.request<InboxResponse>({
         method: "GET",
-        path: `/messages/${encodeURIComponent(signer.identity)}`,
+        path: `/messages/${encodeURIComponent(signer.identity)}${query}`,
         headers,
       });
     };

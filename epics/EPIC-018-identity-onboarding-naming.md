@@ -1,6 +1,6 @@
 # EPIC-018 — Hosted identity onboarding: launcher, name policy & credential scope
 
-- **Status:** proposed
+- **Status:** complete — T1–T5 done
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
@@ -9,11 +9,11 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E18-T1 Configurable name policy | open | fixes the homoglyph bypass below |
-| E18-T2 Availability & policy endpoint | open | the one new relay endpoint E15 defers |
-| E18-T3 Launcher host & no-identity mode | open | same SPA, dedicated host |
-| E18-T4 Credential scope (rpId) model | open | narrow: hosted origin hop only |
-| E18-T5 Docs | open | |
+| E18-T1 Configurable name policy | **done** | `packages/identity/namepolicy.go` with typed reasons; ASCII-LDH enforcement closes the homoglyph bypass; `NAME_*` config wired into registration |
+| E18-T2 Availability & policy endpoint | **done** | `GET /hosted/availability` returning a verdict + the policy; policy evaluated before registration so a rejection cannot leak whether a reserved name is taken; cost-weighted per-IP limit |
+| E18-T3 Launcher host & no-identity mode | **done** | `LAUNCHER_HOST` config + `/` redirect; live availability as the user types; fragment hand-off to the identity's own origin |
+| E18-T4 Credential scope (rpId) model | **done** | `registrableDomain()` in `@poweur/client`; scope stored on the identity record and reused for every assertion; pre-E18 records keep the host they were minted with |
+| E18-T5 Docs | **done** | operator policy table in `relay/configuration.md`; `web/claim-your-id.md` for the user-facing flow |
 
 ## Goal
 
@@ -165,90 +165,148 @@ client with its own secure storage needs no WebAuthn at all.
 
 ## Tasks
 
-### E18-T1 — Configurable hosted name policy
+### E18-T1 — Configurable hosted name policy — **done**
 
-- [ ] Add `NamePolicy` to `packages/identity` with `DefaultHostedPolicy()` (`MinLen = 3`, for
-      test/dev parity) and `ValidateHostedHandleWithPolicy(identity string, p NamePolicy) error`
-      returning a **typed** reason (`ErrReserved`, `ErrTooShort`, … ) rather than a bare error
-      string, so T2 can map it to a `reason` code
-- [ ] Enforce ASCII LDH: reject every non-ASCII rune, reject leading `xn--`, reject `--` runs
-      and leading/trailing hyphens; lowercase-normalize before reserved/blocked matching
-- [ ] **Regression test for the homoglyph bypass:** `аdmin.poweur.net` (Cyrillic U+0430) and
-      `аlice.poweur.net` must both fail; keep the existing `www` case green
-- [ ] Expand `ReservedLabels` to the grouped set above; keep it a package-level default that
-      `NamePolicy.Reserved` extends rather than replaces
-- [ ] Optional blocked-terms list loaded from `NAME_BLOCKED_FILE` (one term per line, `#`
-      comments), matched per `BlockMode`; absent file = no blocking, never a startup failure
-- [ ] Wire `config.NamePolicy` from the env vars in the table above; pass it into the
-      registration path at `server.go:268`; keep `ValidateHostedHandle` as a thin
-      default-policy wrapper so existing callers compile unchanged
-- [ ] Set `NAME_MIN_LEN=3` in the integration/dev relay config; set `6` in `deploy/`
+- [x] `NamePolicy` in `packages/identity/namepolicy.go` with `DefaultHostedPolicy()`
+      (`MinLen = 3`) and `ValidateHostedHandleWithPolicy`, returning a typed `*NameError`
+      whose `Reason` T2 maps straight to a `reason` code (`ReasonOf(err)`)
+- [x] ASCII LDH enforced in `validateLabel` itself, so it holds for every identity rather
+      than only hosted ones; leading `xn--`, `--` runs and edge hyphens refused for hosted
+      handles, where v1 has no IDN story
+- [x] **Homoglyph regression test** covering Cyrillic `аdmin`, `аlice` and `pоweur`, with
+      `www`/`admin` still reserved and `alice` still fine
+- [x] `ReservedLabels` expanded to the grouped set; `NamePolicy.Reserved` extends it and
+      cannot shorten it (an operator's own list must not be able to un-reserve `www`)
+- [x] `NAME_BLOCKED_FILE` list, `substring`/`exact` matching; a missing file means no
+      blocking and never blocks startup. The rejection message does **not** echo the term
+      that matched — a blocklist that answers "which word?" is one you can read out
+- [x] `NAME_*` wired through `config.FromEnv` into the registration path
+- [x] `NAME_MIN_LEN=6` set in `docker-compose.prod.yml`; the package default of 3 stays for
+      dev and the fixtures
 
-**Acceptance:** unit tests cover every `reason` branch and the two homoglyph cases; the
-`apps/integration` suite passes unchanged with the dev policy; a relay booted with
-`NAME_MIN_LEN=6` rejects `bob` and accepts `robert`.
+**Two decisions the tests pinned down.** *Reserved beats length*: "admin" is 5 characters,
+so a length-first order would answer `too_short` under a `MinLen` of 6 and quietly invite
+the user to try "admins". And *the handle is validated before the FQDN shape*, because only
+the policy produces typed reasons — shape-first turned `аdmin` into a nameless "invalid
+character" rather than `charset`.
 
-### E18-T2 — Availability & policy endpoint
+**The flags are negative (`DisallowDigits`, `DisallowHyphen`), not positive.** Every test
+relay and the integration harness build a `Config` literal, so a zero-valued policy has to
+mean "the usual rules"; an `AllowDigits bool` left unset would have silently rejected every
+handle containing a number.
 
-- [ ] `GET /hosted/availability?handle=&domain=` returning the verdict document above;
-      `domain` defaults to the relay's first `HostedDomains` entry and must be one of them
-      (`domain_not_hosted` otherwise)
-- [ ] Map T1's typed errors to `reason` codes; `taken` is checked last (policy rejection must
-      not leak whether a reserved name is also registered)
-- [ ] Tighter rate limit than the message buckets, per-IP, since this enumerates the identity
-      set; document the deliberate tradeoff (a public registry is enumerable by design — the
-      limit is about cost, not secrecy)
-- [ ] Integration coverage in `apps/integration/` for each reason code
-- [ ] Document in `apps/docs/docs/relay/api-reference.md`
+**One fixture renamed:** `verify.poweur.net` → `seedcheck.poweur.net` in
+`apps/integration/seed_test.go`. `verify` is on the new reserved list, and the name was
+describing the test rather than testing the name.
 
-**Acceptance:** `INT` test registers `robert.poweur.net`, then asserts `available:false,
-reason:"taken"`; `admin` → `reserved`; `bob` → `too_short` under the prod policy;
-`аdmin` → `charset`.
+**Acceptance:** met — unit tests cover every reason branch and the homoglyph cases,
+`apps/integration` passes with the dev policy, and `TestINT_NAME_02` boots a relay with
+`MinLen: 6` that refuses `bob` and accepts `melissa`.
 
-### E18-T3 — Launcher host & no-identity mode
+### E18-T2 — Availability & policy endpoint — **done**
 
-- [ ] `LAUNCHER_HOST` config (default `id.<first hosted domain>`); relay serves the existing
-      SPA there; add `id` and `launcher` to the reserved labels (T1) so the host cannot be
-      claimed as an identity
-- [ ] No-identity mode in `app.js`: welcome → claim handle → passkey → land in the app.
-      Reuse the existing `new-id` sub-page; **do not fork it**
-- [ ] Live availability as the user types (debounced `GET /hosted/availability`), with the
-      `reason` message inline and the passkey button disabled until `available:true` — no
-      WebAuthn ceremony is ever spent on a name that will be rejected
-- [ ] After successful registration, hand off to the identity's own origin
-      (`https://<identity>/app/`) with the identity record; the credential from T4 opens
-      there without re-enrollment
-- [ ] Honour the existing `REGISTRATION_GATE` (`open`/`invite`/`pow`, EPIC-014) in this flow,
-      including the PoW solver with progress
-- [ ] Playwright e2e for the full launcher path
+- [x] `GET /hosted/availability?handle=&domain=` returning the verdict document, always
+      `200` — every "no" is an answer, not an error. `domain` defaults to the first
+      `HostedDomains` entry and must be one of them
+- [x] T1's typed errors map straight to `reason`; **`taken` is checked last**, so a policy
+      rejection cannot be used to ask whether a reserved handle is also registered
+      (asserted directly, with `admin` both reserved *and* present in the store)
+- [x] Tighter per-IP limit via a new `Limiter.AllowCost` — the endpoint charges several
+      units of the same bucket messages use, which caps probing without a second limiter and
+      a second set of tunables. The tradeoff is documented where it lives: a public registry
+      is enumerable by design, so this is about cost, not secrecy
+- [x] `apps/integration/availability_test.go` covers each reason code, and asserts the
+      endpoint and `POST /identities` agree — a name the endpoint calls reserved is refused
+      by registration too, or the check would be decoration
+- [x] Documented in `apps/docs/docs/relay/api-reference.md`, with the policy table in
+      `configuration.md`
+- [x] `IdentityApi.availability()` in `@poweur/client`, so T3's live check is one call
 
-**Acceptance:** a browser with empty storage loads `id.poweur.net/app/`, claims a name,
-creates a passkey, and arrives signed-in at `<name>.poweur.net/app/` — no CLI, no second
-credential prompt.
+**Acceptance:** met (`TestINT_NAME_01`): `robert` is available, is registered through the
+real CLI path, and then reports `taken`; `admin` → `reserved`; `bob` → `too_short` under a
+`MinLen` of 6; `аdmin` → `charset`.
 
-### E18-T4 — Credential scope (rpId) model
+### E18-T3 — Launcher host & no-identity mode — **done**
 
-- [ ] Compute `rp.id` as the registrable domain of the identity's home; store it on the
-      identity record so unlock uses the same value it was created with
-- [ ] Registrable-domain helper shared by `apps/web` and `@poweur/client` — a small PSL-lite
-      that handles the common multi-label suffixes (`co.uk`, `com.au`); an operator on an
-      exotic suffix can override via config rather than shipping the full PSL
-- [ ] Migration for identities created before this change (stored `rpId` absent ⇒ fall back to
-      the identity hostname, which is what they were minted with) — **existing passkeys must
-      keep working**; cover with a unit test
-- [ ] Document the per-domain scope tradeoff in `apps/docs/docs/protocol/` and cross-link from
-      EPIC-011
+- [x] `LAUNCHER_HOST` (default `id.<first hosted domain>`), advertised at `GET /` so a
+      client can tell whether it is the launcher, with `/` redirecting there to `/app/`.
+      `id` and `launcher` are reserved (T1), so the host cannot be claimed
+- [x] No-identity mode: the existing welcome → new-id flow *is* it, unforked. What it
+      gained is the check below
+- [x] Live availability as the user types (350 ms debounce, last-write-wins so a fast
+      typist never sees a stale verdict), the relay's own message inline, and Next disabled
+      until it says yes. A relay that cannot answer fails **open** — registration is still
+      the authority and will refuse if it would have
+- [x] Hand-off to the identity's own origin after a hosted claim made on the launcher host
+- [x] `REGISTRATION_GATE` honoured, with the proof-of-work reported as it is solved
+- [x] `test/e2e/launcher.spec.js`
+
+**The hand-off carries the record in the URL fragment.** Storage is per-origin, so
+something has to travel; a fragment is never sent to a server, and what it holds is the
+same AES-GCM blob `localStorage` had — the wrapping secret comes from the passkey and is
+not in it. The receiving page clears the fragment as soon as it has stored the record, so
+it does not sit in the address bar or in history. The user is not asked for a second
+credential because T4 scoped the passkey to the domain both hosts share.
+
+**Found here: the registration proof-of-work gate never auto-solved.** `createIdentity`
+decided whether it had been gated by looking for `pow_required` *in the error message*,
+but the relay sends that as the error **code** and a human sentence as the message — so
+against a real relay the string never matched and the retry never happened. It branches on
+`RelayError.relayCode` now, pinned by a live-relay test that boots a relay with
+`REGISTRATION_GATE=pow`. `solveRegistrationChallenge` also gained progress callbacks,
+because a silent solve in front of a signup screen looks like a hang.
+
+**Follow-ups, owned by [EPIC-015](EPIC-015-web-app-ux.md)'s second wave.** T3 gave the SPA a
+launcher *host*; it did not give it a launcher *mode*. `boot()` still branches on stored
+identity alone, so the same welcome card renders on `id.poweur.net`, on the apex and on
+`bob.poweur.net`, and the claim form still asks for a parent domain and a hosted/DNS choice the
+root document already answers. E15-T7 adds the host→mode resolution (and widens `LAUNCHER_HOST`
+to a set so the apex stops serving the JSON banner), E15-T8/T9 build the two doors over it, and
+E15-T10 removes the questions. No name-policy or credential-scope work is reopened here.
+
+**Acceptance:** met in the two halves the harness can reach — `launcher.spec.js` asserts a
+name is checked (reserved / taken / non-ASCII / free) before any passkey exists, and that
+an identity arriving as a hand-off fragment is adopted, made active, and left locked with
+the fragment cleared. The cross-origin hop itself cannot run against a test relay, which is
+one host on `127.0.0.1` with no DNS for `alice.poweur.net`.
+
+### E18-T5 — Docs — **done**
+
+- [x] Operator guide: the [handle policy table](../apps/docs/docs/relay/configuration.md)
+      (what is configuration and what is not), the blocked-terms file, and `LAUNCHER_HOST`
+- [x] User-facing [claim walkthrough](../apps/docs/docs/web/claim-your-id.md), including
+      why the name is checked before the passkey and what the hand-off carries
+- [x] The self-hoster note: their relay serves the app at `<identity>/app/` from the
+      released image — no fork, nothing to publish to an app store
+
+### E18-T4 — Credential scope (rpId) model — **done**
+
+- [x] `credentialRpId(identity, host)` computes the registrable domain of the identity's home
+      and **falls back to the page host when the identity lives elsewhere** — a browser only
+      accepts an `rp.id` that is a suffix of the current host, so asking for `poweur.net`
+      from a dev relay on `127.0.0.1` is a `SecurityError`, not a wider scope. The value used
+      is stored on the identity record at creation
+- [x] `registrableDomain()` in `@poweur/client` (`names.ts`), a PSL-lite covering the common
+      multi-label suffixes. Never returns a public suffix: `bob.co.uk` scopes to itself
+- [x] **Assertions name the scope too.** A credential minted with `rp.id = poweur.net` is not
+      found from `alice.poweur.net` unless the assertion asks for that scope — so
+      `authenticatePasskey`, `assertChallenge` and the keystore's `rpId` argument all read the
+      stored value rather than the page host
+- [x] Migration: a record with no stored scope keeps being asserted against the host it was
+      minted on. Unit-tested, because "upgrading" those to the registrable domain would
+      silently stop finding the credential
+- [x] Documented in `security/key-management.md` (with the per-domain tradeoff stated as a
+      decision) and cross-linked from `protocol/web-identity.md`
+
+**Also fixed here: the TypeScript twin had the same homoglyph bug.** `names.ts` used
+`\p{L}` exactly as Go did, and no vector covered it — so the two implementations agreed
+about `аdmin` only by both being wrong. The names vectors now include the homoglyph and
+newly-reserved cases, which failed six conformance tests until `names.ts` was brought into
+line (ASCII LDH, the expanded reserved list, and the hosted `xn--` / `--` rules).
 
 **Acceptance:** a passkey created on `id.poweur.net` unlocks the identity on
 `alice.poweur.net`; an identity record written before the change still unlocks with its
 original hostname scope.
-
-### E18-T5 — Docs
-
-- [ ] Operator guide: choosing a name policy, the blocked-terms file, running a launcher host
-- [ ] User-facing "claim your ID" walkthrough in `apps/docs/docs/web/`
-- [ ] Note in the self-hosting guide that a self-hoster's relay serves the app at
-      `<identity>/app/` from the released image — **no fork, no app-store publishing**
 
 ## Non-goals
 

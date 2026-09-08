@@ -9,6 +9,7 @@ import { DavClient, ROOT_INFO, formatBytes, parseMultistatus } from "../src/file
 import { RelayError } from "../src/errors.js";
 import { SyncClient } from "../src/sync.js";
 import { normalizeGrantPath, verifyGrantSignature } from "../src/shares.js";
+import { PROFILE_PATH } from "../src/profile.js";
 import { createTestIdentity, type TestIdentity } from "./helpers/identities.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 
@@ -178,6 +179,44 @@ describe("TypeScript client ↔ real relay (files, sync, shares)", () => {
     expect((await contacts.checkPin(visitor.identity)).status).toBe("ok");
     expect(await contacts.remove(visitor.identity)).toBe(true);
     expect((await contacts.load()).contacts).toHaveLength(0);
+  });
+
+  it("round-trips a profile, and the relay refuses an off-tree avatar", async () => {
+    const written = await owner.client.setProfile({
+      version: 1,
+      display_name: "Owner",
+      bio: "  writes tests  ",
+      avatar: "public/avatar.png",
+      links: [{ label: "site", url: "https://example.org" }, { url: "" }],
+    });
+    // Empty fields are dropped rather than written as empty strings, and the
+    // empty link never reaches the document.
+    expect(written.links).toHaveLength(1);
+    expect(written.bio).toBe("writes tests");
+
+    const { profile, explicit } = await owner.client.profile();
+    expect(explicit).toBe(true);
+    expect(profile.display_name).toBe("Owner");
+    expect(profile.avatar).toBe("public/avatar.png");
+
+    // The avatar rule is what stops a profile pointing at a third-party host;
+    // the client refuses before the relay has to.
+    await expect(
+      owner.client.setProfile({ version: 1, avatar: "https://cdn.example.org/a.png" }),
+    ).rejects.toThrow(/under public\//);
+
+    // …and the relay refuses it too, for a client that skipped the check.
+    const dav = await owner.client.dav();
+    await expect(
+      dav.writeJson(PROFILE_PATH, { version: 1, avatar: "https://cdn.example.org/a.png" }),
+    ).rejects.toBeTruthy();
+  });
+
+  it("reports no profile for an identity that never wrote one", async () => {
+    const fresh = await createTestIdentity(relay.baseUrl, "noprofile");
+    const { profile, explicit } = await fresh.client.profile();
+    expect(explicit).toBe(false);
+    expect(profile).toEqual({ version: 1 });
   });
 
   it("parses a multistatus body without a DOM", () => {

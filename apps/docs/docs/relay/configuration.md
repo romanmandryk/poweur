@@ -26,6 +26,32 @@ The relay is configured via environment variables. On startup, the relay also lo
 | `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Per-identity storage quota; `0` = unlimited. Enforced on WebDAV `PUT`/`MKCOL` with `507` |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Max single uploaded file; `0` = unlimited |
 | `STORAGE_PROVIDER` | `relay-fs` | File-body backend. v1 supports `relay-fs` only (`POWEUR_DATA` required for DAV) |
+| `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
+| `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push streams per identity; `0` = unlimited |
+| `STREAM_IDLE_TIMEOUT` | `1h` | Closes a push stream regardless of traffic, so a forgotten tab does not hold a connection forever |
+| `LAUNCHER_HOST` | `id.<first hosted domain>` | Host that serves the claim flow for people with no identity yet |
+
+### Hosted handle policy
+
+Which names an operator hands out is a deployment decision; the character set is not.
+Handles are always ASCII `a-z 0-9 -` — a handle becomes a DNS label and a name under the
+wildcard certificate, and non-ASCII letters would also let `аdmin` (Cyrillic `а`)
+impersonate `admin`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NAME_MIN_LEN` | `3` | Minimum handle length. The default is the dev/test value; a public deployment should raise it (the shipped compose file sets `6`) |
+| `NAME_MAX_LEN` | `24` | Maximum handle length (hard ceiling is the 63-byte DNS label limit) |
+| `NAME_ALLOW_HYPHEN` | `true` | Hyphens inside the handle; never leading, trailing or doubled |
+| `NAME_ALLOW_DIGITS` | `true` | Digits anywhere in the handle |
+| `NAME_RESERVED` | *(empty)* | Extra reserved names, comma-separated. **Adds to** the built-in list, which cannot be shortened by configuration |
+| `NAME_BLOCKED_FILE` | *(empty)* | Path to a blocked-terms list, one term per line, `#` comments. A missing file means no blocking and never blocks startup |
+| `NAME_BLOCK_MODE` | `substring` | `substring` matches anywhere in the handle, `exact` only the whole handle |
+
+Clients discover all of this from
+[`GET /hosted/availability`](/relay/api-reference#get-hostedavailability), which echoes the
+policy alongside its verdict — so the app validates as the user types without hardcoding
+the rules of the relay it happens to be talking to.
 
 `GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
 File trees live under `$POWEUR_DATA/identities/<id>/` and are served at `/dav/<identity>/`

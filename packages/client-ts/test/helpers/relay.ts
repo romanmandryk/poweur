@@ -55,7 +55,7 @@ async function waitForHealth(baseUrl: string, timeoutMs = 60_000): Promise<void>
 }
 
 export async function startRelay(
-  options: { hostedDomains?: string } = {},
+  options: { hostedDomains?: string; env?: Record<string, string> } = {},
 ): Promise<RunningRelay> {
   const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), "poweur-ts-relay-"));
@@ -77,6 +77,7 @@ export async function startRelay(
       RATE_LIMIT_MINUTE: "10000",
       RATE_LIMIT_HOUR: "100000",
       RATE_LIMIT_DAY: "1000000",
+      ...(options.env ?? {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
