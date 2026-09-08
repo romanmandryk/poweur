@@ -2,8 +2,6 @@
   "name": "poweur",
   "private": true,
   "scripts": {
-    "ios": "pnpm --filter @poweur/ios build",
-    "android": "pnpm --filter @poweur/android build",
     "web": "pnpm --filter @poweur/web build",
     "web:dev": "pnpm --filter @poweur/web dev",
     "web:test": "pnpm --filter @poweur/web test",
@@ -11,6 +9,9 @@
     "web:test:all": "pnpm --filter @poweur/web test:all",
     "web:vendor": "pnpm --filter @poweur/web vendor",
     "web:vendor:check": "pnpm --filter @poweur/web vendor:check",
+    "mobile:stage": "pnpm --filter @poweur/mobile stage",
+    "mobile:sync": "pnpm --filter @poweur/mobile sync",
+    "mobile:test": "pnpm --filter @poweur/mobile test",
     "client": "pnpm --filter @poweur/client build",
     "client:build": "pnpm --filter @poweur/client build",
     "client:test": "pnpm --filter @poweur/client test",

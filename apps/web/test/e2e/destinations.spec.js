@@ -174,14 +174,22 @@ test.describe("five destinations at 375px", () => {
     await stubPasskeys(page);
     await createIdentity(page, relay);
 
-    // Measured in one pass: the shell re-renders from strings whenever a
-    // background read lands, so a node measured across that swap is detached.
-    const boxes = await page.$$eval(".nav-tab", (tabs) =>
+    // Measured in one pass, and only once the shell has settled: it re-renders
+    // from strings whenever a background read lands, so a measurement taken
+    // across that swap sees detached nodes or a half-built nav. Under a full
+    // suite — several relays, slower registration — that window is wide enough
+    // to hit, which is what made this flake.
+    const measure = () => page.$$eval(".nav-tab", (tabs) =>
       tabs.map((tab) => {
         const rect = tab.getBoundingClientRect();
         return { height: rect.height, width: rect.width };
       }));
-    expect(boxes).toHaveLength(5);
+    await expect
+      .poll(async () => (await measure()).filter((box) => box.height > 0).length,
+        { message: "the bottom nav never settled at five measurable tabs" })
+      .toBe(5);
+
+    const boxes = await measure();
     for (const box of boxes) {
       expect(box.height, "tab height").toBeGreaterThanOrEqual(44);
       expect(box.width, "tab width").toBeGreaterThanOrEqual(44);

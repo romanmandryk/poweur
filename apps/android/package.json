@@ -1,9 +1,0 @@
-{
-  "name": "@poweur/android",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "build": "gradle assembleRelease",
-    "dev": "gradle assembleDebug"
-  }
-}

@@ -1,0 +1,13 @@
+# Staged from apps/web by `pnpm stage`; never edited here, never committed.
+www/
+
+# Native build output. The platform projects themselves ARE committed (they
+# carry entitlements, icons and Info.plist that are part of the app), but
+# nothing a build regenerates is.
+ios/App/App/public/
+ios/App/build/
+ios/build/
+android/app/build/
+android/build/
+android/.gradle/
+DerivedData/

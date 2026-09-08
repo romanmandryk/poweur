@@ -1998,6 +1998,13 @@ async function doCreateIdentity() {
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
 
+    // The `#create=` hash has done its job. Left in place it makes the
+    // launcher reopen step 2 for a handle that already exists — including
+    // after a reload, which drops the user into a stale creation flow.
+    if (globalThis.location?.hash.startsWith("#create=")) {
+      history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+    }
+
     // Claimed on the launcher host? The identity's own origin is where it
     // lives, so hand it over rather than leaving the user on `id.…` with
     // storage that the identity's own pages cannot read (EPIC-018 E18-T3).
