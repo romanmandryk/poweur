@@ -650,7 +650,9 @@ function renderLauncher() {
       <div class="form-card">
         <div class="form-group">
           <label class="form-label" for="ni-handle">Handle</label>
-          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false" />
+          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false"
+                 aria-describedby="ni-availability" />
+          <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
@@ -1360,6 +1362,7 @@ function attachEvents() {
   // Launcher step 1 → hosted stays here; DNS mode redirects to identity host
   q("#btn-next-id")?.addEventListener("click", doNextIdentityStep);
   q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doNextIdentityStep(); });
+  attachAvailabilityCheck();
 
   // Launcher step 2 → create identity + toggle DNS fields
   q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
@@ -1730,6 +1733,73 @@ function showJoinDevicePanel() {
   });
 }
 
+/**
+ * Check the handle against the relay as the user types (EPIC-018 E18-T3).
+ *
+ * The whole reason this endpoint exists is ordering: without it, "that name is
+ * taken" arrives *after* a WebAuthn ceremony the user cannot get back. So the
+ * Next button stays disabled until the relay has said yes, and the reason for
+ * every no is shown under the field in the relay's own words — its policy is
+ * deployment configuration this client cannot know.
+ */
+const AVAILABILITY_DEBOUNCE_MS = 350;
+let availabilityToken = 0;
+
+function attachAvailabilityCheck() {
+  const input = q("#ni-handle");
+  const status = q("#ni-availability");
+  const next = q("#btn-next-id");
+  if (!input || !status || !next) return;
+
+  let timer = null;
+  const setStatus = (text, cls = "") => {
+    status.textContent = text;
+    status.className = `idin-status small ${cls}`;
+  };
+
+  const check = async () => {
+    const handle = input.value.trim().toLowerCase();
+    const domain = q("#ni-domain")?.value.trim().toLowerCase() || "";
+    const hosted = q("#ni-hosted-step1")?.checked !== false;
+    const token = ++availabilityToken;
+
+    // Self-hosted names are not this relay's to give out.
+    if (!hosted || !handle) {
+      next.disabled = false;
+      setStatus("");
+      return;
+    }
+    next.disabled = true;
+    setStatus("Checking…");
+    try {
+      const verdict = await identityApiFor(defaultRelayUrl()).availability(handle, domain);
+      if (token !== availabilityToken) return; // a later keystroke won
+      next.disabled = !verdict.available;
+      setStatus(
+        verdict.available ? `${verdict.identity} is available` : verdict.message,
+        verdict.available ? "val-ok" : "val-warn",
+      );
+    } catch (error) {
+      if (token !== availabilityToken) return;
+      // A relay that cannot answer must not block the flow — registration
+      // itself is still the authority, and it will refuse if this would have.
+      next.disabled = false;
+      setStatus("");
+      console.warn("Availability check failed:", error.message);
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    next.disabled = true;
+    setStatus("");
+    timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS);
+  });
+  q("#ni-domain")?.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS); });
+  q("#ni-hosted-step1")?.addEventListener("change", check);
+  if (input.value.trim()) check();
+}
+
 function doNextIdentityStep() {
   const handle = q("#ni-handle")?.value.trim().toLowerCase();
   const domain = q("#ni-domain")?.value.trim().toLowerCase();
@@ -1750,6 +1820,64 @@ function doNextIdentityStep() {
 /** @deprecated use doNextIdentityStep */
 function doRedirectToIdentityDomain() {
   doNextIdentityStep();
+}
+
+/**
+ * Move a freshly claimed identity from the launcher host to its own origin.
+ *
+ * Storage is per-origin, so the record has to travel. It goes in the URL
+ * *fragment*, which browsers never send to a server, and what it carries is
+ * the same AES-GCM blob localStorage held — the wrapping secret comes from the
+ * passkey and is not in it. The passkey itself needs no second ceremony: E18-T4
+ * scoped it to the registrable domain both hosts share.
+ *
+ * Returns false when there is nothing to hand off (self-hosted flow, an
+ * unknown launcher host, or the app is already on the identity's origin), and
+ * the caller carries on where it is.
+ */
+async function handOffToIdentityOrigin(identity) {
+  const record = loadIdentityRecord(identity);
+  const host = globalThis.location?.hostname ?? "";
+  if (!record || !host || host === identity) return false;
+
+  let launcherHost = "";
+  try {
+    const root = await fetch(new URL("/", relayUrlFor(identity)).toString(), {
+      headers: { Accept: "application/json" },
+    }).then(r => (r.ok ? r.json() : null));
+    launcherHost = String(root?.launcher_host ?? "").toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!launcherHost || launcherHost !== host.toLowerCase()) return false;
+
+  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
+  setLoading(true, `Taking you to ${identity}…`);
+  globalThis.location.href = `https://${identity}/app/#claim=${payload}`;
+  return true;
+}
+
+/**
+ * The receiving half: adopt an identity handed over by the launcher.
+ *
+ * The fragment is cleared immediately — it has served its purpose, and leaving
+ * a wrapped key blob in the address bar and in history is needless exposure.
+ */
+function adoptHandOff() {
+  const hash = globalThis.location?.hash ?? "";
+  if (!hash.startsWith("#claim=")) return false;
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(fromBase64url(hash.slice("#claim=".length))));
+    if (!decoded?.identity || !decoded?.record) return false;
+    saveIdentityRecord(decoded.identity, decoded.record);
+    setActiveIdentity(decoded.identity);
+    S.identity = decoded.identity;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+  }
 }
 
 async function doCreateIdentity() {
@@ -1804,6 +1932,12 @@ async function doCreateIdentity() {
       keys: keyBytesFromJwks(identity, sigPriv, encPriv),
       ...(hosted ? {} : { dnsProvider: provider, dnsToken }),
       ...(q("#ni-invite")?.value.trim() ? { inviteCode: q("#ni-invite").value.trim() } : {}),
+      // A relay may gate signup behind proof-of-work (EPIC-014). Solving it
+      // silently is a signup screen that looks stuck, so say what is happening.
+      onRegistrationChallenge: ({ bits }) =>
+        setLoading(true, `This relay asks for proof of work (${bits} bits)…`),
+      onRegistrationProgress: (attempts) =>
+        setLoading(true, `Proof of work: ${attempts.toLocaleString()} attempts…`),
     });
 
     saveIdentityRecord(identity, {
@@ -1833,6 +1967,12 @@ async function doCreateIdentity() {
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
+
+    // Claimed on the launcher host? The identity's own origin is where it
+    // lives, so hand it over rather than leaving the user on `id.…` with
+    // storage that the identity's own pages cannot read (EPIC-018 E18-T3).
+    if (await handOffToIdentityOrigin(identity)) return;
+
     // A configured app beats an empty inbox: every step is skippable, but the
     // policy question is one nobody thinks to go looking for in Settings.
     S.onboard = { step: 1 };
@@ -3607,7 +3747,16 @@ function boot() {
   S.identity = getActiveIdentity();
   S.config   = getConfig();
 
-  if (parseCreateHash()) {
+  // A hand-off from the launcher arrives as a fragment and is adopted before
+  // anything else looks at storage (EPIC-018 E18-T3).
+  const handedOver = adoptHandOff();
+
+  if (handedOver) {
+    // Locked on arrival: the keys are wrapped, and the passkey that opens them
+    // works here because it is scoped to the domain both hosts share (E18-T4).
+    R.page = "messages";
+    R.push("unlock");
+  } else if (parseCreateHash()) {
     R.page = "launcher";
   } else if (!S.identity) {
     R.page = "messages";

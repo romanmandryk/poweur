@@ -12,12 +12,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PoweurClient } from "../src/client.js";
 import { RelayError } from "../src/errors.js";
 import { RelayClient } from "../src/http.js";
-import { IdentityApi } from "../src/identity.js";
+import { createIdentity, IdentityApi } from "../src/identity.js";
 import { sendAnonymous } from "../src/messages.js";
 import { resolveIdentity } from "../src/resolve.js";
 import { verifyDocument } from "../src/document.js";
 import { INBOX_OPEN, ANON_CHALLENGE_POW, ANON_CHALLENGE_NONE } from "../src/types.js";
-import { createTestIdentity, localResolveOptions, type TestIdentity } from "./helpers/identities.js";
+import {
+  createTestIdentity, localResolveOptions, uniqueIdentity, type TestIdentity,
+} from "./helpers/identities.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 
 describe("TypeScript client ↔ real relay (messaging)", () => {
@@ -247,6 +249,29 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     expect((await api.availability("admin")).reason).toBe("reserved");
     expect((await api.availability("аdmin")).reason).toBe("charset");
   });
+
+  it("solves a registration proof-of-work gate, reporting progress", async () => {
+    // A relay that gates signup behind PoW is the case where a silent solve
+    // looks like a broken signup screen, so the callbacks are the feature.
+    const gated = await startRelay({
+      env: { REGISTRATION_GATE: "pow", REGISTRATION_POW_BITS: "16" },
+    });
+    try {
+      const api = new IdentityApi(new RelayClient(gated.baseUrl));
+      const bits: number[] = [];
+      const attempts: number[] = [];
+      const created = await createIdentity(api, uniqueIdentity("gated"), {
+        hosted: true,
+        onRegistrationChallenge: (challenge) => bits.push(challenge.bits),
+        onRegistrationProgress: (count) => attempts.push(count),
+      });
+      expect(created.response.identity).toContain("gated");
+      expect(bits[0]).toBeGreaterThan(0);
+      expect(attempts.length).toBeGreaterThan(0);
+    } finally {
+      gated.stop();
+    }
+  }, 180_000);
 
   it("reports relay health", async () => {
     const health = await alice.client.identity.health();

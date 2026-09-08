@@ -1,0 +1,4 @@
+# Relay image only needs the Go modules the Dockerfile copies.
+*
+!packages/identity/**
+!apps/api/**

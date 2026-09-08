@@ -1,7 +1,10 @@
-FROM golang:1.23-alpine AS builder
-WORKDIR /app
-COPY go.mod ./
-COPY . .
+# Built from the repo root (identity is a replace-path sibling of apps/api):
+#   docker build -f apps/api/Dockerfile --build-arg VERSION=dev .
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY packages/identity ./packages/identity
+COPY apps/api ./apps/api
+WORKDIR /src/apps/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /relay .
 
 FROM alpine:3.20

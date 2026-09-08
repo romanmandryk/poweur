@@ -82,6 +82,11 @@ type Config struct {
 	// for the startup log — an operator who typos it should see that no terms
 	// loaded rather than assume the list is live.
 	NameBlockedFile string
+	// LauncherHost is the host that serves the claim flow for people who have
+	// no identity yet (EPIC-018 E18-T3). Defaults to `id.<first hosted
+	// domain>`; empty when nothing is hosted here. It is the *same* SPA on a
+	// dedicated host, not a second app.
+	LauncherHost string
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
 	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
@@ -171,6 +176,7 @@ func FromEnv() Config {
 		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
 		RegistrationPowBits:     int(getenvInt64("REGISTRATION_POW_BITS", 0)),
 		NamePolicy:              namePolicyFromEnv(),
+		LauncherHost:            launcherHostFromEnv(),
 		NameBlockedFile:         strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
 		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
@@ -208,6 +214,22 @@ func namePolicyFromEnv() idpkg.NamePolicy {
 		policy.Blocked = terms
 	}
 	return policy
+}
+
+// launcherHostFromEnv resolves LAUNCHER_HOST, defaulting to `id.<first hosted
+// domain>`. `id` is a reserved label (E18-T1), so the host can never collide
+// with an identity someone claimed.
+func launcherHostFromEnv() string {
+	if explicit := strings.ToLower(strings.TrimSpace(os.Getenv("LAUNCHER_HOST"))); explicit != "" {
+		return explicit
+	}
+	for _, domain := range splitCSV(os.Getenv("HOSTED_DOMAINS")) {
+		parent := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+		if parent != "" {
+			return "id." + parent
+		}
+	}
+	return ""
 }
 
 // getenvBoolDefault differs from getenvBool: these two flags default to true,

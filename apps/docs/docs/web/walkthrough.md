@@ -32,7 +32,9 @@ same UI.
 
 Creating an identity (Apps → Add new ID, or the welcome screen) registers it, wraps the
 keys under a passkey or PIN, and enrolls this browser in the relay keystore so clearing
-site data is not fatal — see [key management](../security/key-management.md).
+site data is not fatal — see [key management](../security/key-management.md). Starting
+from nothing on a hosted relay, [claiming an ID](claim-your-id.md) is the flow that gets
+you here.
 
 Then a three-step setup runs. Every step is skippable, and skipping writes nothing:
 

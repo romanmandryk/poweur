@@ -71,6 +71,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         'web/walkthrough',
+        'web/claim-your-id',
       ],
     },
     {

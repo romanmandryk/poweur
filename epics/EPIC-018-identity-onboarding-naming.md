@@ -1,6 +1,6 @@
 # EPIC-018 — Hosted identity onboarding: launcher, name policy & credential scope
 
-- **Status:** in progress — T1, T2 and T4 done; T3 and T5 open
+- **Status:** complete — T1–T5 done
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
@@ -11,9 +11,9 @@
 |------|--------|-------|
 | E18-T1 Configurable name policy | **done** | `packages/identity/namepolicy.go` with typed reasons; ASCII-LDH enforcement closes the homoglyph bypass; `NAME_*` config wired into registration |
 | E18-T2 Availability & policy endpoint | **done** | `GET /hosted/availability` returning a verdict + the policy; policy evaluated before registration so a rejection cannot leak whether a reserved name is taken; cost-weighted per-IP limit |
-| E18-T3 Launcher host & no-identity mode | open | same SPA, dedicated host |
+| E18-T3 Launcher host & no-identity mode | **done** | `LAUNCHER_HOST` config + `/` redirect; live availability as the user types; fragment hand-off to the identity's own origin |
 | E18-T4 Credential scope (rpId) model | **done** | `registrableDomain()` in `@poweur/client`; scope stored on the identity record and reused for every assertion; pre-E18 records keep the host they were minted with |
-| E18-T5 Docs | open | |
+| E18-T5 Docs | **done** | operator policy table in `relay/configuration.md`; `web/claim-your-id.md` for the user-facing flow |
 
 ## Goal
 
@@ -226,26 +226,50 @@ describing the test rather than testing the name.
 real CLI path, and then reports `taken`; `admin` → `reserved`; `bob` → `too_short` under a
 `MinLen` of 6; `аdmin` → `charset`.
 
-### E18-T3 — Launcher host & no-identity mode
+### E18-T3 — Launcher host & no-identity mode — **done**
 
-- [ ] `LAUNCHER_HOST` config (default `id.<first hosted domain>`); relay serves the existing
-      SPA there; add `id` and `launcher` to the reserved labels (T1) so the host cannot be
-      claimed as an identity
-- [ ] No-identity mode in `app.js`: welcome → claim handle → passkey → land in the app.
-      Reuse the existing `new-id` sub-page; **do not fork it**
-- [ ] Live availability as the user types (debounced `GET /hosted/availability`), with the
-      `reason` message inline and the passkey button disabled until `available:true` — no
-      WebAuthn ceremony is ever spent on a name that will be rejected
-- [ ] After successful registration, hand off to the identity's own origin
-      (`https://<identity>/app/`) with the identity record; the credential from T4 opens
-      there without re-enrollment
-- [ ] Honour the existing `REGISTRATION_GATE` (`open`/`invite`/`pow`, EPIC-014) in this flow,
-      including the PoW solver with progress
-- [ ] Playwright e2e for the full launcher path
+- [x] `LAUNCHER_HOST` (default `id.<first hosted domain>`), advertised at `GET /` so a
+      client can tell whether it is the launcher, with `/` redirecting there to `/app/`.
+      `id` and `launcher` are reserved (T1), so the host cannot be claimed
+- [x] No-identity mode: the existing welcome → new-id flow *is* it, unforked. What it
+      gained is the check below
+- [x] Live availability as the user types (350 ms debounce, last-write-wins so a fast
+      typist never sees a stale verdict), the relay's own message inline, and Next disabled
+      until it says yes. A relay that cannot answer fails **open** — registration is still
+      the authority and will refuse if it would have
+- [x] Hand-off to the identity's own origin after a hosted claim made on the launcher host
+- [x] `REGISTRATION_GATE` honoured, with the proof-of-work reported as it is solved
+- [x] `test/e2e/launcher.spec.js`
 
-**Acceptance:** a browser with empty storage loads `id.poweur.net/app/`, claims a name,
-creates a passkey, and arrives signed-in at `<name>.poweur.net/app/` — no CLI, no second
-credential prompt.
+**The hand-off carries the record in the URL fragment.** Storage is per-origin, so
+something has to travel; a fragment is never sent to a server, and what it holds is the
+same AES-GCM blob `localStorage` had — the wrapping secret comes from the passkey and is
+not in it. The receiving page clears the fragment as soon as it has stored the record, so
+it does not sit in the address bar or in history. The user is not asked for a second
+credential because T4 scoped the passkey to the domain both hosts share.
+
+**Found here: the registration proof-of-work gate never auto-solved.** `createIdentity`
+decided whether it had been gated by looking for `pow_required` *in the error message*,
+but the relay sends that as the error **code** and a human sentence as the message — so
+against a real relay the string never matched and the retry never happened. It branches on
+`RelayError.relayCode` now, pinned by a live-relay test that boots a relay with
+`REGISTRATION_GATE=pow`. `solveRegistrationChallenge` also gained progress callbacks,
+because a silent solve in front of a signup screen looks like a hang.
+
+**Acceptance:** met in the two halves the harness can reach — `launcher.spec.js` asserts a
+name is checked (reserved / taken / non-ASCII / free) before any passkey exists, and that
+an identity arriving as a hand-off fragment is adopted, made active, and left locked with
+the fragment cleared. The cross-origin hop itself cannot run against a test relay, which is
+one host on `127.0.0.1` with no DNS for `alice.poweur.net`.
+
+### E18-T5 — Docs — **done**
+
+- [x] Operator guide: the [handle policy table](../apps/docs/docs/relay/configuration.md)
+      (what is configuration and what is not), the blocked-terms file, and `LAUNCHER_HOST`
+- [x] User-facing [claim walkthrough](../apps/docs/docs/web/claim-your-id.md), including
+      why the name is checked before the passkey and what the hand-off carries
+- [x] The self-hoster note: their relay serves the app at `<identity>/app/` from the
+      released image — no fork, nothing to publish to an app store
 
 ### E18-T4 — Credential scope (rpId) model — **done**
 
@@ -275,13 +299,6 @@ line (ASCII LDH, the expanded reserved list, and the hosted `xn--` / `--` rules)
 **Acceptance:** a passkey created on `id.poweur.net` unlocks the identity on
 `alice.poweur.net`; an identity record written before the change still unlocks with its
 original hostname scope.
-
-### E18-T5 — Docs
-
-- [ ] Operator guide: choosing a name policy, the blocked-terms file, running a launcher host
-- [ ] User-facing "claim your ID" walkthrough in `apps/docs/docs/web/`
-- [ ] Note in the self-hosting guide that a self-hoster's relay serves the app at
-      `<identity>/app/` from the released image — **no fork, no app-store publishing**
 
 ## Non-goals
 
