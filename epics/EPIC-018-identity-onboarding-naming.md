@@ -1,6 +1,6 @@
 # EPIC-018 — Hosted identity onboarding: launcher, name policy & credential scope
 
-- **Status:** proposed
+- **Status:** in progress — T1 and T2 done; T3–T5 open
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
@@ -9,8 +9,8 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E18-T1 Configurable name policy | open | fixes the homoglyph bypass below |
-| E18-T2 Availability & policy endpoint | open | the one new relay endpoint E15 defers |
+| E18-T1 Configurable name policy | **done** | `packages/identity/namepolicy.go` with typed reasons; ASCII-LDH enforcement closes the homoglyph bypass; `NAME_*` config wired into registration |
+| E18-T2 Availability & policy endpoint | **done** | `GET /hosted/availability` returning a verdict + the policy; policy evaluated before registration so a rejection cannot leak whether a reserved name is taken; cost-weighted per-IP limit |
 | E18-T3 Launcher host & no-identity mode | open | same SPA, dedicated host |
 | E18-T4 Credential scope (rpId) model | open | narrow: hosted origin hop only |
 | E18-T5 Docs | open | |
@@ -165,45 +165,66 @@ client with its own secure storage needs no WebAuthn at all.
 
 ## Tasks
 
-### E18-T1 — Configurable hosted name policy
+### E18-T1 — Configurable hosted name policy — **done**
 
-- [ ] Add `NamePolicy` to `packages/identity` with `DefaultHostedPolicy()` (`MinLen = 3`, for
-      test/dev parity) and `ValidateHostedHandleWithPolicy(identity string, p NamePolicy) error`
-      returning a **typed** reason (`ErrReserved`, `ErrTooShort`, … ) rather than a bare error
-      string, so T2 can map it to a `reason` code
-- [ ] Enforce ASCII LDH: reject every non-ASCII rune, reject leading `xn--`, reject `--` runs
-      and leading/trailing hyphens; lowercase-normalize before reserved/blocked matching
-- [ ] **Regression test for the homoglyph bypass:** `аdmin.poweur.net` (Cyrillic U+0430) and
-      `аlice.poweur.net` must both fail; keep the existing `www` case green
-- [ ] Expand `ReservedLabels` to the grouped set above; keep it a package-level default that
-      `NamePolicy.Reserved` extends rather than replaces
-- [ ] Optional blocked-terms list loaded from `NAME_BLOCKED_FILE` (one term per line, `#`
-      comments), matched per `BlockMode`; absent file = no blocking, never a startup failure
-- [ ] Wire `config.NamePolicy` from the env vars in the table above; pass it into the
-      registration path at `server.go:268`; keep `ValidateHostedHandle` as a thin
-      default-policy wrapper so existing callers compile unchanged
-- [ ] Set `NAME_MIN_LEN=3` in the integration/dev relay config; set `6` in `deploy/`
+- [x] `NamePolicy` in `packages/identity/namepolicy.go` with `DefaultHostedPolicy()`
+      (`MinLen = 3`) and `ValidateHostedHandleWithPolicy`, returning a typed `*NameError`
+      whose `Reason` T2 maps straight to a `reason` code (`ReasonOf(err)`)
+- [x] ASCII LDH enforced in `validateLabel` itself, so it holds for every identity rather
+      than only hosted ones; leading `xn--`, `--` runs and edge hyphens refused for hosted
+      handles, where v1 has no IDN story
+- [x] **Homoglyph regression test** covering Cyrillic `аdmin`, `аlice` and `pоweur`, with
+      `www`/`admin` still reserved and `alice` still fine
+- [x] `ReservedLabels` expanded to the grouped set; `NamePolicy.Reserved` extends it and
+      cannot shorten it (an operator's own list must not be able to un-reserve `www`)
+- [x] `NAME_BLOCKED_FILE` list, `substring`/`exact` matching; a missing file means no
+      blocking and never blocks startup. The rejection message does **not** echo the term
+      that matched — a blocklist that answers "which word?" is one you can read out
+- [x] `NAME_*` wired through `config.FromEnv` into the registration path
+- [x] `NAME_MIN_LEN=6` set in `docker-compose.prod.yml`; the package default of 3 stays for
+      dev and the fixtures
 
-**Acceptance:** unit tests cover every `reason` branch and the two homoglyph cases; the
-`apps/integration` suite passes unchanged with the dev policy; a relay booted with
-`NAME_MIN_LEN=6` rejects `bob` and accepts `robert`.
+**Two decisions the tests pinned down.** *Reserved beats length*: "admin" is 5 characters,
+so a length-first order would answer `too_short` under a `MinLen` of 6 and quietly invite
+the user to try "admins". And *the handle is validated before the FQDN shape*, because only
+the policy produces typed reasons — shape-first turned `аdmin` into a nameless "invalid
+character" rather than `charset`.
 
-### E18-T2 — Availability & policy endpoint
+**The flags are negative (`DisallowDigits`, `DisallowHyphen`), not positive.** Every test
+relay and the integration harness build a `Config` literal, so a zero-valued policy has to
+mean "the usual rules"; an `AllowDigits bool` left unset would have silently rejected every
+handle containing a number.
 
-- [ ] `GET /hosted/availability?handle=&domain=` returning the verdict document above;
-      `domain` defaults to the relay's first `HostedDomains` entry and must be one of them
-      (`domain_not_hosted` otherwise)
-- [ ] Map T1's typed errors to `reason` codes; `taken` is checked last (policy rejection must
-      not leak whether a reserved name is also registered)
-- [ ] Tighter rate limit than the message buckets, per-IP, since this enumerates the identity
-      set; document the deliberate tradeoff (a public registry is enumerable by design — the
-      limit is about cost, not secrecy)
-- [ ] Integration coverage in `apps/integration/` for each reason code
-- [ ] Document in `apps/docs/docs/relay/api-reference.md`
+**One fixture renamed:** `verify.poweur.net` → `seedcheck.poweur.net` in
+`apps/integration/seed_test.go`. `verify` is on the new reserved list, and the name was
+describing the test rather than testing the name.
 
-**Acceptance:** `INT` test registers `robert.poweur.net`, then asserts `available:false,
-reason:"taken"`; `admin` → `reserved`; `bob` → `too_short` under the prod policy;
-`аdmin` → `charset`.
+**Acceptance:** met — unit tests cover every reason branch and the homoglyph cases,
+`apps/integration` passes with the dev policy, and `TestINT_NAME_02` boots a relay with
+`MinLen: 6` that refuses `bob` and accepts `melissa`.
+
+### E18-T2 — Availability & policy endpoint — **done**
+
+- [x] `GET /hosted/availability?handle=&domain=` returning the verdict document, always
+      `200` — every "no" is an answer, not an error. `domain` defaults to the first
+      `HostedDomains` entry and must be one of them
+- [x] T1's typed errors map straight to `reason`; **`taken` is checked last**, so a policy
+      rejection cannot be used to ask whether a reserved handle is also registered
+      (asserted directly, with `admin` both reserved *and* present in the store)
+- [x] Tighter per-IP limit via a new `Limiter.AllowCost` — the endpoint charges several
+      units of the same bucket messages use, which caps probing without a second limiter and
+      a second set of tunables. The tradeoff is documented where it lives: a public registry
+      is enumerable by design, so this is about cost, not secrecy
+- [x] `apps/integration/availability_test.go` covers each reason code, and asserts the
+      endpoint and `POST /identities` agree — a name the endpoint calls reserved is refused
+      by registration too, or the check would be decoration
+- [x] Documented in `apps/docs/docs/relay/api-reference.md`, with the policy table in
+      `configuration.md`
+- [x] `IdentityApi.availability()` in `@poweur/client`, so T3's live check is one call
+
+**Acceptance:** met (`TestINT_NAME_01`): `robert` is available, is registered through the
+real CLI path, and then reports `taken`; `admin` → `reserved`; `bob` → `too_short` under a
+`MinLen` of 6; `аdmin` → `charset`.
 
 ### E18-T3 — Launcher host & no-identity mode
 

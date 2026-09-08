@@ -204,6 +204,30 @@ export interface AnonymousPolicy {
   max_per_day?: number;
 }
 
+/** Why a handle is (un)available — the relay's `reason` vocabulary. */
+export type HandleReason =
+  | "available"
+  | "taken"
+  | "reserved"
+  | "blocked"
+  | "too_short"
+  | "too_long"
+  | "charset"
+  | "hyphen"
+  | "punycode"
+  | "domain_not_hosted"
+  | "invalid";
+
+/** `GET /hosted/availability` (EPIC-018 E18-T2). */
+export interface HandleAvailability {
+  handle: string;
+  identity: string;
+  available: boolean;
+  reason: HandleReason;
+  message: string;
+  policy: { min_len: number; max_len: number; charset: string };
+}
+
 /** One labeled URL on a profile. */
 export interface ProfileLink {
   label?: string;

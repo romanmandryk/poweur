@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	idpkg "github.com/poweur/identity"
 )
 
 const (
@@ -72,6 +74,14 @@ type Config struct {
 	// RegistrationPowBits is the PoW difficulty for REGISTRATION_GATE=pow
 	// (0 = default; clamped by the pow window).
 	RegistrationPowBits int
+	// NamePolicy governs which hosted handles may be claimed (EPIC-018 E18-T1).
+	// Operator configuration, loaded from NAME_* below; the character set is
+	// not part of it and never configurable.
+	NamePolicy idpkg.NamePolicy
+	// NameBlockedFile is the path the blocked-terms list was read from, kept
+	// for the startup log — an operator who typos it should see that no terms
+	// loaded rather than assume the list is live.
+	NameBlockedFile string
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
 	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
@@ -108,6 +118,20 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid STORAGE_PROVIDER: %s (v1 supports relay-fs)", c.StorageProvider)
 	}
+	switch c.NamePolicy.BlockMode {
+	case "", idpkg.BlockModeSubstring, idpkg.BlockModeExact:
+	default:
+		return fmt.Errorf("invalid NAME_BLOCK_MODE: %s (use substring|exact)", c.NamePolicy.BlockMode)
+	}
+	if c.NamePolicy.MinLen > c.NamePolicy.MaxLen && c.NamePolicy.MaxLen > 0 {
+		return fmt.Errorf("NAME_MIN_LEN (%d) exceeds NAME_MAX_LEN (%d)",
+			c.NamePolicy.MinLen, c.NamePolicy.MaxLen)
+	}
+	if c.NameBlockedFile != "" {
+		if _, err := idpkg.LoadBlockedTerms(c.NameBlockedFile); err != nil {
+			return fmt.Errorf("NAME_BLOCKED_FILE %s: %w", c.NameBlockedFile, err)
+		}
+	}
 	if len(missing) == 0 {
 		return nil
 	}
@@ -131,21 +155,23 @@ func (c Config) IsHostedDomain(identity string) bool {
 
 func FromEnv() Config {
 	return Config{
-		ListenAddr:           getenv("LISTEN_ADDR", DefaultListenAddr),
-		WebStaticDir:         strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
-		RelayAddress:         os.Getenv("RELAY_ADDRESS"),
-		RelayScheme:          getenv("RELAY_SCHEME", DefaultRelayScheme),
-		DNSTTL:               getenvDuration("DNS_TTL", DefaultDNSTTL),
-		ChallengeTTL:         getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
-		Version:              getenv("VERSION", DefaultVersion),
-		DNSProxyMode:         strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
-		MaxInboxPerIdentity:  getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
-		MaxAcksPerIdentity:   getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
+		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
+		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
+		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
+		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
+		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),
+		ChallengeTTL:            getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
+		Version:                 getenv("VERSION", DefaultVersion),
+		DNSProxyMode:            strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
+		MaxInboxPerIdentity:     getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
+		MaxAcksPerIdentity:      getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
 		DataDir:                 strings.TrimSpace(os.Getenv("POWEUR_DATA")),
 		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),
 		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
 		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
 		RegistrationPowBits:     int(getenvInt64("REGISTRATION_POW_BITS", 0)),
+		NamePolicy:              namePolicyFromEnv(),
+		NameBlockedFile:         strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
 		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
 		MaxFileBytes:            getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
@@ -160,6 +186,42 @@ func FromEnv() Config {
 			PerHour:   getenvInt("GLOBAL_RATE_LIMIT_HOUR", DefaultGlobalHourLimit),
 			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
 		},
+	}
+}
+
+// namePolicyFromEnv builds the hosted name policy from NAME_*.
+//
+// Defaults are the package's dev-friendly ones (MinLen 3), not the production
+// values: the fixtures and the integration suite are full of "bob", and a
+// production deployment sets NAME_MIN_LEN=6 in its own config. A blocked-terms
+// file that cannot be read is logged by the caller and treated as no terms —
+// a relay must not refuse to boot over a profanity list.
+func namePolicyFromEnv() idpkg.NamePolicy {
+	policy := idpkg.DefaultHostedPolicy()
+	policy.MinLen = getenvInt("NAME_MIN_LEN", policy.MinLen)
+	policy.MaxLen = getenvInt("NAME_MAX_LEN", 24)
+	policy.DisallowHyphen = !getenvBoolDefault("NAME_ALLOW_HYPHEN", true)
+	policy.DisallowDigits = !getenvBoolDefault("NAME_ALLOW_DIGITS", true)
+	policy.Reserved = splitCSV(os.Getenv("NAME_RESERVED"))
+	policy.BlockMode = strings.ToLower(getenv("NAME_BLOCK_MODE", idpkg.BlockModeSubstring))
+	if terms, err := idpkg.LoadBlockedTerms(os.Getenv("NAME_BLOCKED_FILE")); err == nil {
+		policy.Blocked = terms
+	}
+	return policy
+}
+
+// getenvBoolDefault differs from getenvBool: these two flags default to true,
+// so an unset variable must not read as false.
+func getenvBoolDefault(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 

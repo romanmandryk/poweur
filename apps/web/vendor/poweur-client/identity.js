@@ -25,6 +25,22 @@ export class IdentityApi {
         return this.client.request({ method: "GET", path: "/health" });
     }
     /**
+     * Can this handle be claimed here (EPIC-018 E18-T2)?
+     *
+     * Called before the passkey ceremony, not after: the relay's answer carries
+     * a `reason` and the policy it applied, so a client can say *why* a name is
+     * unavailable and validate the next attempt inline.
+     */
+    availability(handle, domain) {
+        const query = new URLSearchParams({ handle });
+        if (domain)
+            query.set("domain", domain);
+        return this.client.request({
+            method: "GET",
+            path: `/hosted/availability?${query.toString()}`,
+        });
+    }
+    /**
      * The relay's canonical address (host[:port]). Registration signatures bind
      * to it, so a captured signature cannot be replayed at another relay.
      */

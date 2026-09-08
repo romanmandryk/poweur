@@ -422,6 +422,50 @@ On success, the relay creates (or updates) up to three DNS records:
 
 ---
 
+## GET /hosted/availability {#get-hostedavailability}
+
+Is this handle claimable, and if not, why? Read-only, unauthenticated, and meant to be
+called **before** a client spends a WebAuthn ceremony on a name the relay will refuse.
+
+### Query parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `handle` | yes | The leftmost label only (`melissa`, not `melissa.poweur.net`) |
+| `domain` | no | Hosted parent; defaults to the relay's first `HOSTED_DOMAINS` entry |
+
+### Response body
+
+Always `200` with a verdict — the failure modes are answers, not errors:
+
+```json
+{
+  "handle":    "admin",
+  "identity":  "admin.poweur.net",
+  "available": false,
+  "reason":    "reserved",
+  "message":   "This name is reserved by the operator.",
+  "policy":    { "min_len": 6, "max_len": 24, "charset": "a-z 0-9 -" }
+}
+```
+
+`reason` is one of `available`, `taken`, `reserved`, `blocked`, `too_short`, `too_long`,
+`charset`, `hyphen`, `punycode`, `domain_not_hosted`. `policy` echoes the relay's
+[handle policy](/relay/configuration) so a client can validate inline without hardcoding
+the rules of the relay it is talking to.
+
+**Policy is evaluated before registration.** A name the policy refuses reports *why it is
+refused*, never `taken`, so the endpoint cannot be used to ask whether a reserved handle is
+also registered.
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | Verdict returned (including every "not available" case) |
+| `400 Bad Request` | `handle` missing |
+| `429 Too Many Requests` | Per-IP limit. This endpoint enumerates the registered set — a public registry is enumerable by design, so the limit is about cost, not secrecy, and it is charged several units per call against the same per-IP bucket messages use |
+
+---
+
 ## POST /identities/:identity/encryption-key
 
 Add or replace the X25519 encryption public key for a locally hosted

@@ -165,6 +165,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /auth/pow", s.handleAuthPow)
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
+	mux.HandleFunc("GET /hosted/availability", s.handleHostedAvailability)
 	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
 	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
@@ -282,8 +283,12 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := idpkg.ValidateHostedHandle(req.Identity); err != nil && hosted {
-		writeError(w, http.StatusBadRequest, "invalid_identity", err.Error())
+	// Hosted handles answer to the operator's policy (EPIC-018 E18-T1); the
+	// reason code travels with the error so a client can react to *why*
+	// without parsing the message.
+	if err := idpkg.ValidateHostedHandleWithPolicy(req.Identity, s.cfg.NamePolicy); err != nil && hosted {
+		writeError(w, http.StatusBadRequest, "invalid_identity",
+			fmt.Sprintf("%s (%s)", err.Error(), idpkg.ReasonOf(err)))
 		return
 	}
 	if err := idpkg.ValidateIdentityName(req.Identity); err != nil {

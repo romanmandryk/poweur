@@ -22,6 +22,7 @@ import { newNonce } from "./ids.js";
 import { RelayClient, type RelayClientOptions } from "./http.js";
 import { solvePow } from "./pow.js";
 import type {
+  HandleAvailability,
   HealthResponse,
   IdentityDocument,
   IdentityResponse,
@@ -52,6 +53,22 @@ export class IdentityApi {
 
   health(): Promise<HealthResponse> {
     return this.client.request<HealthResponse>({ method: "GET", path: "/health" });
+  }
+
+  /**
+   * Can this handle be claimed here (EPIC-018 E18-T2)?
+   *
+   * Called before the passkey ceremony, not after: the relay's answer carries
+   * a `reason` and the policy it applied, so a client can say *why* a name is
+   * unavailable and validate the next attempt inline.
+   */
+  availability(handle: string, domain?: string): Promise<HandleAvailability> {
+    const query = new URLSearchParams({ handle });
+    if (domain) query.set("domain", domain);
+    return this.client.request<HandleAvailability>({
+      method: "GET",
+      path: `/hosted/availability?${query.toString()}`,
+    });
   }
 
   /**

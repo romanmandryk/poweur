@@ -229,6 +229,25 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     ).rejects.toThrow(/aborted/);
   }, 180_000);
 
+  it("answers handle availability before a client commits to a name", async () => {
+    const api = new IdentityApi(new RelayClient(relay.baseUrl));
+    const handle = alice.identity.split(".")[0]!;
+
+    const taken = await api.availability(handle);
+    expect(taken.available).toBe(false);
+    expect(taken.reason).toBe("taken");
+    // The policy travels with the verdict so a client can validate inline.
+    expect(taken.policy.charset).toBe("a-z 0-9 -");
+
+    const free = await api.availability(`unclaimed${Date.now().toString(36)}`);
+    expect(free.available).toBe(true);
+    expect(free.reason).toBe("available");
+
+    // Reserved and non-ASCII are answers, not errors.
+    expect((await api.availability("admin")).reason).toBe("reserved");
+    expect((await api.availability("аdmin")).reason).toBe("charset");
+  });
+
   it("reports relay health", async () => {
     const health = await alice.client.identity.health();
     expect(health.status).toBeTruthy();
