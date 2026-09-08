@@ -33,7 +33,17 @@ const SESSION_PREFIX = "poweur:session:";
 export function defaultRelayUrl() {
   const configured = readConfigRaw().relayUrl;
   if (configured) return configured;
-  return globalThis.location?.origin ?? "";
+  // Only a web origin can stand in for a relay. A shell runs on
+  // `capacitor://localhost`, which is not one — returning it produced an app
+  // that tried to register against itself, with no way to say otherwise
+  // because Settings needs an identity first. Empty means "ask" (EPIC-019).
+  const origin = globalThis.location?.origin ?? "";
+  return /^https?:$/.test(globalThis.location?.protocol ?? "") ? origin : "";
+}
+
+/** True when a relay is known without asking the user (EPIC-019 E19-T1). */
+export function hasRelayUrl() {
+  return Boolean(defaultRelayUrl());
 }
 
 /**

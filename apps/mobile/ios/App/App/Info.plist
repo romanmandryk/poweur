@@ -22,6 +22,27 @@
 	     targets arrive as poweur:// URLs. Universal links for a hosted domain
 	     are E19-T3's associated-domains work and are deliberately not here —
 	     a self-hosted identity must never depend on the operator's domain. -->
+	<!-- App Transport Security. Production relays are HTTPS and stay subject to
+	     ATS in full; the two exceptions below are loopback only, so a developer
+	     can point the shell at `go run .` on their own machine. Nothing off the
+	     device is reachable in cleartext, and an attacker who can MITM your own
+	     loopback has already won. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -20,6 +20,7 @@ import {
   loadSessionRecord,
   BrowserSessionStore,
   defaultRelayUrl,
+  hasRelayUrl,
   relayUrlFor,
   rpIdFor,
   resolveOptionsFor,
@@ -144,5 +145,34 @@ describe("credential scope (EPIC-018 E18-T4)", () => {
 
   it("falls back to the host for an identity it has never seen", () => {
     expect(rpIdFor("unknown.poweur.net")).toBe(globalThis.location.hostname);
+  });
+});
+
+describe("relay URL on a shell origin (EPIC-019 E19-T1)", () => {
+  it("treats a non-web origin as no relay at all", () => {
+    // A Capacitor shell runs on capacitor://localhost. Returning that as the
+    // relay produced an app that registered against itself and had no way to
+    // be told otherwise, since Settings needs an identity first.
+    const original = Object.getOwnPropertyDescriptor(globalThis, "location");
+    Object.defineProperty(globalThis, "location", {
+      value: { origin: "capacitor://localhost", protocol: "capacitor:" },
+      configurable: true,
+    });
+    try {
+      expect(defaultRelayUrl()).toBe("");
+      expect(hasRelayUrl()).toBe(false);
+
+      // …until the user names one, which is what the first-run prompt writes.
+      saveConfig({ ...getConfig(), relayUrl: "https://poweur.net" });
+      expect(defaultRelayUrl()).toBe("https://poweur.net");
+      expect(hasRelayUrl()).toBe(true);
+    } finally {
+      if (original) Object.defineProperty(globalThis, "location", original);
+    }
+  });
+
+  it("still falls back to the origin when the relay serves the app", () => {
+    expect(defaultRelayUrl()).toBe(globalThis.location.origin);
+    expect(hasRelayUrl()).toBe(true);
   });
 });

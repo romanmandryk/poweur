@@ -32,7 +32,7 @@ import {
   getActiveIdentity, setActiveIdentity,
   loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
-  defaultRelayUrl, relayUrlFor,
+  defaultRelayUrl, hasRelayUrl, relayUrlFor,
 } from "./storage.js";
 
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
@@ -872,6 +872,7 @@ function renderAddId() {
       </div>
       <div class="sub-body">
         <p class="muted small" style="margin-bottom:20px">Connect or create a Poweur ID identity on this device.</p>
+        ${renderRelayPrompt()}
         <div class="option-list">
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
@@ -908,6 +909,76 @@ function renderAddId() {
         </div>
       </div>
     </div>`;
+}
+
+/**
+ * Ask which relay to talk to, when nothing else can answer.
+ *
+ * A relay-served SPA knows: it is *on* the relay. A shell is not on anything —
+ * it runs from its own bundle — so the first question it has to ask is where
+ * the user's identity lives. Every option below this needs the answer, which
+ * is why it sits above them rather than inside one of them.
+ */
+function renderRelayPrompt() {
+  if (hasRelayUrl()) return "";
+  return `
+    <div class="form-card relay-prompt">
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label" for="setup-relay">Relay</label>
+        <p class="muted small" style="margin-bottom:6px">
+          The server your identity lives on. Your own, or the one that invited you.
+        </p>
+        <input id="setup-relay" class="input" type="url" inputmode="url"
+               placeholder="https://poweur.net" autocomplete="off" spellcheck="false" />
+        <p class="idin-status small" id="setup-relay-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>`;
+}
+
+/**
+ * Save the typed relay once it answers, so the options below light up.
+ *
+ * It is checked rather than taken on faith: a typo here would otherwise
+ * surface as an unexplained failure three screens later, during registration.
+ */
+function attachRelayPrompt() {
+  const input = q("#setup-relay");
+  const status = q("#setup-relay-status");
+  if (!input || !status) return;
+
+  let timer = null;
+  const check = async () => {
+    const raw = input.value.trim();
+    if (!raw) { status.textContent = ""; return; }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    status.textContent = "Checking…";
+    status.className = "idin-status small";
+    try {
+      const health = await fetch(new URL("/health", url).toString(), {
+        headers: { Accept: "application/json" },
+      }).then(r => (r.ok ? r.json() : null));
+      if (!health?.status) throw new Error("that does not look like a relay");
+      saveConfig({ ...getConfig(), relayUrl: url.replace(/\/$/, "") });
+      S.config = getConfig();
+      status.textContent = `Connected to ${new URL(url).host}`;
+      status.className = "idin-status small val-ok";
+      render();
+    } catch (error) {
+      status.textContent = `Could not reach ${url} — ${error.message}`;
+      status.className = "idin-status small val-warn";
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(check, 600);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    clearTimeout(timer);
+    check();
+  });
+  input.focus();
 }
 
 // Unlock ───────────────────────────────────────────────────────────────────────
@@ -1383,6 +1454,7 @@ function attachEvents() {
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
   // Add ID options
+  attachRelayPrompt();
   q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
   q("#btn-signin-passkey")?.addEventListener("click", doSignInWithPasskey);
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
