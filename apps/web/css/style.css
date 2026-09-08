@@ -1494,3 +1494,21 @@ input, textarea, select { font-family: inherit; }
   color: var(--accent);
   margin-left: auto;
 }
+
+/* Tray badges: only where a count means "waiting for you" (E07-T3). */
+.tray-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.tray-tab.active .tray-badge { background: rgba(255,255,255,.28); }

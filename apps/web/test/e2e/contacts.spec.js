@@ -64,6 +64,8 @@ test.describe("contacts, requests and key pinning", () => {
     // ── Bob sees it, in the requests tray rather than as a conversation ────
     const accept = await requestFrom(bobPage, aliceId);
     await expect(bobPage.locator(".request-intro")).toHaveText("hi, it's alice");
+    // The tray says how many are waiting, from any tray (E07-T3).
+    await expect(bobPage.locator('.tray-tab[data-tray="requests"] .tray-badge')).toHaveText("1");
 
     // The same stranger is one tap from being added in the inbox too.
     await bobPage.click('.tray-tab[data-tray="inbox"]');

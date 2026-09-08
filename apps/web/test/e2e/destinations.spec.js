@@ -201,6 +201,10 @@ test.describe("five destinations at 375px", () => {
 
     await page.click('.tray-tab[data-tray="anonymous"]');
     await expect(page.locator(".empty-state-title")).toHaveText("No anonymous messages");
+
+    // No badges when nothing is waiting: a badge that never clears teaches
+    // people to ignore badges (E07-T3).
+    await expect(page.locator(".tray-badge")).toHaveCount(0);
   });
 
   test("Contacts offers the identity input, which rejects a typo", async ({ page }) => {

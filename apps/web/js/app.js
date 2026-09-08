@@ -81,7 +81,7 @@ const S = {
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
   requests: { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
-  anon: { messages: [], loading: false, loaded: false, error: null },
+  anon: { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
   profile: { doc: null, explicit: false, loaded: false, loading: false },
   /** null unless the first-run flow is on screen. */
@@ -292,6 +292,21 @@ const CONTACT_STATE_CHIP = {
   blocked:   { label: "Blocked",   cls: "chip-red"    },
 };
 
+/**
+ * How many things are waiting in a tray.
+ *
+ * Only the trays where a count is unambiguous: a request and an anonymous
+ * message are both "something addressed to you that you have not dealt with".
+ * The inbox gets no badge, because the app has no read state and a number
+ * there would be counting messages held, not messages unread — a badge that
+ * never clears teaches people to ignore badges.
+ */
+function trayCount(tray) {
+  if (tray === "requests") return incomingRequests().length;
+  if (tray === "anonymous") return S.anon.messages.length;
+  return 0;
+}
+
 /** The contact record for an identity, or null — the app's one lookup. */
 function contactFor(identity) {
   const wanted = String(identity ?? "").toLowerCase();
@@ -333,9 +348,15 @@ function renderMessages() {
       <h1 class="dest-title">Messages</h1>
     </div>
     <div class="tray-bar" role="tablist" aria-label="Message trays">
-      ${TRAYS.map(t => `
+      ${TRAYS.map(t => {
+        const waiting = trayCount(t.id);
+        return `
         <button class="tray-tab${S.tray === t.id ? " active" : ""}" data-tray="${t.id}"
-                role="tab" aria-selected="${S.tray === t.id}">${t.label}</button>`).join("")}
+                role="tab" aria-selected="${S.tray === t.id}"
+                ${waiting ? `aria-label="${esc(t.label)}, ${waiting} waiting"` : ""}>${t.label}${
+          waiting ? `<span class="tray-badge">${waiting > 99 ? "99+" : waiting}</span>` : ""
+        }</button>`;
+      }).join("")}
     </div>
     ${renderTray()}
     <button class="fab" id="btn-compose" title="New message" aria-label="New message">✏️</button>`;
@@ -1353,7 +1374,11 @@ function attachEvents() {
     // Always, not only on the Requests tray: an accept to a request *we* sent
     // arrives here, and the handshake only completes once we have read it.
     loadRequests();
-    if (S.tray === "anonymous") { loadPolicy(); loadAnon(); }
+    // The anonymous queue is drained here too, so its badge is honest before
+    // the tray is opened — but only for the few who turned anonymous on, so
+    // everyone else pays nothing for a queue that is always empty.
+    loadPolicy();
+    if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon();
   }
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
@@ -1465,7 +1490,7 @@ function switchIdentity(identity) {
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
   S.requests = { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
-  S.anon = { messages: [], loading: false, loaded: false, error: null };
+  S.anon = { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.policy = { doc: null, explicit: false, loading: false, loaded: false };
   S.profile = { doc: null, explicit: false, loaded: false, loading: false };
   S.files = {
@@ -2993,7 +3018,10 @@ function showPolicyPanel() {
 /** Drain the anonymous queue — challenge-signed, so serialized like the rest. */
 function loadAnon({ force = false } = {}) {
   const A = S.anon;
-  if (A.loading || (A.loaded && !force)) return Promise.resolve();
+  if (A.loading) return Promise.resolve();
+  if (!force && A.fetchedAt && Date.now() - A.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
+    return Promise.resolve();
+  }
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
   A.loading = true;
@@ -3007,6 +3035,7 @@ function loadAnon({ force = false } = {}) {
       A.error = `Could not read anonymous messages: ${error.message}`;
     } finally {
       A.loading = false;
+      A.fetchedAt = Date.now();
       if (R.page === "messages" && !R.sub) render();
     }
   });

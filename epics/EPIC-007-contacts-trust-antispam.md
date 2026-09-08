@@ -97,8 +97,11 @@ this epic turns verified identity into *usable trust*.
       tells the sender to request)
 - [x] Web app: contacts list with profile cards, requests tray with accept/block, and the
       policy panel — shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T2/T3.
-      **Still open:** unread badge counts on the trays, and a composer that reads a policy
-      rejection back into the UI (it surfaces the relay's error text today)
+      Tray badges count what is *waiting* — pending requests, anonymous messages — and the
+      inbox deliberately gets none, since the app has no read state and a badge that never
+      clears teaches people to ignore badges.
+      **Still open:** a composer that reads a policy rejection back into the UI (it
+      surfaces the relay's error text today)
 - [x] CLI writes/reads `contacts.json` through the normal file API so contacts sync
       across devices for free (EPIC-004)
 
