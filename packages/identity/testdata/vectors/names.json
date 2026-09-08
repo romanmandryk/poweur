@@ -63,5 +63,36 @@
     "identity": "",
     "valid": false,
     "hosted_valid": false
+  },
+  {
+    "identity": "аdmin.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "аlice.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "xn--80ak6aa92e.example.org",
+    "valid": true,
+    "hosted_valid": false,
+    "dir_name": "xn--80ak6aa92e__example__org"
+  },
+  {
+    "identity": "support.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "verify.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "id.poweur.net",
+    "valid": false,
+    "hosted_valid": false
   }
 ]

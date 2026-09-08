@@ -1,6 +1,6 @@
 # EPIC-018 — Hosted identity onboarding: launcher, name policy & credential scope
 
-- **Status:** in progress — T1 and T2 done; T3–T5 open
+- **Status:** in progress — T1, T2 and T4 done; T3 and T5 open
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
@@ -12,7 +12,7 @@
 | E18-T1 Configurable name policy | **done** | `packages/identity/namepolicy.go` with typed reasons; ASCII-LDH enforcement closes the homoglyph bypass; `NAME_*` config wired into registration |
 | E18-T2 Availability & policy endpoint | **done** | `GET /hosted/availability` returning a verdict + the policy; policy evaluated before registration so a rejection cannot leak whether a reserved name is taken; cost-weighted per-IP limit |
 | E18-T3 Launcher host & no-identity mode | open | same SPA, dedicated host |
-| E18-T4 Credential scope (rpId) model | open | narrow: hosted origin hop only |
+| E18-T4 Credential scope (rpId) model | **done** | `registrableDomain()` in `@poweur/client`; scope stored on the identity record and reused for every assertion; pre-E18 records keep the host they were minted with |
 | E18-T5 Docs | open | |
 
 ## Goal
@@ -247,18 +247,30 @@ real CLI path, and then reports `taken`; `admin` → `reserved`; `bob` → `too_
 creates a passkey, and arrives signed-in at `<name>.poweur.net/app/` — no CLI, no second
 credential prompt.
 
-### E18-T4 — Credential scope (rpId) model
+### E18-T4 — Credential scope (rpId) model — **done**
 
-- [ ] Compute `rp.id` as the registrable domain of the identity's home; store it on the
-      identity record so unlock uses the same value it was created with
-- [ ] Registrable-domain helper shared by `apps/web` and `@poweur/client` — a small PSL-lite
-      that handles the common multi-label suffixes (`co.uk`, `com.au`); an operator on an
-      exotic suffix can override via config rather than shipping the full PSL
-- [ ] Migration for identities created before this change (stored `rpId` absent ⇒ fall back to
-      the identity hostname, which is what they were minted with) — **existing passkeys must
-      keep working**; cover with a unit test
-- [ ] Document the per-domain scope tradeoff in `apps/docs/docs/protocol/` and cross-link from
-      EPIC-011
+- [x] `credentialRpId(identity, host)` computes the registrable domain of the identity's home
+      and **falls back to the page host when the identity lives elsewhere** — a browser only
+      accepts an `rp.id` that is a suffix of the current host, so asking for `poweur.net`
+      from a dev relay on `127.0.0.1` is a `SecurityError`, not a wider scope. The value used
+      is stored on the identity record at creation
+- [x] `registrableDomain()` in `@poweur/client` (`names.ts`), a PSL-lite covering the common
+      multi-label suffixes. Never returns a public suffix: `bob.co.uk` scopes to itself
+- [x] **Assertions name the scope too.** A credential minted with `rp.id = poweur.net` is not
+      found from `alice.poweur.net` unless the assertion asks for that scope — so
+      `authenticatePasskey`, `assertChallenge` and the keystore's `rpId` argument all read the
+      stored value rather than the page host
+- [x] Migration: a record with no stored scope keeps being asserted against the host it was
+      minted on. Unit-tested, because "upgrading" those to the registrable domain would
+      silently stop finding the credential
+- [x] Documented in `security/key-management.md` (with the per-domain tradeoff stated as a
+      decision) and cross-linked from `protocol/web-identity.md`
+
+**Also fixed here: the TypeScript twin had the same homoglyph bug.** `names.ts` used
+`\p{L}` exactly as Go did, and no vector covered it — so the two implementations agreed
+about `аdmin` only by both being wrong. The names vectors now include the homoglyph and
+newly-reserved cases, which failed six conformance tests until `names.ts` was brought into
+line (ASCII LDH, the expanded reserved list, and the hosted `xn--` / `--` rules).
 
 **Acceptance:** a passkey created on `id.poweur.net` unlocks the identity on
 `alice.poweur.net`; an identity record written before the change still unlocks with its

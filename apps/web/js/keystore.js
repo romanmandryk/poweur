@@ -24,8 +24,8 @@ import {
   toBase64url, fromBase64,
 } from "@poweur/client";
 
-import { assertChallenge, rpId, wrapKeysWithPRF } from "./passkey.js";
-import { loadIdentityRecord, relayUrlFor, saveIdentityRecord } from "./storage.js";
+import { assertChallenge, credentialRpId, wrapKeysWithPRF } from "./passkey.js";
+import { loadIdentityRecord, relayUrlFor, rpIdFor, saveIdentityRecord } from "./storage.js";
 import { jwksFromSeed, wrapKeysWithPin } from "./vault.js";
 
 /** A stable id for an enrollment, independent of the credential it wraps. */
@@ -122,13 +122,16 @@ export function deviceLabel(userAgent = globalThis.navigator?.userAgent ?? "") {
  * authenticator that may not be needed.
  */
 export async function removeEnrollment(client, identity, enrollmentId, { revokeSessions = true } = {}) {
-  const options = { revokeSessions, rpId: rpId() };
+  // The relay verifies the assertion against the scope the credential was
+  // created with (EPIC-018 E18-T4), so both sides must name the same one.
+  const scope = rpIdFor(identity);
+  const options = { revokeSessions, rpId: scope };
   try {
     await client.keystore.remove(client.signer, identity, enrollmentId, options);
   } catch (error) {
     if (!needsRecoveryMaster(error)) throw error;
     const api = apiFor(relayUrlFor(identity));
-    const { assertion } = await assertChallenge(await api.challenge(identity));
+    const { assertion } = await assertChallenge(await api.challenge(identity), { rpId: scope });
     await client.keystore.remove(client.signer, identity, enrollmentId, {
       ...options,
       actorAssertion: assertion,
@@ -157,7 +160,10 @@ function needsRecoveryMaster(error) {
  */
 export async function recoverFromKeystore(identity, { relayUrl = relayUrlFor(identity) } = {}) {
   const api = apiFor(relayUrl);
-  const { assertion, prfOutput } = await assertChallenge(await api.challenge(identity));
+  // Nothing is stored for this identity here, so the scope cannot be read back
+  // from a record: derive the one it *would* have been created with.
+  const scope = credentialRpId(identity);
+  const { assertion, prfOutput } = await assertChallenge(await api.challenge(identity), { rpId: scope });
   if (!prfOutput) {
     throw new Error(
       "This authenticator did not return a PRF secret, so it cannot open the stored copy. " +
@@ -165,7 +171,7 @@ export async function recoverFromKeystore(identity, { relayUrl = relayUrlFor(ide
     );
   }
 
-  const { entries } = await api.fetch(identity, assertion, rpId());
+  const { entries } = await api.fetch(identity, assertion, scope);
   const entry = entries.find((e) => e.credential_id === assertion.credential_id) ?? entries[0];
   if (!entry) throw new Error("No stored copy for this identity");
 

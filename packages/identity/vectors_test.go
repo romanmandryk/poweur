@@ -285,6 +285,12 @@ func TestVectors_Names(t *testing.T) {
 		"alice.poweur.net", "a-b.example.org", "bob.co.uk", "ab.poweur.net",
 		"www.poweur.net", "dav.example.org", "nodots", "192.168.0.1",
 		"-bad.example.org", "bad-.example.org", "UPPER.Example.ORG", "",
+		// Homoglyphs (EPIC-018 E18-T1). Without these in the vectors the two
+		// implementations could disagree about "аdmin" — as they did, silently,
+		// while both used a Unicode letter class.
+		"аdmin.poweur.net", "аlice.poweur.net", "xn--80ak6aa92e.example.org",
+		// Newly reserved labels, so a TS list that drifts from Go's is caught.
+		"support.poweur.net", "verify.poweur.net", "id.poweur.net",
 	} {
 		vector := nameVector{
 			Identity: name,

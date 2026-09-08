@@ -16,6 +16,8 @@
  * the relay stores it and checks signatures against it.
  */
 
+import { registrableDomain } from "@poweur/client";
+
 import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./vault.js";
 
 const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
@@ -25,13 +27,41 @@ const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
 /**
  * The relying-party id the relay must be told to verify assertions against.
  *
- * WebAuthn binds a credential to the page's host, so this is the host and not
- * a configured relay URL — the two differ whenever an identity is served from
- * its own domain. (EPIC-018 E18-T4 owns what a Capacitor shell, which has no
- * meaningful host, does instead.)
+ * The page host, which is what a credential minted before EPIC-018 E18-T4 was
+ * bound to. Prefer `rpIdFor(identity)` (storage.js), which returns the value
+ * the credential was actually created with; this is the fallback for records
+ * that predate storing it, and for calls with no identity in hand.
  */
 export function rpId() {
   return globalThis.location?.hostname ?? "";
+}
+
+/**
+ * The rp.id a credential for `identity` should be created with (E18-T4).
+ *
+ * The registrable domain of the identity's home, so one credential works on
+ * both the launcher host and the identity's own origin — `id.poweur.net`
+ * mints it, `alice.poweur.net` asserts it, and the user is never asked to
+ * enroll twice for the hop the launcher introduces.
+ *
+ * A browser only accepts an rp.id that is the current host or a registrable
+ * suffix of it, so this falls back to the page host whenever the identity
+ * lives somewhere else — which is exactly the dev case, where the app is on
+ * 127.0.0.1 and the identity is alice.poweur.net. `host` defaults to the page
+ * and is a parameter so the rule is testable without a fake `location`.
+ *
+ * The tradeoff, stated because it is a decision: hosted credentials become
+ * scoped per *domain* rather than per identity, so any `*.poweur.net` origin
+ * can ask for an assertion from any hosted credential. Every one of those
+ * origins is the same relay under the same operator, so this adds no trust
+ * boundary that did not already exist, and the WebAuthn user handle keeps the
+ * identities apart in the authenticator's picker.
+ */
+export function credentialRpId(identity, host = globalThis.location?.hostname ?? "") {
+  const candidate = registrableDomain(String(identity || ""));
+  if (!candidate) return host;
+  if (host === candidate || host.endsWith("." + candidate)) return candidate;
+  return host;
 }
 
 /**
@@ -42,12 +72,12 @@ export function rpId() {
  * @returns {{ credentialId: string, prfOutput: Uint8Array|null, supportsPRF: boolean,
  *            credentialPublicKey: string|null, credentialAlg: number|null }}
  */
-export async function createPasskey(identity, userId) {
+export async function createPasskey(identity, userId, options = {}) {
   if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this browser.");
 
   const challenge = crypto.getRandomValues(new Uint8Array(32));
   const userIdBytes = fromBase64url(userId);
-  const rpId = window.location.hostname;
+  const rpId = options.rpId || credentialRpId(identity);
 
   const createOptions = {
     challenge,
@@ -120,7 +150,9 @@ export async function createPasskey(identity, userId) {
     /* leave null — see above */
   }
 
-  return { credentialId, prfOutput, supportsPRF: prfOutput !== null, credentialPublicKey, credentialAlg };
+  // rpId travels back so the caller can store what this credential was
+  // actually bound to; every later assertion has to ask for the same scope.
+  return { credentialId, prfOutput, supportsPRF: prfOutput !== null, credentialPublicKey, credentialAlg, rpId };
 }
 
 // ─── Passkey Authentication ───────────────────────────────────────────────────
@@ -131,7 +163,7 @@ export async function createPasskey(identity, userId) {
  * @param {string} credentialId — base64url credential ID stored alongside identity
  * @returns {{ assertion: PublicKeyCredential, prfOutput: Uint8Array|null, supportsPRF: boolean }}
  */
-export async function authenticatePasskey(credentialId) {
+export async function authenticatePasskey(credentialId, { rpId: scope = null } = {}) {
   if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this browser.");
 
   const challenge = crypto.getRandomValues(new Uint8Array(32));
@@ -145,6 +177,9 @@ export async function authenticatePasskey(credentialId) {
     extensions: {
       prf: { eval: { first: PRF_SALT } },
     },
+    // Named explicitly: a credential created with rp.id "poweur.net" is not
+    // found from alice.poweur.net unless the assertion asks for that scope.
+    ...(scope ? { rpId: scope } : {}),
   };
 
   let assertion;
@@ -192,7 +227,7 @@ export async function unwrapKeysWithPRF(prfOutput, encryptedData) {
  *
  * @returns {{ assertion: object, prfOutput: Uint8Array|null }}
  */
-export async function assertChallenge(challenge, { credentialId = null } = {}) {
+export async function assertChallenge(challenge, { credentialId = null, rpId: scope = null } = {}) {
   if (!window.PublicKeyCredential) throw new Error("WebAuthn is not supported in this browser.");
 
   const options = {
@@ -202,6 +237,7 @@ export async function assertChallenge(challenge, { credentialId = null } = {}) {
     userVerification: "required",
     timeout: 120000,
     extensions: { prf: { eval: { first: PRF_SALT } } },
+    ...(scope ? { rpId: scope } : {}),
   };
   if (credentialId) {
     options.allowCredentials = [{ type: "public-key", id: fromBase64url(credentialId) }];

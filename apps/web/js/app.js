@@ -29,7 +29,7 @@ import {
   getConfig, saveConfig,
   saveIdentityRecord, loadIdentityRecord, listIdentities, removeIdentity,
   getActiveIdentity, setActiveIdentity,
-  loadSessionRecord, removeSessionRecord,
+  loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
   defaultRelayUrl, relayUrlFor,
 } from "./storage.js";
@@ -1500,7 +1500,7 @@ async function doUnlock() {
   try {
     let opened;
     if (rec.supportsPRF !== false && rec.encryptedKeys?.kdf === "prf") {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
       if (!prfOutput) throw new Error("PRF not available from this authenticator.");
       opened = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys);
     } else {
@@ -1577,7 +1577,7 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
 
   setLoading(true, "Creating a passkey on this device…");
   const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-  const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
+  const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
     await createPasskey(identity, userId);
 
   let encryptedKeys;
@@ -1596,7 +1596,7 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
     identity,
     publicKey: publicKeyFromJwk(signingJWK),
     encPublicKey: publicKeyFromJwk(encJWK),
-    credentialId, credentialPublicKey, credentialAlg,
+    credentialId, credentialPublicKey, credentialAlg, rpId: credentialScope,
     encryptedKeys,
     relay: relayUrl,
     userId,
@@ -1782,7 +1782,7 @@ async function doCreateIdentity() {
 
     setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg } =
+    const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
       await createPasskey(identity, userId);
 
     let encryptedKeys;
@@ -1808,7 +1808,7 @@ async function doCreateIdentity() {
 
     saveIdentityRecord(identity, {
       identity, publicKey, encPublicKey,
-      credentialId, credentialPublicKey, credentialAlg,
+      credentialId, credentialPublicKey, credentialAlg, rpId: credentialScope,
       encryptedKeys, relay: relayUrl,
       userId, createdAt: created.document.updated_at, supportsPRF,
       seedDerived: true,
@@ -3406,7 +3406,7 @@ async function doRotateEncKey() {
 
     let encryptedKeys;
     if (rec.supportsPRF !== false) {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
       encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
     } else {
       setLoading(false);

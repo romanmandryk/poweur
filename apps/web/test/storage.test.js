@@ -21,6 +21,7 @@ import {
   BrowserSessionStore,
   defaultRelayUrl,
   relayUrlFor,
+  rpIdFor,
   resolveOptionsFor,
 } from "../js/storage.js";
 
@@ -122,5 +123,26 @@ describe("storage — BrowserSessionStore is the SDK's SessionStore", () => {
     saveSessionRecord("alice.poweur.net", { sessionId: "x" });
     expect(loadSessionRecord("alice.poweur.net")).toEqual({ sessionId: "x" });
     expect(localStorage.getItem("poweur:session:alice.poweur.net")).toBeNull();
+  });
+});
+
+describe("credential scope (EPIC-018 E18-T4)", () => {
+  it("keeps asserting pre-E18 records against the host they were minted on", () => {
+    // No rpId on the record: it was created before the field existed, bound to
+    // the page host. Reading the registrable domain for it would stop finding
+    // the credential at all.
+    saveIdentityRecord("legacy.poweur.net", { identity: "legacy.poweur.net", credentialId: "c" });
+    expect(rpIdFor("legacy.poweur.net")).toBe(globalThis.location.hostname);
+  });
+
+  it("uses the stored scope once a record carries one", () => {
+    saveIdentityRecord("scoped.poweur.net", {
+      identity: "scoped.poweur.net", credentialId: "c", rpId: "poweur.net",
+    });
+    expect(rpIdFor("scoped.poweur.net")).toBe("poweur.net");
+  });
+
+  it("falls back to the host for an identity it has never seen", () => {
+    expect(rpIdFor("unknown.poweur.net")).toBe(globalThis.location.hostname);
   });
 });

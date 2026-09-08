@@ -15,6 +15,7 @@ import {
   PolicyControls, INBOX_MODES, describePowBits, powCost, POW_UNCOMFORTABLE_BITS,
 } from "../js/components/policy-controls.js";
 import { avatarColor, el, handleOf } from "../js/components/dom.js";
+import { credentialRpId } from "../js/passkey.js";
 
 const entry = (identity, extra = {}) => ({
   identity,
@@ -375,5 +376,28 @@ describe("PolicyControls", () => {
 
     expect(saves).toEqual([{ version: 1, mode: "contacts_and_requests" }]);
     expect(controls.el.querySelector(".idin-status").textContent).toBe("relay said no");
+  });
+});
+
+describe("credentialRpId (EPIC-018 E18-T4)", () => {
+  it("widens to the registrable domain only when the page is under it", () => {
+    // Production: the app is served from the identity's own origin (or the
+    // launcher host), so one credential covers both.
+    expect(credentialRpId("alice.poweur.net", "alice.poweur.net")).toBe("poweur.net");
+    expect(credentialRpId("alice.poweur.net", "id.poweur.net")).toBe("poweur.net");
+  });
+
+  it("falls back to the page host when the identity lives elsewhere", () => {
+    // Dev: the app is on 127.0.0.1 and the identity is alice.poweur.net. A
+    // browser refuses an rp.id that is not a suffix of the current host, so
+    // asking for "poweur.net" there would be a SecurityError, not a wider scope.
+    expect(credentialRpId("alice.poweur.net", "127.0.0.1")).toBe("127.0.0.1");
+    expect(credentialRpId("alice.poweur.net", "localhost")).toBe("localhost");
+  });
+
+  it("scopes a self-hosted identity to its own registrable domain", () => {
+    expect(credentialRpId("bob.example.org", "bob.example.org")).toBe("example.org");
+    // …but never to a public suffix.
+    expect(credentialRpId("bob.co.uk", "bob.co.uk")).toBe("bob.co.uk");
   });
 });

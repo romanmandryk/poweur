@@ -204,6 +204,19 @@ export function removeSessionRecord(identity) {
 // from it, and it is the one secret that must never be written down by us.
 let _unlockedKeys = null; // { identity, signingJWK, encJWK, seed }
 
+/**
+ * The rp.id a stored credential was created with (EPIC-018 E18-T4).
+ *
+ * Records written before this existed were minted with the page host and must
+ * keep being asserted against it — reading the registrable domain for them
+ * would silently stop finding their credential.
+ */
+export function rpIdFor(identity) {
+  const record = loadIdentityRecord(identity);
+  if (record?.rpId) return record.rpId;
+  return globalThis.location?.hostname ?? "";
+}
+
 export function setUnlockedKeys(identity, signingJWK, encJWK, seed = null) {
   _unlockedKeys = { identity, signingJWK, encJWK, seed };
 }

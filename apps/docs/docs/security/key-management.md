@@ -24,6 +24,28 @@ Three consequences follow, and they explain most of the design below:
 - **Losing the wrapped copy loses nothing if you hold the seed**, and losing the seed loses
   nothing if a wrapped copy survives. They are independent paths to the same key material.
 
+### Credential scope (`rp.id`)
+
+A passkey is bound to a WebAuthn *relying party*, and the browser will only mint or assert one
+whose `rp.id` is the page's host or a registrable suffix of it. Since EPIC-018 a hosted
+credential is scoped to the **registrable domain of the identity's home** — `alice.poweur.net`
+gets `rp.id = poweur.net` — so a credential created on the launcher host (`id.poweur.net`)
+opens on the identity's own origin with no second enrollment. Self-hosted identities are
+unchanged in spirit: `bob.example.org` gets `example.org`, and a public suffix is never
+claimed (`bob.co.uk` stays `bob.co.uk`).
+
+The tradeoff, stated so it is a decision rather than an accident: hosted passkeys are scoped
+per **domain**, not per identity, so any `*.poweur.net` origin can request an assertion for any
+hosted credential. Every one of those origins is the same relay under the same operator, so
+this adds no trust boundary that did not already exist, and the WebAuthn user handle keeps
+identities distinct in the authenticator's picker. It is not a claim that an identity is bound
+to a domain — the first consequence above still holds.
+
+The scope is recorded on the identity record at creation and reused for every later assertion.
+Records written before this existed carry no scope and keep being asserted against the host
+they were minted on, so **existing passkeys go on working**; a client that "upgraded" them to
+the registrable domain would simply stop finding the credential.
+
 ## Master seed
 
 Both long-lived keys derive from a single 32-byte master seed, so there is exactly one artifact
