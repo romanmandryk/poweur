@@ -673,12 +673,14 @@ function renderLauncher() {
         <div class="form-group">
           <label class="form-label" for="ni-handle">Handle</label>
           <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false"
+                 autocapitalize="none" autocorrect="off"
                  aria-describedby="ni-availability" />
           <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
         </div>
         <div class="form-group">
           <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}" autocomplete="off" />
+          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}"
+                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
         </div>
         <div class="form-group">
           <label class="form-label" style="display:flex;align-items:center;gap:8px">
@@ -884,6 +886,7 @@ function renderAddId() {
             </div>
             <div class="option-inline-form">
               <input id="signin-id-input" class="input" type="text" placeholder="alice.poweur.net"
+                autocapitalize="none" autocorrect="off"
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
@@ -928,7 +931,7 @@ function renderRelayPrompt() {
         <p class="muted small" style="margin-bottom:6px">
           The server your identity lives on. Your own, or the one that invited you.
         </p>
-        <input id="setup-relay" class="input" type="url" inputmode="url"
+        <input id="setup-relay" class="input" type="url" inputmode="url" autocapitalize="none" autocorrect="off"
                placeholder="https://poweur.net" autocomplete="off" spellcheck="false" />
         <p class="idin-status small" id="setup-relay-status" role="status" aria-live="polite"></p>
       </div>
@@ -1677,13 +1680,20 @@ async function doRecoverFromKeystore(identity) {
  * than a copy that only works until its site data is cleared.
  */
 async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
+  // Same rule as creation: no authenticator means a PIN, not a refusal. This
+  // is the path a shell takes after a device-enrollment ceremony, and turning
+  // it away would mean an identity could be joined on a browser but not on a
+  // phone (EPIC-019).
   const support = await checkPasskeySupport();
-  if (!support.available) throw new Error(`Passkey unavailable: ${support.reason}`);
 
-  setLoading(true, "Creating a passkey on this device…");
   const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-  const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
-    await createPasskey(identity, userId);
+  let credentialId = "", prfOutput = null, supportsPRF = false;
+  let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
+  if (support.available) {
+    setLoading(true, "Creating a passkey on this device…");
+    ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+      await createPasskey(identity, userId));
+  }
 
   let encryptedKeys;
   if (supportsPRF) {
@@ -1755,6 +1765,7 @@ function showJoinDevicePanel() {
     <div class="form-group">
       <label class="form-label" for="join-identity">Your Poweur ID</label>
       <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
+             autocapitalize="none" autocorrect="off"
              autocomplete="off" spellcheck="false" inputmode="url" />
     </div>
     <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
@@ -2000,8 +2011,14 @@ async function doCreateIdentity() {
   const identity = `${handle}.${domain}`;
   if (loadIdentityRecord(identity)) return toast("Identity already exists on this device", "warning");
 
+  // A passkey is a lock, not the identity (EPIC-011). Where there is no
+  // authenticator to hold one, a PIN holds the same wrapped keys — so an
+  // absent authenticator changes *how* the keys are protected, not whether an
+  // identity can exist. That case is not exotic: a Capacitor shell runs on
+  // `capacitor://localhost`, which is not a secure http(s) origin, so WebAuthn
+  // is unavailable there by construction (EPIC-019, where the OS keystore
+  // eventually replaces the PIN).
   const support = await checkPasskeySupport();
-  if (!support.available) return toast(`Passkey unavailable: ${support.reason}`, "error", 7000);
 
   setLoading(true, "Generating keys…");
   try {
@@ -2010,10 +2027,18 @@ async function doCreateIdentity() {
     const { signingJWK: sigPriv, encJWK: encPriv, seed, publicKey, encPublicKey } =
       await generateSeedIdentityJwks();
 
-    setLoading(true, "Creating passkey…");
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
-    const { credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
-      await createPasskey(identity, userId);
+    let credentialId = "", prfOutput = null, supportsPRF = false;
+    let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
+    if (support.available) {
+      setLoading(true, "Creating passkey…");
+      ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+        await createPasskey(identity, userId));
+    } else {
+      setLoading(false);
+      toast(`No passkey here (${support.reason}) — protecting your keys with a PIN instead`,
+        "info", 7000);
+    }
 
     let encryptedKeys;
     if (supportsPRF) {
@@ -2178,8 +2203,10 @@ function startEventStream() {
     onEvent: (event) => {
       if (identity !== S.identity) return; // the user switched identities
       if (event.type === "ready") return;  // nothing new by itself
-      loadInbox();
-      if (S.tray === "requests") loadRequests({ force: true });
+      // A queued contact request never reaches the inbox, so reading only
+      // that would leave the Requests tray silent until the user opened it.
+      if (event.type === "request") loadRequests({ force: true });
+      else loadInbox();
     },
     onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
   }).catch(() => {});
@@ -2721,7 +2748,11 @@ function loadRequests({ force = false } = {}) {
     } finally {
       Q.loading = false;
       Q.fetchedAt = Date.now();
-      if (R.page === "messages" && !R.sub && S.tray === "requests") render();
+      // Repaint for the whole destination, not just this tray: the count is
+      // on the tray *bar*, which is visible from every tray. Repainting only
+      // when the Requests tray was open meant a request that arrived by push
+      // was fetched and then not shown.
+      if (R.page === "messages" && !R.sub) render();
     }
   });
 }

@@ -14,7 +14,15 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Depth, Destination, Overwrite, If, Lock-Token, X-Poweur-Identity, X-Poweur-Signature, X-Poweur-Session-Id")
+		// Every header the protocol sends must be listed, or the browser's
+		// preflight fails and the request never happens. X-Poweur-Challenge was
+		// missing, which nothing same-origin ever noticed — the web app is
+		// served *by* the relay, so it sends no preflight — while a Capacitor
+		// shell on capacitor://localhost, or any third-party site using the
+		// SDK, had every authenticated call blocked before it left the browser.
+		w.Header().Set("Access-Control-Allow-Headers",
+			"Content-Type, Authorization, Depth, Destination, Overwrite, If, Lock-Token, "+
+				"X-Poweur-Identity, X-Poweur-Challenge, X-Poweur-Signature, X-Poweur-Session-Id")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

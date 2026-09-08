@@ -1,6 +1,6 @@
 # EPIC-019 — Mobile app: Capacitor shell over the web client
 
-- **Status:** in progress — T1 scaffolding, T2's JS half, T6 and T7 done; native builds unverified on this machine (no iOS platform installed), Android not generated
+- **Status:** in progress — T1 done and **verified on an iOS simulator**, T2's JS half, T6 and T7 done; Android not generated
 - **Priority:** P2 (after EPIC-015 makes the web app worth wrapping; the decision itself is P1 because it constrains E15)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the UI being wrapped), [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (onboarding + credential scope), [EPIC-011](EPIC-011-key-management-recovery.md) (T8 key transfer)
 - **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), `requirements.md`'s mobile-app requirements
@@ -9,7 +9,7 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E19-T1 Shell + single-origin client | **partial** | `apps/mobile` stages `apps/web` and `cap add ios` succeeds; **not compiled here** — this machine's Xcode has no iOS platform installed |
+| E19-T1 Shell + single-origin client | **done for iOS** | builds, installs and runs on an iOS 26.5 simulator: claim → PIN → unlock → push-driven request, against a local dev relay. Android platform not generated (no SDK here) |
 | E19-T2 Native key custody (`kdf:"native"`) | **partial** | JS half complete and tested (`apps/web/js/native.js`); the Keychain/Keystore plugin is specified, not written |
 | E19-T3 Optional passkey enrollment | open | hosted identities only |
 | E19-T4 Push & background sync | open | needs E09; hooks only until then |
@@ -17,6 +17,15 @@
 | E19-T6 Retire the native stubs | **done** | `apps/android` and `apps/ios` deleted; root scripts now point at `apps/mobile` |
 | E19-T7 Multi-identity across relays | **done** (in the code the shell wraps) | two relays, two identities, one origin — `apps/web/test/e2e/multi-relay.spec.js` |
 | E19-T8 Bringing an existing identity over | open | device-to-device; the relay cannot approve |
+
+**The shell's front door is specified in [E15-T7](EPIC-015-web-app-ux.md).** The web app is
+getting host-aware modes — `launcher` on the parent domain, `identity` on `bob.poweur.net` — and
+the shell is the third: `capacitor://localhost` is not a meaningful host, so it resolves to
+`shell` mode, asks for a relay first (the existing `renderRelayPrompt()`, which E15-T10 keeps for
+exactly this case) and then behaves like the launcher. The shell needs no screen of its own for
+it, which is the point: E15-T9's removal of free-text identity entry is scoped to the two
+browser doors, because in the shell the identity genuinely is not knowable from the URL. E15-T11's
+desktop layout leaves the phone breakpoint untouched, so it changes nothing the shell wraps.
 
 ## Goal
 
@@ -105,15 +114,40 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
 - [ ] **Android platform not generated** — needs an Android SDK, absent on this machine
 - [ ] Navigation allow-list / CSP review, splash and icons
 
-**Not compiled here, and that is a host limitation rather than a code one.** `cap add ios`
-succeeds and the project is committed, but every `xcodebuild` destination is ineligible:
-this machine runs Xcode 26.6, whose iOS SDK is 26.5, while the only installed *simulator
-runtime* is iOS 18.3. `xcodebuild -downloadPlatform iOS` (several GB) is the fix. So the
-acceptance below is **unverified**, and saying otherwise would be the easiest lie in this
-epic to tell.
+**Acceptance:** met on iOS. The shell runs on an iOS 26.5 simulator against a local dev
+relay: it claims a handle (live availability answering from the relay), creates an
+identity, unlocks it after a relaunch, and receives a contact request **by push with
+nothing touched on the device**. Android remains ungenerated — that needs an SDK this
+machine does not have.
 
-**Acceptance (unverified):** the shell runs on an iOS simulator and an Android emulator,
-connects to a local dev relay, and completes an existing identity's unlock + inbox load.
+### What running it on a device found
+
+Four defects, none of which any browser test could have caught, because each needs either
+a real safe area, a non-`http(s)` origin, or an authenticator that does not exist:
+
+1. **The header sat under the Dynamic Island.** It padded for `safe-area-inset-top` but
+   kept a fixed height, so the padding squeezed its contents up instead of moving them
+   down. Invisible at 375px in a browser, where the inset is zero.
+2. **A fresh install could reach no relay.** `defaultRelayUrl()` fell back to
+   `location.origin`, which in a shell is `capacitor://localhost` — so registration
+   addressed the app itself, and the only screen that sets a relay lives behind an
+   identity. A non-web origin now means "no relay", and the add-identity screen asks,
+   checking `/health` before saving.
+3. **Identity creation dead-ended.** WebAuthn needs a secure `http(s)` origin, so a shell
+   has no authenticator *by construction* — and the app refused rather than falling back.
+   It now takes the PIN path, which is exactly what E19-T2 says custody should be here
+   until the OS keystore lands. The same rule applies to the device-enrollment path,
+   which would otherwise let an identity be joined on a browser but not on a phone.
+4. **Every authenticated call was blocked before it left the browser.** The relay's CORS
+   allow-list was missing `X-Poweur-Challenge`, so the preflight failed for every
+   challenge-signed read. Nothing same-origin ever noticed — the web app is served *by*
+   the relay and sends no preflight — which is why a suite of 29 browser tests was green
+   while the shell could not read its own inbox. Pinned now by a preflight test that
+   asserts every protocol header, from a `capacitor://localhost` origin.
+
+Two smaller ones: iOS auto-capitalised handles (`autocapitalize="none"` on every identity
+field), and a queued contact request produced no push at all — the relay notified only on
+the inbox path, so a request waited silently until the app was opened.
 
 ### E19-T2 — Native key custody (`kdf: "native"`) — **partial**
 

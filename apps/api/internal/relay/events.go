@@ -3,6 +3,7 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -132,6 +133,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.hub.unsubscribe(identity, id)
+	log.Printf("stream: %s opened (%d open for this identity)", identity, s.hub.count(identity))
+	defer func() { log.Printf("stream: %s closed", identity) }()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -139,6 +142,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Proxies that buffer eagerly would turn a push channel into a poll.
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+
+	// Padding before the first event, because WebKit will not surface a
+	// streamed response to `fetch` until enough bytes have arrived: without
+	// it, a Capacitor shell holds an open, correctly-authenticated stream and
+	// never sees a single event. Two kilobytes of comment costs nothing and is
+	// the same trick that defeats buffering proxies.
+	if _, err := fmt.Fprint(w, ":"+strings.Repeat(" ", 2048)+"\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
 
 	// Say hello immediately: a client that has been offline should pick up
 	// from its cursor without waiting for the next message to arrive.

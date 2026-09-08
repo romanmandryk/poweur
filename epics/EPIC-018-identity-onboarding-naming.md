@@ -256,6 +256,14 @@ against a real relay the string never matched and the retry never happened. It b
 `REGISTRATION_GATE=pow`. `solveRegistrationChallenge` also gained progress callbacks,
 because a silent solve in front of a signup screen looks like a hang.
 
+**Follow-ups, owned by [EPIC-015](EPIC-015-web-app-ux.md)'s second wave.** T3 gave the SPA a
+launcher *host*; it did not give it a launcher *mode*. `boot()` still branches on stored
+identity alone, so the same welcome card renders on `id.poweur.net`, on the apex and on
+`bob.poweur.net`, and the claim form still asks for a parent domain and a hosted/DNS choice the
+root document already answers. E15-T7 adds the host→mode resolution (and widens `LAUNCHER_HOST`
+to a set so the apex stops serving the JSON banner), E15-T8/T9 build the two doors over it, and
+E15-T10 removes the questions. No name-policy or credential-scope work is reopened here.
+
 **Acceptance:** met in the two halves the harness can reach — `launcher.spec.js` asserts a
 name is checked (reserved / taken / non-ASCII / free) before any passkey exists, and that
 an identity arriving as a hand-off fragment is adopted, made active, and left locked with

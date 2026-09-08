@@ -737,6 +737,10 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 					"a contact request from this sender is already pending or in cooldown")
 				return
 			}
+			// A queued request is a delivery too: without this, a contact
+			// request waits silently until the recipient happens to open the
+			// app, which is exactly the wait push exists to remove.
+			s.notify(msg.Recipient, "request", msg.ID)
 			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
 			return
 		}

@@ -97,7 +97,11 @@ relay drops notifications for a slow reader instead of blocking the POST that pr
 **Acceptance:** met. `test/events-relay.test.ts` covers notification, reconnect, and that a
 message sent while nobody is listening is still there afterwards;
 `apps/web/test/e2e/policy.spec.js` asserts the browser case that matters — a reader sitting
-on Messages, touching nothing, sees the message arrive.
+on Messages, touching nothing, sees the message arrive. Confirmed on an iOS simulator too
+(EPIC-019), which is where two gaps in this task showed up: a **queued contact request**
+produced no notification at all (the relay notified only on the inbox path), and the client
+fetched it without repainting, because the loader only re-rendered when its own tray was
+open while the badge lives on the tray bar.
 
 ### E09-T3 — Typed messages & threads (activate reserved fields)
 

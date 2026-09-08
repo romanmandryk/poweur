@@ -184,16 +184,16 @@ test.describe("five destinations at 375px", () => {
         const rect = tab.getBoundingClientRect();
         return { height: rect.height, width: rect.width };
       }));
+    // The whole check polls, not just the wait for five tabs: a measurement
+    // taken while the shell is mid-render sees a nav that is present but not
+    // yet laid out, and asserting on that once made this test flake under a
+    // full-suite load rather than report a real regression.
     await expect
-      .poll(async () => (await measure()).filter((box) => box.height > 0).length,
-        { message: "the bottom nav never settled at five measurable tabs" })
-      .toBe(5);
-
-    const boxes = await measure();
-    for (const box of boxes) {
-      expect(box.height, "tab height").toBeGreaterThanOrEqual(44);
-      expect(box.width, "tab width").toBeGreaterThanOrEqual(44);
-    }
+      .poll(async () => {
+        const boxes = await measure();
+        return boxes.length === 5 && boxes.every((box) => box.height >= 44 && box.width >= 44);
+      }, { message: "the bottom nav never settled at five tabs of at least 44px" })
+      .toBe(true);
   });
 
   test("Messages shows three trays and switches between them", async ({ page }) => {
