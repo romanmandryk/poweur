@@ -26,7 +26,17 @@ const (
 	DefaultGlobalDayLimit      = 1000000
 	DefaultVersion             = "0.1.0"
 	DefaultMaxInboxPerIdentity = 50
-	DefaultMaxAcksPerIdentity  = 50
+	// DefaultSpoolTTL is how long undelivered mail waits for a recipient who
+	// never comes back (EPIC-009 E09-T1). Long enough for a holiday, short
+	// enough that a dead identity is not a permanent storage cost.
+	DefaultSpoolTTL = 30 * 24 * time.Hour
+	// DefaultMaxStreamsPerIdentity allows a handful of devices without letting
+	// a reconnect loop pin a connection per attempt.
+	DefaultMaxStreamsPerIdentity = 8
+	// DefaultStreamIdleTimeout closes a push stream after an hour; clients
+	// reconnect, and catching up is a cursor read.
+	DefaultStreamIdleTimeout  = time.Hour
+	DefaultMaxAcksPerIdentity = 50
 	// EPIC-003 storage defaults: 5 GiB per identity, 2 GiB max single file.
 	DefaultMaxIdentityBytes = int64(5) << 30
 	DefaultMaxFileBytes     = int64(2) << 30
@@ -54,16 +64,25 @@ type GlobalRateLimits struct {
 type Config struct {
 	ListenAddr string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
-	WebStaticDir         string
-	RelayAddress         string
-	RelayScheme          string
-	DNSTTL               time.Duration
-	ChallengeTTL         time.Duration
-	Version              string
-	RateLimits           RateLimits
-	GlobalRateLimits     GlobalRateLimits
-	DNSProxyMode         string
-	MaxInboxPerIdentity  int
+	WebStaticDir        string
+	RelayAddress        string
+	RelayScheme         string
+	DNSTTL              time.Duration
+	ChallengeTTL        time.Duration
+	Version             string
+	RateLimits          RateLimits
+	GlobalRateLimits    GlobalRateLimits
+	DNSProxyMode        string
+	MaxInboxPerIdentity int
+	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
+	SpoolTTL time.Duration
+	// MaxStreamsPerIdentity caps concurrent push streams per identity
+	// (EPIC-009 E09-T2); 0 = unlimited.
+	MaxStreamsPerIdentity int
+	// StreamIdleTimeout closes a push stream after this long regardless of
+	// traffic, so a forgotten tab does not hold a connection forever.
+	// 0 disables the timeout.
+	StreamIdleTimeout    time.Duration
 	MaxAcksPerIdentity   int
 	DataDir              string
 	HostedDomains        []string
@@ -169,6 +188,9 @@ func FromEnv() Config {
 		Version:                 getenv("VERSION", DefaultVersion),
 		DNSProxyMode:            strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
 		MaxInboxPerIdentity:     getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
+		SpoolTTL:                getenvDuration("SPOOL_TTL", DefaultSpoolTTL),
+		MaxStreamsPerIdentity:   getenvInt("MAX_STREAMS_PER_IDENTITY", DefaultMaxStreamsPerIdentity),
+		StreamIdleTimeout:       getenvDuration("STREAM_IDLE_TIMEOUT", DefaultStreamIdleTimeout),
 		MaxAcksPerIdentity:      getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
 		DataDir:                 strings.TrimSpace(os.Getenv("POWEUR_DATA")),
 		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),

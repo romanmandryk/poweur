@@ -28,6 +28,7 @@ export * from "./resolve.js";
 export * from "./identity.js";
 export * from "./session.js";
 export * from "./messages.js";
+export * from "./events.js";
 export * from "./files.js";
 export * from "./sync.js";
 export * from "./shares.js";

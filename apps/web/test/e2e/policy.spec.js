@@ -95,6 +95,37 @@ test.describe("inbox policy, anonymous and PoW", () => {
     await stranger.close();
   });
 
+  test("a message arrives without the reader touching anything", async ({ browser }) => {
+    test.slow();
+    // EPIC-009 E09-T2: the app holds a push stream open, so a message shows up
+    // with no click, no navigation and no poll interval to wait out.
+    const readerCtx = await browser.newContext({ viewport: MOBILE });
+    const senderCtx = await browser.newContext({ viewport: MOBILE });
+    const reader = await readerCtx.newPage();
+    const sender = await senderCtx.newPage();
+    await stubPasskeys(reader);
+    await stubPasskeys(sender);
+
+    const suffix = Date.now().toString(36);
+    const readerId = await registerIdentity(reader, relay, `pshr${suffix}`);
+    await registerIdentity(sender, relay, `pshs${suffix}`);
+
+    // The reader sits on Messages and does nothing at all from here on.
+    await reader.click('.nav-tab[data-page="messages"]');
+    await expect(reader.locator(".empty-state-title")).toHaveText("No messages yet");
+
+    await sender.click("#btn-compose");
+    await sender.fill(".idin input", readerId);
+    await sender.fill("#c-body", "pushed, not polled");
+    await sender.click("#btn-send-msg");
+    await expect(sender.locator("#c-status")).toHaveText("✓ Sent", { timeout: 20_000 });
+
+    await expect(reader.locator(".conv-preview")).toHaveText("pushed, not polled", { timeout: 30_000 });
+
+    await readerCtx.close();
+    await senderCtx.close();
+  });
+
   test("an anonymous message is refused while the policy denies it", async ({ page }) => {
     test.slow();
     await stubPasskeys(page);

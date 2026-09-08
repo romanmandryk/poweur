@@ -26,6 +26,10 @@ The relay is configured via environment variables. On startup, the relay also lo
 | `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Per-identity storage quota; `0` = unlimited. Enforced on WebDAV `PUT`/`MKCOL` with `507` |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Max single uploaded file; `0` = unlimited |
 | `STORAGE_PROVIDER` | `relay-fs` | File-body backend. v1 supports `relay-fs` only (`POWEUR_DATA` required for DAV) |
+| `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
+| `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push streams per identity; `0` = unlimited |
+| `STREAM_IDLE_TIMEOUT` | `1h` | Closes a push stream regardless of traffic, so a forgotten tab does not hold a connection forever |
+| `LAUNCHER_HOST` | `id.<first hosted domain>` | Host that serves the claim flow for people with no identity yet |
 
 ### Hosted handle policy
 

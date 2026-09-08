@@ -13,6 +13,7 @@ import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
+  streamForever,
 } from "@poweur/client";
 
 import {
@@ -1343,6 +1344,9 @@ function attachEvents() {
   qAll(".conv-row[data-compose-to]").forEach(r =>
     r.addEventListener("click", () => R.push("compose", { to: r.dataset.composeTo })));
 
+  // A push stream costs one connection and saves every poll after it.
+  if (getUnlockedKeys()) startEventStream();
+
   // Load inbox when unlocked and on the Messages destination
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
     loadInbox();
@@ -1452,6 +1456,7 @@ function attachEvents() {
  * to whoever was signed in.
  */
 function switchIdentity(identity) {
+  stopEventStream();
   clearUnlockedKeys();
   clearProfileCache();
   S.identity = identity;
@@ -2046,6 +2051,39 @@ function challengeSerial(task) {
   const next = challengeChain.then(task, task);
   challengeChain = next.catch(() => {});
   return next;
+}
+
+/**
+ * Hold the relay's push stream open while an identity is unlocked
+ * (EPIC-009 E09-T2).
+ *
+ * The stream never carries a message — it says "there is something", and the
+ * inbox fetch that follows is where delivery happens. That is what makes
+ * reconnecting free: a gap costs one extra read, not a lost message, so the
+ * polling that renders already do stays as the fallback.
+ */
+let streamAbort = null;
+
+function startEventStream() {
+  const client = clientFor(S.identity);
+  if (!client || streamAbort) return;
+  const identity = S.identity;
+  streamAbort = new AbortController();
+  streamForever(client.relay, client.signer, {
+    signal: streamAbort.signal,
+    onEvent: (event) => {
+      if (identity !== S.identity) return; // the user switched identities
+      if (event.type === "ready") return;  // nothing new by itself
+      loadInbox();
+      if (S.tray === "requests") loadRequests({ force: true });
+    },
+    onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
+  }).catch(() => {});
+}
+
+function stopEventStream() {
+  streamAbort?.abort();
+  streamAbort = null;
 }
 
 function loadInbox() {

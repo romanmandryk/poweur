@@ -60,6 +60,8 @@ type Server struct {
 
 	locksMu  sync.Mutex
 	davLocks map[string]webdav.LockSystem
+	// hub fans delivery notifications out to open push streams (E09-T2).
+	hub *hub
 
 	cacheMu       sync.Mutex
 	relayCache    map[string]cachedRelay
@@ -86,17 +88,27 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 	if err != nil {
 		keystore = storage.NewKeystoreStore()
 	}
+	// Undelivered mail survives a restart (EPIC-009 E09-T1); a relay with no
+	// data dir keeps the old memory-only behaviour rather than refusing to run.
+	inbox, err := storage.OpenInboxStore(cfg.DataDir)
+	if err != nil {
+		inbox = storage.NewInboxStore()
+	}
+	acks, err := storage.OpenAckStore(cfg.DataDir)
+	if err != nil {
+		acks = storage.NewAckStore()
+	}
 	s := &Server{
 		cfg:           cfg,
 		resolver:      resolver,
 		providers:     providers,
 		identities:    store,
-		inbox:         storage.NewInboxStore(),
+		inbox:         inbox,
 		requests:      storage.NewRequestStore(),
 		anonInbox:     storage.NewInboxStore(),
 		anon:          newAnonState(),
 		powSecret:     newPowSecret(),
-		acks:          storage.NewAckStore(),
+		acks:          acks,
 		challenges:    storage.NewChallengeStore(),
 		keystore:      keystore,
 		rendezvous:    storage.NewRendezvousStore(),
@@ -107,6 +119,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		idCache:       idpkg.NewCache(),
 		davTokens:     newDAVTokenStore(),
 		davLocks:      make(map[string]webdav.LockSystem),
+		hub:           newHub(),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
 	}
@@ -138,6 +151,42 @@ func (s *Server) runPruner() {
 		s.davTokens.Prune()
 		s.anon.prune()
 		s.pruneLocalityCache()
+		s.expireSpool()
+	}
+}
+
+// expireSpool retires mail nobody ever came for, and tells each sender.
+//
+// The notice is a `sys.delivery.failed` ack the **relay** generates, so it
+// carries no signature — nobody else can honestly say "I gave up holding
+// this". Clients must read it as what it is: the relay's own admission, not
+// proof about the recipient. It is queued to the sender like any ack, so it
+// surfaces on their next pickup.
+func (s *Server) expireSpool() {
+	if s.cfg.SpoolTTL <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-s.cfg.SpoolTTL)
+	for _, expired := range s.inbox.Expire(cutoff) {
+		log.Printf("spool: expired message %s for %s after %s",
+			expired.Item.ID, expired.Identity, s.cfg.SpoolTTL)
+		if expired.Item.Sender == "" {
+			continue // anonymous senders have no inbox to notify
+		}
+		s.acks.Add(expired.Item.Sender, storage.StoredAck{
+			Type:      "sys.delivery.failed",
+			ID:        "exp_" + expired.Item.ID,
+			MessageID: expired.Item.ID,
+			State:     "expired",
+			Sender:    s.cfg.RelayAddress,
+			Recipient: expired.Item.Sender,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}, s.cfg.MaxInboxPerIdentity)
+	}
+	// An undelivered *receipt* is only worth so much; expiring it silently is
+	// right, because notifying about a notification has no bottom.
+	for _, expired := range s.acks.Expire(cutoff) {
+		log.Printf("spool: expired ack %s for %s", expired.Item.ID, expired.Identity)
 	}
 }
 
@@ -158,6 +207,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
+	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
+	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
@@ -694,6 +745,10 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return
 		}
+		// Tell anyone listening that there is something to pick up (E09-T2).
+		// The notification carries no payload: the cursor read it triggers is
+		// where delivery actually happens.
+		s.notify(msg.Recipient, "message", msg.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
 	}
@@ -781,6 +836,7 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 			Signature: ack.Signature,
 			SessionID: ack.SessionID,
 		}, s.cfg.MaxAcksPerIdentity)
+		s.notify(ack.Recipient, "ack", ack.MessageID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": ack.ID})
 		return
 	}
@@ -792,28 +848,42 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": ack.ID})
 }
 
-func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
-	identity := r.PathValue("identity")
+// consumeChallenge spends the nonce this request names, falling back to the
+// most recent one for callers that do not echo it. Spending by value is what
+// lets a client hold a push stream open and poll at the same time without the
+// two invalidating each other.
+func (s *Server) consumeChallenge(identity string, r *http.Request) (storage.Challenge, bool) {
+	if value := r.Header.Get("X-Poweur-Challenge"); value != "" {
+		return s.challenges.ConsumeValue(identity, value)
+	}
+	return s.challenges.Consume(identity)
+}
+
+// authorizeInboxRead proves the caller owns the inbox: a one-shot challenge
+// signed by the identity key or a live session key. Shared by the pickup and
+// the consume that follows it — forgetting someone's mail must need at least
+// the proof that reading it does.
+func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, identity string) bool {
 	if identity == "" {
 		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
-		return
+		return false
 	}
 	headerIdentity := r.Header.Get("X-Poweur-Identity")
 	if headerIdentity == "" || headerIdentity != identity {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing or mismatch")
-		return
+		return false
 	}
 	signature := r.Header.Get("X-Poweur-Signature")
 	if signature == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
-		return
+		return false
 	}
 	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
-	challenge, ok := s.challenges.Consume(identity)
+	challenge, ok := s.consumeChallenge(identity, r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge missing or expired")
-		return
+		return false
 	}
 
 	var publicKey ed25519.PublicKey
@@ -821,22 +891,22 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		session, ok := s.sessions.Get(sessionID)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "session_expired", "session expired or not found")
-			return
+			return false
 		}
 		if session.Identity != identity {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
-			return
+			return false
 		}
 		publicKey = session.PublicKeyBytes
 	} else {
 		if !s.isLocalIdentity(r.Context(), identity) {
 			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
-			return
+			return false
 		}
 		pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-			return
+			return false
 		}
 		s.warmIdentityCache(identity, pub)
 		publicKey = pub
@@ -844,6 +914,33 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 
 	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
+	identity := r.PathValue("identity")
+	if !s.authorizeInboxRead(w, r, identity) {
+		return
+	}
+
+	// Two pickup modes (EPIC-009 E09-T1). `?since=` reads without forgetting
+	// and hands back a cursor the client acknowledges once it has the messages
+	// safely; without the parameter this is the original drain-on-read, kept
+	// for clients that have not moved yet. Deleting at read time loses a
+	// message to a dropped connection exactly as a restart used to.
+	if r.URL.Query().Has("since") {
+		cursor := r.URL.Query().Get("since")
+		messages, nextCursor := s.inbox.Since(identity, cursor)
+		acks, nextAckCursor := s.acks.Since(identity, cursor)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"messages":   messages,
+			"acks":       acks,
+			"cursor":     nextCursor,
+			"ack_cursor": nextAckCursor,
+			"pending":    s.inbox.Pending(identity),
+		})
 		return
 	}
 
@@ -856,6 +953,34 @@ func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 		acks = []storage.StoredAck{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "acks": acks})
+}
+
+// handleMessagesConsume forgets everything through the cursor a client says it
+// has (EPIC-009 E09-T1). Authenticated exactly like the pickup it follows —
+// forgetting someone's mail needs at least the proof that reading it does.
+func (s *Server) handleMessagesConsume(w http.ResponseWriter, r *http.Request) {
+	identity := r.PathValue("identity")
+	if !s.authorizeInboxRead(w, r, identity) {
+		return
+	}
+	var body struct {
+		Through    string `json:"through"`
+		AckThrough string `json:"ack_through"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "malformed body")
+		return
+	}
+	removed := s.inbox.Consume(identity, body.Through)
+	ackRemoved := 0
+	if body.AckThrough != "" {
+		ackRemoved = s.acks.Consume(identity, body.AckThrough)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"consumed":      removed,
+		"acks_consumed": ackRemoved,
+		"pending":       s.inbox.Pending(identity),
+	})
 }
 
 // resolveSigningKey returns the public key the relay should verify a message

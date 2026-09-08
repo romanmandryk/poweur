@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** proposed
+- **Status:** in progress — T1 and T2 done; T3–T6 open
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -31,38 +31,73 @@ not crypto changes (except groups, which get their own carefully-scoped task).
 
 ## Tasks
 
-### E09-T1 — Persistent inbox & message history
+### E09-T1 — Persistent inbox & message history — **done** (history still open)
 
-- [ ] Move inbox + acks onto the E02-T1 storage layer: spool undelivered messages under
-      `identities/<id>/spool/`, delete on acked pickup; decide and spec *history* separately —
-      delivered messages are the **client's** to keep (store under
-      `/poweur-sys/private/messages/<peer>/<year-month>.ndjson` so history syncs via EPIC-004
-      like any file — relay holds ciphertext only, exactly as today)
-- [ ] Pickup protocol: `GET /messages/{identity}?since=<cursor>` with stable ordering +
-      explicit consume-ack (replace the current implicit drain semantics; keep backward compat
-      behind a version header for old clients)
-- [ ] Retention config: spool TTL for never-picked-up messages (default 30 days), expired →
-      `sys.delivery.failed` ack to sender
-- [ ] Integration test: relay restart with undelivered mail → delivered after restart
+- [x] Inbox and acks moved onto a durable spool: one file per entry, ordered by a
+      per-identity sequence number that doubles as the pickup cursor. **Not** under
+      `identities/<id>/spool/` as sketched — it lives at `<POWEUR_DATA>/spool/…`, outside
+      the DAV tree. The tree's roots are a documented, permission-checked layout and
+      undelivered mail is not one of them; keeping it out means no new root, no new
+      permission rule, and no way to reach the spool over DAV
+- [x] Pickup protocol: `GET /messages/{id}?since=<cursor>` reads without forgetting and
+      returns a cursor; `POST /messages/{id}/consume` is the explicit acknowledgement.
+      Backward compatibility is the **absence of the parameter** rather than a version
+      header — a request with no `since` gets the original drain, which is exactly what an
+      old client already sends
+- [x] Retention: `SPOOL_TTL` (default 30 days), expired messages reported to the sender as
+      a `sys.delivery.failed` ack
+- [x] `TestINT_SPOOL_01`: a message posted, never picked up, and still delivered after the
+      relay restarts on the same data dir — and not delivered twice
+- [ ] **Still open:** client-side *history* (`poweur-sys/private/messages/…`). The relay
+      half is done; where a client keeps what it has already read is a separate decision
+      and belongs with the messages store the web app now has in memory
 
-**Acceptance:** restart-loss test passes; multi-device pickup (two sessions, one identity)
-delivers to both.
+**The expiry notice is unsigned, and says so.** Only the relay can honestly report that it
+gave up holding something, so the `sys.delivery.failed` ack it generates carries no
+signature. Clients must read it as the relay's own admission rather than proof about the
+recipient — written into the API reference next to the endpoint.
 
-### E09-T2 — WebSocket push delivery
+**Found on the way: one outstanding challenge per identity.** The challenge store kept a
+single nonce per identity, so any two authenticated reads in flight at once invalidated
+each other — E15-T6 worked around it with a single-flight guard in the web app, and a push
+stream reconnecting behind a poll would have hit it constantly. Challenges are now spent
+**by value** (the caller echoes the one it was issued), with the newest-wins behaviour kept
+for WebAuthn assertions, which carry the challenge inside signed client data instead.
 
-- [ ] `GET /ws` endpoint: client authenticates with session-signed challenge (reuse
-      `resolveSigningKey` flow), subscribes to its identity; relay pushes new messages, acks,
-      and `sys.*` events over the socket; polling remains as fallback
-- [ ] Presence side-effect: socket-connected sessions update `devices.json` last_seen
-      (EPIC-004) — explicitly NOT user-visible presence in v1 (privacy decision, document it)
-- [ ] Reconnect/backoff + missed-event catch-up via the T1 cursor (socket is notification,
-      cursor is truth — no exactly-once requirement on the socket)
-- [ ] Web client + CLI (`poweur listen`) consume the socket; sync daemon (E04-T4) subscribes
-      for `sys.sync.changed`
-- [ ] Load consideration: connection limits per identity, idle timeouts (config)
+**Acceptance:** restart-loss test passes. Multi-device pickup is now *possible* rather than
+demonstrated — the cursor read no longer consumes, so two devices can both read — but it is
+untested until a second device has somewhere to record its own cursor (the history item
+above).
 
-**Acceptance:** message latency drops from poll-interval to sub-second in the integration
-demo; kill-the-socket catch-up test passes.
+### E09-T2 — Push delivery — **done** (as SSE, not WebSocket)
+
+- [x] `GET /events/{identity}`: authenticated with the same challenge-signed headers as the
+      inbox pickup, pushing `message` and `ack` notifications, with polling untouched as the
+      fallback
+- [x] Reconnect/backoff and catch-up through the T1 cursor — `streamForever` in
+      `@poweur/client`, with the backoff reset on every successful connection
+- [x] Web client subscribes while unlocked; `poweur listen` on the TS CLI
+- [x] Connection limits (`MAX_STREAMS_PER_IDENTITY`) and idle timeout (`STREAM_IDLE_TIMEOUT`)
+- [ ] **Deferred:** presence side-effect on `devices.json` — that document is EPIC-004 T6
+      and does not exist yet. The privacy decision it records (not user-visible in v1)
+      stands unchanged
+- [ ] **Open:** the Go CLI has no `listen`; the sync daemon does not subscribe
+
+**Server-Sent Events rather than a WebSocket, deliberately.** The channel only ever pushes
+one way — this epic's own rule is "the socket is notification, the cursor is truth" — and
+SSE delivers that over plain `net/http`. A WebSocket would have made gorilla the relay's
+**first third-party dependency**, for a stream that never reads. Nothing in the contract
+depends on the transport: catching up is a cursor read either way, so a bidirectional
+socket can replace it later without clients changing.
+
+Events carry **no payload**, only `{type, message_id}`. Delivery semantics stay in one
+place, so a dropped frame costs a round trip rather than a message — which is also why the
+relay drops notifications for a slow reader instead of blocking the POST that produced them.
+
+**Acceptance:** met. `test/events-relay.test.ts` covers notification, reconnect, and that a
+message sent while nobody is listening is still there afterwards;
+`apps/web/test/e2e/policy.spec.js` asserts the browser case that matters — a reader sitting
+on Messages, touching nothing, sees the message arrive.
 
 ### E09-T3 — Typed messages & threads (activate reserved fields)
 

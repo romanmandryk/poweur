@@ -40,7 +40,11 @@ export class RelayClient {
     }
     async raw(options) {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+        const abort = () => controller.abort();
+        if (options.signal?.aborted)
+            abort();
+        options.signal?.addEventListener("abort", abort, { once: true });
+        const timer = options.stream ? null : setTimeout(abort, this.#timeoutMs);
         const headers = { ...this.#headers, ...options.headers };
         let body;
         if (options.body !== undefined) {
@@ -64,7 +68,9 @@ export class RelayClient {
             });
         }
         finally {
-            clearTimeout(timer);
+            if (timer !== null)
+                clearTimeout(timer);
+            options.signal?.removeEventListener("abort", abort);
         }
     }
     /** Perform a request and decode JSON, mapping failures to typed errors. */

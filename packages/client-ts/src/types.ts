@@ -74,6 +74,11 @@ export interface Ack {
 export interface InboxResponse {
   messages: Message[];
   acks: Ack[];
+  /** Present on a `?since=` pickup: acknowledge it with `consume`. */
+  cursor?: string;
+  ack_cursor?: string;
+  /** How many messages are still spooled after this read. */
+  pending?: number;
 }
 
 export interface PreviousKey {

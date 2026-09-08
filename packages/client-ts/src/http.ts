@@ -46,6 +46,14 @@ interface RequestOptions {
   raw?: boolean;
   /** Statuses to treat as success beyond 2xx (e.g. 207 for PROPFIND). */
   allowStatus?: number[];
+  /** Caller's abort signal, honoured alongside the client's own timeout. */
+  signal?: AbortSignal;
+  /**
+   * A long-lived response (the push stream) opts out of the request timeout —
+   * a stream that is *supposed* to stay open all day must not be killed after
+   * thirty seconds of quiet.
+   */
+  stream?: boolean;
 }
 
 export class RelayClient {
@@ -67,7 +75,10 @@ export class RelayClient {
 
   async raw(options: RequestOptions): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    const timer = options.stream ? null : setTimeout(abort, this.#timeoutMs);
     const headers: Record<string, string> = { ...this.#headers, ...options.headers };
     let body: BodyInit | undefined;
     if (options.body !== undefined) {
@@ -91,7 +102,8 @@ export class RelayClient {
         signal: controller.signal,
       });
     } finally {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
     }
   }
 

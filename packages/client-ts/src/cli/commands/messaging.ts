@@ -2,6 +2,7 @@
 
 import { rfc3339 } from "../../encoding.js";
 import { RelayClient } from "../../http.js";
+import { streamForever } from "../../events.js";
 import { sendAnonymous } from "../../messages.js";
 import {
   appendJournal,
@@ -149,6 +150,60 @@ export async function send(argv: string[], streams: Streams): Promise<number> {
     }
     throw error;
   }
+}
+
+/**
+ * `poweur listen` — hold a push stream open and print what arrives
+ * (EPIC-009 E09-T2).
+ *
+ * The stream is a cue, not a delivery: every notification triggers a cursor
+ * read, which is where the messages actually come from. That is why a dropped
+ * connection costs nothing — reconnecting picks up from the same cursor.
+ */
+export async function listen(argv: string[], streams: Streams): Promise<number> {
+  const args = parseArgs(argv, { bool: COMMON_BOOL });
+  const { client } = await openClient({
+    ...(flagString(args, "use-identity") ? { identity: flagString(args, "use-identity") } : {}),
+  });
+  const jsonOut = flagBool(args, "json");
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+
+  let cursor = "";
+  const drain = async () => {
+    const { messages, acks, cursor: next } = await client.messages.inbox(
+      client.signer, client.decryptor, { since: cursor },
+    );
+    for (const message of messages) {
+      if (jsonOut) {
+        streams.stdout(JSON.stringify(message) + "\n");
+      } else {
+        streams.stdout(`${message.sender}: ${message.plaintext ?? "<could not decrypt>"}\n`);
+      }
+    }
+    for (const ack of acks) {
+      if (!jsonOut) streams.stdout(`ack ${ack.message_id} ${ack.state}\n`);
+    }
+    if (next && (messages.length > 0 || acks.length > 0)) {
+      // Only forget once the messages have actually been printed.
+      await client.messages.consume(client.signer, { through: next, ackThrough: next });
+    }
+    if (next) cursor = "";
+  };
+
+  streams.stderr(`listening as ${client.identityName} (ctrl-c to stop)\n`);
+  await streamForever(client.relay, client.signer, {
+    signal: controller.signal,
+    onOpen: () => { void drain(); },
+    onEvent: (event) => {
+      if (event.type === "ready") return; // the open handler already drained
+      void drain().catch((error) => streams.stderr(`pickup failed: ${String(error)}\n`));
+    },
+    onError: (error) => streams.stderr(`stream dropped, retrying: ${String(error)}\n`),
+  });
+  return 0;
 }
 
 export async function inbox(argv: string[], streams: Streams): Promise<number> {
