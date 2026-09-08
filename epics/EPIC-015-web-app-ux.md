@@ -130,11 +130,15 @@ removes from relay URLs.
   E15-T2.
 - `AudiencePicker` is built and unit-tested but has no consumer until the share dialog in
   E15-T4, so the shell does not import it yet.
-- Profile presentation degrades to the identity document. `/.well-known/poweur/profile.json`
-  is **Host-routed** and a browser cannot set Host, so on a shared dev relay another
-  identity's `poweur-sys/public` is unreachable; there is no non-Host path for it and adding
-  one is EPIC-006's call, not this epic's. Capabilities still surface, because the identity
-  document carries them.
+- Profile presentation degrades to the identity document **in dev only**.
+  `/.well-known/poweur/profile.json` is Host-routed, which is exactly right in production:
+  a card fetches `https://bob.poweur.net/.well-known/…`, the browser sets `Host` for it,
+  and the relay serves Bob's tree with `Access-Control-Allow-Origin: *`. A local relay is
+  the odd case — many identities behind one IP that DNS does not know — and there the
+  browser cannot say which tree it wants. Identity documents survive it because they also
+  have a path-addressed route (`GET /identities/{id}`); `profile.json` has no twin. Not a
+  product gap, so nothing is asked of EPIC-006. Capabilities surface either way, from the
+  identity document.
 
 **EPIC-011 dependency: mocked at first, now real.** T1 shipped `js/keystore-mock.js` while
 E11 was in flight — this browser's enrollment real, everything else flagged `mock`, every
@@ -328,9 +332,9 @@ the changes feed: a file written behind the UI's back appears with no click.
 - [x] Profile editor in Settings: display name, avatar, bio and a link →
       `poweur-sys/public/profile.json`. The avatar is uploaded into `/public` first and
       referenced as a **tree path**, which is the schema's rule and the reason a profile
-      can never point at a third party's server. Saving primes the resolver cache, so the
-      new name appears on cards immediately rather than after the Host-routed fetch that
-      cannot succeed on a shared dev relay
+      can never point at a third party's server. Saving primes the resolver cache so the
+      new name appears on cards at once — which is also what makes the editor usable
+      against a local dev relay, where the well-known fetch cannot resolve (see below)
 - [x] Capabilities shown read-only on the profile panel — what this identity speaks, not a
       preference
 - [x] **First-run onboarding**: three skippable steps (policy → profile → done) after a

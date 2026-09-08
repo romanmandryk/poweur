@@ -112,6 +112,9 @@ identity through the six-digit comparison ceremony — see
   EPIC-005 T5).
 - Rotating a pre-EPIC-011 identity onto a recovery seed, and nominating a recovery
   master, both owned by EPIC-011.
-- Reading another identity's `profile.json` from a shared dev relay: the well-known
-  route is Host-routed and a browser cannot set `Host`, so profile cards fall back to
-  the identity document there. On an identity's own origin it resolves normally.
+- Nothing here is blocked by the Host-routed well-known path. A profile card fetches
+  `https://<identity>/.well-known/poweur/profile.json`, which is that identity's own
+  hostname, so the browser sets `Host` for it and the relay serves the right tree
+  (`Access-Control-Allow-Origin: *`). Only a local dev relay is different: many
+  identities behind one IP that DNS does not know, so cards there fall back to the
+  identity document.
