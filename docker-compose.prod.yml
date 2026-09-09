@@ -9,6 +9,7 @@ services:
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
       # HOSTED_DOMAINS: poweur.net
+      HOSTED_DOMAINS: poweur.net
       # Handle policy (EPIC-018). The package default is 3 so the test
       # fixtures ("bob") keep working; production holds short handles back.
       NAME_MIN_LEN: "6"
