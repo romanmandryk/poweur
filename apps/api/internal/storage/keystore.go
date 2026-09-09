@@ -34,7 +34,7 @@ type KeystoreEntry struct {
 	EnrollmentID string `json:"enrollment_id"`
 	// Kind: passkey | hardware-key | cli-passphrase | recovery-kit | native.
 	Kind string `json:"kind"`
-	// Wrap: prf | pin | passphrase | native.
+	// Wrap: prf | passphrase | native.
 	Wrap string `json:"wrap"`
 	// Payload: seed | legacy-keypair. Legacy identities predate the seed model.
 	Payload string `json:"payload"`

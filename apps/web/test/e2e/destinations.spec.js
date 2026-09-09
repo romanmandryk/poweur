@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { startRelay } from "../helpers/relay.mjs";
+import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
 
 /**
  * E15-T1 acceptance: the five destinations render and route, and the shell is
@@ -18,111 +19,8 @@ const DESTINATIONS = [
   { page: "settings", title: "Settings" },
 ];
 
-/**
- * Stand in for a platform authenticator.
- *
- * Headless Chromium has no real one, but a stub that returns nothing is not a
- * useful stand-in either: without `getPublicKey()` the relay has nothing to
- * verify, so the app declines to enroll and half of EPIC-011 goes untested.
- * This one holds a real Ed25519 key and signs real assertions. It reports no
- * PRF, so registration takes the PIN path — which is also the case worth
- * covering, since a PIN-wrapped browser cannot bootstrap itself.
- */
-async function stubPasskeys(page) {
-  await page.addInitScript(() => {
-    const rawId = crypto.getRandomValues(new Uint8Array(32));
-    let keyPair = null;
-
-    const ensureKey = async () => {
-      keyPair ??= await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-      return keyPair;
-    };
-
-    const base = {
-      rawId: rawId.buffer,
-      id: btoa(String.fromCharCode(...rawId)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
-      type: "public-key",
-      getClientExtensionResults: () => ({}), // no PRF → PIN path
-    };
-
-    navigator.credentials.create = async () => {
-      const pair = await ensureKey();
-      const spki = await crypto.subtle.exportKey("spki", pair.publicKey);
-      return {
-        ...base,
-        response: {
-          getPublicKey: () => spki,
-          getPublicKeyAlgorithm: () => -8, // COSE EdDSA
-        },
-      };
-    };
-
-    navigator.credentials.get = async (options) => {
-      const pair = await ensureKey();
-      const challenge = new Uint8Array(options.publicKey.challenge);
-      const b64url = (bytes) =>
-        btoa(String.fromCharCode(...new Uint8Array(bytes)))
-          .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
-      const clientData = new TextEncoder().encode(JSON.stringify({
-        type: "webauthn.get",
-        challenge: b64url(challenge),
-        origin: window.location.origin,
-      }));
-      const rpHash = new Uint8Array(
-        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(window.location.hostname)),
-      );
-      const authData = new Uint8Array(37);
-      authData.set(rpHash, 0);
-      authData[32] = 0x01 | 0x04;
-      authData[36] = 1;
-      const clientHash = new Uint8Array(await crypto.subtle.digest("SHA-256", clientData));
-      const signed = new Uint8Array(authData.length + clientHash.length);
-      signed.set(authData, 0);
-      signed.set(clientHash, authData.length);
-      const signature = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, signed);
-
-      return {
-        ...base,
-        response: {
-          clientDataJSON: clientData.buffer,
-          authenticatorData: authData.buffer,
-          signature,
-        },
-      };
-    };
-
-    if (window.PublicKeyCredential) {
-      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
-    }
-  });
-}
-
-/** Register through the UI, exactly as a new user would. */
-async function createIdentity(page, relay) {
-  const handle = `dest${Date.now().toString(36)}`;
-  await page.goto(`${relay.baseUrl}/app/`);
-  await page.evaluate((url) => {
-    localStorage.setItem("poweur:config", JSON.stringify({ relayUrl: url, parentDomain: "poweur.net" }));
-  }, relay.baseUrl);
-  await page.reload();
-
-  if (await page.locator("#btn-welcome-start").count()) await page.click("#btn-welcome-start");
-  if (await page.locator("#opt-create-new").count()) await page.click("#opt-create-new");
-  await page.waitForSelector("#claim-card");
-  await page.fill("#ni-handle", handle);
-  await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
-  await page.click("#btn-claim");
-  await expect(page.locator("#pin-input")).toBeVisible({ timeout: 30_000 });
-  await page.fill("#pin-input", "test-pin");
-  await page.fill("#pin-confirm", "test-pin");
-  await page.click("#btn-pin-ok");
-  await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
-  // First run lands in the setup flow (E15-T5); these specs test what comes
-  // after it, and onboarding has its own coverage.
-  await page.click("#btn-onboard-skip");
-  await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
-  return `${handle}.poweur.net`;
+function destHandle() {
+  return `dest${Date.now().toString(36)}`;
 }
 
 test.describe("five destinations at 375px", () => {
@@ -136,7 +34,7 @@ test.describe("five destinations at 375px", () => {
 
   test("routes between all five and never scrolls sideways", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     await expect(page.locator(".nav-tab")).toHaveCount(5);
 
@@ -173,7 +71,7 @@ test.describe("five destinations at 375px", () => {
 
   test("every nav tab clears the 44px touch-target floor", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     // Measured in one pass, and only once the shell has settled: it re-renders
     // from strings whenever a background read lands, so a measurement taken
@@ -199,7 +97,7 @@ test.describe("five destinations at 375px", () => {
 
   test("Messages shows three trays and switches between them", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     await expect(page.locator(".tray-tab")).toHaveCount(3);
     await expect(page.locator(".tray-tab.active")).toHaveText("Inbox");
@@ -218,7 +116,7 @@ test.describe("five destinations at 375px", () => {
 
   test("Contacts offers the identity input, which rejects a typo", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="contacts"]');
     await expect(page.locator(".empty-state-title")).toHaveText("No contacts yet");
@@ -242,7 +140,7 @@ test.describe("five destinations at 375px", () => {
 
   test("Contacts completes a bare handle with your own domain", async ({ page }) => {
     await stubPasskeys(page);
-    const identity = await createIdentity(page, relay);
+    const identity = await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="contacts"]');
     await page.click("#btn-add-contact-empty");
@@ -255,7 +153,7 @@ test.describe("five destinations at 375px", () => {
 
   test("Files lists the storage roots for the unlocked identity", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="files"]');
     await expect(page.locator(".conv-name").first()).toBeVisible({ timeout: 20_000 });
@@ -267,7 +165,7 @@ test.describe("five destinations at 375px", () => {
 
   test("Settings lists this device from the relay keystore", async ({ page }) => {
     await stubPasskeys(page);
-    const identity = await createIdentity(page, relay);
+    const identity = await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="settings"]');
     await page.click("#row-keys-devices");
@@ -277,7 +175,7 @@ test.describe("five destinations at 375px", () => {
     // the relay rather than from anything held locally.
     await expect(panel.locator(".enrollment-row")).toHaveCount(1);
     await expect(panel).toContainText("this device");
-    await expect(panel).toContainText("PIN"); // the wrap this stubbed passkey used
+    await expect(panel).toContainText("passkey (PRF)");
     // You cannot evict the device you are on.
     await expect(panel.locator("[data-remove-enrollment]")).toBeDisabled();
 
@@ -286,13 +184,12 @@ test.describe("five destinations at 375px", () => {
 
   test("shows a real 24-word recovery kit and checks it back", async ({ page }) => {
     await stubPasskeys(page);
-    await createIdentity(page, relay);
+    await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="settings"]');
     await page.click("#row-recovery-kit");
 
-    // The stubbed authenticator has no PRF, so registration fell back to a PIN.
-    // The identity is still seed-derived, so the kit itself is available.
+    // The identity is seed-derived, so the kit itself is available.
     const panel = page.locator("#panel-root");
     await expect(panel.locator(".mnemonic-word")).toHaveCount(24);
 

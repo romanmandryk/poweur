@@ -806,7 +806,7 @@ rejected.
 | Field | Values |
 |-------|--------|
 | `kind` | `passkey` \| `hardware-key` \| `cli-passphrase` \| `recovery-kit` \| `native` |
-| `wrap` | `prf` \| `pin` \| `passphrase` \| `native` |
+| `wrap` | `prf` \| `passphrase` \| `native` |
 | `payload` | `seed` \| `legacy-keypair` (identities predating the seed model) |
 | `credential_alg` | COSE id: `-7` ES256, `-8` EdDSA, `-257` RS256 |
 | `role` | `device` (default) \| `recovery-master` |

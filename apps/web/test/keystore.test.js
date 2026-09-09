@@ -16,7 +16,7 @@ import {
   keysFromMnemonic, deviceLabel, rewrap,
 } from "../js/keystore.js";
 import { saveIdentityRecord } from "../js/storage.js";
-import { jwksFromSeed, unwrapKeysAES, unwrapKeysWithPin } from "../js/vault.js";
+import { jwksFromSeed, unwrapKeysAES } from "../js/vault.js";
 
 const IDENTITY = "alice.poweur.net";
 
@@ -116,16 +116,9 @@ describe("rewrap", () => {
     expect(opened.seed).toBe(toBase64url(seed));
   });
 
-  it("does the same under a PIN", async () => {
-    const seed = sdk.newSeed();
-    const { signingJWK, encJWK } = jwksFromSeed(seed);
-    const wrapped = await rewrap({ pin: "hunter2" }, { signingJWK, encJWK, seed: toBase64url(seed) });
-    expect((await unwrapKeysWithPin("hunter2", wrapped)).seed).toBe(toBase64url(seed));
-  });
-
-  it("refuses to store keys with neither a PRF secret nor a PIN", async () => {
+  it("refuses to store keys with no PRF secret", async () => {
     await expect(rewrap({}, { signingJWK: {}, encJWK: {}, seed: null }))
-      .rejects.toThrow(/PRF secret or a PIN/);
+      .rejects.toThrow(/PRF secret/);
   });
 });
 

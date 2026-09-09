@@ -5,8 +5,9 @@
  * which allows deriving a deterministic secret from the authenticator — used to
  * wrap the identity's Ed25519 + X25519 private keys stored in localStorage.
  *
- * Fallback: if the authenticator or browser does not support PRF, keys are
- * wrapped with a user-supplied PIN via PBKDF2 (see vault.js).
+ * There is no PIN fallback. An authenticator that cannot emit PRF cannot hold
+ * a web identity; the user is told to switch browser/authenticator or use the
+ * mobile app (native keystore). A PIN is not a substitute wrapping secret.
  *
  * Since EPIC-011 this module also produces the **assertions** the relay
  * keystore verifies. That is the bootstrap path: after site data is cleared
@@ -21,6 +22,10 @@ import { registrableDomain } from "@poweur/client";
 import { wrapKeysAES, unwrapKeysAES, toBase64url, fromBase64url } from "./vault.js";
 
 const PRF_SALT = new TextEncoder().encode("poweur-prf-v1");
+
+/** Shown whenever this browser cannot wrap keys with passkey PRF. */
+export const PRF_UNAVAILABLE_MESSAGE =
+  "This browser or authenticator does not support passkeys with PRF. Use Safari or Chrome with Apple or Google passkeys, or the Poweur mobile app.";
 
 // ─── Passkey Creation ─────────────────────────────────────────────────────────
 
@@ -111,13 +116,12 @@ export async function createPasskey(identity, userId, options = {}) {
   try {
     credential = await navigator.credentials.create({ publicKey: createOptions });
   } catch (err) {
-    // Firefox on macOS and older Safari can fail with platform-authenticator
-    // errors or unsupported PRF. Retry without PRF and without locking to
-    // platform-only — lets Firefox use its own authenticator UI flow.
+    // Firefox on macOS can fail when locked to a platform authenticator.
+    // Retry without that constraint, but keep requesting PRF — a credential
+    // that cannot emit one is not usable here.
     try {
       const fallbackOptions = {
         ...createOptions,
-        extensions: {},
         authenticatorSelection: {
           residentKey: "required",
           userVerification: "required",
@@ -133,6 +137,7 @@ export async function createPasskey(identity, userId, options = {}) {
   const extResults = credential.getClientExtensionResults();
   const prfFirst = extResults?.prf?.results?.first;
   const prfOutput = prfFirst ? new Uint8Array(prfFirst) : null;
+  if (!prfOutput) throw new Error(PRF_UNAVAILABLE_MESSAGE);
 
   // SPKI DER + COSE algorithm id, which is what the relay verifies assertions
   // against. `getPublicKey()` is unavailable on older Safari; without it the
@@ -265,11 +270,30 @@ export async function assertChallenge(challenge, { credentialId = null, rpId: sc
 // ─── Platform Support Detection ───────────────────────────────────────────────
 
 export async function checkPasskeySupport() {
-  if (!window.PublicKeyCredential) return { available: false, reason: "WebAuthn not supported" };
-  try {
-    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    return { available, reason: available ? null : "No platform authenticator available" };
-  } catch {
-    return { available: false, reason: "Could not query platform authenticator" };
+  if (!window.PublicKeyCredential) {
+    return { available: false, prf: false, reason: PRF_UNAVAILABLE_MESSAGE };
   }
+  let available = false;
+  try {
+    available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return { available: false, prf: false, reason: PRF_UNAVAILABLE_MESSAGE };
+  }
+  if (!available) {
+    return { available: false, prf: false, reason: PRF_UNAVAILABLE_MESSAGE };
+  }
+
+  let prf = null;
+  try {
+    if (typeof PublicKeyCredential.getClientCapabilities === "function") {
+      const caps = await PublicKeyCredential.getClientCapabilities();
+      if (caps && Object.prototype.hasOwnProperty.call(caps, "extension:prf")) {
+        prf = Boolean(caps["extension:prf"]);
+      }
+    }
+  } catch { /* capabilities are advisory; create() is the authority */ }
+  if (prf === false) {
+    return { available: true, prf: false, reason: PRF_UNAVAILABLE_MESSAGE };
+  }
+  return { available: true, prf, reason: null };
 }

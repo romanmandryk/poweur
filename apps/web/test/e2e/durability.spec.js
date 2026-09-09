@@ -35,11 +35,6 @@ async function reloadAndUnlock(page) {
   const unlock = page.locator("#btn-do-unlock");
   await expect(unlock).toBeVisible({ timeout: 30_000 });
   await unlock.click();
-  // The PIN path (no PRF from the stub authenticator) asks for the PIN.
-  if (await page.locator("#pin-input").count()) {
-    await page.fill("#pin-input", "test-pin");
-    await page.click("#btn-pin-ok");
-  }
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
 }
 

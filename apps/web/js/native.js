@@ -7,7 +7,7 @@
  * use it when the answer is yes.
  *
  * Why this exists at all: a browser wraps identity keys with a passkey's PRF
- * output or a PIN, and a passkey drags WebAuthn's origin model along with it —
+ * output, and a passkey drags WebAuthn's origin model along with it —
  * associated domains, `rp.id`, a relying party. A native keystore has none of
  * that, which is what lets one store build work against *any* relay on *any*
  * domain. That is why `kdf: "native"` is the load-bearing task of EPIC-019 and
@@ -15,7 +15,7 @@
  *
  * The contract a plugin must satisfy is at the bottom of this file. Everything
  * above it works unchanged in a plain browser, where `hasNativeKeystore()` is
- * false and the app takes the passkey or PIN path exactly as before.
+ * false and the app requires a PRF-capable passkey.
  */
 
 import { wrapKeysAES, unwrapKeysAES, fromBase64url, toBase64url } from "./vault.js";
@@ -102,8 +102,8 @@ export async function forgetNativeSecret(identity) {
  * Whether this device can gate on biometrics right now.
  *
  * Distinguishes "no hardware" from "enrolled but currently unavailable", which
- * matters: the first means fall back to a PIN forever, the second means try
- * again after the user fixes it.
+ * matters: the first means this shell cannot use native custody, the second
+ * means try again after the user fixes it.
  */
 export async function biometricAvailability() {
   const store = plugin();
@@ -167,7 +167,7 @@ function secretKeyFor(identity) {
  *
  *   canUseBiometrics()                    → { available: boolean, reason?: string }
  *
- * The app stores only the *wrapped* keys, exactly as it does for `prf` and
- * `pbkdf2`; the plugin holds one 32-byte secret and knows nothing about
+ * The app stores only the *wrapped* keys, exactly as it does for `prf`;
+ * the plugin holds one 32-byte secret and knows nothing about
  * identities, relays or messages.
  */

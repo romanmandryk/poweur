@@ -45,7 +45,7 @@ documented at the bottom of `native.js`; the platforms implement it in
 [`android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java`](android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java).
 
 Neither does anything cryptographic. The web layer generates 32 random bytes, derives an
-AES key from them and wraps the identity keys exactly as the `prf` and `pbkdf2` paths do;
+AES key from them and wraps the identity keys exactly as the `prf` path does;
 the plugin only holds those bytes somewhere the app cannot read without the user. That is
 why the platform halves are small, and why the shapes differ without the app noticing:
 
@@ -109,9 +109,8 @@ A USB phone that `adb devices` does not list is almost always USB debugging, not
 the cable: on a Pixel, Developer options → USB debugging, then the USB
 notification → **File transfer / Android Auto**, and accept **Allow USB debugging**.
 
-The emulator has no fingerprint enrolled out of the box, and without one the app falls back
-to a PIN — the same path a phone with no biometrics takes, which is worth seeing, but it is
-not the path being tested. Enrol one under **Settings → Security → Fingerprint**, and when
+The emulator has no fingerprint enrolled out of the box, and without one the app cannot
+use native custody — it will try a PRF passkey or refuse. Enrol one under **Settings → Security → Fingerprint**, and when
 the emulator asks for a finger, touch it from the host:
 
 ```bash

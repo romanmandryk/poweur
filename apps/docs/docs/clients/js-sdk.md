@@ -40,7 +40,7 @@ matching abstraction for *where* keys live:
 | Runtime | `KeyStore` | Notes |
 |---------|-----------|-------|
 | Node / Bun / Deno | `FileKeyStore` | `~/.poweur/keys` — the Go CLI's own directory |
-| Browser | your own, over a passkey PRF or PIN | `LocalStorageKeyStore` exists for demos only |
+| Browser | your own, over a passkey PRF | `LocalStorageKeyStore` exists for demos only |
 | Tests, ephemeral agents | `MemoryKeyStore` | nothing touches disk |
 
 `LocalSigner` and `LocalDecryptor` wrap raw key bytes when you already hold
@@ -159,7 +159,7 @@ from `globalThis`. Three things differ by runtime:
   is Node-only. Browsers get the remote half — changes feed, manifest, chunked
   upload — via `SyncClient`.
 - **Key custody.** `FileKeyStore` is Node-only. In a browser, wrap keys with a
-  passkey PRF or PIN and implement `KeyStore` over that.
+  passkey PRF and implement `KeyStore` over that. A PIN is a non-goal.
 
 ## CLI
 

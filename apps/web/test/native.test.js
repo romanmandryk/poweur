@@ -68,7 +68,7 @@ describe("in a shell with a keystore", () => {
     const wrapped = await wrapKeysNative(
       "alice.poweur.net", keys.signingJWK, keys.encJWK, "seedbytes",
     );
-    // The record is the same shape as prf/pbkdf2 — only `kdf` differs, which
+    // The record is the same shape as prf — only `kdf` differs, which
     // is what lets the rest of the app stay ignorant of custody.
     expect(wrapped.kdf).toBe("native");
     expect(wrapped.iv).toBeTruthy();

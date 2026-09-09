@@ -7,8 +7,8 @@ import { openApp, stubPasskeys } from "../helpers/app-ui.mjs";
  *
  * The Swift and Kotlin halves cannot run in Chromium, but the decision they
  * exist to serve can: given a plugin, the app must stop reaching for a passkey
- * or a PIN and put custody in the keystore instead — and must then be able to
- * unlock from it, with no PIN sheet anywhere in the flow.
+ * and put custody in the keystore instead — and must then be able to unlock
+ * from it, with no PIN sheet anywhere in the flow.
  *
  * The fake below is the contract from the bottom of `js/native.js` and nothing
  * more, which is the point: if the app starts depending on something the real
@@ -62,8 +62,8 @@ async function stubKeystore(page, { available = true } = {}) {
   }, available);
 }
 
-/** Claim a name; `pin` says whether a PIN sheet is expected on the way. */
-async function claim(page, relay, handle, { pin }) {
+/** Claim a name. Native custody never asks for a PIN. */
+async function claim(page, relay, handle) {
   await openApp(page, relay);
   if (await page.locator("#btn-welcome-start").count()) await page.click("#btn-welcome-start");
   if (await page.locator("#opt-create-new").count()) await page.click("#opt-create-new");
@@ -71,12 +71,6 @@ async function claim(page, relay, handle, { pin }) {
   await page.fill("#ni-handle", handle);
   await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
   await page.click("#btn-claim");
-  if (pin) {
-    await page.waitForSelector("#pin-input");
-    await page.fill("#pin-input", "test-pin");
-    await page.fill("#pin-confirm", "test-pin");
-    await page.click("#btn-pin-ok");
-  }
   await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
   await page.click("#btn-onboard-skip");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
@@ -99,7 +93,7 @@ test.describe("native custody", () => {
     await stubPasskeys(page);
     await stubKeystore(page);
 
-    const identity = await claim(page, relay, `nat${Date.now().toString(36)}`, { pin: false });
+    const identity = await claim(page, relay, `nat${Date.now().toString(36)}`);
 
     // Custody is the keystore's, the wrapped blob still lives in the record,
     // and the plugin holds exactly one secret — for this identity.
@@ -138,18 +132,18 @@ test.describe("native custody", () => {
       .toContain(`Unlock ${identity.split(".")[0]}`);
   });
 
-  test("a shell with no enrolled biometrics falls back rather than failing", async ({ page }) => {
+  test("a shell with no enrolled biometrics uses a PRF passkey rather than failing closed on PIN", async ({ page }) => {
     test.slow();
     // A keystore that cannot gate on biometrics is not a keystore we will use:
     // storing behind an ungated secret would be a silent downgrade, so the app
-    // takes the PIN path and says nothing was lost.
+    // takes the PRF passkey path instead.
     await stubPasskeys(page);
     await stubKeystore(page, { available: false });
 
-    const identity = await claim(page, relay, `nof${Date.now().toString(36)}`, { pin: true });
+    const identity = await claim(page, relay, `nof${Date.now().toString(36)}`);
     const record = await page.evaluate((id) =>
       JSON.parse(localStorage.getItem(`poweur:identity:${id}`)), identity);
-    expect(record.encryptedKeys.kdf).not.toBe("native");
+    expect(record.encryptedKeys.kdf).toBe("prf");
     expect(await page.evaluate(() => Object.keys(window.__keystore.secrets).length)).toBe(0);
   });
 
@@ -157,7 +151,7 @@ test.describe("native custody", () => {
     test.slow();
     await stubPasskeys(page);
     await stubKeystore(page);
-    const identity = await claim(page, relay, `rem${Date.now().toString(36)}`, { pin: false });
+    const identity = await claim(page, relay, `rem${Date.now().toString(36)}`);
     expect(await page.evaluate(() => Object.keys(window.__keystore.secrets).length)).toBe(1);
 
     await page.click('.nav-tab[data-page="settings"]');

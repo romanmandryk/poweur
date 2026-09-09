@@ -41,10 +41,6 @@ async function claim(page, relay, handle) {
   await page.fill("#ni-handle", handle);
   await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
   await page.click("#btn-claim");
-  await page.waitForSelector("#pin-input");
-  await page.fill("#pin-input", "test-pin");
-  await page.fill("#pin-confirm", "test-pin");
-  await page.click("#btn-pin-ok");
   await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
   await page.click("#btn-onboard-skip");
   return `${handle}.poweur.net`;

@@ -672,6 +672,10 @@ The key principle of the Poweur ID security model is: **trust is rooted in the d
 
 The device secure enclave (accessed via WebAuthn / passkeys) is the only trusted component. Everything else — including the relay — is treated as untrusted infrastructure that can be observed, replaced, or compromised without exposing user secrets or allowing message forgery.
 
+### Web client wrapping (non-goal: PIN)
+
+The web app wraps identity keys with the WebAuthn **PRF** extension (Apple or Google platform passkeys in Safari or Chrome). A user-chosen PIN is not a wrap method: it is too weak if keystore ciphertext is stolen from a relay, and it trained people to think a passkey that cannot emit PRF was protecting them. Authenticators or browsers without PRF are refused immediately; the user is told to switch authenticator/browser or use the mobile app (native keystore). The CLI keeps file keys or a passphrase wrap; the mobile shell keeps OS keystore custody. The relay accepts `wrap` of `prf`, `passphrase`, or `native` only.
+
 **What the relay can and cannot do:**
 
 | Can | Cannot |

@@ -168,10 +168,10 @@ export function saveConfig(config) {
  *   encPublicKey: string,       // base64url X25519 public key
  *   credentialId: string,       // base64url WebAuthn credential ID
  *   encryptedKeys: {            // wrapped private keys
- *     kdf: "prf" | "pbkdf2",
+ *     kdf: "prf" | "native",
  *     iv: string,
  *     ciphertext: string,
- *     salt?: string,            // only for pbkdf2
+ *     gate?: string,            // only for native
  *   },
  *   relay: string,              // relay URL this identity lives on
  *   userId: string,             // base64url random bytes (WebAuthn user ID)

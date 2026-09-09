@@ -76,7 +76,7 @@ Two payoffs, and the second is the reason this is P1:
     readonly publicKey: string;             // "ed25519:…"
     sign(canonicalString: string): Promise<string>;
   }
-  interface KeyStore { … }    // browser: passkey/PIN-wrapped; node/agent: file or env
+  interface KeyStore { … }    // browser: passkey-PRF-wrapped; node/agent: file or env
   ```
 
   This is what lets a passkey-gated browser key and an unattended agent key (`--sign-with=identity`

@@ -22,12 +22,12 @@ import {
 
 import {
   createPasskey, authenticatePasskey,
-  wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport,
+  wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport, PRF_UNAVAILABLE_MESSAGE,
 } from "./passkey.js";
 
 import {
   generateSeedIdentityJwks, generateEncryptionJwk, jwksFromSeed, keyBytesFromJwks,
-  publicKeyFromJwk, wrapKeysWithPin, unwrapKeysWithPin, toBase64url, fromBase64url,
+  publicKeyFromJwk, toBase64url, fromBase64url,
 } from "./vault.js";
 
 import {
@@ -492,7 +492,7 @@ function renderClaimCard(info) {
         ${suffix}
       </div>
       <p class="idin-status small" id="ni-availability" role="status" aria-live="polite">${esc(policyHint(info))}</p>
-      <button class="btn btn-primary claim-submit" id="btn-claim">Create ID</button>
+      <button class="btn btn-primary claim-submit" id="btn-claim"${webCustodyBlocked() ? " disabled" : ""}>Create ID</button>
       ${renderClaimNote(info)}
     </div>`;
 }
@@ -500,13 +500,17 @@ function renderClaimCard(info) {
 /**
  * What this browser can actually do, said before the name is typed (E15-T12).
  *
- * The app already declines to enroll where an authenticator hides its public
- * key (EPIC-011) and falls back to a PIN — but it said so *after* a name had
- * been chosen and the ceremony attempted, which reads as a failure rather
- * than as the design.
+ * Native keystore (the mobile shell) or passkey PRF. Authenticators without
+ * PRF are refused up front — a PIN is not a wrapping secret.
  */
+function webCustodyBlocked() {
+  if (S.custody?.kind === "native") return false;
+  if (!S.passkey) return false;
+  return S.passkey.available === false || S.passkey.prf === false;
+}
+
 function renderClaimNote(info) {
-  if (!info.reachable && info.resolved) {
+  if (info.reachable === false && info.resolved) {
     return `<p class="form-note small claim-note val-warn">
       Can't reach the relay right now — names can't be checked until it answers.
     </p>`;
@@ -517,14 +521,14 @@ function renderClaimNote(info) {
       Nothing leaves the device in plain form.
     </p>`;
   }
-  if (S.passkey && !S.passkey.available) {
-    return `<p class="form-note small claim-note">
-      ${esc(custodyFallbackMessage(S.custody ?? {}, S.passkey))}. They are still
-      generated here and never leave in plain form.
+  if (webCustodyBlocked()) {
+    return `<p class="form-note small claim-note val-warn" id="claim-prf-required">
+      ${esc(S.passkey.reason || PRF_UNAVAILABLE_MESSAGE)}
     </p>`;
   }
   return `<p class="form-note small claim-note">
     Your keys are generated on this device and never leave it in plain form.
+    This browser must support passkeys with PRF (Apple or Google passkeys in Safari or Chrome).
   </p>`;
 }
 
@@ -1034,7 +1038,7 @@ function renderDnsClaim(info) {
         <input id="ni-invite" class="input" type="text" placeholder="optional" autocomplete="off" />
       </div>
       <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
-      <button class="btn btn-passkey" id="btn-claim" style="width:100%">🔑 Create with passkey</button>
+      <button class="btn btn-passkey" id="btn-claim" style="width:100%"${webCustodyBlocked() ? " disabled" : ""}>🔑 Create with passkey</button>
       <p class="form-note small" style="margin-top:10px;text-align:center">
         Keys are generated locally and never leave your device in plain form.
       </p>
@@ -2134,16 +2138,12 @@ async function doUnlock() {
         reason: `Unlock ${id.split(".")[0]}`,
       });
       setLoading(true, "Unlocking…");
-    } else if (rec.supportsPRF !== false && rec.encryptedKeys?.kdf === "prf") {
+    } else if (rec.encryptedKeys?.kdf === "prf") {
       const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
-      if (!prfOutput) throw new Error("PRF not available from this authenticator.");
+      if (!prfOutput) throw new Error(PRF_UNAVAILABLE_MESSAGE);
       opened = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys);
     } else {
-      setLoading(false);
-      const pin = await promptPin("Enter your PIN:");
-      if (!pin) return;
-      setLoading(true, "Unlocking…");
-      opened = await unwrapKeysWithPin(pin, rec.encryptedKeys);
+      throw new Error(PRF_UNAVAILABLE_MESSAGE);
     }
 
     setUnlockedKeys(id, opened.signingJWK, opened.encJWK, opened.seed ?? null);
@@ -2207,7 +2207,7 @@ async function doRecoverFromKeystore(identity) {
  */
 function custodyOf(rec) {
   if (rec?.encryptedKeys?.kdf === "native") return "native";
-  return rec?.supportsPRF !== false ? "prf" : "pin";
+  return "prf";
 }
 
 const CUSTODY_COPY = {
@@ -2223,12 +2223,6 @@ const CUSTODY_COPY = {
     chip: "🔑 Passkey (PRF)",
     chipClass: "chip-green",
   },
-  pin: {
-    action: "Unlock with PIN",
-    note: "You'll be asked for your PIN",
-    chip: "🔐 PIN-protected",
-    chipClass: "chip-orange",
-  },
 };
 
 /**
@@ -2236,20 +2230,6 @@ const CUSTODY_COPY = {
  * could manage. Naming the actual obstacle is the difference between advice a
  * user can act on ("set a passcode") and a shrug ("no passkey here").
  */
-function custodyFallbackMessage(custody, support) {
-  const REASONS = {
-    no_passcode: "This device has no passcode, so its keystore cannot hold a key",
-    not_enrolled: "No biometrics are enrolled on this device",
-    no_hardware: "This device has no biometric sensor",
-    locked_out: "Biometrics are locked out on this device",
-    hardware_busy: "The biometric sensor is unavailable right now",
-  };
-  const why = hasNativeKeystore()
-    ? (REASONS[custody.reason] ?? "This device's keystore is unavailable")
-    : `No passkey here (${support.reason})`;
-  return `${why} — protecting your keys with a PIN instead`;
-}
-
 /**
  * Which custody this device should use for a *new* record (EPIC-019 E19-T2).
  *
@@ -2258,18 +2238,18 @@ function custodyFallbackMessage(custody, support) {
  * beats it on both ends: the secret is held by the secure element rather than
  * by the browser profile, and it carries no origin model — no `rp.id`, no
  * relying party, no associated domain — which is exactly what lets one shell
- * build work against any relay on any domain. A passkey comes next, and a PIN
- * last, because a PIN is only as good as what the user typed.
+ * build work against any relay on any domain. A passkey with PRF comes next.
+ * Authenticators without PRF are refused; a PIN is not a wrapping secret.
  *
- * Falling back is not a failure to report loudly: a device with no enrolled
- * biometrics is an ordinary device, and the caller says which path it took.
+ * A device with no enrolled biometrics is an ordinary device: the caller
+ * tries a PRF passkey, and says so if that is missing too.
  */
 async function chooseCustody() {
-  if (!hasNativeKeystore()) return { kind: "passkey-or-pin", reason: "no_native_keystore" };
+  if (!hasNativeKeystore()) return { kind: "passkey", reason: "no_native_keystore" };
   const biometrics = await biometricAvailability();
   return biometrics.available
     ? { kind: "native", gate: GATE_BIOMETRIC, biometryKind: biometrics.kind ?? null }
-    : { kind: "passkey-or-pin", reason: biometrics.reason ?? "unavailable" };
+    : { kind: "passkey", reason: biometrics.reason ?? "unavailable" };
 }
 
 /**
@@ -2281,24 +2261,17 @@ async function chooseCustody() {
  * than a copy that only works until its site data is cleared.
  */
 async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
-  // Same rule as creation: no authenticator means a PIN, not a refusal. This
-  // is the path a shell takes after a device-enrollment ceremony, and turning
-  // it away would mean an identity could be joined on a browser but not on a
-  // phone (EPIC-019).
   const custody = await chooseCustody();
-  const support = custody.kind === "native"
-    ? { available: false, reason: "native keystore" }
-    : await checkPasskeySupport();
+  if (custody.kind !== "native") {
+    const support = await checkPasskeySupport();
+    if (!support.available || support.prf === false) {
+      throw new Error(support.reason || PRF_UNAVAILABLE_MESSAGE);
+    }
+  }
 
   const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
   let credentialId = "", prfOutput = null, supportsPRF = false;
   let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
-  if (support.available) {
-    setLoading(true, "Creating a passkey on this device…");
-    ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
-      await createPasskey(identity, userId));
-  }
-
   let encryptedKeys;
   if (custody.kind === "native") {
     setLoading(false);
@@ -2307,15 +2280,12 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
       reason: `Protect ${identity.split(".")[0]}`,
     });
     setLoading(true, "Securing keys…");
-  } else if (supportsPRF) {
+  } else {
+    setLoading(true, "Creating a passkey on this device…");
+    ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+      await createPasskey(identity, userId));
     setLoading(true, "Securing keys…");
     encryptedKeys = await rewrap({ prfOutput }, { signingJWK, encJWK, seed });
-  } else {
-    setLoading(false);
-    const pin = await promptPin("Set a PIN to protect your keys:", true);
-    if (!pin) throw new Error("Cancelled");
-    setLoading(true, "Securing keys…");
-    encryptedKeys = await rewrap({ pin }, { signingJWK, encJWK, seed });
   }
 
   saveIdentityRecord(identity, {
@@ -2551,7 +2521,7 @@ function attachAvailabilityCheck() {
     // Self-hosted names are not this relay's to give out, and an empty field
     // is not a question.
     if (!intent.hosted || !intent.handle) {
-      submit.disabled = false;
+      submit.disabled = webCustodyBlocked();
       setStatus(intent.handle ? "" : policyHint(info));
       return;
     }
@@ -2563,7 +2533,7 @@ function attachAvailabilityCheck() {
       // Keep the policy: it is what the field's hint renders from, and it is
       // deployment configuration this client cannot know (E15-T12).
       if (verdict.policy) S.door = { ...S.door, policy: verdict.policy };
-      submit.disabled = !verdict.available;
+      submit.disabled = webCustodyBlocked() || !verdict.available;
       setStatus(
         verdict.available ? `${verdict.identity} is available` : verdict.message,
         verdict.available ? "val-ok" : "val-warn",
@@ -2574,8 +2544,7 @@ function attachAvailabilityCheck() {
       // itself is still the authority, and it will refuse if this would have.
       // But it must say so: silently enabling the button teaches the user the
       // check passed when nothing was checked (E15-T12).
-      submit.disabled = false;
-      setStatus("Can't reach the relay to check this name — you can still try.", "val-warn");
+      submit.disabled = webCustodyBlocked();
       console.warn("Availability check failed:", error.message);
     }
   };
@@ -2600,6 +2569,7 @@ function attachAvailabilityCheck() {
 }
 
 function doClaim() {
+  if (webCustodyBlocked()) return toast(S.passkey.reason || PRF_UNAVAILABLE_MESSAGE, "error", 9000);
   const intent = readClaimIntent();
   if (!intent.handle) {
     focusHandleField();
@@ -2706,17 +2676,13 @@ async function doCreateIdentity(intent) {
   const identity = `${handle}.${domain}`;
   if (loadIdentityRecord(identity)) return toast("Identity already exists on this device", "warning");
 
-  // A passkey is a lock, not the identity (EPIC-011). Where there is no
-  // authenticator to hold one, a PIN holds the same wrapped keys — so an
-  // absent authenticator changes *how* the keys are protected, not whether an
-  // identity can exist. That case is not exotic: a Capacitor shell runs on
-  // `capacitor://localhost`, which is not a secure http(s) origin, so WebAuthn
-  // is unavailable there by construction (EPIC-019, where the OS keystore
-  // eventually replaces the PIN).
   const custody = await chooseCustody();
-  const support = custody.kind === "native"
-    ? { available: false, reason: "native keystore" }
-    : await checkPasskeySupport();
+  if (custody.kind !== "native") {
+    const support = await checkPasskeySupport();
+    if (!support.available || support.prf === false) {
+      return toast(support.reason || PRF_UNAVAILABLE_MESSAGE, "error", 9000);
+    }
+  }
 
   setLoading(true, "Generating keys…");
   try {
@@ -2728,35 +2694,20 @@ async function doCreateIdentity(intent) {
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
     let credentialId = "", prfOutput = null, supportsPRF = false;
     let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
-    if (support.available) {
-      setLoading(true, "Creating passkey…");
-      ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
-        await createPasskey(identity, userId));
-    } else if (custody.kind !== "native") {
-      setLoading(false);
-      toast(custodyFallbackMessage(custody, support), "info", 8000);
-    }
-
     let encryptedKeys;
     if (custody.kind === "native") {
-      // Drop the overlay: the keystore draws its own prompt, and ours would
-      // cover it.
       setLoading(false);
       encryptedKeys = await wrapKeysNative(identity, sigPriv, encPriv, seed, {
         gate: custody.gate,
         reason: `Protect ${handle}`,
       });
       setLoading(true, "Securing keys…");
-    } else if (supportsPRF) {
+    } else {
+      setLoading(true, "Creating passkey…");
+      ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
+        await createPasskey(identity, userId));
       setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPRF(prfOutput, sigPriv, encPriv, seed);
-    } else {
-      // Drop overlay so the PIN sheet can receive clicks.
-      setLoading(false);
-      const pin = await promptPin("Set a PIN to protect your keys:", true);
-      if (!pin) return;
-      setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv, seed);
     }
 
     setLoading(true, "Registering identity…");
@@ -4215,7 +4166,6 @@ const ENROLLMENT_KIND_LABEL = {
 
 const ENROLLMENT_WRAP_LABEL = {
   prf: "passkey (PRF)",
-  pin: "PIN",
   passphrase: "passphrase",
   native: "the OS keystore",
 };
@@ -4282,12 +4232,9 @@ async function showKeysAndDevicesPanel() {
       closePanel();
       setLoading(true, "Backing up this browser…");
       try {
-        const { canBootstrap } = await enrollThisBrowser(clientFor(identity), identity);
+        await enrollThisBrowser(clientFor(identity), identity);
         setLoading(false);
-        toast(canBootstrap
-          ? "This browser is backed up"
-          : "Backed up — but a PIN-wrapped browser cannot restore itself; keep your recovery kit",
-          canBootstrap ? "success" : "warning", canBootstrap ? 3500 : 8000);
+        toast("This browser is backed up", "success", 3500);
         showKeysAndDevicesPanel();
       } catch (error) {
         setLoading(false);
@@ -4477,7 +4424,7 @@ function showIdentityKeysPanel() {
     <div class="kv-row"><span class="kv-label">Relay</span><span class="kv-value small">${esc(rec.relay)}</span></div>
     <div class="kv-row"><span class="kv-label">Created</span><span class="kv-value small">${esc(fmtTime(rec.createdAt))}</span></div>
     <div class="kv-row"><span class="kv-label">Protection</span>
-      <span class="chip ${rec.supportsPRF !== false ? "chip-green" : "chip-orange"}">${rec.supportsPRF !== false ? "Passkey PRF" : "PIN (PBKDF2)"}</span>
+      <span class="chip chip-green">${rec.encryptedKeys?.kdf === "native" ? "Device keystore" : "Passkey PRF"}</span>
     </div>
     <div class="kv-row"><span class="kv-label">DNS</span>
       <code class="kv-value small" style="font-size:11px;line-height:1.6">_poweur.${esc(rec.identity)}<br>_poweur-enc.${esc(rec.identity)}</code>
@@ -4619,15 +4566,15 @@ async function doRotateEncKey() {
     await client.identity.publishEncryptionKey(client.signer, encPublicKey);
 
     let encryptedKeys;
-    if (rec.supportsPRF !== false) {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
-      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
+    if (rec.encryptedKeys?.kdf === "native") {
+      encryptedKeys = await wrapKeysNative(id, keys.signingJWK, encPrivNew, keys.seed, {
+        gate: rec.encryptedKeys.gate,
+        reason: `Protect ${id.split(".")[0]}`,
+      });
     } else {
-      setLoading(false);
-      const pin = await promptPin("Re-enter PIN to save new key:");
-      if (!pin) return;
-      setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew, keys.seed);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
+      if (!prfOutput) throw new Error(PRF_UNAVAILABLE_MESSAGE);
+      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
     }
 
     // The encryption key no longer derives from the seed, so a kit rebuilt from
@@ -4671,31 +4618,6 @@ function doRemoveIdentity() {
       toast("Identity removed from device", "info");
     });
     q("#panel-cancel-remove")?.addEventListener("click", closePanel);
-  });
-}
-
-// ─── PIN prompt ───────────────────────────────────────────────────────────────
-
-function promptPin(label, confirm = false) {
-  return new Promise(resolve => {
-    showPanel("Key protection PIN", `
-      <p class="muted small" style="margin-bottom:14px">${esc(label)}</p>
-      <div class="form-group">
-        <input id="pin-input" class="input" type="password" placeholder="PIN (min 4 characters)" />
-      </div>
-      ${confirm ? `<div class="form-group"><input id="pin-confirm" class="input" type="password" placeholder="Confirm PIN" /></div>` : ""}
-      <button class="btn btn-primary mt-sm" id="btn-pin-ok">OK</button>`,
-    () => {
-      const ok = () => {
-        const pin = q("#pin-input")?.value ?? "";
-        if (pin.length < 4) { toast("PIN must be ≥ 4 characters", "warning"); return; }
-        if (confirm && pin !== (q("#pin-confirm")?.value ?? "")) { toast("PINs do not match", "warning"); return; }
-        closePanel(); resolve(pin);
-      };
-      q("#btn-pin-ok")?.addEventListener("click", ok);
-      q("#pin-input")?.addEventListener("keydown", e => { if (e.key === "Enter") ok(); });
-    },
-    () => resolve(null));
   });
 }
 

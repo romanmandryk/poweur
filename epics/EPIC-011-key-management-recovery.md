@@ -100,7 +100,7 @@ instead of an email address being the thing that recovers your Poweur ID.
 |---|---|---|---|---|
 | Identity signing key | Ed25519 | CLI: `keys_dir/<id>.key` (`apps/cli/internal/identity/keys.go`); Web: JWK in localStorage, signed inside WebCrypto (`apps/web/js/vault.js`) | CLI: **plaintext base64, file mode 0600**; Web: AES-wrapped | permanent |
 | Encryption key | X25519 | CLI: `keys_dir/<id>.enc`; Web: JWK in localStorage | same as above | permanent |
-| Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/js/passkey.js`); **exactly one credential supported**; PIN/PBKDF2 fallback when PRF unavailable |
+| Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/js/passkey.js`); authenticators without PRF are **refused** |
 | Session keys | Ed25519 | client memory/disk + relay session store | identity-signed `SessionProof`, ≤ 24 h TTL (`apps/api/internal/relay/sessions.go`) | hours |
 | Relay challenges | nonce | relay memory | single-use, short expiry | minutes |
 | (planned) DAV tokens / app passwords | bearer / argon2id hash | relay + `poweur-sys/relay/` | scoped, revocable (E03-T3) | hours–long |
@@ -184,11 +184,11 @@ multi-enrollment needs — **no change to the salt for multi-passkey support.**
   "version": 1,
   "enrollment_id": "<base64url, 16 random bytes>",
   "kind": "passkey | hardware-key | cli-passphrase | recovery-kit | native",
-  "wrap": "prf | pin | passphrase | native",
+  "wrap": "prf | passphrase | native",
   "payload": "seed | legacy-keypair",
   "credential_id": "<base64url>",
   "credential_public_key": "<COSE key, base64url>",
-  "wrapped": { "iv": "<b64url>", "ciphertext": "<b64url>", "salt": "<b64url, pin/passphrase only>" },
+  "wrapped": { "iv": "<b64url>", "ciphertext": "<b64url>", "salt": "<b64url, passphrase only>" },
   "label": "MacBook Pro",
   "created_at": "<RFC3339>",
   "last_used_at": "<RFC3339>"

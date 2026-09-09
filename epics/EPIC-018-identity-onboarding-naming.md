@@ -56,7 +56,7 @@ Two things stand between the current code and that flow:
   ([`apps/web/js/passkey.js:30`](../apps/web/js/passkey.js)). The passkey is **not** the
   identity key — it supplies a PRF secret that wraps the Ed25519/X25519 keys
   (`wrapKeysAES`, [`apps/web/js/vault.js`](../apps/web/js/vault.js); the stored record
-  carries `kdf: "prf" | "pbkdf2"`). So credential scope governs *which lock opens on which
+  carries `kdf: "prf" | "native"`). So credential scope governs *which lock opens on which
   origin*, not where the identity can live.
 - `HOSTED_DOMAINS` already exists in [`apps/api/internal/config`](../apps/api/internal/config/config.go);
   this epic extends the same env-var pattern.

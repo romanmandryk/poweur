@@ -173,6 +173,20 @@ describe("keystore ↔ real relay", () => {
     await expect(api.fetch(identity, assertion, RP_ID)).rejects.toThrow();
   });
 
+  it("refuses wrap=pin", async () => {
+    await expect(
+      api.enroll(signer, identity, {
+        enrollmentId: "enr-pin",
+        kind: "passkey",
+        wrap: "pin" as "prf",
+        wrapped,
+        credentialId: auth.credentialId,
+        credentialPublicKey: auth.spki,
+        credentialAlg: COSE_EDDSA,
+      }),
+    ).rejects.toThrow(/unknown wrap/);
+  });
+
   it("refuses a passkey enrollment with no verifiable public key", async () => {
     await expect(
       api.enroll(signer, identity, {

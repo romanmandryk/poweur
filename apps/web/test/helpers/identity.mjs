@@ -9,12 +9,14 @@
  */
 import { createIdentity, rfc3339 } from "@poweur/client";
 
-import { generateIdentityJwks, keyBytesFromJwks, wrapKeysWithPin } from "../../js/vault.js";
+import { generateIdentityJwks, keyBytesFromJwks, wrapKeysAES } from "../../js/vault.js";
 import { identityApiFor } from "../../js/client.js";
 import { saveIdentityRecord, setActiveIdentity, setUnlockedKeys } from "../../js/storage.js";
 
-export async function createWebIdentity(relayUrl, identity, { pin = "test-pin" } = {}) {
+export async function createWebIdentity(relayUrl, identity) {
   const { signingJWK, encJWK, publicKey, encPublicKey } = await generateIdentityJwks();
+  const wrapSecret = crypto.getRandomValues(new Uint8Array(32));
+  const encryptedKeys = { ...(await wrapKeysAES(wrapSecret, signingJWK, encJWK)), kdf: "prf" };
 
   await createIdentity(identityApiFor(relayUrl), identity, {
     hosted: true,
@@ -24,14 +26,14 @@ export async function createWebIdentity(relayUrl, identity, { pin = "test-pin" }
   saveIdentityRecord(identity, {
     identity, publicKey, encPublicKey,
     credentialId: "test-credential",
-    encryptedKeys: await wrapKeysWithPin(pin, signingJWK, encJWK),
+    encryptedKeys,
     relay: relayUrl,
     userId: "test-user",
     createdAt: rfc3339(),
-    supportsPRF: false,
+    supportsPRF: true,
   });
 
-  return { identity, signingJWK, encJWK, publicKey, encPublicKey };
+  return { identity, signingJWK, encJWK, publicKey, encPublicKey, wrapSecret };
 }
 
 /** Make `identity` the unlocked, active one — what `clientFor()` needs. */

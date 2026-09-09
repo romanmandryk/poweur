@@ -4,21 +4,18 @@
  *
  * Headless Chromium has no authenticator, and a stub that returns nothing is
  * not a useful stand-in either — without `getPublicKey()` the app declines to
- * enroll (EPIC-011), so half the flows never start. This one holds a real
- * Ed25519 key and signs real assertions, and reports no PRF so registration
- * takes the PIN path.
+ * enroll (EPIC-011), and without PRF it refuses to create an identity. This
+ * one holds a real Ed25519 key, signs real assertions, and returns a stable
+ * PRF secret.
  */
 
 import { expect } from "@playwright/test";
 
-export async function stubPasskeys(page) {
-  await page.addInitScript(() => {
-    // An insecure origin has no `navigator.credentials` at all, and assigning
-    // through it threw — killing the whole init script for pages that only
-    // needed the rest of it. There is nothing to stub there anyway: the app
-    // takes its PIN path, which is the point of that path existing.
+export async function stubPasskeys(page, { prf = true } = {}) {
+  await page.addInitScript((withPrf) => {
     if (!navigator.credentials) return;
     const rawId = crypto.getRandomValues(new Uint8Array(32));
+    const prfBytes = new Uint8Array(32).fill(7);
     let keyPair = null;
     const ensureKey = async () => {
       keyPair ??= await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
@@ -31,7 +28,9 @@ export async function stubPasskeys(page) {
       rawId: rawId.buffer,
       id: b64url(rawId),
       type: "public-key",
-      getClientExtensionResults: () => ({}), // no PRF → PIN path
+      getClientExtensionResults: () => withPrf
+        ? { prf: { results: { first: prfBytes.buffer } } }
+        : {},
     };
     navigator.credentials.create = async () => {
       const pair = await ensureKey();
@@ -67,8 +66,14 @@ export async function stubPasskeys(page) {
     };
     if (window.PublicKeyCredential) {
       PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = async () => true;
+      PublicKeyCredential.getClientCapabilities = async () => ({ "extension:prf": withPrf });
     }
-  });
+  }, prf);
+}
+
+/** Authenticator that can sign but emits no PRF — the web app must refuse. */
+export async function stubPasskeysWithoutPrf(page) {
+  return stubPasskeys(page, { prf: false });
 }
 
 /** Open the SPA pointed at a test relay (the relay URL is config, not origin). */
@@ -97,10 +102,6 @@ export async function registerIdentity(page, relay, handle) {
   await page.fill("#ni-handle", handle);
   await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
   await page.click("#btn-claim");
-  await page.waitForSelector("#pin-input");
-  await page.fill("#pin-input", "test-pin");
-  await page.fill("#pin-confirm", "test-pin");
-  await page.click("#btn-pin-ok");
   await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
   // First run lands in the setup flow (E15-T5); these specs test what comes
   // after it, and onboarding has its own coverage.

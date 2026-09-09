@@ -28,7 +28,7 @@ import type { RelayClient } from "./http.js";
 import { newNonce } from "./ids.js";
 
 /** How the seed copy is protected. */
-export type KeystoreWrap = "prf" | "pin" | "passphrase" | "native";
+export type KeystoreWrap = "prf" | "passphrase" | "native";
 
 /** What kind of enrollment holds it. */
 export type KeystoreKind =
@@ -45,7 +45,7 @@ export type KeystorePayload = "seed" | "legacy-keypair";
 export interface WrappedBlob {
   iv: string;
   ciphertext: string;
-  /** Present for pin/passphrase wraps (PBKDF2 salt). */
+  /** Present for passphrase wraps (PBKDF2 salt). */
   salt?: string;
 }
 

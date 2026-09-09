@@ -87,7 +87,10 @@ test.describe("front doors", () => {
     await expect(page.locator("#ni-handle")).toHaveValue("melissa");
     await expect(page.locator("#ni-availability"))
       .toContainText("is available", { timeout: 20_000 });
-    await expect(page.locator("#btn-claim")).toBeEnabled();
+    // This host is `http://id.poweur.net`, not a secure context, so there is
+    // no PRF-capable passkey here. The name is free; creating it is not.
+    await expect(page.locator("#claim-prf-required")).toContainText("does not support passkeys with PRF");
+    await expect(page.locator("#btn-claim")).toBeDisabled();
   });
 
   test("an unclaimed identity host offers its own name and nothing else", async ({ page }) => {

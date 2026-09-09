@@ -12,8 +12,9 @@ long-lived keys are derived, stored and recovered.
 ## The passkey is a lock, not the key
 
 A common misreading is that the passkey *is* the identity. It is not. The identity is an
-Ed25519 signing key and an X25519 encryption key; a passkey (or a PIN) only supplies the secret
-that **wraps** those keys at rest.
+Ed25519 signing key and an X25519 encryption key; a passkey's PRF output (or a
+phone's native keystore) supplies the secret that **wraps** those keys at rest.
+A user PIN is a non-goal on the web client — authenticators without PRF are refused.
 
 Three consequences follow, and they explain most of the design below:
 
@@ -112,8 +113,8 @@ enrollment := { enrollment_id, kind, wrap, payload,
 
 Wrapping is unchanged from the shipped code: HKDF-SHA256 over the wrapping secret with salt
 `poweur-key-wrapping-v1`, then AES-256-GCM. The secret comes from a passkey's PRF output
-(`poweur-prf-v1`), a PIN via PBKDF2, or a device's secure storage — `wrap` says which. Adding an
-authenticator is re-wrapping the same seed, never re-keying the identity.
+(`poweur-prf-v1`), a CLI passphrase, or a device's secure storage — `wrap` says which.
+Adding an authenticator is re-wrapping the same seed, never re-keying the identity.
 
 ### Why writes and reads authenticate differently
 

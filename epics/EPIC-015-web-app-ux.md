@@ -49,8 +49,8 @@ audience picker, policy controls) that EPIC-012's contact-form/website work buil
   bottom nav and slide-up panel system (`#panel-root`/`#panel-backdrop`). The protocol lives
   in `@poweur/client` (E15-T6); `js/vault.js` holds key custody and `js/client.js` builds the
   one client every screen uses. Tested with Vitest (unit + live-relay) and Playwright (e2e).
-- **Shipped modules with UI:** identity create/import/unlock (passkey + PIN,
-  `js/passkey.js`/`js/crypto.js`), messaging compose + inbox (`js/messaging.js`), a file
+- **Shipped modules with UI:** identity create/import/unlock (passkey PRF; PIN is a non-goal,
+  `js/passkey.js`/`js/vault.js`), messaging compose + inbox (`js/messaging.js`), a file
   browser (`js/files.js` — list/upload/download/mkdir/rename/delete against DAV) reachable
   but not yet a first-class destination.
 - **Shipped on the relay, NOT surfaced in the web app:**
@@ -420,7 +420,7 @@ package), otherwise last, as a refactor behind the existing test suites.*
       `js/messaging.js`, `js/files.js`, `js/pow.js`); `js/app.js` keeps only UI. `js/client.js` is
       the single place a `PoweurClient` is built, which is what makes the relay-URL rule structural
 - [x] Keep `js/passkey.js` + `js/storage.js` and expose them as the browser `Signer`/`KeyStore`
-      implementation the package expects — passkey/PIN gating stays a web-app concern and raw keys
+      implementation the package expects — passkey PRF gating stays a web-app concern and raw keys
       never cross the package boundary. `js/vault.js` holds the custody half of the old `crypto.js`:
       the wrapped-blob format is byte-identical (HKDF salt `poweur-key-wrapping-v1`, AES-256-GCM,
       `{signingJWK,encJWK}`) so shipped identities keep opening and EPIC-011 can re-wrap the same
@@ -728,8 +728,8 @@ screenshot diffing across machines is a flake source this suite does not need.
       ([`app.js:1898`](../apps/web/js/app.js)): the button says why it cannot check instead of
       quietly enabling itself
 - [ ] **Passkey support is checked before the name, not after.** E11 already declines to enroll
-      when the browser hides `getPublicKey()`; the landing should say so up front and offer the
-      PIN path, rather than after a name has been chosen
+      when the browser hides `getPublicKey()`; the landing should say so up front and refuse
+      authenticators without PRF, rather than after a name has been chosen
 - [ ] Paste tolerance in the handle field: `alice.poweur.net`, `@alice`, `Alice`, and trailing
       whitespace all normalise to `alice`. A field with a visible suffix invites pasting the
       whole thing

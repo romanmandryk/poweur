@@ -67,7 +67,7 @@ This was the open question that motivated the epic, and the answer falls out of 
 already stored. The passkey is **not** the identity key: PRF output derives an AES key that
 wraps the Ed25519/X25519 keys (`wrapKeysAES`,
 [`apps/web/js/vault.js`](../apps/web/js/vault.js)), and the stored record already
-carries a `kdf` discriminator (`"prf" | "pbkdf2"`). The passkey is a **lock, not the key** —
+carries a `kdf` discriminator (`"prf" | "native"`). The passkey is a **lock, not the key** —
 so nothing binds an identity to a domain. Two independent consequences:
 
 - **Web:** the relay serves the SPA itself (`WEB_STATIC_DIR` → `/app/`), so someone running
@@ -91,9 +91,9 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
   a shell on `capacitor://localhost`. E15-T1 must make the base URL come from the identity
   record / config. **This is the one thing E15 has to get right for this epic to be cheap**,
   and it is cheap to do now.
-- **Key custody is an interface with three implementations** — `prf` (browser passkey),
-  `pbkdf2` (PIN, works everywhere), `native` (Keychain/Keystore). The stored record's `kdf`
-  field already discriminates them; nothing else in the app cares which is in use.
+- **Key custody is an interface with two web/shell implementations** — `prf` (browser
+  passkey; authenticators without PRF are refused — PIN is a non-goal) and `native`
+  (Keychain/Keystore). The stored record's `kdf` field already discriminates them.
 - **Mobile-first layout is EPIC-015's job, not this epic's.** A wrapped web app feels native
   or doesn't based on the layout it wraps. E19 must not become the place where responsive
   bugs are fixed.
@@ -138,9 +138,8 @@ a real safe area, a non-`http(s)` origin, or an authenticator that does not exis
    identity. A non-web origin now seeds `https://poweur.net`, and the landing picker
    can switch to a local emulator or a typed URL.
 3. **Identity creation dead-ended.** WebAuthn needs a secure `http(s)` origin, so a shell
-   has no authenticator *by construction* — and the app refused rather than falling back.
-   It now takes the PIN path, which is exactly what E19-T2 says custody should be here
-   until the OS keystore lands. The same rule applies to the device-enrollment path,
+   has no authenticator *by construction* — native keystore custody is the answer
+   (E19-T2). A PIN fallback is a non-goal. The same rule applies to the device-enrollment path,
    which would otherwise let an identity be joined on a browser but not on a phone.
 4. **Every authenticated call was blocked before it left the browser.** The relay's CORS
    allow-list was missing `X-Poweur-Challenge`, so the preflight failed for every
@@ -163,17 +162,18 @@ the inbox path, so a request waited silently until the app was opened.
       in preferences). Registration differs by platform and both are wired:
       `MainActivity.onCreate` on Android, and a `CAPBridgeViewController` subclass on iOS
       because `SceneDelegate` builds the root controller itself
-- [x] Registered as a third `kdf` alongside `prf` / `pbkdf2`: `wrapKeysAES` /
+- [x] Registered as a third `kdf` alongside `prf`: `wrapKeysAES` /
       `unwrapKeysAES` are reused unchanged, and only where the 32 bytes come from differs.
       Six unit tests cover the JS half against a fake plugin, including that the identity
       keys are never handed to it and that one secret is kept per identity
-- [x] Identity creation in the shell defaults to `native`, with `pbkdf2` PIN as the
-      fallback where biometrics are unavailable. `chooseCustody()` ranks keystore over
-      passkey over PIN, and the fallback names the actual obstacle ("this device has no
-      passcode") rather than reporting a missing passkey. Covered by
+- [x] Identity creation in the shell defaults to `native`. Where biometrics are
+      unavailable the app tries a PRF passkey rather than a PIN (PIN wrapping is a
+      non-goal). `chooseCustody()` ranks keystore over passkey, and the fallback names
+      the actual obstacle ("this device has no passcode") rather than reporting a
+      missing passkey. Covered by
       `apps/web/test/e2e/native-custody.spec.js` against a contract-shaped fake plugin:
       that the keystore wins over a *working* passkey, that unlock never asks for a PIN,
-      that a keystore which cannot gate on biometrics is not used, and that removing an
+      that a keystore which cannot gate on biometrics falls back to PRF rather than a PIN, and that removing an
       identity forgets its hardware secret
 - [ ] **Tiered custody**, because background receive (T7) cannot prompt for biometrics:
 

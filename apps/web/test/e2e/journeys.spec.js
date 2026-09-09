@@ -25,10 +25,6 @@ async function addIdentity(page, handle) {
   await page.fill("#ni-handle", handle);
   await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
   await page.click("#btn-claim");
-  await page.waitForSelector("#pin-input");
-  await page.fill("#pin-input", "test-pin");
-  await page.fill("#pin-confirm", "test-pin");
-  await page.click("#btn-pin-ok");
   await page.waitForSelector("#btn-onboard-skip", { timeout: 45_000 });
   await page.click("#btn-onboard-skip");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
@@ -43,10 +39,6 @@ async function switchTo(page, identity) {
   const unlock = page.locator("#btn-do-unlock");
   await expect(unlock).toBeVisible({ timeout: 30_000 });
   await unlock.click();
-  if (await page.locator("#pin-input").count()) {
-    await page.fill("#pin-input", "test-pin");
-    await page.click("#btn-pin-ok");
-  }
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
 }
 
@@ -121,10 +113,6 @@ test.describe("browser journeys", () => {
     await page.reload();
     if (await page.locator("#btn-unlock-main").count()) await page.click("#btn-unlock-main");
     await page.click("#btn-do-unlock");
-    if (await page.locator("#pin-input").count()) {
-      await page.fill("#pin-input", "test-pin");
-      await page.click("#btn-pin-ok");
-    }
     await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
     await expect(page.locator(`.conv-row[data-compose-to="${home}"]`))
       .toContainText("reminder: dentist", { timeout: 30_000 });
@@ -251,10 +239,6 @@ test.describe("browser journeys", () => {
     await ownerPage.reload();
     if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");
     await ownerPage.click("#btn-do-unlock");
-    if (await ownerPage.locator("#pin-input").count()) {
-      await ownerPage.fill("#pin-input", "test-pin");
-      await ownerPage.click("#btn-pin-ok");
-    }
     await expect(ownerPage.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
 
     await expect(ownerPage.locator(`.conv-row[data-compose-to="${strangerId}"]`))
