@@ -93,6 +93,11 @@ describe("contact requests ↔ real relay", () => {
     const queued = await dave.client.requests();
     const entry = queued.find((r) => r.sender === erin.identity);
     expect(entry?.type).toBe(MSG_TYPE_CONTACT_REQUEST);
+    // The intro is readable here or nowhere: under this policy the queue is
+    // the only place the request appears, so a sealed payload means deciding
+    // about a stranger with nothing but their name.
+    expect(entry?.plaintext).toBe("let me in");
+    expect(entry?.payload).not.toBe("let me in");
 
     // …and nowhere else: the queue is not the inbox.
     const inbox = await dave.client.inbox();

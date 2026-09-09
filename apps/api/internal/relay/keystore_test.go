@@ -240,6 +240,24 @@ func TestKeystore_PasskeyEnrollmentNeedsUsablePublicKey(t *testing.T) {
 	}
 }
 
+func TestKeystore_RejectsPinWrap(t *testing.T) {
+	f := newKeystoreFixture(t)
+	wrapped := json.RawMessage(`{"iv":"aXY","ciphertext":"Y3Q"}`)
+	issuedAt := time.Now().UTC().Format(time.RFC3339)
+	req := KeystoreEnrollRequest{
+		EnrollmentID: "e-pin", Kind: "passkey", Wrap: "pin", Payload: "seed",
+		Wrapped: wrapped, IssuedAt: issuedAt, Nonce: "n-pin",
+		IdentitySignature: "dGVzdA",
+	}
+	code, body := f.do(t, http.MethodPut, "/identities/"+f.identity+"/keystore", req)
+	if code != http.StatusBadRequest {
+		t.Fatalf("want 400 for wrap=pin, got %d %s", code, body)
+	}
+	if !strings.Contains(string(body), "unknown wrap method") {
+		t.Fatalf("want unknown wrap method, got %s", body)
+	}
+}
+
 // The bootstrap read: no identity key anywhere in this request.
 func TestKeystore_FetchWithAssertionReturnsCiphertext(t *testing.T) {
 	f := newKeystoreFixture(t)

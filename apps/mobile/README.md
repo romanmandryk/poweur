@@ -5,10 +5,13 @@ build of the UI and no forked screen: `pnpm stage` copies `apps/web` into `www/`
 `cap sync` carries it into the platform projects.
 
 ```bash
-pnpm --filter @poweur/mobile sync     # stage apps/web, then cap sync
-pnpm --filter @poweur/mobile ios      # …and open Xcode
-pnpm --filter @poweur/mobile test     # staging invariants (no native toolchain needed)
+pnpm --filter @poweur/mobile run sync     # stage apps/web, then cap sync
+pnpm --filter @poweur/mobile run ios      # …and open Xcode
+pnpm --filter @poweur/mobile test         # staging invariants (no native toolchain needed)
 ```
+
+`pnpm stage` is a pnpm 10+ builtin (publish staging). Always `pnpm run stage` / `pnpm run sync`
+so the package scripts run, not pnpm's own command.
 
 ## Why a shell rather than native or React Native
 
@@ -36,14 +39,83 @@ PRF output, and a passkey brings WebAuthn's origin model with it — associated 
 store build work against any relay on any domain**, self-hosted included. Associated
 domains (E19-T3) are then an optional nicety for hosted identities rather than a gate.
 
-The JavaScript half is complete and tested; the plugin contract it expects — four methods
-over Keychain / Android Keystore — is documented at the bottom of `native.js`.
+Both halves now exist. The contract — four methods, and what each has to guarantee — is
+documented at the bottom of `native.js`; the platforms implement it in
+[`ios/App/App/PoweurKeystorePlugin.swift`](ios/App/App/PoweurKeystorePlugin.swift) and
+[`android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java`](android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java).
+
+Neither does anything cryptographic. The web layer generates 32 random bytes, derives an
+AES key from them and wraps the identity keys exactly as the `prf` path does;
+the plugin only holds those bytes somewhere the app cannot read without the user. That is
+why the platform halves are small, and why the shapes differ without the app noticing:
+
+| | iOS | Android |
+|---|---|---|
+| Where the secret lives | Keychain item, `kSecClassGenericPassword` | ciphertext in `SharedPreferences`, opened by a per-identity AES key in the TEE |
+| Biometric gate | `SecAccessControl(.biometryCurrentSet)` over `WhenPasscodeSetThisDeviceOnly` | `setUserAuthenticationRequired(true)` + `setInvalidatedByBiometricEnrollment(true)`, unlocked by `BiometricPrompt` |
+| Prompts on **store** | no | **yes** — the Keystore gates the key, not the direction |
+| Enrolment changed | OS destroys the item; reads as absent | `KeyPermanentlyInvalidatedException`; deleted, then reads as absent |
+
+Both report an invalidated key as an **absence**, never as a failed unlock: that difference
+is what sends the user to re-enrolment (EPIC-011) instead of to a retry that can never work.
+
+Registration is not symmetric either. Android is told about the plugin in
+`MainActivity.onCreate`; iOS needs a `CAPBridgeViewController` subclass, because
+`SceneDelegate` builds the root controller itself and Capacitor only scans plugins that
+ship as Swift packages — hence `MainViewController.swift`, whose entire job is one
+`registerPluginInstance` call.
 
 ## State of the platform projects
 
-`ios/` is generated (`cap add ios`, Capacitor 8, SwiftPM — no CocoaPods). **It has not been
-compiled here:** this machine's Xcode 26.6 has no iOS platform installed, only an iOS 18.3
-simulator runtime, so every `xcodebuild` destination is ineligible. Install it with
-`xcodebuild -downloadPlatform iOS` (several GB) before expecting a build.
+`ios/` is generated (`cap add ios`, Capacitor 8, SwiftPM — no CocoaPods) and **verified on
+an iOS 26.5 simulator**: claim → keystore custody with no PIN → relaunch → unlock from the
+Keychain. Requires the iOS platform (`xcodebuild -downloadPlatform iOS`, several GB).
 
-`android/` is not generated yet — it needs an Android SDK, which this machine does not have.
+One simulator caveat: it has no device passcode, and `.biometryCurrentSet` items are
+accepted and read back without ever drawing the Face ID sheet. The gate itself is therefore
+only proven on real hardware; what the simulator proves is that the plugin is registered,
+the item round-trips, and the app takes the native path over the passkey path.
+
+`android/` is generated (`cap add android`) and builds (`./gradlew :app:assembleDebug`).
+See **Testing on Android** below.
+
+## Testing on Android
+
+What is needed, and why:
+
+| Piece | Why |
+|---|---|
+| **Android Studio** | the only supported way to install the SDK, and the AVD Manager that creates emulators |
+| **SDK Platform 36 + Build-Tools 36** | `compileSdk`/`targetSdk` in `android/variables.gradle` |
+| **Platform-Tools** (`adb`) | installing and log-reading |
+| **JDK 21** | what Capacitor 8's Gradle build expects (`brew install openjdk@21`) |
+| **A system image with biometrics** | Google APIs, API 34+; a bare AOSP image has no fingerprint sensor to enrol |
+
+Everything but the last is installed by Android Studio's first-run wizard. Then,
+from the **repo root** (not `apps/mobile/android`):
+
+```bash
+pnpm mobile:android   # stage, cap sync, assembleDebug
+adb install -r apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+A fresh install talks to **https://poweur.net**. The landing picker can switch to
+the local `go run` relay (`http://10.0.2.2:8080` on the emulator, `127.0.0.1:8080`
+on iOS) or a typed URL. A physical phone cannot use `10.0.2.2`; use **Other…**
+with the Mac's LAN address, and add that host to `network_security_config.xml`
+if it is plain HTTP.
+
+A USB phone that `adb devices` does not list is almost always USB debugging, not
+the cable: on a Pixel, Developer options → USB debugging, then the USB
+notification → **File transfer / Android Auto**, and accept **Allow USB debugging**.
+
+The emulator has no fingerprint enrolled out of the box, and without one the app cannot
+use native custody — it will try a PRF passkey or refuse. Enrol one under **Settings → Security → Fingerprint**, and when
+the emulator asks for a finger, touch it from the host:
+
+```bash
+adb -e emu finger touch 1
+```
+
+A relay on the host is reachable from the emulator at `http://10.0.2.2:8080`, not
+`127.0.0.1` — that address belongs to the emulated device.

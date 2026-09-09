@@ -5,10 +5,11 @@
   "description": "Capacitor shell over the web client (EPIC-019)",
   "scripts": {
     "stage": "node scripts/stage-web.mjs",
-    "sync": "pnpm stage && cap sync",
-    "ios": "pnpm sync && cap open ios",
-    "android": "pnpm sync && cap open android",
-    "build:ios": "pnpm sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
+    "sync": "pnpm run stage && cap sync",
+    "ios": "pnpm run sync && cap open ios",
+    "android": "pnpm run sync && cap open android",
+    "build:ios": "pnpm run sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
+    "build:android": "pnpm run sync && ./android/gradlew -p android :app:assembleDebug",
     "test": "node --test --test-reporter=spec test/stage.test.mjs"
   },
   "dependencies": {

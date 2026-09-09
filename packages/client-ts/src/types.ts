@@ -223,6 +223,27 @@ export type HandleReason =
   | "domain_not_hosted"
   | "invalid";
 
+/**
+ * `GET /` — the relay's service banner.
+ *
+ * A client reads it to learn which front door it is behind (EPIC-015 E15-T7):
+ * the same static tree is served on the launcher host, on a hosted identity's
+ * own origin, and from a native shell, and only the host distinguishes them.
+ */
+export interface RelayRoot {
+  service?: string;
+  relay_address?: string;
+  /** The canonical launcher host — what a post-claim hand-off targets. */
+  launcher_host?: string;
+  /**
+   * Every host that serves the claim flow. Absent on relays older than
+   * E15-T7, where `launcher_host` is the whole set.
+   */
+  launcher_hosts?: string[];
+  hosted_domains?: string[];
+  web_ui?: string;
+}
+
 /** `GET /hosted/availability` (EPIC-018 E18-T2). */
 export interface HandleAvailability {
   handle: string;
@@ -268,6 +289,13 @@ export interface ContactRequestEntry {
   timestamp: string;
   type?: string;
   payload: string;
+  /** Present because the queued envelope is E2E-encrypted like any message. */
+  encryption?: EncryptionMeta;
+  /**
+   * The decrypted intro, when a decryptor was supplied and it opened. Null
+   * when it could not be read; absent when nobody tried.
+   */
+  plaintext?: string | null;
 }
 
 export interface AnonQueueMessage {

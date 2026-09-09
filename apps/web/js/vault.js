@@ -3,8 +3,9 @@
  *
  * This is the half of the old `js/crypto.js` that stays web-owned: the
  * protocol moved to `@poweur/client` (EPIC-015 E15-T6), but *how a browser
- * holds a private key* is a web-app concern — passkey PRF or a PIN, wrapped
- * with AES-GCM in `localStorage`.
+ * holds a private key* is a web-app concern — passkey PRF (or a native
+ * keystore on the mobile shell), wrapped with AES-GCM in `localStorage`.
+ * A user PIN is not a wrapping secret; authenticators without PRF are refused.
  *
  * The wrapped blob format is the shipped one, extended additively: HKDF salt
  * `poweur-key-wrapping-v1`, AES-256-GCM, payload
@@ -28,7 +29,6 @@ const { newSeed, deriveSigningKey, deriveEncryptionKey } = sdkCrypto;
 const enc = new TextEncoder();
 
 const WRAP_SALT = enc.encode("poweur-key-wrapping-v1");
-const PIN_ITERATIONS = 300_000;
 
 // ─── Encoding ─────────────────────────────────────────────────────────────────
 
@@ -216,17 +216,6 @@ async function aesKeyFromSecret(secret32Bytes) {
   );
 }
 
-async function aesKeyFromPin(pin, salt) {
-  const material = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PIN_ITERATIONS },
-    material,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
-}
-
 async function seal(key, signingJWK, encJWK, seed) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const payload = enc.encode(JSON.stringify({ signingJWK, encJWK, ...(seed ? { seed } : {}) }));
@@ -250,15 +239,4 @@ export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK, seed = null
 
 export async function unwrapKeysAES(secret32Bytes, wrapped) {
   return unseal(await aesKeyFromSecret(secret32Bytes), wrapped);
-}
-
-/** Wrap under a user PIN (PBKDF2) — the fallback when PRF is unavailable. */
-export async function wrapKeysWithPin(pin, signingJWK, encJWK, seed = null) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const sealed = await seal(await aesKeyFromPin(pin, salt), signingJWK, encJWK, seed);
-  return { ...sealed, salt: toBase64url(salt), kdf: "pbkdf2" };
-}
-
-export async function unwrapKeysWithPin(pin, wrapped) {
-  return unseal(await aesKeyFromPin(pin, fromBase64url(wrapped.salt)), wrapped);
 }

@@ -54,7 +54,7 @@ export interface StoredIdentityKeys {
 
 /**
  * Where key material lives. The browser implementation wraps keys with a
- * passkey PRF or PIN; the Node implementation is `~/.poweur/keys`, the same
+ * passkey PRF; the Node implementation is `~/.poweur/keys`, the same
  * directory the Go CLI uses.
  */
 export interface KeyStore {

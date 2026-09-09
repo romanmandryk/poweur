@@ -23,9 +23,10 @@ import {
 import "./helpers/browser-globals.mjs";
 import { startRelay } from "./helpers/relay.mjs";
 import { clientFor, identityApiFor } from "../js/client.js";
-import { listEnrollments, enrollThisBrowser, removeEnrollment } from "../js/keystore.js";
+import { listEnrollments, enrollThisBrowser, removeEnrollment, restoreLocalRecord } from "../js/keystore.js";
 import {
   saveIdentityRecord, loadIdentityRecord, setActiveIdentity, setUnlockedKeys, clearUnlockedKeys,
+  removeIdentity,
 } from "../js/storage.js";
 import { jwksFromSeed, unwrapKeysAES, wrapKeysAES } from "../js/vault.js";
 
@@ -153,9 +154,12 @@ describe("web keystore ↔ real relay", () => {
 
   it("recovers the identity from an assertion alone, with no identity key", async () => {
     // The scenario: this browser's site data is gone. No key, no record — the
-    // authenticator is all that is left.
+    // authenticator is all that is left. Restore reuses that authenticator;
+    // it must not mint a second passkey or a second enrollment.
     const record = loadIdentityRecord(identity);
+    const enrollmentId = record.enrollmentId;
     clearUnlockedKeys();
+    removeIdentity(identity);
 
     const api = new KeystoreApi(new RelayClient(relay.baseUrl));
     const assertion = await laptop.assert(await api.challenge(identity));
@@ -170,7 +174,19 @@ describe("web keystore ↔ real relay", () => {
     );
     expect(opened.seed).toBe(toBase64url(seed));
 
+    const restored = restoreLocalRecord(identity, {
+      entry: entries[0],
+      assertion,
+      signingJWK: opened.signingJWK,
+      encJWK: opened.encJWK,
+      seed: opened.seed,
+    }, { relayUrl: relay.baseUrl });
     setUnlockedKeys(identity, opened.signingJWK, opened.encJWK, opened.seed);
+
+    expect(restored.enrollmentId).toBe(enrollmentId);
+    expect(restored.credentialId).toBe(laptop.credentialId);
+    expect(restored.encryptedKeys.ciphertext).toBe(entries[0].wrapped.ciphertext);
+    expect(await listEnrollments(clientFor(identity), identity)).toHaveLength(1);
   });
 
   it("refuses a stranger's authenticator", async () => {

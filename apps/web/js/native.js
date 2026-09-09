@@ -7,7 +7,7 @@
  * use it when the answer is yes.
  *
  * Why this exists at all: a browser wraps identity keys with a passkey's PRF
- * output or a PIN, and a passkey drags WebAuthn's origin model along with it —
+ * output, and a passkey drags WebAuthn's origin model along with it —
  * associated domains, `rp.id`, a relying party. A native keystore has none of
  * that, which is what lets one store build work against *any* relay on *any*
  * domain. That is why `kdf: "native"` is the load-bearing task of EPIC-019 and
@@ -15,7 +15,7 @@
  *
  * The contract a plugin must satisfy is at the bottom of this file. Everything
  * above it works unchanged in a plain browser, where `hasNativeKeystore()` is
- * false and the app takes the passkey or PIN path exactly as before.
+ * false and the app requires a PRF-capable passkey.
  */
 
 import { wrapKeysAES, unwrapKeysAES, fromBase64url, toBase64url } from "./vault.js";
@@ -58,7 +58,11 @@ export async function wrapKeysNative(identity, signingJWK, encJWK, seed = null, 
   const store = requirePlugin();
   const gate = options.gate ?? GATE_BIOMETRIC;
   const secret = randomSecret();
-  await store.setSecret({ key: secretKeyFor(identity), value: toBase64url(secret), gate });
+  // Android gates the *key*, not the direction, so storing under a biometric
+  // gate prompts too — and a prompt with no reason on it is a prompt nobody
+  // should agree to. iOS ignores it here; passing it costs nothing.
+  const reason = options.reason ?? "Protect your identity";
+  await store.setSecret({ key: secretKeyFor(identity), value: toBase64url(secret), gate, reason });
   const wrapped = await wrapKeysAES(secret, signingJWK, encJWK, seed);
   secret.fill(0);
   return { ...wrapped, kdf: "native", gate };
@@ -98,8 +102,8 @@ export async function forgetNativeSecret(identity) {
  * Whether this device can gate on biometrics right now.
  *
  * Distinguishes "no hardware" from "enrolled but currently unavailable", which
- * matters: the first means fall back to a PIN forever, the second means try
- * again after the user fixes it.
+ * matters: the first means this shell cannot use native custody, the second
+ * means try again after the user fixes it.
  */
 export async function biometricAvailability() {
   const store = plugin();
@@ -140,8 +144,11 @@ function secretKeyFor(identity) {
  * JavaScript above is complete; what remains is the platform half, and it is
  * deliberately tiny — everything cryptographic already happens here.
  *
- *   setSecret({ key, value, gate })       → void
- *     Store `value` (base64url of 32 random bytes) under `key`.
+ *   setSecret({ key, value, gate, reason }) → void
+ *     Store `value` (base64url of 32 random bytes) under `key`. `reason` is
+ *     shown when the platform has to prompt to *store* — Android's Keystore
+ *     gates a key for both directions, so writing under a biometric gate asks
+ *     the user too; iOS does not, and ignores it.
  *     gate "biometric": iOS `SecAccessControl` with `.biometryCurrentSet`,
  *       Android `setUserAuthenticationRequired(true)` + `BiometricPrompt`.
  *     gate "device": iOS `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`,
@@ -160,7 +167,7 @@ function secretKeyFor(identity) {
  *
  *   canUseBiometrics()                    → { available: boolean, reason?: string }
  *
- * The app stores only the *wrapped* keys, exactly as it does for `prf` and
- * `pbkdf2`; the plugin holds one 32-byte secret and knows nothing about
+ * The app stores only the *wrapped* keys, exactly as it does for `prf`;
+ * the plugin holds one 32-byte secret and knows nothing about
  * identities, relays or messages.
  */

@@ -14,7 +14,7 @@ import {
   generateIdentityJwks, generateEncryptionJwk,
   jwksFromKeyBytes, keyBytesFromJwks,
   WebCryptoSigner, JwkDecryptor,
-  wrapKeysAES, unwrapKeysAES, wrapKeysWithPin, unwrapKeysWithPin,
+  wrapKeysAES, unwrapKeysAES,
 } from "../js/vault.js";
 
 describe("vault — JWK ↔ @poweur/client key bytes", () => {
@@ -106,17 +106,5 @@ describe("vault — key wrapping (format is frozen for EPIC-011)", () => {
     const { signingJWK, encJWK } = await generateIdentityJwks();
     const wrapped = await wrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), signingJWK, encJWK);
     await expect(unwrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), wrapped)).rejects.toThrow();
-  });
-
-  it("round-trips under a PIN and rejects the wrong one", async () => {
-    const { signingJWK, encJWK } = await generateIdentityJwks();
-    const wrapped = await wrapKeysWithPin("correct horse", signingJWK, encJWK);
-
-    expect(wrapped.kdf).toBe("pbkdf2");
-    expect(wrapped.salt).toBeTruthy();
-
-    const opened = await unwrapKeysWithPin("correct horse", wrapped);
-    expect(opened.signingJWK).toEqual(signingJWK);
-    await expect(unwrapKeysWithPin("wrong", wrapped)).rejects.toThrow();
   });
 });

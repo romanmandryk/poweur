@@ -227,6 +227,52 @@ func TestPolicyContactAcceptRouting(t *testing.T) {
 	mustStatus(t, resp, http.StatusForbidden, "normal message while requested")
 }
 
+// A `contacts_only` inbox may still start a handshake, so it has to be able
+// to hear the answer. Without this rule the accept bounces, the requester's
+// contacts stay `requested`, and their own policy then bounces every message
+// the person who accepted them sends — a stalemate neither side can see.
+func TestPolicyContactAcceptReachesContactsOnlyRequester(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
+	aliceTok := mintDAVToken(t, ts, alice, "", "")
+
+	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_only"}`)
+	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"requested"}]}`)
+
+	// Bob answers the request alice sent him: queued, not rejected.
+	resp, acceptID := postTypedMessage(t, ts, bob, alice.name, "sys.contact.accept", "yes")
+	out := mustStatus(t, resp, http.StatusAccepted, "accept answering our own request")
+	if out["status"] != "request_queued" {
+		t.Fatalf("accept outcome: %v", out)
+	}
+
+	// It rides the requests queue, not the message stream — a closed inbox
+	// stays closed to the message stream even for this.
+	inbox := challengeSigned(t, ts, alice, "/messages/"+alice.name)
+	if msgs, _ := inbox["messages"].([]any); len(msgs) != 0 {
+		t.Fatalf("accept leaked into a contacts_only inbox: %v", msgs)
+	}
+	reqs := challengeSigned(t, ts, alice, "/requests/"+alice.name)
+	list, _ := reqs["requests"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("requests queue: %v", reqs)
+	}
+	if first, _ := list[0].(map[string]any); first["id"] != acceptID || first["type"] != "sys.contact.accept" {
+		t.Fatalf("queued accept: %v", list[0])
+	}
+
+	// The rule is narrow: only an accept, and only from someone we asked.
+	resp, _ = postTypedMessage(t, ts, carol, alice.name, "sys.contact.accept", "gotcha")
+	mustStatus(t, resp, http.StatusForbidden, "unsolicited accept under contacts_only")
+	resp, _ = postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "let me in")
+	mustStatus(t, resp, http.StatusForbidden, "request under contacts_only")
+	resp, _ = postTypedMessage(t, ts, bob, alice.name, "", "sneaky normal message")
+	mustStatus(t, resp, http.StatusForbidden, "normal message while requested")
+}
+
 func TestTypedMessageSignatureBindsType(t *testing.T) {
 	server, ts := newDAVTestServer(t, 0, 0)
 	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")

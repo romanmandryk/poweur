@@ -83,7 +83,7 @@ var validKeystoreKinds = map[string]bool{
 }
 
 var validKeystoreWraps = map[string]bool{
-	"prf": true, "pin": true, "passphrase": true, "native": true,
+	"prf": true, "passphrase": true, "native": true,
 }
 
 // wrappedDigest is the base64url SHA-256 of the raw wrapped ciphertext, bound

@@ -23,7 +23,10 @@ function fakePlugin({ invalidated = false } = {}) {
   return {
     prompts,
     secrets,
-    async setSecret({ key, value, gate }) { secrets.set(key, { value, gate }); },
+    async setSecret({ key, value, gate, reason }) {
+      prompts.push(reason);
+      secrets.set(key, { value, gate });
+    },
     async getSecret({ key, reason }) {
       prompts.push(reason);
       if (invalidated) return { value: null };
@@ -65,7 +68,7 @@ describe("in a shell with a keystore", () => {
     const wrapped = await wrapKeysNative(
       "alice.poweur.net", keys.signingJWK, keys.encJWK, "seedbytes",
     );
-    // The record is the same shape as prf/pbkdf2 — only `kdf` differs, which
+    // The record is the same shape as prf — only `kdf` differs, which
     // is what lets the rest of the app stay ignorant of custody.
     expect(wrapped.kdf).toBe("native");
     expect(wrapped.iv).toBeTruthy();
@@ -118,6 +121,21 @@ describe("in a shell with a keystore", () => {
     install(fakePlugin({ invalidated: true }));
     await expect(unwrapKeysNative("alice.poweur.net", wrapped))
       .rejects.toThrow(/Add the device again|recovery kit/);
+  });
+
+  it("says what storing is authorising, because Android prompts on write too", async () => {
+    const plugin = fakePlugin();
+    install(plugin);
+    // Android's Keystore gates the key rather than the direction, so writing
+    // under a biometric gate raises a prompt. Without a reason the user is
+    // asked to authenticate for no stated purpose.
+    await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, null, {
+      reason: "Protect alice",
+    });
+    expect(plugin.prompts).toContain("Protect alice");
+
+    await wrapKeysNative("bob.poweur.net", keys.signingJWK, keys.encJWK);
+    expect(plugin.prompts.filter(Boolean).every((reason) => reason.length > 0)).toBe(true);
   });
 
   it("survives a plugin that throws when asked about biometrics", async () => {

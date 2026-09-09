@@ -3,7 +3,7 @@
  *
  * This stores key material in plain `localStorage`, which any script on the
  * origin can read. It is here for demos, tests and throwaway identities — a
- * production browser app should wrap keys with a passkey PRF or a PIN
+ * production browser app should wrap keys with a passkey PRF
  * (see `apps/web/js/passkey.js`) and implement `KeyStore` over that instead.
  */
 

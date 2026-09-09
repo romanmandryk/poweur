@@ -13,7 +13,7 @@ so a behaviour you see here can be traced to the spec that defines it.
 
 It is vanilla JS with no build step. The protocol lives in
 [`@poweur/client`](../clients/js-sdk.md), vendored into the served tree; the app owns
-key custody (passkey/PIN) and the screens.
+key custody (passkey PRF, or the mobile shell's native keystore) and the screens.
 
 ## Five destinations
 
@@ -31,8 +31,9 @@ same UI.
 ## First run
 
 Creating an identity (Apps → Add new ID, or the welcome screen) registers it, wraps the
-keys under a passkey or PIN, and enrolls this browser in the relay keystore so clearing
-site data is not fatal — see [key management](../security/key-management.md). Starting
+keys under a passkey's PRF secret, and enrolls this browser in the relay keystore so clearing
+site data is not fatal — see [key management](../security/key-management.md). A browser or
+authenticator without PRF is refused (use Apple or Google passkeys, or the mobile app). Starting
 from nothing on a hosted relay, [claiming an ID](claim-your-id.md) is the flow that gets
 you here.
 

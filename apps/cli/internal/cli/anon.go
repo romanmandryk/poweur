@@ -164,8 +164,13 @@ func runAnon(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	// This queue drains like the inbox, so whatever opens is archived here or
+	// nowhere. Anonymous records keep an empty sender on purpose: the archive
+	// must not invent a name the relay could not verify.
+	var archive []idpkg.HistoryRecord
 	for _, m := range messages {
 		display := "[encrypted: no local encryption key]"
+		opened := false
 		if encPriv != nil && m.Encryption != nil {
 			plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
 				Ciphertext:         m.Payload,
@@ -176,10 +181,16 @@ func runAnon(args []string, stdout, stderr io.Writer) int {
 				display = "[decrypt failed: " + err.Error() + "]"
 			} else {
 				display = string(plaintext)
+				opened = true
 			}
 		}
 		fmt.Fprintf(stdout, "ANONYMOUS\t%s\t%s\n", m.Timestamp, display)
+		if opened {
+			archive = append(archive, historyRecordFrom(identityValue, idpkg.HistoryQueueAnonymous,
+				m.ID, "", identityValue, m.Timestamp, "", display))
+		}
 	}
+	archiveRecords(*useIdentity, archive, stderr)
 	fmt.Fprintln(stdout, "\nnote: anonymous messages are unauthenticated — treat content accordingly")
 	return 0
 }

@@ -1,0 +1,112 @@
+[
+  {
+    "name": "empty",
+    "raw": {
+      "version": 1,
+      "conversations": {}
+    },
+    "valid": true,
+    "unread": {
+      "anonymous": 1,
+      "bob.example.org": 2
+    },
+    "marks": {
+      "bob.example.org": {
+        "timestamp": "2026-01-15T09:30:00Z",
+        "id": "m2"
+      }
+    }
+  },
+  {
+    "name": "partly-read",
+    "raw": {
+      "version": 1,
+      "conversations": {
+        "bob.example.org": {
+          "timestamp": "2026-01-15T09:00:00Z",
+          "id": "m1"
+        }
+      }
+    },
+    "valid": true,
+    "unread": {
+      "anonymous": 1,
+      "bob.example.org": 1
+    },
+    "marks": {
+      "bob.example.org": {
+        "timestamp": "2026-01-15T09:30:00Z",
+        "id": "m2"
+      }
+    }
+  },
+  {
+    "name": "fully-read",
+    "raw": {
+      "version": 1,
+      "conversations": {
+        "bob.example.org": {
+          "timestamp": "2026-01-15T09:30:00Z",
+          "id": "m2"
+        },
+        "anonymous": {
+          "timestamp": "2026-01-15T10:00:00Z",
+          "id": "m4"
+        }
+      }
+    },
+    "valid": true,
+    "marks": {
+      "anonymous": {
+        "timestamp": "2026-01-15T10:00:00Z",
+        "id": "m4"
+      },
+      "bob.example.org": {
+        "timestamp": "2026-01-15T09:30:00Z",
+        "id": "m2"
+      }
+    }
+  },
+  {
+    "name": "same-second",
+    "raw": {
+      "version": 1,
+      "conversations": {
+        "bob.example.org": {
+          "timestamp": "2026-01-15T09:00:00Z"
+        }
+      }
+    },
+    "valid": true,
+    "unread": {
+      "anonymous": 1,
+      "bob.example.org": 2
+    },
+    "marks": {
+      "bob.example.org": {
+        "timestamp": "2026-01-15T09:30:00Z",
+        "id": "m2"
+      }
+    }
+  },
+  {
+    "name": "bad-timestamp",
+    "raw": {
+      "version": 1,
+      "conversations": {
+        "bob.example.org": {
+          "timestamp": "yesterday"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "bad-version",
+    "raw": {
+      "version": 7,
+      "conversations": {}
+    },
+    "valid": false
+  }
+]

@@ -17,11 +17,12 @@
 |------|--------|-------|
 | E15-T1 Information architecture & shared components | **done** | five destinations, IdentityInput / AudiencePicker / ProfileCard, relay URL off `location.origin` |
 | Keys, devices & recovery (E11's web surface) | **done** | seed-derived identities, keystore inventory, recovery kit, the E11-T3 ceremony |
-| E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog |
+| E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog. **Friction fixed since manual testing:** a bare handle is completed with your own domain (a hosted relay puts everyone under one, so typing `alice` failed validation with "that does not look like a Poweur ID"); the add-contact buttons resolve on press instead of staying disabled behind a debounced lookup, which left someone who typed a name and pressed the button they were looking at with nothing at all; a queued request's intro is decrypted and shown |
 | E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send |
 | E15-T4 Files explorer & sharing | **done** | chunked upload, share dialog, received shares, changes-feed refresh |
 | E15-T5 Profile, first-run onboarding & polish | **done** | profile editor, three skippable steps, a11y pass, walkthrough docs |
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
+| Durable messages & honest badges ([EPIC-009](EPIC-009-messaging-upgrades.md) E09-T1's web surface) | **done** | the message store was memory-only and the relay drains on pickup, so a refresh lost messages *permanently*; the app now redraws from the archive at `poweur-sys/private/messages/`, keeps its own sent copies, and counts unread from read marks rather than from how much it happens to hold. `test/e2e/durability.spec.js` asserts each of these after a reload |
 | **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage |
 | **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field |
 | **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed → passkey only; unclaimed → prefilled and locked |
@@ -48,8 +49,8 @@ audience picker, policy controls) that EPIC-012's contact-form/website work buil
   bottom nav and slide-up panel system (`#panel-root`/`#panel-backdrop`). The protocol lives
   in `@poweur/client` (E15-T6); `js/vault.js` holds key custody and `js/client.js` builds the
   one client every screen uses. Tested with Vitest (unit + live-relay) and Playwright (e2e).
-- **Shipped modules with UI:** identity create/import/unlock (passkey + PIN,
-  `js/passkey.js`/`js/crypto.js`), messaging compose + inbox (`js/messaging.js`), a file
+- **Shipped modules with UI:** identity create/import/unlock (passkey PRF; PIN is a non-goal,
+  `js/passkey.js`/`js/vault.js`), messaging compose + inbox (`js/messaging.js`), a file
   browser (`js/files.js` — list/upload/download/mkdir/rename/delete against DAV) reachable
   but not yet a first-class destination.
 - **Shipped on the relay, NOT surfaced in the web app:**
@@ -419,7 +420,7 @@ package), otherwise last, as a refactor behind the existing test suites.*
       `js/messaging.js`, `js/files.js`, `js/pow.js`); `js/app.js` keeps only UI. `js/client.js` is
       the single place a `PoweurClient` is built, which is what makes the relay-URL rule structural
 - [x] Keep `js/passkey.js` + `js/storage.js` and expose them as the browser `Signer`/`KeyStore`
-      implementation the package expects — passkey/PIN gating stays a web-app concern and raw keys
+      implementation the package expects — passkey PRF gating stays a web-app concern and raw keys
       never cross the package boundary. `js/vault.js` holds the custody half of the old `crypto.js`:
       the wrapped-blob format is byte-identical (HKDF salt `poweur-key-wrapping-v1`, AES-256-GCM,
       `{signingJWK,encJWK}`) so shipped identities keep opening and EPIC-011 can re-wrap the same
@@ -526,14 +527,45 @@ for it.
 to the generic welcome rather than to a guessed mode. A landing page offering to claim a name
 on a relay we cannot reach is worse than one that says it cannot reach the relay.
 
-#### Claimed-ness is a fetch, not a guess
+#### Claimed-ness is a fetch — but "absent" is not "claimable"
 
-`GET /hosted/availability?handle=&domain=` (E18-T2) already answers this: `taken` means
-claimed, and the same call carries the policy the form needs. It is rate-limited, it is a
-verdict rather than a boolean, and it needs no new endpoint — which keeps this epic's
-"no new relay endpoints" rule intact. For a host outside `hosted_domains` it answers
-`domain_not_hosted`, so that case falls back to `GET /identities/{host}`, whose 200/404 is the
-same question asked the only other way the relay can answer it.
+The obvious probe is the identity's own published documents: registration serves
+`/.well-known/poweur/id.json` (and `/pubkey`, `/enckey`) Host-routed off the identity's own
+origin ([`wellknown.go:17`](../apps/api/internal/relay/wellknown.go)), so a 404 there looks like
+"unclaimed" for free. Three reasons the front doors use `GET /hosted/availability` (E18-T2)
+instead, recorded here because it is a reasonable thing to want to simplify away:
+
+1. **It is not extra state.** `Exists()` and `DocumentJSON()` are two reads of the *same*
+   `IdentityStore` map ([`identity_store.go:189`](../apps/api/internal/storage/identity_store.go)) —
+   the registration record the relay keeps in order to verify signatures, route DAV and serve
+   `id.json` at all. Availability adds no rows and no writes; it is a different query over
+   state that has to exist either way.
+2. **Absent ≠ claimable, and that gap is a spent passkey.** `admin.poweur.net`,
+   `www.poweur.net` and `pay.poweur.net` all 404 and none of them can be claimed — they are
+   reserved (E18-T1). A document probe would render "claim this name" on those hosts, take the
+   user through a WebAuthn ceremony, and have `POST /identities` refuse: exactly the ordering
+   failure E18-T2 was built to remove. Availability answers *taken / reserved / blocked /
+   too_short / charset* and returns the policy block E15-T12 validates against.
+3. **Host routing does not work in the harness.** The well-known route needs the browser to
+   send a `Host` the relay can map to a tree; the test relay is one listener on `127.0.0.1`
+   with no DNS — the same limitation this epic already recorded for `profile.json` under
+   E15-T1. Availability is query-addressed, and `GET /identities/{host}` is the path-addressed
+   twin, so both are drivable in e2e.
+
+**Do not probe `profile.json` for this.** It is optional by design — E15-T5's onboarding is
+skippable and skipping writes nothing — so its absence means "no profile", not "unclaimed", and
+it additionally requires DAV to be enabled. Only `id.json` / `pubkey` track registration.
+
+For a host **outside** `hosted_domains` availability answers `domain_not_hosted`, which is the
+honest answer: claimability there is not this relay's to decide. That case falls back to
+`GET /identities/{host}`, whose 200/404 is claimed-ness asked the only other way, with no
+claim offered on a 404.
+
+*Noted while checking this:* neither `/.well-known/poweur/id.json` nor `GET /identities/{id}`
+is rate-limited, so the availability endpoint's cost-weighted bucket (E18-T2) caps the
+*expensive* probe while a cheaper one sits beside it. Not a vulnerability — a public registry
+is enumerable by design and E18-T2 says so — but the cost argument reads stronger than it is.
+Worth a look in EPIC-013's abuse pass rather than here.
 
 #### One relay-side change, and it is configuration
 
@@ -607,7 +639,9 @@ the identity's own origin with the fragment cleared.
 
 ### E15-T9 — The identity host: sign in, or claim this name
 
-- [ ] Resolve claimed-ness once on entering `identity` mode, by the rule above
+- [ ] Resolve claimed-ness once on entering `identity` mode, by the rule above —
+      availability for a host under `hosted_domains`, `GET /identities/{host}` otherwise,
+      and **no claim offered on a `reserved` or `blocked` verdict**, only on `available`
 - [ ] **Claimed** → a sign-in screen for exactly this identity: avatar, handle and domain from
       its published profile (E15-T5's resolver), one **Sign in with passkey**, one **Add this
       device** (E11-T3's ceremony), and **no control that takes a typed identity**. "Add new ID"
@@ -694,8 +728,8 @@ screenshot diffing across machines is a flake source this suite does not need.
       ([`app.js:1898`](../apps/web/js/app.js)): the button says why it cannot check instead of
       quietly enabling itself
 - [ ] **Passkey support is checked before the name, not after.** E11 already declines to enroll
-      when the browser hides `getPublicKey()`; the landing should say so up front and offer the
-      PIN path, rather than after a name has been chosen
+      when the browser hides `getPublicKey()`; the landing should say so up front and refuse
+      authenticators without PRF, rather than after a name has been chosen
 - [ ] Paste tolerance in the handle field: `alice.poweur.net`, `@alice`, `Alice`, and trailing
       whitespace all normalise to `alice`. A field with a visible suffix invites pasting the
       whole thing

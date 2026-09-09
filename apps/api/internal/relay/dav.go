@@ -43,28 +43,39 @@ func (s *Server) lockSystem(identity string) webdav.LockSystem {
 
 // resolveDAVTree extracts (owner, prefix) from a /dav request. Two forms:
 //
-//	/dav/<identity>/<path>   canonical
+//	/dav/<identity>/<path>   canonical (what clients always send)
 //	Host: <identity> /dav/<path>   vanity alias via Host-routing
+//
+// On a shared wildcard relay the SPA origin *is* the identity Host, and the
+// client still emits the canonical path. When both apply, the path wins:
+// a first segment that names a hosted identity is canonical; otherwise Host
+// selects the owner (vanity, for Finder mounts at https://<identity>/dav/).
 func (s *Server) resolveDAVTree(r *http.Request) (owner, prefix string, ok bool) {
 	host := r.Host
 	if h, _, err := splitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	seg := firstDavSegment(r.URL.Path)
 	if host != "" && s.identities.Exists(host) {
+		if seg != "" && s.identities.Exists(seg) {
+			return seg, "/dav/" + seg, true
+		}
 		return host, "/dav", true
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/dav")
-	rest = strings.TrimPrefix(rest, "/")
-	seg := rest
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		seg = rest[:i]
-	}
-	seg = strings.ToLower(seg)
 	if seg == "" {
 		return "", "", false
 	}
 	return seg, "/dav/" + seg, true
+}
+
+func firstDavSegment(path string) string {
+	rest := strings.TrimPrefix(path, "/dav")
+	rest = strings.TrimPrefix(rest, "/")
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.ToLower(rest)
 }
 
 // davMethodAccess classifies WebDAV methods into read/write for the

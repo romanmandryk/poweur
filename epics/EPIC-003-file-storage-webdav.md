@@ -10,7 +10,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E03-T1 Storage-layer spec | **done** | [`apps/docs/docs/files/storage-model.md`](../apps/docs/docs/files/storage-model.md) |
-| E03-T2 WebDAV server | **done** | `/dav/{identity}/` + Host vanity; Class 2 in-mem locks; etags; quota 507 |
+| E03-T2 WebDAV server | **done** | `/dav/{identity}/` + Host vanity; canonical path wins when both apply (identity Host + `/dav/<id>/…`); Class 2 in-mem locks; etags; quota 507 |
 | E03-T3 Auth bridge | **done** | `POST /auth/dav-token`, app passwords in `poweur-sys/relay/`, CLI `poweur dav` |
 | E03-T4 Cross-identity `/public` | **done** | Visitor tokens + access.log; integration `TestINT_DAV_02` |
 | E03-T5 Web file browser | **done** | shipped as `apps/web/js/files.js` + a SPA panel; since E15-T6/T1 the DAV client is `packages/client-ts/src/files.ts` and the browser is a first-class Files destination. Vitest/Playwright coverage |

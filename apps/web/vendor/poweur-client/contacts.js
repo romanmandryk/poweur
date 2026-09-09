@@ -7,7 +7,7 @@
  * whose resolved key later changes without a signed rotation is refused, the
  * known-hosts model.
  */
-import { parseEd25519PublicKey } from "./crypto/index.js";
+import { decryptMessage, parseEd25519PublicKey } from "./crypto/index.js";
 import { rfc3339, stripKeyPrefix, toBase64url, withEd25519Prefix } from "./encoding.js";
 import { PoweurError } from "./errors.js";
 import { resolveIdentity } from "./resolve.js";
@@ -170,7 +170,16 @@ export class Contacts {
  * Drain the pending contact-request queue. Challenge-signed with the identity
  * key, the same shape as the inbox fetch.
  */
-export async function fetchRequests(client, signer) {
+/**
+ * Drain the pending contact-request queue.
+ *
+ * With a `decryptor`, each entry's intro is opened into `plaintext`. Under
+ * `contacts_and_requests` — the policy humans are told to pick — the queue is
+ * the *only* place a request appears, so leaving the intro sealed means being
+ * asked to accept or block a stranger with nothing but their name to go on.
+ * The envelope is an ordinary E2E-encrypted message; only the routing differs.
+ */
+export async function fetchRequests(client, signer, decryptor) {
     const { challenge } = await client.request({
         method: "GET",
         path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
@@ -185,5 +194,19 @@ export async function fetchRequests(client, signer) {
             "X-Poweur-Signature": signature,
         },
     });
-    return response.requests ?? [];
+    const requests = response.requests ?? [];
+    if (!decryptor)
+        return requests;
+    const key = await decryptor.privateKeyBytes();
+    return requests.map((entry) => {
+        if (!entry.encryption)
+            return { ...entry, plaintext: null };
+        try {
+            return { ...entry, plaintext: decryptMessage(key, entry.payload, entry.encryption) };
+        }
+        catch {
+            // An intro we cannot read is not a request we should hide.
+            return { ...entry, plaintext: null };
+        }
+    });
 }

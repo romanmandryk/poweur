@@ -18,8 +18,10 @@ commit anything, and one passkey carries you from the signup host to your own.
 2. **Type a name.** It is checked as you type. "Taken", "reserved by the operator", "use
    only a-z, 0-9 and hyphen" — whatever the answer is, it arrives *before* anything else
    happens, and the Next button stays disabled until the relay says the name is free.
-3. **Create a passkey.** Touch ID, Windows Hello, a security key — whatever your device
-   offers. This is the only ceremony in the flow.
+3. **Create a passkey with PRF.** Touch ID, Face ID, Windows Hello, or a security key
+   that implements the WebAuthn PRF extension (Apple Passwords / iCloud Keychain, or
+   Google Password Manager). Password-manager passkeys that cannot emit PRF are
+   refused — there is no PIN fallback. This is the only ceremony in the flow.
 4. **You land on your own address.** `alice.poweur.net/app/`, signed in, with the setup
    flow ([walkthrough](/web/walkthrough#first-run)) waiting.
 

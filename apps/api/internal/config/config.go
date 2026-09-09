@@ -105,7 +105,19 @@ type Config struct {
 	// no identity yet (EPIC-018 E18-T3). Defaults to `id.<first hosted
 	// domain>`; empty when nothing is hosted here. It is the *same* SPA on a
 	// dedicated host, not a second app.
+	//
+	// It stays a single value because it is the *canonical* launcher — the one
+	// a hand-off targets and the one docs name. LauncherHosts below is the set
+	// that actually serves the flow.
 	LauncherHost string
+	// LauncherHosts is every host that serves the claim flow (EPIC-015 E15-T7).
+	// Defaults to `id.<d>` *and* the bare `<d>` for each hosted domain: someone
+	// typing the product's own domain is the commonest way to arrive, and
+	// before this they were served the JSON service banner.
+	//
+	// LauncherHost is always the first entry, so a deployment that sets only
+	// LAUNCHER_HOST keeps exactly today's behaviour.
+	LauncherHosts []string
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
 	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
@@ -199,6 +211,7 @@ func FromEnv() Config {
 		RegistrationPowBits:     int(getenvInt64("REGISTRATION_POW_BITS", 0)),
 		NamePolicy:              namePolicyFromEnv(),
 		LauncherHost:            launcherHostFromEnv(),
+		LauncherHosts:           launcherHostsFromEnv(),
 		NameBlockedFile:         strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
 		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
@@ -252,6 +265,62 @@ func launcherHostFromEnv() string {
 		}
 	}
 	return ""
+}
+
+// launcherHostsFromEnv resolves the set of hosts that serve the claim flow.
+//
+// LAUNCHER_HOSTS wins when set. Otherwise an explicit LAUNCHER_HOST stays a set
+// of one — an operator who named a single host meant a single host, and
+// silently adding the apex to their deployment would serve the SPA somewhere
+// they did not ask for. Only the *default* expands to both `id.<d>` and `<d>`.
+func launcherHostsFromEnv() []string {
+	if explicit := splitCSV(os.Getenv("LAUNCHER_HOSTS")); len(explicit) > 0 {
+		return normalizeHosts(explicit)
+	}
+	if explicit := strings.TrimSpace(os.Getenv("LAUNCHER_HOST")); explicit != "" {
+		return normalizeHosts([]string{explicit})
+	}
+	var hosts []string
+	for _, domain := range splitCSV(os.Getenv("HOSTED_DOMAINS")) {
+		parent := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+		if parent == "" {
+			continue
+		}
+		hosts = append(hosts, "id."+parent, parent)
+	}
+	return normalizeHosts(hosts)
+}
+
+// normalizeHosts lowercases, strips the root dot and drops duplicates while
+// keeping first-seen order — the first entry is the canonical launcher.
+func normalizeHosts(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, h := range in {
+		host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(h), "."))
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		out = append(out, host)
+	}
+	return out
+}
+
+// IsLauncherHost reports whether host serves the claim flow. Host may carry a
+// port and a trailing root dot; both are stripped before comparison.
+func (c Config) IsLauncherHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	if host == "" {
+		return false
+	}
+	for _, h := range c.LauncherHosts {
+		if host == h {
+			return true
+		}
+	}
+	// A Config literal built in a test may set LauncherHost alone.
+	return c.LauncherHost != "" && host == strings.ToLower(strings.TrimSuffix(c.LauncherHost, "."))
 }
 
 // getenvBoolDefault differs from getenvBool: these two flags default to true,

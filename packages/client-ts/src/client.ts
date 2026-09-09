@@ -13,6 +13,13 @@ import { Contacts, fetchRequests } from "./contacts.js";
 import { DavClient, mintDavToken } from "./files.js";
 import { RelayClient, type RelayClientOptions } from "./http.js";
 import { EnrollApi } from "./enroll.js";
+import {
+  HISTORY_QUEUE_ANONYMOUS,
+  HISTORY_QUEUE_INBOX,
+  HISTORY_QUEUE_SENT,
+  MessageHistory,
+  type HistoryRecord,
+} from "./history.js";
 import { IdentityApi } from "./identity.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
@@ -94,6 +101,109 @@ export class PoweurClient {
   }
 
   /**
+   * The archive under `poweur-sys/private/messages/` (EPIC-009 E09-T1).
+   *
+   * Requires a decryptor: history is sealed to the identity's own encryption
+   * key, so a client that cannot read messages cannot keep them either.
+   */
+  async history(): Promise<MessageHistory> {
+    if (!this.decryptor) {
+      throw new PoweurError("invalid_argument", "message history needs a decryptor to seal to");
+    }
+    return new MessageHistory(await this.dav(), this.signer.identity, this.decryptor);
+  }
+
+  /**
+   * Archive whatever just came off a queue, best-effort.
+   *
+   * Never allowed to throw: the pickup already drained the relay, so failing
+   * the caller here would lose the message twice. `archived`/`lost` say what
+   * happened so a UI can warn rather than pretend.
+   */
+  async archive(records: HistoryRecord[]): Promise<{ archived: number; lost: number }> {
+    if (!records.length) return { archived: 0, lost: 0 };
+    try {
+      const history = await this.history();
+      const { written, failed } = await history.appendAll(records);
+      return { archived: written, lost: failed };
+    } catch {
+      return { archived: 0, lost: records.length };
+    }
+  }
+
+  /**
+   * `inboxAndAck` plus the archive write — the call a durable client wants.
+   *
+   * Reading and keeping are one step on purpose. Any gap between them is a
+   * window where the relay has forgotten a message and nothing has written it
+   * down, and a client that offers the two separately will eventually take it.
+   */
+  async inboxAndArchive(): Promise<{
+    messages: InboxMessage[];
+    acks: Ack[];
+    acked: string[];
+    archived: number;
+    lost: number;
+  }> {
+    const { messages, acks, acked } = await this.inboxAndAck();
+    const { archived, lost } = await this.archive(
+      messages
+        .filter((m) => m.plaintext !== null)
+        .map((m) => ({
+          id: m.id,
+          sender: m.sender ?? "",
+          recipient: m.recipient || this.signer.identity,
+          timestamp: m.timestamp,
+          ...(m.type ? { type: m.type } : {}),
+          queue: HISTORY_QUEUE_INBOX as typeof HISTORY_QUEUE_INBOX,
+          body: m.plaintext ?? "",
+        })),
+    );
+    return { messages, acks, acked, archived, lost };
+  }
+
+  /** Send, then keep our own copy — the relay never hands a sender one back. */
+  async sendAndArchive(
+    recipient: string,
+    plaintext: string,
+    options: SendOptions = {},
+  ): Promise<SendResult & { archived: number; lost: number }> {
+    const result = await this.send(recipient, plaintext, options);
+    const { archived, lost } = await this.archive([
+      {
+        id: result.message.id,
+        sender: this.signer.identity,
+        recipient: result.message.recipient,
+        timestamp: result.message.timestamp,
+        ...(options.type ? { type: options.type } : {}),
+        queue: HISTORY_QUEUE_SENT,
+        body: plaintext,
+      },
+    ]);
+    return { ...result, archived, lost };
+  }
+
+  /**
+   * Drain the anonymous queue and keep it. Anonymous records carry no sender:
+   * the archive must not invent a name the relay could not verify.
+   */
+  async anonAndArchive(): Promise<{ messages: Awaited<ReturnType<PoweurClient["anon"]>>; archived: number; lost: number }> {
+    const messages = await this.anon();
+    const { archived, lost } = await this.archive(
+      messages
+        .filter((m) => m.plaintext !== null)
+        .map((m) => ({
+          id: m.id,
+          recipient: this.signer.identity,
+          timestamp: m.timestamp,
+          queue: HISTORY_QUEUE_ANONYMOUS as typeof HISTORY_QUEUE_ANONYMOUS,
+          body: m.plaintext ?? "",
+        })),
+    );
+    return { messages, archived, lost };
+  }
+
+  /**
    * Fetch the inbox and emit a tick-2 receipt for every message that actually
    * decrypted — proof it reached a client, not just a relay. Messages we
    * could not decrypt stay at tick 1 on the sender's side, deliberately.
@@ -144,8 +254,9 @@ export class PoweurClient {
     return new Contacts(await this.dav(), this.#resolveOptions);
   }
 
+  /** Pending contact requests, with their intros decrypted when we can. */
   requests(): Promise<ContactRequestEntry[]> {
-    return fetchRequests(this.relay, this.signer);
+    return fetchRequests(this.relay, this.signer, this.decryptor);
   }
 
   /**

@@ -16,7 +16,7 @@ import { createWebIdentity, unlock } from "./helpers/identity.mjs";
 
 import { clientFor, identityApiFor, lookup } from "../js/client.js";
 import { loadIdentityRecord, saveIdentityRecord, relayUrlFor, loadSessionRecord } from "../js/storage.js";
-import { unwrapKeysWithPin } from "../js/vault.js";
+import { unwrapKeysAES } from "../js/vault.js";
 
 describe("web client ↔ real relay", () => {
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
@@ -46,11 +46,11 @@ describe("web client ↔ real relay", () => {
     expect(JSON.stringify(record)).not.toContain(alice.signingJWK.d);
   });
 
-  it("reopens the wrapped keys with the right PIN only", async () => {
+  it("reopens the wrapped keys with the wrap secret only", async () => {
     const { encryptedKeys } = loadIdentityRecord(alice.identity);
-    const opened = await unwrapKeysWithPin("test-pin", encryptedKeys);
+    const opened = await unwrapKeysAES(alice.wrapSecret, encryptedKeys);
     expect(opened.signingJWK).toEqual(alice.signingJWK);
-    await expect(unwrapKeysWithPin("wrong-pin", encryptedKeys)).rejects.toThrow();
+    await expect(unwrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), encryptedKeys)).rejects.toThrow();
   });
 
   it("resolves an identity web-first through the relay", async () => {
@@ -74,8 +74,8 @@ describe("web client ↔ real relay", () => {
           publicKey: who.publicKey,
           encPublicKey: who.encPublicKey,
           relay: relay.baseUrl,
-          encryptedKeys: { kdf: "pbkdf2" },
-          supportsPRF: false,
+          encryptedKeys: { kdf: "prf" },
+          supportsPRF: true,
           createdAt: new Date().toISOString(),
         });
       }

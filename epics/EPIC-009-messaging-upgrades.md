@@ -48,9 +48,33 @@ not crypto changes (except groups, which get their own carefully-scoped task).
       a `sys.delivery.failed` ack
 - [x] `TestINT_SPOOL_01`: a message posted, never picked up, and still delivered after the
       relay restarts on the same data dir — and not delivered twice
-- [ ] **Still open:** client-side *history* (`poweur-sys/private/messages/…`). The relay
-      half is done; where a client keeps what it has already read is a separate decision
-      and belongs with the messages store the web app now has in memory
+- [x] Client-side *history*, at `poweur-sys/private/messages/` — the format is canonical in
+      `packages/identity/history.go` with conformance vectors (`history-paths`,
+      `history-read-state`), implemented in the Go CLI (`poweur history`), in
+      `@poweur/client` (`MessageHistory`, `inboxAndArchive`, `sendAndArchive`,
+      `anonAndArchive`) and in the web app, which now redraws from it after a reload
+
+**How it is stored, and why that way.** One file per message under a month shard, named by a
+sort key so a plain listing is chronological, sealed to the owner's own X25519 key — the same
+envelope messages already use, with the owner as their own recipient. That needs no new key
+custody (every identity has that key), makes `poweur-sys/private`'s "the relay stores but must
+not read" a fact rather than a contract, and lets any enrolled device open the archive. Records
+are write-once and their path is a pure function of `(timestamp, id)`, so two devices picking up
+the same message write identical bytes to one path and there is no merge to get wrong. The
+sender's own copy is archived too: the relay never hands a sender their own message back, so
+without it a conversation shows only one side.
+
+**Read marks are positions, not timestamps.** `read-state.json` records `(timestamp, id)` per
+peer. Message timestamps are RFC3339 to the second, so two messages a moment apart routinely
+share one, and a timestamp-only mark silently swallows the second. Comparing on the same total
+order `SortHistory` imposes is what lets an unread count actually reach zero — and the web
+app's conversation badge, which used to be `messages.length`, now counts from it.
+
+**Found on the way: an accepted anonymous message published no event.** `handleAnonMessage`
+never called `notify`, so a client sitting on the Messages screen learned about anonymous mail
+only when something unrelated caused a re-render. It now publishes its own event kind (`anon`)
+rather than `message`: told `message`, a client fetches the inbox — which by design never holds
+an anonymous message — and leaves the tray that has something silent.
 
 **The expiry notice is unsigned, and says so.** Only the relay can honestly report that it
 gave up holding something, so the `sys.delivery.failed` ack it generates carries no
@@ -64,10 +88,11 @@ stream reconnecting behind a poll would have hit it constantly. Challenges are n
 **by value** (the caller echoes the one it was issued), with the newest-wins behaviour kept
 for WebAuthn assertions, which carry the challenge inside signed client data instead.
 
-**Acceptance:** restart-loss test passes. Multi-device pickup is now *possible* rather than
-demonstrated — the cursor read no longer consumes, so two devices can both read — but it is
-untested until a second device has somewhere to record its own cursor (the history item
-above).
+**Acceptance:** restart-loss test passes. Multi-device pickup is demonstrated:
+`TestINT_HISTORY_01` reads a message once, throws the local home away, and a second device
+holding only the identity reads the same archive; `TestINT_HISTORY_03` shows read marks
+surviving to it. `apps/web/test/e2e/durability.spec.js` asserts the same properties through the
+browser, after a reload each time — which is the failure people actually hit.
 
 ### E09-T2 — Push delivery — **done** (as SSE, not WebSocket)
 

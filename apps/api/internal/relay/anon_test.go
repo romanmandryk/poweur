@@ -116,6 +116,39 @@ func TestAnonNoChallengeFlow(t *testing.T) {
 	}
 }
 
+// An accepted anonymous message must wake a listening client, and wake it to
+// the right queue. Told "message", a client fetches the inbox — which by
+// design never holds an anonymous message — and the anon tray stays silent
+// until something unrelated makes the client look again.
+func TestAnonDeliveryNotifiesItsOwnQueue(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	tok := mintDAVToken(t, ts, alice, "", "")
+	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+		`{"version":1,"mode":"contacts_only","anonymous":{"allow":true,"challenge":"none"}}`)
+
+	id, events, ok := server.hub.subscribe(alice.name, 0)
+	if !ok {
+		t.Fatal("subscribe refused")
+	}
+	defer server.hub.unsubscribe(alice.name, id)
+
+	resp := postAnon(t, ts, "alice.poweur.net", "anon says hi", "", "")
+	mustStatus(t, resp, http.StatusAccepted, "anon with challenge none")
+
+	select {
+	case event := <-events:
+		if event.Type != "anon" {
+			t.Fatalf("event kind = %q, want anon", event.Type)
+		}
+		if event.Identity != alice.name || event.MessageID == "" {
+			t.Fatalf("event: %+v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("an accepted anonymous message published no event")
+	}
+}
+
 func TestAnonPowChallengeFlow(t *testing.T) {
 	server, ts := newDAVTestServer(t, 0, 0)
 	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")

@@ -13,10 +13,10 @@ import { crypto as sdk, toBase64url } from "@poweur/client";
 import "./helpers/browser-globals.mjs";
 import {
   buildRecoveryKit, verifyRecoveryKit, recoveryKitEligibility,
-  keysFromMnemonic, deviceLabel, rewrap,
+  keysFromMnemonic, deviceLabel, rewrap, restoreLocalRecord,
 } from "../js/keystore.js";
-import { saveIdentityRecord } from "../js/storage.js";
-import { jwksFromSeed, unwrapKeysAES, unwrapKeysWithPin } from "../js/vault.js";
+import { saveIdentityRecord, loadIdentityRecord } from "../js/storage.js";
+import { jwksFromSeed, unwrapKeysAES, wrapKeysAES } from "../js/vault.js";
 
 const IDENTITY = "alice.poweur.net";
 
@@ -116,16 +116,56 @@ describe("rewrap", () => {
     expect(opened.seed).toBe(toBase64url(seed));
   });
 
-  it("does the same under a PIN", async () => {
+  it("refuses to store keys with no PRF secret", async () => {
+    await expect(rewrap({}, { signingJWK: {}, encJWK: {}, seed: null }))
+      .rejects.toThrow(/PRF secret/);
+  });
+});
+
+describe("restoreLocalRecord", () => {
+  it("rebuilds the local record from the authenticator that opened it", async () => {
     const seed = sdk.newSeed();
     const { signingJWK, encJWK } = jwksFromSeed(seed);
-    const wrapped = await rewrap({ pin: "hunter2" }, { signingJWK, encJWK, seed: toBase64url(seed) });
-    expect((await unwrapKeysWithPin("hunter2", wrapped)).seed).toBe(toBase64url(seed));
+    const prf = crypto.getRandomValues(new Uint8Array(32));
+    const wrapped = await wrapKeysAES(prf, signingJWK, encJWK, toBase64url(seed));
+
+    const record = restoreLocalRecord(IDENTITY, {
+      signingJWK, encJWK, seed: toBase64url(seed),
+      assertion: { credential_id: "cred-abc" },
+      entry: {
+        enrollment_id: "enr-1",
+        credential_id: "cred-abc",
+        credential_public_key: "spki",
+        credential_alg: -8,
+        wrapped,
+        payload: "seed",
+        created_at: "2026-03-01T00:00:00Z",
+      },
+    }, { relayUrl: "https://poweur.net" });
+
+    expect(record).toMatchObject({
+      enrollmentId: "enr-1",
+      credentialId: "cred-abc",
+      credentialPublicKey: "spki",
+      credentialAlg: -8,
+      supportsPRF: true,
+      seedDerived: true,
+    });
+    expect(record.encryptedKeys.kdf).toBe("prf");
+    expect(record.encryptedKeys.ciphertext).toBe(wrapped.ciphertext);
+    expect(loadIdentityRecord(IDENTITY).enrollmentId).toBe("enr-1");
+
+    // The blob the relay held still opens under the same PRF — we did not re-wrap.
+    const opened = await unwrapKeysAES(prf, record.encryptedKeys);
+    expect(opened.signingJWK).toEqual(signingJWK);
+    expect(opened.seed).toBe(toBase64url(seed));
   });
 
-  it("refuses to store keys with neither a PRF secret nor a PIN", async () => {
-    await expect(rewrap({}, { signingJWK: {}, encJWK: {}, seed: null }))
-      .rejects.toThrow(/PRF secret or a PIN/);
+  it("refuses a fetch that named no credential", () => {
+    expect(() => restoreLocalRecord(IDENTITY, {
+      entry: { wrapped: { iv: "a", ciphertext: "b" } },
+      assertion: {},
+    }, { relayUrl: "https://poweur.net" })).toThrow(/nothing to restore/i);
   });
 });
 

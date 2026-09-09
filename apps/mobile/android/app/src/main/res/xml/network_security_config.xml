@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Android twin of the ATS exceptions in `ios/App/App/Info.plist`.
+
+  Production relays are HTTPS and stay under the platform default, which refuses
+  cleartext everywhere else. These three names exist so a dev relay on the
+  developer's own machine is reachable: `10.0.2.2` is how an emulated device
+  addresses its host, since `127.0.0.1` there is the emulator itself.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,56 @@
+[
+  {
+    "name": "ordinary",
+    "timestamp": "2026-01-15T09:30:00Z",
+    "id": "msg_1757404500000_AbC-_9",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-msg_1757404500000_AbC-_9.json"
+  },
+  {
+    "name": "month-boundary",
+    "timestamp": "2026-01-31T23:59:59Z",
+    "id": "msg_end",
+    "path": "poweur-sys/private/messages/2026-01/20260131T235959Z-msg_end.json"
+  },
+  {
+    "name": "next-month",
+    "timestamp": "2026-02-01T00:00:00Z",
+    "id": "msg_start",
+    "path": "poweur-sys/private/messages/2026-02/20260201T000000Z-msg_start.json"
+  },
+  {
+    "name": "offset-timestamp",
+    "timestamp": "2026-01-15T10:30:00+01:00",
+    "id": "msg_offset",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-msg_offset.json"
+  },
+  {
+    "name": "traversal-id",
+    "timestamp": "2026-01-15T09:30:00Z",
+    "id": "../../poweur-sys/relay/contacts",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-h-nJhKW1V7Bpl1Zl-r.json"
+  },
+  {
+    "name": "slash-id",
+    "timestamp": "2026-01-15T09:30:00Z",
+    "id": "a/b",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-h-wUzdwDP2S53qgOpn.json"
+  },
+  {
+    "name": "empty-id",
+    "timestamp": "2026-01-15T09:30:00Z",
+    "id": "",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-h-47DEQpj8HBSa-_TI.json"
+  },
+  {
+    "name": "dotfile-id",
+    "timestamp": "2026-01-15T09:30:00Z",
+    "id": ".poweur-web-public",
+    "path": "poweur-sys/private/messages/2026-01/20260115T093000Z-h-h9fFysXHhWR3y7Tr.json"
+  },
+  {
+    "name": "unparseable-timestamp",
+    "timestamp": "yesterday",
+    "id": "msg_undated",
+    "path": "poweur-sys/private/messages/unknown/00000000T000000Z-msg_undated.json"
+  }
+]

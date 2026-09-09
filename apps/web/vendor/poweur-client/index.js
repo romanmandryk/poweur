@@ -35,6 +35,7 @@ export * from "./shares.js";
 export * from "./contacts.js";
 export * from "./policy.js";
 export * from "./profile.js";
+export * from "./history.js";
 export * from "./apppass.js";
 export * from "./client.js";
 export * as crypto from "./crypto/index.js";

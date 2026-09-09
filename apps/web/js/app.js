@@ -6,7 +6,11 @@
  * `PoweurClient` that `js/client.js` builds for the active identity.
  *
  * Five destinations (E15-T1): messages | contacts | files | launcher | settings
- * Sub-pages (full-screen, back button): add-id | unlock | compose | onboarding
+ * Sub-pages (full-screen, back button): add-id | unlock | compose | onboarding | claim
+ *
+ * Before any of that there is a **front door** (E15-T7): with no identity on
+ * this device the host decides what someone sees — a landing page that claims
+ * a name, an identity host's sign-in, or the generic welcome. See `js/mode.js`.
  */
 
 import {
@@ -18,12 +22,12 @@ import {
 
 import {
   createPasskey, authenticatePasskey,
-  wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport,
+  wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport, PRF_UNAVAILABLE_MESSAGE,
 } from "./passkey.js";
 
 import {
   generateSeedIdentityJwks, generateEncryptionJwk, jwksFromSeed, keyBytesFromJwks,
-  publicKeyFromJwk, wrapKeysWithPin, unwrapKeysWithPin, toBase64url, fromBase64url,
+  publicKeyFromJwk, toBase64url, fromBase64url,
 } from "./vault.js";
 
 import {
@@ -32,10 +36,17 @@ import {
   getActiveIdentity, setActiveIdentity,
   loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
-  defaultRelayUrl, hasRelayUrl, relayUrlFor,
+  defaultRelayUrl, hasRelayUrl, relayUrlFor, isShellRuntime,
+  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor,
 } from "./storage.js";
 
+import {
+  hasNativeKeystore, biometricAvailability, wrapKeysNative, unwrapKeysNative,
+  forgetNativeSecret, GATE_BIOMETRIC,
+} from "./native.js";
+
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
+import { modeNow, resolveMode } from "./mode.js";
 
 import { resolveProfile, clearProfileCache, primeProfile } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
@@ -45,7 +56,7 @@ import { ProfileCard } from "./components/profile-card.js";
 import {
   listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
   recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
-  recoverFromKeystore, rewrap,
+  recoverFromKeystore, restoreLocalRecord, rewrap,
 } from "./keystore.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
@@ -55,7 +66,7 @@ const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"];
 
 const R = {
   page: "messages",      // messages | contacts | files | launcher | settings
-  sub: null,             // null | add-id | unlock | compose
+  sub: null,             // null | add-id | unlock | compose | onboarding | claim
   params: {},
   go(page, params = {}) {
     this.page = page; this.sub = null; this.params = params;
@@ -71,6 +82,18 @@ const R = {
   },
 };
 
+/**
+ * Sub-pages that are a *detail of the list behind them* rather than a gate
+ * (E15-T11). On a phone they still cover the screen — the CSS decides — but on
+ * a wide one they sit beside the list they came from, which is the whole
+ * reason a 1440px window should not be one 1360px-wide column.
+ *
+ * Gates (unlock, add-id, onboarding, claim) are deliberately not here: they
+ * are not a detail of anything, and showing an inbox behind an unlock prompt
+ * would suggest it is reachable.
+ */
+const DETAIL_SUBS = new Set(["compose"]);
+
 const S = {
   config: getConfig(),
   identity: getActiveIdentity(),
@@ -80,12 +103,29 @@ const S = {
   /** Messages destination: inbox | requests | anonymous, as distinct trays. */
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
+  /**
+   * The durable archive (EPIC-009 E09-T1), read from
+   * `poweur-sys/private/messages/`. `S.messages` is its in-memory view, so a
+   * reload repopulates from the tree rather than starting empty — the relay
+   * drains on pickup and has nothing left to re-serve.
+   */
+  history: { loading: false, loaded: false, error: null, readState: { conversations: {} } },
   requests: { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   anon: { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
   profile: { doc: null, explicit: false, loaded: false, loading: false },
   /** null unless the first-run flow is on screen. */
   onboard: null,
+  /**
+   * The identity host's own name (E15-T9): is it claimed, and if not may it
+   * be claimed here? `state` is one of
+   * `idle | checking | claimed | claimable | unavailable | offline`.
+   */
+  door: { subject: "", state: "idle", message: "", policy: null },
+  /** `checkPasskeySupport()`, resolved once and told to the user up front. */
+  passkey: null,
+  /** `chooseCustody()`, likewise: what will hold the keys, said before the name. */
+  custody: null,
   files: {
     dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
     /** null = our own tree; an identity = browsing what they shared with us. */
@@ -178,12 +218,18 @@ function render() {
   const app = document.getElementById("app");
   if (!app) return;
 
-  if (R.sub) {
+  if (R.sub && !DETAIL_SUBS.has(R.sub)) {
     app.innerHTML = renderSubPage();
+  } else if (isFrontDoor()) {
+    // No identity on this device: the destinations are not reachable yet, so
+    // the nav would be five tabs that all say the same thing. The door is the
+    // whole page (E15-T7).
+    app.innerHTML = renderFrontDoor();
   } else {
     app.innerHTML = `
       ${renderHeader()}
       <div class="page-content" id="page-content">${renderPage()}</div>
+      ${R.sub ? `<div class="detail-pane" id="detail-pane">${renderSubPage()}</div>` : ""}
       ${renderBottomNav()}`;
   }
   flushMounts();
@@ -303,7 +349,10 @@ const CONTACT_STATE_CHIP = {
  */
 function trayCount(tray) {
   if (tray === "requests") return incomingRequests().length;
-  if (tray === "anonymous") return S.anon.messages.length;
+  // Unread, not held. `S.anon.messages.length` never reached zero, because
+  // nothing in the app ever removed one — so the badge sat there for the life
+  // of the session no matter how many times the tray was opened.
+  if (tray === "anonymous") return unreadAnonymous();
   return 0;
 }
 
@@ -313,6 +362,291 @@ function contactFor(identity) {
   return S.contacts.list.find(c => c.identity.toLowerCase() === wanted) ?? null;
 }
 
+// ─── Front doors (E15-T7 / T8 / T9) ───────────────────────────────────────────
+
+/**
+ * True when this device holds no identity, so the app is a front door rather
+ * than a client. The claim and add-id flows are sub-pages, which render
+ * themselves — they are how you stop being at the door.
+ */
+function isFrontDoor() {
+  return !S.identity && !R.sub;
+}
+
+/**
+ * Which door, decided by the host.
+ *
+ * `unknown` — a dev server, a self-hoster's relay host, a shell that has not
+ * been told its relay yet — keeps the generic welcome. It is the honest
+ * answer: we do not know what this host stands for, so we do not pretend to.
+ */
+function renderFrontDoor() {
+  const info = modeNow();
+  switch (info.mode) {
+    case "launcher": return renderLanding(info);
+    case "shell":    return renderLanding(info);
+    case "identity": return renderIdentityDoor(info);
+    default:         return renderWelcome();
+  }
+}
+
+/** The three sentences. Any longer and nobody reads them. */
+const HOW_IT_WORKS = [
+  ["🏷️", "A name you own", "Your ID is an address on the internet — like a domain, but for a person."],
+  ["🔒", "Messages and files under it", "End-to-end encrypted mail and a synced drive, addressed to the name."],
+  ["🔑", "Sign in with it", "No passwords to reuse: your device holds the key, and apps ask it."],
+];
+
+/**
+ * The parent-domain landing (E15-T8).
+ *
+ * One dominant control: a name, with the domain as a fixed suffix *inside* the
+ * field. The suffix is not a question — the host already answered it — so it
+ * is not an input. Free text returns only where the domain genuinely is not
+ * knowable: a relay that hosts nothing under a domain of its own.
+ */
+function renderLanding(info) {
+  const relayPrompt = renderRelayPrompt();
+  // A shell still shows the claim field: production is the default relay, so
+  // the picker is a switch, not a gate. Without a relay there is nothing to
+  // claim under, which is the original empty-shell case.
+  const claim = !relayPrompt || hasRelayUrl() ? renderClaimCard(info) : "";
+  return `
+    <div class="landing" id="landing">
+      <header class="landing-bar">
+        <span class="app-wordmark">Poweur ID</span>
+        <button class="btn-theme" id="btn-theme" aria-label="Toggle theme">${document.documentElement.dataset.theme === "dark" ? "☀️" : "🌙"}</button>
+      </header>
+      <div class="landing-body">
+        <div class="landing-hero">
+          <h1 class="landing-title">Your name. Your inbox. Your files.</h1>
+          <p class="landing-sub">Claim an identity you own, and take it everywhere.</p>
+        </div>
+        ${relayPrompt ? `<div class="landing-card">${relayPrompt}</div>` : ""}
+        ${claim}
+        <ol class="landing-steps">
+          ${HOW_IT_WORKS.map(([icon, title, body]) => `
+            <li class="landing-step">
+              <span class="landing-step-icon" aria-hidden="true">${icon}</span>
+              <div>
+                <div class="landing-step-title">${esc(title)}</div>
+                <div class="landing-step-body">${esc(body)}</div>
+              </div>
+            </li>`).join("")}
+        </ol>
+        <div class="landing-alt">
+          <button class="btn-link" id="opt-have-id">I already have an ID</button>
+          <span class="landing-alt-sep" aria-hidden="true">·</span>
+          <button class="btn-link" id="opt-own-domain">Use my own domain</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
+ * The name field, shared by the landing and the `claim` sub-page.
+ *
+ * `#ni-handle`, `#ni-availability` and `#btn-claim` are the contract the
+ * availability wiring and the e2e specs use; the suffix beside them changes
+ * shape with what the relay hosts, not with which screen this is on.
+ */
+function renderClaimCard(info) {
+  // The field's shape depends on what the relay hosts, so drawing it from a
+  // guess means redrawing it a moment later in a different shape. A skeleton
+  // is the honest frame for "about to know" (E15-T12).
+  if (!info.probed) {
+    return `
+      <div class="claim-card" id="claim-card-pending">
+        <div class="skeleton-stack" aria-hidden="true">
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-line"></div>
+        </div>
+        <p class="muted small" role="status">Connecting…</p>
+      </div>`;
+  }
+
+  const domains = info.hostedDomains ?? [];
+  let suffix;
+  if (domains.length > 1) {
+    suffix = `
+      <select class="claim-suffix claim-suffix-select" id="ni-domain" aria-label="Domain">
+        ${domains.map(d => `<option value="${esc(d)}"${d === info.domain ? " selected" : ""}>.${esc(d)}</option>`).join("")}
+      </select>`;
+  } else if (domains.length === 1) {
+    suffix = `<span class="claim-suffix" id="ni-domain-fixed" data-domain="${esc(domains[0])}">.${esc(domains[0])}</span>`;
+  } else {
+    // Nothing hosted here (or the relay could not be asked). The domain is
+    // genuinely unknown, so this is the one place it is still typed.
+    suffix = `<input class="claim-suffix claim-suffix-input" id="ni-domain" type="text"
+                     value="${esc(info.domain || S.config.parentDomain || "")}" placeholder="example.org"
+                     autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Parent domain" />`;
+  }
+
+  return `
+    <div class="claim-card" id="claim-card">
+      <label class="claim-label" for="ni-handle">Choose your name</label>
+      <div class="claim-field">
+        <input id="ni-handle" class="claim-input" type="text" placeholder="yourname"
+               autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off"
+               enterkeyhint="go" aria-describedby="ni-availability" />
+        ${suffix}
+      </div>
+      <p class="idin-status small" id="ni-availability" role="status" aria-live="polite">${esc(policyHint(info))}</p>
+      <button class="btn btn-primary claim-submit" id="btn-claim"${webCustodyBlocked() ? " disabled" : ""}>Create ID</button>
+      ${renderClaimNote(info)}
+    </div>`;
+}
+
+/**
+ * What this browser can actually do, said before the name is typed (E15-T12).
+ *
+ * Native keystore (the mobile shell) or passkey PRF. Authenticators without
+ * PRF are refused up front — a PIN is not a wrapping secret.
+ */
+function webCustodyBlocked() {
+  if (S.custody?.kind === "native") return false;
+  if (!S.passkey) return false;
+  return S.passkey.available === false || S.passkey.prf === false;
+}
+
+function renderClaimNote(info) {
+  if (info.reachable === false && info.resolved) {
+    return `<p class="form-note small claim-note val-warn">
+      Can't reach the relay right now — names can't be checked until it answers.
+    </p>`;
+  }
+  if (S.custody?.kind === "native") {
+    return `<p class="form-note small claim-note">
+      This device's keystore will hold your key, and only your biometrics release it.
+      Nothing leaves the device in plain form.
+    </p>`;
+  }
+  if (webCustodyBlocked()) {
+    return `<p class="form-note small claim-note val-warn" id="claim-prf-required">
+      ${esc(S.passkey.reason || PRF_UNAVAILABLE_MESSAGE)}
+    </p>`;
+  }
+  return `<p class="form-note small claim-note">
+    Your keys are generated on this device and never leave it in plain form.
+    This browser must support passkeys with PRF (Apple or Google passkeys in Safari or Chrome).
+  </p>`;
+}
+
+/**
+ * The rule, before the first keystroke rather than after it (E15-T12).
+ *
+ * The relay's policy is deployment configuration — a production relay asks for
+ * six characters where the package default is three — so the only honest
+ * source is the verdict document, which carries the policy it applied. Until
+ * the first check answers, say nothing rather than guess.
+ */
+function policyHint(info) {
+  const policy = S.door.policy;
+  if (!info.reachable && info.resolved === false) return "";
+  if (!policy) return "";
+  const bits = [];
+  if (policy.min_len && policy.max_len) bits.push(`${policy.min_len}–${policy.max_len} characters`);
+  if (policy.charset) bits.push(policy.charset);
+  return bits.join(", ");
+}
+
+/**
+ * The identity host's own door (E15-T9).
+ *
+ * `bob.poweur.net` is not a place to ask who you are — the URL bar already
+ * said. So there is no identity field here: either Bob signs in, or the name
+ * is free and can be claimed, as `bob` and nothing else.
+ */
+function renderIdentityDoor(info) {
+  const subject = info.subject;
+  const door = S.door;
+  const head = `
+    <header class="landing-bar">
+      <span class="app-wordmark">Poweur ID</span>
+      <button class="btn-theme" id="btn-theme" aria-label="Toggle theme">${document.documentElement.dataset.theme === "dark" ? "☀️" : "🌙"}</button>
+    </header>`;
+
+  const shell = (body) => `<div class="landing door" id="door">${head}<div class="landing-body">${body}</div></div>`;
+
+  if (door.state === "idle" || door.state === "checking") {
+    return shell(`
+      <div class="door-card">
+        ${avatarHtml(subject, "xl")}
+        <div class="door-name">${esc(subject)}</div>
+        <div class="skeleton-stack" aria-hidden="true">
+          <div class="skeleton skeleton-line"></div>
+          <div class="skeleton skeleton-btn"></div>
+        </div>
+        <p class="muted small" role="status">Checking this name…</p>
+      </div>`);
+  }
+
+  if (door.state === "claimed") {
+    return shell(`
+      <div class="door-card">
+        ${avatarHtml(subject, "xl")}
+        <div class="door-name">${esc(idHandle(subject))}</div>
+        <div class="door-domain">${esc(idDomain(subject))}</div>
+        <button class="btn btn-passkey door-primary" id="btn-door-signin">🔑 Sign in with passkey</button>
+        <button class="btn btn-secondary door-secondary" id="opt-join-device">📱 Add this device</button>
+        <p class="form-note small">
+          This name is taken. If it is yours, your passkey opens it — on this device or a
+          device you already use.
+        </p>
+      </div>
+      ${renderDoorFooter(info)}`);
+  }
+
+  if (door.state === "claimable") {
+    return shell(`
+      <div class="door-card">
+        ${avatarHtml(subject, "xl")}
+        <div class="door-kicker">This name is free</div>
+        <div class="door-name">${esc(idHandle(subject))}</div>
+        <div class="door-domain">${esc(idDomain(subject))}</div>
+        <button class="btn btn-primary door-primary" id="btn-door-claim">Claim ${esc(subject)}</button>
+        <p class="form-note small">
+          You are claiming <strong>${esc(subject)}</strong> — the name this page is served
+          from. Your keys are generated here and never leave in plain form.
+        </p>
+      </div>
+      ${renderDoorFooter(info)}`);
+  }
+
+  if (door.state === "offline") {
+    return shell(`
+      <div class="door-card">
+        ${avatarHtml(subject, "xl")}
+        <div class="door-name">${esc(subject)}</div>
+        <p class="door-message">Can't reach the relay, so this name can't be checked.</p>
+        <button class="btn btn-secondary door-primary" id="btn-door-retry">Try again</button>
+        <button class="btn btn-passkey door-secondary" id="btn-door-signin">🔑 Sign in with passkey</button>
+      </div>`);
+  }
+
+  // unavailable — reserved, blocked, or a policy refusal. Offering a claim
+  // here would spend a passkey on a name registration is going to refuse.
+  return shell(`
+    <div class="door-card">
+      ${avatarHtml(subject, "xl")}
+      <div class="door-name">${esc(subject)}</div>
+      <p class="door-message">${esc(door.message || "This name is not available.")}</p>
+      ${renderDoorFooter(info)}
+    </div>`);
+}
+
+/** The way out of an identity host: the launcher, where a name is chosen. */
+function renderDoorFooter(info) {
+  const launcher = info.launcherHost;
+  if (!launcher) return "";
+  return `
+    <div class="landing-alt">
+      <a class="btn-link" id="door-launcher-link"
+         href="${esc(`${globalThis.location?.protocol ?? "https:"}//${launcher}/app/`)}">Claim a different name</a>
+    </div>`;
+}
+
+/** The honest fallback: an unrecognised host, so no claim is offered. */
 function renderWelcome() {
   return `
     <div class="welcome-wrap">
@@ -334,10 +668,10 @@ function renderLocked() {
       <div class="unlock-name">${esc(idHandle(S.identity))}</div>
       <div class="unlock-sub">${esc(idDomain(S.identity))}</div>
       <button class="btn btn-passkey mt-md" id="btn-unlock-main">
-        🔑 Unlock with passkey
+        🔓 ${CUSTODY_COPY[custodyOf(rec)].action}
       </button>
       <p class="form-note small" style="max-width:220px">
-        Your device will prompt for ${rec?.supportsPRF !== false ? "biometric" : "PIN"} authentication
+        ${CUSTODY_COPY[custodyOf(rec)].note}
       </p>
     </div>`;
 }
@@ -346,6 +680,7 @@ function renderMessages() {
   return `
     <div class="dest-header">
       <h1 class="dest-title">Messages</h1>
+      <button class="btn btn-sm btn-primary dest-action" id="btn-compose-top">${svgPlus} New message</button>
     </div>
     <div class="tray-bar" role="tablist" aria-label="Message trays">
       ${TRAYS.map(t => {
@@ -413,7 +748,10 @@ function incomingRequests() {
     // The queue also carries `sys.contact.accept` answers to requests we sent;
     // those are handled in the background, not shown as someone asking.
     if (entry.type && entry.type !== "sys.contact.request") continue;
-    add({ sender: entry.sender, timestamp: entry.timestamp, intro: null, queued: true });
+    // The queued envelope is encrypted like any message and the SDK opens it,
+    // so a request routed here reads the same as one routed to the inbox —
+    // otherwise the recommended policy is the one that shows you least.
+    add({ sender: entry.sender, timestamp: entry.timestamp, intro: entry.plaintext ?? null, queued: true });
   }
   for (const raw of S.messages) {
     const m = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -523,7 +861,11 @@ function buildConversations() {
   const byContact = {};
   for (const raw of S.messages) {
     const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    // An unsigned message has nobody to thread under; it belongs to the
+    // anonymous tray, which renders it as a different kind of object.
+    if (!m.sender) continue;
     const contact = m.sender === S.identity ? m.recipient : m.sender;
+    if (!contact) continue;
     if (!byContact[contact]) byContact[contact] = [];
     byContact[contact].push(m);
   }
@@ -538,7 +880,9 @@ function buildConversations() {
         // Someone we have no entry for at all: adding them is one tap from
         // the message that made us want to.
         stranger: !known,
-        unread: msgs.length,
+        // Messages past the read mark — a count that reaches zero when the
+        // conversation is opened, rather than the total held forever.
+        unread: unreadFor(contact),
         // The SDK decrypts in place, so show the message rather than a padlock
         // when we could actually read it.
         preview: lastMsg.plaintext ?? "🔒 Could not decrypt",
@@ -607,95 +951,140 @@ function renderContactRow(contact) {
     </div>`;
 }
 
-// ─── Launcher page ────────────────────────────────────────────────────────────
+// ─── Apps destination ─────────────────────────────────────────────────────────
 
-function parseCreateHash() {
-  const hash = window.location.hash;
-  if (!hash.startsWith("#create=")) return null;
-  try { return JSON.parse(atob(hash.slice("#create=".length))); } catch { return null; }
+/**
+ * The Launcher used to *be* the create-identity form, so the "Apps" tab showed
+ * "New identity — step 1 of 2" to someone who already had one. Claiming moved
+ * to the front door (E15-T7/T8/T9); what is left here is the seam EPIC-010
+ * fills, said plainly rather than filled with something else.
+ */
+function renderLauncher() {
+  return `
+    <div class="dest-header">
+      <h1 class="dest-title">Apps</h1>
+    </div>
+    ${emptyState("🚀", "No apps yet",
+      "Apps and automations that read and write your Poweur files will appear here.")}`;
 }
 
-function renderLauncher() {
-  const cfg = S.config;
-  const step2 = parseCreateHash();
+// ─── Claim sub-page ───────────────────────────────────────────────────────────
 
-  if (step2) {
-    // Step 2 — on the identity's own domain, collect DNS credentials and create
-    const { handle, domain } = step2;
-    return `
-      <div class="launcher-form-page">
-        <div class="section-label">New identity — step 2 of 2</div>
-        <div class="form-card">
-          <div class="form-group">
-            <label class="form-label">Handle</label>
-            <input class="input" type="text" value="${esc(handle)}" disabled />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Domain</label>
-            <input class="input" type="text" value="${esc(domain)}" disabled />
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="display:flex;align-items:center;gap:8px">
-              <input type="checkbox" id="ni-hosted" checked />
-              Hosted registration (no DNS token — identity under this relay's domain)
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="ni-invite">Invite code (if required by relay)</label>
-            <input id="ni-invite" class="input" type="text" placeholder="optional" autocomplete="off" />
-          </div>
-          <div id="ni-dns-fields" style="display:none">
-            <div class="form-group">
-              <label class="form-label" for="ni-provider">DNS provider (self-hosted only)</label>
-              <select id="ni-provider" class="input select">
-                <option value="cloudflare"${cfg.dnsProvider==="cloudflare"?" selected":""}>Cloudflare</option>
-                <option value="hetzner"${cfg.dnsProvider==="hetzner"?" selected":""}>Hetzner</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="ni-token">DNS API token</label>
-              <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
-            </div>
-          </div>
-          <button class="btn btn-passkey" id="btn-create-id" style="width:100%;margin-top:4px">
-            🔑 Create with passkey
-          </button>
-          <p class="form-note small" style="margin-top:10px;text-align:center">Keys are generated locally and never leave your device in plain form.</p>
-        </div>
-      </div>`;
-  }
+/**
+ * Claiming from somewhere that is not a launcher host: the "Add new ID" option
+ * inside the app, or the self-hosted DNS path.
+ *
+ * `R.params.dns` picks the second one. It is a *different intent*, not a
+ * checkbox on the first — which is why there is no "hosted?" toggle anywhere
+ * any more (E15-T10). Whether a registration is hosted is derived from the
+ * domain: hosted iff the relay says it hosts it.
+ */
+function renderClaim() {
+  const info = modeNow();
+  const dns = Boolean(R.params.dns);
 
-  // Step 1 — pick a handle; hosted stays on this relay, DNS mode redirects to identity host
   return `
-    <div class="launcher-form-page">
-      <div class="section-label">New identity — step 1 of 2</div>
-      <div class="form-card">
-        <div class="form-group">
-          <label class="form-label" for="ni-handle">Handle</label>
-          <input id="ni-handle" class="input" type="text" placeholder="alice" autocomplete="off" spellcheck="false"
-                 autocapitalize="none" autocorrect="off"
-                 aria-describedby="ni-availability" />
-          <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="ni-domain">Parent domain</label>
-          <input id="ni-domain" class="input" type="text" value="${esc(cfg.parentDomain || "poweur.net")}"
-                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="display:flex;align-items:center;gap:8px">
-            <input type="checkbox" id="ni-hosted-step1" checked />
-            Hosted on this relay (no DNS token)
-          </label>
-        </div>
-        <button class="btn btn-primary" id="btn-next-id" style="width:100%;margin-top:4px">
-          Next →
-        </button>
-        <p class="form-note small" style="margin-top:10px;text-align:center" id="ni-step1-note">
-          Hosted: create passkey on this relay. Uncheck for self-hosted DNS (redirects to your subdomain).
-        </p>
+    <div class="sub-page">
+      <div class="sub-header">
+        <button class="btn-back" id="btn-back">${svgBack}</button>
+        <span class="sub-title">${dns ? "Use my own domain" : "New identity"}</span>
+      </div>
+      <div class="sub-body">
+        ${dns ? renderDnsClaim(info) : renderClaimCard(info)}
       </div>
     </div>`;
+}
+
+/**
+ * The self-hosted path, on one page.
+ *
+ * It used to redirect to `https://<handle>.<domain>/app/` to collect the DNS
+ * token — a host that, in DNS mode, does not resolve until *after* the
+ * registration being collected has written it. Nothing needed the hop: the
+ * relay writing the zone is the one being asked here.
+ */
+function renderDnsClaim(info) {
+  const cfg = S.config;
+  return `
+    <div class="form-card">
+      <p class="muted small" style="margin-bottom:16px">
+        Your identity lives under a domain you control. The relay writes the DNS records
+        for you with a scoped API token, which is never stored.
+      </p>
+      <div class="form-group">
+        <label class="form-label" for="ni-handle">Name</label>
+        <input id="ni-handle" class="input" type="text" placeholder="yourname"
+               autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="ni-domain">Your domain</label>
+        <input id="ni-domain" class="input" type="text" placeholder="example.org"
+               value="${esc(cfg.parentDomain || "")}"
+               autocomplete="off" spellcheck="false" autocapitalize="none" autocorrect="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="ni-provider">DNS provider</label>
+        <select id="ni-provider" class="input select">
+          <option value="cloudflare"${cfg.dnsProvider === "cloudflare" ? " selected" : ""}>Cloudflare</option>
+          <option value="hetzner"${cfg.dnsProvider === "hetzner" ? " selected" : ""}>Hetzner</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="ni-token">DNS API token</label>
+        <input id="ni-token" class="input" type="password" placeholder="Scoped API token" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="ni-invite">Invite code (if this relay asks for one)</label>
+        <input id="ni-invite" class="input" type="text" placeholder="optional" autocomplete="off" />
+      </div>
+      <p class="idin-status small" id="ni-availability" role="status" aria-live="polite"></p>
+      <button class="btn btn-passkey" id="btn-claim" style="width:100%"${webCustodyBlocked() ? " disabled" : ""}>🔑 Create with passkey</button>
+      <p class="form-note small" style="margin-top:10px;text-align:center">
+        Keys are generated locally and never leave your device in plain form.
+      </p>
+    </div>`;
+}
+
+/**
+ * What the user is asking for, gathered from whichever claim screen is up.
+ *
+ * `hosted` is **derived, never asked** (E15-T10): a registration is hosted iff
+ * the relay hosts the domain, which the root document already published. The
+ * checkbox that used to ask this made a fact into a prompt, and got it wrong
+ * the moment someone unticked it on a relay that hosts nothing else.
+ */
+function readClaimIntent() {
+  const info = modeNow();
+  const handle = normalizeHandleInput(q("#ni-handle")?.value ?? "", info);
+  const domain = (q("#ni-domain")?.value ?? q("#ni-domain-fixed")?.dataset.domain ?? info.domain ?? "")
+    .trim().toLowerCase().replace(/^\.+/, "");
+  return {
+    handle,
+    domain,
+    hosted: info.hostedDomains.includes(domain),
+    provider: q("#ni-provider")?.value,
+    dnsToken: q("#ni-token")?.value.trim() ?? "",
+    inviteCode: q("#ni-invite")?.value.trim() ?? "",
+  };
+}
+
+/**
+ * What someone types into a field that already shows its suffix.
+ *
+ * A visible `.poweur.net` invites pasting the whole address, and an ID copied
+ * from somewhere else arrives as `@alice` or `Alice ` (E15-T12). All of those
+ * mean the same handle, so none of them should be an error.
+ */
+export function normalizeHandleInput(raw, info = { domain: "", hostedDomains: [] }) {
+  let value = String(raw ?? "").trim().toLowerCase().replace(/^@+/, "");
+  const domains = [info.domain, ...(info.hostedDomains ?? [])].filter(Boolean);
+  for (const domain of domains) {
+    if (value.endsWith(`.${domain}`)) {
+      value = value.slice(0, value.length - domain.length - 1);
+      break;
+    }
+  }
+  return value;
 }
 
 // ─── Settings page ────────────────────────────────────────────────────────────
@@ -714,8 +1103,8 @@ function renderSettings() {
         ${avatarHtml(S.identity, "lg")}
         <div class="settings-id-name">${esc(idHandle(S.identity))}</div>
         <div class="settings-id-domain">${esc(idDomain(S.identity))}</div>
-        <span class="chip ${rec.supportsPRF !== false ? "chip-green" : "chip-orange"}" style="margin-top:4px">
-          ${rec.supportsPRF !== false ? "🔑 Passkey (PRF)" : "🔐 PIN-protected"}
+        <span class="chip ${CUSTODY_COPY[custodyOf(rec)].chipClass}" style="margin-top:4px">
+          ${CUSTODY_COPY[custodyOf(rec)].chip}
         </span>
       </div>
     ` : `
@@ -813,12 +1202,13 @@ function renderSettings() {
           <span class="settings-row-value ${sessOk ? "val-ok" : "val-warn"}">${sessOk ? "Active" : "None"}</span>
           ${sess ? `<span class="settings-row-arrow">›</span>` : ""}
         </div>
+        ${usesDnsPath(rec, S.identity) ? `
         <div class="settings-row" role="button" tabindex="0" id="row-dns">
           <span class="settings-row-icon">🌐</span>
           <span class="settings-row-label">DNS provider</span>
           <span class="settings-row-value">${esc(S.config.dnsProvider || "Cloudflare")}</span>
           <span class="settings-row-arrow">›</span>
-        </div>
+        </div>` : ""}
         ${rec ? `
         <div class="settings-row" role="button" tabindex="0" id="row-rotate-enc">
           <span class="settings-row-icon">🔄</span>
@@ -851,6 +1241,20 @@ function renderSettings() {
     <div style="height:32px"></div>`;
 }
 
+/**
+ * Does this identity have DNS credentials to configure? (E15-T10)
+ *
+ * Records written from now on say so outright. Older ones do not, so they fall
+ * back to the question the flag answers: is this identity's domain one the
+ * relay hosts? A hosted user has no token and never will.
+ */
+function usesDnsPath(record, identity) {
+  if (typeof record?.hosted === "boolean") return !record.hosted;
+  const domain = idDomain(identity);
+  const hosted = modeNow().hostedDomains;
+  return Boolean(domain) && hosted.length > 0 && !hosted.includes(domain);
+}
+
 // ─── Sub-pages ────────────────────────────────────────────────────────────────
 
 function renderSubPage() {
@@ -859,23 +1263,43 @@ function renderSubPage() {
     case "unlock":  return renderUnlock();
     case "compose": return renderCompose();
     case "onboarding": return renderOnboarding();
+    case "claim":   return renderClaim();
     default:        return renderAddId();
   }
 }
 
 // Add ID ───────────────────────────────────────────────────────────────────────
 
+/**
+ * Add an identity to this device.
+ *
+ * What it may ask depends on which door it was opened from (E15-T9). On
+ * `bob.poweur.net` the subject is in the URL bar, so the typed-identity field
+ * would be an invitation to sign into someone else's name from Bob's page —
+ * and creating a *different* identity belongs on the launcher, not here.
+ */
 function renderAddId() {
+  const info = modeNow();
+  const subject = info.mode === "identity" ? info.subject : "";
+  // Only where the identity genuinely is not knowable: a shell, an unknown
+  // host, or a launcher that stands for no one in particular.
+  const asksWhichIdentity = !subject;
+
   return `
     <div class="sub-page">
       <div class="sub-header">
         <button class="btn-back" id="btn-back">${svgBack}</button>
-        <span class="sub-title">Add identity</span>
+        <span class="sub-title">${subject ? "Sign in" : "Add identity"}</span>
       </div>
       <div class="sub-body">
-        <p class="muted small" style="margin-bottom:20px">Connect or create a Poweur ID identity on this device.</p>
+        <p class="muted small" style="margin-bottom:20px">
+          ${subject
+            ? `Sign in to <strong>${esc(subject)}</strong> on this device.`
+            : "Connect or create a Poweur ID identity on this device."}
+        </p>
         ${renderRelayPrompt()}
         <div class="option-list">
+          ${asksWhichIdentity ? `
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
               <div class="option-icon-wrap">🔑</div>
@@ -890,7 +1314,15 @@ function renderAddId() {
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
-          </div>
+          </div>` : `
+          <button class="option-card" id="btn-door-signin">
+            <div class="option-icon-wrap">🔑</div>
+            <div class="option-body">
+              <div class="option-title">Sign in with passkey</div>
+              <div class="option-desc">Unlock ${esc(subject)} on this device</div>
+            </div>
+            <span class="option-arrow">›</span>
+          </button>`}
 
           <button class="option-card" id="opt-join-device">
             <div class="option-icon-wrap">📱</div>
@@ -901,6 +1333,7 @@ function renderAddId() {
             <span class="option-arrow">›</span>
           </button>
 
+          ${subject ? "" : `
           <button class="option-card" id="opt-create-new">
             <div class="option-icon-wrap">✨</div>
             <div class="option-body">
@@ -908,7 +1341,7 @@ function renderAddId() {
               <div class="option-desc">Create a fresh identity with a passkey</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>
+          </button>`}
         </div>
       </div>
     </div>`;
@@ -918,42 +1351,76 @@ function renderAddId() {
  * Ask which relay to talk to, when nothing else can answer.
  *
  * A relay-served SPA knows: it is *on* the relay. A shell is not on anything —
- * it runs from its own bundle — so the first question it has to ask is where
- * the user's identity lives. Every option below this needs the answer, which
- * is why it sits above them rather than inside one of them.
+ * it runs from its own bundle — so it has to name one. Production is the
+ * default; local and a typed URL are the other two choices. The picker stays
+ * visible in the shell after a default is known, because switching relays is
+ * why the shell exists.
  */
 function renderRelayPrompt() {
-  if (hasRelayUrl()) return "";
+  if (!isShellRuntime() && hasRelayUrl()) return "";
+  const current = defaultRelayUrl();
+  const preset = relayPresetFor(current);
+  const customValue = preset === "custom" ? current : "";
+  const localHost = localDevRelayUrl().replace(/^https?:\/\//, "");
   return `
     <div class="form-card relay-prompt">
       <div class="form-group" style="margin-bottom:0">
-        <label class="form-label" for="setup-relay">Relay</label>
+        <label class="form-label" for="setup-relay-preset">Relay</label>
         <p class="muted small" style="margin-bottom:6px">
-          The server your identity lives on. Your own, or the one that invited you.
+          Where new identities are created. poweur.net is the hosted relay; switch to a local or your own for testing.
         </p>
+        <select id="setup-relay-preset" class="input select">
+          <option value="production"${preset === "production" ? " selected" : ""}>poweur.net</option>
+          <option value="local"${preset === "local" ? " selected" : ""}>Local emulator (${esc(localHost)})</option>
+          <option value="custom"${preset === "custom" ? " selected" : ""}>Other…</option>
+        </select>
         <input id="setup-relay" class="input" type="url" inputmode="url" autocapitalize="none" autocorrect="off"
-               placeholder="https://poweur.net" autocomplete="off" spellcheck="false" />
+               placeholder="https://relay.example.com" autocomplete="off" spellcheck="false"
+               value="${esc(customValue)}"${preset === "custom" ? "" : " hidden"} />
         <p class="idin-status small" id="setup-relay-status" role="status" aria-live="polite"></p>
       </div>
     </div>`;
 }
 
+function relayUrlForPreset(preset, typed) {
+  if (preset === "local") return localDevRelayUrl();
+  if (preset === "custom") {
+    const raw = (typed ?? "").trim();
+    if (!raw) return "";
+    return (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).replace(/\/+$/, "");
+  }
+  return PRODUCTION_RELAY_URL;
+}
+
 /**
- * Save the typed relay once it answers, so the options below light up.
+ * Save the chosen relay once it answers.
  *
- * It is checked rather than taken on faith: a typo here would otherwise
- * surface as an unexplained failure three screens later, during registration.
+ * Custom URLs are checked rather than taken on faith: a typo here would
+ * otherwise surface as an unexplained failure three screens later. Switching
+ * to a preset hits `/health` before saving; the first paint of the default
+ * does not, so the landing cannot loop on its own seed.
  */
 function attachRelayPrompt() {
+  const presetEl = q("#setup-relay-preset");
   const input = q("#setup-relay");
   const status = q("#setup-relay-status");
-  if (!input || !status) return;
+  if (!presetEl || !status) return;
+
+  const showCustom = () => {
+    if (!input) return;
+    input.hidden = presetEl.value !== "custom";
+  };
 
   let timer = null;
-  const check = async () => {
-    const raw = input.value.trim();
-    if (!raw) { status.textContent = ""; return; }
-    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const apply = async ({ probe } = { probe: true }) => {
+    showCustom();
+    const url = relayUrlForPreset(presetEl.value, input?.value);
+    if (!url) { status.textContent = ""; return; }
+    if (!probe) {
+      status.textContent = `Using ${new URL(url).host}`;
+      status.className = "idin-status small val-ok";
+      return;
+    }
     status.textContent = "Checking…";
     status.className = "idin-status small";
     try {
@@ -961,27 +1428,47 @@ function attachRelayPrompt() {
         headers: { Accept: "application/json" },
       }).then(r => (r.ok ? r.json() : null));
       if (!health?.status) throw new Error("that does not look like a relay");
-      saveConfig({ ...getConfig(), relayUrl: url.replace(/\/$/, "") });
+      saveConfig({ ...getConfig(), relayUrl: url });
       S.config = getConfig();
       status.textContent = `Connected to ${new URL(url).host}`;
       status.className = "idin-status small val-ok";
-      render();
+      // A shell has no host of its own, so the relay it was just given is the
+      // only thing that can say what it may claim under (E15-T7).
+      resolveMode({ force: true }).then(() => render());
     } catch (error) {
       status.textContent = `Could not reach ${url} — ${error.message}`;
       status.className = "idin-status small val-warn";
     }
   };
 
-  input.addEventListener("input", () => {
+  presetEl.addEventListener("change", () => {
     clearTimeout(timer);
-    timer = setTimeout(check, 600);
+    if (presetEl.value === "custom") {
+      showCustom();
+      status.textContent = "";
+      input?.focus();
+      return;
+    }
+    apply({ probe: true });
   });
-  input.addEventListener("keydown", (event) => {
+  input?.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => apply({ probe: true }), 600);
+  });
+  input?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     clearTimeout(timer);
-    check();
+    apply({ probe: true });
   });
-  input.focus();
+
+  showCustom();
+  // First paint of the default: do not re-probe and re-render, or the landing
+  // loops. Switching away from it still hits /health before saving.
+  if (presetEl.value !== "custom" && defaultRelayUrl() === relayUrlForPreset(presetEl.value)) {
+    apply({ probe: false });
+  } else if (presetEl.value === "custom" && input?.value.trim()) {
+    apply({ probe: false });
+  }
 }
 
 // Unlock ───────────────────────────────────────────────────────────────────────
@@ -1003,10 +1490,10 @@ function renderUnlock() {
           <div class="unlock-sub muted">${esc(idDomain(id))}</div>
         </div>
         <button class="btn btn-passkey" id="btn-do-unlock" style="max-width:280px">
-          🔑 Authenticate with passkey
+          🔓 ${CUSTODY_COPY[custodyOf(rec)].action}
         </button>
         <p class="form-note small" style="max-width:220px">
-          ${rec.supportsPRF !== false ? "Touch ID, Face ID, or Windows Hello" : "You'll be asked for your PIN"}
+          ${CUSTODY_COPY[custodyOf(rec)].note}
         </p>
       </div>
     </div>`;
@@ -1032,6 +1519,7 @@ function renderCompose() {
               resolve: resolveForComponents,
               contacts: S.contacts.list,
               value: preset,
+              defaultDomain: idDomain(S.identity),
               label: "To",
               onSubmit: () => q("#c-body")?.focus(),
             });
@@ -1432,18 +1920,28 @@ function attachEvents() {
   // Main unlock banner
   q("#btn-unlock-main")?.addEventListener("click", () => R.push("unlock"));
 
-  // FAB compose
+  // Compose, from the thumb-reach button on a phone or the header on a wide
+  // screen — one of the two is hidden by CSS, never both (E15-T11).
   q("#btn-compose")?.addEventListener("click", () => R.push("compose"));
+  q("#btn-compose-top")?.addEventListener("click", () => R.push("compose"));
 
-  // Conversation row → compose to that contact
+  // Conversation row → compose to that contact. Opening it is reading it, so
+  // the badge clears here rather than waiting for a reply to be sent.
   qAll(".conv-row[data-compose-to]").forEach(r =>
-    r.addEventListener("click", () => R.push("compose", { to: r.dataset.composeTo })));
+    r.addEventListener("click", () => {
+      const peer = r.dataset.composeTo;
+      markConversationRead(peer).catch(() => {});
+      R.push("compose", { to: peer });
+    }));
 
   // A push stream costs one connection and saves every poll after it.
   if (getUnlockedKeys()) startEventStream();
 
   // Load inbox when unlocked and on the Messages destination
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
+    // The archive first: after a reload it is the only place the messages
+    // still exist, and it also carries the read marks the badges count from.
+    loadHistory();
     loadInbox();
     // Always, not only on the Requests tray: an accept to a request *we* sent
     // arrives here, and the handshake only completes once we have read it.
@@ -1453,30 +1951,49 @@ function attachEvents() {
     // everyone else pays nothing for a queue that is always empty.
     loadPolicy();
     if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon();
+    // Looking at the anonymous tray is reading it: there is nothing to open,
+    // so the tray itself is the conversation.
+    if (S.tray === "anonymous" && unreadAnonymous() > 0) {
+      markConversationRead("anonymous").catch(() => {});
+    }
   }
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
   // Add ID options
   attachRelayPrompt();
   q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
-  q("#btn-signin-passkey")?.addEventListener("click", doSignInWithPasskey);
+  q("#btn-signin-passkey")?.addEventListener("click", () => doSignInWithPasskey());
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
-  q("#opt-create-new")?.addEventListener("click", () => { R.sub = null; R.go("launcher"); });
+  q("#opt-create-new")?.addEventListener("click", () => R.push("claim"));
 
-  // Launcher step 1 → hosted stays here; DNS mode redirects to identity host
-  q("#btn-next-id")?.addEventListener("click", doNextIdentityStep);
-  q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doNextIdentityStep(); });
+  // Front doors (E15-T7/T8/T9)
+  q("#opt-have-id")?.addEventListener("click", () => R.push("add-id"));
+  q("#opt-own-domain")?.addEventListener("click", () => R.push("claim", { dns: true }));
+  q("#btn-door-signin")?.addEventListener("click", () => doSignInWithPasskey(modeNow().subject));
+  q("#btn-door-claim")?.addEventListener("click", doClaimThisHost);
+  q("#btn-door-retry")?.addEventListener("click", () => {
+    S.door = { ...S.door, state: "idle" };
+    resolveMode({ force: true }).then(() => { render(); });
+  });
+  // The identity host has to know whether its own name is taken before it can
+  // show either half of its door.
+  probeDoor();
+
+  // Anything that draws from the mode repaints once the relay answers. The
+  // guard is `probed`, not `resolved`: an unreachable relay never resolves,
+  // and looping on that would spin the page.
+  if (!modeNow().probed) resolveMode().then(() => render());
+
+  // One claim button, wherever the field is
+  if (q("#claim-card") && !S.passkey) {
+    checkPasskeySupport().then((support) => { S.passkey = support; render(); });
+  }
+  if (q("#claim-card") && !S.custody) {
+    chooseCustody().then((custody) => { S.custody = custody; render(); });
+  }
+  q("#btn-claim")?.addEventListener("click", doClaim);
+  q("#ni-handle")?.addEventListener("keydown", e => { if (e.key === "Enter") doClaim(); });
   attachAvailabilityCheck();
-
-  // Launcher step 2 → create identity + toggle DNS fields
-  q("#btn-create-id")?.addEventListener("click", doCreateIdentity);
-  const hostedCb = q("#ni-hosted");
-  const dnsFields = q("#ni-dns-fields");
-  const syncDnsVisibility = () => {
-    if (dnsFields) dnsFields.style.display = hostedCb?.checked ? "none" : "block";
-  };
-  hostedCb?.addEventListener("change", syncDnsVisibility);
-  syncDnsVisibility();
 
   // Unlock sub-page
   q("#btn-do-unlock")?.addEventListener("click", doUnlock);
@@ -1564,6 +2081,7 @@ function switchIdentity(identity) {
   S.messages = [];
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
+  S.history = { loading: false, loaded: false, error: null, readState: { conversations: {} } };
   S.requests = { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.anon = { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.policy = { doc: null, explicit: false, loading: false, loaded: false };
@@ -1584,8 +2102,13 @@ const qAll = sel => document.querySelectorAll(sel);
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
-async function doSignInWithPasskey() {
-  const fqdn = q("#signin-id-input")?.value.trim().toLowerCase();
+/**
+ * @param {string} [identity] the subject, when the host already named it
+ *        (E15-T9). Falls back to the typed field, which survives only where
+ *        the identity genuinely is not knowable — a shell, an unknown host.
+ */
+async function doSignInWithPasskey(identity) {
+  const fqdn = (identity || q("#signin-id-input")?.value || "").trim().toLowerCase();
   if (!fqdn) return toast("Enter your identity (e.g. alice.poweur.net)", "warning");
 
   if (!loadIdentityRecord(fqdn)) {
@@ -1607,16 +2130,20 @@ async function doUnlock() {
   setLoading(true, "Authenticating…");
   try {
     let opened;
-    if (rec.supportsPRF !== false && rec.encryptedKeys?.kdf === "prf") {
+    if (rec.encryptedKeys?.kdf === "native") {
+      // The prompt is the platform's own, so the overlay would sit on top of
+      // it saying "Authenticating…" about a dialog the user is already reading.
+      setLoading(false);
+      opened = await unwrapKeysNative(id, rec.encryptedKeys, {
+        reason: `Unlock ${id.split(".")[0]}`,
+      });
+      setLoading(true, "Unlocking…");
+    } else if (rec.encryptedKeys?.kdf === "prf") {
       const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
-      if (!prfOutput) throw new Error("PRF not available from this authenticator.");
+      if (!prfOutput) throw new Error(PRF_UNAVAILABLE_MESSAGE);
       opened = await unwrapKeysWithPRF(prfOutput, rec.encryptedKeys);
     } else {
-      setLoading(false);
-      const pin = await promptPin("Enter your PIN:");
-      if (!pin) return;
-      setLoading(true, "Unlocking…");
-      opened = await unwrapKeysWithPin(pin, rec.encryptedKeys);
+      throw new Error(PRF_UNAVAILABLE_MESSAGE);
     }
 
     setUnlockedKeys(id, opened.signingJWK, opened.encJWK, opened.seed ?? null);
@@ -1655,56 +2182,113 @@ async function doRecoverFromKeystore(identity) {
     return;
   }
 
-  setLoading(false);
   try {
-    await adoptIdentity({
-      identity,
-      relayUrl,
-      signingJWK: recovered.signingJWK,
-      encJWK: recovered.encJWK,
-      seed: recovered.seed,
-      label: `${deviceLabel()} (restored)`,
-    });
+    restoreLocalRecord(identity, recovered, { relayUrl });
+    switchIdentity(identity);
+    setUnlockedKeys(identity, recovered.signingJWK, recovered.encJWK, recovered.seed);
+    S.config = getConfig();
+
+    setLoading(true, "Creating session…");
+    await ensureSession(identity);
+
+    setLoading(false);
     toast(`${identity} restored on this device`, "success", 5000);
+    R.sub = null; R.page = "messages"; R.params = {};
+    render();
   } catch (error) {
+    setLoading(false);
     toast(error.message, "error", 9000);
   }
 }
 
 /**
- * Take ownership of key material this browser did not generate — from a
- * keystore restore or a device-enrollment ceremony.
+ * How this device holds a record's keys, for the copy that tells the user what
+ * to expect when they unlock. Three custodies, three different prompts — and
+ * telling someone to expect a passkey when the phone is about to draw a Face ID
+ * sheet for its own keystore is exactly the kind of small lie that makes people
+ * distrust the whole screen.
+ */
+function custodyOf(rec) {
+  if (rec?.encryptedKeys?.kdf === "native") return "native";
+  return "prf";
+}
+
+const CUSTODY_COPY = {
+  native: {
+    action: "Unlock",
+    note: "Your device will ask for Face ID, Touch ID or your passcode",
+    chip: "🛡️ Device keystore",
+    chipClass: "chip-green",
+  },
+  prf: {
+    action: "Unlock with passkey",
+    note: "Touch ID, Face ID, or Windows Hello",
+    chip: "🔑 Passkey (PRF)",
+    chipClass: "chip-green",
+  },
+};
+
+/**
+ * Why the keys are about to be protected by something weaker than this device
+ * could manage. Naming the actual obstacle is the difference between advice a
+ * user can act on ("set a passcode") and a shrug ("no passkey here").
+ */
+/**
+ * Which custody this device should use for a *new* record (EPIC-019 E19-T2).
  *
- * Creates a local passkey to wrap it, stores the record, and registers the new
- * enrollment so this browser becomes a recovery path in its own right rather
- * than a copy that only works until its site data is cleared.
+ * The order is not a preference, it is a ranking by what an attacker has to
+ * defeat. A hardware keystore gated on biometrics beats a passkey because it
+ * beats it on both ends: the secret is held by the secure element rather than
+ * by the browser profile, and it carries no origin model — no `rp.id`, no
+ * relying party, no associated domain — which is exactly what lets one shell
+ * build work against any relay on any domain. A passkey with PRF comes next.
+ * Authenticators without PRF are refused; a PIN is not a wrapping secret.
+ *
+ * A device with no enrolled biometrics is an ordinary device: the caller
+ * tries a PRF passkey, and says so if that is missing too.
+ */
+async function chooseCustody() {
+  if (!hasNativeKeystore()) return { kind: "passkey", reason: "no_native_keystore" };
+  const biometrics = await biometricAvailability();
+  return biometrics.available
+    ? { kind: "native", gate: GATE_BIOMETRIC, biometryKind: biometrics.kind ?? null }
+    : { kind: "passkey", reason: biometrics.reason ?? "unavailable" };
+}
+
+/**
+ * Take ownership of key material this browser did not generate — a new
+ * device joining via the enrollment ceremony, or a recovery-kit restore.
+ *
+ * Creates a local passkey to wrap it and registers a *new* enrollment. The
+ * cleared-site-data path does not come here: that authenticator already
+ * exists and `restoreLocalRecord` reuses it.
  */
 async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
-  // Same rule as creation: no authenticator means a PIN, not a refusal. This
-  // is the path a shell takes after a device-enrollment ceremony, and turning
-  // it away would mean an identity could be joined on a browser but not on a
-  // phone (EPIC-019).
-  const support = await checkPasskeySupport();
+  const custody = await chooseCustody();
+  if (custody.kind !== "native") {
+    const support = await checkPasskeySupport();
+    if (!support.available || support.prf === false) {
+      throw new Error(support.reason || PRF_UNAVAILABLE_MESSAGE);
+    }
+  }
 
   const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
   let credentialId = "", prfOutput = null, supportsPRF = false;
   let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
-  if (support.available) {
+  let encryptedKeys;
+  if (custody.kind === "native") {
+    setLoading(false);
+    encryptedKeys = await wrapKeysNative(identity, signingJWK, encJWK, seed, {
+      gate: custody.gate,
+      reason: `Protect ${identity.split(".")[0]}`,
+    });
+    setLoading(true, "Securing keys…");
+  } else {
     setLoading(true, "Creating a passkey on this device…");
     ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
       await createPasskey(identity, userId));
-  }
-
-  let encryptedKeys;
-  if (supportsPRF) {
     setLoading(true, "Securing keys…");
     encryptedKeys = await rewrap({ prfOutput }, { signingJWK, encJWK, seed });
-  } else {
-    setLoading(false);
-    const pin = await promptPin("Set a PIN to protect your keys:", true);
-    if (!pin) throw new Error("Cancelled");
-    setLoading(true, "Securing keys…");
-    encryptedKeys = await rewrap({ pin }, { signingJWK, encJWK, seed });
   }
 
   saveIdentityRecord(identity, {
@@ -1847,6 +2431,68 @@ function showJoinDevicePanel() {
 }
 
 /**
+ * Is this identity host's own name claimed — and if not, may it be? (E15-T9)
+ *
+ * "Absent" and "claimable" are not the same answer. `admin.poweur.net` and
+ * `www.poweur.net` have no identity document and can never be claimed, so a
+ * door that keyed off a 404 would walk the user through a WebAuthn ceremony
+ * that registration then refuses. `GET /hosted/availability` answers both
+ * halves in one call, and carries the policy the claim field renders.
+ *
+ * Outside `hosted_domains` availability answers `domain_not_hosted`, which is
+ * the honest answer — claimability there is not this relay's to decide — so
+ * that case asks `GET /identities/{host}` instead and offers no claim either
+ * way.
+ */
+let doorProbe = null;
+
+function probeDoor() {
+  const info = modeNow();
+  if (info.mode !== "identity" || S.identity) return;
+  if (S.door.subject === info.subject && S.door.state !== "idle") return;
+  if (doorProbe) return;
+
+  S.door = { subject: info.subject, state: "checking", message: "", policy: null };
+  const relayUrl = defaultRelayUrl();
+  if (!relayUrl) {
+    S.door = { ...S.door, state: "offline" };
+    return;
+  }
+
+  const api = identityApiFor(relayUrl);
+  const hosted = info.hostedDomains.includes(info.domain);
+
+  doorProbe = (hosted
+    ? api.availability(info.handle, info.domain).then((verdict) => {
+        if (verdict.reason === "taken") return { state: "claimed", message: "", policy: verdict.policy };
+        if (verdict.available) return { state: "claimable", message: "", policy: verdict.policy };
+        // reserved / blocked / too_short / charset — a name registration will
+        // refuse, so no claim is offered and the relay's own words explain it.
+        return { state: "unavailable", message: verdict.message, policy: verdict.policy };
+      })
+    : api.get(info.subject).then(
+        () => ({ state: "claimed", message: "", policy: null }),
+        (error) => {
+          if (error?.status === 404) {
+            return {
+              state: "unavailable",
+              message: "This relay does not host names under this domain.",
+              policy: null,
+            };
+          }
+          throw error;
+        },
+      )
+  )
+    .then((next) => { S.door = { subject: info.subject, ...next }; })
+    .catch(() => { S.door = { subject: info.subject, state: "offline", message: "", policy: null }; })
+    .finally(() => {
+      doorProbe = null;
+      render();
+    });
+}
+
+/**
  * Check the handle against the relay as the user types (EPIC-018 E18-T3).
  *
  * The whole reason this endpoint exists is ordering: without it, "that name is
@@ -1861,8 +2507,8 @@ let availabilityToken = 0;
 function attachAvailabilityCheck() {
   const input = q("#ni-handle");
   const status = q("#ni-availability");
-  const next = q("#btn-next-id");
-  if (!input || !status || !next) return;
+  const submit = q("#btn-claim");
+  if (!input || !status || !submit) return;
 
   let timer = null;
   const setStatus = (text, cls = "") => {
@@ -1871,23 +2517,26 @@ function attachAvailabilityCheck() {
   };
 
   const check = async () => {
-    const handle = input.value.trim().toLowerCase();
-    const domain = q("#ni-domain")?.value.trim().toLowerCase() || "";
-    const hosted = q("#ni-hosted-step1")?.checked !== false;
+    const info = modeNow();
+    const intent = readClaimIntent();
     const token = ++availabilityToken;
 
-    // Self-hosted names are not this relay's to give out.
-    if (!hosted || !handle) {
-      next.disabled = false;
-      setStatus("");
+    // Self-hosted names are not this relay's to give out, and an empty field
+    // is not a question.
+    if (!intent.hosted || !intent.handle) {
+      submit.disabled = webCustodyBlocked();
+      setStatus(intent.handle ? "" : policyHint(info));
       return;
     }
-    next.disabled = true;
+    submit.disabled = true;
     setStatus("Checking…");
     try {
-      const verdict = await identityApiFor(defaultRelayUrl()).availability(handle, domain);
+      const verdict = await identityApiFor(defaultRelayUrl()).availability(intent.handle, intent.domain);
       if (token !== availabilityToken) return; // a later keystroke won
-      next.disabled = !verdict.available;
+      // Keep the policy: it is what the field's hint renders from, and it is
+      // deployment configuration this client cannot know (E15-T12).
+      if (verdict.policy) S.door = { ...S.door, policy: verdict.policy };
+      submit.disabled = webCustodyBlocked() || !verdict.available;
       setStatus(
         verdict.available ? `${verdict.identity} is available` : verdict.message,
         verdict.available ? "val-ok" : "val-warn",
@@ -1896,43 +2545,52 @@ function attachAvailabilityCheck() {
       if (token !== availabilityToken) return;
       // A relay that cannot answer must not block the flow — registration
       // itself is still the authority, and it will refuse if this would have.
-      next.disabled = false;
-      setStatus("");
+      // But it must say so: silently enabling the button teaches the user the
+      // check passed when nothing was checked (E15-T12).
+      submit.disabled = webCustodyBlocked();
       console.warn("Availability check failed:", error.message);
     }
   };
 
-  input.addEventListener("input", () => {
+  const schedule = () => {
     clearTimeout(timer);
-    next.disabled = true;
-    setStatus("");
     timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS);
+  };
+
+  input.addEventListener("input", () => {
+    // A pasted `alice.poweur.net` or `@alice` means the same handle as
+    // `alice`; a field that shows its own suffix invites exactly that.
+    const cleaned = normalizeHandleInput(input.value, modeNow());
+    if (cleaned !== input.value) input.value = cleaned;
+    submit.disabled = true;
+    setStatus("");
+    schedule();
   });
-  q("#ni-domain")?.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, AVAILABILITY_DEBOUNCE_MS); });
-  q("#ni-hosted-step1")?.addEventListener("change", check);
+  q("#ni-domain")?.addEventListener("input", schedule);
+  q("#ni-domain")?.addEventListener("change", schedule);
   if (input.value.trim()) check();
 }
 
-function doNextIdentityStep() {
-  const handle = q("#ni-handle")?.value.trim().toLowerCase();
-  const domain = q("#ni-domain")?.value.trim().toLowerCase();
-  const hosted = q("#ni-hosted-step1")?.checked !== false;
-  if (!handle) return toast("Enter a handle", "warning");
-  if (!domain) return toast("Enter a parent domain", "warning");
-  if (handle.length < 3) return toast("Handle must be at least 3 characters", "warning");
-  const encoded = btoa(JSON.stringify({ handle, domain, hosted }));
-  if (hosted) {
-    // Stay on this relay (wildcard / local) — same as CLI --hosted
-    window.location.hash = `create=${encoded}`;
-    render();
-    return;
+function doClaim() {
+  if (webCustodyBlocked()) return toast(S.passkey.reason || PRF_UNAVAILABLE_MESSAGE, "error", 9000);
+  const intent = readClaimIntent();
+  if (!intent.handle) {
+    focusHandleField();
+    return toast("Choose a name", "warning");
   }
-  window.location.href = `https://${handle}.${domain}/app/#create=${encoded}`;
+  if (!intent.domain) return toast("Enter the domain your identity lives under", "warning");
+  return doCreateIdentity(intent);
 }
 
-/** @deprecated use doNextIdentityStep */
-function doRedirectToIdentityDomain() {
-  doNextIdentityStep();
+/** The identity host's own name, claimed as itself and nothing else (E15-T9). */
+function doClaimThisHost() {
+  const info = modeNow();
+  if (!info.handle || !info.domain) return;
+  return doCreateIdentity({
+    handle: info.handle,
+    domain: info.domain,
+    hosted: info.hostedDomains.includes(info.domain),
+  });
 }
 
 /**
@@ -1953,20 +2611,19 @@ async function handOffToIdentityOrigin(identity) {
   const host = globalThis.location?.hostname ?? "";
   if (!record || !host || host === identity) return false;
 
-  let launcherHost = "";
-  try {
-    const root = await fetch(new URL("/", relayUrlFor(identity)).toString(), {
-      headers: { Accept: "application/json" },
-    }).then(r => (r.ok ? r.json() : null));
-    launcherHost = String(root?.launcher_host ?? "").toLowerCase();
-  } catch {
-    return false;
-  }
-  if (!launcherHost || launcherHost !== host.toLowerCase()) return false;
+  // Any launcher host hands off, not only the canonical one: the apex claims
+  // names too now (E15-T7), and an identity claimed there needs the same hop.
+  const info = await resolveMode();
+  if (info.mode !== "launcher") return false;
 
   const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
   setLoading(true, `Taking you to ${identity}…`);
-  globalThis.location.href = `https://${identity}/app/#claim=${payload}`;
+  // The port travels with the hop. It is empty in production, where identity
+  // hosts are on 443 — and it is the difference between a working hand-off and
+  // a dead host anywhere the relay is not (a dev server, the e2e harness).
+  const port = globalThis.location?.port ? `:${globalThis.location.port}` : "";
+  globalThis.location.href =
+    `${globalThis.location?.protocol ?? "https:"}//${identity}${port}/app/#claim=${payload}`;
   return true;
 }
 
@@ -1993,32 +2650,42 @@ function adoptHandOff() {
   }
 }
 
-async function doCreateIdentity() {
-  const step2 = parseCreateHash();
-  if (!step2) return;
+/**
+ * Create an identity from an explicit intent (E15-T7).
+ *
+ * It used to read the handle out of a `#create=` hash and the mode out of a
+ * checkbox, which is why the same form could be opened for a name that had
+ * nothing to do with the page it was on. The caller now says what is being
+ * claimed, and every caller gets that from the host.
+ *
+ * @param {{handle: string, domain: string, hosted: boolean,
+ *          provider?: string, dnsToken?: string, inviteCode?: string}} intent
+ */
+async function doCreateIdentity(intent) {
+  if (!intent?.handle || !intent?.domain) return toast("Choose a name first", "warning");
 
-  const handle   = step2.handle;
-  const domain   = step2.domain;
+  const { handle, domain, hosted } = intent;
   // A brand-new identity has no record yet, so this is the one moment the
   // relay is not read from one — see storage.defaultRelayUrl().
   const relayUrl = defaultRelayUrl();
-  const provider = q("#ni-provider")?.value;
-  const dnsToken = q("#ni-token")?.value.trim();
-  const hosted = q("#ni-hosted")?.checked !== false;
+  const provider = intent.provider;
+  const dnsToken = intent.dnsToken ?? "";
 
-  if (!hosted && !dnsToken) return toast("Enter a DNS API token, or enable hosted registration", "warning");
+  if (!relayUrl) return toast("Choose a relay first", "warning");
+  if (!hosted && !dnsToken) {
+    return toast(`This relay does not host ${domain} — enter a DNS API token for it`, "warning", 7000);
+  }
 
   const identity = `${handle}.${domain}`;
   if (loadIdentityRecord(identity)) return toast("Identity already exists on this device", "warning");
 
-  // A passkey is a lock, not the identity (EPIC-011). Where there is no
-  // authenticator to hold one, a PIN holds the same wrapped keys — so an
-  // absent authenticator changes *how* the keys are protected, not whether an
-  // identity can exist. That case is not exotic: a Capacitor shell runs on
-  // `capacitor://localhost`, which is not a secure http(s) origin, so WebAuthn
-  // is unavailable there by construction (EPIC-019, where the OS keystore
-  // eventually replaces the PIN).
-  const support = await checkPasskeySupport();
+  const custody = await chooseCustody();
+  if (custody.kind !== "native") {
+    const support = await checkPasskeySupport();
+    if (!support.available || support.prf === false) {
+      return toast(support.reason || PRF_UNAVAILABLE_MESSAGE, "error", 9000);
+    }
+  }
 
   setLoading(true, "Generating keys…");
   try {
@@ -2030,27 +2697,20 @@ async function doCreateIdentity() {
     const userId = toBase64url(crypto.getRandomValues(new Uint8Array(16)));
     let credentialId = "", prfOutput = null, supportsPRF = false;
     let credentialPublicKey = null, credentialAlg = null, credentialScope = null;
-    if (support.available) {
+    let encryptedKeys;
+    if (custody.kind === "native") {
+      setLoading(false);
+      encryptedKeys = await wrapKeysNative(identity, sigPriv, encPriv, seed, {
+        gate: custody.gate,
+        reason: `Protect ${handle}`,
+      });
+      setLoading(true, "Securing keys…");
+    } else {
       setLoading(true, "Creating passkey…");
       ({ credentialId, prfOutput, supportsPRF, credentialPublicKey, credentialAlg, rpId: credentialScope } =
         await createPasskey(identity, userId));
-    } else {
-      setLoading(false);
-      toast(`No passkey here (${support.reason}) — protecting your keys with a PIN instead`,
-        "info", 7000);
-    }
-
-    let encryptedKeys;
-    if (supportsPRF) {
       setLoading(true, "Securing keys…");
       encryptedKeys = await wrapKeysWithPRF(prfOutput, sigPriv, encPriv, seed);
-    } else {
-      // Drop overlay so the PIN sheet can receive clicks.
-      setLoading(false);
-      const pin = await promptPin("Set a PIN to protect your keys:", true);
-      if (!pin) return;
-      setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, sigPriv, encPriv, seed);
     }
 
     setLoading(true, "Registering identity…");
@@ -2058,7 +2718,7 @@ async function doCreateIdentity() {
       hosted,
       keys: keyBytesFromJwks(identity, sigPriv, encPriv),
       ...(hosted ? {} : { dnsProvider: provider, dnsToken }),
-      ...(q("#ni-invite")?.value.trim() ? { inviteCode: q("#ni-invite").value.trim() } : {}),
+      ...(intent.inviteCode ? { inviteCode: intent.inviteCode } : {}),
       // A relay may gate signup behind proof-of-work (EPIC-014). Solving it
       // silently is a signup screen that looks stuck, so say what is happening.
       onRegistrationChallenge: ({ bits }) =>
@@ -2071,6 +2731,10 @@ async function doCreateIdentity() {
       identity, publicKey, encPublicKey,
       credentialId, credentialPublicKey, credentialAlg, rpId: credentialScope,
       encryptedKeys, relay: relayUrl,
+      // Which registration path this identity took. Settings shows DNS
+      // credentials only to someone who has any (E15-T10); before this it was
+      // shown to every hosted user, none of whom will ever hold a token.
+      hosted,
       userId, createdAt: created.document.updated_at, supportsPRF,
       seedDerived: true,
     });
@@ -2095,13 +2759,6 @@ async function doCreateIdentity() {
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
 
-    // The `#create=` hash has done its job. Left in place it makes the
-    // launcher reopen step 2 for a handle that already exists — including
-    // after a reload, which drops the user into a stale creation flow.
-    if (globalThis.location?.hash.startsWith("#create=")) {
-      history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
-    }
-
     // Claimed on the launcher host? The identity's own origin is where it
     // lives, so hand it over rather than leaving the user on `id.…` with
     // storage that the identity's own pages cannot read (EPIC-018 E18-T3).
@@ -2115,9 +2772,28 @@ async function doCreateIdentity() {
 
   } catch (err) {
     setLoading(false);
-    toast(err.message, "error", 8000);
     console.error(err);
+    // Availability is advisory and fails open, so the relay can still refuse
+    // here — after a passkey ceremony. Say what became of that credential and
+    // put the cursor back on the name, rather than leaving a toast to be
+    // dismissed over a form that still looks fine (E15-T12).
+    if (err?.relayCode === "handle_unavailable" || /taken|reserved|not available/i.test(err?.message ?? "")) {
+      S.door = { ...S.door, state: "claimable", message: err.message };
+      toast(`${err.message} The passkey you just created is unused — pick another name.`, "error", 9000);
+      focusHandleField(handle);
+      return;
+    }
+    toast(err.message, "error", 8000);
   }
+}
+
+/** Put the user back where the fix is, with the attempt still in the field. */
+function focusHandleField(value = "") {
+  const field = q("#ni-handle");
+  if (!field) return;
+  field.value = value;
+  field.focus();
+  field.select?.();
 }
 
 /**
@@ -2203,9 +2879,12 @@ function startEventStream() {
     onEvent: (event) => {
       if (identity !== S.identity) return; // the user switched identities
       if (event.type === "ready") return;  // nothing new by itself
-      // A queued contact request never reaches the inbox, so reading only
-      // that would leave the Requests tray silent until the user opened it.
+      // Each queue has its own event, because each is read by a different
+      // call: told the wrong one, the app fetches an empty inbox and leaves
+      // the tray that actually has something silent until the user happens to
+      // open it.
       if (event.type === "request") loadRequests({ force: true });
+      else if (event.type === "anon") loadAnon({ force: true });
       else loadInbox();
     },
     onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
@@ -2222,8 +2901,13 @@ function loadInbox() {
   if (!client) return Promise.resolve();
   inboxInFlight ??= challengeSerial(async () => {
     try {
-      // The SDK decrypts and emits tick-2 receipts for what actually opened.
-      const { messages, acks } = await client.inboxAndAck();
+      // Read, receipt and *keep* in one step. Any gap between the pickup and
+      // the archive write is a window where the relay has forgotten a message
+      // and nothing has written it down — and a drain gives no second chance.
+      const { messages, acks, lost } = await client.inboxAndArchive();
+      if (lost) {
+        toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
+      }
       mergeMessages(messages);
       mergeInto(S.acks, acks);
       if (R.page === "messages" && !R.sub) render();
@@ -2235,6 +2919,136 @@ function loadInbox() {
     }
   });
   return inboxInFlight;
+}
+
+/**
+ * Load the archive into the message store.
+ *
+ * This is what makes a reload show yesterday's conversation. `GET /messages`
+ * drains — the relay hands each message over exactly once and forgets it — so
+ * everything on screen after a refresh comes from here, not from the relay's
+ * spool. Runs once per unlocked identity; `loadInbox` keeps it current after.
+ */
+let historyInFlight = null;
+
+function loadHistory({ force = false } = {}) {
+  const H = S.history;
+  if (H.loading) return historyInFlight ?? Promise.resolve();
+  if (H.loaded && !force) return Promise.resolve();
+  const client = clientFor(S.identity);
+  if (!client) return Promise.resolve();
+
+  H.loading = true;
+  historyInFlight = (async () => {
+    try {
+      const store = await client.history();
+      const [records, readState] = await Promise.all([store.load(), store.readState()]);
+      H.readState = readState;
+      // Signed conversations and the anonymous queue are different objects to
+      // this app — one has someone to reply to and one does not — so they are
+      // restored into the trays that render them, not into one list.
+      const signed = records.filter(r => r.queue !== "anonymous");
+      const anonymous = records.filter(r => r.queue === "anonymous");
+      mergeMessages(signed.map(recordToMessage));
+      mergeInto(S.anon.messages, anonymous.map(recordToMessage), messageKey);
+      H.loaded = true;
+      H.error = null;
+    } catch (error) {
+      H.error = `Could not load your message history: ${error.message}`;
+      console.warn("History load failed:", error.message);
+    } finally {
+      H.loading = false;
+      historyInFlight = null;
+      if (R.page === "messages" && !R.sub) render();
+    }
+  })();
+  return historyInFlight;
+}
+
+/** An archived record in the shape the trays already render. */
+function recordToMessage(record) {
+  return {
+    id: record.id,
+    sender: record.sender || "",
+    recipient: record.recipient,
+    timestamp: record.timestamp,
+    type: record.type ?? "",
+    queue: record.queue,
+    plaintext: record.body,
+  };
+}
+
+/** The reverse, for archiving something the app produced itself. */
+function messageToRecord(message, queue) {
+  return {
+    id: message.id,
+    ...(message.sender ? { sender: message.sender } : {}),
+    recipient: message.recipient || S.identity,
+    timestamp: message.timestamp,
+    ...(message.type ? { type: message.type } : {}),
+    queue,
+    body: message.plaintext ?? "",
+  };
+}
+
+/**
+ * Unread per conversation, from the read marks rather than from how much we
+ * happen to be holding.
+ *
+ * The old count was `messages.length`, which is a number that can never reach
+ * zero — a badge that never clears teaches people to ignore badges. A mark is
+ * a *position* (timestamp and id): message timestamps are RFC3339 to the
+ * second, so two messages a moment apart share one, and a timestamp-only mark
+ * would silently swallow the second.
+ */
+function unreadFor(peer) {
+  const wanted = String(peer ?? "").toLowerCase();
+  const mark = S.history.readState?.conversations?.[wanted] ?? null;
+  let count = 0;
+  for (const raw of S.messages) {
+    const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!m.sender || m.sender.toLowerCase() === String(S.identity).toLowerCase()) continue;
+    if (m.sender.toLowerCase() !== wanted) continue;
+    if (mark && markCovers(mark, m.timestamp, m.id ?? "")) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/** Unread anonymous messages — the same rule, for the tray that has no sender. */
+function unreadAnonymous() {
+  const mark = S.history.readState?.conversations?.["anonymous"] ?? null;
+  return S.anon.messages.filter(m => !(mark && markCovers(mark, m.timestamp, m.id ?? ""))).length;
+}
+
+function markCovers(mark, timestamp, id) {
+  if (!mark?.timestamp) return false;
+  if (mark.timestamp !== timestamp) return new Date(mark.timestamp) > new Date(timestamp);
+  return (mark.id ?? "") >= id;
+}
+
+/**
+ * Record that a conversation has been read, and repaint so the badge clears
+ * at the moment the user would expect it to.
+ */
+async function markConversationRead(peer) {
+  const client = clientFor(S.identity);
+  if (!client) return;
+  const wanted = String(peer ?? "").toLowerCase();
+  const records = (wanted === "anonymous" ? S.anon.messages : S.messages)
+    .map(raw => (typeof raw === "string" ? JSON.parse(raw) : raw))
+    .filter(m => wanted === "anonymous"
+      ? true
+      : m.sender && m.sender.toLowerCase() === wanted)
+    .map(m => messageToRecord(m, wanted === "anonymous" ? "anonymous" : "inbox"));
+  if (!records.length) return;
+  try {
+    const store = await client.history();
+    S.history.readState = await store.markConversationRead(wanted, records);
+    if (R.page === "messages") render();
+  } catch (error) {
+    console.warn("Could not save read marks:", error.message);
+  }
 }
 
 async function doSend() {
@@ -2270,8 +3084,22 @@ async function doSend() {
       return;
     }
     setStatus("Sending…");
-    await client.send(to, body, { signWith: sessionIsValid(sess) ? "session" : "identity" });
+    const sent = await client.sendAndArchive(to, body, {
+      signWith: sessionIsValid(sess) ? "session" : "identity",
+    });
     setStatus("✓ Sent", "ok");
+    // Keep our own copy on screen too: the relay never hands a sender their
+    // own message back, so without this the conversation shows only one side
+    // until someone replies.
+    mergeMessages([{
+      id: sent.message.id,
+      sender: S.identity,
+      recipient: sent.message.recipient,
+      timestamp: sent.message.timestamp,
+      queue: "sent",
+      plaintext: body,
+    }]);
+    if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
     if (q("#c-body")) q("#c-body").value = "";
     toast("Message sent!", "success");
     setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
@@ -2961,8 +3789,8 @@ function showAddContactPanel(preset = "") {
       <label class="form-label" for="ac-petname">Petname (optional)</label>
       <input id="ac-petname" class="input" type="text" placeholder="What you call them" autocomplete="off" />
     </div>
-    <button class="btn btn-primary mt-md" id="btn-add-contact-go" disabled>Send request</button>
-    <button class="btn mt-sm" id="btn-add-contact-msg" disabled>Just message them</button>`,
+    <button class="btn btn-primary mt-md" id="btn-add-contact-go">Send request</button>
+    <button class="btn mt-sm" id="btn-add-contact-msg">Just message them</button>`,
   (close) => {
     const host = q("#add-contact-input");
     const go = q("#btn-add-contact-go");
@@ -2971,27 +3799,47 @@ function showAddContactPanel(preset = "") {
       resolve: resolveForComponents,
       contacts: S.contacts.list,
       value: preset,
+      // On a hosted relay everyone shares a domain, so "alice" is what people
+      // type and `alice.poweur.net` is what they mean.
+      defaultDomain: idDomain(S.identity),
       label: "Identity",
-      onChange: (result) => {
-        picked = result;
-        if (go) go.disabled = !result;
-        if (msg) msg.disabled = !result;
-      },
+      onChange: (result) => { picked = result; },
       onSubmit: () => go?.click(),
     });
     host?.replaceChildren(input.el);
     input.focus();
-    go?.addEventListener("click", () => {
-      if (!picked) return;
+
+    /**
+     * Resolve on the way out rather than gating the button on it.
+     *
+     * The buttons used to stay disabled until a debounced lookup came back,
+     * so someone who typed a name and hit the button they were already
+     * looking at got nothing at all — no error, no send, just a dead control.
+     * Pressing it now forces the lookup it was waiting for.
+     */
+    const resolveNow = async (button) => {
+      if (picked) return picked;
+      if (button) button.disabled = true;
+      try {
+        return await input.lookup();
+      } finally {
+        if (button) button.disabled = false;
+      }
+    };
+
+    go?.addEventListener("click", async () => {
+      const target = await resolveNow(go);
+      if (!target) return toast("Enter a Poweur ID we can find", "warning");
       const intro = q("#ac-intro")?.value.trim();
       const petname = q("#ac-petname")?.value.trim();
       close();
-      doRequestContact(picked.identity, { intro, petname });
+      doRequestContact(target.identity, { intro, petname });
     });
-    msg?.addEventListener("click", () => {
-      if (!picked) return;
+    msg?.addEventListener("click", async () => {
+      const target = await resolveNow(msg);
+      if (!target) return toast("Enter a Poweur ID we can find", "warning");
       close();
-      R.push("compose", { to: picked.identity });
+      R.push("compose", { to: target.identity });
     });
   });
 }
@@ -3137,8 +3985,11 @@ function loadAnon({ force = false } = {}) {
   A.loading = true;
   return challengeSerial(async () => {
     try {
-      // `GET /anon/{id}` drains like the inbox: keep what we have been handed.
-      mergeInto(A.messages, await client.anon());
+      // `GET /anon/{id}` drains like the inbox: what we are handed here is
+      // handed here once, so it is archived in the same step.
+      const { messages, lost } = await client.anonAndArchive();
+      mergeInto(A.messages, messages, messageKey);
+      if (lost) toast("Anonymous messages could not be saved to your history", "warning", 6000);
       A.loaded = true;
       A.error = null;
     } catch (error) {
@@ -3318,7 +4169,6 @@ const ENROLLMENT_KIND_LABEL = {
 
 const ENROLLMENT_WRAP_LABEL = {
   prf: "passkey (PRF)",
-  pin: "PIN",
   passphrase: "passphrase",
   native: "the OS keystore",
 };
@@ -3385,12 +4235,9 @@ async function showKeysAndDevicesPanel() {
       closePanel();
       setLoading(true, "Backing up this browser…");
       try {
-        const { canBootstrap } = await enrollThisBrowser(clientFor(identity), identity);
+        await enrollThisBrowser(clientFor(identity), identity);
         setLoading(false);
-        toast(canBootstrap
-          ? "This browser is backed up"
-          : "Backed up — but a PIN-wrapped browser cannot restore itself; keep your recovery kit",
-          canBootstrap ? "success" : "warning", canBootstrap ? 3500 : 8000);
+        toast("This browser is backed up", "success", 3500);
         showKeysAndDevicesPanel();
       } catch (error) {
         setLoading(false);
@@ -3580,7 +4427,7 @@ function showIdentityKeysPanel() {
     <div class="kv-row"><span class="kv-label">Relay</span><span class="kv-value small">${esc(rec.relay)}</span></div>
     <div class="kv-row"><span class="kv-label">Created</span><span class="kv-value small">${esc(fmtTime(rec.createdAt))}</span></div>
     <div class="kv-row"><span class="kv-label">Protection</span>
-      <span class="chip ${rec.supportsPRF !== false ? "chip-green" : "chip-orange"}">${rec.supportsPRF !== false ? "Passkey PRF" : "PIN (PBKDF2)"}</span>
+      <span class="chip chip-green">${rec.encryptedKeys?.kdf === "native" ? "Device keystore" : "Passkey PRF"}</span>
     </div>
     <div class="kv-row"><span class="kv-label">DNS</span>
       <code class="kv-value small" style="font-size:11px;line-height:1.6">_poweur.${esc(rec.identity)}<br>_poweur-enc.${esc(rec.identity)}</code>
@@ -3722,15 +4569,15 @@ async function doRotateEncKey() {
     await client.identity.publishEncryptionKey(client.signer, encPublicKey);
 
     let encryptedKeys;
-    if (rec.supportsPRF !== false) {
-      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
-      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
+    if (rec.encryptedKeys?.kdf === "native") {
+      encryptedKeys = await wrapKeysNative(id, keys.signingJWK, encPrivNew, keys.seed, {
+        gate: rec.encryptedKeys.gate,
+        reason: `Protect ${id.split(".")[0]}`,
+      });
     } else {
-      setLoading(false);
-      const pin = await promptPin("Re-enter PIN to save new key:");
-      if (!pin) return;
-      setLoading(true, "Securing keys…");
-      encryptedKeys = await wrapKeysWithPin(pin, keys.signingJWK, encPrivNew, keys.seed);
+      const { prfOutput } = await authenticatePasskey(rec.credentialId, { rpId: rpIdFor(S.identity) });
+      if (!prfOutput) throw new Error(PRF_UNAVAILABLE_MESSAGE);
+      encryptedKeys = await wrapKeysWithPRF(prfOutput, keys.signingJWK, encPrivNew, keys.seed);
     }
 
     // The encryption key no longer derives from the seed, so a kit rebuilt from
@@ -3765,37 +4612,15 @@ function doRemoveIdentity() {
       const removed = S.identity;
       removeIdentity(removed);
       removeSessionRecord(removed);
+      // The wrapped blob is gone; leaving its hardware secret behind would be
+      // an entry nothing can ever open, kept for the life of the install.
+      forgetNativeSecret(removed);
       switchIdentity(listIdentities()[0] || null);
       closePanel();
       R.go("messages");
       toast("Identity removed from device", "info");
     });
     q("#panel-cancel-remove")?.addEventListener("click", closePanel);
-  });
-}
-
-// ─── PIN prompt ───────────────────────────────────────────────────────────────
-
-function promptPin(label, confirm = false) {
-  return new Promise(resolve => {
-    showPanel("Key protection PIN", `
-      <p class="muted small" style="margin-bottom:14px">${esc(label)}</p>
-      <div class="form-group">
-        <input id="pin-input" class="input" type="password" placeholder="PIN (min 4 characters)" />
-      </div>
-      ${confirm ? `<div class="form-group"><input id="pin-confirm" class="input" type="password" placeholder="Confirm PIN" /></div>` : ""}
-      <button class="btn btn-primary mt-sm" id="btn-pin-ok">OK</button>`,
-    () => {
-      const ok = () => {
-        const pin = q("#pin-input")?.value ?? "";
-        if (pin.length < 4) { toast("PIN must be ≥ 4 characters", "warning"); return; }
-        if (confirm && pin !== (q("#pin-confirm")?.value ?? "")) { toast("PINs do not match", "warning"); return; }
-        closePanel(); resolve(pin);
-      };
-      q("#btn-pin-ok")?.addEventListener("click", ok);
-      q("#pin-input")?.addEventListener("keydown", e => { if (e.key === "Enter") ok(); });
-    },
-    () => resolve(null));
   });
 }
 
@@ -3933,8 +4758,6 @@ function boot() {
     // works here because it is scoped to the domain both hosts share (E18-T4).
     R.page = "messages";
     R.push("unlock");
-  } else if (parseCreateHash()) {
-    R.page = "launcher";
   } else if (!S.identity) {
     R.page = "messages";
   } else if (!getUnlockedKeys() && !sessionIsValid(loadSessionRecord(S.identity))) {
@@ -3946,6 +4769,42 @@ function boot() {
   }
 
   render();
+
+  // The door depends on the relay's answer, and the first paint above came
+  // from the cached one (or from `unknown`, which renders the generic welcome
+  // — the safe thing to show while we find out). Correct it when it lands.
+  resolveMode().then((info) => {
+    setDocumentIdentity(info);
+    if (!S.identity) render();
+  });
+}
+
+/**
+ * Title and description per door (E15-T12).
+ *
+ * `poweur.net` is a landing page a search engine will index and a tab someone
+ * keeps open; `bob.poweur.net` is neither. Before this every host claimed to
+ * be "Poweur ID".
+ */
+function setDocumentIdentity(info) {
+  const title = {
+    launcher: "Poweur ID — claim your name",
+    identity: info.subject ? `${info.subject} — Poweur ID` : "Poweur ID",
+    shell: "Poweur ID",
+  }[info.mode] ?? "Poweur ID";
+  const description = {
+    launcher: "Claim an identity you own: encrypted messages, a synced drive, and sign-in — under your own name.",
+    identity: `Sign in to ${info.subject || "this identity"} with a passkey.`,
+  }[info.mode] ?? "Encrypted, identity-first messaging.";
+
+  document.title = title;
+  let meta = document.querySelector('meta[name="description"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "description");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", description);
 }
 
 boot();

@@ -26,7 +26,7 @@ import {
 
 import { assertChallenge, credentialRpId, wrapKeysWithPRF } from "./passkey.js";
 import { loadIdentityRecord, relayUrlFor, rpIdFor, saveIdentityRecord } from "./storage.js";
-import { jwksFromSeed, wrapKeysWithPin } from "./vault.js";
+import { jwksFromSeed, publicKeyFromJwk } from "./vault.js";
 
 /** A stable id for an enrollment, independent of the credential it wraps. */
 function newEnrollmentId() {
@@ -60,15 +60,20 @@ export async function listEnrollments(client, identity) {
  * site data destroys it — the failure EPIC-011 exists to remove. Called at
  * registration and offered afterwards for identities that predate it.
  *
- * A PIN-wrapped identity is enrolled too: the blob is still recoverable, it
- * just cannot authorize its own `fetch`, so it needs another enrollment or a
- * recovery kit to come back. `enrolled: false` says so rather than implying
- * more safety than there is.
+ * Native-keystore enrollments are stored too; they cannot authorize a
+ * WebAuthn bootstrap fetch, which `canBootstrap` reports.
  */
 export async function enrollThisBrowser(client, identity, { label = deviceLabel() } = {}) {
   const record = loadIdentityRecord(identity);
   if (!record) throw new Error(`No local record for ${identity}`);
-  if (!record.credentialPublicKey) {
+  const kdf = record.encryptedKeys?.kdf;
+  if (kdf !== "prf" && kdf !== "native") {
+    throw new Error(
+      "This browser's keys are not wrapped with passkey PRF, so they cannot be backed up. " +
+      "Use Safari or Chrome with Apple or Google passkeys, or the Poweur mobile app.",
+    );
+  }
+  if (kdf === "prf" && !record.credentialPublicKey) {
     throw new Error(
       "This browser's passkey did not expose a public key, so the relay cannot verify it. " +
       "Add a device from one that can, or keep a recovery kit.",
@@ -76,17 +81,19 @@ export async function enrollThisBrowser(client, identity, { label = deviceLabel(
   }
 
   const enrollmentId = record.enrollmentId ?? newEnrollmentId();
-  const { kdf, ...wrapped } = record.encryptedKeys;
+  const { kdf: _kdf, ...wrapped } = record.encryptedKeys;
 
   await client.keystore.enroll(client.signer, identity, {
     enrollmentId,
-    kind: "passkey",
-    wrap: kdf === "prf" ? "prf" : "pin",
+    kind: kdf === "native" ? "native" : "passkey",
+    wrap: kdf === "native" ? "native" : "prf",
     payload: record.seedDerived ? "seed" : "legacy-keypair",
     wrapped,
-    credentialId: record.credentialId,
-    credentialPublicKey: record.credentialPublicKey,
-    ...(record.credentialAlg ? { credentialAlg: record.credentialAlg } : {}),
+    ...(kdf === "prf" ? {
+      credentialId: record.credentialId,
+      credentialPublicKey: record.credentialPublicKey,
+      ...(record.credentialAlg ? { credentialAlg: record.credentialAlg } : {}),
+    } : {}),
     label,
   });
 
@@ -157,6 +164,9 @@ function needsRecoveryMaster(error) {
  * `credentialId` is deliberately not passed — this browser has no record of
  * which credential to ask for, so the platform offers its discoverable ones.
  * `residentKey: "required"` at creation is what makes that possible.
+ *
+ * The caller writes the local record with `restoreLocalRecord` — same
+ * credential, same enrollment, no second passkey.
  */
 export async function recoverFromKeystore(identity, { relayUrl = relayUrlFor(identity) } = {}) {
   const api = apiFor(relayUrl);
@@ -184,6 +194,46 @@ export async function recoverFromKeystore(identity, { relayUrl = relayUrlFor(ide
     encJWK: opened.encJWK,
     seed: opened.seed ?? null,
   };
+}
+
+/**
+ * Rebuild the local identity record from the authenticator that just opened
+ * a keystore copy.
+ *
+ * This is the cleared-site-data path: the passkey already exists, its PRF
+ * already unwrapped the blob, and minting a second credential would ask the
+ * user to "add a passkey" they just used. The enrollment row stays put —
+ * reusing it does not overwrite another authenticator's copy, because this
+ * *is* that authenticator.
+ *
+ * New-device join still mints a fresh passkey (`adoptIdentity`); this helper
+ * is only for the same authenticator coming back.
+ */
+export function restoreLocalRecord(identity, recovered, { relayUrl }) {
+  const { entry, assertion, signingJWK, encJWK, seed } = recovered ?? {};
+  const credentialId = assertion?.credential_id || entry?.credential_id;
+  if (!entry?.enrollment_id || !credentialId || !entry.wrapped) {
+    throw new Error("Nothing to restore — the authenticator did not match a stored copy.");
+  }
+  const wrapped = typeof entry.wrapped === "object" ? { ...entry.wrapped } : {};
+  const record = {
+    identity,
+    publicKey: publicKeyFromJwk(signingJWK),
+    encPublicKey: publicKeyFromJwk(encJWK),
+    credentialId,
+    credentialPublicKey: entry.credential_public_key ?? null,
+    credentialAlg: entry.credential_alg ?? null,
+    rpId: credentialRpId(identity),
+    encryptedKeys: { ...wrapped, kdf: "prf" },
+    relay: relayUrl,
+    userId: toBase64url(crypto.getRandomValues(new Uint8Array(16))),
+    createdAt: entry.created_at || new Date().toISOString(),
+    supportsPRF: true,
+    seedDerived: Boolean(seed) || entry.payload === "seed",
+    enrollmentId: entry.enrollment_id,
+  };
+  saveIdentityRecord(identity, record);
+  return record;
 }
 
 // ─── Recovery kit ─────────────────────────────────────────────────────────────
@@ -233,9 +283,8 @@ export function keysFromMnemonic(mnemonic) {
   return { ...jwksFromSeed(seed), seed: toBase64url(seed) };
 }
 
-/** Re-wrap an opened identity under this browser's PRF secret or PIN. */
-export async function rewrap({ prfOutput = null, pin = null }, { signingJWK, encJWK, seed }) {
-  if (prfOutput) return wrapKeysWithPRF(prfOutput, signingJWK, encJWK, seed);
-  if (pin) return wrapKeysWithPin(pin, signingJWK, encJWK, seed);
-  throw new Error("A PRF secret or a PIN is required to store keys in this browser");
+/** Re-wrap an opened identity under this browser's PRF secret. */
+export async function rewrap({ prfOutput = null }, { signingJWK, encJWK, seed }) {
+  if (!prfOutput) throw new Error("A PRF secret is required to store keys in this browser");
+  return wrapKeysWithPRF(prfOutput, signingJWK, encJWK, seed);
 }
