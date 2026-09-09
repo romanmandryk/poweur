@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { freePort, startRelay } from "../helpers/relay.mjs";
+import { startRelay } from "../helpers/relay.mjs";
 import { stubPasskeys, registerIdentity } from "../helpers/app-ui.mjs";
 
 /**
@@ -9,31 +9,31 @@ import { stubPasskeys, registerIdentity } from "../helpers/app-ui.mjs";
  * mapped into it with Chromium's own resolver rules. That is enough: what is
  * under test is what the app does with the `Host` it is served under, and the
  * relay routes on exactly that header in production too.
+ *
+ * One thing these hosts cannot do is *create* an identity. `http://id.poweur.net`
+ * is not a secure context, so `crypto.subtle` and `PublicKeyCredential` do not
+ * exist there, and Chromium's `--unsafely-treat-insecure-origin-as-secure` no
+ * longer grants it. So claims here are made through `127.0.0.1`, which is
+ * trustworthy by name, and what these tests assert is the *door* each host
+ * shows. Production serves all of them over https, where the question does not
+ * arise.
  */
 const MOBILE = { width: 375, height: 812 };
 
 /** @type {Awaited<ReturnType<typeof startRelay>>} */
 let relay;
-// Chosen before the browser launches, because the allow-list below needs it:
-// Chromium reads secure-origin exceptions at launch, and they carry a port.
-const port = await freePort();
+let port;
 
 test.beforeAll(async () => {
-  relay = await startRelay({ port });
+  relay = await startRelay();
+  port = new URL(relay.baseUrl).port;
 });
 test.afterAll(() => relay?.stop());
 
 test.use({
   viewport: MOBILE,
   launchOptions: {
-    args: [
-      "--host-resolver-rules=MAP *.poweur.net 127.0.0.1,MAP poweur.net 127.0.0.1",
-      // `http://id.poweur.net:PORT` is not a secure context, so `crypto.subtle`
-      // and `PublicKeyCredential` do not exist there — creating an identity
-      // fails before it starts, for a reason nothing about the app. Production
-      // serves these hosts over https, where none of this applies.
-      `--unsafely-treat-insecure-origin-as-secure=http://id.poweur.net:${port},http://poweur.net:${port}`,
-    ],
+    args: ["--host-resolver-rules=MAP *.poweur.net 127.0.0.1,MAP poweur.net 127.0.0.1"],
   },
 });
 

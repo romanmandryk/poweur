@@ -42,11 +42,8 @@ export async function waitForHealth(baseUrl, { timeoutMs = 30_000 } = {}) {
  * Start a real Go relay with POWEUR_DATA + HOSTED_DOMAINS + WEB_STATIC_DIR.
  * Returns { baseUrl, port, dataDir, stop }.
  */
-export async function startRelay({ hostedDomains = "poweur.net", port: fixedPort } = {}) {
-  // A caller may name the port when something outside the relay has to know it
-  // in advance — Chromium's secure-origin allow-list takes origins with their
-  // port, and is read at browser launch, before any `beforeAll` could run.
-  const port = fixedPort ?? (await freePort());
+export async function startRelay({ hostedDomains = "poweur.net" } = {}) {
+  const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), "poweur-web-relay-"));
   const addr = `127.0.0.1:${port}`;
   const baseUrl = `http://${addr}`;

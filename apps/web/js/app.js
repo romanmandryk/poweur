@@ -36,7 +36,8 @@ import {
   getActiveIdentity, setActiveIdentity,
   loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
-  defaultRelayUrl, hasRelayUrl, relayUrlFor,
+  defaultRelayUrl, hasRelayUrl, relayUrlFor, isShellRuntime,
+  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor,
 } from "./storage.js";
 
 import {
@@ -396,6 +397,10 @@ const HOW_IT_WORKS = [
  */
 function renderLanding(info) {
   const relayPrompt = renderRelayPrompt();
+  // A shell still shows the claim field: production is the default relay, so
+  // the picker is a switch, not a gate. Without a relay there is nothing to
+  // claim under, which is the original empty-shell case.
+  const claim = !relayPrompt || hasRelayUrl() ? renderClaimCard(info) : "";
   return `
     <div class="landing" id="landing">
       <header class="landing-bar">
@@ -407,7 +412,8 @@ function renderLanding(info) {
           <h1 class="landing-title">Your name. Your inbox. Your files.</h1>
           <p class="landing-sub">Claim an identity you own, and take it everywhere.</p>
         </div>
-        ${relayPrompt ? `<div class="landing-card">${relayPrompt}</div>` : renderClaimCard(info)}
+        ${relayPrompt ? `<div class="landing-card">${relayPrompt}</div>` : ""}
+        ${claim}
         <ol class="landing-steps">
           ${HOW_IT_WORKS.map(([icon, title, body]) => `
             <li class="landing-step">
@@ -1322,42 +1328,76 @@ function renderAddId() {
  * Ask which relay to talk to, when nothing else can answer.
  *
  * A relay-served SPA knows: it is *on* the relay. A shell is not on anything —
- * it runs from its own bundle — so the first question it has to ask is where
- * the user's identity lives. Every option below this needs the answer, which
- * is why it sits above them rather than inside one of them.
+ * it runs from its own bundle — so it has to name one. Production is the
+ * default; local and a typed URL are the other two choices. The picker stays
+ * visible in the shell after a default is known, because switching relays is
+ * why the shell exists.
  */
 function renderRelayPrompt() {
-  if (hasRelayUrl()) return "";
+  if (!isShellRuntime() && hasRelayUrl()) return "";
+  const current = defaultRelayUrl();
+  const preset = relayPresetFor(current);
+  const customValue = preset === "custom" ? current : "";
+  const localHost = localDevRelayUrl().replace(/^https?:\/\//, "");
   return `
     <div class="form-card relay-prompt">
       <div class="form-group" style="margin-bottom:0">
-        <label class="form-label" for="setup-relay">Relay</label>
+        <label class="form-label" for="setup-relay-preset">Relay</label>
         <p class="muted small" style="margin-bottom:6px">
-          The server your identity lives on. Your own, or the one that invited you.
+          Where new identities are created. poweur.net is the hosted relay; switch to a local or your own for testing.
         </p>
+        <select id="setup-relay-preset" class="input select">
+          <option value="production"${preset === "production" ? " selected" : ""}>poweur.net</option>
+          <option value="local"${preset === "local" ? " selected" : ""}>Local emulator (${esc(localHost)})</option>
+          <option value="custom"${preset === "custom" ? " selected" : ""}>Other…</option>
+        </select>
         <input id="setup-relay" class="input" type="url" inputmode="url" autocapitalize="none" autocorrect="off"
-               placeholder="https://poweur.net" autocomplete="off" spellcheck="false" />
+               placeholder="https://relay.example.com" autocomplete="off" spellcheck="false"
+               value="${esc(customValue)}"${preset === "custom" ? "" : " hidden"} />
         <p class="idin-status small" id="setup-relay-status" role="status" aria-live="polite"></p>
       </div>
     </div>`;
 }
 
+function relayUrlForPreset(preset, typed) {
+  if (preset === "local") return localDevRelayUrl();
+  if (preset === "custom") {
+    const raw = (typed ?? "").trim();
+    if (!raw) return "";
+    return (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).replace(/\/+$/, "");
+  }
+  return PRODUCTION_RELAY_URL;
+}
+
 /**
- * Save the typed relay once it answers, so the options below light up.
+ * Save the chosen relay once it answers.
  *
- * It is checked rather than taken on faith: a typo here would otherwise
- * surface as an unexplained failure three screens later, during registration.
+ * Custom URLs are checked rather than taken on faith: a typo here would
+ * otherwise surface as an unexplained failure three screens later. Switching
+ * to a preset hits `/health` before saving; the first paint of the default
+ * does not, so the landing cannot loop on its own seed.
  */
 function attachRelayPrompt() {
+  const presetEl = q("#setup-relay-preset");
   const input = q("#setup-relay");
   const status = q("#setup-relay-status");
-  if (!input || !status) return;
+  if (!presetEl || !status) return;
+
+  const showCustom = () => {
+    if (!input) return;
+    input.hidden = presetEl.value !== "custom";
+  };
 
   let timer = null;
-  const check = async () => {
-    const raw = input.value.trim();
-    if (!raw) { status.textContent = ""; return; }
-    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const apply = async ({ probe } = { probe: true }) => {
+    showCustom();
+    const url = relayUrlForPreset(presetEl.value, input?.value);
+    if (!url) { status.textContent = ""; return; }
+    if (!probe) {
+      status.textContent = `Using ${new URL(url).host}`;
+      status.className = "idin-status small val-ok";
+      return;
+    }
     status.textContent = "Checking…";
     status.className = "idin-status small";
     try {
@@ -1365,7 +1405,7 @@ function attachRelayPrompt() {
         headers: { Accept: "application/json" },
       }).then(r => (r.ok ? r.json() : null));
       if (!health?.status) throw new Error("that does not look like a relay");
-      saveConfig({ ...getConfig(), relayUrl: url.replace(/\/$/, "") });
+      saveConfig({ ...getConfig(), relayUrl: url });
       S.config = getConfig();
       status.textContent = `Connected to ${new URL(url).host}`;
       status.className = "idin-status small val-ok";
@@ -1378,16 +1418,34 @@ function attachRelayPrompt() {
     }
   };
 
-  input.addEventListener("input", () => {
+  presetEl.addEventListener("change", () => {
     clearTimeout(timer);
-    timer = setTimeout(check, 600);
+    if (presetEl.value === "custom") {
+      showCustom();
+      status.textContent = "";
+      input?.focus();
+      return;
+    }
+    apply({ probe: true });
   });
-  input.addEventListener("keydown", (event) => {
+  input?.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => apply({ probe: true }), 600);
+  });
+  input?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     clearTimeout(timer);
-    check();
+    apply({ probe: true });
   });
-  input.focus();
+
+  showCustom();
+  // First paint of the default: do not re-probe and re-render, or the landing
+  // loops. Switching away from it still hits /health before saving.
+  if (presetEl.value !== "custom" && defaultRelayUrl() === relayUrlForPreset(presetEl.value)) {
+    apply({ probe: false });
+  } else if (presetEl.value === "custom" && input?.value.trim()) {
+    apply({ probe: false });
+  }
 }
 
 // Unlock ───────────────────────────────────────────────────────────────────────

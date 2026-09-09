@@ -22,6 +22,9 @@ import {
   defaultRelayUrl,
   hasRelayUrl,
   relayUrlFor,
+  PRODUCTION_RELAY_URL,
+  localDevRelayUrl,
+  relayPresetFor,
   rpIdFor,
   resolveOptionsFor,
 } from "../js/storage.js";
@@ -149,23 +152,21 @@ describe("credential scope (EPIC-018 E18-T4)", () => {
 });
 
 describe("relay URL on a shell origin (EPIC-019 E19-T1)", () => {
-  it("treats a non-web origin as no relay at all", () => {
+  it("seeds a non-web origin from the production relay, never from itself", () => {
     // A Capacitor shell runs on capacitor://localhost. Returning that as the
-    // relay produced an app that registered against itself and had no way to
-    // be told otherwise, since Settings needs an identity first.
+    // relay produced an app that registered against itself. Production is the
+    // seed; the picker can still switch to a local or custom relay.
     const original = Object.getOwnPropertyDescriptor(globalThis, "location");
     Object.defineProperty(globalThis, "location", {
       value: { origin: "capacitor://localhost", protocol: "capacitor:" },
       configurable: true,
     });
     try {
-      expect(defaultRelayUrl()).toBe("");
-      expect(hasRelayUrl()).toBe(false);
-
-      // …until the user names one, which is what the first-run prompt writes.
-      saveConfig({ ...getConfig(), relayUrl: "https://poweur.net" });
-      expect(defaultRelayUrl()).toBe("https://poweur.net");
+      expect(defaultRelayUrl()).toBe(PRODUCTION_RELAY_URL);
       expect(hasRelayUrl()).toBe(true);
+
+      saveConfig({ ...getConfig(), relayUrl: "https://selfhost.example" });
+      expect(defaultRelayUrl()).toBe("https://selfhost.example");
     } finally {
       if (original) Object.defineProperty(globalThis, "location", original);
     }
@@ -176,19 +177,39 @@ describe("relay URL on a shell origin (EPIC-019 E19-T1)", () => {
     expect(hasRelayUrl()).toBe(true);
   });
 
-  it("asks the shell, because Android's shell origin looks like the web", () => {
+  it("does not treat Android's https://localhost shell origin as a relay", () => {
     // The protocol test above is an iOS answer. **Android serves the same
     // bundle from `https://localhost`** — an ordinary web origin by every
-    // syntactic test — so the shell was handed itself as a relay and opened on
-    // a blank page with no way to name a real one. Capacitor says which
-    // platform it is; that is the only reliable signal.
+    // syntactic test — so Capacitor is the signal, and production is the seed.
     globalThis.Capacitor = { isNativePlatform: () => true };
     try {
-      expect(defaultRelayUrl()).toBe("");
-      expect(hasRelayUrl()).toBe(false);
+      expect(defaultRelayUrl()).toBe(PRODUCTION_RELAY_URL);
+      expect(defaultRelayUrl()).not.toBe(globalThis.location.origin);
+      expect(hasRelayUrl()).toBe(true);
 
-      saveConfig({ ...getConfig(), relayUrl: "https://poweur.net" });
-      expect(defaultRelayUrl()).toBe("https://poweur.net");
+      saveConfig({ ...getConfig(), relayUrl: "http://10.0.2.2:8080" });
+      expect(defaultRelayUrl()).toBe("http://10.0.2.2:8080");
+    } finally {
+      delete globalThis.Capacitor;
+    }
+  });
+});
+
+describe("relay presets (shell picker)", () => {
+  it("maps known URLs onto the three picker choices", () => {
+    expect(relayPresetFor("")).toBe("production");
+    expect(relayPresetFor(PRODUCTION_RELAY_URL)).toBe("production");
+    expect(relayPresetFor("https://poweur.net/")).toBe("production");
+    expect(relayPresetFor("http://127.0.0.1:8080")).toBe("local");
+    expect(relayPresetFor("http://10.0.2.2:8080")).toBe("local");
+    expect(relayPresetFor("https://selfhost.example")).toBe("custom");
+  });
+
+  it("points the local preset at the emulator host on Android", () => {
+    expect(localDevRelayUrl()).toBe("http://127.0.0.1:8080");
+    globalThis.Capacitor = { getPlatform: () => "android" };
+    try {
+      expect(localDevRelayUrl()).toBe("http://10.0.2.2:8080");
     } finally {
       delete globalThis.Capacitor;
     }

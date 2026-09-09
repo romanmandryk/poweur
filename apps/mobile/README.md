@@ -5,10 +5,13 @@ build of the UI and no forked screen: `pnpm stage` copies `apps/web` into `www/`
 `cap sync` carries it into the platform projects.
 
 ```bash
-pnpm --filter @poweur/mobile sync     # stage apps/web, then cap sync
-pnpm --filter @poweur/mobile ios      # …and open Xcode
-pnpm --filter @poweur/mobile test     # staging invariants (no native toolchain needed)
+pnpm --filter @poweur/mobile run sync     # stage apps/web, then cap sync
+pnpm --filter @poweur/mobile run ios      # …and open Xcode
+pnpm --filter @poweur/mobile test         # staging invariants (no native toolchain needed)
 ```
+
+`pnpm stage` is a pnpm 10+ builtin (publish staging). Always `pnpm run stage` / `pnpm run sync`
+so the package scripts run, not pnpm's own command.
 
 ## Why a shell rather than native or React Native
 
@@ -88,13 +91,23 @@ What is needed, and why:
 | **JDK 21** | what Capacitor 8's Gradle build expects (`brew install openjdk@21`) |
 | **A system image with biometrics** | Google APIs, API 34+; a bare AOSP image has no fingerprint sensor to enrol |
 
-Everything but the last is installed by Android Studio's first-run wizard. Then:
+Everything but the last is installed by Android Studio's first-run wizard. Then,
+from the **repo root** (not `apps/mobile/android`):
 
 ```bash
-pnpm --filter @poweur/mobile sync            # stage apps/web, then cap sync
-cd apps/mobile/android && ./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+pnpm mobile:android   # stage, cap sync, assembleDebug
+adb install -r apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+A fresh install talks to **https://poweur.net**. The landing picker can switch to
+the local `go run` relay (`http://10.0.2.2:8080` on the emulator, `127.0.0.1:8080`
+on iOS) or a typed URL. A physical phone cannot use `10.0.2.2`; use **Other…**
+with the Mac's LAN address, and add that host to `network_security_config.xml`
+if it is plain HTTP.
+
+A USB phone that `adb devices` does not list is almost always USB debugging, not
+the cable: on a Pixel, Developer options → USB debugging, then the USB
+notification → **File transfer / Android Auto**, and accept **Allow USB debugging**.
 
 The emulator has no fingerprint enrolled out of the box, and without one the app falls back
 to a PIN — the same path a phone with no biometrics takes, which is worth seeing, but it is

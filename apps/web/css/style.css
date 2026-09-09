@@ -1502,8 +1502,10 @@ input, textarea, select { font-family: inherit; }
 .tray-tab.active .tray-badge { background: rgba(255,255,255,.28); }
 
 /* First-run relay prompt (EPIC-019 E19-T1): a shell is not served by a relay,
-   so it has to ask which one before any of the options below mean anything. */
+   so it names one — production by default, local or a typed URL otherwise. */
 .relay-prompt { margin-bottom: 16px; }
+.relay-prompt .input.select + .input { margin-top: 8px; }
+.relay-prompt .input[hidden] { display: none; }
 
 /* ─── Front doors (E15-T7 / T8 / T9) ──────────────────────────────────────── */
 

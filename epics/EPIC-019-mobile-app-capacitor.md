@@ -21,11 +21,13 @@
 **The shell's front door is specified in [E15-T7](EPIC-015-web-app-ux.md).** The web app is
 getting host-aware modes — `launcher` on the parent domain, `identity` on `bob.poweur.net` — and
 the shell is the third: `capacitor://localhost` is not a meaningful host, so it resolves to
-`shell` mode, asks for a relay first (the existing `renderRelayPrompt()`, which E15-T10 keeps for
-exactly this case) and then behaves like the launcher. The shell needs no screen of its own for
-it, which is the point: E15-T9's removal of free-text identity entry is scoped to the two
-browser doors, because in the shell the identity genuinely is not knowable from the URL. E15-T11's
-desktop layout leaves the phone breakpoint untouched, so it changes nothing the shell wraps.
+`shell` mode. The shell seeds from `https://poweur.net` (not from its own origin) and keeps
+`renderRelayPrompt()` as a three-way picker — production, local emulator, or a typed URL —
+which E15-T10 keeps for exactly this case. It then behaves like the launcher. The shell needs
+no screen of its own for it, which is the point: E15-T9's removal of free-text identity entry
+is scoped to the two browser doors, because in the shell the identity genuinely is not
+knowable from the URL. E15-T11's desktop layout leaves the phone breakpoint untouched, so it
+changes nothing the shell wraps.
 
 ## Goal
 
@@ -133,8 +135,8 @@ a real safe area, a non-`http(s)` origin, or an authenticator that does not exis
 2. **A fresh install could reach no relay.** `defaultRelayUrl()` fell back to
    `location.origin`, which in a shell is `capacitor://localhost` — so registration
    addressed the app itself, and the only screen that sets a relay lives behind an
-   identity. A non-web origin now means "no relay", and the add-identity screen asks,
-   checking `/health` before saving.
+   identity. A non-web origin now seeds `https://poweur.net`, and the landing picker
+   can switch to a local emulator or a typed URL.
 3. **Identity creation dead-ended.** WebAuthn needs a secure `http(s)` origin, so a shell
    has no authenticator *by construction* — and the app refused rather than falling back.
    It now takes the PIN path, which is exactly what E19-T2 says custody should be here

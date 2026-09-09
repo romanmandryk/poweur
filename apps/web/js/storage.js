@@ -15,12 +15,46 @@
  *    `defaultRelayUrl()` below — and only as the seed for a *new* identity.
  */
 
+/** The hosted production relay. A shell has no origin of its own, so this is the seed. */
+export const PRODUCTION_RELAY_URL = "https://poweur.net";
+
 const IDENTITY_PREFIX = "poweur:identity:";
 const ACTIVE_KEY = "poweur:active";
 const CONFIG_KEY = "poweur:config";
 const SESSION_PREFIX = "poweur:session:";
 
 // ─── Relay URLs ───────────────────────────────────────────────────────────────
+
+const LOCAL_RELAY_URLS = [
+  "http://127.0.0.1:8080",
+  "http://localhost:8080",
+  "http://10.0.2.2:8080",
+];
+
+/**
+ * A loopback relay for the local `go run` process.
+ *
+ * An Android emulator cannot reach the host at `127.0.0.1` — that address is
+ * the emulated device — so it uses `10.0.2.2`. iOS Simulator and a browser on
+ * this machine use loopback. A physical phone is neither: it needs the Mac's
+ * LAN address, typed under Other….
+ */
+export function localDevRelayUrl() {
+  if (globalThis.Capacitor?.getPlatform?.() === "android") return "http://10.0.2.2:8080";
+  return "http://127.0.0.1:8080";
+}
+
+/**
+ * Which first-run preset a stored URL maps to, so the picker can restore it.
+ *
+ * @returns {"production" | "local" | "custom"}
+ */
+export function relayPresetFor(url) {
+  const trimmed = String(url ?? "").replace(/\/+$/, "");
+  if (!trimmed || trimmed === PRODUCTION_RELAY_URL) return "production";
+  if (LOCAL_RELAY_URLS.includes(trimmed)) return "local";
+  return "custom";
+}
 
 /**
  * The relay to register a *new* identity with, when the user has not named one.
@@ -29,15 +63,16 @@ const SESSION_PREFIX = "poweur:session:";
  * SPA under `/app/`, so its own origin is the sensible default for a fresh
  * registration — but the moment an identity exists, `relayUrlFor()` takes over
  * and the origin is never consulted again. `test/origin.test.js` enforces that.
+ *
+ * A shell's origin is not a relay (iOS `capacitor://localhost`, Android
+ * `https://localhost`). Returning it produced an app that registered against
+ * itself. The shell therefore seeds from the production hosted relay, and the
+ * first-run picker can switch to a local or custom one.
  */
 export function defaultRelayUrl() {
   const configured = readConfigRaw().relayUrl;
   if (configured) return configured;
-  // Only a web origin can stand in for a relay. A shell's origin is not one —
-  // returning it produced an app that tried to register against itself, with
-  // no way to say otherwise because Settings needs an identity first. Empty
-  // means "ask" (EPIC-019).
-  if (isShellRuntime()) return "";
+  if (isShellRuntime()) return PRODUCTION_RELAY_URL;
   const origin = globalThis.location?.origin ?? "";
   return /^https?:$/.test(globalThis.location?.protocol ?? "") ? origin : "";
 }
