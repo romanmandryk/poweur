@@ -8,7 +8,12 @@ services:
     environment:
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
-      # HOSTED_DOMAINS: poweur.net
+      # Which domains this relay hosts names under. Without it `GET /` answers
+      # `hosted_domains: null` and every host classifies as `unknown` (E15-T7):
+      # the apex is not a launcher, `bob.poweur.net` is not an identity host,
+      # and all three front doors collapse to the generic welcome. Set here
+      # rather than left to `apps/api/.env.prod`, because that file is written
+      # by Ansible and this compose file is what the GitHub deploy re-runs.
       HOSTED_DOMAINS: poweur.net
       # Handle policy (EPIC-018). The package default is 3 so the test
       # fixtures ("bob") keep working; production holds short handles back.
