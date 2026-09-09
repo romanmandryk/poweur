@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/net.poweur.tasks/project.schema.json",
+  "title": "project.json — /apps/net.poweur.tasks/projects/<project-id>/project.json (PCP-0007)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "created"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "opaque; must equal the containing directory name"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "archived": {
+      "type": "boolean"
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    }
+  },
+  "description": "No member/ACL field by design: access is the EPIC-005 share grant (PCP-0003).",
+  "additionalProperties": true
+}

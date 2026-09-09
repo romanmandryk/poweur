@@ -6,7 +6,7 @@
       "id": "net.poweur.tasks",
       "owner": "poweur core",
       "pcp": "pcp-0007-tasks",
-      "status": "reserved"
+      "status": "draft"
     }
   ],
   "message_types": [
@@ -65,6 +65,13 @@
       "owner": "poweur core",
       "path": "conventions/schemas/poweur-sys/",
       "status": "experimental"
+    },
+    {
+      "namespace": "net.poweur.tasks",
+      "owner": "poweur core",
+      "path": "conventions/schemas/net.poweur.tasks/",
+      "pcp": "pcp-0007-tasks",
+      "status": "draft"
     }
   ]
 }
