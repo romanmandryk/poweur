@@ -526,14 +526,45 @@ for it.
 to the generic welcome rather than to a guessed mode. A landing page offering to claim a name
 on a relay we cannot reach is worse than one that says it cannot reach the relay.
 
-#### Claimed-ness is a fetch, not a guess
+#### Claimed-ness is a fetch — but "absent" is not "claimable"
 
-`GET /hosted/availability?handle=&domain=` (E18-T2) already answers this: `taken` means
-claimed, and the same call carries the policy the form needs. It is rate-limited, it is a
-verdict rather than a boolean, and it needs no new endpoint — which keeps this epic's
-"no new relay endpoints" rule intact. For a host outside `hosted_domains` it answers
-`domain_not_hosted`, so that case falls back to `GET /identities/{host}`, whose 200/404 is the
-same question asked the only other way the relay can answer it.
+The obvious probe is the identity's own published documents: registration serves
+`/.well-known/poweur/id.json` (and `/pubkey`, `/enckey`) Host-routed off the identity's own
+origin ([`wellknown.go:17`](../apps/api/internal/relay/wellknown.go)), so a 404 there looks like
+"unclaimed" for free. Three reasons the front doors use `GET /hosted/availability` (E18-T2)
+instead, recorded here because it is a reasonable thing to want to simplify away:
+
+1. **It is not extra state.** `Exists()` and `DocumentJSON()` are two reads of the *same*
+   `IdentityStore` map ([`identity_store.go:189`](../apps/api/internal/storage/identity_store.go)) —
+   the registration record the relay keeps in order to verify signatures, route DAV and serve
+   `id.json` at all. Availability adds no rows and no writes; it is a different query over
+   state that has to exist either way.
+2. **Absent ≠ claimable, and that gap is a spent passkey.** `admin.poweur.net`,
+   `www.poweur.net` and `pay.poweur.net` all 404 and none of them can be claimed — they are
+   reserved (E18-T1). A document probe would render "claim this name" on those hosts, take the
+   user through a WebAuthn ceremony, and have `POST /identities` refuse: exactly the ordering
+   failure E18-T2 was built to remove. Availability answers *taken / reserved / blocked /
+   too_short / charset* and returns the policy block E15-T12 validates against.
+3. **Host routing does not work in the harness.** The well-known route needs the browser to
+   send a `Host` the relay can map to a tree; the test relay is one listener on `127.0.0.1`
+   with no DNS — the same limitation this epic already recorded for `profile.json` under
+   E15-T1. Availability is query-addressed, and `GET /identities/{host}` is the path-addressed
+   twin, so both are drivable in e2e.
+
+**Do not probe `profile.json` for this.** It is optional by design — E15-T5's onboarding is
+skippable and skipping writes nothing — so its absence means "no profile", not "unclaimed", and
+it additionally requires DAV to be enabled. Only `id.json` / `pubkey` track registration.
+
+For a host **outside** `hosted_domains` availability answers `domain_not_hosted`, which is the
+honest answer: claimability there is not this relay's to decide. That case falls back to
+`GET /identities/{host}`, whose 200/404 is claimed-ness asked the only other way, with no
+claim offered on a 404.
+
+*Noted while checking this:* neither `/.well-known/poweur/id.json` nor `GET /identities/{id}`
+is rate-limited, so the availability endpoint's cost-weighted bucket (E18-T2) caps the
+*expensive* probe while a cheaper one sits beside it. Not a vulnerability — a public registry
+is enumerable by design and E18-T2 says so — but the cost argument reads stronger than it is.
+Worth a look in EPIC-013's abuse pass rather than here.
 
 #### One relay-side change, and it is configuration
 
@@ -607,7 +638,9 @@ the identity's own origin with the fragment cleared.
 
 ### E15-T9 — The identity host: sign in, or claim this name
 
-- [ ] Resolve claimed-ness once on entering `identity` mode, by the rule above
+- [ ] Resolve claimed-ness once on entering `identity` mode, by the rule above —
+      availability for a host under `hosted_domains`, `GET /identities/{host}` otherwise,
+      and **no claim offered on a `reserved` or `blocked` verdict**, only on `available`
 - [ ] **Claimed** → a sign-in screen for exactly this identity: avatar, handle and domain from
       its published profile (E15-T5's resolver), one **Sign in with passkey**, one **Add this
       device** (E11-T3's ceremony), and **no control that takes a typed identity**. "Add new ID"
