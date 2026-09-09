@@ -21,6 +21,7 @@ export * from "./kit.js";
 export * from "./enroll.js";
 export * from "./names.js";
 export * from "./document.js";
+export * from "./fingerprint.js";
 export * from "./ids.js";
 export * from "./pow.js";
 export * from "./http.js";

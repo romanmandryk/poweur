@@ -272,6 +272,55 @@ func TestVectors_Pow(t *testing.T) {
 	WriteVectors(t, vectorsDir, "pow-clamp", clamps)
 }
 
+// fingerprintVector pins the short auth string (EPIC-007 E07-T4). This is
+// the one derivation a *human* transcribes between two implementations, so
+// a Go/TS split here is not a failed request — it is two people on a phone
+// call concluding they are being attacked when they are not.
+type fingerprintVector struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+	// Kind is "signing" (ed25519) or "encryption" (x25519).
+	Kind        string `json:"kind"`
+	Fingerprint string `json:"fingerprint"`
+	Valid       bool   `json:"valid"`
+}
+
+func TestVectors_Fingerprints(t *testing.T) {
+	pub := vectorKey().Public().(ed25519.PublicKey)
+	raw := []byte(pub)
+	flipped := append([]byte(nil), raw...)
+	flipped[31] ^= 0x01
+
+	vectors := []fingerprintVector{}
+	add := func(name, kind, key string) {
+		var fp string
+		var err error
+		if kind == "encryption" {
+			fp, err = EncryptionKeyFingerprint(key)
+		} else {
+			fp, err = KeyFingerprint(key)
+		}
+		vectors = append(vectors, fingerprintVector{
+			Name: name, Key: key, Kind: kind, Fingerprint: fp, Valid: err == nil,
+		})
+	}
+
+	add("vector-key", "signing", FormatEd25519PublicKey(pub))
+	// The same key in every encoding a document might carry it in: all four
+	// must land on one string or the invariant is not an invariant.
+	add("vector-key-bare", "signing", base64.RawURLEncoding.EncodeToString(raw))
+	add("vector-key-padded", "signing", base64.URLEncoding.EncodeToString(raw))
+	add("vector-key-std", "signing", base64.StdEncoding.EncodeToString(raw))
+	add("one-bit-flip", "signing", FormatEd25519PublicKey(ed25519.PublicKey(flipped)))
+	add("all-zero-key", "signing", FormatEd25519PublicKey(make([]byte, 32)))
+	// Same 32 bytes, other algorithm: the prefix inside the hash keeps these apart.
+	add("same-bytes-as-x25519", "encryption", FormatX25519PublicKey(raw))
+	add("malformed", "signing", "ed25519:not-base64!!")
+	add("wrong-length", "signing", "ed25519:"+base64.RawURLEncoding.EncodeToString([]byte("short")))
+
+	WriteVectors(t, vectorsDir, "fingerprints", vectors)
+}
+
 type nameVector struct {
 	Identity string `json:"identity"`
 	Valid    bool   `json:"valid"`

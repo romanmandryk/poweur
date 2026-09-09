@@ -142,6 +142,11 @@ func runContactsSet(args []string, stdout, stderr io.Writer, state, verb string)
 		return 1
 	}
 	fmt.Fprintf(stdout, "%s %s\n", verb, target)
+	// Pinning is trust-on-first-use, so this is the moment the pin is worth
+	// verifying — print the safety number while the user is still here.
+	if entry.PinnedKey != "" {
+		fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(entry.PinnedKey))
+	}
 	return 0
 }
 
@@ -283,7 +288,14 @@ func runContactsLs(args []string, stdout, stderr io.Writer) int {
 		if c.Petname != "" {
 			name = fmt.Sprintf("%s (%s)", c.Petname, c.Identity)
 		}
-		fmt.Fprintf(stdout, "%s\t%s\tpinned=%v\n", name, c.State, c.PinnedKey != "")
+		// The fingerprint is the pin's user-facing form (E07-T4): the point
+		// of a pin is that somebody compared it out of band, and nobody
+		// compares 43 characters of base64.
+		pin := "not pinned"
+		if c.PinnedKey != "" {
+			pin = idpkg.FingerprintOrKey(c.PinnedKey)
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", name, c.State, pin)
 	}
 	return 0
 }
@@ -543,12 +555,20 @@ func checkPinnedKey(cfg config.Config, identityValue string, priv ed25519.Privat
 		repinContact(ctx, cfg, identityValue, priv, contacts, contact, res.Document.PublicKey, stderr)
 		return 0
 	}
+	// Print the fingerprints first and the full keys after: the fingerprint
+	// is what the user can actually read to their contact over the phone,
+	// which is the verification this message is asking them to perform.
 	fmt.Fprintf(stderr,
 		"REFUSING TO SEND: %s's current key does not match the pinned key and no rotation statement covers it.\n"+
-			"  pinned:   %s\n  resolved: %s\n"+
+			"  pinned safety number:   %s\n"+
+			"  resolved safety number: %s\n"+
+			"  pinned key:   %s\n  resolved key: %s\n"+
 			"This can mean a compromised relay or registrar impersonating your contact.\n"+
-			"Verify out of band, then re-send with --accept-new-key to trust the new key.\n",
-		recipient, contact.PinnedKey, res.Document.PublicKey)
+			"Read the safety numbers to %s over a channel you already trust; if they match theirs,\n"+
+			"re-send with --accept-new-key to trust the new key.\n",
+		recipient,
+		idpkg.FingerprintOrKey(contact.PinnedKey), idpkg.FingerprintOrKey(res.Document.PublicKey),
+		contact.PinnedKey, res.Document.PublicKey, recipient)
 	return 1
 }
 

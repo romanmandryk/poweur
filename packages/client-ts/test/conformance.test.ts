@@ -36,6 +36,11 @@ import {
 import { canonicalDocument, keyValidAt, verifyDocument } from "../src/document.js";
 import { fromBase64, fromUtf8, toBase64url } from "../src/encoding.js";
 import {
+  encryptionKeyFingerprint,
+  fingerprintOrKey,
+  keyFingerprint,
+} from "../src/fingerprint.js";
+import {
   isValidIdentityName,
   sanitizeIdentityDirName,
   validateHostedHandle,
@@ -287,6 +292,35 @@ describe("name policy matches Go", () => {
       expect(hostedValid).toBe(vector.hosted_valid);
       if (vector.dir_name) {
         expect(sanitizeIdentityDirName(vector.identity)).toBe(vector.dir_name);
+      }
+    });
+  }
+});
+
+describe("key fingerprints match Go", () => {
+  interface FingerprintVector {
+    name: string;
+    key: string;
+    kind: "signing" | "encryption";
+    fingerprint: string;
+    valid: boolean;
+  }
+
+  for (const vector of loadVectors<FingerprintVector[]>("fingerprints")) {
+    it(`derives the same short auth string for "${vector.name}"`, () => {
+      const derive = () =>
+        vector.kind === "encryption"
+          ? encryptionKeyFingerprint(vector.key)
+          : keyFingerprint(vector.key);
+      if (!vector.valid) {
+        expect(derive).toThrow();
+        // The display helper still has to hand the raw value back.
+        expect(fingerprintOrKey(vector.key)).toBe(vector.key);
+        return;
+      }
+      expect(derive()).toBe(vector.fingerprint);
+      if (vector.kind === "signing") {
+        expect(fingerprintOrKey(vector.key)).toBe(vector.fingerprint);
       }
     });
   }

@@ -1768,6 +1768,7 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 		"encryption_public_key": res.Document.EncryptionPublicKey,
 		"relay":                 res.Document.Relay,
 		"capabilities":          res.Document.Capabilities,
+		"fingerprint":           idpkg.FingerprintOrKey(res.Document.PublicKey),
 	}
 	if *jsonOut {
 		return writeOutput(stdout, true, out, "")
@@ -1775,6 +1776,8 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
 	fmt.Fprintf(stdout, "source: %s\n", res.Source)
 	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
+	// The safety number (E07-T4) is the form a human can compare out of band.
+	fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(res.Document.PublicKey))
 	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
 	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
 	return 0
