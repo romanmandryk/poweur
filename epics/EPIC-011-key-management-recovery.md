@@ -36,8 +36,9 @@
 >   Safari) the app declines to enroll and says so, rather than storing a copy no assertion
 >   could ever unlock.
 > - **Bootstrap recovery works**: signing in with an identity this browser holds nothing for
->   fetches the wrapped seed with an assertion alone and re-wraps it under a fresh local
->   passkey — a new enrollment, not a reused one. Covered against a real relay in
+>   fetches the wrapped seed with an assertion alone. The same authenticator that opened
+>   the blob is reused — no second passkey, no second enrollment. New-device join still
+>   mints a fresh credential. Covered against a real relay in
 >   `apps/web/test/keystore-relay.test.js`.
 > - **The T3 ceremony has both halves**, covered by a two-browser-context Playwright test
 >   that asserts the six digits match on both screens before approval.

@@ -56,7 +56,7 @@ import { ProfileCard } from "./components/profile-card.js";
 import {
   listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
   recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
-  recoverFromKeystore, rewrap,
+  recoverFromKeystore, restoreLocalRecord, rewrap,
 } from "./keystore.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
@@ -2182,18 +2182,21 @@ async function doRecoverFromKeystore(identity) {
     return;
   }
 
-  setLoading(false);
   try {
-    await adoptIdentity({
-      identity,
-      relayUrl,
-      signingJWK: recovered.signingJWK,
-      encJWK: recovered.encJWK,
-      seed: recovered.seed,
-      label: `${deviceLabel()} (restored)`,
-    });
+    restoreLocalRecord(identity, recovered, { relayUrl });
+    switchIdentity(identity);
+    setUnlockedKeys(identity, recovered.signingJWK, recovered.encJWK, recovered.seed);
+    S.config = getConfig();
+
+    setLoading(true, "Creating session…");
+    await ensureSession(identity);
+
+    setLoading(false);
     toast(`${identity} restored on this device`, "success", 5000);
+    R.sub = null; R.page = "messages"; R.params = {};
+    render();
   } catch (error) {
+    setLoading(false);
     toast(error.message, "error", 9000);
   }
 }
@@ -2253,12 +2256,12 @@ async function chooseCustody() {
 }
 
 /**
- * Take ownership of key material this browser did not generate — from a
- * keystore restore or a device-enrollment ceremony.
+ * Take ownership of key material this browser did not generate — a new
+ * device joining via the enrollment ceremony, or a recovery-kit restore.
  *
- * Creates a local passkey to wrap it, stores the record, and registers the new
- * enrollment so this browser becomes a recovery path in its own right rather
- * than a copy that only works until its site data is cleared.
+ * Creates a local passkey to wrap it and registers a *new* enrollment. The
+ * cleared-site-data path does not come here: that authenticator already
+ * exists and `restoreLocalRecord` reuses it.
  */
 async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, label }) {
   const custody = await chooseCustody();
