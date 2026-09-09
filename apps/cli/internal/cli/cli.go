@@ -46,6 +46,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSend(args[1:], stdout, stderr)
 	case "inbox":
 		return runInbox(args[1:], stdout, stderr)
+	case "history":
+		return runHistory(args[1:], stdout, stderr)
 	case "messages":
 		return runMessages(args[1:], stdout, stderr)
 	case "relay":
@@ -764,6 +766,12 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
 
+		// The relay never hands a sender their own message back, so this copy
+		// is the only record that the conversation has two sides.
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
+			recipient, timestamp, *msgType, plaintext)}, stderr)
+
 		output := map[string]any{
 			"id":             messageID,
 			"status":         resp.StatusCode,
@@ -851,6 +859,10 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 
 	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
+
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
+		recipient, timestamp, *msgType, plaintext)}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,
@@ -981,6 +993,7 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 			Timestamp  string          `json:"timestamp"`
 			Payload    string          `json:"payload"`
 			Signature  string          `json:"signature"`
+			Type       string          `json:"type,omitempty"`
 			SessionID  string          `json:"session_id,omitempty"`
 			Encryption *EncryptionMeta `json:"encryption,omitempty"`
 		} `json:"messages"`
@@ -990,6 +1003,18 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+
+	// Under `open` an accept arrives as an ordinary typed message, so the
+	// inbox drain is where the handshake we started gets finished. Under a
+	// closed policy the same envelope rides the requests queue instead;
+	// `runRequests` does this on its side.
+	var accepts []string
+	for _, msg := range inbox.Messages {
+		if msg.Type == idpkg.MsgTypeContactAccept && msg.Sender != "" {
+			accepts = append(accepts, msg.Sender)
+		}
+	}
+	promoteAcceptedContacts(context.Background(), *useIdentity, accepts, stdout, stderr)
 
 	// Surface tick-2 (delivered_client) acks for previously-sent messages
 	// before printing inbound payloads. The ack stream is independent of
@@ -1005,6 +1030,11 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 	}
 
 	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+
+	// What the drain hands over exists nowhere else once this call returns,
+	// so everything that opens is archived before the function can fail.
+	var archive []idpkg.HistoryRecord
+	defer func() { archiveRecords(*useIdentity, archive, stderr) }()
 
 	for _, msg := range inbox.Messages {
 		display := msg.Payload
@@ -1031,6 +1061,11 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 			prefix = "🔒"
 		}
 		fmt.Fprintf(stdout, "%s [%s] %s: %s\n", prefix, msg.Timestamp, msg.Sender, display)
+
+		if decrypted {
+			archive = append(archive, historyRecordFrom(identityValue, idpkg.HistoryQueueInbox,
+				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, display))
+		}
 
 		// Tick-2 ack: only emit when we actually decrypted the message,
 		// i.e. we have proof the inbound message reached the client.
@@ -1884,6 +1919,7 @@ func printHelp(w io.Writer) {
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
   poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
   poweur inbox [--use-identity=...] [--json]
+  poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
   poweur session refresh [--use-identity=...] [--json]
   poweur session revoke [--use-identity=...] [--json]

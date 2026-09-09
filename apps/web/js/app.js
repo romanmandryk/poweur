@@ -103,6 +103,13 @@ const S = {
   /** Messages destination: inbox | requests | anonymous, as distinct trays. */
   tray: "inbox",
   contacts: { list: [], loading: false, loaded: false, error: null, filter: "" },
+  /**
+   * The durable archive (EPIC-009 E09-T1), read from
+   * `poweur-sys/private/messages/`. `S.messages` is its in-memory view, so a
+   * reload repopulates from the tree rather than starting empty — the relay
+   * drains on pickup and has nothing left to re-serve.
+   */
+  history: { loading: false, loaded: false, error: null, readState: { conversations: {} } },
   requests: { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   anon: { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
@@ -342,7 +349,10 @@ const CONTACT_STATE_CHIP = {
  */
 function trayCount(tray) {
   if (tray === "requests") return incomingRequests().length;
-  if (tray === "anonymous") return S.anon.messages.length;
+  // Unread, not held. `S.anon.messages.length` never reached zero, because
+  // nothing in the app ever removed one — so the badge sat there for the life
+  // of the session no matter how many times the tray was opened.
+  if (tray === "anonymous") return unreadAnonymous();
   return 0;
 }
 
@@ -734,7 +744,10 @@ function incomingRequests() {
     // The queue also carries `sys.contact.accept` answers to requests we sent;
     // those are handled in the background, not shown as someone asking.
     if (entry.type && entry.type !== "sys.contact.request") continue;
-    add({ sender: entry.sender, timestamp: entry.timestamp, intro: null, queued: true });
+    // The queued envelope is encrypted like any message and the SDK opens it,
+    // so a request routed here reads the same as one routed to the inbox —
+    // otherwise the recommended policy is the one that shows you least.
+    add({ sender: entry.sender, timestamp: entry.timestamp, intro: entry.plaintext ?? null, queued: true });
   }
   for (const raw of S.messages) {
     const m = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -844,7 +857,11 @@ function buildConversations() {
   const byContact = {};
   for (const raw of S.messages) {
     const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    // An unsigned message has nobody to thread under; it belongs to the
+    // anonymous tray, which renders it as a different kind of object.
+    if (!m.sender) continue;
     const contact = m.sender === S.identity ? m.recipient : m.sender;
+    if (!contact) continue;
     if (!byContact[contact]) byContact[contact] = [];
     byContact[contact].push(m);
   }
@@ -859,7 +876,9 @@ function buildConversations() {
         // Someone we have no entry for at all: adding them is one tap from
         // the message that made us want to.
         stranger: !known,
-        unread: msgs.length,
+        // Messages past the read mark — a count that reaches zero when the
+        // conversation is opened, rather than the total held forever.
+        unread: unreadFor(contact),
         // The SDK decrypts in place, so show the message rather than a padlock
         // when we could actually read it.
         preview: lastMsg.plaintext ?? "🔒 Could not decrypt",
@@ -1496,6 +1515,7 @@ function renderCompose() {
               resolve: resolveForComponents,
               contacts: S.contacts.list,
               value: preset,
+              defaultDomain: idDomain(S.identity),
               label: "To",
               onSubmit: () => q("#c-body")?.focus(),
             });
@@ -1901,15 +1921,23 @@ function attachEvents() {
   q("#btn-compose")?.addEventListener("click", () => R.push("compose"));
   q("#btn-compose-top")?.addEventListener("click", () => R.push("compose"));
 
-  // Conversation row → compose to that contact
+  // Conversation row → compose to that contact. Opening it is reading it, so
+  // the badge clears here rather than waiting for a reply to be sent.
   qAll(".conv-row[data-compose-to]").forEach(r =>
-    r.addEventListener("click", () => R.push("compose", { to: r.dataset.composeTo })));
+    r.addEventListener("click", () => {
+      const peer = r.dataset.composeTo;
+      markConversationRead(peer).catch(() => {});
+      R.push("compose", { to: peer });
+    }));
 
   // A push stream costs one connection and saves every poll after it.
   if (getUnlockedKeys()) startEventStream();
 
   // Load inbox when unlocked and on the Messages destination
   if (R.page === "messages" && !R.sub && getUnlockedKeys()) {
+    // The archive first: after a reload it is the only place the messages
+    // still exist, and it also carries the read marks the badges count from.
+    loadHistory();
     loadInbox();
     // Always, not only on the Requests tray: an accept to a request *we* sent
     // arrives here, and the handshake only completes once we have read it.
@@ -1919,6 +1947,11 @@ function attachEvents() {
     // everyone else pays nothing for a queue that is always empty.
     loadPolicy();
     if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon();
+    // Looking at the anonymous tray is reading it: there is nothing to open,
+    // so the tray itself is the conversation.
+    if (S.tray === "anonymous" && unreadAnonymous() > 0) {
+      markConversationRead("anonymous").catch(() => {});
+    }
   }
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
@@ -2044,6 +2077,7 @@ function switchIdentity(identity) {
   S.messages = [];
   S.acks = [];
   S.contacts = { list: [], loading: false, loaded: false, error: null, filter: "" };
+  S.history = { loading: false, loaded: false, error: null, readState: { conversations: {} } };
   S.requests = { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.anon = { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 };
   S.policy = { doc: null, explicit: false, loading: false, loaded: false };
@@ -2891,9 +2925,12 @@ function startEventStream() {
     onEvent: (event) => {
       if (identity !== S.identity) return; // the user switched identities
       if (event.type === "ready") return;  // nothing new by itself
-      // A queued contact request never reaches the inbox, so reading only
-      // that would leave the Requests tray silent until the user opened it.
+      // Each queue has its own event, because each is read by a different
+      // call: told the wrong one, the app fetches an empty inbox and leaves
+      // the tray that actually has something silent until the user happens to
+      // open it.
       if (event.type === "request") loadRequests({ force: true });
+      else if (event.type === "anon") loadAnon({ force: true });
       else loadInbox();
     },
     onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
@@ -2910,8 +2947,13 @@ function loadInbox() {
   if (!client) return Promise.resolve();
   inboxInFlight ??= challengeSerial(async () => {
     try {
-      // The SDK decrypts and emits tick-2 receipts for what actually opened.
-      const { messages, acks } = await client.inboxAndAck();
+      // Read, receipt and *keep* in one step. Any gap between the pickup and
+      // the archive write is a window where the relay has forgotten a message
+      // and nothing has written it down — and a drain gives no second chance.
+      const { messages, acks, lost } = await client.inboxAndArchive();
+      if (lost) {
+        toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
+      }
       mergeMessages(messages);
       mergeInto(S.acks, acks);
       if (R.page === "messages" && !R.sub) render();
@@ -2923,6 +2965,136 @@ function loadInbox() {
     }
   });
   return inboxInFlight;
+}
+
+/**
+ * Load the archive into the message store.
+ *
+ * This is what makes a reload show yesterday's conversation. `GET /messages`
+ * drains — the relay hands each message over exactly once and forgets it — so
+ * everything on screen after a refresh comes from here, not from the relay's
+ * spool. Runs once per unlocked identity; `loadInbox` keeps it current after.
+ */
+let historyInFlight = null;
+
+function loadHistory({ force = false } = {}) {
+  const H = S.history;
+  if (H.loading) return historyInFlight ?? Promise.resolve();
+  if (H.loaded && !force) return Promise.resolve();
+  const client = clientFor(S.identity);
+  if (!client) return Promise.resolve();
+
+  H.loading = true;
+  historyInFlight = (async () => {
+    try {
+      const store = await client.history();
+      const [records, readState] = await Promise.all([store.load(), store.readState()]);
+      H.readState = readState;
+      // Signed conversations and the anonymous queue are different objects to
+      // this app — one has someone to reply to and one does not — so they are
+      // restored into the trays that render them, not into one list.
+      const signed = records.filter(r => r.queue !== "anonymous");
+      const anonymous = records.filter(r => r.queue === "anonymous");
+      mergeMessages(signed.map(recordToMessage));
+      mergeInto(S.anon.messages, anonymous.map(recordToMessage), messageKey);
+      H.loaded = true;
+      H.error = null;
+    } catch (error) {
+      H.error = `Could not load your message history: ${error.message}`;
+      console.warn("History load failed:", error.message);
+    } finally {
+      H.loading = false;
+      historyInFlight = null;
+      if (R.page === "messages" && !R.sub) render();
+    }
+  })();
+  return historyInFlight;
+}
+
+/** An archived record in the shape the trays already render. */
+function recordToMessage(record) {
+  return {
+    id: record.id,
+    sender: record.sender || "",
+    recipient: record.recipient,
+    timestamp: record.timestamp,
+    type: record.type ?? "",
+    queue: record.queue,
+    plaintext: record.body,
+  };
+}
+
+/** The reverse, for archiving something the app produced itself. */
+function messageToRecord(message, queue) {
+  return {
+    id: message.id,
+    ...(message.sender ? { sender: message.sender } : {}),
+    recipient: message.recipient || S.identity,
+    timestamp: message.timestamp,
+    ...(message.type ? { type: message.type } : {}),
+    queue,
+    body: message.plaintext ?? "",
+  };
+}
+
+/**
+ * Unread per conversation, from the read marks rather than from how much we
+ * happen to be holding.
+ *
+ * The old count was `messages.length`, which is a number that can never reach
+ * zero — a badge that never clears teaches people to ignore badges. A mark is
+ * a *position* (timestamp and id): message timestamps are RFC3339 to the
+ * second, so two messages a moment apart share one, and a timestamp-only mark
+ * would silently swallow the second.
+ */
+function unreadFor(peer) {
+  const wanted = String(peer ?? "").toLowerCase();
+  const mark = S.history.readState?.conversations?.[wanted] ?? null;
+  let count = 0;
+  for (const raw of S.messages) {
+    const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!m.sender || m.sender.toLowerCase() === String(S.identity).toLowerCase()) continue;
+    if (m.sender.toLowerCase() !== wanted) continue;
+    if (mark && markCovers(mark, m.timestamp, m.id ?? "")) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/** Unread anonymous messages — the same rule, for the tray that has no sender. */
+function unreadAnonymous() {
+  const mark = S.history.readState?.conversations?.["anonymous"] ?? null;
+  return S.anon.messages.filter(m => !(mark && markCovers(mark, m.timestamp, m.id ?? ""))).length;
+}
+
+function markCovers(mark, timestamp, id) {
+  if (!mark?.timestamp) return false;
+  if (mark.timestamp !== timestamp) return new Date(mark.timestamp) > new Date(timestamp);
+  return (mark.id ?? "") >= id;
+}
+
+/**
+ * Record that a conversation has been read, and repaint so the badge clears
+ * at the moment the user would expect it to.
+ */
+async function markConversationRead(peer) {
+  const client = clientFor(S.identity);
+  if (!client) return;
+  const wanted = String(peer ?? "").toLowerCase();
+  const records = (wanted === "anonymous" ? S.anon.messages : S.messages)
+    .map(raw => (typeof raw === "string" ? JSON.parse(raw) : raw))
+    .filter(m => wanted === "anonymous"
+      ? true
+      : m.sender && m.sender.toLowerCase() === wanted)
+    .map(m => messageToRecord(m, wanted === "anonymous" ? "anonymous" : "inbox"));
+  if (!records.length) return;
+  try {
+    const store = await client.history();
+    S.history.readState = await store.markConversationRead(wanted, records);
+    if (R.page === "messages") render();
+  } catch (error) {
+    console.warn("Could not save read marks:", error.message);
+  }
 }
 
 async function doSend() {
@@ -2958,8 +3130,22 @@ async function doSend() {
       return;
     }
     setStatus("Sending…");
-    await client.send(to, body, { signWith: sessionIsValid(sess) ? "session" : "identity" });
+    const sent = await client.sendAndArchive(to, body, {
+      signWith: sessionIsValid(sess) ? "session" : "identity",
+    });
     setStatus("✓ Sent", "ok");
+    // Keep our own copy on screen too: the relay never hands a sender their
+    // own message back, so without this the conversation shows only one side
+    // until someone replies.
+    mergeMessages([{
+      id: sent.message.id,
+      sender: S.identity,
+      recipient: sent.message.recipient,
+      timestamp: sent.message.timestamp,
+      queue: "sent",
+      plaintext: body,
+    }]);
+    if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
     if (q("#c-body")) q("#c-body").value = "";
     toast("Message sent!", "success");
     setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
@@ -3649,8 +3835,8 @@ function showAddContactPanel(preset = "") {
       <label class="form-label" for="ac-petname">Petname (optional)</label>
       <input id="ac-petname" class="input" type="text" placeholder="What you call them" autocomplete="off" />
     </div>
-    <button class="btn btn-primary mt-md" id="btn-add-contact-go" disabled>Send request</button>
-    <button class="btn mt-sm" id="btn-add-contact-msg" disabled>Just message them</button>`,
+    <button class="btn btn-primary mt-md" id="btn-add-contact-go">Send request</button>
+    <button class="btn mt-sm" id="btn-add-contact-msg">Just message them</button>`,
   (close) => {
     const host = q("#add-contact-input");
     const go = q("#btn-add-contact-go");
@@ -3659,27 +3845,47 @@ function showAddContactPanel(preset = "") {
       resolve: resolveForComponents,
       contacts: S.contacts.list,
       value: preset,
+      // On a hosted relay everyone shares a domain, so "alice" is what people
+      // type and `alice.poweur.net` is what they mean.
+      defaultDomain: idDomain(S.identity),
       label: "Identity",
-      onChange: (result) => {
-        picked = result;
-        if (go) go.disabled = !result;
-        if (msg) msg.disabled = !result;
-      },
+      onChange: (result) => { picked = result; },
       onSubmit: () => go?.click(),
     });
     host?.replaceChildren(input.el);
     input.focus();
-    go?.addEventListener("click", () => {
-      if (!picked) return;
+
+    /**
+     * Resolve on the way out rather than gating the button on it.
+     *
+     * The buttons used to stay disabled until a debounced lookup came back,
+     * so someone who typed a name and hit the button they were already
+     * looking at got nothing at all — no error, no send, just a dead control.
+     * Pressing it now forces the lookup it was waiting for.
+     */
+    const resolveNow = async (button) => {
+      if (picked) return picked;
+      if (button) button.disabled = true;
+      try {
+        return await input.lookup();
+      } finally {
+        if (button) button.disabled = false;
+      }
+    };
+
+    go?.addEventListener("click", async () => {
+      const target = await resolveNow(go);
+      if (!target) return toast("Enter a Poweur ID we can find", "warning");
       const intro = q("#ac-intro")?.value.trim();
       const petname = q("#ac-petname")?.value.trim();
       close();
-      doRequestContact(picked.identity, { intro, petname });
+      doRequestContact(target.identity, { intro, petname });
     });
-    msg?.addEventListener("click", () => {
-      if (!picked) return;
+    msg?.addEventListener("click", async () => {
+      const target = await resolveNow(msg);
+      if (!target) return toast("Enter a Poweur ID we can find", "warning");
       close();
-      R.push("compose", { to: picked.identity });
+      R.push("compose", { to: target.identity });
     });
   });
 }
@@ -3825,8 +4031,11 @@ function loadAnon({ force = false } = {}) {
   A.loading = true;
   return challengeSerial(async () => {
     try {
-      // `GET /anon/{id}` drains like the inbox: keep what we have been handed.
-      mergeInto(A.messages, await client.anon());
+      // `GET /anon/{id}` drains like the inbox: what we are handed here is
+      // handed here once, so it is archived in the same step.
+      const { messages, lost } = await client.anonAndArchive();
+      mergeInto(A.messages, messages, messageKey);
+      if (lost) toast("Anonymous messages could not be saved to your history", "warning", 6000);
       A.loaded = true;
       A.error = null;
     } catch (error) {

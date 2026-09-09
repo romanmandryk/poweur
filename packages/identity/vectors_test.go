@@ -367,3 +367,76 @@ func TestVectors_SysDocs(t *testing.T) {
 	}
 	WriteVectors(t, vectorsDir, "profiles", profiles)
 }
+
+// historyVector pins the client-side message archive (EPIC-009 E09-T1). The
+// path is the interesting half: two clients that disagree about where a
+// message is filed write it twice, and the sender-chosen id inside that path
+// is untrusted input, so the sanitizing rule has to be identical on both
+// sides or one of them has a traversal the other does not.
+type historyVector struct {
+	Name      string `json:"name"`
+	Timestamp string `json:"timestamp"`
+	ID        string `json:"id"`
+	Path      string `json:"path"`
+}
+
+type readStateVector struct {
+	Name   string              `json:"name"`
+	Raw    json.RawMessage     `json:"raw"`
+	Valid  bool                `json:"valid"`
+	Unread map[string]int      `json:"unread,omitempty"`
+	Marks  map[string]ReadMark `json:"marks,omitempty"`
+}
+
+func TestVectors_History(t *testing.T) {
+	paths := []historyVector{}
+	for _, entry := range []struct{ name, ts, id string }{
+		{"ordinary", "2026-01-15T09:30:00Z", "msg_1757404500000_AbC-_9"},
+		{"month-boundary", "2026-01-31T23:59:59Z", "msg_end"},
+		{"next-month", "2026-02-01T00:00:00Z", "msg_start"},
+		{"offset-timestamp", "2026-01-15T10:30:00+01:00", "msg_offset"},
+		{"traversal-id", "2026-01-15T09:30:00Z", "../../poweur-sys/relay/contacts"},
+		{"slash-id", "2026-01-15T09:30:00Z", "a/b"},
+		{"empty-id", "2026-01-15T09:30:00Z", ""},
+		{"dotfile-id", "2026-01-15T09:30:00Z", ".poweur-web-public"},
+		{"unparseable-timestamp", "yesterday", "msg_undated"},
+	} {
+		paths = append(paths, historyVector{
+			Name: entry.name, Timestamp: entry.ts, ID: entry.id,
+			Path: HistoryPath(entry.ts, entry.id),
+		})
+	}
+	WriteVectors(t, vectorsDir, "history-paths", paths)
+
+	const owner = "alice.example.org"
+	records := []HistoryRecord{
+		{Version: 1, ID: "m1", Sender: "bob.example.org", Recipient: owner, Timestamp: "2026-01-15T09:00:00Z", Queue: HistoryQueueInbox, Body: "one"},
+		{Version: 1, ID: "m2", Sender: "bob.example.org", Recipient: owner, Timestamp: "2026-01-15T09:30:00Z", Queue: HistoryQueueInbox, Body: "two"},
+		{Version: 1, ID: "m3", Sender: owner, Recipient: "bob.example.org", Timestamp: "2026-01-15T09:45:00Z", Queue: HistoryQueueSent, Body: "reply"},
+		{Version: 1, ID: "m4", Recipient: owner, Timestamp: "2026-01-15T10:00:00Z", Queue: HistoryQueueAnonymous, Body: "tip"},
+	}
+
+	states := []readStateVector{}
+	for _, entry := range []struct {
+		name string
+		raw  string
+	}{
+		{"empty", `{"version":1,"conversations":{}}`},
+		{"partly-read", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"2026-01-15T09:00:00Z","id":"m1"}}}`},
+		{"fully-read", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"2026-01-15T09:30:00Z","id":"m2"},"anonymous":{"timestamp":"2026-01-15T10:00:00Z","id":"m4"}}}`},
+		{"same-second", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"2026-01-15T09:00:00Z"}}}`},
+		{"bad-timestamp", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"yesterday"}}}`},
+		{"bad-version", `{"version":7,"conversations":{}}`},
+	} {
+		state, err := ParseReadState([]byte(entry.raw))
+		v := readStateVector{Name: entry.name, Raw: json.RawMessage(entry.raw), Valid: err == nil}
+		if err == nil {
+			v.Unread = state.Unread(owner, records)
+			// Reading everything must reach zero from any starting point.
+			marked := state.MarkRead("BOB.example.org", "2026-01-15T09:30:00Z", "m2")
+			v.Marks = marked.Conversations
+		}
+		states = append(states, v)
+	}
+	WriteVectors(t, vectorsDir, "history-read-state", states)
+}

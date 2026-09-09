@@ -26,6 +26,7 @@ export function isValidIdentity(value) {
  * @param {(identity: string) => Promise<object>} options.resolve
  * @param {Array<{identity: string, petname?: string}>} [options.contacts]  autocomplete source
  * @param {string} [options.value]
+ * @param {string} [options.defaultDomain]  complete a bare handle with this
  * @param {string} [options.placeholder]
  * @param {string} [options.label]
  * @param {boolean} [options.preview]        show a ProfileCard for the resolved ID
@@ -36,6 +37,7 @@ export function IdentityInput({
   resolve,
   contacts = [],
   value = "",
+  defaultDomain = "",
   placeholder = "alice.poweur.net",
   label = null,
   preview = true,
@@ -77,10 +79,30 @@ export function IdentityInput({
   let resolveToken = 0;     // guards against an earlier lookup landing last
   let highlighted = -1;
 
-  const current = () => input.value.trim().toLowerCase();
+  /**
+   * What was typed, completed to a full Poweur ID.
+   *
+   * A hosted relay puts everyone under one domain, so "add alice" meant
+   * typing `alice.poweur.net` in full — and typing `alice` failed validation
+   * with "that does not look like a Poweur ID", which is true and useless.
+   * A bare handle is completed with the caller's own domain, which is right
+   * far more often than it is wrong and is always visible in the field before
+   * anything is sent.
+   */
+  const current = () => {
+    const raw = input.value.trim().toLowerCase();
+    if (!raw || raw.includes(".") || !defaultDomain) return raw;
+    return `${raw}.${defaultDomain}`;
+  };
+
+  /** The completion, when one happened — shown so it is never a surprise. */
+  const completed = () => {
+    const raw = input.value.trim().toLowerCase();
+    return raw && !raw.includes(".") && defaultDomain ? current() : "";
+  };
 
   function matches() {
-    const query = current();
+    const query = input.value.trim().toLowerCase();
     if (!query) return [];
     return contacts
       .filter((contact) => {
@@ -150,7 +172,7 @@ export function IdentityInput({
       const entry = await resolve(identity);
       if (token !== resolveToken) return null; // a newer lookup won
       resolved = { identity, entry };
-      setStatus("Found", "val-ok");
+      setStatus(completed() ? `Found ${identity}` : "Found", "val-ok");
       if (preview) previewSlot.append(ProfileCard({ identity, resolve, cached: entry, compact: true }).el);
       onChange(resolved);
       return resolved;

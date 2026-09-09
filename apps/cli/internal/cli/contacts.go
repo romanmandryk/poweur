@@ -95,11 +95,12 @@ func runContactsSet(args []string, stdout, stderr io.Writer, state, verb string)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "identity")
 	petname := fs.String("petname", "", "local display name for this contact")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeArgs(args, nil)); err != nil {
 		return 1
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "usage: poweur contacts %s <identity>\n", map[string]string{"added": "add", "blocked": "block"}[verb])
+		fmt.Fprintf(stderr, "usage: poweur contacts %s <identity> [--petname=...]\n",
+			map[string]string{"added": "add", "blocked": "block", "accepted": "accept"}[verb])
 		return 1
 	}
 	target := strings.ToLower(fs.Arg(0))
@@ -150,7 +151,7 @@ func runContactsRequest(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("contacts request", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "identity")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeArgs(args, nil)); err != nil {
 		return 1
 	}
 	if fs.NArg() < 1 {
@@ -208,7 +209,7 @@ func runContactsAccept(args []string, stdout, stderr io.Writer) int {
 	fsArgs.SetOutput(io.Discard)
 	useIdentity := fsArgs.String("use-identity", "", "")
 	fsArgs.String("petname", "", "")
-	_ = fsArgs.Parse(args)
+	_ = fsArgs.Parse(normalizeArgs(args, nil))
 	target := fsArgs.Arg(0)
 	sendArgs := []string{target, "contact request accepted", "--type", idpkg.MsgTypeContactAccept}
 	if *useIdentity != "" {
@@ -224,7 +225,7 @@ func runContactsRm(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("contacts rm", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "identity")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeArgs(args, nil)); err != nil {
 		return 1
 	}
 	if fs.NArg() != 1 {
@@ -307,14 +308,30 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if *jsonOut {
-		return writeOutput(stdout, true, map[string]any{"requests": requests}, "")
+
+	// The queue carries answers as well as questions: a closed policy routes
+	// `sys.contact.accept` here rather than into the message stream. Reading
+	// the queue is therefore the moment to finish those handshakes — and the
+	// drain means this is the only chance to see them.
+	var accepts []string
+	var pending []requestEntry
+	for _, req := range requests {
+		if req.Type == idpkg.MsgTypeContactAccept {
+			accepts = append(accepts, req.Sender)
+			continue
+		}
+		pending = append(pending, req)
 	}
-	if len(requests) == 0 {
+	promoteAcceptedContacts(ctx, *useIdentity, accepts, stdout, stderr)
+
+	if *jsonOut {
+		return writeOutput(stdout, true, map[string]any{"requests": pending, "accepted": accepts}, "")
+	}
+	if len(pending) == 0 {
 		fmt.Fprintln(stdout, "no pending requests")
 		return 0
 	}
-	for _, req := range requests {
+	for _, req := range pending {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n",
 			req.Sender, req.Type, req.Timestamp, req.Sender)
 	}
@@ -549,5 +566,62 @@ func repinContact(ctx context.Context, cfg config.Config, identityValue string, 
 	}
 	if err := putContacts(ctx, cfg.RelayURL, identityValue, tok.Token, contacts); err != nil {
 		fmt.Fprintf(stderr, "note: failed to persist the new pin: %v\n", err)
+	}
+}
+
+// promoteAcceptedContacts finishes handshakes this identity started.
+//
+// `contacts request` records the target as `requested` and pins the key it
+// addressed. Their answer — a `sys.contact.accept` — arrives later, in the
+// inbox under `open` or in the requests queue under a closed policy, and
+// until something acts on it our own contacts still say `requested`. That
+// matters beyond cosmetics: our own policy reads the same file, so a
+// `contacts_only` inbox goes on bouncing the person who just accepted us.
+//
+// Promotion is deliberately narrow. Only someone we ourselves asked is
+// promoted, and only while the key we pinned when we asked is still theirs —
+// an accept is a reason to finish what we started, never a reason to re-pin.
+// Callers pass the senders of the accepts they just read; the helper is
+// best-effort and reports what it changed on stderr.
+func promoteAcceptedContacts(ctx context.Context, useIdentity string, senders []string, stdout, stderr io.Writer) {
+	if len(senders) == 0 {
+		return
+	}
+	relayURL, identityValue, token, ok := loadShareSession(useIdentity, io.Discard)
+	if !ok {
+		return
+	}
+	contacts, err := fetchContacts(ctx, relayURL, identityValue, token)
+	if err != nil {
+		return
+	}
+	changed := false
+	for _, sender := range senders {
+		existing, found := contacts.Find(strings.ToLower(sender))
+		if !found || existing.State != idpkg.ContactRequested {
+			continue
+		}
+		pin, err := resolvePin(ctx, existing.Identity)
+		if err != nil {
+			fmt.Fprintf(stderr, "note: %s accepted, but their key could not be resolved: %v\n", existing.Identity, err)
+			continue
+		}
+		if existing.PinnedKey != "" && pin != existing.PinnedKey {
+			fmt.Fprintf(stderr, "warning: %s accepted, but their key changed since you asked — "+
+				"left as requested; run `poweur contacts accept %s` to trust the new key\n",
+				existing.Identity, existing.Identity)
+			continue
+		}
+		existing.State = idpkg.ContactAccepted
+		existing.PinnedKey = pin
+		contacts = contacts.Upsert(existing)
+		changed = true
+		fmt.Fprintf(stdout, "🤝 %s accepted your contact request\n", existing.Identity)
+	}
+	if !changed {
+		return
+	}
+	if err := putContacts(ctx, relayURL, identityValue, token, contacts); err != nil {
+		fmt.Fprintln(stderr, "note: could not record the acceptance:", err)
 	}
 }

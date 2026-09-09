@@ -94,10 +94,25 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	}
 
 	// Non-contact (or pending request state) from here on.
+	//
+	// One rule spans both closed modes: an accept is the answer to a request
+	// *we* sent, so it is admitted whenever we already list the sender as
+	// `requested` — but only then, and only into the requests queue, never
+	// the message stream. Without it a `contacts_only` inbox could send a
+	// contact request and never hear back: their accept bounces off our
+	// policy, our contacts stay `requested`, and our policy then bounces
+	// every message they send. Both sides see silence and neither can tell
+	// it apart from being ignored.
+	answersOurRequest := msg.Type == idpkg.MsgTypeContactAccept &&
+		known && contact.State == idpkg.ContactRequested
+
 	switch policy.Mode {
 	case idpkg.InboxOpen:
 		return policyAllow, ""
 	case idpkg.InboxContactsOnly:
+		if answersOurRequest {
+			return policyQueueRequest, ""
+		}
 		return policyReject, rejected
 	case idpkg.InboxContactsAndRequests:
 		switch msg.Type {
@@ -107,11 +122,7 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 			}
 			return policyQueueRequest, ""
 		case idpkg.MsgTypeContactAccept:
-			// An accept is only meaningful as the answer to a request WE
-			// sent — i.e. the recipient already lists the sender as
-			// `requested`. It rides the requests queue so clients process
-			// it out-of-band of the message stream.
-			if known && contact.State == idpkg.ContactRequested {
+			if answersOurRequest {
 				return policyQueueRequest, ""
 			}
 			return policyReject, rejected

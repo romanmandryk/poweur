@@ -233,6 +233,12 @@ func (s *Server) handleAnonMessage(w http.ResponseWriter, r *http.Request, msg M
 		writeError(w, http.StatusServiceUnavailable, "inbox_full", "recipient anonymous queue is full")
 		return
 	}
+	// An accepted anonymous message is a delivery like any other, and its own
+	// event kind because it belongs to a different queue: told "message", a
+	// client would fetch the inbox, find nothing, and leave the anon queue
+	// unread until something else happened to make it look. The event says
+	// nothing about the sender — there is nothing to say.
+	s.notify(msg.Recipient, "anon", msg.ID)
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "anon_accepted"})
 }
 

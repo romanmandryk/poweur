@@ -17,11 +17,12 @@
 |------|--------|-------|
 | E15-T1 Information architecture & shared components | **done** | five destinations, IdentityInput / AudiencePicker / ProfileCard, relay URL off `location.origin` |
 | Keys, devices & recovery (E11's web surface) | **done** | seed-derived identities, keystore inventory, recovery kit, the E11-T3 ceremony |
-| E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog |
+| E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog. **Friction fixed since manual testing:** a bare handle is completed with your own domain (a hosted relay puts everyone under one, so typing `alice` failed validation with "that does not look like a Poweur ID"); the add-contact buttons resolve on press instead of staying disabled behind a debounced lookup, which left someone who typed a name and pressed the button they were looking at with nothing at all; a queued request's intro is decrypted and shown |
 | E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send |
 | E15-T4 Files explorer & sharing | **done** | chunked upload, share dialog, received shares, changes-feed refresh |
 | E15-T5 Profile, first-run onboarding & polish | **done** | profile editor, three skippable steps, a11y pass, walkthrough docs |
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
+| Durable messages & honest badges ([EPIC-009](EPIC-009-messaging-upgrades.md) E09-T1's web surface) | **done** | the message store was memory-only and the relay drains on pickup, so a refresh lost messages *permanently*; the app now redraws from the archive at `poweur-sys/private/messages/`, keeps its own sent copies, and counts unread from read marks rather than from how much it happens to hold. `test/e2e/durability.spec.js` asserts each of these after a reload |
 | **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage |
 | **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field |
 | **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed → passkey only; unclaimed → prefilled and locked |

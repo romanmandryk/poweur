@@ -289,6 +289,13 @@ export interface ContactRequestEntry {
   timestamp: string;
   type?: string;
   payload: string;
+  /** Present because the queued envelope is E2E-encrypted like any message. */
+  encryption?: EncryptionMeta;
+  /**
+   * The decrypted intro, when a decryptor was supplied and it opened. Null
+   * when it could not be read; absent when nobody tried.
+   */
+  plaintext?: string | null;
 }
 
 export interface AnonQueueMessage {

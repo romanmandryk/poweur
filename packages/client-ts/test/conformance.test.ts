@@ -41,6 +41,14 @@ import {
   validateHostedHandle,
 } from "../src/names.js";
 import { validateInboxPolicy } from "../src/policy.js";
+import {
+  historyFileName,
+  historyPath,
+  markRead,
+  parseReadState,
+  unreadCounts,
+  type HistoryRecord,
+} from "../src/history.js";
 import { validateProfile } from "../src/profile.js";
 import { checkPow, clampPowBits } from "../src/pow.js";
 import { verifyGrantSignature, verifyGroupSignature } from "../src/shares.js";
@@ -364,6 +372,65 @@ describe("message encryption interoperates with Go", () => {
           nonce: vector.nonce,
         }),
       ).toThrow(/authentication failed|malformed/);
+    });
+  }
+});
+
+describe("message history (Go vectors)", () => {
+  interface HistoryPathVector {
+    name: string;
+    timestamp: string;
+    id: string;
+    path: string;
+  }
+
+  interface ReadStateVector {
+    name: string;
+    raw: unknown;
+    valid: boolean;
+    unread?: Record<string, number>;
+    marks?: Record<string, { timestamp: string; id?: string }>;
+  }
+
+  // The archive path is the one thing two implementations absolutely must
+  // agree on: disagree, and the same message is filed twice — once by the web
+  // app and once by the CLI — and neither knows the other's copy exists.
+  for (const vector of loadVectors<HistoryPathVector[]>("history-paths")) {
+    it(`files "${vector.name}" at the same path as Go`, () => {
+      expect(historyPath(vector.timestamp, vector.id)).toBe(vector.path);
+    });
+  }
+
+  // The owner's own tree is the target, so a sender-chosen id that escapes
+  // its segment is a write into someone else's config, not a cosmetic bug.
+  it("never lets a sender's id escape its path segment", () => {
+    for (const id of ["../../poweur-sys/relay/contacts", "a/b", "..", "", ".poweur-web-public"]) {
+      const name = historyFileName("2026-01-15T09:30:00Z", id);
+      expect(name).not.toMatch(/[/\\]/);
+      expect(name).not.toContain("..");
+      expect(name.startsWith(".")).toBe(false);
+    }
+  });
+
+  const owner = "alice.example.org";
+  const records: HistoryRecord[] = [
+    { id: "m1", sender: "bob.example.org", recipient: owner, timestamp: "2026-01-15T09:00:00Z", queue: "inbox", body: "one" },
+    { id: "m2", sender: "bob.example.org", recipient: owner, timestamp: "2026-01-15T09:30:00Z", queue: "inbox", body: "two" },
+    { id: "m3", sender: owner, recipient: "bob.example.org", timestamp: "2026-01-15T09:45:00Z", queue: "sent", body: "reply" },
+    { id: "m4", recipient: owner, timestamp: "2026-01-15T10:00:00Z", queue: "anonymous", body: "tip" },
+  ];
+
+  for (const vector of loadVectors<ReadStateVector[]>("history-read-state")) {
+    it(`agrees with Go on read state "${vector.name}"`, () => {
+      const raw = JSON.stringify(vector.raw);
+      if (!vector.valid) {
+        expect(() => parseReadState(raw)).toThrow();
+        return;
+      }
+      const state = parseReadState(raw);
+      expect(unreadCounts(state, owner, records)).toEqual(vector.unread ?? {});
+      const marked = markRead(state, "BOB.example.org", "2026-01-15T09:30:00Z", "m2");
+      expect(marked.conversations).toEqual(vector.marks ?? {});
     });
   }
 });

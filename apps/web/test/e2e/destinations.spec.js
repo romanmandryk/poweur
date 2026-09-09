@@ -229,8 +229,28 @@ test.describe("five destinations at 375px", () => {
 
     await field.fill("not an identity");
     await expect(page.locator(".idin-status")).toContainText("does not look like a Poweur ID");
-    // Resolution gates the action, so a typo cannot be submitted.
-    await expect(page.locator("#btn-add-contact-go")).toBeDisabled();
+
+    // Pressing send on a typo resolves it first and refuses — the button is
+    // live rather than disabled, because a control that greys out while a
+    // debounced lookup is in flight leaves someone who typed a name and
+    // pressed the button they were looking at with nothing at all.
+    await page.click("#btn-add-contact-go");
+    await expect(page.locator(".toast.warning")).toContainText("Enter a Poweur ID we can find");
+    // Nothing was written: the panel is still open on the same typo.
+    await expect(field).toHaveValue("not an identity");
+  });
+
+  test("Contacts completes a bare handle with your own domain", async ({ page }) => {
+    await stubPasskeys(page);
+    const identity = await createIdentity(page, relay);
+
+    await page.click('.nav-tab[data-page="contacts"]');
+    await page.click("#btn-add-contact-empty");
+    // A hosted relay puts everyone under one domain, so this is what people
+    // type; before, it failed validation with "that does not look like a
+    // Poweur ID", which is true and useless.
+    await page.locator(".idin input").fill(identity.split(".")[0]);
+    await expect(page.locator(".idin-status")).toContainText(`Found ${identity}`, { timeout: 20_000 });
   });
 
   test("Files lists the storage roots for the unlocked identity", async ({ page }) => {

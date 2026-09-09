@@ -384,3 +384,58 @@ func joinNewlines(parts []string) string {
 	}
 	return out
 }
+
+// Flags after a positional argument (EPIC-007 follow-up). Go's flag package
+// stops parsing at the first non-flag word, so `contacts accept bob
+// --petname Bob` reached the handler as three positionals and failed with a
+// usage line — while `contacts --petname Bob accept bob` worked. Every other
+// command in the CLI normalises first; the contacts subcommands did not, and
+// nobody types the working order.
+func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
+	tests := []struct {
+		name  string
+		in    []string
+		bools map[string]bool
+		want  []string
+	}{
+		{
+			name: "value flag after positional",
+			in:   []string{"bob.poweur.net", "--petname", "Bob"},
+			want: []string{"--petname", "Bob", "bob.poweur.net"},
+		},
+		{
+			name: "equals form needs no value pickup",
+			in:   []string{"bob.poweur.net", "--petname=Bob"},
+			want: []string{"--petname=Bob", "bob.poweur.net"},
+		},
+		{
+			name:  "bool flag does not swallow the next positional",
+			in:    []string{"bob.poweur.net", "--json"},
+			bools: map[string]bool{"--json": true},
+			want:  []string{"--json", "bob.poweur.net"},
+		},
+		{
+			name: "two positionals keep their order",
+			in:   []string{"bob.poweur.net", "hi there", "--use-identity", "me.poweur.net"},
+			want: []string{"--use-identity", "me.poweur.net", "bob.poweur.net", "hi there"},
+		},
+		{
+			name: "already normalised is unchanged",
+			in:   []string{"--petname", "Bob", "bob.poweur.net"},
+			want: []string{"--petname", "Bob", "bob.poweur.net"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeArgs(tt.in, tt.bools)
+			if len(got) != len(tt.want) {
+				t.Fatalf("normalizeArgs(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("normalizeArgs(%v) = %v, want %v", tt.in, got, tt.want)
+				}
+			}
+		})
+	}
+}
