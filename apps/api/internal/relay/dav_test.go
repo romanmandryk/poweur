@@ -420,6 +420,57 @@ func TestDAVVanityHostRouting(t *testing.T) {
 	}
 }
 
+func TestDAVCanonicalPathOnIdentityHost(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "davcanon.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "davpeer.poweur.net")
+	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	bobTok := mintDAVToken(t, ts, bob, "", "")
+
+	// The web app on https://<identity> still writes /dav/<identity>/… —
+	// Host must not swallow the identity segment as a tree root.
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/dav/"+alice.name+"/poweur-sys/relay/inbox-policy.json",
+		bytes.NewReader([]byte(`{"version":1,"mode":"open"}`)))
+	req.Host = alice.name
+	req.Header.Set("Authorization", "Bearer "+aliceTok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		t.Fatalf("canonical PUT on identity Host: %d %s", resp.StatusCode, raw)
+	}
+
+	got := davReq(t, ts, http.MethodGet, "/dav/"+alice.name+"/poweur-sys/relay/inbox-policy.json", aliceTok, nil, nil)
+	body, _ := io.ReadAll(got.Body)
+	got.Body.Close()
+	if got.StatusCode != http.StatusOK || !strings.Contains(string(body), `"mode":"open"`) {
+		t.Fatalf("canonical read after identity-Host PUT: %d %s", got.StatusCode, body)
+	}
+
+	// Same Host, another identity's canonical tree — not alice's unknown root.
+	put := davReq(t, ts, http.MethodPut, "/dav/"+bob.name+"/public/hello.txt", bobTok, []byte("hi"), nil)
+	put.Body.Close()
+	if put.StatusCode != http.StatusCreated {
+		t.Fatalf("bob public PUT: %d", put.StatusCode)
+	}
+	visitTok := mintDAVToken(t, ts, alice, bob.name, "dav:read")
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/dav/"+bob.name+"/public/hello.txt", nil)
+	req.Host = alice.name
+	req.Header.Set("Authorization", "Bearer "+visitTok)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "hi" {
+		t.Fatalf("canonical visit from identity Host: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestPubWebServing(t *testing.T) {
 	server, ts := newDAVTestServer(t, 0, 0)
 	alice := registerDAVIdentity(t, server, ts, "davpub.poweur.net")

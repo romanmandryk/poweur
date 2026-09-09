@@ -18,6 +18,11 @@ See also: [Storage model](./storage-model.md) (layout, quotas, providers).
 |---|---|
 | `https://<relay>/dav/<identity>/…` | Canonical tree URL |
 | `https://<identity>/dav/…` | Vanity alias (Host-routing on wildcard relays) |
+
+On a shared wildcard relay both can apply at once (`Host: <identity>` and a
+canonical `/dav/<identity>/…` path). The path wins: the first `/dav/` segment is
+the owner when it names a hosted identity; otherwise Host selects the owner
+(the Finder-style vanity mount).
 | `POST /auth/dav-token` | Mint a bearer token (session- or identity-signed) |
 | `DELETE /auth/dav-token/{token}` | Revoke a token immediately |
 | `GET /files/<identity>/quota` | Used bytes / quota / change_id (owner credentials) |
