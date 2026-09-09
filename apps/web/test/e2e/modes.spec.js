@@ -112,6 +112,27 @@ test.describe("front doors", () => {
     await expect(page.locator("#btn-door-claim")).toHaveCount(0);
   });
 
+  test("a front door gets the whole window on a desktop, not the nav column", async ({ browser }) => {
+    // The app shell is a grid at >=768px — nav rail, header, content. A front
+    // door replaces #app's contents entirely, so an unscoped grid laid the
+    // *whole landing page* into the nav column: 240px hard against the left
+    // edge, with the claim button's own label clipped.
+    const wide = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await wide.newPage();
+    await stubPasskeys(page);
+    await page.goto(at("id.poweur.net"));
+    await page.waitForSelector("#claim-card");
+
+    const box = await page.locator(".landing-body").boundingBox();
+    expect(box.width).toBeGreaterThan(400);
+    // Centred: the gap either side is the same, which a nav column is not.
+    expect(Math.abs(box.x - (1440 - box.x - box.width))).toBeLessThan(4);
+    // And nothing overflows its container.
+    expect(await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await wide.close();
+  });
+
   test("a claimed identity host offers sign-in only", async ({ page, browser }) => {
     test.slow();
     // Claim through the same 127.0.0.1 path every other spec uses (a secure

@@ -1768,7 +1768,11 @@ input, textarea, select { font-family: inherit; }
 
 /* ─── Tablet: 768–1023px ──────────────────────────────────────────────────── */
 @media (min-width: 768px) {
-  #app {
+  /* Scoped to the app shell, and `:has(.bottom-nav)` is how it knows: a front
+     door replaces #app's contents entirely (E15-T7), and an unscoped grid put
+     that whole page into the *nav* column — 80px, then 240px — which is what a
+     launcher looked like on a 1440px screen. */
+  #app:has(.bottom-nav) {
     display: grid;
     max-width: 100%;
     grid-template-columns: var(--rail) minmax(0, 1fr);
@@ -1795,6 +1799,9 @@ input, textarea, select { font-family: inherit; }
     border-right: 1px solid var(--sep);
   }
   .nav-tab {
+    /* `flex: 1` spreads five tabs across a phone's width; in a full-height
+       rail it spread them down 900px of nothing. */
+    flex: 0 0 auto;
     padding: 12px 8px;
     font-size: 10px;
     border-radius: var(--radius-sm);
@@ -1840,7 +1847,7 @@ input, textarea, select { font-family: inherit; }
 
 /* ─── Desktop: ≥1024px ────────────────────────────────────────────────────── */
 @media (min-width: 1024px) {
-  #app { grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+  #app:has(.bottom-nav) { grid-template-columns: var(--sidebar) minmax(0, 1fr); }
 
   .bottom-nav { padding: 20px 12px; }
 

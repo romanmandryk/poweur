@@ -121,10 +121,17 @@ test.describe("native custody", () => {
     await page.evaluate(() => sessionStorage.clear());
     await page.reload();
     await expect(page.locator(".unlock-name")).toHaveText(identity.split(".")[0], { timeout: 20_000 });
-    // Boot pushes the `unlock` sub-page when the session is gone. `#btn-unlock-main`
-    // on the landing only *opens* that sub-page; the action itself is `#btn-do-unlock`.
-    await expect(page.locator("#btn-do-unlock")).toContainText("Unlock");
-    await page.locator("#btn-do-unlock").click();
+    // `.unlock-name` appears on two screens: the landing's unlock card and the
+    // `unlock` sub-page boot pushes when the session is gone. Whichever painted
+    // first satisfied it, and under full-suite load that was sometimes the
+    // card — whose `#btn-unlock-main` only *opens* the sub-page. The action
+    // itself is always `#btn-do-unlock`, so get there first and then assert.
+    if (await page.locator("#btn-unlock-main").count()) {
+      await page.click("#btn-unlock-main");
+    }
+    const unlock = page.locator("#btn-do-unlock");
+    await expect(unlock).toContainText("Unlock", { timeout: 20_000 });
+    await unlock.click();
     await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 30_000 });
     expect(await page.locator("#pin-input").count()).toBe(0);
     expect(await page.evaluate(() => window.__keystore.prompts))
