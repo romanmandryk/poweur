@@ -73,8 +73,12 @@ test.describe("hosted web client E2E", () => {
     await page.fill("#pin-confirm", "test-pin");
     await page.click("#btn-pin-ok");
 
-    // Should land on main with identity
-    await expect(page.locator("body")).toContainText(handle, { timeout: 45_000 });
+    // Wait for the *end* of registration, not for the handle to appear
+    // anywhere. The claim field now answers "<handle>.poweur.net is available"
+    // while the name is still being typed (E15-T12), so a body-text match on
+    // the handle passed the moment it was judged — and the assertions below
+    // then raced a registration still in flight.
+    await expect(page.locator(".onboard-title")).toBeVisible({ timeout: 45_000 });
 
     const identity = `${handle}.poweur.net`;
     const docRes = await page.request.get(`${relay.baseUrl}/identities/${identity}`);

@@ -258,8 +258,12 @@ func (s *Server) Router() http.Handler {
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// Someone with no identity yet who lands on the launcher host wants the
-	// app, not a service banner.
-	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" {
+	// app, not a service banner — but this path is also the relay's root
+	// document, which every client reads to learn the relay's address and which
+	// hosts are launchers. Redirecting that turned the document into an HTML
+	// page and left the app unable to tell which front door it was standing in.
+	// So the redirect is for readers who did not ask for the document.
+	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" && !wantsJSON(r) {
 		host := r.Host
 		if h, _, err := splitHostPort(host); err == nil {
 			host = h
@@ -282,6 +286,13 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"hosted_domains": s.cfg.HostedDomains,
 		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
 	})
+}
+
+// wantsJSON reports whether the caller asked for the root document itself.
+// Every `@poweur/client` JSON request says so; a browser navigating says
+// `text/html`, and curl says `*/*`.
+func wantsJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

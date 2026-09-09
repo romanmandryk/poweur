@@ -75,7 +75,15 @@ export class RelayClient {
     }
     /** Perform a request and decode JSON, mapping failures to typed errors. */
     async request(options) {
-        const response = await this.raw(options);
+        // Say so. `GET /` is both the relay's root document and the launcher's
+        // front door, and a relay serving a web UI redirects readers who did not
+        // ask for the document — so a client that stayed silent got HTML back and
+        // could not tell which front door it was standing in. Only this path
+        // decodes JSON; `raw()` also carries downloads and streams.
+        const response = await this.raw({
+            ...options,
+            headers: { Accept: "application/json", ...options.headers },
+        });
         const ok = response.ok || (options.allowStatus?.includes(response.status) ?? false);
         const text = await response.text();
         let data;

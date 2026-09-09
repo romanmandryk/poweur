@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { startRelay } from "../helpers/relay.mjs";
-import { stubPasskeys } from "../helpers/app-ui.mjs";
+import { freePort, startRelay } from "../helpers/relay.mjs";
+import { stubPasskeys, registerIdentity } from "../helpers/app-ui.mjs";
 
 /**
  * E15-T7/T8/T9 — one static tree, three front doors.
@@ -14,18 +14,26 @@ const MOBILE = { width: 375, height: 812 };
 
 /** @type {Awaited<ReturnType<typeof startRelay>>} */
 let relay;
-let port;
+// Chosen before the browser launches, because the allow-list below needs it:
+// Chromium reads secure-origin exceptions at launch, and they carry a port.
+const port = await freePort();
 
 test.beforeAll(async () => {
-  relay = await startRelay();
-  port = new URL(relay.baseUrl).port;
+  relay = await startRelay({ port });
 });
 test.afterAll(() => relay?.stop());
 
 test.use({
   viewport: MOBILE,
   launchOptions: {
-    args: ["--host-resolver-rules=MAP *.poweur.net 127.0.0.1,MAP poweur.net 127.0.0.1"],
+    args: [
+      "--host-resolver-rules=MAP *.poweur.net 127.0.0.1,MAP poweur.net 127.0.0.1",
+      // `http://id.poweur.net:PORT` is not a secure context, so `crypto.subtle`
+      // and `PublicKeyCredential` do not exist there — creating an identity
+      // fails before it starts, for a reason nothing about the app. Production
+      // serves these hosts over https, where none of this applies.
+      `--unsafely-treat-insecure-origin-as-secure=http://id.poweur.net:${port},http://poweur.net:${port}`,
+    ],
   },
 });
 
@@ -49,12 +57,11 @@ test.describe("front doors", () => {
 
   test("the apex is a launcher too, and is not a service banner", async ({ page }) => {
     // Before E15-T7 `GET /` here answered {"service":"poweur-relay"} to a human.
-    const bare = await page.request.get(`http://poweur.net:${port}/`, { maxRedirects: 0 });
-    expect(bare.status()).toBe(302);
-    expect(bare.headers().location).toBe("/app/");
-
+    // Navigate in the page so Chromium's host-resolver-rules apply; Playwright's
+    // `page.request` does not use them and would hit the real apex over DNS.
     await stubPasskeys(page);
-    await page.goto(at("poweur.net"));
+    await page.goto(at("poweur.net", "/"));
+    await expect(page).toHaveURL(at("poweur.net"));
     await expect(page.locator("#claim-card")).toBeVisible({ timeout: 20_000 });
   });
 
@@ -107,21 +114,12 @@ test.describe("front doors", () => {
 
   test("a claimed identity host offers sign-in only", async ({ page, browser }) => {
     test.slow();
-    // Claim it on the launcher first, the way a real user arrives at it.
+    // Claim through the same 127.0.0.1 path every other spec uses (a secure
+    // origin). What this asserts is the *identity host* door for a name that
+    // already exists, not the launcher ceremony — that is the rest of this file.
     await stubPasskeys(page);
-    await page.goto(at("id.poweur.net"));
-    await page.waitForSelector("#claim-card");
     const handle = `mode${Date.now().toString(36)}`;
-    await page.fill("#ni-handle", handle);
-    await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
-    await page.click("#btn-claim");
-    await page.waitForSelector("#pin-input");
-    await page.fill("#pin-input", "test-pin");
-    await page.fill("#pin-confirm", "test-pin");
-    await page.click("#btn-pin-ok");
-
-    // The hand-off carries it to its own origin, which is a different storage.
-    await page.waitForURL(new RegExp(`${handle}\\.poweur\\.net`), { timeout: 60_000 });
+    await registerIdentity(page, relay, handle);
 
     // A *fresh* browser on that host holds nothing, so this is the door a
     // stranger — or the owner on a new device — actually sees.

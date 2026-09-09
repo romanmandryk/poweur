@@ -13,6 +13,11 @@ import { expect } from "@playwright/test";
 
 export async function stubPasskeys(page) {
   await page.addInitScript(() => {
+    // An insecure origin has no `navigator.credentials` at all, and assigning
+    // through it threw — killing the whole init script for pages that only
+    // needed the rest of it. There is nothing to stub there anyway: the app
+    // takes its PIN path, which is the point of that path existing.
+    if (!navigator.credentials) return;
     const rawId = crypto.getRandomValues(new Uint8Array(32));
     let keyPair = null;
     const ensureKey = async () => {

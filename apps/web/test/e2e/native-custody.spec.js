@@ -16,24 +16,41 @@ import { openApp, stubPasskeys } from "../helpers/app-ui.mjs";
  */
 const MOBILE = { width: 375, height: 812 };
 
-/** Install a contract-shaped `PoweurKeystore` before any app code runs. */
+/**
+ * Install a contract-shaped `PoweurKeystore` before any app code runs.
+ *
+ * Backed by `localStorage` on purpose: a real keystore outlives the app, and a
+ * fake that forgot everything on reload would make "unlock after a relaunch" —
+ * the whole point of hardware custody — untestable, while looking like an app
+ * bug when it failed.
+ */
 async function stubKeystore(page, { available = true } = {}) {
   await page.addInitScript((biometricsAvailable) => {
-    const secrets = new Map();
-    window.__keystore = { secrets, prompts: [] };
+    const STORE = "__fake_keystore";
+    const read = () => { try { return JSON.parse(localStorage.getItem(STORE) ?? "{}"); } catch { return {}; } };
+    const write = (all) => localStorage.setItem(STORE, JSON.stringify(all));
+
+    window.__keystore = {
+      prompts: [],
+      get secrets() { return read(); },
+    };
     globalThis.Capacitor = {
       isNativePlatform: () => true,
       Plugins: {
         PoweurKeystore: {
           async setSecret({ key, value, gate, reason }) {
             window.__keystore.prompts.push(reason);
-            secrets.set(key, { value, gate });
+            write({ ...read(), [key]: { value, gate } });
           },
           async getSecret({ key, reason }) {
             window.__keystore.prompts.push(reason);
-            return { value: secrets.get(key)?.value ?? null };
+            return { value: read()[key]?.value ?? null };
           },
-          async deleteSecret({ key }) { secrets.delete(key); },
+          async deleteSecret({ key }) {
+            const all = read();
+            delete all[key];
+            write(all);
+          },
           async canUseBiometrics() {
             return biometricsAvailable
               ? { available: true, kind: "face" }
@@ -92,12 +109,11 @@ test.describe("native custody", () => {
     expect(record.encryptedKeys.gate).toBe("biometric");
     expect(record.encryptedKeys.ciphertext).toBeTruthy();
 
-    const held = await page.evaluate(() => [...window.__keystore.secrets.keys()]);
+    const held = await page.evaluate(() => Object.keys(window.__keystore.secrets));
     expect(held).toEqual([`poweur.identity.${identity}`]);
 
     // The keys themselves never reach the plugin.
-    const stored = await page.evaluate(() =>
-      JSON.stringify([...window.__keystore.secrets.values()]));
+    const stored = await page.evaluate(() => JSON.stringify(window.__keystore.secrets));
     expect(stored).not.toContain(record.encryptedKeys.ciphertext);
 
     // Locking and unlocking goes through the keystore: the prompt names the
@@ -105,9 +121,10 @@ test.describe("native custody", () => {
     await page.evaluate(() => sessionStorage.clear());
     await page.reload();
     await expect(page.locator(".unlock-name")).toHaveText(identity.split(".")[0], { timeout: 20_000 });
-    await expect(page.locator("#btn-unlock-main")).toContainText("Unlock");
-
-    await page.click("#btn-unlock-main");
+    // Boot pushes the `unlock` sub-page when the session is gone. `#btn-unlock-main`
+    // on the landing only *opens* that sub-page; the action itself is `#btn-do-unlock`.
+    await expect(page.locator("#btn-do-unlock")).toContainText("Unlock");
+    await page.locator("#btn-do-unlock").click();
     await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 30_000 });
     expect(await page.locator("#pin-input").count()).toBe(0);
     expect(await page.evaluate(() => window.__keystore.prompts))
@@ -126,7 +143,7 @@ test.describe("native custody", () => {
     const record = await page.evaluate((id) =>
       JSON.parse(localStorage.getItem(`poweur:identity:${id}`)), identity);
     expect(record.encryptedKeys.kdf).not.toBe("native");
-    expect(await page.evaluate(() => window.__keystore.secrets.size)).toBe(0);
+    expect(await page.evaluate(() => Object.keys(window.__keystore.secrets).length)).toBe(0);
   });
 
   test("removing an identity forgets its hardware secret", async ({ page }) => {
@@ -134,7 +151,7 @@ test.describe("native custody", () => {
     await stubPasskeys(page);
     await stubKeystore(page);
     const identity = await claim(page, relay, `rem${Date.now().toString(36)}`, { pin: false });
-    expect(await page.evaluate(() => window.__keystore.secrets.size)).toBe(1);
+    expect(await page.evaluate(() => Object.keys(window.__keystore.secrets).length)).toBe(1);
 
     await page.click('.nav-tab[data-page="settings"]');
     await page.click("#row-remove-id");
@@ -143,7 +160,7 @@ test.describe("native custody", () => {
     // An orphaned keystore entry would sit there for the life of the install,
     // openable by nothing.
     await expect
-      .poll(() => page.evaluate(() => window.__keystore.secrets.size), { timeout: 10_000 })
+      .poll(() => page.evaluate(() => Object.keys(window.__keystore.secrets).length), { timeout: 10_000 })
       .toBe(0);
     expect(await page.evaluate((id) =>
       localStorage.getItem(`poweur:identity:${id}`), identity)).toBeNull();

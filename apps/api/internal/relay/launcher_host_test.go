@@ -55,6 +55,44 @@ func TestRootRedirectsOnEveryLauncherHost(t *testing.T) {
 	}
 }
 
+// The redirect must not eat the root document. `GET /` is where every client
+// learns the relay's address and which hosts are launchers, so a client that
+// asks for JSON gets JSON even on a launcher host — without this the web app
+// followed the redirect into `/app/`, failed to parse HTML, and resolved to no
+// mode at all on the one host whose whole job is claiming a name.
+func TestRootServesDocumentToJSONClientsOnLauncherHost(t *testing.T) {
+	ts := httptest.NewServer(launcherTestServer(t, t.TempDir()).Router())
+	defer ts.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+	req.Host = "id.poweur.net"
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Service       string   `json:"service"`
+		LauncherHosts []string `json:"launcher_hosts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Service != "poweur-relay" {
+		t.Errorf("service = %q", body.Service)
+	}
+	if len(body.LauncherHosts) != 2 {
+		t.Errorf("launcher_hosts = %v, want both", body.LauncherHosts)
+	}
+}
+
 // An identity host is not a launcher: it serves its own front door, and the
 // service banner is still what a non-browser client asks for.
 func TestRootServesBannerOnIdentityHost(t *testing.T) {
