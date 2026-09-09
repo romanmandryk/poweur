@@ -76,11 +76,10 @@ async function registerIdentity(page, relay, handle) {
   await openApp(page, relay);
   await page.click("#btn-welcome-start");
   await page.click("#opt-create-new");
+  await page.waitForSelector("#claim-card");
   await page.fill("#ni-handle", handle);
-  await page.fill("#ni-domain", "poweur.net");
-  await page.click("#btn-next-id");
-  await page.waitForSelector("#btn-create-id");
-  await page.click("#btn-create-id");
+  await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
+  await page.click("#btn-claim");
   await page.waitForSelector("#pin-input");
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");

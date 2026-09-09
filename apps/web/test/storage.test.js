@@ -175,4 +175,22 @@ describe("relay URL on a shell origin (EPIC-019 E19-T1)", () => {
     expect(defaultRelayUrl()).toBe(globalThis.location.origin);
     expect(hasRelayUrl()).toBe(true);
   });
+
+  it("asks the shell, because Android's shell origin looks like the web", () => {
+    // The protocol test above is an iOS answer. **Android serves the same
+    // bundle from `https://localhost`** — an ordinary web origin by every
+    // syntactic test — so the shell was handed itself as a relay and opened on
+    // a blank page with no way to name a real one. Capacitor says which
+    // platform it is; that is the only reliable signal.
+    globalThis.Capacitor = { isNativePlatform: () => true };
+    try {
+      expect(defaultRelayUrl()).toBe("");
+      expect(hasRelayUrl()).toBe(false);
+
+      saveConfig({ ...getConfig(), relayUrl: "https://poweur.net" });
+      expect(defaultRelayUrl()).toBe("https://poweur.net");
+    } finally {
+      delete globalThis.Capacitor;
+    }
+  });
 });

@@ -75,16 +75,23 @@ export async function openApp(page, relay) {
   await page.reload();
 }
 
-/** Register a hosted identity through the real screens. Returns its FQDN. */
+/**
+ * Register a hosted identity through the real screens. Returns its FQDN.
+ *
+ * A test relay answers on `127.0.0.1`, which is no launcher and no identity
+ * host, so this takes the `unknown`-mode route: the generic welcome, then Add
+ * identity → Add new ID. The claim field itself is the same one the launcher
+ * shows, and the domain comes from what the relay says it hosts rather than
+ * from a typed field (E15-T8/T10).
+ */
 export async function registerIdentity(page, relay, handle) {
   await openApp(page, relay);
   if (await page.locator("#btn-welcome-start").count()) await page.click("#btn-welcome-start");
   if (await page.locator("#opt-create-new").count()) await page.click("#opt-create-new");
+  await page.waitForSelector("#claim-card");
   await page.fill("#ni-handle", handle);
-  await page.fill("#ni-domain", "poweur.net");
-  await page.click("#btn-next-id");
-  await page.waitForSelector("#btn-create-id");
-  await page.click("#btn-create-id");
+  await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
+  await page.click("#btn-claim");
   await page.waitForSelector("#pin-input");
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");

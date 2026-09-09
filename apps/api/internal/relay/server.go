@@ -259,12 +259,12 @@ func (s *Server) Router() http.Handler {
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// Someone with no identity yet who lands on the launcher host wants the
 	// app, not a service banner.
-	if s.cfg.LauncherHost != "" && s.cfg.WebStaticDir != "" && r.URL.Path == "/" {
+	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" {
 		host := r.Host
 		if h, _, err := splitHostPort(host); err == nil {
 			host = h
 		}
-		if strings.EqualFold(strings.TrimSuffix(host, "."), s.cfg.LauncherHost) {
+		if s.cfg.IsLauncherHost(host) {
 			http.Redirect(w, r, "/app/", http.StatusFound)
 			return
 		}
@@ -274,7 +274,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"relay_address": s.cfg.RelayAddress,
 		// The host that serves the claim flow, so a client can tell whether it
 		// is running as the launcher and where to hand a new identity off from.
-		"launcher_host":  s.cfg.LauncherHost,
+		"launcher_host": s.cfg.LauncherHost,
+		// Every host that serves the claim flow, so a client can tell which
+		// front door it is (EPIC-015 E15-T7). launcher_host stays the
+		// canonical one a hand-off targets.
+		"launcher_hosts": s.cfg.LauncherHosts,
 		"hosted_domains": s.cfg.HostedDomains,
 		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
 	})

@@ -41,14 +41,22 @@ export class IdentityApi {
         });
     }
     /**
+     * The relay's service banner (EPIC-015 E15-T7).
+     *
+     * It carries the launcher hosts and hosted domains a client needs to work
+     * out which front door it is serving, so this is the one unauthenticated
+     * read that happens before anything else — including before an identity
+     * exists.
+     */
+    root() {
+        return this.client.request({ method: "GET", path: "/" });
+    }
+    /**
      * The relay's canonical address (host[:port]). Registration signatures bind
      * to it, so a captured signature cannot be replayed at another relay.
      */
     async relayAddress() {
-        const root = await this.client.request({
-            method: "GET",
-            path: "/",
-        });
+        const root = await this.root();
         if (!root.relay_address) {
             throw new PoweurError("relay_error", "relay did not return its address");
         }

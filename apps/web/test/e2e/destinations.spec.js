@@ -109,13 +109,10 @@ async function createIdentity(page, relay) {
 
   if (await page.locator("#btn-welcome-start").count()) await page.click("#btn-welcome-start");
   if (await page.locator("#opt-create-new").count()) await page.click("#opt-create-new");
+  await page.waitForSelector("#claim-card");
   await page.fill("#ni-handle", handle);
-  await page.fill("#ni-domain", "poweur.net");
-  await page.check("#ni-hosted-step1");
-  await page.click("#btn-next-id");
-  await expect(page.locator("#btn-create-id")).toBeVisible({ timeout: 10_000 });
-  await page.check("#ni-hosted");
-  await page.click("#btn-create-id");
+  await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
+  await page.click("#btn-claim");
   await expect(page.locator("#pin-input")).toBeVisible({ timeout: 30_000 });
   await page.fill("#pin-input", "test-pin");
   await page.fill("#pin-confirm", "test-pin");
@@ -165,9 +162,13 @@ test.describe("five destinations at 375px", () => {
         .toBeGreaterThan(60);
     }
 
-    // The launcher is the fifth tab and keeps its own content.
+    // The fifth tab is Apps. It used to render "New identity — step 1 of 2":
+    // the create-identity form was the launcher destination, so someone who
+    // already had an identity was offered another one. Claiming moved to the
+    // front door (E15-T7), and what is left here says so (E15-T11).
     await page.click('.nav-tab[data-page="launcher"]');
-    await expect(page.locator("#ni-handle, #btn-create-id")).toHaveCount(1);
+    await expect(page.locator(".dest-title")).toHaveText("Apps");
+    await expect(page.locator("#ni-handle")).toHaveCount(0);
   });
 
   test("every nav tab clears the 44px touch-target floor", async ({ page }) => {

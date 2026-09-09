@@ -3,14 +3,13 @@ import { startRelay } from "../helpers/relay.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
 
 /**
- * E18-T3: claiming a name before spending a passkey on it, and the hand-off
- * from the launcher host to the identity's own origin.
+ * E18-T3: the hand-off from a launcher host to the identity's own origin.
  *
- * The cross-origin hop itself cannot run here — a test relay is one host on
- * 127.0.0.1 and `alice.poweur.net` is in no DNS — so this covers the two
- * halves that *are* testable: the launcher computes the right hand-off, and an
- * arriving fragment is adopted. The relay side of the same flow is
- * `TestINT_NAME_01`.
+ * The *receiving* half is what lives here: an arriving fragment is adopted,
+ * made active and left locked. Judging a name before a passkey is spent, and
+ * the hop itself across real hosts, moved to `modes.spec.js` — which maps the
+ * hosts into the test relay with Chromium's resolver rules and can therefore
+ * drive both ends (E15-T7).
  */
 const MOBILE = { width: 375, height: 812 };
 
@@ -22,37 +21,6 @@ test.describe("claiming a name", () => {
   test.afterAll(() => relay?.stop());
 
   test.use({ viewport: MOBILE });
-
-  test("the handle is checked before any passkey is created", async ({ page }) => {
-    test.slow();
-    await stubPasskeys(page);
-    // A registered identity to collide with.
-    const taken = await registerIdentity(page, relay, `clm${Date.now().toString(36)}`);
-
-    await page.goto(`${relay.baseUrl}/app/`);
-    await page.click('.nav-tab[data-page="launcher"]');
-
-    // Reserved: the relay's own vocabulary, not a guess made in the browser.
-    await page.fill("#ni-handle", "admin");
-    await expect(page.locator("#ni-availability")).toHaveText(
-      "This name is reserved by the operator.", { timeout: 20_000 });
-    await expect(page.locator("#btn-next-id")).toBeDisabled();
-
-    // Already claimed.
-    await page.fill("#ni-handle", taken.split(".")[0]);
-    await expect(page.locator("#ni-availability")).toHaveText("That name is already taken.", { timeout: 20_000 });
-    await expect(page.locator("#btn-next-id")).toBeDisabled();
-
-    // Non-ASCII: the homoglyph gate, reported as a character-set problem.
-    await page.fill("#ni-handle", "аdmin");
-    await expect(page.locator("#ni-availability")).toHaveText("Use only a-z, 0-9 and hyphen.", { timeout: 20_000 });
-
-    // …and a free one unlocks the step.
-    const free = `free${Date.now().toString(36)}`;
-    await page.fill("#ni-handle", free);
-    await expect(page.locator("#ni-availability")).toContainText("is available", { timeout: 20_000 });
-    await expect(page.locator("#btn-next-id")).toBeEnabled();
-  });
 
   test("an identity handed over by the launcher is adopted and locked", async ({ browser }) => {
     test.slow();

@@ -58,7 +58,11 @@ export async function wrapKeysNative(identity, signingJWK, encJWK, seed = null, 
   const store = requirePlugin();
   const gate = options.gate ?? GATE_BIOMETRIC;
   const secret = randomSecret();
-  await store.setSecret({ key: secretKeyFor(identity), value: toBase64url(secret), gate });
+  // Android gates the *key*, not the direction, so storing under a biometric
+  // gate prompts too — and a prompt with no reason on it is a prompt nobody
+  // should agree to. iOS ignores it here; passing it costs nothing.
+  const reason = options.reason ?? "Protect your identity";
+  await store.setSecret({ key: secretKeyFor(identity), value: toBase64url(secret), gate, reason });
   const wrapped = await wrapKeysAES(secret, signingJWK, encJWK, seed);
   secret.fill(0);
   return { ...wrapped, kdf: "native", gate };
@@ -140,8 +144,11 @@ function secretKeyFor(identity) {
  * JavaScript above is complete; what remains is the platform half, and it is
  * deliberately tiny — everything cryptographic already happens here.
  *
- *   setSecret({ key, value, gate })       → void
- *     Store `value` (base64url of 32 random bytes) under `key`.
+ *   setSecret({ key, value, gate, reason }) → void
+ *     Store `value` (base64url of 32 random bytes) under `key`. `reason` is
+ *     shown when the platform has to prompt to *store* — Android's Keystore
+ *     gates a key for both directions, so writing under a biometric gate asks
+ *     the user too; iOS does not, and ignores it.
  *     gate "biometric": iOS `SecAccessControl` with `.biometryCurrentSet`,
  *       Android `setUserAuthenticationRequired(true)` + `BiometricPrompt`.
  *     gate "device": iOS `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`,

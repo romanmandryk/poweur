@@ -61,14 +61,11 @@ test.describe("hosted web client E2E", () => {
       await page.click("#opt-create-new");
     }
 
-    await page.fill("#ni-handle", handle);
-    await page.fill("#ni-domain", "poweur.net");
-    await page.check("#ni-hosted-step1");
-    await page.click("#btn-next-id");
+    await page.waitForSelector("#claim-card");
 
-    await expect(page.locator("#btn-create-id")).toBeVisible({ timeout: 10_000 });
-    await page.check("#ni-hosted");
-    await page.click("#btn-create-id");
+    await page.fill("#ni-handle", handle);
+    await expect(page.locator("#btn-claim")).toBeEnabled({ timeout: 20_000 });
+    await page.click("#btn-claim");
 
     // PIN panel (PRF stub returns no PRF)
     await expect(page.locator("#pin-input")).toBeVisible({ timeout: 30_000 });

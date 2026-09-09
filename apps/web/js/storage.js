@@ -33,12 +33,28 @@ const SESSION_PREFIX = "poweur:session:";
 export function defaultRelayUrl() {
   const configured = readConfigRaw().relayUrl;
   if (configured) return configured;
-  // Only a web origin can stand in for a relay. A shell runs on
-  // `capacitor://localhost`, which is not one — returning it produced an app
-  // that tried to register against itself, with no way to say otherwise
-  // because Settings needs an identity first. Empty means "ask" (EPIC-019).
+  // Only a web origin can stand in for a relay. A shell's origin is not one —
+  // returning it produced an app that tried to register against itself, with
+  // no way to say otherwise because Settings needs an identity first. Empty
+  // means "ask" (EPIC-019).
+  if (isShellRuntime()) return "";
   const origin = globalThis.location?.origin ?? "";
   return /^https?:$/.test(globalThis.location?.protocol ?? "") ? origin : "";
+}
+
+/**
+ * Inside a native shell, whichever way it serves its own bundle.
+ *
+ * The protocol test alone was an iOS answer: iOS serves the app from
+ * `capacitor://localhost`, but **Android serves it from `https://localhost`** —
+ * a perfectly ordinary web origin by every syntactic test, and one this
+ * function would happily hand back as a relay. The shell says so itself, so
+ * ask it first and keep the protocol test for the cases it still covers
+ * (`file://`, a future scheme).
+ */
+export function isShellRuntime() {
+  if (globalThis.Capacitor?.isNativePlatform?.()) return true;
+  return !/^https?:$/.test(globalThis.location?.protocol ?? "");
 }
 
 /** True when a relay is known without asking the user (EPIC-019 E19-T1). */

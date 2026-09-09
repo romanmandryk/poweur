@@ -1,6 +1,6 @@
 # EPIC-019 — Mobile app: Capacitor shell over the web client
 
-- **Status:** in progress — T1 done and **verified on an iOS simulator**, T2's JS half, T6 and T7 done; Android not generated
+- **Status:** in progress — T1 and T2 done and **verified on an iOS simulator**, T6 and T7 done; the Android project is generated and builds
 - **Priority:** P2 (after EPIC-015 makes the web app worth wrapping; the decision itself is P1 because it constrains E15)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the UI being wrapped), [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (onboarding + credential scope), [EPIC-011](EPIC-011-key-management-recovery.md) (T8 key transfer)
 - **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), `requirements.md`'s mobile-app requirements
@@ -9,8 +9,8 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E19-T1 Shell + single-origin client | **done for iOS** | builds, installs and runs on an iOS 26.5 simulator: claim → PIN → unlock → push-driven request, against a local dev relay. Android platform not generated (no SDK here) |
-| E19-T2 Native key custody (`kdf:"native"`) | **partial** | JS half complete and tested (`apps/web/js/native.js`); the Keychain/Keystore plugin is specified, not written |
+| E19-T1 Shell + single-origin client | **done** | iOS: builds, installs and runs on an iOS 26.5 simulator: claim → unlock → push-driven request, against a local dev relay. Android: `cap add android` done, `:app:assembleDebug` green, not yet run on an emulator |
+| E19-T2 Native key custody (`kdf:"native"`) | **done, minus tiered custody** | Swift and Java plugins written and wired; identity creation in the shell takes the keystore over a passkey, and unlock comes back from it. Verified on the iOS simulator. Background-receive tiering stays open and belongs with T4 |
 | E19-T3 Optional passkey enrollment | open | hosted identities only |
 | E19-T4 Push & background sync | open | needs E09; hooks only until then |
 | E19-T5 Packaging, CI & release | open | |
@@ -111,14 +111,16 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
 - [x] Deep links: the `poweur://` scheme is registered in `Info.plist`. Universal links are
       **deliberately not** here — they bind the app to the operator's domain, and E19-T3
       owns that as an optional extra for hosted identities
-- [ ] **Android platform not generated** — needs an Android SDK, absent on this machine
+- [x] **Android platform generated** (`cap add android`) and building: `:app:assembleDebug`
+      is green against SDK 36 / JDK 21. A `network_security_config.xml` mirrors the iOS ATS
+      exceptions so a dev relay on the host is reachable — including `10.0.2.2`, which is
+      how an emulated device addresses its host. Not yet run on an emulator
 - [ ] Navigation allow-list / CSP review, splash and icons
 
 **Acceptance:** met on iOS. The shell runs on an iOS 26.5 simulator against a local dev
 relay: it claims a handle (live availability answering from the relay), creates an
 identity, unlocks it after a relaunch, and receives a contact request **by push with
-nothing touched on the device**. Android remains ungenerated — that needs an SDK this
-machine does not have.
+nothing touched on the device**. Android builds but has not been run.
 
 ### What running it on a device found
 
@@ -149,19 +151,28 @@ Two smaller ones: iOS auto-capitalised handles (`autocapitalize="none"` on every
 field), and a queued contact request produced no push at all — the relay notified only on
 the inbox path, so a request waited silently until the app was opened.
 
-### E19-T2 — Native key custody (`kdf: "native"`) — **partial**
+### E19-T2 — Native key custody (`kdf: "native"`) — **done, minus tiered custody**
 
-- [ ] **The plugin itself is not written.** Its contract — four methods over iOS Keychain
-      (`SecAccessControl` + LocalAuthentication) and Android Keystore (`BiometricPrompt`) —
-      is specified at the bottom of `apps/web/js/native.js`. Writing Swift and Kotlin that
-      could not be compiled or run on this machine would have produced something that looks
-      finished and has never executed
+- [x] **The plugin is written on both platforms**, against the contract at the bottom of
+      `apps/web/js/native.js`: `ios/App/App/PoweurKeystorePlugin.swift` (Keychain +
+      `SecAccessControl(.biometryCurrentSet)` + LocalAuthentication) and
+      `android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java` (a per-identity
+      AES key in the Android Keystore, unlocked by `BiometricPrompt`, opening a ciphertext
+      in preferences). Registration differs by platform and both are wired:
+      `MainActivity.onCreate` on Android, and a `CAPBridgeViewController` subclass on iOS
+      because `SceneDelegate` builds the root controller itself
 - [x] Registered as a third `kdf` alongside `prf` / `pbkdf2`: `wrapKeysAES` /
       `unwrapKeysAES` are reused unchanged, and only where the 32 bytes come from differs.
       Six unit tests cover the JS half against a fake plugin, including that the identity
       keys are never handed to it and that one secret is kept per identity
-- [ ] Identity creation in the shell defaults to `native`, with `pbkdf2` PIN as the
-      documented fallback where biometrics are unavailable or the user declines
+- [x] Identity creation in the shell defaults to `native`, with `pbkdf2` PIN as the
+      fallback where biometrics are unavailable. `chooseCustody()` ranks keystore over
+      passkey over PIN, and the fallback names the actual obstacle ("this device has no
+      passcode") rather than reporting a missing passkey. Covered by
+      `apps/web/test/e2e/native-custody.spec.js` against a contract-shaped fake plugin:
+      that the keystore wins over a *working* passkey, that unlock never asks for a PIN,
+      that a keystore which cannot gate on biometrics is not used, and that removing an
+      identity forgets its hardware secret
 - [ ] **Tiered custody**, because background receive (T7) cannot prompt for biometrics:
 
       | Operation | Credential | Gate |
@@ -188,6 +199,13 @@ the inbox path, so a request waited silently until the app was opened.
 **Acceptance:** an identity created in the app on a self-hosted relay
 (`*.example.org`) unlocks by biometrics on relaunch; no WebAuthn is invoked at any point;
 the wrapped-key record round-trips through `unwrapKeysAES`.
+
+**Where it stands against that:** met on an iOS 26.5 simulator against a local dev relay —
+claim with no PIN, `kdf: "native"`, relaunch, unlock from the Keychain, Settings reporting
+"Device keystore". Two gaps remain, both honest rather than incidental: the simulator has
+no device passcode, so `.biometryCurrentSet` items are stored and read back without ever
+drawing the Face ID sheet — the *gate* is only proven on hardware — and the Android plugin
+compiles and is registered but has not been run on an emulator.
 
 ### E19-T3 — Optional passkey enrollment (hosted identities)
 
