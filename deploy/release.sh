@@ -52,16 +52,27 @@ compose_infra "$release" exec -T caddy caddy reload --config /etc/caddy/Caddyfil
 export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
 printf '%s\n' "$TELEMETRY_TRUSTED_PROXIES" > "$release/.trusted-proxies"
 compose_relay "$release" up -d --remove-orphans
-# A network namespace curl checks services without publishing backend ports.
-for attempt in $(seq 1 30); do
-  if docker run --rm --network infra_net curlimages/curl:8.16.0 -fsS http://poweur-relay:8080/health > "$release/.health.json"; then
+# Probe from a container on infra_net so backend ports stay unpublished.
+# Short connect timeouts: curl's default wait made Grafana look "down" for a minute per try.
+curl_probe=(docker run --rm --network infra_net curlimages/curl:8.16.0 -fsS --connect-timeout 2 --max-time 5)
+docker pull curlimages/curl:8.16.0 >/dev/null
+wait_http() {
+  local url=$1 attempts=${2:-90}
+  for attempt in $(seq 1 "$attempts"); do
+    if "${curl_probe[@]}" "$url" >/dev/null; then return 0; fi
+    [[ $attempt -lt $attempts ]] || { echo "Timed out waiting for $url" >&2; return 1; }
+    sleep 2
+  done
+}
+for attempt in $(seq 1 60); do
+  if "${curl_probe[@]}" http://poweur-relay:8080/health > "$release/.health.json"; then
     if jq -e --arg sha "$sha" '.versionHash == $sha and .storage.writable != false' "$release/.health.json" >/dev/null; then break; fi
   fi
-  [[ $attempt -lt 30 ]] || false
+  [[ $attempt -lt 60 ]] || { echo 'Timed out waiting for relay /health' >&2; false; }
   sleep 2
 done
 for url in http://infra-alloy:12345/-/ready http://infra-loki:3100/ready http://infra-prometheus:9090/-/ready http://infra-grafana:3000/api/health; do
-  docker run --rm --network infra_net curlimages/curl:8.16.0 -fsS --retry 20 --retry-delay 2 --retry-all-errors "$url" >/dev/null
+  wait_http "$url"
 done
 # An authenticated smoke identity is used only for inbox challenge/read, never
 # registration or messaging, so deployments do not inflate growth metrics.
