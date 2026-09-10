@@ -28,6 +28,7 @@ The relay exposes two distinct surfaces and authenticates them differently:
 |----------|-------|-------|
 | `POST /messages` | open / messaging | Subject to the at-least-one-local rule (see below) |
 | `POST /acks` | open / messaging | Same rule and rate limits as `/messages` |
+| `GET /` | public read | Service banner; JSON when `Accept: application/json` |
 | `GET /health` | public read | Global rate limit only |
 | `GET /identities/:identity` | public read | Global rate limit only |
 | `GET /auth/challenge` | public read | Issues short-lived owner-only auth material |
@@ -731,6 +732,34 @@ Rotate the long-lived signing key. Body includes `identity_document` (signed by 
 key, with `previous_keys`), `new_public_key`, and `rotation_signature` from the **old** key
 over `identity-rotation\n…`. See [Web identity — Key rotation](/protocol/web-identity).
 
+## GET /
+
+Service banner. Browser navigations on a launcher host may 302 to `/app/`;
+clients that send `Accept: application/json` always get this document. The
+release fields are how Settings → About and `poweur --version` consumers
+learn what is running (EPIC-013 E13-T6).
+
+### Response body
+
+```json
+{
+  "service": "poweur-relay",
+  "relay_address": "poweur.net",
+  "launcher_host": "id.poweur.net",
+  "launcher_hosts": ["id.poweur.net", "poweur.net"],
+  "hosted_domains": ["poweur.net"],
+  "web_ui": "GET /app/ (when WEB_STATIC_DIR is set)",
+  "version": "0.1.1",
+  "buildTime": "2026-09-10 12:00",
+  "versionHash": "0434c17…"
+}
+```
+
+`version` is the relay semver. `buildTime` is UTC `YYYY-MM-DD HH:MM` when
+known. `versionHash` is the git revision the binary was built from.
+
+---
+
 ## GET /health
 
 Liveness check. Used by load balancers, monitoring systems, and client connectivity checks.
@@ -741,7 +770,9 @@ When `POWEUR_DATA` is set, includes storage health; `status` may be `degraded` i
 ```json
 {
   "status":  "ok",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "buildTime": "2026-09-10 12:00",
+  "versionHash": "0434c17…",
   "storage": {
     "configured": true,
     "path": "/data",

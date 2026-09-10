@@ -17,7 +17,9 @@ The relay is configured via environment variables. On startup, the relay also lo
 | `LISTEN_ADDR` | `:8080` | Address the relay binds to |
 | `RELAY_ADDRESS` | *(required)* | Public host or IP of this relay (e.g. `relay.poweur.net`). Do not include a port. |
 | `RELAY_SCHEME` | `https` | Scheme used for relay-to-relay calls (`http` or `https`) |
-| `VERSION` | `0.1.0` | Relay version exposed in `GET /health` |
+| `VERSION` | `0.1.1` | Relay semver exposed in `GET /` and `GET /health`. Override for tests; do not put a git sha here. |
+| `BUILD_TIME` | *(VCS `vcs.time`)* | Build timestamp (RFC3339 or `YYYY-MM-DD HH:MM`); advertised as `buildTime` |
+| `VERSION_HASH` | *(VCS `vcs.revision`)* | Git revision advertised as `versionHash` |
 | `POWEUR_DATA` | *(empty)* | Durable identity store root (`identities/…/id.json`) |
 | `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net`) |
 | `REGISTRATION_GATE` | `open` | `open` or `invite` for hosted registrations |
@@ -112,7 +114,7 @@ For production deployments, TLS termination is typically handled by a load balan
 LISTEN_ADDR=:8080
 RELAY_ADDRESS=relay.poweur.net
 RELAY_SCHEME=https
-VERSION=0.1.0
+VERSION=0.1.1
 
 # DNS
 DNS_PROVIDER=cloudflare

@@ -94,8 +94,9 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "version":
       case "--version":
       case "-v": {
-        const { SDK_VERSION } = await import("../index.js");
+        const { SDK_VERSION, SDK_BUILD_TIME } = await import("../index.js");
         streams.stdout(`poweur (@poweur/client) ${SDK_VERSION}\n`);
+        if (SDK_BUILD_TIME) streams.stdout(`built ${SDK_BUILD_TIME}\n`);
         return 0;
       }
       case "help":

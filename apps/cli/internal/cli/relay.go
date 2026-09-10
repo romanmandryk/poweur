@@ -130,9 +130,11 @@ type IdentityResponse struct {
 }
 
 type HealthResponse struct {
-	Status  string         `json:"status"`
-	Version string         `json:"version"`
-	Storage *StorageHealth `json:"storage,omitempty"`
+	Status      string         `json:"status"`
+	Version     string         `json:"version"`
+	BuildTime   string         `json:"buildTime,omitempty"`
+	VersionHash string         `json:"versionHash,omitempty"`
+	Storage     *StorageHealth `json:"storage,omitempty"`
 }
 
 type StorageHealth struct {

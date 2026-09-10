@@ -182,6 +182,19 @@ test.describe("five destinations at 375px", () => {
     expect(identity).toContain(".poweur.net");
   });
 
+  test("About lists app, SDK and connected relay versions", async ({ page }) => {
+    await stubPasskeys(page);
+    const identity = await registerIdentity(page, relay, destHandle());
+
+    await page.click('.nav-tab[data-page="settings"]');
+    await expect(page.locator("#about-app-version")).toHaveText("0.1.1");
+    await expect(page.locator("#about-sdk-version")).toHaveText("0.1.1");
+    await expect(page.locator("#about-app-build")).toContainText("2026-09-10");
+    await expect(page.locator("#about-relay-version")).toHaveText("0.1.1", { timeout: 15_000 });
+    await expect(page.locator("#about-relay-meta")).toContainText(identity);
+    await expect(page.locator("#about-relay-meta")).toContainText(relay.baseUrl);
+  });
+
   test("shows a real 24-word recovery kit and checks it back", async ({ page }) => {
     await stubPasskeys(page);
     await registerIdentity(page, relay, destHandle());

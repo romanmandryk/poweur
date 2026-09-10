@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/poweur/api/internal/buildinfo"
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
@@ -273,6 +274,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	version, buildTime, versionHash := s.releaseInfo()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":       "poweur-relay",
 		"relay_address": s.cfg.RelayAddress,
@@ -285,7 +287,28 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"launcher_hosts": s.cfg.LauncherHosts,
 		"hosted_domains": s.cfg.HostedDomains,
 		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
+		"version":        version,
+		"buildTime":      buildTime,
+		"versionHash":    versionHash,
 	})
+}
+
+// releaseInfo is the semver + build stamp advertised on GET / and /health.
+func (s *Server) releaseInfo() (version, buildTime, versionHash string) {
+	version = s.cfg.Version
+	if version == "" {
+		version = buildinfo.Version
+	}
+	rawTime := s.cfg.BuildTime
+	if rawTime == "" {
+		rawTime = buildinfo.Time
+	}
+	buildTime = buildinfo.FormatTime(rawTime)
+	versionHash = s.cfg.VersionHash
+	if versionHash == "" {
+		versionHash = buildinfo.Hash
+	}
+	return
 }
 
 // wantsJSON reports whether the caller asked for the root document itself.
@@ -296,7 +319,14 @@ func wantsJSON(r *http.Request) bool {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	resp := HealthResponse{Status: "ok", Version: s.cfg.Version, Storage: s.storageHealth()}
+	version, buildTime, versionHash := s.releaseInfo()
+	resp := HealthResponse{
+		Status:      "ok",
+		Version:     version,
+		BuildTime:   buildTime,
+		VersionHash: versionHash,
+		Storage:     s.storageHealth(),
+	}
 	if resp.Storage != nil && resp.Storage.Configured && !resp.Storage.Writable {
 		resp.Status = "degraded"
 	}

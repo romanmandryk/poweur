@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poweur/api/internal/buildinfo"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -24,7 +25,6 @@ const (
 	DefaultGlobalMinuteLimit   = 1000
 	DefaultGlobalHourLimit     = 100000
 	DefaultGlobalDayLimit      = 1000000
-	DefaultVersion             = "0.1.0"
 	DefaultMaxInboxPerIdentity = 50
 	// DefaultSpoolTTL is how long undelivered mail waits for a recipient who
 	// never comes back (EPIC-009 E09-T1). Long enough for a holiday, short
@@ -64,12 +64,16 @@ type GlobalRateLimits struct {
 type Config struct {
 	ListenAddr string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
-	WebStaticDir        string
-	RelayAddress        string
-	RelayScheme         string
-	DNSTTL              time.Duration
-	ChallengeTTL        time.Duration
-	Version             string
+	WebStaticDir string
+	RelayAddress string
+	RelayScheme  string
+	DNSTTL       time.Duration
+	ChallengeTTL time.Duration
+	// Version is the relay semver (buildinfo.Version unless VERSION is set).
+	Version string
+	// BuildTime and VersionHash are release metadata for GET / and /health.
+	BuildTime           string
+	VersionHash         string
 	RateLimits          RateLimits
 	GlobalRateLimits    GlobalRateLimits
 	DNSProxyMode        string
@@ -197,7 +201,9 @@ func FromEnv() Config {
 		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
 		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),
 		ChallengeTTL:            getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
-		Version:                 getenv("VERSION", DefaultVersion),
+		Version:                 getenv("VERSION", buildinfo.Version),
+		BuildTime:               getenv("BUILD_TIME", buildinfo.Time),
+		VersionHash:             getenv("VERSION_HASH", buildinfo.Hash),
 		DNSProxyMode:            strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
 		MaxInboxPerIdentity:     getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
 		SpoolTTL:                getenvDuration("SPOOL_TTL", DefaultSpoolTTL),

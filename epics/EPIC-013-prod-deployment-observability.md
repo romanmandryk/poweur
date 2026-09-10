@@ -14,6 +14,7 @@
 | E13-T3 CI/CD hardening | open | Tests, pinned deploys, health gate and rollback |
 | E13-T4 External stack, dashboards & alerts | open | Same VM initially; independently movable later |
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
+| E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 
 ## Goal
 
@@ -252,9 +253,20 @@ protocol as part of T1–T4.
 **Acceptance (later):** two independently configured relays contribute bounded aggregates;
 disabling reporting stops it. Untrusted submissions cannot silently inflate reviewed totals.
 
+### E13-T6 — Release versions on every surface
+
+Ship a patch version and a build stamp with every change to a shippable package, and show them where an operator or a user can actually read them. Go modules do not store this module's semver in `go.mod`; bump the `internal/buildinfo.Version` constant instead.
+
+- [x] Agent docs (`AGENTS.md`, `CLAUDE.md`): when a change updates the relay, Go CLI, TS SDK, web app or mobile shell, bump that package's **patch** version in the same change set and stamp the UTC build time (`YYYY-MM-DD HH:MM`).
+- [x] Relay `GET /` (JSON) and `GET /health` expose `version`, `buildTime`, `versionHash`. Semver lives in `apps/api/internal/buildinfo`; hash/time come from VCS info, `VERSION_HASH`/`BUILD_TIME`, or image build-args — never overload `VERSION` with a git sha.
+- [x] Go CLI `poweur version` / `--version` / `-v` prints the CLI semver and build stamp. TS CLI already has `poweur version`; include the SDK build time.
+- [x] Settings → About lists app version, `@poweur/client` version, and the relay of the active identity (or the current identity-host on the web), each with a smaller-font build timestamp.
+
+**Acceptance:** a patched web/mobile build shows its own version and the connected relay's version in About; `curl -H 'Accept: application/json' $RELAY/` returns the three release fields; `poweur --version` (Go and TS) prints a semver.
+
 ## Verification and delivery
 
-Ship T1/T2 then T4; T3 can proceed independently. T5 stays deferred. Keep this as one epic.
+Ship T1/T2 then T4; T3 can proceed independently. T6 (release versions) is done and independent of the telemetry work. T5 stays deferred. Keep this as one epic.
 Run relay unit tests and `apps/integration` for implementation changes, including a capture
 collector and a collector-outage scenario. Consent changes touching clients require the usual
 web tests, client tests/build/typecheck, canonical specs/vectors when needed, and re-vendoring.

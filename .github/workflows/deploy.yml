@@ -32,7 +32,9 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: true
-          build-args: VERSION=${{ github.sha }}
+          build-args: |
+            VERSION_HASH=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}

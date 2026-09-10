@@ -439,3 +439,16 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionFlag(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-v"} {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{arg}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("%s: exit %d: %s", arg, code, stderr.String())
+		}
+		if !bytes.Contains(stdout.Bytes(), []byte("poweur ")) {
+			t.Fatalf("%s: output %q", arg, stdout.String())
+		}
+	}
+}

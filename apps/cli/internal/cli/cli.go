@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poweur/cli/internal/buildinfo"
 	"github.com/poweur/cli/internal/config"
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	"github.com/poweur/cli/internal/identity"
@@ -72,6 +73,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
 		return runAuth(args[1:], stdout, stderr)
+	case "version", "--version", "-v":
+		buildinfo.Write(stdout)
+		return 0
 	case "-h", "--help", "help":
 		printHelp(stdout)
 		return 0
@@ -1292,10 +1296,20 @@ func runRelayStatus(args []string, stdout, stderr io.Writer) int {
 		"status":  health.Status,
 		"version": health.Version,
 	}
+	if health.BuildTime != "" {
+		output["buildTime"] = health.BuildTime
+	}
+	if health.VersionHash != "" {
+		output["versionHash"] = health.VersionHash
+	}
 	if health.Storage != nil {
 		output["storage"] = health.Storage
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version))
+	line := fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version)
+	if health.BuildTime != "" {
+		line = fmt.Sprintf("relay %s (version %s, %s)\n", health.Status, health.Version, health.BuildTime)
+	}
+	return writeOutput(stdout, *jsonOut, output, line)
 }
 
 func runRelaySet(args []string, stdout, stderr io.Writer) int {
@@ -1943,6 +1957,7 @@ func printHelp(w io.Writer) {
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
+  poweur version
 `)
 }
 

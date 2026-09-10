@@ -8,6 +8,7 @@ This repo is a **pnpm + Go workspace** for Poweur: DNS/web identity, relay messa
 2. Prefer extending existing packages (`packages/identity`, `apps/api`, `apps/cli`, `apps/web`) over new top-level apps.
 3. Do not invent parallel crypto or message formats — match canonical strings and wire types already used by the relay and CLI.
 4. Do not commit secrets (`.env`, DNS tokens, private keys). `.env` examples stay local.
+5. **Bump a patch version** in the same change set for every shippable package you actually changed (see [Version bumps](#version-bumps-required)).
 
 ## Testing requirements (non-negotiable)
 
@@ -127,6 +128,30 @@ Run the slice you touched **and** `apps/integration` (and `apps/web` tests if th
 - Update checkboxes (`[x]` / `[ ]`) and the **Progress** table in the epic when shipping.
 - If you defer work, say so in the epic (**open** / **Deferred**) and name the follow-up epic if any (e.g. inbox durability → EPIC-009; key rotation → EPIC-001 E01-T5 + EPIC-011).
 - Do not silently drop acceptance criteria.
+
+## Version bumps (required)
+
+When a change updates a shippable package, bump that package's **patch** version
+in the **same change set**. Otherwise Settings → About and `poweur --version`
+still print the previous number, and two builds with different behavior share
+one version. Bump only the packages you touched; a protocol change that lands
+in Go + TS + web bumps all three.
+
+Go modules do **not** store this module's semver in `go.mod` (that file is the
+module path and its *dependencies*). Do not invent a version comment there —
+bump the `Version` constant instead.
+
+| Package | Where to bump | Also stamp |
+|---------|---------------|------------|
+| Relay (`apps/api`) | `apps/api/internal/buildinfo.Version` | `BUILD_TIME` / `VERSION_HASH` env or VCS info at build; `GET /` exposes them |
+| Go CLI (`apps/cli`) | `apps/cli/internal/buildinfo.Version` | same; printed by `poweur version` / `--version` / `-v` |
+| `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM`; re-vendor the web copy |
+| Web app | `apps/web/package.json` **and** `apps/web/js/build-info.js` | `APP_VERSION` / `APP_BUILD_TIME` |
+| Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
+
+Default bump is **patch**. Minor/major is for breaking protocol or public API
+changes. `VERSION` on the relay is the semver override for tests — never pass a
+git sha as `VERSION` (that belongs in `VERSION_HASH`).
 
 ## Style
 

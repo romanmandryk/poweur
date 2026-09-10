@@ -18,7 +18,7 @@ import {
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
   normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
-  streamForever,
+  streamForever, SDK_VERSION, SDK_BUILD_TIME,
 } from "@poweur/client";
 
 import {
@@ -59,6 +59,7 @@ import {
   recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
   recoverFromKeystore, restoreLocalRecord, rewrap,
 } from "./keystore.js";
+import { APP_VERSION, APP_BUILD_TIME } from "./build-info.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -1227,19 +1228,76 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">About</div>
       <div class="settings-rows">
-        <div class="settings-row no-action">
-          <span class="settings-row-icon">📋</span>
-          <span class="settings-row-label">Protocol</span>
-          <span class="settings-row-value">Poweur ID v1</span>
-        </div>
-        <div class="settings-row no-action">
-          <span class="settings-row-icon">💻</span>
-          <span class="settings-row-label">Client</span>
-          <span class="settings-row-value">Web</span>
-        </div>
+        ${aboutRow("📋", "Protocol", "Poweur ID v1")}
+        ${aboutRow("💻", "App", APP_VERSION, `${buildStamp(APP_BUILD_TIME)}${isShellRuntime() ? " · Mobile" : " · Web"}`, { value: "about-app-version", meta: "about-app-build" })}
+        ${aboutRow("📦", "SDK", SDK_VERSION, buildStamp(SDK_BUILD_TIME), { value: "about-sdk-version", meta: "about-sdk-build" })}
+        ${aboutRelayRow()}
       </div>
     </div>
     <div style="height:32px"></div>`;
+}
+
+function buildStamp(time, extra) {
+  const bits = [time, extra].filter(Boolean);
+  return bits.join(" · ");
+}
+
+function aboutRow(icon, label, value, meta = "", ids = {}) {
+  const valueId = ids.value ? ` id="${esc(ids.value)}"` : "";
+  const metaId = ids.meta ? ` id="${esc(ids.meta)}"` : "";
+  return `
+        <div class="settings-row no-action settings-row-about">
+          <span class="settings-row-icon">${icon}</span>
+          <div class="settings-row-stack">
+            <div class="settings-row-stack-top">
+              <span class="settings-row-label">${esc(label)}</span>
+              <span class="settings-row-value"${valueId}>${esc(value)}</span>
+            </div>
+            ${meta || ids.meta ? `<span class="settings-row-meta"${metaId}>${esc(meta)}</span>` : ""}
+          </div>
+        </div>`;
+}
+
+function aboutRelayRow() {
+  const identity = S.identity || modeNow().subject || "";
+  const relayUrl = identity ? relayUrlFor(identity) : defaultRelayUrl();
+  const meta = [identity, relayUrl].filter(Boolean).join(" · ") || "…";
+  return aboutRow("🔗", "Relay", "…", meta, {
+    value: "about-relay-version",
+    meta: "about-relay-meta",
+  });
+}
+
+/**
+ * Fill the connected relay's advertised version after Settings renders.
+ * The URL is the active identity's home relay (or the identity-host subject
+ * on the web when that is all we have).
+ */
+function fillAboutRelay() {
+  const versionEl = q("#about-relay-version");
+  const metaEl = q("#about-relay-meta");
+  if (!versionEl || !metaEl) return;
+  const identity = S.identity || modeNow().subject || "";
+  const relayUrl = identity ? relayUrlFor(identity) : defaultRelayUrl();
+  if (!relayUrl) {
+    versionEl.textContent = "—";
+    metaEl.textContent = "Not connected";
+    return;
+  }
+  identityApiFor(relayUrl).root().then(root => {
+    if (!q("#about-relay-version")) return;
+    versionEl.textContent = root.version || "unknown";
+    metaEl.textContent = [
+      identity,
+      relayUrl,
+      root.buildTime,
+      root.versionHash && String(root.versionHash).slice(0, 7),
+    ].filter(Boolean).join(" · ");
+  }).catch(() => {
+    if (!q("#about-relay-version")) return;
+    versionEl.textContent = "—";
+    metaEl.textContent = [identity, relayUrl, "unreachable"].filter(Boolean).join(" · ");
+  });
 }
 
 /**
@@ -2048,6 +2106,7 @@ function attachEvents() {
   // Settings rows
   q("#settings-add-id")?.addEventListener("click", () => R.push("add-id"));
   q("#row-switch-id")?.addEventListener("click", () => R.push("add-id"));
+  fillAboutRelay();
   q("#row-identity-keys")?.addEventListener("click", showIdentityKeysPanel);
   q("#row-relay")?.addEventListener("click", showRelayPanel);
   q("#row-lookup")?.addEventListener("click", showLookupPanel);
