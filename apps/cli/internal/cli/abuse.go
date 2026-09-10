@@ -291,10 +291,13 @@ func runBlocksImport(args []string, stdout, stderr io.Writer) int {
 // own tree (which is how an EPIC-005 share delivers one).
 //
 // The tree read needs a token minted for the *publisher's* audience — a share
-// grant is what turns that from a 403 into a document. Reading across relays
-// is not wired up in v1 (our home relay issues the token, and a peer would not
-// honour it), which is why `--file` exists: a list handed over any other way
-// still imports, and the signature is what makes that safe.
+// grant is what turns that from a 403 into a document — and minted at the
+// publisher's own relay, since a grant is enforced by whoever stores the file
+// and no operator honours another operator's tokens.
+//
+// `--file` stays for every other way a list travels: handed over out of band,
+// pulled from a web page, mailed. The signature is what makes that safe, so
+// the transport does not have to be.
 func readBlocklistSource(ctx context.Context, fs *flag.FlagSet, file, path string, cfg config.Config, identityValue string, priv ed25519.PrivateKey, stderr io.Writer) ([]byte, int) {
 	if file != "" {
 		raw, err := os.ReadFile(file)
@@ -305,12 +308,16 @@ func readBlocklistSource(ctx context.Context, fs *flag.FlagSet, file, path strin
 		return raw, 0
 	}
 	publisher := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
-	tok, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, publisher, "dav:read", priv)
+	relayURL := cfg.RelayURL
+	if resolved, err := resolveRecipientRelayURL(ctx, publisher, cfg); err == nil && resolved != "" {
+		relayURL = resolved
+	}
+	tok, err := MintDAVToken(ctx, relayURL, identityValue, publisher, "dav:read", priv)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return nil, 1
 	}
-	raw, status, err := davGetBytes(ctx, cfg.RelayURL, publisher, tok.Token, path)
+	raw, status, err := davGetBytes(ctx, relayURL, publisher, tok.Token, path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return nil, 1

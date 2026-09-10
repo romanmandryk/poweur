@@ -25,18 +25,24 @@ import (
 //     to somebody else's list in transit. The publisher signs; the importer
 //     verifies against the publisher's resolved identity key, which is the same
 //     trust chain everything else here uses.
-//   - **Not public.** The document lives in the owner-and-relay zone, not
-//     `poweur-sys/public/`, and travels by an EPIC-005 share to a chosen
-//     audience. A blocklist names people; publishing one to the world is a
-//     denunciation list, and the format should not make that the easy path.
+//   - **Not public.** The document lives in `shared/`, where nobody reads it
+//     without an EPIC-005 grant — not in `public/`, which any Poweur ID may
+//     read, and not in `poweur-sys/public/`, which the whole web may. A
+//     blocklist names people; published to the world it is a denunciation
+//     list, and the format should not make that the easy path.
 //   - **Adoption is a copy, not a subscription.** Importing writes entries into
 //     the importer's own contacts, where they can see and undo them. Nobody
 //     ends up with a block they cannot explain because a list they subscribed
 //     to grew overnight.
 
-// BlocklistTreePath is where an exported blocklist lives in the owner's tree:
-// the relay-readable config zone, shareable per EPIC-005, never world-served.
-const BlocklistTreePath = "poweur-sys/relay/blocks.json"
+// BlocklistTreePath is where an exported blocklist lives in the owner's tree.
+//
+// `shared/` and not `poweur-sys/relay/`: the sys zone is owner-and-relay only
+// — the permission layer refuses every visitor there, grant or no grant, so a
+// blocklist published into it could never actually be adopted by anybody. A
+// document whose whole purpose is to be handed to chosen people belongs in
+// the one zone EPIC-005 grants reach.
+const BlocklistTreePath = "shared/blocks.json"
 
 // MaxBlocklistEntries bounds a blocklist document. Chosen against the 64 KB
 // system-document budget the relay validates writes under, not plucked from

@@ -31,12 +31,6 @@ var sysValidators = map[string]func([]byte) error{
 		_, err := idpkg.ParseInboxPolicy(b)
 		return err
 	},
-	// A blocklist other people adopt (E07-T5): refuse a malformed or unsigned
-	// one at the door rather than at every importer.
-	files.SysRelay + "/blocks.json": func(b []byte) error {
-		_, err := idpkg.ParseBlocklist(b)
-		return err
-	},
 	files.SysRelay + "/app-passwords.json": func(b []byte) error {
 		_, err := idpkg.ParseAppPasswordsFile(b)
 		return err

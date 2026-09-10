@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/blocks.schema.json",
-  "title": "blocks.json — poweur-sys/relay/blocks.json (owner + relay; shared by grant, never world-readable)",
+  "title": "blocks.json — shared/blocks.json (a signed blocklist; readable only through an EPIC-005 grant)",
   "type": "object",
   "required": [
     "publisher",
