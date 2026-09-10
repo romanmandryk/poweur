@@ -37,7 +37,7 @@ compose_relay "$release" up -d --remove-orphans
 # time (`Resolving timed out after 2000 milliseconds`).
 docker pull curlimages/curl:8.16.0 >/dev/null
 probe_curl() {
-  docker run --rm --network "container:$1" curlimages/curl:8.16.0 -fsS --connect-timeout 2 --max-time 5 "$2"
+  docker run --rm --network "container:$1" curlimages/curl:8.16.0 -fsS --connect-timeout 2 --max-time 5 "$2" 2>/dev/null
 }
 wait_http() {
   local container=$1 url=$2 attempts=${3:-90}
@@ -68,18 +68,18 @@ wait_http infra-grafana http://127.0.0.1:3000/api/health
 # An authenticated smoke identity is used only for inbox challenge/read, never
 # registration or messaging, so deployments do not inflate growth metrics.
 if [[ -f "$root/.smoke/config.toml" ]]; then
-  # Identity create recorded an absolute host keys_dir (e.g. /tmp/poweur-smoke-home).
-  # The container only sees the mount at /root/.poweur.
-  smoke=$(mktemp -d)
-  cp -a "$root/.smoke/." "$smoke/"
+  # Identity create recorded an absolute host keys_dir. Overlay a container path
+  # and run as the deploy user so inbox cannot leave root-owned files that
+  # `rm` cannot delete (that failed the last release after a successful inbox).
+  patched=$(mktemp)
   {
-    grep -v '^keys_dir[[:space:]]*=' "$smoke/config.toml" || true
+    grep -v '^keys_dir[[:space:]]*=' "$root/.smoke/config.toml" || true
     printf 'keys_dir = "/root/.poweur/keys"\n'
-  } > "$smoke/config.toml.next"
-  mv "$smoke/config.toml.next" "$smoke/config.toml"
-  docker run --rm --network infra_net -v "$smoke:/root/.poweur" \
+  } > "$patched"
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/root --network infra_net \
+    -v "$root/.smoke:/root/.poweur" -v "$patched:/root/.poweur/config.toml:ro" \
     --entrypoint /poweur-smoke "$image" inbox --json >/dev/null
-  rm -rf "$smoke"
+  rm -f "$patched"
 else
   echo 'Missing .smoke identity; run OPS.md authenticated smoke setup' >&2
   false
