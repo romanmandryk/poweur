@@ -162,13 +162,26 @@ poweur identity dns alice.poweur.net
 
 Resolve an identity using the **web-first** chain (HTTPS
 `/.well-known/poweur/id.json`, then DNS TXT). Prints source (`web` / `dns` /
-`both`), keys, relay, and capabilities. Prefer this over `identity dns` for
-hosted identities that have no per-user TXT records.
+`both`), keys, the safety number, and the relay. Prefer this over `identity dns`
+for hosted identities that have no per-user TXT records.
+
+It also reads the identity's public self-description from the same well-known
+route — `profile.json` (display name, bio, locale, avatar, links) and
+`capabilities.json` (features and endpoint hints), both served world-readable
+out of `poweur-sys/public/`. Both are optional: an identity that publishes
+neither still looks up fine, and only an unreachable host (as opposed to a 404)
+prints a note on stderr. When there is no `capabilities.json`, the identity
+document's own `capabilities` list is shown instead — the same fallback the web
+client uses, so the two surfaces degrade to the same answer.
 
 ```bash
 poweur identity lookup alice.poweur.net
 poweur identity lookup alice.poweur.net --json
 ```
+
+In `--json`, `capabilities` stays the identity document's string list and
+`capabilities_document` carries `capabilities.json` when one is published;
+`profile` is the profile document or `null`.
 
 ---
 

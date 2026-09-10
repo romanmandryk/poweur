@@ -182,6 +182,24 @@ func ResolveIdentity(ctx context.Context, identityName string) (idpkg.Result, er
 	return idpkg.Resolve(ctx, identityName, opts)
 }
 
+// FetchProfile reads an identity's world-readable profile.json (E06-T2),
+// served at /.well-known/poweur/ from their own host — the same route and
+// the same resolver hardening as id.json, so this needs no new endpoint and
+// no new SSRF story. Absent profiles return idpkg.ErrPublicFileAbsent.
+func FetchProfile(ctx context.Context, identityName string) (idpkg.Profile, error) {
+	return idpkg.FetchProfile(ctx, identityName, resolveOptions())
+}
+
+// FetchCapabilities reads an identity's capabilities.json (E06-T2).
+func FetchCapabilities(ctx context.Context, identityName string) (idpkg.Capabilities, error) {
+	return idpkg.FetchCapabilities(ctx, identityName, resolveOptions())
+}
+
+// ResolveScheme is the scheme the resolver is configured for ("https", or
+// "http" under local/integration overrides). Callers building a URL into an
+// identity's own host — an avatar, say — must use the same one.
+func ResolveScheme() string { return resolveScheme }
+
 type txtAdapter struct{}
 
 func (txtAdapter) LookupTXT(ctx context.Context, name string) ([]string, error) {

@@ -1778,13 +1778,25 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// The identity document answers "which keys"; profile.json and
+	// capabilities.json answer "who" and "what do they speak" (E06-T2).
+	// Both are optional and live on a host we do not control, so they are
+	// fetched best-effort: a lookup that can verify a stranger's keys but
+	// cannot show the user their name is a lookup that stops half way.
+	profile, capabilities, profileNote := lookupPublicFiles(ctx, res)
+
 	out := map[string]any{
 		"identity":              res.Document.Identity,
 		"source":                res.Source,
 		"public_key":            res.Document.PublicKey,
 		"encryption_public_key": res.Document.EncryptionPublicKey,
 		"relay":                 res.Document.Relay,
+		// `capabilities` stays the identity document's own string list (its
+		// wire shape is a contract); `capabilities_document` is the richer
+		// capabilities.json when the identity publishes one.
 		"capabilities":          res.Document.Capabilities,
+		"capabilities_document": capabilities,
+		"profile":               profile,
 		"fingerprint":           idpkg.FingerprintOrKey(res.Document.PublicKey),
 	}
 	if *jsonOut {
@@ -1797,6 +1809,11 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(res.Document.PublicKey))
 	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
 	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
+	printProfile(stdout, res.Document.Identity, profile)
+	printCapabilities(stdout, capabilities)
+	if profileNote != "" {
+		fmt.Fprintln(stderr, profileNote)
+	}
 	return 0
 }
 
