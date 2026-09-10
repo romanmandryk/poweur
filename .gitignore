@@ -24,6 +24,10 @@ apps/ios/android/
 apps/android/build/
 apps/android/.gradle/
 
+# Python leftovers (deployment helpers are Bash/Node)
+__pycache__/
+*.pyc
+
 # Go
 apps/api/coverage/
 apps/integration/coverage/

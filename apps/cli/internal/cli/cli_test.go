@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -401,28 +402,34 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 		{
 			name: "value flag after positional",
 			in:   []string{"bob.poweur.net", "--petname", "Bob"},
-			want: []string{"--petname", "Bob", "bob.poweur.net"},
+			want: []string{"--petname", "Bob", "--", "bob.poweur.net"},
 		},
 		{
 			name: "equals form needs no value pickup",
 			in:   []string{"bob.poweur.net", "--petname=Bob"},
-			want: []string{"--petname=Bob", "bob.poweur.net"},
+			want: []string{"--petname=Bob", "--", "bob.poweur.net"},
 		},
 		{
 			name:  "bool flag does not swallow the next positional",
 			in:    []string{"bob.poweur.net", "--json"},
 			bools: map[string]bool{"--json": true},
-			want:  []string{"--json", "bob.poweur.net"},
+			want:  []string{"--json", "--", "bob.poweur.net"},
 		},
 		{
 			name: "two positionals keep their order",
 			in:   []string{"bob.poweur.net", "hi there", "--use-identity", "me.poweur.net"},
-			want: []string{"--use-identity", "me.poweur.net", "bob.poweur.net", "hi there"},
+			want: []string{"--use-identity", "me.poweur.net", "--", "bob.poweur.net", "hi there"},
 		},
 		{
-			name: "already normalised is unchanged",
+			name: "already normalised keeps a terminator before positionals",
 			in:   []string{"--petname", "Bob", "bob.poweur.net"},
-			want: []string{"--petname", "Bob", "bob.poweur.net"},
+			want: []string{"--petname", "Bob", "--", "bob.poweur.net"},
+		},
+		{
+			name:  "dash-prefixed base64url stays positional",
+			in:    []string{"alice.poweur.net", "-jeCR-4zJRkkEUe3K70Erw", "--ephemeral-key", "secret", "--json"},
+			bools: map[string]bool{"--json": true},
+			want:  []string{"--ephemeral-key", "secret", "--json", "--", "alice.poweur.net", "-jeCR-4zJRkkEUe3K70Erw"},
 		},
 	}
 	for _, tt := range tests {
@@ -437,6 +444,28 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNormalizeArgsDashPrefixedRendezvousParses(t *testing.T) {
+	fs := flag.NewFlagSet("key claim", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	ephemeral := fs.String("ephemeral-key", "", "")
+	relay := fs.String("relay", "", "")
+	jsonOut := fs.Bool("json", false, "")
+	args := normalizeArgs([]string{
+		"tsenroll.poweur.net", "-jeCR-4zJRkkEUe3K70Erw",
+		"--ephemeral-key", "secret", "--relay", "http://127.0.0.1:8080", "--json",
+	}, map[string]bool{"--json": true})
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse: %v (%s)", err, buf.String())
+	}
+	if fs.Arg(0) != "tsenroll.poweur.net" || fs.Arg(1) != "-jeCR-4zJRkkEUe3K70Erw" {
+		t.Fatalf("positionals %v", fs.Args())
+	}
+	if *ephemeral != "secret" || *relay != "http://127.0.0.1:8080" || !*jsonOut {
+		t.Fatalf("flags ephemeral=%q relay=%q json=%v", *ephemeral, *relay, *jsonOut)
 	}
 }
 

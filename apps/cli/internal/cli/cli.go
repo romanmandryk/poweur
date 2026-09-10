@@ -1971,27 +1971,63 @@ func resolveIdentity(flagValue string, fallback string) string {
 	return fallback
 }
 
+// looksLikeFlag reports CLI flags (`--relay`, `-json`) without treating
+// dash-prefixed positionals as flags. Enrollment rendezvous ids are base64url
+// and often start with `-` or `--`; Go's flag package would otherwise reject
+// `key claim <identity> -jeCR-...`.
+func looksLikeFlag(arg string) bool {
+	if arg == "-" || arg == "--" || !strings.HasPrefix(arg, "-") {
+		return false
+	}
+	name := strings.TrimLeft(arg, "-")
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, r := range name[1:] {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isBoolFlag(arg string, boolFlags map[string]bool) bool {
+	if boolFlags[arg] {
+		return true
+	}
+	name := strings.TrimLeft(arg, "-")
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	return boolFlags["--"+name] || boolFlags["-"+name]
+}
+
 func normalizeArgs(args []string, boolFlags map[string]bool) []string {
 	var flags []string
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if boolFlags[arg] || strings.Contains(arg, "=") {
-				continue
-			}
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
+		if !looksLikeFlag(arg) {
+			positional = append(positional, arg)
 			continue
 		}
-		positional = append(positional, arg)
+		flags = append(flags, arg)
+		if isBoolFlag(arg, boolFlags) || strings.Contains(arg, "=") {
+			continue
+		}
+		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			flags = append(flags, args[i+1])
+			i++
+		}
 	}
-
-	return append(flags, positional...)
+	if len(positional) == 0 {
+		return flags
+	}
+	return append(append(flags, "--"), positional...)
 }
 
 func resolveDNSProvider(flagValue string) string {

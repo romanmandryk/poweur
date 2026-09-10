@@ -20,7 +20,7 @@ step "1/8  System packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
-  git curl ca-certificates gnupg lsb-release rsync ufw
+  git curl ca-certificates gnupg lsb-release rsync ufw jq openssl
 
 if ! command -v docker &>/dev/null; then
   info "Installing Docker CE..."
@@ -149,53 +149,14 @@ else
   info "Docker network infra_net already exists"
 fi
 
-# ── 8. Systemd services ───────────────────────────────────────────────────────
-step "8/8  Systemd services"
-
-cat > /etc/systemd/system/poweur-infra.service <<'EOF'
-[Unit]
-Description=Poweur Infrastructure (Caddy, Postgres, Prometheus, Grafana)
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=infra
-Group=infra
-WorkingDirectory=/opt/infra
-ExecStart=/usr/bin/docker compose up --remove-orphans
-ExecStop=/usr/bin/docker compose down
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/systemd/system/poweur-app.service <<'EOF'
-[Unit]
-Description=Poweur App Stack
-After=docker.service poweur-infra.service
-Requires=docker.service
-Wants=poweur-infra.service
-
-[Service]
-Type=simple
-User=poweur
-Group=poweur
-WorkingDirectory=/opt/apps/poweur
-ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up --remove-orphans
-ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable poweur-infra poweur-app
-info "Systemd services registered and enabled for boot"
+# ── 8. Boot policy ────────────────────────────────────────────────────────────
+step "8/8  Boot policy"
+# Releases are started by GitHub Actions via deploy/release.sh. Docker's
+# restart: unless-stopped brings containers back after reboot. Do not install
+# the old foreground compose systemd units; they fight the immutable release.
+systemctl enable docker.service
+systemctl disable --now poweur-app.service poweur-infra.service 2>/dev/null || true
+info "Docker enabled on boot; legacy compose units left disabled"
 
 # ── Firewall ──────────────────────────────────────────────────────────────────
 ufw allow 22/tcp   comment "SSH"   >/dev/null
@@ -223,12 +184,8 @@ echo "$ACTIONS_PRIVKEY"
 echo -e "\n${YELLOW}ACTION 3 of 3 — Add DEPLOY_HOST secret${NC}"
 echo -e "${CYAN}Name: DEPLOY_HOST   Value: $(curl -4 -s ifconfig.me 2>/dev/null || echo '<your-server-ip>')${NC}"
 
-echo -e "\n${YELLOW}Edit passwords:${NC}"
-echo -e "  ${CYAN}nano /opt/infra/.env${NC}                       (Postgres + Grafana)"
+echo -e "\n${YELLOW}Finish with deploy/OPS.md:${NC}"
+echo -e "  ${CYAN}sudo bash deploy/setup-observability.sh --file .observability.env --import-env /opt/infra/.env${NC}"
 echo -e "  ${CYAN}nano /opt/apps/poweur/apps/api/.env.prod${NC}   (app config)"
-
-echo -e "\n${YELLOW}Start services:${NC}"
-echo -e "  ${CYAN}systemctl start poweur-infra${NC}   (wait ~10s)"
-echo -e "  ${CYAN}systemctl start poweur-app${NC}"
-echo -e "  ${CYAN}systemctl status poweur-infra poweur-app${NC}"
+echo -e "  Then create the smoke identity, capture the baseline, and run GitHub Deploy."
 echo ""
