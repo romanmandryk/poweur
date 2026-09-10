@@ -28,13 +28,14 @@
     },
     "status": {
       "type": "string",
-      "enum": [
+      "minLength": 1,
+      "examples": [
         "todo",
         "doing",
         "done",
         "cancelled"
       ],
-      "description": "readers MUST treat an unknown value as todo and preserve it on write"
+      "description": "Vocabulary: todo | doing | done | cancelled. NOT an enum on purpose: the PCP requires readers to treat an unknown value as todo and preserve it verbatim on write, so a document carrying one is valid, not malformed. Writers SHOULD stay inside the vocabulary."
     },
     "created": {
       "type": "string",
@@ -88,5 +89,27 @@
       "description": "RFC 3339; set when status becomes done, cleared otherwise"
     }
   },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "done"
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "then": {
+    "required": [
+      "completed"
+    ],
+    "properties": {
+      "completed": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "description": "Unknown top-level fields MUST be preserved on read-modify-write (additionalProperties is true for that reason, not by oversight).",
   "additionalProperties": true
 }

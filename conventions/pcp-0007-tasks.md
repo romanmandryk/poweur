@@ -16,8 +16,10 @@ problem**: the home directory, the identity, the sharing model and the sync jour
 already exist. What is missing for the tasks domain is an agreement on *which files,
 with which fields*, so that a second implementation can read the first one's data.
 
-This PCP is also the **first exercise of the PCP process itself** (E06-T5); a
-retrospective on the process lands in this document once the reference app is built.
+This PCP is also the **first exercise of the PCP process itself** (E06-T5). It was written
+before the reference app and revised by what building the app found;
+§[Retrospective](#retrospective-what-the-convention-process-missed) is that report, and is
+the point of the exercise.
 
 ## Prior art
 
@@ -192,3 +194,128 @@ of todo.txt, and importers MUST mint fresh ids rather than pretend.
    Poweur internals, exactly as a third-party app would. Two-identity collaboration over
    a shared project is covered by `apps/integration/tasks_test.go`.
 2. _(needed for `stable`: one independent implementation, ideally not in this repo.)_
+
+## Retrospective: what the convention process missed
+
+E06-T5's real deliverable. PCP-0007 was written first and implemented second, on purpose,
+to find out what [PCP-0001](pcp-0001-process.md) does not ask for. What follows is what
+the reference app actually hit, in the order it hurt.
+
+### 1. The prose and the schema were allowed to contradict each other
+
+The worst one, and it survived review.
+
+`task.schema.json` had `"status": {"enum": ["todo","doing","done","cancelled"]}`. The prose
+two sections above it says an unknown `status` MUST be treated as `todo` **and preserved
+verbatim on write**. Both statements were in the same commit. They cannot both hold: a
+validator built from the schema rejects exactly the documents the prose orders readers to
+accept, and the reference implementation, following the prose, emitted documents that fail
+its own convention's schema.
+
+Nobody noticed because **nothing in the process compares the two**. PCP-0001's template
+says "JSON shapes (link a JSON Schema)" and stops there. It never says whether the schema
+or the prose is normative when they differ, and CI validated only that the schema file
+*parses* — a check that a schema saying the opposite of its PCP passes comfortably.
+
+*Fixed here:* `status` is `type: string` with the vocabulary as `examples` and the
+preserve rule in its `description`; the `done` → `completed` coupling that only lived in
+prose is now `if`/`then` in the schema; and `apps/tasks/pkg/tasks/schema_test.go` fails
+if the published schema and the implementation drift on field sets, required lists, or
+that enum coming back.
+
+*Process change PCP-0001 needs:* say which artifact is normative — recommend **the prose
+is normative and the schema is a conformance test of it** — and require every PCP with a
+schema to ship a document that exercises the compatibility rules and validates.
+
+### 2. "Unknown fields MUST be preserved" is much harder than it reads
+
+It is one line in PCP-0001's ground rules and it is the single largest piece of the
+reference implementation. A struct-based reader in any statically typed language decodes
+into known fields and drops the rest — silently, correctly by the language's lights, and
+undetectably until another implementation's data goes missing. Getting it right needs a
+parallel `map[string]json.RawMessage`, a merge on write, and a decision about what happens
+when a known and an unknown field collide (here: the known field wins).
+
+A rule that every mainstream JSON binding violates by default cannot be left as one
+sentence in a "ground rules" list. **PCP-0001 should carry a short implementer's note
+naming the trap and the shape of the fix**, and every PCP that inherits the rule should
+be required to state what its implementation does on collision.
+
+### 3. Nothing said who creates the app's namespace directory
+
+`app-data.md` tells an app to request `dav:rw:/apps/<app-id>/`, and separately that
+`manifest.json` must be written first. It never says who creates `/apps/<app-id>` itself,
+or that `/apps` already exists.
+
+The reference app did the obvious thing — `MKCOL /apps`, then `MKCOL /apps/<app-id>` — and
+got a flat 403 on the first call, because a token scoped to the app's namespace covers
+that namespace and everything under it and *nothing above it*. The app cannot create its
+own parent with the only credential the convention tells it to ask for. (`/apps` turns out
+to be one of the five roots the relay provisions with the home, so it never needed
+creating — but that is knowable only by reading the relay's source, which is precisely
+what a convention exists to avoid.)
+
+**A convention that describes a namespace must describe its bootstrap**: which directories
+exist already, which the app creates, and with what credential.
+
+### 4. The recipient's view of a shared namespace was never specified
+
+PCP-0007 says sharing a project is an EPIC-005 share of `projects/<project-id>`, and stops.
+What the *recipient's* app then sees was left to the imagination — including ours: the
+integration test for this was written expecting the recipient to need a project id handed
+over out of band, and it was wrong. EPIC-005 makes a grant's ancestor directories readable,
+so an unmodified `poweur-tasks projects` against the owner's home enumerates exactly the
+shared projects and no others. Discovery works, and no one had written that down.
+
+What does not work is one level up: `manifest.json` is a **sibling** of `projects/`, not an
+ancestor of the grant, so it stays 403 for the recipient. Every shared namespace therefore
+presents to its recipient as a namespace with no readable manifest — which `app-data.md`
+defines as "abandoned by tooling (cleanup UIs may flag it)". A convention-conformant app
+looking at a legitimately shared project sees a namespace its own rules call abandoned.
+
+Both halves are pinned by `TestINT_TASKS_04_RecipientsViewOfASharedNamespace`, which fails
+loudly if the platform behaviour moves under this text.
+
+**PCP-0001 should require a "what the other side sees" section** for any convention whose
+data can be shared: which paths the recipient can read, what is missing from their view,
+and what their app should do about it.
+
+### 5. `stable` requires two implementations; the process never budgets for the second
+
+PCP-0001 gates `stable` on "two independent implementations [that] interoperate" and then
+provides nothing to interoperate *against*: no conformance vectors, no sample documents, no
+"here is a document exercising every compatibility rule — your reader must round-trip it
+unchanged". The repo already knows how to do this — `packages/identity/testdata/vectors/`
+does exactly this for the protocol, and AGENTS.md treats regenerating those vectors as
+mandatory — but the PCP process was written without borrowing it.
+
+The second implementer's hardest problems are the compatibility rules, and those are
+exactly what prose cannot pin down. **A PCP should be required to ship a `testdata/`
+directory of conformance documents before it can leave `draft`.** PCP-0007 has not done
+this yet; it is the largest thing still missing here, and it is deliberately called out
+rather than quietly skipped.
+
+### 6. Reserving a name is not proposing a convention
+
+`net.poweur.tasks` sat in `registry.json` citing `"pcp": "pcp-0007-tasks"` for as long as
+this task was deferred — pointing at a file nobody had written. A reservation that cites a
+non-existent document looks, to anyone reading the registry, exactly like a documented
+claim. CI now fails on that (`TestConventionsRegistryPCPReferencesResolve`), but the
+process should also say plainly that a registry entry may cite a PCP only once the PCP
+exists, and that an unattributed reservation is the honest way to hold a name.
+
+### 7. What the process got right
+
+Worth recording, because the failures above are cheaper than they look next to it:
+
+- **No new platform mechanism was needed.** Two identities collaborate on a shared task
+  list with zero server code, no tasks-specific endpoint and no relay change. The
+  "conventions, not protocol" thesis survived contact with a real domain.
+- **Relay-enforced namespace claims are the right call.** `manifest.json` validated on
+  write, with `app_id` matched against its directory, means an app cannot squat another
+  app's namespace even by accident (`TestINT_TASKS_03`).
+- **One file per task paid for itself immediately.** Two writers, no coordination, no
+  conflicts — the granularity guidance in `app-data.md` is doing real work.
+- **Writing the PCP before the implementation is what surfaced all of the above.** A PCP
+  written after the code would have documented whatever the code happened to do, and every
+  one of these gaps would have been invisible.
