@@ -2,6 +2,8 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
-  core-js: set this to true or false
-  core-js-pure: set this to true or false
-  esbuild: set this to true or false
+  # Transitive install scripts. pnpm 10+ blocks these until approved.
+  # Placeholders ("set this to true or false") keep every install asking.
+  esbuild: true
+  core-js: true
+  core-js-pure: true

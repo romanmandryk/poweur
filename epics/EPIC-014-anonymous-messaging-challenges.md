@@ -13,9 +13,9 @@
 |------|--------|-------|
 | E14-T1 Spec | **done** | [`apps/docs/docs/trust/anonymous-and-challenges.md`](../apps/docs/docs/trust/anonymous-and-challenges.md) + PCP-0006; measured difficulty table committed (native: 16 bits ≈ 40 ms, 20 ≈ 0.6 s, 24 ≈ 9 s); coordinated with E07's schema (the `anonymous` block extends `inbox-policy.schema.json`) |
 | E14-T2 PoW primitive | **done** | `packages/identity/pow.go` (HMAC-sealed stateless tokens, purpose-bound, bit dial clamped [8, 30], cancellable solve, benchmark) + the JS solver, since moved into `packages/client-ts/src/pow.ts` by E15-T6 (was `apps/web/js/pow.js`) |
-| E14-T3 Relay enforcement | **done** | Unsigned envelopes → opt-in check → 428 challenge → verified single-use solution → dedicated anon queue (`GET /anon/{identity}`); encrypt-only holds (ephemeral keys); size/daily caps + per-IP rate limit; load auto-raises the difficulty floor (+4 bits over 120 challenges/min); `verified`/`payment` return typed envelopes with 501 on attempts. Full rejection-path matrix in `anon_test.go`. **Open:** `stranger_challenge` gate for identified non-contacts (seam specified; lands with E07-T5) |
+| E14-T3 Relay enforcement | **done** | Unsigned envelopes → opt-in check → 428 challenge → verified single-use solution → dedicated anon queue (`GET /anon/{identity}`); encrypt-only holds (ephemeral keys); size/daily caps + per-IP rate limit; load auto-raises the difficulty floor (+4 bits over 120 challenges/min); `verified`/`payment` return typed envelopes with 501 on attempts. Full rejection-path matrix in `anon_test.go`. **Open:** `stranger_challenge` gate for identified non-contacts (seam specified; stays here — E07-T5 shipped without it, see the task notes) |
 | E14-T4 Client UX | **done for CLI + web app** | CLI shipped: `poweur send --anon` (auto-solve with progress), `poweur anon` (decrypting drain with ANONYMOUS marker + trust warning), `poweur policy set --anon-*`; `TestINT_ANON_01` end to end, all three tiers (closed / free / priced) in `TestINT_JOURNEY_04`. Web app shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T3: policy panel with the difficulty slider, anonymous tray, in-page solving on send. **Fixed since:** an accepted anonymous message published no push event, so a reader sitting on the Messages screen saw nothing until an unrelated re-render happened to poll the queue. It now publishes its own kind (`anon`) rather than `message` — told `message`, a client fetches the inbox, which by design never holds an anonymous message. The tray badge counts *unread* rather than held, so it clears when the tray is looked at, and the messages themselves are archived like any other. **Open (EPIC-012):** the same send from a public page with no identity |
-| E14-T5 Second consumers | **done** (E07 hook open) | `REGISTRATION_GATE=pow` + `REGISTRATION_POW_BITS` + `GET /auth/pow` + CLI auto-solve (`TestINT_ANON_02`) — **closes the EPIC-002 deferral**; PCP-0006 filed; E07-T5 contact-request PoW remains with EPIC-007 |
+| E14-T5 Second consumers | **done** (E07 hook open) | `REGISTRATION_GATE=pow` + `REGISTRATION_POW_BITS` + `GET /auth/pow` + CLI auto-solve (`TestINT_ANON_02`) — **closes the EPIC-002 deferral**; PCP-0006 filed; contact-request PoW is **not** with EPIC-007 — E07-T5 shipped and left it here, with E14-T3's `stranger_challenge` gate |
 
 ## Goal
 
@@ -129,8 +129,14 @@ accepts; benchmarks committed.
       (parallel to E07's requests queue; reuse its storage pattern), with
       `anonymous.max_bytes` / `max_per_day` enforced and single-use solution cache
 - [ ] `stranger_challenge`: same gate wired in front of E07-T2's contact-request path
-      for identified non-contacts — **open** (seam specified in the spec; lands with
-      E07-T5's abuse-pressure pass)
+      for identified non-contacts — **open** (seam specified in the spec). **No longer
+      waiting on E07-T5:** that pass shipped (per-sender-relay metering, `sys.abuse.report`,
+      signed blocklists) without this gate, deliberately — it needs inbox-policy schema
+      fields (`stranger_challenge`, `stranger_pow_bits`), a matching `@poweur/client`
+      change and regenerated `inbox-policies` vectors, which belong with the challenge
+      work here rather than with contacts. EPIC-007's new
+      [`relay-reputation.md`](../apps/docs/docs/trust/relay-reputation.md) recommends it
+      as the phase-2 pick
 - [x] Global anon load shedding: relay-wide anon QPS threshold auto-raises the
       effective bits floor (log + metric when it kicks in — EPIC-013 counters:
       `message_rejections_total{reason=anon}`, `pow_challenges_total{result}`)
@@ -172,8 +178,9 @@ there is signed in but sends unsigned, which is the same wire path.
 - [x] EPIC-002 deferred item: optional PoW on hosted registration
       (`REGISTRATION_GATE=pow`, bits from config) using the same package — closes that
       deferral
-- [ ] E07-T5 hook: PoW on contact requests from unknown relays — **open** (design note + seam;
-      implement with EPIC-007 if it has landed)
+- [ ] E07-T5 hook: PoW on contact requests from unknown relays — **open**. EPIC-007's
+      E07-T5 has landed and left this here by design (see E14-T3); implement it as part of
+      the `stranger_challenge` gate, on top of the per-sender-relay meter E07-T5 shipped
 - [x] Registry entries (EPIC-006 PCP) for the challenge envelope + policy fields
       (PCP-0006)
 
