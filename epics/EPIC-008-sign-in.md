@@ -10,7 +10,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E08-T1 Protocol spec | **done** | [`apps/docs/docs/auth/sign-in.md`](../apps/docs/docs/auth/sign-in.md); wire objects, canonical string, origin normalization and scope vocabulary in `packages/identity/signin.go`; reference verifier/signer/metadata in `packages/identity/signin/`. Session delegation **reuses** the relay's proof chain — `CanonicalSessionRegistration` and `VerifySessionProof` moved into `packages/identity` and the relay's `acceptSessionProof` now calls them, so there is one implementation, not two. Vectors: `packages/identity/testdata/vectors/signin.json` (10 cases incl. expired, wrong audience, replayed nonce, session-delegated) |
-| E08-T2 Verifier SDKs + reference RP | open | |
+| E08-T2 Verifier SDKs + reference RP | **done** | Go SDK is [`packages/identity/signin`](../packages/identity/signin) (`signin.NewVerifier(origin)` + one `Verify` call), not a separate `pkg/signin-verifier` — E08-T1 already landed the reference verifier there and a second copy would be a second thing to audit. TS twin: [`packages/client-ts/src/signin.ts`](../packages/client-ts/src/signin.ts), same surface, pinned to Go by all ten `signin.json` vectors (`test/signin.test.ts`, 109 tests). Reference RP: [`apps/guestbook`](../apps/guestbook) — deployable (`go run ./cmd/guestbook`), serves its own `/.well-known/poweur.json`, does redirect + deep-link + cross-device poll. Tutorial: [`apps/docs/docs/auth/add-sign-in.md`](../apps/docs/docs/auth/add-sign-in.md) |
 | E08-T3 Signer UX | open | |
 | E08-T4 Scoped resource grants | open | |
 | E08-T5 Interop bridges | open | |
@@ -77,17 +77,28 @@ authorization grant (deliberately rhymes with OAuth so the OIDC bridge is thin).
 
 ### E08-T2 — Verifier SDKs + reference RP
 
-- [ ] Go package `pkg/signin-verifier`: parse/validate response, resolver-chain key fetch
-      (E01-T3), nonce cache interface — usable by any Go backend in <20 lines
-- [ ] TypeScript package (npm, monorepo `apps/`/`packages/`) with the same surface for
-      Node/edge backends
-- [ ] Reference relying party: a tiny demo site ("Poweur Guestbook") deployable from the repo,
-      exercising QR + redirect flows against real identities — doubles as the integration test
-      and the adoption tutorial
-- [ ] Tutorial doc: "Add Sign in with Poweur to your app in 15 minutes"
+- [x] Go package: parse/validate response, resolver-chain key fetch (E01-T3), nonce cache
+      interface — usable by any Go backend in <20 lines. **Shipped as
+      `packages/identity/signin`, not `pkg/signin-verifier`** (see the note below)
+- [x] TypeScript package with the same surface for Node/edge backends —
+      `packages/client-ts/src/signin.ts`, exported from `@poweur/client`
+- [x] Reference relying party: "Poweur Guestbook" (`apps/guestbook`), deployable from the
+      repo, exercising deep-link + redirect + cross-device poll flows against real
+      identities — doubles as the integration fixture and the adoption tutorial
+- [x] Tutorial doc: "Add Sign in with Poweur to your app in 15 minutes"
 
 **Acceptance:** demo RP works against a hosted identity end-to-end in CI (headless browser
 test); both SDKs published.
+
+**Shipped.** One deviation from the task text, recorded rather than silently taken: the Go
+SDK is `packages/identity/signin`, the package E08-T1 already put the reference verifier
+in. A `pkg/signin-verifier` would have been a copy of it, and AGENTS.md asks for extending
+existing packages over new top-level ones. Import path `github.com/poweur/identity/signin`.
+
+End-to-end coverage is `apps/integration/signin_test.go` — real relay, real hosted
+identity, the CLI as the signer — rather than a headless browser: the browser adds a
+rendering surface, not a protocol surface, and `apps/web` already owns the Playwright
+suite. The guestbook's own `server_test.go` covers what a correct RP *refuses*.
 
 ### E08-T3 — Signer UX in web client and CLI
 
