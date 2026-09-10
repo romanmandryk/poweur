@@ -496,6 +496,9 @@ input, textarea, select { font-family: inherit; }
 
 .conv-info { flex: 1; min-width: 0; }
 .conv-name { font-size: 16px; font-weight: 600; }
+/* Thread marker on a conversation row: present only when the messages carry
+   a thread_id, so an unthreaded conversation looks exactly as it did. */
+.conv-thread { font-size: 13px; font-weight: 500; color: var(--t3); }
 .conv-preview { font-size: 14px; color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 
 .conv-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
