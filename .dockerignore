@@ -2,3 +2,4 @@
 *
 !packages/identity/**
 !apps/api/**
+!apps/cli/**
