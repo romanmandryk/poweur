@@ -88,8 +88,18 @@ wait_http infra-grafana http://127.0.0.1:3000/api/health
 # An authenticated smoke identity is used only for inbox challenge/read, never
 # registration or messaging, so deployments do not inflate growth metrics.
 if [[ -f "$root/.smoke/config.toml" ]]; then
-  docker run --rm --network infra_net -v "$root/.smoke:/root/.poweur" \
+  # Identity create recorded an absolute host keys_dir (e.g. /tmp/poweur-smoke-home).
+  # The container only sees the mount at /root/.poweur.
+  smoke=$(mktemp -d)
+  cp -a "$root/.smoke/." "$smoke/"
+  {
+    grep -v '^keys_dir[[:space:]]*=' "$smoke/config.toml" || true
+    printf 'keys_dir = "/root/.poweur/keys"\n'
+  } > "$smoke/config.toml.next"
+  mv "$smoke/config.toml.next" "$smoke/config.toml"
+  docker run --rm --network infra_net -v "$smoke:/root/.poweur" \
     --entrypoint /poweur-smoke "$image" inbox --json >/dev/null
+  rm -rf "$smoke"
 else
   echo 'Missing .smoke identity; run OPS.md authenticated smoke setup' >&2
   false
