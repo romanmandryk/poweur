@@ -2,8 +2,6 @@ name: Deploy
 
 on:
   workflow_dispatch:
-  push:
-    branches: [master]
 
 env:
   REGISTRY: ghcr.io
@@ -64,8 +62,6 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - uses: actions/checkout@v4
-
       - name: Install pinned SSH host key
         env:
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -75,7 +71,7 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Deploy relay and observability together
+      - name: Compose up relay and observability
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -84,5 +80,26 @@ jobs:
           RELEASE_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          scp deploy/release.sh "poweur@$DEPLOY_HOST:/tmp/poweur-release-$RELEASE_SHA.sh"
-          ssh "poweur@$DEPLOY_HOST" bash "/tmp/poweur-release-$RELEASE_SHA.sh" "$RELEASE_SHA" "$RELEASE_IMAGE"
+          ssh "poweur@$DEPLOY_HOST" env RELEASE_SHA="$RELEASE_SHA" RELEASE_IMAGE="$RELEASE_IMAGE" bash -s <<'EOF'
+          set -euo pipefail
+          cd /opt/apps/poweur
+          git fetch origin "$RELEASE_SHA"
+          git reset --hard "$RELEASE_SHA"
+          export RELAY_IMAGE="$RELEASE_IMAGE"
+          export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
+          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
+          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
+            exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+          export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
+          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
+          for _ in $(seq 1 30); do
+            if docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health >/dev/null; then
+              echo "Relay /health ok"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Relay /health not ready; stack is up" >&2
+          docker logs --tail 40 poweur-relay >&2 || true
+          exit 1
+          EOF

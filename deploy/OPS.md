@@ -2,7 +2,7 @@
 
 E13 uses the existing VM and Grafana database. Relay → authenticated OTLP/HTTP → Alloy → Prometheus (metrics) and Loki (logs), with Grafana for both dashboards. No new analytics application. Tracking is disabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. Production setup enables it explicitly.
 
-Deployment helpers use Bash with `openssl` (secret generation) and `jq` (JSON health checks). Ansible installs both; on an existing VM, run `sudo apt-get install jq openssl` once. Node.js 22 is used only for CI/development tests, with no npm dependencies or build step. The deployed helpers do not require Node or Python.
+`setup-observability.sh` uses `openssl` to generate secrets. Ansible installs it; on an existing VM, `sudo apt-get install openssl` once is enough. Node.js 22 is used only for CI/development tests. Production deploy is `git reset` plus `docker compose up`.
 
 Local deployment checks:
 
@@ -22,27 +22,8 @@ node deploy/tests/stack-smoke.mjs  # requires Docker; isolated containers and vo
    sudo chown poweur:poweur .observability.env
    ```
 
-   **Do not generate replacement Grafana database passwords on an existing database.** The helper preserves imported/existing settings, creates independent intake and hashing secrets, and writes mode `0600`. Re-running it preserves all values. Keep `.observability.env` and `apps/api/.env.prod` on the VM, outside release snapshots and GitHub logs. Back up both encrypted.
-3. Capture the currently running release before stopping old services:
-
-   ```sh
-   sudo bash deploy/capture-baseline.sh
-   sudo chown -R poweur:poweur .releases .current
-   ```
-
-   The baseline copies the live web mount, previous infra configuration, and exact running relay image ID. It excludes infra `.env` files. Do not prune that image. On a first E13 upgrade, `release.sh` refuses to replace an existing relay without a recorded baseline.
-4. Create a dedicated hosted smoke identity using the Go CLI against the existing relay. Keep its config/keys under `/opt/apps/poweur/.smoke` (the CLI uses `$HOME/.poweur`; run with a temporary home and move its `.poweur` there). For example, from the checkout with Go installed:
-
-   ```sh
-   go build -o /tmp/poweur-smoke ./apps/cli
-   mkdir -p /tmp/poweur-smoke-home
-   HOME=/tmp/poweur-smoke-home /tmp/poweur-smoke identity create deploysmoke.poweur.net --hosted --relay https://relay.poweur.net
-   mv /tmp/poweur-smoke-home/.poweur /opt/apps/poweur/.smoke
-   chmod -R go-rwx /opt/apps/poweur/.smoke
-   ```
-
-   If the name is taken, use another dedicated identity. Do not enable detailed analytics on it. The release image contains the CLI; each deploy runs authenticated `inbox --json`, without registering or sending messages. Ensure `poweur` owns `.smoke`. Its private key is an operational secret.
-5. Retire the old foreground Compose systemd units during a short maintenance window; otherwise they can restart old configuration over a new release:
+   **Do not generate replacement Grafana database passwords on an existing database.** The helper preserves imported/existing settings, creates independent intake and hashing secrets, and writes mode `0600`. Re-running it preserves all values. Keep `.observability.env` and `apps/api/.env.prod` on the VM, outside git and GitHub logs. Back up both encrypted.
+3. Retire the old foreground Compose systemd units during a short maintenance window; otherwise they can restart old configuration over a new release:
 
    ```sh
    sudo systemctl disable --now poweur-app.service poweur-infra.service
@@ -53,10 +34,10 @@ node deploy/tests/stack-smoke.mjs  # requires Docker; isolated containers and vo
    ```
 
    Docker's `restart: unless-stopped` now handles reboot. Do not restart the legacy units or run `docker compose up` from the old checkout or `/opt/infra`. Ansible now prepares the host and secrets; release Actions own application startup.
-6. In GitHub Actions secrets configure `DEPLOY_HOST`, `DEPLOY_SSH_KEY` and **`DEPLOY_KNOWN_HOSTS`**. The last value is the server's known_hosts entry, verified against its SSH host-key fingerprint through your provider console. Existing server→GitHub read access must still work. GHCR uses the workflow's token; no image password is committed.
-7. Before rollout, ensure `grafana.poweur.net` points to the VM and uses HTTPS. Caddy now obtains its origin certificate too; use DNS-only or a **per-host Cloudflare Full (strict)** rule for Grafana. Then run **Deploy** (manual dispatch or merge to `master`). It runs all CI suites, builds the relay/CLI image, deploys by immutable digest, and compose-ups that commit. A failed health check leaves this release running; it does not compose an older Grafana or relay image. Watch the first rollout, then verify private dashboards.
-8. Set `GRAFANA_SMTP_ENABLED`, `GRAFANA_SMTP_HOST`, `GRAFANA_SMTP_USER`, `GRAFANA_SMTP_PASSWORD`, `GRAFANA_SMTP_FROM_ADDRESS` and `ALERT_EMAIL` in `.observability.env`. Redeploy and send a test notification in Grafana → Alerting → Contact points. Alerts exist without SMTP, but email cannot arrive until configured. Enable GitHub Actions failure notifications for **External relay health**; it probes from GitHub every 15 minutes. Scheduled Actions can be delayed or disabled after inactivity; it is a basic external monitor, not an uptime SLA.
-9. In Grafana, open **Poweur Growth**, choose **Share → Share externally**, and enable a public link. Share only that generated link. Keep anonymous access disabled. **Poweur Relay Ops**, Explore and Loki remain behind login. The public dashboard has aggregate Prometheus panels only; do not add log panels or actor fields to it.
+4. In GitHub Actions secrets configure `DEPLOY_HOST`, `DEPLOY_SSH_KEY` and **`DEPLOY_KNOWN_HOSTS`**. The last value is the server's known_hosts entry, verified against its SSH host-key fingerprint through your provider console. Existing server→GitHub read access must still work. GHCR uses the workflow's token; no image password is committed.
+5. Before rollout, ensure `grafana.poweur.net` is routed to Grafana (HTTP origin via Caddy, or DNS-only / per-host Full strict). Then run **Deploy** (manual dispatch only). It runs CI, builds the relay image, `git reset --hard` on the VM, and `docker compose up`. A red `/health` check does not compose an older stack. Watch the first rollout, then verify private dashboards.
+6. Set `GRAFANA_SMTP_ENABLED`, `GRAFANA_SMTP_HOST`, `GRAFANA_SMTP_USER`, `GRAFANA_SMTP_PASSWORD`, `GRAFANA_SMTP_FROM_ADDRESS` and `ALERT_EMAIL` in `.observability.env`. Redeploy and send a test notification in Grafana → Alerting → Contact points. Alerts exist without SMTP, but email cannot arrive until configured. Enable GitHub Actions failure notifications for **External relay health**; it probes from GitHub every 15 minutes. Scheduled Actions can be delayed or disabled after inactivity; it is a basic external monitor, not an uptime SLA.
+7. In Grafana, open **Poweur Growth**, choose **Share → Share externally**, and enable a public link. Share only that generated link. Keep anonymous access disabled. **Poweur Relay Ops**, Explore and Loki remain behind login. The public dashboard has aggregate Prometheus panels only; do not add log panels or actor fields to it.
 
 ## DNS: no new record required for the same VM
 
@@ -66,13 +47,11 @@ For a remote relay/stack, add **A/AAAA `ingest.poweur.net` pointing to the intak
 
 If proxying ingest through Cloudflare, use a **per-host** Full (strict) origin rule, as for Grafana. Do not change the whole zone's TLS mode without migrating the existing HTTP-origin identity hosts. A DNS-only ingest record avoids that complication. Set `OTEL_EXPORTER_OTLP_ENDPOINT=https://ingest.poweur.net` and `TELEMETRY_ALLOW_HTTP=0` for remote export; preserve the intake credentials. `metrics.poweur.net` is reserved but is not a configured intake alias.
 
-Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to the resolved client IP. Release scripts trust only Caddy's current Docker address on the relay. If recreating Caddy manually, redeploy the relay to refresh that address. Review Cloudflare range changes periodically. CDN request logs are separate from relay consent mode.
+Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to the resolved client IP. Deploy sets `TELEMETRY_TRUSTED_PROXIES` to Caddy's current Docker bridge address. If you recreate Caddy by hand, compose-up the relay again so it picks up the new address. Review Cloudflare range changes periodically. CDN request logs are separate from relay consent mode.
 
 ## Routine deployment
 
-`.current` points to `.releases/<commit>` after a successful release. That directory holds the matching static web files, stack config and `.relay-image` digest. `docker inspect poweur-relay` and `/health` identify the running release. No application data is stored under the release directory.
-
-There is no automatic or scripted rollback to an older stack. A failed gate leaves the compose that just started. The only images in `deploy/infra/docker-compose.yml` are the current ones (Grafana 12.2.0). Delete leftover `.releases/baseline-*` directories on the VM if they are still present; they are unused snapshots of Grafana 11.
+Manual **Deploy** workflow: CI, push a GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no `.releases` pointer and no rollback script. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
 
 ## Fresh VM
 
@@ -86,7 +65,7 @@ docker compose -p infra --env-file .observability.env -f deploy/infra/docker-com
 docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
 ```
 
-Then create the smoke identity, capture the baseline with `--infra /opt/apps/poweur/deploy/infra`, and run Deploy. Caddy/Grafana DNS and existing Cloudflare identity routing still need the original host setup. Do not expose internal backend ports.
+Then run the Deploy workflow (manual dispatch). Caddy/Grafana DNS and existing Cloudflare identity routing still need the original host setup. Do not expose internal backend ports.
 
 ## Dashboards, retention and failures
 
@@ -98,6 +77,6 @@ Then create the smoke identity, capture the baseline with `--infra /opt/apps/pow
 
 ## Backup, restore and moving the stack
 
-Back up `poweur_poweur_data`, `infra_postgres_data`, `infra_grafana_data`, `infra_loki_data`, `infra_prometheus_data`, `infra_alloy_data` and Caddy's data/config volumes, plus encrypted copies of the two environment files and smoke keys. The relay volume includes identity documents, files, inbox/spool and consent preferences; do not rely on the old memory-only assumption. Stop writers for a consistent filesystem snapshot, or use `pg_dump` for PostgreSQL and a provider snapshot strategy. Keep backups off this VM. Restore into the same volume names, then restore matching images/configuration and verify `/health`, authenticated inbox, Grafana queries and a test alert. Never use `down -v` on production.
+Back up `poweur_poweur_data`, `infra_postgres_data`, `infra_grafana_data`, `infra_loki_data`, `infra_prometheus_data`, `infra_alloy_data` and Caddy's data/config volumes, plus encrypted copies of the two environment files. The relay volume includes identity documents, files, inbox/spool and consent preferences; do not rely on the old memory-only assumption. Stop writers for a consistent filesystem snapshot, or use `pg_dump` for PostgreSQL and a provider snapshot strategy. Keep backups off this VM. Restore into the same volume names, then restore matching images/configuration and verify `/health`, authenticated inbox, Grafana queries and a test alert. Never use `down -v` on production.
 
 To move observability, copy only infra volumes/configuration/secrets to the new VM, configure ingest DNS/TLS, and change the relay endpoint to HTTPS. Do not copy or mount relay `POWEUR_DATA` into the analytics stack. Keep the HMAC key on the relay stable if you want historical hashed actors to stay linkable; rotating it intentionally starts new pseudonyms. Keep the Grafana DB credentials consistent when moving its database.

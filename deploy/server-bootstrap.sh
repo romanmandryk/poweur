@@ -151,9 +151,9 @@ fi
 
 # ── 8. Boot policy ────────────────────────────────────────────────────────────
 step "8/8  Boot policy"
-# Releases are started by GitHub Actions via deploy/release.sh. Docker's
+# Releases are `docker compose up` from GitHub Actions. Docker's
 # restart: unless-stopped brings containers back after reboot. Do not install
-# the old foreground compose systemd units; they fight the immutable release.
+# the old foreground compose systemd units; they fight Compose.
 systemctl enable docker.service
 systemctl disable --now poweur-app.service poweur-infra.service 2>/dev/null || true
 info "Docker enabled on boot; legacy compose units left disabled"
@@ -187,5 +187,5 @@ echo -e "${CYAN}Name: DEPLOY_HOST   Value: $(curl -4 -s ifconfig.me 2>/dev/null 
 echo -e "\n${YELLOW}Finish with deploy/OPS.md:${NC}"
 echo -e "  ${CYAN}sudo bash deploy/setup-observability.sh --file .observability.env --import-env /opt/infra/.env${NC}"
 echo -e "  ${CYAN}nano /opt/apps/poweur/apps/api/.env.prod${NC}   (app config)"
-echo -e "  Then create the smoke identity and run GitHub Deploy."
+echo -e "  Then run the Deploy workflow (manual dispatch)."
 echo ""

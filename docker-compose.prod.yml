@@ -1,6 +1,6 @@
 services:
   relay:
-    image: ${RELAY_IMAGE:?Deploy with deploy/release.sh to select a tested image}
+    image: ${RELAY_IMAGE:?Set RELAY_IMAGE to a GHCR digest}
     container_name: poweur-relay
     restart: unless-stopped
     logging:

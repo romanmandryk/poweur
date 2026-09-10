@@ -11,7 +11,7 @@
 |------|--------|-------|
 | E13-T1 Standard telemetry export & metrics | done | OTel SDK, bounded queue, opt-in export and private metric labels |
 | E13-T2 Structured logs, action events & consent modes | done | DAV consent preference, web/native settings, both CLIs and SDK; withdrawal rechecked |
-| E13-T3 CI/CD hardening | done | Reusable CI gate, digest deployments, baseline capture, health/auth smoke and rollback |
+| E13-T3 CI/CD hardening | done | CI gates build; Deploy is manual dispatch: digest + `git reset` + `compose up` + `/health`. No rollback/smoke/baseline. |
 | E13-T4 External stack, dashboards & alerts | done | Alloy/Loki, private + aggregate dashboards, alerts, external GitHub probe; operator enables public link/SMTP |
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
@@ -198,21 +198,19 @@ nor IP. All current action families have coverage; logs contain no content or cr
 
 - [x] `deploy.yml`: add a `test` job (Go suites + `apps/integration`; web tests when the
       SPA changed) that `build` **needs** — today a red master still deploys
-- [x] Deploy by digest/sha, not `:latest`: compose reads `RELAY_IMAGE` from `.env` on the
-      VM; the deploy step writes the new sha there → `docker compose ps` shows exactly
-      what runs, and rollback = write previous sha + `up -d` (document as a one-liner;
-      keep last N shas in ghcr via retention policy)
-- [x] Post-deploy gate: workflow curls `/health` (and one authenticated smoke call) after
-      `up -d`; failure exits non-zero so the run is red and auto-rolls back to the prior sha
+- [x] Deploy by digest/sha, not `:latest`: `RELAY_IMAGE` is the GHCR digest from the
+      build job; `docker compose up` on the VM checkout. Auto-rollback and baseline
+      snapshots were removed after they restored Grafana 11 over a working 12 stack.
+- [x] Post-deploy gate: `wget` `/health` inside the relay container. Failure is red
+      but does not compose an older stack. Authenticated CLI smoke is not part of deploy.
 - [x] Build the web app + docs artifacts in CI if/when they gain a build step (today
       `apps/web` is static — volume-mounted; keep that, but note it in the ops doc)
 - [x] `deploy/README.md` (or extend `BACKUP.md` into `deploy/OPS.md`): the full runbook —
       bootstrap, deploy, rollback, backup/restore, where secrets live (Ansible vars +
       GitHub secrets), metrics/dashboards URLs
 
-**Acceptance:** a PR that breaks tests cannot reach prod; deployed sha visible on the VM;
-rollback rehearsed once and documented; failed health gate leaves the previous version
-running.
+**Acceptance:** a PR that breaks tests cannot reach prod; deployed digest visible on the VM;
+failed `/health` leaves the compose that just started (no restore of an older stack).
 
 ### E13-T4 — External stack, dashboards and alerts
 
@@ -270,19 +268,16 @@ Run relay unit tests and `apps/integration` for implementation changes, includin
 collector and a collector-outage scenario. Consent changes touching clients require the usual
 web tests, client tests/build/typecheck, canonical specs/vectors when needed, and re-vendoring.
 Implementation is complete for T1–T4. Production rollout is an operator step: follow
-`deploy/OPS.md` to import existing database secrets, capture the baseline, configure the
-smoke identity/SSH key, retire the old systemd units, then run Deploy. Configure SMTP,
-GitHub failure notifications and the public Growth share link manually. No live VM
-rollout or production public sharing was performed by this implementation.
+`deploy/OPS.md` to import existing database secrets, retire the old systemd units, then
+run Deploy (manual). Configure SMTP, GitHub failure notifications and the public Growth
+share link manually.
 
 Verification: relay/CLI/identity and real-relay integration suites; TS SDK unit/live-relay/
-interop tests; web Vitest and 55 Playwright scenarios; telemetry race and stalled-collector
-shutdown tests. Real isolated Docker smoke verifies authenticated intake, Prometheus/Loki
-queries, private access denial, public aggregate sharing and an actual Grafana alert after
-Alloy stops. Deployment helpers use Bash/openssl/jq. Dependency-free Node tests rehearse secret
-preservation, baseline capture, successful release and failed-health rollback with
-command substitutes; the real stack smoke test also runs in Node. No Python runtime
-is required by deployment scripts. The production VM rollback drill remains part of the operator runbook.
+interop tests; web Vitest and Playwright; telemetry race and stalled-collector
+shutdown tests. Real isolated Docker smoke (`stack-smoke.mjs`) verifies authenticated intake,
+Prometheus/Loki queries, private access denial, public aggregate sharing and an actual
+Grafana alert after Alloy stops. Secret-generation tests cover `setup-observability.sh`.
+No Python runtime is required.
 
 Implementation choices: same-VM relay uses authenticated `http://infra-alloy:4318` on the
 private bridge, so DNS is optional until remote export. The optional public intake hostname
