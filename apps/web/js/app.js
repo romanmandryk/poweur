@@ -60,6 +60,7 @@ import {
   recoverFromKeystore, restoreLocalRecord, rewrap,
 } from "./keystore.js";
 import { APP_VERSION, APP_BUILD_TIME } from "./build-info.js";
+import { startJoinPoll, describeJoinError } from "./enroll-wait.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -2490,7 +2491,7 @@ function showJoinDevicePanel(knownIdentity = "") {
   // and polls until a device that already holds the seed approves.
   let session = null;
   let joining = null;
-  let polling = null;
+  let poller = null;
   let enroll = null;
   let relayUrl = defaultRelayUrl();
   // Prefer the identity the door already named (the URL bar, or a
@@ -2501,7 +2502,24 @@ function showJoinDevicePanel(knownIdentity = "") {
     || (modeNow().mode === "identity" ? modeNow().subject : "");
   const here = isShellRuntime() ? "device" : "browser";
 
-  const stop = () => { clearInterval(polling); polling = null; };
+  const stop = () => { poller?.stop(); poller = null; };
+
+  const abandon = () => {
+    stop();
+    if (session && joining) {
+      enroll?.cancel(joining, session).catch(() => {});
+      session = null;
+    }
+  };
+
+  const showJoinRetry = (message, again) => {
+    const state = q("#join-state");
+    if (!state) return;
+    state.innerHTML = `
+      <p class="form-note small val-warn">${esc(message)}</p>
+      <button class="btn btn-primary" id="btn-join-start" style="width:100%">Try again</button>`;
+    q("#btn-join-start")?.addEventListener("click", again);
+  };
 
   showPanel("Add this device", `
     <p class="muted small" style="margin-bottom:12px">
@@ -2522,6 +2540,9 @@ function showJoinDevicePanel(knownIdentity = "") {
     const start = async () => {
       const identity = known || joinIdentityFromForm();
       if (!identity) return toast("Enter your identity", "warning");
+      // A second tap (or Try again) must not leave the previous interval
+      // firing — that is how a stack of identical error toasts starts.
+      abandon();
 
       setLoading(true, "Opening a secure channel…");
       try {
@@ -2544,7 +2565,9 @@ function showJoinDevicePanel(knownIdentity = "") {
                really this device:</p>
             <p class="sas-code">${esc(session.sas)}</p>
           </div>
-          <p class="small muted" id="join-wait">Waiting for approval…</p>`;
+          <p class="small muted" id="join-wait">Waiting for approval…</p>
+          <p class="small muted" id="join-expiry"></p>
+          <button class="btn btn-sm btn-ghost" id="btn-join-check" style="margin-top:8px">Check now</button>`;
         q("#btn-copy-rendezvous")?.addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(session.rendezvousId);
@@ -2553,43 +2576,51 @@ function showJoinDevicePanel(knownIdentity = "") {
             toast("Copy failed — select the code and copy it manually", "warning");
           }
         });
+        q("#btn-join-check")?.addEventListener("click", () => poller?.checkNow());
 
-        polling = setInterval(async () => {
-          let seedBytes;
-          try {
-            seedBytes = await enroll.claim(identity, session);
-          } catch (error) {
-            stop();
-            toast(error.message, "error", 8000);
-            return;
-          }
-          if (!seedBytes) return;
-          stop();
-          closePanel();
-          try {
-            const derived = jwksFromSeed(seedBytes);
-            await adoptIdentity({
-              identity, relayUrl,
-              signingJWK: derived.signingJWK,
-              encJWK: derived.encJWK,
-              seed: toBase64url(seedBytes),
-              label: deviceLabel(),
-            });
-            toast(`${identity} is set up on this device`, "success", 5000);
-          } catch (error) {
-            toast(error.message, "error", 9000);
-          }
-        }, 2000);
+        const deadlineMs = Date.parse(session.expiresAt)
+          ? Math.max(0, Date.parse(session.expiresAt) - Date.now())
+          : undefined;
+        poller = startJoinPoll({
+          claim: () => enroll.claim(identity, session),
+          deadlineMs,
+          onTick: (text) => {
+            const expiry = q("#join-expiry");
+            if (expiry) expiry.textContent = text;
+          },
+          onSeed: async (seedBytes) => {
+            session = null;
+            closePanel();
+            try {
+              const derived = jwksFromSeed(seedBytes);
+              await adoptIdentity({
+                identity, relayUrl,
+                signingJWK: derived.signingJWK,
+                encJWK: derived.encJWK,
+                seed: toBase64url(seedBytes),
+                label: deviceLabel(),
+              });
+              toast(`${identity} is set up on this device`, "success", 5000);
+            } catch (error) {
+              toast(error.message, "error", 9000);
+            }
+          },
+          onError: (error, { terminal }) => {
+            const detail = describeJoinError(error);
+            const wait = q("#join-wait");
+            if (!terminal) {
+              if (wait) wait.textContent = detail;
+              return;
+            }
+            toast(detail, "error", 9000);
+            showJoinRetry(detail, start);
+          },
+        });
       } catch (error) {
         setLoading(false);
-        toast(error.message, "error", 8000);
-        const state = q("#join-state");
-        if (state && known) {
-          state.innerHTML = `
-            <p class="form-note small val-warn">${esc(error.message)}</p>
-            <button class="btn btn-primary" id="btn-join-start" style="width:100%">Try again</button>`;
-          q("#btn-join-start")?.addEventListener("click", start);
-        }
+        const detail = error.message || "Could not open a secure channel";
+        toast(detail, "error", 8000);
+        if (known) showJoinRetry(detail, start);
       }
     };
 
@@ -2601,11 +2632,7 @@ function showJoinDevicePanel(knownIdentity = "") {
   () => {
     // Panel closed: free the rendezvous so the relay's per-identity cap does
     // not fill with abandoned ceremonies.
-    stop();
-    if (session && joining) {
-      enroll?.cancel(joining, session).catch(() => {});
-      session = null;
-    }
+    abandon();
   });
 }
 
@@ -4923,8 +4950,13 @@ function closePanel() {
 function toast(msg, type = "info", duration = 3500) {
   const root = document.getElementById("toast-root");
   if (!root) return;
+  // A backgrounded join poller used to dump the same 404 a dozen times when
+  // the phone woke up. Same message + kind already on screen stays one toast.
+  const key = `${type}:${msg}`;
+  if ([...root.querySelectorAll(".toast")].some((el) => el.dataset.toastKey === key)) return;
   const el = document.createElement("div");
   el.className = `toast ${type}`;
+  el.dataset.toastKey = key;
   el.innerHTML = `<span class="toast-icon"></span><span>${esc(msg)}</span>`;
   root.appendChild(el);
   setTimeout(() => el.remove(), duration + 400);

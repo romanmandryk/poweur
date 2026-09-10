@@ -414,6 +414,9 @@ table. Ship **two transports plus one optimisation**, sharing a single enrollmen
 - [x] Short expiry; **number matching** on both screens as the confirmation step. Comparing the
       code *is* the authentication — `poweur key approve --sas` refuses a mismatch outright
       rather than only printing it
+- [x] Web join polling is one-in-flight (2 s, 10 min, claim immediately), retries network
+      blips, wakes on `visibilitychange` / focus, and has a **Check now** button. A
+      backgrounded phone used to fire every missed `setInterval` at once and stack 404 toasts
 - [ ] Number matching is a **confirmation, never a transport.** A standalone "approve on your
       other device" prompt is an MFA-fatigue surface: the identity name is public, so anyone
       could trigger prompts. Approval is only ever offered inside a ceremony the user started

@@ -50,6 +50,10 @@ test.describe("new-device enrollment", () => {
     const phoneSas = await phonePage.locator(".sas-code").innerText();
     expect(requestCode.trim()).not.toBe("");
     expect(phoneSas.trim()).toMatch(/^\d{6}$/);
+    // A phone that stops polling (backgrounded WebView) can tap this instead
+    // of waiting for the next 2s tick.
+    await expect(phonePage.locator("#btn-join-check")).toBeVisible();
+    await expect(phonePage.locator("#join-expiry")).toContainText("Expires");
 
     // ── The trusted device looks it up and sees the *same* digits ───────────
     await laptopPage.click('.nav-tab[data-page="settings"]');

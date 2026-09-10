@@ -204,6 +204,9 @@ E11-T1–T4 landed on master; this is the UI over them, and it replaces the T1 m
       The identity-host door (`alice.poweur.net`) does not re-ask the name; the offer is posted
       to the identity's home relay; request-code paste strips wrapping noise so a phone keyboard
       cannot turn a live offer into "rendezvous not found or expired".
+      Join polling is one-in-flight (not `setInterval`), claims immediately, retries
+      network blips, wakes on `visibilitychange` / focus, and exposes **Check now** —
+      a backgrounded phone used to dump a stack of 404 toasts when it resumed.
 
 **A note on what the user types.** The six digits are a *comparison*, not an address: the
 rendezvous id is 16 random bytes, so that is what moves between devices, exactly as
