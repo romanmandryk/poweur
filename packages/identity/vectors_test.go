@@ -489,3 +489,86 @@ func TestVectors_History(t *testing.T) {
 	}
 	WriteVectors(t, vectorsDir, "history-read-state", states)
 }
+
+// abuseReportVector and blocklistVector pin the two documents EPIC-007 E07-T5
+// added (`packages/identity/abuse.go`, `blocks.go`). Neither has a TypeScript
+// implementation yet — these exist so that when one is written it has a target
+// to conform to, and so that a change to either canonical string here is a
+// visible diff rather than a silent fork.
+//
+// Both canonical forms sort and normalise: message IDs and block entries are
+// sorted, identities lowercased and trimmed. The fixtures below are
+// deliberately supplied unsorted and mixed-case, so an implementation that
+// skips that step fails on them.
+type abuseReportVector struct {
+	Name      string      `json:"name"`
+	Report    AbuseReport `json:"report"`
+	Canonical string      `json:"canonical"`
+}
+
+type blocklistVector struct {
+	Name      string    `json:"name"`
+	Blocklist Blocklist `json:"blocklist"`
+	Canonical string    `json:"canonical"`
+}
+
+func TestVectors_AbuseAndBlocks(t *testing.T) {
+	priv := vectorKey()
+	pub := priv.Public().(ed25519.PublicKey)
+
+	reports := []abuseReportVector{}
+	for _, entry := range []struct {
+		name   string
+		report AbuseReport
+	}{
+		{"spam-with-evidence", AbuseReport{
+			Version: 1, Type: MsgTypeAbuseReport,
+			Reporter: "alice.poweur.net", Subject: "loud.cheapco.test",
+			Reason: AbuseReasonSpam, MessageIDs: []string{"m-9", "m-1", " m-4 "},
+			Note: "twelve identical messages overnight", CreatedAt: VectorTime,
+		}},
+		{"bare", AbuseReport{
+			Version: 1, Type: MsgTypeAbuseReport,
+			Reporter: "Alice.Poweur.NET", Subject: "Loud.CheapCo.Test",
+			Reason: AbuseReasonHarassment, CreatedAt: VectorTime,
+		}},
+	} {
+		report := entry.report
+		if err := report.Sign(priv); err != nil {
+			t.Fatalf("sign %s: %v", entry.name, err)
+		}
+		if err := report.VerifySignature(pub); err != nil {
+			t.Fatalf("verify %s: %v", entry.name, err)
+		}
+		reports = append(reports, abuseReportVector{entry.name, report, report.Canonical()})
+	}
+	WriteVectors(t, vectorsDir, "abuse-reports", reports)
+
+	lists := []blocklistVector{}
+	for _, entry := range []struct {
+		name string
+		list Blocklist
+	}{
+		{"two-entries", Blocklist{
+			Version: 1, Publisher: "Alice.Poweur.NET", Name: "alice's list",
+			Entries: []BlockEntry{
+				{Identity: "Zoe.example.org", Reason: AbuseReasonPhishing, AddedAt: VectorTime},
+				{Identity: " spamco.example.test ", Reason: AbuseReasonSpam},
+			},
+			UpdatedAt: VectorTime,
+		}},
+		{"empty", Blocklist{
+			Version: 1, Publisher: "alice.poweur.net", Entries: []BlockEntry{}, UpdatedAt: VectorTime,
+		}},
+	} {
+		list := entry.list
+		if err := list.Sign(priv); err != nil {
+			t.Fatalf("sign %s: %v", entry.name, err)
+		}
+		if err := list.VerifySignature(pub); err != nil {
+			t.Fatalf("verify %s: %v", entry.name, err)
+		}
+		lists = append(lists, blocklistVector{entry.name, list, list.Canonical()})
+	}
+	WriteVectors(t, vectorsDir, "blocklists", lists)
+}
