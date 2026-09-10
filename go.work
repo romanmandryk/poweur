@@ -4,5 +4,6 @@ use (
 	./apps/api
 	./apps/cli
 	./apps/integration
+	./apps/tasks
 	./packages/identity
 )
