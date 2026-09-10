@@ -16,6 +16,7 @@
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
+  normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
   streamForever,
 } from "@poweur/client";
@@ -2326,43 +2327,79 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
 }
 
 /**
- * The joining half of the enrollment ceremony (E11-T3), run on the **new**
- * device.
+ * The identity this new device is asking to join.
  *
- * This device generates the ephemeral keypair, so the six-digit code
- * authenticates a public key and protects no secret — which is why the
- * ceremony needs no PAKE. It polls until the other device approves.
+ * On an identity host the URL already named it — asking again is how people
+ * type `alice` when the door said `alice.poweur.net`, and the offer then
+ * lands under a name the approving device will never look up. Elsewhere we
+ * still need a typed name, and a bare handle is completed with the host's
+ * domain so it matches what the unlocked device holds.
  */
+function joinIdentityFromForm() {
+  const info = modeNow();
+  if (info.mode === "identity" && info.subject) return info.subject;
+  const raw = (q("#join-identity")?.value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw.includes(".")) return raw;
+  const domain = (info.domain || getConfig().parentDomain || "").replace(/^\./, "");
+  return domain ? `${raw}.${domain}` : raw;
+}
+
+/** Home relay for an identity this device does not yet hold. */
+async function enrollApiForJoin(identity) {
+  const fallback = defaultRelayUrl();
+  try {
+    const relayUrl = await resolveRecipientRelayUrl(
+      identity,
+      fallback.startsWith("http://") ? "http" : "https",
+      resolveOptionsForRelay(fallback),
+    );
+    return { enroll: new EnrollApi(new RelayClient(relayUrl)), relayUrl };
+  } catch {
+    return { enroll: new EnrollApi(new RelayClient(fallback)), relayUrl: fallback };
+  }
+}
+
 function showJoinDevicePanel() {
+  // Joining half of E11-T3: this device has no key yet. It opens a rendezvous
+  // and polls until a device that already holds the seed approves.
   let session = null;
   let joining = null;
   let polling = null;
-  const relayUrl = defaultRelayUrl();
-  const enroll = new EnrollApi(new RelayClient(relayUrl));
+  let enroll = null;
+  let relayUrl = defaultRelayUrl();
+  const known = modeNow().mode === "identity" ? modeNow().subject : "";
 
   const stop = () => { clearInterval(polling); polling = null; };
 
   showPanel("Add this device", `
     <p class="muted small" style="margin-bottom:12px">
-      Enter your identity. This device will show a code to type on a device you already use.
+      ${known
+        ? `This device will show a code to type on a device that already has <strong>${esc(known)}</strong>.`
+        : "Enter your identity. This device will show a code to type on a device you already use."}
     </p>
+    ${known ? "" : `
     <div class="form-group">
       <label class="form-label" for="join-identity">Your Poweur ID</label>
       <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
              autocapitalize="none" autocorrect="off"
              autocomplete="off" spellcheck="false" inputmode="url" />
-    </div>
+    </div>`}
     <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
     <div id="join-state"></div>`,
   () => {
     q("#btn-join-start")?.addEventListener("click", async () => {
-      const identity = q("#join-identity")?.value.trim().toLowerCase();
+      const identity = joinIdentityFromForm();
       if (!identity) return toast("Enter your identity", "warning");
 
       setLoading(true, "Opening a secure channel…");
       try {
         // offer/claim/cancel are unauthenticated by necessity — this device has
-        // no key yet — so they need the endpoint, not a signer.
+        // no key yet — so they need the identity's home relay, not a signer.
+        // Posting to this page's origin while the unlocked device talks to the
+        // stored relay (poweur.net vs alice.poweur.net) is how a live offer
+        // looks expired.
+        ({ enroll, relayUrl } = await enrollApiForJoin(identity));
         session = await enroll.offer(identity, deviceLabel());
         joining = identity;
         setLoading(false);
@@ -2424,7 +2461,7 @@ function showJoinDevicePanel() {
     // not fill with abandoned ceremonies.
     stop();
     if (session && joining) {
-      enroll.cancel(joining, session).catch(() => {});
+      enroll?.cancel(joining, session).catch(() => {});
       session = null;
     }
   });
@@ -4294,13 +4331,14 @@ function showApproveDevicePanel() {
     <div class="form-group">
       <label class="form-label" for="enroll-rendezvous">Request code from the new device</label>
       <input id="enroll-rendezvous" class="input mono" type="text"
-             autocomplete="off" spellcheck="false" placeholder="paste it here" />
+             autocapitalize="none" autocorrect="off" autocomplete="off"
+             spellcheck="false" inputmode="text" placeholder="paste it here" />
     </div>
     <button class="btn btn-primary" id="btn-enroll-lookup" style="width:100%">Continue</button>
     <div id="enroll-confirm"></div>`,
   () => {
     q("#btn-enroll-lookup")?.addEventListener("click", async () => {
-      const rendezvousId = q("#enroll-rendezvous")?.value.trim();
+      const rendezvousId = normalizeRendezvousId(q("#enroll-rendezvous")?.value ?? "");
       if (!rendezvousId) return toast("Enter the request code from the new device", "warning");
 
       const client = clientFor(identity);

@@ -11,7 +11,7 @@
 |------|--------|-------|
 | E04-T1 Sync protocol spec | **done** | [`apps/docs/docs/files/sync-protocol.md`](../apps/docs/docs/files/sync-protocol.md); moves-as-delete+put documented for v1; `sys.sync.changed` payload defined, delivery deferred to EPIC-009 |
 | E04-T2 Journal + changes/manifest | **done** | Journal hooked into the metadata `Index` (single choke point: DAV, uploads, relay writes all journal); compaction is lazy (on load/append: 30 d / 10 000 records) instead of a `runPruner` job; per-principal visibility via the E03-T4 permission engine (EPIC-005 grants slot in) |
-| E04-T3 Chunked resumable upload | **done** (web wiring open) | tus-header-style protocol at `/sync/{id}/upload` (choice written up in the spec); quota at start; 24 h spool expiry; kill-and-resume covered in `TestSyncChunkedUploadResume`; **open:** wire web-app uploads > 50 MB (the web app now uploads through `DavClient.write`; the chunked path is `SyncClient` in `packages/client-ts/src/sync.ts`) |
+| E04-T3 Chunked resumable upload | **done** | tus-header-style protocol at `/sync/{id}/upload` (choice written up in the spec); quota at start; 24 h spool expiry; kill-and-resume covered in `TestSyncChunkedUploadResume`; web app routes files ≥ 64 MiB through `SyncClient.uploadChunked` (`doUploadFiles` in `apps/web/js/app.js`); **open:** a web-side test for that threshold branch |
 | E04-T4 `poweur sync` client | **done** (one-shot) | `pull`/`push`/`run`/`status` + conflicted-copy matrix + `--path` selective sync + `.poweurignore` (subset, no negation); engine in `apps/cli/internal/sync` with fake-remote conflict-matrix tests + `TestINT_SYNC_01` two-device convergence; **deferred:** fsnotify daemon mode (poll with `run` or cron until then) |
 | E04-T5 Mobile & desktop passes | **deferred** (web half done) | mount-vs-sync doc, launchd/systemd templates, iOS/Android File-Provider notes still open; web changes-feed auto-refresh shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4 |
 | E04-T6 Device registry | **deferred** | design sketch in sync-protocol.md §Device registry; lands with EPIC-007/009 groundwork (`devices.json`, per-device cursors, revocation) |
@@ -99,8 +99,11 @@ Nextcloud-style chunk-assembly:
 - [x] Implement chosen protocol at `/sync/{identity}/upload`, final assembly atomically
       replaces target path + journal entry; partial uploads expire (pruner)
 - [x] Quota check at upload start, not just finish
-- [ ] Wire into web app uploads (E03-T5) for files > 50 MB — **open** (CLI uses chunking
-      for files ≥ 64 MiB; web app still does single PUT)
+- [x] Wire into web app uploads (E03-T5) for large files — shipped: `doUploadFiles` in
+      `apps/web/js/app.js` routes anything ≥ `DEFAULT_CHUNK_THRESHOLD` (64 MiB, from
+      `packages/client-ts/src/sync.ts`) through `SyncClient.uploadChunked`, single PUT below
+      it. **Open:** no web-side test pins the threshold branch (`SyncClient` itself is covered
+      in `packages/client-ts`)
 
 **Acceptance:** kill-and-resume test: a 1 GB upload interrupted at 60% resumes and completes
 without re-sending earlier chunks.

@@ -74,6 +74,19 @@ describe("device enrollment ceremony ↔ real relay", () => {
     expect(toBase64url(received!)).toBe(toBase64url(seed));
   });
 
+  it("finds the offer even when the request code was pasted with wrapping noise", async () => {
+    const { identity, signer } = await newParty();
+    const session = await api.offer(identity);
+    // Spaces, a newline, zero-width chars, an en-dash — the shape a phone
+    // keyboard produces when the user copies the code off the other screen.
+    const messy = `  ${session.rendezvousId.replace("-", "\u2013")}\n`.replace(
+      /(.{4})/,
+      "$1\u200b",
+    );
+    const pending = await api.pending(signer, identity, messy);
+    expect(pending.sas).toBe(session.sas);
+  });
+
   it("consumes the rendezvous, so a captured id cannot be replayed", async () => {
     const { identity, signer, seed } = await newParty();
     const session = await api.offer(identity);

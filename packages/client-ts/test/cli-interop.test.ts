@@ -15,7 +15,11 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { run } from "../src/cli/index.js";
-import { signerFor } from "../src/crypto/keys.js";
+import { identityKeysFromSeed, signerFor } from "../src/crypto/keys.js";
+import { ed25519PublicKey } from "../src/crypto/index.js";
+import { newSeed } from "../src/crypto/seed.js";
+import { toBase64url } from "../src/encoding.js";
+import { EnrollApi } from "../src/enroll.js";
 import { loadConfig, saveConfig } from "../src/node/config.js";
 import { FileKeyStore } from "../src/node/keystore.js";
 import { FileSessionStore } from "../src/node/sessionstore.js";
@@ -36,14 +40,14 @@ let tsIdentity: string;
 let goCache: { GOCACHE: string; GOMODCACHE: string };
 const originalEnv = { ...process.env };
 
-/** Env that points the Go CLI at the local relay and the shared tree. */
-function goEnv(): NodeJS.ProcessEnv {
+/** Env that points the Go CLI at the local relay and a `~/.poweur` tree. */
+function goEnv(homeDir = home): NodeJS.ProcessEnv {
   return {
     ...process.env,
     // HOME is redirected so the Go CLI writes ~/.poweur into the temp tree,
     // but its build caches must stay where they are or every invocation
     // recompiles the world.
-    HOME: home,
+    HOME: homeDir,
     ...goCache,
     POWEUR_RESOLVER_SCHEME: "http",
     RESOLVER_ALLOW_PRIVATE: "1",
@@ -53,10 +57,13 @@ function goEnv(): NodeJS.ProcessEnv {
   };
 }
 
-async function goCli(args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function goCli(
+  args: string[],
+  homeDir = home,
+): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync("go", ["run", ".", ...args], {
     cwd: GO_CLI_DIR,
-    env: goEnv(),
+    env: goEnv(homeDir),
     maxBuffer: 8 * 1024 * 1024,
   });
 }
@@ -225,5 +232,121 @@ describe("Go CLI ↔ TypeScript client", () => {
     const goDoc = JSON.parse(stdout) as { public_key: string; relay: string };
     expect(tsDoc.public_key).toBe(goDoc.public_key);
     expect(tsDoc.relay).toBe(goDoc.relay);
+  }, 180_000);
+
+  it("moves a seed from the Go CLI to the TypeScript client", async () => {
+    const identity = uniqueIdentity("goenroll");
+    const created = await goCli([
+      "identity", "create", identity,
+      "--hosted", "--from-seed", "--relay", relay.baseUrl, "--json",
+    ]);
+    const { seed } = JSON.parse(created.stdout) as { seed: string };
+    expect(seed).toBeTruthy();
+
+    const api = new EnrollApi(new RelayClient(relay.baseUrl));
+    const session = await api.offer(identity, "typescript device");
+    // A pasted request code on a phone is rarely clean.
+    const messy = `  ${session.rendezvousId}\n`;
+    await goCli([
+      "key", "approve", messy,
+      "--use-identity", identity,
+      "--relay", relay.baseUrl,
+      "--seed", seed,
+      "--sas", session.sas,
+      "--json",
+    ]);
+    const received = await api.claim(identity, session);
+    expect(received).not.toBeNull();
+    expect(toBase64url(received!)).toBe(seed);
+  }, 180_000);
+
+  it("moves a seed from TypeScript to the Go CLI", async () => {
+    const identity = uniqueIdentity("tsenroll");
+    const seed = newSeed();
+    const keys = identityKeysFromSeed(identity, seed);
+    await createIdentity(new IdentityApi(new RelayClient(relay.baseUrl)), identity, {
+      hosted: true,
+      keys,
+    });
+    const { signer } = signerFor(keys);
+
+    const newDevice = mkdtempSync(join(tmpdir(), "poweur-enroll-"));
+    const enrolled = await goCli(
+      ["key", "enroll", identity, "--relay", relay.baseUrl, "--json"],
+      newDevice,
+    );
+    const offer = JSON.parse(enrolled.stdout) as {
+      rendezvous_id: string;
+      sas: string;
+      ephemeral_private_key: string;
+    };
+
+    const api = new EnrollApi(new RelayClient(relay.baseUrl));
+    const pending = await api.pending(signer, identity, offer.rendezvous_id);
+    expect(pending.sas).toBe(offer.sas);
+    await api.approve(signer, identity, pending, seed);
+
+    await goCli(
+      [
+        "key", "claim", identity, offer.rendezvous_id,
+        "--ephemeral-key", offer.ephemeral_private_key,
+        "--relay", relay.baseUrl,
+        "--json",
+      ],
+      newDevice,
+    );
+    const listed = await goCli(["identity", "show", "--use-identity", identity, "--json"], newDevice);
+    const shown = JSON.parse(listed.stdout) as { public_key: string };
+    expect(shown.public_key.replace(/^ed25519:/, "")).toBe(
+      toBase64url(ed25519PublicKey(keys.signingPrivateKey)),
+    );
+  }, 180_000);
+
+  it("runs the ceremony through both CLIs", async () => {
+    const identity = uniqueIdentity("clienroll");
+    const created = await goCli([
+      "identity", "create", identity,
+      "--hosted", "--from-seed", "--relay", relay.baseUrl, "--json",
+    ]);
+    const { seed } = JSON.parse(created.stdout) as { seed: string };
+
+    const previousHome = process.env["POWEUR_HOME"];
+    const newDevice = mkdtempSync(join(tmpdir(), "poweur-ts-enroll-"));
+    process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
+    let offer: { rendezvous_id: string; sas: string; ephemeral_private_key: string };
+    try {
+      const enrolled = await tsCli([
+        "key", "enroll", identity, "--relay", relay.baseUrl, "--json",
+      ]);
+      expect(enrolled.code).toBe(0);
+      offer = JSON.parse(enrolled.stdout) as typeof offer;
+    } finally {
+      process.env["POWEUR_HOME"] = previousHome;
+    }
+
+    await goCli([
+      "key", "approve", offer.rendezvous_id,
+      "--use-identity", identity,
+      "--relay", relay.baseUrl,
+      "--seed", seed,
+      "--sas", offer.sas,
+      "--json",
+    ]);
+
+    process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
+    try {
+      const claimed = await tsCli([
+        "key", "claim", identity, offer.rendezvous_id,
+        "--ephemeral-key", offer.ephemeral_private_key,
+        "--relay", relay.baseUrl,
+        "--json",
+      ]);
+      expect(claimed.code).toBe(0);
+      const payload = JSON.parse(claimed.stdout) as { enrolled: boolean; identity: string };
+      expect(payload.enrolled).toBe(true);
+      expect(payload.identity).toBe(identity);
+    } finally {
+      process.env["POWEUR_HOME"] = previousHome;
+    }
   }, 180_000);
 });

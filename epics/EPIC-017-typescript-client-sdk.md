@@ -16,7 +16,7 @@
 | E17-T5 Go↔TS conformance vectors | **done** | 3 Go generators → `packages/identity/testdata/vectors/`; 60 TS conformance tests; rule recorded in AGENTS.md |
 | E17-T6 Web app adopts the package | **done** | mirror of [E15-T6](EPIC-015-web-app-ux.md); `apps/web` vendors the built ESM, owns no protocol code, and surfaced the unbound-`fetch` browser bug fixed in `http.ts` |
 | E17-T7 Docs, npm publish & agent quickstart | **partly done** | `apps/docs/docs/clients/js-sdk.md` + quickstart + overview link shipped; **npm publish and the release workflow are open** |
-| E17-T8 CLI parity with the Go CLI | **done** | *added* — `poweur` bin, every Go command, shared `~/.poweur` tree; 8 Go↔TS interop tests |
+| E17-T8 CLI parity with the Go CLI | **done** | *added* — `poweur` bin, every Go command including `key enroll|approve|claim`, shared `~/.poweur` tree; Go↔TS interop covers messaging and the new-device enrollment ceremony |
 
 ## Goal
 

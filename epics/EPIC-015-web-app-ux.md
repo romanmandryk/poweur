@@ -200,7 +200,10 @@ E11-T1–T4 landed on master; this is the UI over them, and it replaces the T1 m
       copy another authenticator still needs
 - [x] **The E11-T3 ceremony, both halves.** The new device shows a request code and six digits;
       the trusted device looks it up and shows the same six digits to compare before approving.
-      `test/e2e/enrollment.spec.js` drives two browser contexts and asserts the digits match
+      `test/e2e/enrollment.spec.js` drives two browser contexts and asserts the digits match.
+      The identity-host door (`alice.poweur.net`) does not re-ask the name; the offer is posted
+      to the identity's home relay; request-code paste strips wrapping noise so a phone keyboard
+      cannot turn a live offer into "rendezvous not found or expired".
 
 **A note on what the user types.** The six digits are a *comparison*, not an address: the
 rendezvous id is 16 random bytes, so that is what moves between devices, exactly as

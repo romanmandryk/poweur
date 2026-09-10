@@ -416,7 +416,9 @@ table. Ship **two transports plus one optimisation**, sharing a single enrollmen
 - [ ] Enrollment notification to **all** existing devices, including the device fingerprint
       and transport used, so an unexpected enrollment is visible after the fact
 - [x] CLI: `poweur key enroll` prints the rendezvous id and code; `key claim` completes it
-      later, so headless boxes can separate the two halves
+      later, so headless boxes can separate the two halves. TypeScript CLI has the same
+      commands. Go↔TS interop covers both directions, including a pasted id with wrapping
+      whitespace (the mobile-app failure mode: "rendezvous not found or expired")
 - [ ] Notify all existing devices when an enrollment completes — needs the typed-message
       channel (EPIC-009); today the inventory (`key ls`) shows it after the fact
 

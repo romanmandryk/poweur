@@ -16,6 +16,12 @@ import { openApp, registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
  * rather than to an interloper.
  */
 
+test.use({
+  launchOptions: {
+    args: ["--host-resolver-rules=MAP *.poweur.net 127.0.0.1,MAP poweur.net 127.0.0.1"],
+  },
+});
+
 test.describe("new-device enrollment", () => {
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
   let relay;
@@ -49,7 +55,7 @@ test.describe("new-device enrollment", () => {
     await laptopPage.click('.nav-tab[data-page="settings"]');
     await laptopPage.click("#row-keys-devices");
     await laptopPage.click("#btn-enroll-device");
-    await laptopPage.fill("#enroll-rendezvous", requestCode.trim());
+    await laptopPage.fill("#enroll-rendezvous", `  ${requestCode.trim()} \n`);
     await laptopPage.click("#btn-enroll-lookup");
 
     const laptopSas = await laptopPage.locator(".sas-code").innerText();
@@ -100,5 +106,44 @@ test.describe("new-device enrollment", () => {
     await expect(page.locator("#toast-root")).toContainText("No pending device");
     // Nothing to approve — the confirmation step never appears.
     await expect(page.locator("#btn-enroll-approve")).toHaveCount(0);
+  });
+
+  test("the identity-host door joins without re-typing the name", async ({ browser }) => {
+    // This is the production shape: the new device is at alice.poweur.net/app/,
+    // the unlocked one talks to the stored relay URL (127.0.0.1 here, poweur.net
+    // in prod). A lookup that posts the offer to the page origin and fetches
+    // from the stored relay is how "rendezvous not found" shows up in 15 seconds.
+    const laptop = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    const phone = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    const laptopPage = await laptop.newPage();
+    const phonePage = await phone.newPage();
+    await stubPasskeys(laptopPage);
+    await stubPasskeys(phonePage);
+
+    const identity = await registerIdentity(laptopPage, relay, `host${Date.now().toString(36)}`);
+    const port = new URL(relay.baseUrl).port;
+
+    await phonePage.goto(`http://${identity}:${port}/app/`);
+    await expect(phonePage.locator("#opt-join-device")).toBeVisible({ timeout: 30_000 });
+    await phonePage.click("#opt-join-device");
+    await expect(phonePage.locator("#join-identity")).toHaveCount(0);
+    await phonePage.click("#btn-join-start");
+
+    const requestCode = await phonePage.locator(".rendezvous-code").innerText();
+    const phoneSas = await phonePage.locator(".sas-code").innerText();
+    expect(requestCode.trim()).not.toBe("");
+    expect(phoneSas.trim()).toMatch(/^\d{6}$/);
+
+    await laptopPage.click('.nav-tab[data-page="settings"]');
+    await laptopPage.click("#row-keys-devices");
+    await laptopPage.click("#btn-enroll-device");
+    await laptopPage.fill("#enroll-rendezvous", `  ${requestCode.trim()} \n`);
+    await laptopPage.click("#btn-enroll-lookup");
+
+    const laptopSas = await laptopPage.locator(".sas-code").innerText();
+    expect(laptopSas.trim()).toBe(phoneSas.trim());
+
+    await laptop.close();
+    await phone.close();
   });
 });

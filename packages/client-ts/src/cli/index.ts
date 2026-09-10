@@ -8,10 +8,8 @@
 
 import { UsageError } from "./args.js";
 import { defaultStreams, fail, type Streams } from "./output.js";
-import {
-  identityCommand,
-  keyRotate,
-} from "./commands/identity.js";
+import { identityCommand } from "./commands/identity.js";
+import { keyCommand } from "./commands/enroll.js";
 import {
   anon,
   inbox,
@@ -39,6 +37,9 @@ export const HELP = `Usage:
   poweur identity lookup <identity> [--json]
   poweur identity export [--use-identity=...] [--out=<file.tar.gz>]
   poweur key rotate [--use-identity=...] [--grace=168h] [--json]
+  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]
+  poweur key approve <rendezvous-id> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--json]
+  poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url> [--relay=...] [--json]
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur inbox [--use-identity=...] [--json]
@@ -73,11 +74,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
   try {
     switch (command) {
       case "identity": return await identityCommand(rest, streams);
-      case "key":
-        if (rest[0] !== "rotate") {
-          throw new UsageError("usage: poweur key rotate [--use-identity <id>] [--grace 168h]");
-        }
-        return await keyRotate(rest.slice(1), streams);
+      case "key": return await keyCommand(rest, streams);
       case "send": return await send(rest, streams);
       case "inbox": return await inbox(rest, streams);
       case "listen": return await listen(rest, streams);

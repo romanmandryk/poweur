@@ -465,8 +465,9 @@ func TestDrill_EnrollNewDeviceViaCode(t *testing.T) {
 		t.Fatalf("expected a clear mismatch warning, got: %s", errBuf.String())
 	}
 
-	// With the right code it goes through.
-	runCLI(t, oldDevice, "key", "approve", offer.RendezvousID,
+	// With the right code it goes through — including when the user pasted
+	// the request code with the wrapping spaces a phone keyboard injects.
+	runCLI(t, oldDevice, "key", "approve", "  "+offer.RendezvousID+" \n",
 		"--use-identity", "enrolled.poweur.net", "--relay", relay.url,
 		"--seed", seed, "--sas", offer.SAS, "--json")
 
