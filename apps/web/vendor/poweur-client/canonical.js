@@ -127,16 +127,39 @@ export function canonicalShareGrant(grant) {
     }
     return fields.join("\n");
 }
-/** Share-group signing input (ShareGroup.Canonical). */
+/**
+ * Share-group signing input (ShareGroup.Canonical).
+ *
+ * A group *identity* (E05-T5) appends three more lines — the marker, the
+ * sorted admin list and the membership epoch. A group with no admins signs
+ * exactly the five lines it always did, so introducing group identities
+ * invalidated no existing owner-local group signature.
+ */
 export function canonicalShareGroup(group) {
     const members = (group.members ?? []).map((m) => m.trim().toLowerCase()).sort();
-    return [
+    const fields = [
         "poweur-share-group",
         group.group.trim().toLowerCase(),
         group.owner.trim().toLowerCase(),
         members.join(","),
         group.updated_at ?? "",
-    ].join("\n");
+    ];
+    if (group.admins?.length) {
+        const admins = group.admins.map((a) => a.trim().toLowerCase()).sort();
+        fields.push("poweur-group-identity", admins.join(","), String(group.epoch ?? 0));
+    }
+    return fields.join("\n");
+}
+/** Where a group identity keeps its own membership (identity.GroupSelfDoc). */
+export const GROUP_SELF_DOC = "poweur-sys/relay/groups/self.json";
+/**
+ * Does this grant-audience group name refer to an addressable group
+ * *identity* rather than an owner-local group? The rule is the presence of
+ * a dot: a Poweur ID is a domain name and always has one, and owner-local
+ * group names are forbidden from having one.
+ */
+export function isGroupIdentityName(name) {
+    return name.trim().includes(".");
 }
 /** Tree roots a grant may cover (identity.ShareRoots). */
 export const SHARE_ROOTS = ["shared", "apps"];
