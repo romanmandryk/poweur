@@ -1044,47 +1044,32 @@ func (s *Server) resolveSigningKey(ctx context.Context, sender, sessionID string
 // identity key and, on success, caches the resulting session so subsequent
 // messages on the same relay take the fast path.
 func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID string, proof *SessionProof) (storage.Session, error) {
-	if proof.SessionPublicKey == "" || proof.IssuedAt == "" || proof.ExpiresAt == "" ||
-		proof.Nonce == "" || proof.IdentitySignature == "" {
-		return storage.Session{}, errors.New("session proof incomplete")
-	}
-	issuedAt, err := time.Parse(time.RFC3339, proof.IssuedAt)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof issued_at invalid")
-	}
-	expiresAt, err := time.Parse(time.RFC3339, proof.ExpiresAt)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof expires_at invalid")
-	}
-	now := time.Now().UTC()
-	if now.After(expiresAt) {
-		return storage.Session{}, errors.New("session proof expired")
-	}
-	if expiresAt.Sub(issuedAt) > maxSessionTTL {
-		return storage.Session{}, errors.New("session proof exceeds max TTL")
-	}
-
-	normalizedPub, pubBytes, err := crypto.NormalizePublicKey(proof.SessionPublicKey)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof public key invalid: " + err.Error())
-	}
-
 	identityPub, err := s.resolveIdentityPublicKey(ctx, sender)
 	if err != nil {
 		return storage.Session{}, errors.New("cannot resolve identity key: " + err.Error())
 	}
-	canonical := crypto.CanonicalSessionRegistration(sender, normalizedPub, proof.IssuedAt, proof.ExpiresAt, proof.Nonce)
-	if err := crypto.VerifySignature(identityPub, canonical, proof.IdentitySignature); err != nil {
-		return storage.Session{}, errors.New("session proof signature invalid")
+	// One implementation of the proof chain, shared with the sign-in
+	// verifier (EPIC-008 E08-T1): completeness, RFC3339 timestamps, expiry,
+	// the 24h TTL cap, key encoding and the identity signature over
+	// CanonicalSessionRegistration.
+	verified, err := idpkg.VerifySessionProof(identityPub, sender, idpkg.SignInSessionProof{
+		SessionPublicKey:  proof.SessionPublicKey,
+		IssuedAt:          proof.IssuedAt,
+		ExpiresAt:         proof.ExpiresAt,
+		Nonce:             proof.Nonce,
+		IdentitySignature: proof.IdentitySignature,
+	}, time.Now().UTC())
+	if err != nil {
+		return storage.Session{}, err
 	}
 
 	sess := storage.Session{
 		ID:                sessionID,
 		Identity:          sender,
-		PublicKey:         normalizedPub,
-		PublicKeyBytes:    pubBytes,
-		IssuedAt:          issuedAt.UTC(),
-		ExpiresAt:         expiresAt.UTC(),
+		PublicKey:         verified.PublicKey,
+		PublicKeyBytes:    verified.PublicKeyBytes,
+		IssuedAt:          verified.IssuedAt,
+		ExpiresAt:         verified.ExpiresAt,
 		IssuedAtRaw:       proof.IssuedAt,
 		ExpiresAtRaw:      proof.ExpiresAt,
 		Nonce:             proof.Nonce,

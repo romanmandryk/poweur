@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	idpkg "github.com/poweur/identity"
 )
 
 // EncryptionMeta matches the encryption envelope attached to a message.
@@ -182,9 +184,12 @@ func CanonicalSessionRevocation(identity, sessionID, issuedAt, nonce string) str
 
 // CanonicalSessionRegistration is the string signed by the long-lived identity
 // key to authorize a short-lived session public key.
+//
+// The definition lives in packages/identity so the relay, the sign-in
+// verifier (EPIC-008) and any third-party Go backend derive the same bytes
+// from one place rather than from two copies that can drift.
 func CanonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce string) string {
-	return fmt.Sprintf("session-registration\n%s\n%s\n%s\n%s\n%s",
-		identity, sessionPublicKey, issuedAt, expiresAt, nonce)
+	return idpkg.CanonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce)
 }
 
 func ParsePublicKey(publicKey string) (ed25519.PublicKey, error) {
