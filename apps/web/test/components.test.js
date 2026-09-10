@@ -181,6 +181,21 @@ describe("IdentityInput", () => {
     expect(input.value()).toMatchObject({ identity: "alice.poweur.net" });
   });
 
+  it("a forced lookup is not discarded by the input debounce", async () => {
+    // Typing arms a 400ms debounce. Pressing Send calls lookup() immediately.
+    // If that debounce is left armed, it starts a second resolve and the
+    // submit's promise resolves to null — which is how CI dropped contact
+    // requests that a person (or Playwright) sent the moment they finished typing.
+    const resolve = (identity) =>
+      new Promise((r) => setTimeout(() => r(entry(identity)), 450));
+    const input = IdentityInput({ resolve, preview: false });
+    input.input.value = "alice.poweur.net";
+    input.input.dispatchEvent(new Event("input"));
+    const result = await input.lookup();
+    expect(result?.identity).toBe("alice.poweur.net");
+    expect(input.value()).toMatchObject({ identity: "alice.poweur.net" });
+  });
+
   it("keeps the last lookup's answer when an earlier one lands late", async () => {
     const slow = (identity) =>
       identity.startsWith("slow")

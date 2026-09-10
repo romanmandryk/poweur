@@ -8,7 +8,7 @@ This repo is a **pnpm + Go workspace** for Poweur: DNS/web identity, relay messa
 2. Prefer extending existing packages (`packages/identity`, `apps/api`, `apps/cli`, `apps/web`) over new top-level apps.
 3. Do not invent parallel crypto or message formats — match canonical strings and wire types already used by the relay and CLI.
 4. Do not commit secrets (`.env`, DNS tokens, private keys). `.env` examples stay local.
-5. **Bump a patch version** in the same change set for every shippable package you actually changed (see [Version bumps](#version-bumps-required)).
+5. **Bump a patch version** only when the change implements or fixes shipped behavior (see [Version bumps](#version-bumps-required)). Test-only and config-only changes keep the current version.
 
 ## Testing requirements (non-negotiable)
 
@@ -131,11 +131,14 @@ Run the slice you touched **and** `apps/integration` (and `apps/web` tests if th
 
 ## Version bumps (required)
 
-When a change updates a shippable package, bump that package's **patch** version
-in the **same change set**. Otherwise Settings → About and `poweur --version`
-still print the previous number, and two builds with different behavior share
-one version. Bump only the packages you touched; a protocol change that lands
-in Go + TS + web bumps all three.
+When a change **implements or fixes product behavior** in a shippable package,
+bump that package's **patch** version in the **same change set**. Otherwise
+Settings → About and `poweur --version` still print the previous number, and
+two builds with different behavior share one version.
+
+Do **not** bump for tests, fixtures, config, docs, or tooling that leave the
+shipped code's behavior unchanged. Bump only the packages whose implementation
+you touched; a protocol change that lands in Go + TS + web bumps all three.
 
 Go modules do **not** store this module's semver in `go.mod` (that file is the
 module path and its *dependencies*). Do not invent a version comment there —

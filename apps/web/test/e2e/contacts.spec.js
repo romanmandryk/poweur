@@ -136,6 +136,9 @@ test.describe("contacts, requests and key pinning", () => {
     await sender.fill(".idin input", readerId);
     await expect(sender.locator("#btn-add-contact-go")).toBeEnabled({ timeout: 20_000 });
     await sender.click("#btn-add-contact-go");
+    // The send is async; asserting it here keeps a failed lookup from looking
+    // like a missed push (the badge wait would time out either way).
+    await expect(sender.locator(".contact-row .chip")).toHaveText("Requested", { timeout: 20_000 });
 
     // No click on the reader's side: the badge appears on its own.
     await expect(reader.locator('.tray-tab[data-tray="requests"] .tray-badge'))

@@ -3030,7 +3030,17 @@ function startEventStream() {
     signal: streamAbort.signal,
     onEvent: (event) => {
       if (identity !== S.identity) return; // the user switched identities
-      if (event.type === "ready") return;  // nothing new by itself
+      // `ready` is the catch-up cue: the stream carries no backlog, so a
+      // client that connected (or reconnected) after something was queued
+      // has to read from its cursor rather than wait for the next event.
+      // streamForever's contract is the same — ignore this and a request
+      // parked while the socket was down stays invisible until a click.
+      if (event.type === "ready") {
+        loadInbox();
+        loadRequests({ force: true });
+        if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
+        return;
+      }
       // Each queue has its own event, because each is read by a different
       // call: told the wrong one, the app fetches an empty inbox and leaves
       // the tray that actually has something silent until the user happens to
@@ -3707,7 +3717,12 @@ function loadRequests({ force = false } = {}) {
   // queue has anything new, so "already loaded once" is not a reason to skip
   // it — an acceptance we never re-fetch is a handshake that never completes.
   // A short floor keeps a burst of renders from becoming a burst of requests.
-  if (Q.loading) return Promise.resolve();
+  if (Q.loading) {
+    // A push that lands mid-drain must not be dropped: the in-flight GET
+    // may have left the relay before the item was queued.
+    if (force) Q.pendingForce = true;
+    return Q.inFlight ?? Promise.resolve();
+  }
   if (!force && Q.fetchedAt && Date.now() - Q.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
     return Promise.resolve();
   }
@@ -3715,7 +3730,7 @@ function loadRequests({ force = false } = {}) {
   if (!client) return Promise.resolve();
 
   Q.loading = true;
-  return challengeSerial(async () => {
+  Q.inFlight = challengeSerial(async () => {
     try {
       // `GET /requests/{id}` drains the same way the inbox does.
       mergeInto(Q.incoming, await client.requests());
@@ -3728,13 +3743,20 @@ function loadRequests({ force = false } = {}) {
     } finally {
       Q.loading = false;
       Q.fetchedAt = Date.now();
+      Q.inFlight = null;
+      const again = Q.pendingForce;
+      Q.pendingForce = false;
       // Repaint for the whole destination, not just this tray: the count is
       // on the tray *bar*, which is visible from every tray. Repainting only
       // when the Requests tray was open meant a request that arrived by push
       // was fetched and then not shown.
       if (R.page === "messages" && !R.sub) render();
+      // Schedule outside this serial task: chaining another challenge-signed
+      // drain from here waits on a promise that cannot resolve until we do.
+      if (again) queueMicrotask(() => loadRequests({ force: true }));
     }
   });
+  return Q.inFlight;
 }
 
 /** Refresh everything a contact write invalidates, then repaint. */
@@ -4128,14 +4150,17 @@ function showPolicyPanel() {
 /** Drain the anonymous queue — challenge-signed, so serialized like the rest. */
 function loadAnon({ force = false } = {}) {
   const A = S.anon;
-  if (A.loading) return Promise.resolve();
+  if (A.loading) {
+    if (force) A.pendingForce = true;
+    return A.inFlight ?? Promise.resolve();
+  }
   if (!force && A.fetchedAt && Date.now() - A.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
     return Promise.resolve();
   }
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
   A.loading = true;
-  return challengeSerial(async () => {
+  A.inFlight = challengeSerial(async () => {
     try {
       // `GET /anon/{id}` drains like the inbox: what we are handed here is
       // handed here once, so it is archived in the same step.
@@ -4149,9 +4174,14 @@ function loadAnon({ force = false } = {}) {
     } finally {
       A.loading = false;
       A.fetchedAt = Date.now();
+      A.inFlight = null;
+      const again = A.pendingForce;
+      A.pendingForce = false;
       if (R.page === "messages" && !R.sub) render();
+      if (again) queueMicrotask(() => loadAnon({ force: true }));
     }
   });
+  return A.inFlight;
 }
 
 // ─── Profile (EPIC-006 E06-T2) ───────────────────────────────────────────────
