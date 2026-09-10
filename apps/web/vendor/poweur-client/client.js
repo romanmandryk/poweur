@@ -6,6 +6,7 @@
  * Everything it composes is usable standalone; this is convenience, not a
  * layer you have to go through.
  */
+import { readAnalyticsPreference, writeAnalyticsPreference } from "./analytics.js";
 import { PoweurError } from "./errors.js";
 import { Contacts, fetchRequests } from "./contacts.js";
 import { DavClient, mintDavToken } from "./files.js";
@@ -22,6 +23,8 @@ import { Shares } from "./shares.js";
 import { SyncClient } from "./sync.js";
 import { CONTACT_ACCEPTED, CONTACT_BLOCKED, CONTACT_REQUESTED, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST, } from "./types.js";
 export class PoweurClient {
+    async analyticsPreference() { return readAnalyticsPreference(await this.dav()); }
+    async setAnalyticsConsent(granted) { return writeAnalyticsPreference(await this.dav(), granted); }
     relay;
     signer;
     decryptor;
