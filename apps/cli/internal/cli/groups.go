@@ -37,7 +37,7 @@ import (
 
 func runGroup(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: poweur group <create|show|add|remove>")
+		fmt.Fprintln(stderr, "usage: poweur group <create|show|add|remove|send|inbox>")
 		return 1
 	}
 	switch args[0] {
@@ -49,8 +49,12 @@ func runGroup(args []string, stdout, stderr io.Writer) int {
 		return runGroupUpdate(args[1:], stdout, stderr, true)
 	case "remove":
 		return runGroupUpdate(args[1:], stdout, stderr, false)
+	case "send":
+		return runGroupSend(args[1:], stdout, stderr)
+	case "inbox":
+		return runGroupInbox(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "unknown group subcommand (want create, show, add, remove)")
+		fmt.Fprintln(stderr, "unknown group subcommand (want create, show, add, remove, send, inbox)")
 		return 1
 	}
 }
