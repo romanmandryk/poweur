@@ -53,10 +53,14 @@ func taskDocPath(projectID, taskID string) (string, error) {
 // Init writes the mandatory manifest and the projects/ collection. Safe to
 // re-run; the relay validates the manifest on write (E06-T3) and rejects an
 // app_id that does not match the directory.
+//
+// It deliberately does NOT try to create `/apps`. A token scoped the way
+// app-data.md tells apps to ask (`dav:rw:/apps/net.poweur.tasks/`) covers the
+// namespace and everything below it and nothing above it, so a MKCOL of the
+// parent is a guaranteed 403. `/apps` is one of the five roots the relay
+// provisions with the home, so it is always already there. Neither fact was
+// written down before this app hit it — see PCP-0007's retrospective.
 func (s *Store) Init(ctx context.Context) error {
-	if err := s.DAV.Mkcol(ctx, "/apps"); err != nil {
-		return err
-	}
 	if err := s.DAV.Mkcol(ctx, NamespaceRoot); err != nil {
 		return err
 	}

@@ -257,16 +257,19 @@ func dispatch(ctx context.Context, store *Store, args []string, asJSON bool, out
 // unknown-field rule exists for: whatever another implementation wrote into
 // this document has to still be there afterwards.
 func applyUpdates(ctx context.Context, store *Store, projectID, taskID string, pairs []string, asJSON bool, out io.Writer) error {
+	// Parse and reject bad input *before* the round trip: a typo should not
+	// cost a network call, and it must not leave the caller unsure whether a
+	// partial write happened.
+	updates, err := parseUpdates(pairs)
+	if err != nil {
+		return err
+	}
 	t, err := store.GetTask(ctx, projectID, taskID)
 	if err != nil {
 		return err
 	}
-	for _, kv := range pairs {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok {
-			return fmt.Errorf("expected key=value, got %q", kv)
-		}
-		if err := setField(&t, strings.TrimSpace(k), v); err != nil {
+	for _, apply := range updates {
+		if err := apply(&t); err != nil {
 			return err
 		}
 	}
@@ -281,50 +284,76 @@ func applyUpdates(ctx context.Context, store *Store, projectID, taskID string, p
 	return nil
 }
 
-func setField(t *Task, key, value string) error {
+// parseUpdates turns `key=value` arguments into mutations, rejecting unknown
+// keys and unparseable values up front.
+func parseUpdates(pairs []string) ([]func(*Task) error, error) {
+	out := make([]func(*Task) error, 0, len(pairs))
+	for _, kv := range pairs {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return nil, fmt.Errorf("expected key=value, got %q", kv)
+		}
+		apply, err := parseUpdate(strings.TrimSpace(k), v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, apply)
+	}
+	return out, nil
+}
+
+func parseUpdate(key, value string) (func(*Task) error, error) {
+	set := func(f func(*Task)) (func(*Task) error, error) {
+		return func(t *Task) error {
+			f(t)
+			return t.Validate()
+		}, nil
+	}
 	switch key {
 	case "status":
 		if !KnownStatus(value) {
-			return fmt.Errorf("status must be one of todo, doing, done, cancelled")
+			return nil, fmt.Errorf("status must be one of todo, doing, done, cancelled")
 		}
-		t.SetStatus(value)
+		return set(func(t *Task) { t.SetStatus(value) })
 	case "title":
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("title must not be empty")
+			return nil, fmt.Errorf("title must not be empty")
 		}
-		t.Title = value
+		return set(func(t *Task) { t.Title = value })
 	case "notes":
-		t.Notes = value
+		return set(func(t *Task) { t.Notes = value })
 	case "due":
-		t.Due = value
+		return set(func(t *Task) { t.Due = value })
 	case "start":
-		t.Start = value
+		return set(func(t *Task) { t.Start = value })
 	case "assignee":
-		t.Assignee = value
+		return set(func(t *Task) { t.Assignee = value })
 	case "parent":
-		t.Parent = value
+		if value != "" {
+			if err := ValidateID(value); err != nil {
+				return nil, fmt.Errorf("parent: %w", err)
+			}
+		}
+		return set(func(t *Task) { t.Parent = value })
 	case "priority":
 		n, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("priority must be an integer 0-9")
+			return nil, fmt.Errorf("priority must be an integer 0-9")
 		}
-		t.Priority = n
+		if n < 0 || n > 9 {
+			return nil, fmt.Errorf("priority must be an integer 0-9")
+		}
+		return set(func(t *Task) { t.Priority = n })
 	case "tags":
-		if strings.TrimSpace(value) == "" {
-			t.Tags = nil
-			break
-		}
 		var tags []string
 		for _, tag := range strings.Split(value, ",") {
 			if tag = strings.TrimSpace(tag); tag != "" {
 				tags = append(tags, tag)
 			}
 		}
-		t.Tags = tags
-	default:
-		return fmt.Errorf("unknown field %q (settable: status, title, notes, due, start, priority, tags, parent, assignee)", key)
+		return set(func(t *Task) { t.Tags = tags })
 	}
-	return t.Validate()
+	return nil, fmt.Errorf("unknown field %q (settable: status, title, notes, due, start, priority, tags, parent, assignee)", key)
 }
 
 func formatTask(t Task) string {
