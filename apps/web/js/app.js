@@ -53,6 +53,7 @@ import { IdentityInput } from "./components/identity-input.js";
 import { PolicyControls, INBOX_MODES, describePowBits } from "./components/policy-controls.js";
 import { AudiencePicker } from "./components/audience-picker.js";
 import { ProfileCard } from "./components/profile-card.js";
+import { describeDevice, deviceIcon } from "./components/devices.js";
 import {
   listEnrollments, enrollThisBrowser, removeEnrollment, deviceLabel,
   recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
@@ -4183,6 +4184,17 @@ async function showKeysAndDevicesPanel() {
     setLoading(false);
     return toast(`Could not read your devices: ${error.message}`, "error", 7000);
   }
+  // The device registry (EPIC-004 E04-T6) is a different list from the key
+  // enrollments above and belongs beside them: enrollments are who can
+  // *unlock* this identity, the registry is who is *using* it — a phone that
+  // syncs, a laptop with an app password, a headless agent. Losing it is
+  // never fatal to this panel, so a failure costs the section, not the page.
+  let registry = [];
+  try {
+    registry = (await (await dav()).devices()).devices ?? [];
+  } catch {
+    registry = null;
+  }
   setLoading(false);
 
   const record = loadIdentityRecord(identity);
@@ -4226,6 +4238,35 @@ async function showKeysAndDevicesPanel() {
     <p class="muted small" style="margin-top:10px">
       Removing a device stops it reading your stored keys and ends its sessions. It does not
       protect against someone who already copied them — that needs a key rotation.
+    </p>
+
+    <h3 class="panel-subhead">Devices using this identity</h3>
+    <p class="muted small">
+      What the relay has seen: apps and machines holding sessions, app passwords or sync
+      cursors. Only you can see this list.
+    </p>
+    ${registry === null
+      ? `<p class="muted small">Could not read the device registry.</p>`
+      : registry.length
+        ? `<div class="enrollment-list">
+            ${registry.map(d => `
+              <div class="enrollment-row${d.revoked ? " is-revoked" : ""}">
+                <span class="enrollment-icon">${deviceIcon(d.kind)}</span>
+                <div class="enrollment-body">
+                  <div class="enrollment-label">
+                    ${esc(d.name || "Unnamed device")}
+                    ${d.revoked ? `<span class="chip chip-orange">revoked</span>` : ""}
+                  </div>
+                  <div class="enrollment-meta small muted">${esc(describeDevice(d))}</div>
+                </div>
+                ${d.revoked ? "" : `<button class="btn btn-sm" data-revoke-device="${esc(d.id)}"
+                        aria-label="Revoke ${esc(d.name || d.id)}">Revoke</button>`}
+              </div>`).join("")}
+          </div>`
+        : `<p class="muted small">No devices recorded yet.</p>`}
+    <p class="muted small" style="margin-top:10px">
+      Revoking ends that device's sessions, DAV tokens and app passwords. A device that still
+      holds your identity key can enrol again — that case needs a key rotation.
     </p>`,
   () => {
     q("#btn-enroll-this")?.addEventListener("click", async () => {
@@ -4257,6 +4298,25 @@ async function showKeysAndDevicesPanel() {
           await removeEnrollment(clientFor(identity), identity, id);
           setLoading(false);
           toast("Device removed", "success");
+        } catch (error) {
+          setLoading(false);
+          toast(error.message, "error", 8000);
+        }
+        showKeysAndDevicesPanel();
+      }));
+
+    qAll("[data-revoke-device]").forEach(button =>
+      button.addEventListener("click", async () => {
+        const id = button.dataset.revokeDevice;
+        if (!confirm("Revoke this device? Its sessions, tokens and app passwords stop working.")) return;
+        closePanel();
+        setLoading(true, "Revoking device…");
+        try {
+          const result = await (await dav()).revokeDevice(id);
+          setLoading(false);
+          toast(`Revoked: ${result.sessions_revoked} session(s), ` +
+                `${result.dav_tokens_revoked} token(s), ${result.app_passwords_revoked} app password(s)`,
+                "success", 5000);
         } catch (error) {
           setLoading(false);
           toast(error.message, "error", 8000);

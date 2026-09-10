@@ -240,4 +240,32 @@ describe("TypeScript client ↔ real relay (files, sync, shares)", () => {
     expect(formatBytes(1024)).toBe("1.0 KB");
     expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
   });
+
+  // Device registry (EPIC-004 E04-T6). The browser is a device like any
+  // other; the owner has to be able to see it and cut it off.
+  describe("device registry", () => {
+    it("lists the devices the relay has seen", async () => {
+      const registry = await dav.devices();
+      expect(registry.identity).toBe(owner.identity);
+      expect(Array.isArray(registry.devices)).toBe(true);
+      for (const device of registry.devices) {
+        expect(device.id).toMatch(/^dev_[a-z2-7]{16}$/);
+      }
+    });
+
+    it("refuses to revoke anything that is not a device id", async () => {
+      for (const bad of ["", "nope", "dev_../../etc/passwd", "sess_abcdefghijklmnop"]) {
+        await expect(dav.revokeDevice(bad)).rejects.toThrow();
+      }
+    });
+
+    it("reports a well-formed but unknown device as not found", async () => {
+      await expect(dav.revokeDevice("dev_aaaaaaaaaaaaaaaa")).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("keeps one identity's registry away from another", async () => {
+      const snoop = new DavClient(visitor.client.relay, owner.identity, (await visitor.client.davToken()).token);
+      await expect(snoop.devices()).rejects.toMatchObject({ status: 401 });
+    });
+  });
 });

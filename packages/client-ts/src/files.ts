@@ -13,7 +13,13 @@ import { rfc3339 } from "./encoding.js";
 import { PoweurError, RelayError } from "./errors.js";
 import { RelayClient, trimRelayUrl } from "./http.js";
 import { newNonce } from "./ids.js";
-import type { DavEntry, DavTokenResponse, QuotaResponse } from "./types.js";
+import type {
+  DavEntry,
+  DavTokenResponse,
+  DeviceListResponse,
+  DeviceRevokeResponse,
+  QuotaResponse,
+} from "./types.js";
 
 /** Tree roots and who can see them (files/storage-model.md). */
 export const ROOT_INFO: Record<string, { badge: string; desc: string }> = {
@@ -190,6 +196,50 @@ export class DavClient {
       });
     }
     return (await response.json()) as QuotaResponse;
+  }
+
+  /**
+   * The owner's device registry (EPIC-004 E04-T6): every machine the relay
+   * has seen using this identity, with a last-seen and a server-side sync
+   * cursor so staleness is answerable without asking the device.
+   *
+   * Owner-only, and deliberately so — presence is not user-visible in v1,
+   * meaning no peer can learn it. There is no endpoint that reports another
+   * identity's devices.
+   */
+  async devices(): Promise<DeviceListResponse> {
+    return this.#deviceRequest<DeviceListResponse>("GET", "");
+  }
+
+  /**
+   * Cut a device off: its sessions, its DAV tokens and its app passwords all
+   * stop working, and it cannot mint replacements under the same
+   * fingerprint.
+   *
+   * It cannot un-steal an identity key. A device holding that key *is* the
+   * owner and can enrol afresh; recovering from a compromised key is key
+   * rotation, not device revocation.
+   */
+  async revokeDevice(deviceId: string): Promise<DeviceRevokeResponse> {
+    return this.#deviceRequest<DeviceRevokeResponse>("POST", "/revoke", { device_id: deviceId });
+  }
+
+  async #deviceRequest<T>(method: string, suffix: string, body?: unknown): Promise<T> {
+    const response = await this.client.raw({
+      method,
+      path: `/devices/${encodeURIComponent(this.identity)}${suffix}`,
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!response.ok) {
+      throw new PoweurError("relay_error", `devices ${method} failed: HTTP ${response.status}`, {
+        status: response.status,
+      });
+    }
+    return (await response.json()) as T;
   }
 }
 
