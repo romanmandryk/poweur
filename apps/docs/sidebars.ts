@@ -42,6 +42,7 @@ const sidebars: SidebarsConfig = {
         'files/storage-model',
         'files/webdav',
         'files/sharing',
+        'files/group-identities',
         'files/sync-protocol',
         'files/e2ee-design',
       ],

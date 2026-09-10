@@ -221,8 +221,14 @@ A grant with `{"group": "team"}` in its audience follows the *current* member li
 a member grants access with one signed file update and no new grant; removing a member
 revokes theirs. Limits: 1000 members per group, 100 audience entries per grant, 64 KB per
 document. Group membership is visible to the relay (it must be, to enforce) but never to
-other users. Cross-owner *group identities* (a group with its own Poweur ID, usable across
-owners and as a message recipient) are designed in E05-T5 and deferred.
+other users.
+
+Cross-owner **group identities** — a group with its own Poweur ID, usable in *any* owner's
+grants — are the same document with an `admins` list and an `epoch`, kept in the group's own
+tree and signed by the group's own key. They get their own page:
+[Group identities](group-identities.md). An owner-local group name may not contain a dot,
+which is what keeps `{"group": "team"}` and `{"group": "team.acme.poweur.net"}` from ever
+meaning the same thing.
 
 ## Revocation & expiry
 
@@ -243,6 +249,9 @@ poweur share group set team --members bob.example.org,carol.poweur.net
 poweur share group ls
 poweur share group remove team
 ```
+
+Group identities have their own verbs (`poweur group create|show|add|remove`) and are
+addressed with `--with-group <poweur-id>` — see [Group identities](group-identities.md).
 
 The recipient needs no ceremony in v1: they mint a DAV token for the owner's tree at the
 owner's relay (`poweur dav token --audience alice.poweur.net --scope dav:full --relay …`)
