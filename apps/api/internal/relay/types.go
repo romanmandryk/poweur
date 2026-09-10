@@ -29,12 +29,22 @@ type Message struct {
 	Signature string `json:"signature"`
 	// Type is the optional envelope-level message type (EPIC-007
 	// `sys.contact.*`). Plaintext by design: the relay routes on it (policy
-	// enforcement) without reading the E2E-encrypted payload. Bound into
-	// the signature via CanonicalMessageTyped.
-	Type         string          `json:"type,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	SessionProof *SessionProof   `json:"session_proof,omitempty"`
-	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
+	// enforcement) without reading the E2E-encrypted payload. Absent means
+	// `chat.text`. Bound into the signature via CanonicalMessageEnvelope.
+	Type string `json:"type,omitempty"`
+	// ThreadID groups messages into a conversation thread (EPIC-009 E09-T3).
+	// Opaque to the relay: it never invents one and never rewrites one.
+	ThreadID string `json:"thread_id,omitempty"`
+	// ExpiresAt is when the sender says this message stops being meaningful.
+	// Signed and carried here; refusing delivery past it is E09-T6.
+	ExpiresAt string `json:"expires_at,omitempty"`
+	// Metadata is small, flat, signed, and **plaintext** — addressing, not
+	// content. Values are strings so two implementations cannot disagree
+	// about how to serialize it for signing.
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	SessionID    string            `json:"session_id,omitempty"`
+	SessionProof *SessionProof     `json:"session_proof,omitempty"`
+	Encryption   *EncryptionMeta   `json:"encryption,omitempty"`
 
 	// Anonymous-sender challenge response (EPIC-014): set only on unsigned
 	// messages (Sender and Signature empty) answering a 428 challenge.

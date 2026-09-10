@@ -101,6 +101,48 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 				"msg_1768469400000_abcdefghi", "", "sys.contact.request", enc),
 		},
 		{
+			// EPIC-009 E09-T3: thread_id alone, with no `type` line before
+			// it — the case that proves the new lines are independently
+			// optional rather than a block that appears together.
+			Name: "message-threaded",
+			Inputs: map[string]any{
+				"sender": "alice.poweur.net", "recipient": "bob.example.org",
+				"timestamp": vectorTime, "payload": "Y2lwaGVydGV4dA",
+				"id": "msg_1768469400000_abcdefghi", "session_id": "sess_0011",
+				"encryption": encInput, "thread_id": "thr_1768469400000_project",
+			},
+			Canonical: CanonicalMessageEnvelope(
+				"alice.poweur.net", "bob.example.org", vectorTime, "Y2lwaGVydGV4dA",
+				"msg_1768469400000_abcdefghi", "sess_0011", "", "thr_1768469400000_project", "", nil, enc),
+		},
+		{
+			// Every E09-T3 field at once, including metadata whose map order
+			// differs from its canonical order — the vector is what pins the
+			// TypeScript client's key sort to Go's.
+			Name: "message-full-envelope",
+			Inputs: map[string]any{
+				"sender": "alice.poweur.net", "recipient": "bob.example.org",
+				"timestamp": vectorTime, "payload": "Y2lwaGVydGV4dA",
+				"id": "msg_1768469400000_abcdefghi", "session_id": "sess_0011",
+				"encryption": encInput, "type": "chat.attachment",
+				"thread_id": "thr_1768469400000_project", "expires_at": "2026-01-16T09:30:00Z",
+				"metadata": map[string]string{
+					"share.path": "shared/.attachments/a1",
+					"mime":       "image/png",
+					"bytes":      "20480",
+				},
+			},
+			Canonical: CanonicalMessageEnvelope(
+				"alice.poweur.net", "bob.example.org", vectorTime, "Y2lwaGVydGV4dA",
+				"msg_1768469400000_abcdefghi", "sess_0011", "chat.attachment",
+				"thr_1768469400000_project", "2026-01-16T09:30:00Z",
+				map[string]string{
+					"share.path": "shared/.attachments/a1",
+					"mime":       "image/png",
+					"bytes":      "20480",
+				}, enc),
+		},
+		{
 			Name: "ack",
 			Inputs: map[string]any{
 				"id": "ack_1768469400000_jklmnopqr", "message_id": "msg_1768469400000_abcdefghi",

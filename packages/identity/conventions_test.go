@@ -72,10 +72,31 @@ func TestConventionsRegistryValid(t *testing.T) {
 			t.Fatalf("message type %q: bad status %q", m.Type, m.Status)
 		}
 	}
-	// Message types the code emits must be registered.
-	for _, mustHave := range []string{MsgTypeContactRequest, MsgTypeContactAccept, MsgTypeContactBlock} {
-		if !seen[mustHave] {
+	// The registry and the code's reserved set must agree in *both*
+	// directions (EPIC-009 E09-T3). The relay refuses an unregistered
+	// `sys.*` envelope, so a type present in one place and missing from the
+	// other is not a documentation gap — it is a message that silently
+	// bounces, or a name nobody claimed.
+	registered := map[string]bool{}
+	for _, m := range reg.MessageTypes {
+		registered[m.Type] = true
+	}
+	for _, mustHave := range SystemMessageTypes() {
+		if !registered[mustHave] {
 			t.Fatalf("message type %q used in code but missing from registry.json", mustHave)
+		}
+	}
+	for _, m := range reg.MessageTypes {
+		if !IsKnownSystemType(m.Type) {
+			t.Fatalf("message type %q is in registry.json but not in SystemMessageTypes()", m.Type)
+		}
+	}
+	// Every registered type must also pass the envelope validator the relay
+	// applies at ingress — a name the registry blesses and the relay rejects
+	// would be worse than an unregistered one.
+	for _, m := range reg.MessageTypes {
+		if err := ValidateMessageType(m.Type); err != nil {
+			t.Fatalf("registered message type %q fails ValidateMessageType: %v", m.Type, err)
 		}
 	}
 	if len(reg.SchemaNamespaces) == 0 {

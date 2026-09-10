@@ -7,13 +7,20 @@ import (
 )
 
 type StoredMessage struct {
-	ID         string                `json:"id"`
-	Sender     string                `json:"sender"`
-	Recipient  string                `json:"recipient"`
-	Timestamp  string                `json:"timestamp"`
-	Payload    string                `json:"payload"`
-	Signature  string                `json:"signature"`
-	Type       string                `json:"type,omitempty"`
+	ID        string `json:"id"`
+	Sender    string `json:"sender"`
+	Recipient string `json:"recipient"`
+	Timestamp string `json:"timestamp"`
+	Payload   string `json:"payload"`
+	Signature string `json:"signature"`
+	Type      string `json:"type,omitempty"`
+	// ThreadID, ExpiresAt and Metadata are part of what the sender signed
+	// (EPIC-009 E09-T3), so the spool has to hand them back verbatim: a
+	// recipient that recomputes the canonical string without them would
+	// reject a message the relay already verified.
+	ThreadID   string                `json:"thread_id,omitempty"`
+	ExpiresAt  string                `json:"expires_at,omitempty"`
+	Metadata   map[string]string     `json:"metadata,omitempty"`
 	SessionID  string                `json:"session_id,omitempty"`
 	Encryption *StoredEncryptionMeta `json:"encryption,omitempty"`
 }

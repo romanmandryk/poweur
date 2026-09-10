@@ -84,51 +84,27 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	policy, contacts := s.recipientPolicy(ctx, msg.Recipient)
 	contact, known := contacts.Find(msg.Sender)
 
-	const rejected = "recipient does not accept messages from this sender (send a contact request if their policy allows it)"
-
 	if known && contact.State == idpkg.ContactBlocked {
-		return policyReject, rejected
+		return policyReject, rejectedDetail
 	}
 	if known && contact.State == idpkg.ContactAccepted {
 		return policyAllow, ""
 	}
 
 	// Non-contact (or pending request state) from here on.
-	//
-	// One rule spans both closed modes: an accept is the answer to a request
-	// *we* sent, so it is admitted whenever we already list the sender as
-	// `requested` — but only then, and only into the requests queue, never
-	// the message stream. Without it a `contacts_only` inbox could send a
-	// contact request and never hear back: their accept bounces off our
-	// policy, our contacts stay `requested`, and our policy then bounces
-	// every message they send. Both sides see silence and neither can tell
-	// it apart from being ignored.
-	answersOurRequest := msg.Type == idpkg.MsgTypeContactAccept &&
-		known && contact.State == idpkg.ContactRequested
-
 	switch policy.Mode {
 	case idpkg.InboxOpen:
 		return policyAllow, ""
-	case idpkg.InboxContactsOnly:
-		if answersOurRequest {
-			return policyQueueRequest, ""
-		}
-		return policyReject, rejected
-	case idpkg.InboxContactsAndRequests:
-		switch msg.Type {
-		case idpkg.MsgTypeContactRequest:
-			if len(msg.Payload) > maxContactRequestPayload {
-				return policyReject, "contact request intro too large"
-			}
-			return policyQueueRequest, ""
-		case idpkg.MsgTypeContactAccept:
-			if answersOurRequest {
-				return policyQueueRequest, ""
-			}
-			return policyReject, rejected
-		default:
-			return policyReject, rejected
-		}
+	case idpkg.InboxContactsOnly, idpkg.InboxContactsAndRequests:
+		// A closed inbox is where the message *type* starts to matter, so
+		// the decision moves to the per-type hooks in typed.go. Everything
+		// without a hook is rejected — the default a closed inbox means.
+		return hookFor(msg.Type)(closedInboxCtx{
+			msg:          msg,
+			mode:         policy.Mode,
+			contact:      contact,
+			knownContact: known,
+		})
 	default:
 		return policyAllow, ""
 	}
@@ -144,6 +120,9 @@ func storedFromMessage(msg Message) storage.StoredMessage {
 		Payload:   msg.Payload,
 		Signature: msg.Signature,
 		Type:      msg.Type,
+		ThreadID:  msg.ThreadID,
+		ExpiresAt: msg.ExpiresAt,
+		Metadata:  msg.Metadata,
 		SessionID: msg.SessionID,
 	}
 	if msg.Encryption != nil {
