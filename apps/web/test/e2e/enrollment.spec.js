@@ -125,8 +125,10 @@ test.describe("new-device enrollment", () => {
     await phonePage.goto(`http://${identity}:${port}/app/`);
     await expect(phonePage.locator("#opt-join-device")).toBeVisible({ timeout: 30_000 });
     await phonePage.click("#opt-join-device");
+    // The host already named the identity — no field, no extra tap.
     await expect(phonePage.locator("#join-identity")).toHaveCount(0);
-    await phonePage.click("#btn-join-start");
+    await expect(phonePage.locator("#btn-join-start")).toHaveCount(0);
+    await expect(phonePage.locator(".rendezvous-code")).toBeVisible({ timeout: 30_000 });
 
     const requestCode = await phonePage.locator(".rendezvous-code").innerText();
     const phoneSas = await phonePage.locator(".sas-code").innerText();

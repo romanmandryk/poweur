@@ -147,6 +147,39 @@ test.describe("native custody", () => {
     expect(await page.evaluate(() => Object.keys(window.__keystore.secrets).length)).toBe(0);
   });
 
+  test("Add identity in the shell does not offer a passkey", async ({ page }) => {
+    await stubPasskeys(page);
+    await stubKeystore(page);
+    await openApp(page, relay);
+    await page.click("#opt-have-id");
+
+    // Native custody: join an existing ID or create one. Passkeys are a
+    // browser authenticator, and "Add new ID" is how the app claims a name
+    // from this screen (the landing already has the claim field too).
+    await expect(page.locator("#opt-join-device")).toBeVisible();
+    await expect(page.locator("#opt-create-new")).toBeVisible();
+    await expect(page.locator("#signin-id-input")).toHaveCount(0);
+    await expect(page.locator("#btn-signin-passkey")).toHaveCount(0);
+    await expect(page.locator("#btn-door-signin")).toHaveCount(0);
+  });
+
+  test("Keys & devices talks about this device, not this browser", async ({ page }) => {
+    test.slow();
+    await stubPasskeys(page);
+    await stubKeystore(page);
+    await claim(page, relay, `key${Date.now().toString(36)}`);
+
+    await page.click('.nav-tab[data-page="settings"]');
+    await page.click("#row-keys-devices");
+
+    const panel = page.locator("#panel-root");
+    await expect(panel.locator(".enrollment-row")).toHaveCount(1, { timeout: 20_000 });
+    await expect(panel).toContainText("this device");
+    await expect(panel).toContainText("the OS keystore");
+    await expect(panel).not.toContainText("this browser");
+    await expect(panel).not.toContainText("Back up this browser");
+  });
+
   test("removing an identity forgets its hardware secret", async ({ page }) => {
     test.slow();
     await stubPasskeys(page);

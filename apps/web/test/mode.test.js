@@ -8,7 +8,7 @@
  * trailing root dot, a port, or a two-label subdomain that is not an identity.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { classifyHost, currentHost, modeNow, resolveMode, resetMode } from "../js/mode.js";
+import { classifyHost, currentHost, modeNow, resolveMode, resetMode, addIdOptions } from "../js/mode.js";
 
 const ROOT = {
   service: "poweur-relay",
@@ -147,4 +147,27 @@ describe("modeNow / resolveMode", () => {
     // that leaves the caller's condition true.
     expect(await resolveMode()).toBe(info);
   });
+});
+
+describe("addIdOptions", () => {
+  const cases = [
+    ["shell",    { passkey: false, join: true,  create: true,  joinSubject: "" }],
+    ["unknown",  { passkey: true,  join: true,  create: true,  joinSubject: "" }],
+    ["launcher", { passkey: true,  join: false, create: false, joinSubject: "" }],
+    ["identity", { passkey: true,  join: true,  create: false, joinSubject: "bob.poweur.net" }],
+  ];
+
+  for (const [mode, expected] of cases) {
+    it(`${mode} offers ${Object.entries(expected).filter(([, v]) => v === true).map(([k]) => k).join(" + ") || "nothing"}`, () => {
+      const info = mode === "identity"
+        ? classifyHost("bob.poweur.net", ROOT)
+        : mode === "launcher"
+          ? classifyHost("id.poweur.net", ROOT)
+          : mode === "shell"
+            ? classifyHost("localhost", ROOT, { shell: true })
+            : classifyHost("localhost", ROOT);
+      expect(info.mode).toBe(mode);
+      expect(addIdOptions(info)).toEqual(expected);
+    });
+  }
 });

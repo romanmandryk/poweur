@@ -55,6 +55,20 @@ test.describe("front doors", () => {
     await expect(page.locator(".landing-step")).toHaveCount(3);
   });
 
+  test("I already have an ID on the launcher is passkey sign-in, not join or create", async ({ page }) => {
+    // Joining from poweur.net would store keys on the wrong origin; creating
+    // is the landing's job. The only thing left is a passkey for an identity
+    // this browser already holds.
+    await stubPasskeys(page);
+    await page.goto(at("id.poweur.net"));
+    await page.waitForSelector("#claim-card");
+    await page.click("#opt-have-id");
+
+    await expect(page.locator("#signin-id-input")).toBeVisible();
+    await expect(page.locator("#opt-join-device")).toHaveCount(0);
+    await expect(page.locator("#opt-create-new")).toHaveCount(0);
+  });
+
   test("the apex is a launcher too, and is not a service banner", async ({ page }) => {
     // Before E15-T7 `GET /` here answered {"service":"poweur-relay"} to a human.
     // Navigate in the page so Chromium's host-resolver-rules apply; Playwright's
@@ -156,6 +170,13 @@ test.describe("front doors", () => {
     await expect(visitor.locator("#btn-door-claim")).toHaveCount(0);
     await expect(visitor.locator("#ni-handle")).toHaveCount(0);
     await expect(visitor.locator("#signin-id-input")).toHaveCount(0);
+
+    // Add this device starts the ceremony; it does not ask who you are.
+    await visitor.click("#opt-join-device");
+    await expect(visitor.locator("#join-identity")).toHaveCount(0);
+    await expect(visitor.locator("#btn-join-start")).toHaveCount(0);
+    await expect(visitor.locator(".rendezvous-code")).toBeVisible({ timeout: 30_000 });
+    await expect(visitor.locator("#panel-root")).toContainText(`${handle}.poweur.net`);
     await other.close();
   });
 });

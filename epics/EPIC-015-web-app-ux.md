@@ -25,7 +25,7 @@
 | Durable messages & honest badges ([EPIC-009](EPIC-009-messaging-upgrades.md) E09-T1's web surface) | **done** | the message store was memory-only and the relay drains on pickup, so a refresh lost messages *permanently*; the app now redraws from the archive at `poweur-sys/private/messages/`, keeps its own sent copies, and counts unread from read marks rather than from how much it happens to hold. `test/e2e/durability.spec.js` asserts each of these after a reload |
 | **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage |
 | **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field |
-| **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed → passkey only; unclaimed → prefilled and locked |
+| **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed door + join skips the name; passkey is web-only (shell uses join / create) |
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
@@ -645,16 +645,20 @@ the identity's own origin with the fragment cleared.
 - [ ] Resolve claimed-ness once on entering `identity` mode, by the rule above —
       availability for a host under `hosted_domains`, `GET /identities/{host}` otherwise,
       and **no claim offered on a `reserved` or `blocked` verdict**, only on `available`
-- [ ] **Claimed** → a sign-in screen for exactly this identity: avatar, handle and domain from
+- [x] **Claimed** → a sign-in screen for exactly this identity: avatar, handle and domain from
       its published profile (E15-T5's resolver), one **Sign in with passkey**, one **Add this
       device** (E11-T3's ceremony), and **no control that takes a typed identity**. "Add new ID"
-      does not belong on this door — creating an identity is what the launcher is for
+      does not belong on this door — creating an identity is what the launcher is for. Join
+      starts the ceremony immediately (no "your Poweur ID" field, no extra tap)
 - [ ] **Unclaimed** → the claim flow with handle and domain fixed to the host and rendered as
       *text, not inputs*, with the subject stated plainly ("You're claiming **bob.poweur.net**").
       Straight to the passkey, and no hand-off: we are already on the identity's origin
 - [ ] A stored identity for this host short-circuits both into today's unlock screen
-- [ ] The free-text "sign in with existing passkey" field survives only in `shell` mode and on an
-      unknown host — the two places the identity genuinely is not knowable
+- [x] Passkey sign-in is a **browser** authenticator: it is offered on web doors, never in the
+      native shell (the shell joins an existing ID or creates one under the OS keystore;
+      optional passkey enrollment is E19-T3). The free-text passkey field survives only on
+      the launcher ("I already have an ID") and on an unknown host — never on the identity
+      host, which already knows the name
 
 **Acceptance:** e2e — a claim completes on `bob.poweur.net` with no name field on screen; a
 second browser context on that host is offered sign-in only and can reach no create form; and

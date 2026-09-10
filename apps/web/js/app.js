@@ -47,7 +47,7 @@ import {
 } from "./native.js";
 
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
-import { modeNow, resolveMode } from "./mode.js";
+import { modeNow, resolveMode, addIdOptions } from "./mode.js";
 
 import { resolveProfile, clearProfileCache, primeProfile } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
@@ -590,7 +590,8 @@ function renderIdentityDoor(info) {
         <div class="door-name">${esc(idHandle(subject))}</div>
         <div class="door-domain">${esc(idDomain(subject))}</div>
         <button class="btn btn-passkey door-primary" id="btn-door-signin">🔑 Sign in with passkey</button>
-        <button class="btn btn-secondary door-secondary" id="opt-join-device">📱 Add this device</button>
+        <button class="btn btn-secondary door-secondary" id="opt-join-device"
+                data-join-identity="${esc(subject)}">📱 Add this device</button>
         <p class="form-note small">
           This name is taken. If it is yours, your passkey opens it — on this device or a
           device you already use.
@@ -1339,13 +1340,14 @@ function renderSubPage() {
  * `bob.poweur.net` the subject is in the URL bar, so the typed-identity field
  * would be an invitation to sign into someone else's name from Bob's page —
  * and creating a *different* identity belongs on the launcher, not here.
+ * Passkeys are a browser authenticator, so the shell does not offer them.
  */
 function renderAddId() {
   const info = modeNow();
-  const subject = info.mode === "identity" ? info.subject : "";
-  // Only where the identity genuinely is not knowable: a shell, an unknown
-  // host, or a launcher that stands for no one in particular.
+  const opts = addIdOptions(info);
+  const subject = opts.joinSubject;
   const asksWhichIdentity = !subject;
+  const here = isShellRuntime() ? "device" : "browser";
 
   return `
     <div class="sub-page">
@@ -1356,18 +1358,20 @@ function renderAddId() {
       <div class="sub-body">
         <p class="muted small" style="margin-bottom:20px">
           ${subject
-            ? `Sign in to <strong>${esc(subject)}</strong> on this device.`
-            : "Connect or create a Poweur ID identity on this device."}
+            ? `Sign in to <strong>${esc(subject)}</strong> on this ${here}.`
+            : opts.create
+              ? "Connect or create a Poweur ID identity on this device."
+              : "Sign in with the passkey this browser already has for your identity."}
         </p>
         ${renderRelayPrompt()}
         <div class="option-list">
-          ${asksWhichIdentity ? `
+          ${opts.passkey && asksWhichIdentity ? `
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
               <div class="option-icon-wrap">🔑</div>
               <div class="option-body">
                 <div class="option-title">Sign in with existing passkey</div>
-                <div class="option-desc">Enter your identity to authenticate on this device</div>
+                <div class="option-desc">Enter your identity to authenticate in this browser</div>
               </div>
             </div>
             <div class="option-inline-form">
@@ -1376,34 +1380,40 @@ function renderAddId() {
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
-          </div>` : `
+          </div>` : ""}
+          ${opts.passkey && !asksWhichIdentity ? `
           <button class="option-card" id="btn-door-signin">
             <div class="option-icon-wrap">🔑</div>
             <div class="option-body">
               <div class="option-title">Sign in with passkey</div>
-              <div class="option-desc">Unlock ${esc(subject)} on this device</div>
+              <div class="option-desc">Unlock ${esc(subject)} in this browser</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>`}
+          </button>` : ""}
 
-          <button class="option-card" id="opt-join-device">
+          ${opts.join ? `
+          <button class="option-card" id="opt-join-device"${subject ? ` data-join-identity="${esc(subject)}"` : ""}>
             <div class="option-icon-wrap">📱</div>
             <div class="option-body">
-              <div class="option-title">Add this device to an existing ID</div>
-              <div class="option-desc">Show a code, approve it on a device you already use</div>
+              <div class="option-title">Add this ${here} to an existing ID</div>
+              <div class="option-desc">${subject
+                ? `Show a code, approve it on a device you already use`
+                : "Enter your ID, show a code, approve it on a device you already use"}</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>
+          </button>` : ""}
 
-          ${subject ? "" : `
+          ${opts.create ? `
           <button class="option-card" id="opt-create-new">
             <div class="option-icon-wrap">✨</div>
             <div class="option-body">
               <div class="option-title">Add new ID</div>
-              <div class="option-desc">Create a fresh identity with a passkey</div>
+              <div class="option-desc">${isShellRuntime()
+                ? "Create a fresh identity on this device"
+                : "Create a fresh identity with a passkey"}</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>`}
+          </button>` : ""}
         </div>
       </div>
     </div>`;
@@ -2023,7 +2033,9 @@ function attachEvents() {
 
   // Add ID options
   attachRelayPrompt();
-  q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
+  q("#opt-join-device")?.addEventListener("click", (event) => {
+    showJoinDevicePanel(event.currentTarget.dataset.joinIdentity ?? "");
+  });
   q("#btn-signin-passkey")?.addEventListener("click", () => doSignInWithPasskey());
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
   q("#opt-create-new")?.addEventListener("click", () => R.push("claim"));
@@ -2446,7 +2458,7 @@ async function enrollApiForJoin(identity) {
   }
 }
 
-function showJoinDevicePanel() {
+function showJoinDevicePanel(knownIdentity = "") {
   // Joining half of E11-T3: this device has no key yet. It opens a rendezvous
   // and polls until a device that already holds the seed approves.
   let session = null;
@@ -2454,14 +2466,20 @@ function showJoinDevicePanel() {
   let polling = null;
   let enroll = null;
   let relayUrl = defaultRelayUrl();
-  const known = modeNow().mode === "identity" ? modeNow().subject : "";
+  // Prefer the identity the door already named (the URL bar, or a
+  // `data-join-identity` on the button) over re-reading mode — a first visit
+  // to `bob.poweur.net` has no cached root for a moment, and asking Bob to
+  // type `bob.poweur.net` is the bug this exists to close (E15-T9).
+  const known = String(knownIdentity || "").trim().toLowerCase()
+    || (modeNow().mode === "identity" ? modeNow().subject : "");
+  const here = isShellRuntime() ? "device" : "browser";
 
   const stop = () => { clearInterval(polling); polling = null; };
 
   showPanel("Add this device", `
     <p class="muted small" style="margin-bottom:12px">
       ${known
-        ? `This device will show a code to type on a device that already has <strong>${esc(known)}</strong>.`
+        ? `This ${here} will show a code to type on a device that already has <strong>${esc(known)}</strong>.`
         : "Enter your identity. This device will show a code to type on a device you already use."}
     </p>
     ${known ? "" : `
@@ -2470,12 +2488,12 @@ function showJoinDevicePanel() {
       <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
              autocapitalize="none" autocorrect="off"
              autocomplete="off" spellcheck="false" inputmode="url" />
-    </div>`}
-    <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
-    <div id="join-state"></div>`,
+    </div>
+    <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>`}
+    <div id="join-state">${known ? `<p class="small muted" id="join-wait">Opening a secure channel…</p>` : ""}</div>`,
   () => {
-    q("#btn-join-start")?.addEventListener("click", async () => {
-      const identity = joinIdentityFromForm();
+    const start = async () => {
+      const identity = known || joinIdentityFromForm();
       if (!identity) return toast("Enter your identity", "warning");
 
       setLoading(true, "Opening a secure channel…");
@@ -2538,8 +2556,20 @@ function showJoinDevicePanel() {
       } catch (error) {
         setLoading(false);
         toast(error.message, "error", 8000);
+        const state = q("#join-state");
+        if (state && known) {
+          state.innerHTML = `
+            <p class="form-note small val-warn">${esc(error.message)}</p>
+            <button class="btn btn-primary" id="btn-join-start" style="width:100%">Try again</button>`;
+          q("#btn-join-start")?.addEventListener("click", start);
+        }
       }
-    });
+    };
+
+    q("#btn-join-start")?.addEventListener("click", start);
+    // The identity host already named the subject — skip the form and the
+    // extra tap, and just show the code (E15-T9).
+    if (known) start();
   },
   () => {
     // Panel closed: free the rendezvous so the relay's per-identity cap does
@@ -4312,15 +4342,17 @@ async function showKeysAndDevicesPanel() {
 
   const record = loadIdentityRecord(identity);
   const thisBrowserEnrolled = enrollments.some(e => e.current);
+  const here = isShellRuntime() ? "device" : "browser";
+  const loseHow = isShellRuntime() ? "clearing app data" : "clearing site data";
 
   showPanel("Keys & devices", `
     ${thisBrowserEnrolled ? "" : `
       <div class="notice notice-warn">
-        <strong>This browser is not backed up.</strong> Its copy of your keys exists only here,
-        so clearing site data would destroy this identity. Registering it stores an encrypted
+        <strong>This ${here} is not backed up.</strong> Its copy of your keys exists only here,
+        so ${loseHow} would destroy this identity. Registering it stores an encrypted
         copy the relay cannot read.
         <button class="btn btn-sm btn-primary" id="btn-enroll-this" style="margin-top:10px">
-          Back up this browser
+          Back up this ${here}
         </button>
       </div>`}
     ${enrollments.length ? `
@@ -4355,11 +4387,11 @@ async function showKeysAndDevicesPanel() {
   () => {
     q("#btn-enroll-this")?.addEventListener("click", async () => {
       closePanel();
-      setLoading(true, "Backing up this browser…");
+      setLoading(true, `Backing up this ${here}…`);
       try {
         await enrollThisBrowser(clientFor(identity), identity);
         setLoading(false);
-        toast("This browser is backed up", "success", 3500);
+        toast(`This ${here} is backed up`, "success", 3500);
         showKeysAndDevicesPanel();
       } catch (error) {
         setLoading(false);

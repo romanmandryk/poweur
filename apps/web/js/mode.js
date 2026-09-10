@@ -144,6 +144,34 @@ function hostedParentOf(host, hostedDomains) {
   return "";
 }
 
+/**
+ * Which "Add identity" actions belong on this door.
+ *
+ * Passkeys are a browser authenticator (WebAuthn + an origin). The native
+ * shell wraps keys in the OS keystore, so offering "sign in with passkey"
+ * there is a ceremony that cannot succeed — or would mint a second,
+ * origin-bound wrapper the app then ignores. Optional passkey enrollment
+ * on hosted names is E19-T3, not this screen.
+ *
+ * Joining from a launcher host would store the keys on the wrong origin
+ * (`poweur.net` instead of `alice.poweur.net`). The identity host already
+ * named the subject; the shell has no origin, so it has to ask. Creating a
+ * new ID is the landing's job on the web and the shell's job in the app.
+ *
+ * @param {ModeInfo} info
+ * @returns {{ passkey: boolean, join: boolean, create: boolean, joinSubject: string }}
+ */
+export function addIdOptions(info) {
+  const identityHost = info.mode === "identity" && Boolean(info.subject);
+  const native = info.mode === "shell";
+  return {
+    passkey: !native,
+    join: native || identityHost || info.mode === "unknown",
+    create: native || info.mode === "unknown",
+    joinSubject: identityHost ? info.subject : "",
+  };
+}
+
 function normalizeHost(value) {
   return String(value ?? "").trim().toLowerCase().replace(/\.$/, "");
 }
