@@ -1,0 +1,32 @@
+logging {
+  level = "warn"
+}
+otelcol.auth.basic "ingest" {
+  htpasswd {
+    inline = sys.env("OTLP_HTPASSWD")
+  }
+}
+otelcol.receiver.otlp "relay" {
+  http {
+    endpoint = "0.0.0.0:4318"
+    auth = otelcol.auth.basic.ingest.handler
+  }
+  output {
+    metrics = [otelcol.exporter.prometheus.relay.input]
+    logs = [otelcol.exporter.otlphttp.loki.input]
+  }
+}
+otelcol.exporter.prometheus "relay" {
+  forward_to = [prometheus.remote_write.local.receiver]
+  resource_to_telemetry_conversion = true
+}
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://infra-prometheus:9090/api/v1/write"
+  }
+}
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://infra-loki:3100/otlp"
+  }
+}

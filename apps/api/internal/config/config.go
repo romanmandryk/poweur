@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poweur/api/internal/buildinfo"
+	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -62,7 +63,9 @@ type GlobalRateLimits struct {
 }
 
 type Config struct {
-	ListenAddr string
+	Telemetry           telemetry.Config
+	TelemetryProxyError error
+	ListenAddr          string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
 	WebStaticDir string
 	RelayAddress string
@@ -134,6 +137,12 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
+	if c.TelemetryProxyError != nil {
+		return c.TelemetryProxyError
+	}
+	if err := c.Telemetry.Validate(); err != nil {
+		return err
+	}
 	var missing []string
 	if strings.TrimSpace(c.RelayAddress) == "" {
 		missing = append(missing, "RELAY_ADDRESS")
@@ -194,7 +203,11 @@ func (c Config) IsHostedDomain(identity string) bool {
 }
 
 func FromEnv() Config {
+	tc := telemetry.FromEnv()
+	proxies, proxyErr := telemetry.ParseTrustedProxies(os.Getenv("TELEMETRY_TRUSTED_PROXIES"))
+	tc.TrustedProxies = proxies
 	return Config{
+		Telemetry: tc, TelemetryProxyError: proxyErr,
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
 		RelayAddress:            os.Getenv("RELAY_ADDRESS"),

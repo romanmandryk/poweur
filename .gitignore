@@ -61,3 +61,12 @@ Thumbs.db
 *.swo
 apps/docs/build/
 apps/docs/.docusaurus/
+
+# Local E13 deployment state/secrets
+.observability.env
+.releases/
+.current
+.current.next
+.previous-release
+.deploy.lock
+.smoke/

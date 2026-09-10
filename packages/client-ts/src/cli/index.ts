@@ -21,6 +21,7 @@ import {
 } from "./commands/messaging.js";
 import { davCommand, shareCommand, syncCommand } from "./commands/files.js";
 import {
+  analyticsCommand,
   authCommand,
   contactsCommand,
   policyCommand,
@@ -60,6 +61,7 @@ export const HELP = `Usage:
   poweur requests [--use-identity=...] [--json]
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
   poweur auth <inspect|sign> <request-file-or-url> [--use-identity=...] [--json]
+  poweur analytics <show|on|off> [--use-identity=...] [--json]
   poweur version
 `;
 
@@ -90,6 +92,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "contacts": return await contactsCommand(rest, streams);
       case "requests": return await requestsCommand(rest, streams);
       case "policy": return await policyCommand(rest, streams);
+      case "analytics": return await analyticsCommand(rest, streams);
       case "auth": return await authCommand(rest, streams);
       case "version":
       case "--version":

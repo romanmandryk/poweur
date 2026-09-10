@@ -67,12 +67,12 @@ func audienceIDs(names ...string) []idpkg.ShareAudience {
 // shareFixture: alice owns a tree with content under /shared, bob/carol/
 // dave are other hosted identities.
 type shareFixture struct {
-	server *Server
-	ts     *httptest.Server
-	alice  davTestIdentity
-	bob    davTestIdentity
-	carol  davTestIdentity
-	dave   davTestIdentity
+	server   *Server
+	ts       *httptest.Server
+	alice    davTestIdentity
+	bob      davTestIdentity
+	carol    davTestIdentity
+	dave     davTestIdentity
 	aliceTok string
 }
 

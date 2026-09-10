@@ -322,6 +322,7 @@ func (s *Server) handleUploadPatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "assembly_failed", err.Error())
 		return
 	}
+	requestAction(r, "upload.complete")
 	w.Header().Set("ETag", files.FormatETag(meta))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path": info.Path, "etag": meta.ETag, "size": meta.Size,

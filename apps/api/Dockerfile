@@ -6,8 +6,11 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/api ./apps/api
+COPY apps/cli ./apps/cli
 WORKDIR /src/apps/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /relay .
+WORKDIR /src/apps/cli
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /poweur-smoke .
 
 FROM alpine:3.20
 ARG VERSION_HASH=
@@ -16,5 +19,6 @@ ENV VERSION_HASH=${VERSION_HASH}
 ENV BUILD_TIME=${BUILD_TIME}
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /relay /relay
+COPY --from=builder /poweur-smoke /poweur-smoke
 EXPOSE 8080
 CMD ["/relay"]

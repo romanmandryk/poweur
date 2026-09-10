@@ -1,6 +1,7 @@
 name: Deploy
 
 on:
+  workflow_dispatch:
   push:
     branches: [master]
 
@@ -8,14 +9,22 @@ env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository_owner }}/poweur-relay
 
+concurrency:
+  group: poweur-production-deploy
+  cancel-in-progress: false
+
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      image: ${{ env.IMAGE }}:${{ github.sha }}
+      image: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +36,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -49,21 +59,25 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Add server to known hosts
-        run: ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+      - uses: actions/checkout@v4
 
-      - name: Deploy
+      - name: Install pinned SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy relay and observability together
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_IMAGE: ${{ needs.build.outputs.image }}
         run: |
-          echo "$GHCR_TOKEN" | ssh poweur@${{ secrets.DEPLOY_HOST }} \
-            "docker login ghcr.io -u $GHCR_USER --password-stdin"
-          ssh poweur@${{ secrets.DEPLOY_HOST }} bash << 'EOF'
-            set -euo pipefail
-            cd /opt/apps/poweur
-            git pull --ff-only origin master
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            echo "Deployed $(git rev-parse --short HEAD)"
-          EOF
+          printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          scp deploy/release.sh "poweur@$DEPLOY_HOST:/tmp/poweur-release-$RELEASE_SHA.sh"
+          ssh "poweur@$DEPLOY_HOST" bash "/tmp/poweur-release-$RELEASE_SHA.sh" "$RELEASE_SHA" "$RELEASE_IMAGE"

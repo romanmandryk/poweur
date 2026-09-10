@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the CLI semver. Bump the patch when shipping apps/cli changes.
-var Version = "0.1.1"
+var Version = "0.1.2"
 
 // Time is a build timestamp (RFC3339 or "2006-01-02 15:04"). Hash is a git
 // revision. Both may be empty in a stripped test binary.

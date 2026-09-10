@@ -249,3 +249,12 @@ export async function authCommand(argv: string[], streams: Streams): Promise<num
   }
   throw new UsageError("unknown auth subcommand (want inspect, sign)");
 }
+
+export async function analyticsCommand(argv: string[], streams: Streams): Promise<number> {
+  const sub = argv[0];
+  if (!["show", "on", "off"].includes(sub ?? "")) throw new UsageError("usage: poweur analytics <show|on|off>");
+  const args = parseArgs(argv.slice(1), { bool: COMMON_BOOL });
+  const { client } = await openClient({ ...(flagString(args, "use-identity") ? { identity: flagString(args, "use-identity") } : {}) });
+  const p = sub === "show" ? await client.analyticsPreference() : await client.setAnalyticsConsent(sub === "on");
+  return write(streams, flagBool(args, "json"), p ?? { version: 1, granted: false }, `Detailed relay analytics: ${p?.granted ? "on (raw identity and IP)" : "off (hashed identity, no IP)"}`);
+}

@@ -1,17 +1,34 @@
-# Cloudflare terminates TLS; Caddy only sees plain HTTP from Cloudflare's edge.
-# All traffic arrives on port 80 from Cloudflare IPs — no cert management needed.
+{
+    # Cloudflare must use Full (strict), not Flexible. Caddy obtains origin
+    # certificates for these fixed infrastructure hosts; identity wildcard
+    # traffic retains the existing Cloudflare HTTP-origin path.
+    email admin@poweur.net
+}
 
-# Relay API
+# Accept HTTP internally for the same-VM relay, and HTTPS for remote exporters.
+# Alloy authenticates both paths. No request/access log is enabled here.
+ingest.poweur.net, http://ingest.poweur.net {
+    @otlp {
+        method POST
+        path /v1/logs /v1/metrics
+    }
+    handle @otlp {
+        request_body {
+            max_size 2MB
+        }
+        reverse_proxy infra-alloy:4318
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
+
 http://relay.poweur.net {
     reverse_proxy poweur-relay:8080
 }
-
-# Grafana
 http://grafana.poweur.net {
     reverse_proxy infra-grafana:3000
 }
-
-# Identity subdomains — Cloudflare proxies *.poweur.net CNAMEs here
 http://poweur.net http://*.poweur.net {
     reverse_proxy poweur-relay:8080
 }

@@ -250,6 +250,10 @@ func (s *Server) verifyEnrollAdmin(
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature invalid")
 		return storage.Identity{}, false
 	}
+	if tw, ok := w.(*responseTelemetry); ok {
+		tw.state.actor = strings.ToLower(identity)
+		tw.state.direct = true
+	}
 	return ident, true
 }
 
@@ -260,4 +264,3 @@ func trimLabel(label string) string {
 	}
 	return label
 }
-

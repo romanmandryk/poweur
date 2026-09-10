@@ -7,6 +7,7 @@
  * layer you have to go through.
  */
 
+import { readAnalyticsPreference, writeAnalyticsPreference } from "./analytics.js";
 import type { Decryptor, Signer } from "./crypto/keys.js";
 import { PoweurError } from "./errors.js";
 import { Contacts, fetchRequests } from "./contacts.js";
@@ -56,6 +57,8 @@ export interface PoweurClientOptions extends RelayClientOptions {
 }
 
 export class PoweurClient {
+  async analyticsPreference() { return readAnalyticsPreference(await this.dav()); }
+  async setAnalyticsConsent(granted: boolean) { return writeAnalyticsPreference(await this.dav(), granted); }
   readonly relay: RelayClient;
   readonly signer: Signer;
   readonly decryptor: Decryptor | null;

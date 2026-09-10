@@ -1163,6 +1163,9 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Inbox</div>
       <div class="settings-rows">
+        <div class="settings-row" role="button" tabindex="0" id="row-analytics">
+          <span class="settings-row-icon">📊</span><span class="settings-row-label">Relay analytics</span><span class="settings-row-arrow">›</span>
+        </div>
         <div class="settings-row" role="button" tabindex="0" id="row-policy">
           <span class="settings-row-icon">🛡️</span>
           <span class="settings-row-label">Who can message you</span>
@@ -2113,6 +2116,7 @@ function attachEvents() {
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
   q("#row-profile")?.addEventListener("click", showProfilePanel);
+  q("#row-analytics")?.addEventListener("click", showAnalyticsPanel);
   q("#row-policy")?.addEventListener("click", showPolicyPanel);
   q("#row-policy-anon")?.addEventListener("click", showPolicyPanel);
   q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
@@ -4905,3 +4909,24 @@ function setDocumentIdentity(info) {
 }
 
 boot();
+
+
+function showAnalyticsPanel() {
+  const identity = S.identity;
+  const client = clientFor(identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  showPanel("Relay analytics", `<p>When your relay exports analytics, timestamps and actions are recorded. With detailed analytics off, your identity is hashed and your IP is omitted. Turning it on includes your raw identity and IP. Message contents and keys are never included.</p><div id="analytics-host" role="status">Loading…</div>`, async (close) => {
+    const host = q("#analytics-host");
+    try {
+      const pref = await client.analyticsPreference();
+      if (!host?.isConnected || S.identity !== identity) return;
+      host.innerHTML = `<label><input id="analytics-consent" type="checkbox" ${pref?.granted ? "checked" : ""}> Allow detailed relay analytics for ${esc(identity)}</label><p class="small muted">Changes affect future exports. Existing records expire under the relay's retention settings.</p><button class="btn btn-primary" id="analytics-save">Save</button>`;
+      q("#analytics-save").addEventListener("click", async (event) => {
+        if (S.identity !== identity) return;
+        event.target.disabled = true;
+        try { await client.setAnalyticsConsent(q("#analytics-consent").checked); toast("Analytics preference saved", "success"); close(); }
+        catch (error) { toast(error.message, "error"); event.target.disabled = false; }
+      });
+    } catch (error) { if (host?.isConnected) host.textContent = `Could not load preference: ${error.message}`; }
+  });
+}

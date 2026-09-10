@@ -1,0 +1,234 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "Poweur",
+      "folder": "Poweur",
+      "interval": "1m",
+      "rules": [
+        {
+          "uid": "relay-down",
+          "title": "Relay health probe failed",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "min(probe_success{job=\"blackbox\"}) < 1",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Relay health probe failed"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "telemetry-missing",
+          "title": "Relay telemetry is missing",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "(time() - max(poweur_heartbeat_timestamp_seconds) > 120) or absent(poweur_heartbeat_timestamp_seconds)",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Relay telemetry is missing"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ingest-down",
+          "title": "Alloy is down",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "up{job=\"alloy\"} < 1",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Alloy is down"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "disk-pressure",
+          "title": "Disk has less than 20% free",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "min(node_filesystem_avail_bytes{mountpoint=\"/\"}/node_filesystem_size_bytes{mountpoint=\"/\"}) < 0.2",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Disk has less than 20% free"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "http-errors",
+          "title": "Sustained relay server errors",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "sum(rate(poweur_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(poweur_http_requests_total[5m])), 0.01) > 0.05",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Sustained relay server errors"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "export-loss",
+          "title": "Telemetry records were lost",
+          "condition": "A",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "increase(poweur_telemetry_dropped[5m]) > 0",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "Telemetry records were lost"
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        }
+      ]
+    }
+  ],
+  "contactPoints": [
+    {
+      "orgId": 1,
+      "name": "Operator email",
+      "receivers": [
+        {
+          "uid": "operator-email",
+          "type": "email",
+          "settings": {
+            "addresses": "$ALERT_EMAIL",
+            "singleEmail": true
+          },
+          "disableResolveMessage": false
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "Operator email",
+      "group_by": [
+        "alertname"
+      ],
+      "group_wait": "30s",
+      "group_interval": "5m",
+      "repeat_interval": "4h"
+    }
+  ]
+}

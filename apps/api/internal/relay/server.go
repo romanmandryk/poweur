@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
+	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
 	"golang.org/x/net/webdav"
 )
@@ -33,6 +33,9 @@ const (
 )
 
 type Server struct {
+	telemetry  *telemetry.Runtime
+	stop       chan struct{}
+	closeOnce  sync.Once
 	cfg        config.Config
 	resolver   dns.Resolver
 	providers  *dns.ProviderFactory
@@ -100,6 +103,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		acks = storage.NewAckStore()
 	}
 	s := &Server{
+		stop:          make(chan struct{}),
 		cfg:           cfg,
 		resolver:      resolver,
 		providers:     providers,
@@ -136,7 +140,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 				id, ok := store.Get(owner)
 				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
 			},
-			Logf: log.Printf,
+			Logf: func(string, ...any) { s.event(context.Background(), "grant.validation", "rejected") },
 		}
 	}
 	go s.runPruner()
@@ -147,7 +151,13 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 func (s *Server) runPruner() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+		}
+		s.sampleTelemetry()
 		s.sessions.Prune()
 		s.davTokens.Prune()
 		s.anon.prune()
@@ -169,8 +179,7 @@ func (s *Server) expireSpool() {
 	}
 	cutoff := time.Now().Add(-s.cfg.SpoolTTL)
 	for _, expired := range s.inbox.Expire(cutoff) {
-		log.Printf("spool: expired message %s for %s after %s",
-			expired.Item.ID, expired.Identity, s.cfg.SpoolTTL)
+		s.event(context.Background(), "message.expire", "success")
 		if expired.Item.Sender == "" {
 			continue // anonymous senders have no inbox to notify
 		}
@@ -186,8 +195,8 @@ func (s *Server) expireSpool() {
 	}
 	// An undelivered *receipt* is only worth so much; expiring it silently is
 	// right, because notifying about a notification has no bottom.
-	for _, expired := range s.acks.Expire(cutoff) {
-		log.Printf("spool: expired ack %s for %s", expired.Item.ID, expired.Identity)
+	for range s.acks.Expire(cutoff) {
+		s.event(context.Background(), "ack.expire", "success")
 	}
 }
 
@@ -254,7 +263,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
-	return corsMiddleware(mux)
+	return s.instrument(mux, corsMiddleware(mux))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +455,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, req.Identity)
 
 	var docJSON []byte
 	if len(req.IdentityDocument) > 0 {
@@ -589,6 +599,7 @@ func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, identityValue)
 
 	provider, err := s.providers.Provider(req.DNSProvider)
 	if err != nil {
@@ -752,6 +763,15 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
+	verifiedActor(r, msg.Sender)
+	if senderLocal {
+		requestAction(r, "message.submit")
+	} else {
+		requestAction(r, "message.receive")
+		if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
+			st.direct = false
+		}
+	}
 
 	// Rate limit by verified sender only — charging an unverified sender field
 	// before sig check would let any attacker exhaust another identity's quota.
@@ -785,6 +805,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			// A queued request is a delivery too: without this, a contact
 			// request waits silently until the recipient happens to open the
 			// app, which is exactly the wait push exists to remove.
+			s.event(r.Context(), "contact.queue", "success")
 			s.notify(msg.Recipient, "request", msg.ID)
 			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
 			return
@@ -797,6 +818,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		// Tell anyone listening that there is something to pick up (E09-T2).
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
+		s.event(r.Context(), "message.enqueue", "success")
 		s.notify(msg.Recipient, "message", msg.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
@@ -860,6 +882,7 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "ack signature verification failed (key source: "+source+")")
 		return
 	}
+	verifiedActor(r, ack.Sender)
 
 	decision := s.rateLimit.Allow(ack.Sender)
 	if !decision.Allowed {
@@ -965,6 +988,7 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
 		return false
 	}
+	verifiedActor(r, identity)
 	return true
 }
 
@@ -1255,7 +1279,14 @@ func (s *Server) resolveRelayHost(ctx context.Context, identity string) (string,
 	return host, nil
 }
 
-func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
+func (s *Server) forwardMessage(ctx context.Context, msg Message) (result error) {
+	defer func() {
+		outcome := "success"
+		if result != nil {
+			outcome = "failure"
+		}
+		s.event(ctx, "message.forward", outcome)
+	}()
 	relayHost, err := s.resolveRelayHost(ctx, msg.Recipient)
 	if err != nil {
 		return err
@@ -1302,7 +1333,14 @@ func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
 // the ack-sender is local but the ack-recipient lives on another relay,
 // the home relay POSTs the ack onward. Used only in privacy-proxy mode;
 // normal direct sends never trigger this path.
-func (s *Server) forwardAck(ctx context.Context, ack Ack) error {
+func (s *Server) forwardAck(ctx context.Context, ack Ack) (result error) {
+	defer func() {
+		outcome := "success"
+		if result != nil {
+			outcome = "failure"
+		}
+		s.event(ctx, "ack.forward", outcome)
+	}()
 	relayHost, err := s.resolveRelayHost(ctx, ack.Recipient)
 	if err != nil {
 		return err
@@ -1366,6 +1404,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 }
 
 func writeError(w http.ResponseWriter, status int, code, detail string) {
+	if tw, ok := w.(interface{ telemetryError(string) }); ok {
+		tw.telemetryError(code)
+	}
 	writeJSON(w, status, ErrorResponse{Error: code, Detail: detail})
 }
 

@@ -3,7 +3,6 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -133,8 +132,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.hub.unsubscribe(identity, id)
-	log.Printf("stream: %s opened (%d open for this identity)", identity, s.hub.count(identity))
-	defer func() { log.Printf("stream: %s closed", identity) }()
+	s.event(r.Context(), "stream.open", "success")
+	defer s.event(r.Context(), "stream.close", "success")
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

@@ -151,9 +151,9 @@ func TestSessionDeleteWithIdentitySignature(t *testing.T) {
 	canon := crypto.CanonicalSessionRevocation("alice.sd.test", sid, issued, nonce)
 	body := SessionRevokeRequest{
 		Identity:          "alice.sd.test",
-		IssuedAt:            issued,
-		Nonce:               nonce,
-		IdentitySignature:   base64.StdEncoding.EncodeToString(ed25519.Sign(idPriv, []byte(canon))),
+		IssuedAt:          issued,
+		Nonce:             nonce,
+		IdentitySignature: base64.StdEncoding.EncodeToString(ed25519.Sign(idPriv, []byte(canon))),
 	}
 	b, _ := json.Marshal(body)
 	ts := httptest.NewServer(server.Router())

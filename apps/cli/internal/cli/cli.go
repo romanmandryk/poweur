@@ -65,6 +65,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runContacts(args[1:], stdout, stderr)
 	case "requests":
 		return runRequests(args[1:], stdout, stderr)
+	case "analytics":
+		return runAnalytics(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
 	case "anon":
@@ -1952,6 +1954,7 @@ func printHelp(w io.Writer) {
   poweur share group remove <name>
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
+  poweur analytics <show|on|off> [--use-identity=...] [--json]
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)

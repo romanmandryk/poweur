@@ -108,6 +108,7 @@ func (s *Server) authenticateDAV(r *http.Request, owner string) (files.Principal
 		if !strings.EqualFold(tok.Audience, owner) {
 			return files.Principal{}, false, "token audience does not match tree"
 		}
+		verifiedActor(r, tok.Identity)
 		return files.Principal{
 			Identity: tok.Identity,
 			Owner:    strings.EqualFold(tok.Identity, owner),
@@ -135,6 +136,7 @@ func (s *Server) authenticateDAV(r *http.Request, owner string) (files.Principal
 				scope = parsed
 			}
 		}
+		verifiedActor(r, owner)
 		return files.Principal{Identity: owner, Owner: true, Scope: scope}, true, ""
 	default:
 		return files.Principal{}, false, "unsupported Authorization scheme"
@@ -254,6 +256,10 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 	// contacts.json / inbox-policy.json / grant / manifest never lands.
 	if !s.checkSysWrite(w, r, clean) {
 		return
+	}
+
+	if access == files.AccessWrite {
+		requestAction(r, systemAction(clean, r.Method))
 	}
 
 	// Audit cross-identity access (E03-T4): any authenticated non-owner

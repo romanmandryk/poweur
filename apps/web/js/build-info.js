@@ -5,5 +5,5 @@
  * About screen can import. Bump APP_VERSION (patch) and stamp APP_BUILD_TIME
  * (UTC `YYYY-MM-DD HH:MM`) in the same change set as `package.json`.
  */
-export const APP_VERSION = "0.1.1";
-export const APP_BUILD_TIME = "2026-09-10 12:00";
+export const APP_VERSION = "0.1.2";
+export const APP_BUILD_TIME = "2026-09-10 12:36";

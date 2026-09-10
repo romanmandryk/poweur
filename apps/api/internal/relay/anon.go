@@ -155,6 +155,7 @@ func (s *Server) writeChallengeRequired(w http.ResponseWriter, recipient string,
 // handleAnonMessage processes an unsigned message (Sender and Signature
 // empty). Caller has already decoded the envelope.
 func (s *Server) handleAnonMessage(w http.ResponseWriter, r *http.Request, msg Message) {
+	requestAction(r, "message.anonymous")
 	if msg.ID == "" || msg.Recipient == "" || msg.Timestamp == "" || msg.Payload == "" {
 		writeError(w, http.StatusBadRequest, "invalid_message", "missing required message fields (id, recipient, timestamp, payload)")
 		return
