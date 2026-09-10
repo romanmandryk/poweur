@@ -121,8 +121,8 @@ for (const health of ['healthy', 'http-failure', 'wrong-sha', 'readonly', 'inval
     fake(root, 'docker', `
       const fs = require('node:fs'), args = process.argv.slice(2);
       fs.appendFileSync(process.env.TEST_ROOT + '/commands', args.join(' ') + '\\n');
-      if (args[0] === 'inspect' && args[1] === '-f') process.stdout.write('172.18.0.2');
-      if (args.includes('http://poweur-relay:8080/health')) {
+      if (args[0] === 'inspect' && args[1] === '-f') process.stdout.write(String(args[2]).includes('Running') ? 'true' : '172.18.0.2');
+      if (args.includes('http://127.0.0.1:8080/health') || args.includes('http://poweur-relay:8080/health')) {
         const mode = process.env.TEST_HEALTH;
         if (mode === 'http-failure') process.exit(1);
         if (mode === 'invalid-json') process.stdout.write('invalid');

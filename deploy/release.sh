@@ -52,28 +52,39 @@ compose_infra "$release" exec -T caddy caddy reload --config /etc/caddy/Caddyfil
 export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
 printf '%s\n' "$TELEMETRY_TRUSTED_PROXIES" > "$release/.trusted-proxies"
 compose_relay "$release" up -d --remove-orphans
-# Probe from a container on infra_net so backend ports stay unpublished.
-# Short connect timeouts: curl's default wait made Grafana look "down" for a minute per try.
-curl_probe=(docker run --rm --network infra_net curlimages/curl:8.16.0 -fsS --connect-timeout 2 --max-time 5)
+# Probe through the target container's network namespace. Joining infra_net
+# as a one-shot curl container makes Docker DNS miss names for seconds at a
+# time (`Resolving timed out after 2000 milliseconds`).
 docker pull curlimages/curl:8.16.0 >/dev/null
+probe_curl() {
+  docker run --rm --network "container:$1" curlimages/curl:8.16.0 -fsS --connect-timeout 2 --max-time 5 "$2"
+}
 wait_http() {
-  local url=$1 attempts=${2:-90}
+  local container=$1 url=$2 attempts=${3:-90}
   for attempt in $(seq 1 "$attempts"); do
-    if "${curl_probe[@]}" "$url" >/dev/null; then return 0; fi
-    [[ $attempt -lt $attempts ]] || { echo "Timed out waiting for $url" >&2; return 1; }
+    if docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -qx true \
+      && probe_curl "$container" "$url" >/dev/null; then
+      return 0
+    fi
+    [[ $attempt -lt $attempts ]] || {
+      echo "Timed out waiting for $container ($url)" >&2
+      docker logs --tail 40 "$container" >&2 || true
+      return 1
+    }
     sleep 2
   done
 }
 for attempt in $(seq 1 60); do
-  if "${curl_probe[@]}" http://poweur-relay:8080/health > "$release/.health.json"; then
+  if probe_curl poweur-relay http://127.0.0.1:8080/health > "$release/.health.json"; then
     if jq -e --arg sha "$sha" '.versionHash == $sha and .storage.writable != false' "$release/.health.json" >/dev/null; then break; fi
   fi
-  [[ $attempt -lt 60 ]] || { echo 'Timed out waiting for relay /health' >&2; false; }
+  [[ $attempt -lt 60 ]] || { echo 'Timed out waiting for relay /health' >&2; docker logs --tail 40 poweur-relay >&2 || true; false; }
   sleep 2
 done
-for url in http://infra-alloy:12345/-/ready http://infra-loki:3100/ready http://infra-prometheus:9090/-/ready http://infra-grafana:3000/api/health; do
-  wait_http "$url"
-done
+wait_http infra-alloy http://127.0.0.1:12345/-/ready
+wait_http infra-loki http://127.0.0.1:3100/ready
+wait_http infra-prometheus http://127.0.0.1:9090/-/ready
+wait_http infra-grafana http://127.0.0.1:3000/api/health
 # An authenticated smoke identity is used only for inbox challenge/read, never
 # registration or messaging, so deployments do not inflate growth metrics.
 if [[ -f "$root/.smoke/config.toml" ]]; then
