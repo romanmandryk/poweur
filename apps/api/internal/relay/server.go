@@ -51,9 +51,14 @@ type Server struct {
 	rendezvous *storage.RendezvousStore
 	sessions   *storage.SessionStore
 	rateLimit  *ratelimit.Limiter
-	regGate    *RegistrationGate
-	client     *http.Client
-	idCache    *idpkg.Cache
+	// requestRelayLimit meters contact-request admissions per sending relay
+	// (E07-T5). Nil when the operator caps no window.
+	requestRelayLimit *ratelimit.PeerLimiter
+	// abuse counts verified sys.abuse.report submissions (E07-T5).
+	abuse   *abuseLog
+	regGate *RegistrationGate
+	client  *http.Client
+	idCache *idpkg.Cache
 
 	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
@@ -111,32 +116,34 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		acks = storage.NewAckStore()
 	}
 	s := &Server{
-		stop:          make(chan struct{}),
-		cfg:           cfg,
-		resolver:      resolver,
-		providers:     providers,
-		identities:    store,
-		inbox:         inbox,
-		requests:      storage.NewRequestStore(),
-		anonInbox:     storage.NewInboxStore(),
-		anon:          newAnonState(),
-		powSecret:     newPowSecret(),
-		acks:          acks,
-		challenges:    storage.NewChallengeStore(),
-		keystore:      keystore,
-		rendezvous:    storage.NewRendezvousStore(),
-		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
-		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
-		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
-		client:        &http.Client{Timeout: 10 * time.Second},
-		idCache:       idpkg.NewCache(),
-		davTokens:     newDAVTokenStore(),
-		linkSecret:    newPowSecret(), // 32 random bytes; see linkSecret above
-		davLocks:      make(map[string]webdav.LockSystem),
-		hub:           newHub(),
-		deviceLocks:   newDeviceLocks(),
-		relayCache:    make(map[string]cachedRelay),
-		localityCache: make(map[string]cachedLocality),
+		stop:              make(chan struct{}),
+		cfg:               cfg,
+		resolver:          resolver,
+		providers:         providers,
+		identities:        store,
+		inbox:             inbox,
+		requests:          storage.NewRequestStore(),
+		anonInbox:         storage.NewInboxStore(),
+		anon:              newAnonState(),
+		powSecret:         newPowSecret(),
+		acks:              acks,
+		challenges:        storage.NewChallengeStore(),
+		keystore:          keystore,
+		rendezvous:        storage.NewRendezvousStore(),
+		sessions:          storage.NewSessionStore(), // sessions remain memory-only by design
+		rateLimit:         ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		requestRelayLimit: ratelimit.NewPeerLimiter(cfg.RequestRelayLimits),
+		abuse:             newAbuseLog(),
+		regGate:           NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
+		client:            &http.Client{Timeout: 10 * time.Second},
+		idCache:           idpkg.NewCache(),
+		davTokens:         newDAVTokenStore(),
+		linkSecret:        newPowSecret(), // 32 random bytes; see linkSecret above
+		davLocks:          make(map[string]webdav.LockSystem),
+		hub:               newHub(),
+		deviceLocks:       newDeviceLocks(),
+		relayCache:        make(map[string]cachedRelay),
+		localityCache:     make(map[string]cachedLocality),
 	}
 	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
 	// only ever talks to the StorageProvider interface.
@@ -172,6 +179,7 @@ func (s *Server) runPruner() {
 		s.sessions.Prune()
 		s.davTokens.Prune()
 		s.anon.prune()
+		s.abuse.prune(time.Now().UTC())
 		s.pruneLocalityCache()
 		s.expireSpool()
 	}
@@ -232,6 +240,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
+	mux.HandleFunc("POST /abuse", s.handleAbuseReport)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("GET /auth/pow", s.handleAuthPow)
@@ -820,6 +829,19 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "policy_rejected", detail)
 			return
 		case policyQueueRequest:
+			// The requests queue is the one door open to strangers, so it is
+			// the one door a flood of cheap identities comes through. Meter
+			// the relay that carried them (E07-T5), not just the identity.
+			if decision, ok := s.meterRequestRelay(r.Context(), msg.Sender); !ok {
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{
+					"error":    "rate_limit_exceeded",
+					"scope":    decision.Scope,
+					"window":   decision.Window,
+					"limit":    decision.Limit,
+					"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
+				})
+				return
+			}
 			outcome := s.requests.Add(msg.Recipient, msg.Sender, storedFromMessage(msg), requestCooldown)
 			if outcome != storage.RequestQueued {
 				writeError(w, http.StatusConflict, outcome,

@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'trust/contacts',
         'trust/anonymous-and-challenges',
+        'trust/relay-reputation',
       ],
     },
     {

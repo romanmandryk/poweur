@@ -15,7 +15,7 @@
 
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
-  EnrollApi, RelayClient, sendAnonymous, clampPowBits,
+  EnrollApi, RelayClient, sendAnonymous, clampPowBits, fingerprintOrKey,
   normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
   streamForever, SDK_VERSION, SDK_BUILD_TIME,
@@ -3846,6 +3846,8 @@ function showContactPanel(identity) {
       <span class="kv-value mono small">${esc(identity)}</span></div>
     <div class="kv-row"><span class="kv-label">State</span>
       <span class="kv-value"><span class="chip ${chip.cls}">${chip.label}</span></span></div>
+    <div class="kv-row"><span class="kv-label">Safety number</span>
+      <span class="kv-value mono small">${contact.pinnedKey ? esc(fingerprintOrKey(contact.pinnedKey)) : "not pinned"}</span></div>
     <div class="kv-row"><span class="kv-label">Pinned key</span>
       <span class="kv-value mono small">${contact.pinnedKey ? esc(contact.pinnedKey) : "not pinned"}</span></div>
 
@@ -3967,9 +3969,13 @@ function showKeyMismatchDialog({ recipient, pinnedKey, resolvedKey }) {
         registrar impersonating your contact. Verify with them out of band before you trust it.
       </p>
       <div class="kv-row"><span class="kv-label">Pinned</span>
-        <span class="kv-value mono small" id="km-pinned">${esc(pinnedKey ?? "")}</span></div>
+        <span class="kv-value mono small" id="km-pinned">${esc(pinnedKey ? fingerprintOrKey(pinnedKey) : "")}</span></div>
       <div class="kv-row"><span class="kv-label">Now</span>
-        <span class="kv-value mono small" id="km-resolved">${esc(resolvedKey ?? "")}</span></div>
+        <span class="kv-value mono small" id="km-resolved">${esc(resolvedKey ? fingerprintOrKey(resolvedKey) : "")}</span></div>
+      <p class="muted small" style="margin-top:8px">
+        These are safety numbers — read them to ${esc(recipient)} over a channel you already
+        trust. They match on both sides when nothing has been tampered with.
+      </p>
       <div class="panel-actions mt-md">
         <button class="btn btn-primary" id="km-cancel">Don't send</button>
         <button class="btn btn-danger" id="km-trust">Trust new key</button>
@@ -4619,6 +4625,7 @@ function showLookupPanel() {
             `identity: ${document.identity}`,
             `source: ${source}`,
             `public_key: ${document.public_key || ""}`,
+            `safety number: ${document.public_key ? fingerprintOrKey(document.public_key) : ""}`,
             `encryption_public_key: ${document.encryption_public_key || ""}`,
             `relay: ${document.relay || ""}`,
             `capabilities: ${(document.capabilities || []).join(", ")}`,

@@ -75,6 +75,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runAnalytics(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
+	case "blocks":
+		return runBlocks(args[1:], stdout, stderr)
+	case "report":
+		return runReport(args[1:], stdout, stderr)
 	case "anon":
 		return runAnon(args[1:], stdout, stderr)
 	case "session":
@@ -659,8 +663,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
 	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
+	requestOnReject := fs.Bool("request-on-reject", false, "if the recipient's inbox policy rejects the message, send it as a contact request instead (no prompt)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
@@ -794,6 +799,14 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 				fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 			fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+			// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+			if offerContactRequest(contactRequestOffer{
+				recipient: recipient, plaintext: plaintext, msgType: *msgType,
+				useIdentity: identityValue, status: resp.StatusCode, body: body,
+				auto: *requestOnReject, jsonOut: *jsonOut,
+			}, stdout, stderr) {
+				return 0
+			}
 			return 1
 		}
 
@@ -891,6 +904,14 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 			fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+		if offerContactRequest(contactRequestOffer{
+			recipient: recipient, plaintext: plaintext, msgType: *msgType,
+			useIdentity: identityValue, status: resp.StatusCode, body: body,
+			auto: *requestOnReject, jsonOut: *jsonOut,
+		}, stdout, stderr) {
+			return 0
+		}
 		return 1
 	}
 
@@ -1731,13 +1752,26 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// The identity document answers "which keys"; profile.json and
+	// capabilities.json answer "who" and "what do they speak" (E06-T2).
+	// Both are optional and live on a host we do not control, so they are
+	// fetched best-effort: a lookup that can verify a stranger's keys but
+	// cannot show the user their name is a lookup that stops half way.
+	profile, capabilities, profileNote := lookupPublicFiles(ctx, res)
+
 	out := map[string]any{
 		"identity":              res.Document.Identity,
 		"source":                res.Source,
 		"public_key":            res.Document.PublicKey,
 		"encryption_public_key": res.Document.EncryptionPublicKey,
 		"relay":                 res.Document.Relay,
+		// `capabilities` stays the identity document's own string list (its
+		// wire shape is a contract); `capabilities_document` is the richer
+		// capabilities.json when the identity publishes one.
 		"capabilities":          res.Document.Capabilities,
+		"capabilities_document": capabilities,
+		"profile":               profile,
+		"fingerprint":           idpkg.FingerprintOrKey(res.Document.PublicKey),
 	}
 	if *jsonOut {
 		return writeOutput(stdout, true, out, "")
@@ -1745,8 +1779,15 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
 	fmt.Fprintf(stdout, "source: %s\n", res.Source)
 	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
+	// The safety number (E07-T4) is the form a human can compare out of band.
+	fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(res.Document.PublicKey))
 	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
 	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
+	printProfile(stdout, res.Document.Identity, profile)
+	printCapabilities(stdout, capabilities)
+	if profileNote != "" {
+		fmt.Fprintln(stderr, profileNote)
+	}
 	return 0
 }
 
@@ -1887,7 +1928,7 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
+  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
   poweur inbox [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json] [--once]
   poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
@@ -1917,6 +1958,9 @@ func printHelp(w io.Writer) {
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]
+  poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
+  poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
+  poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)

@@ -26,6 +26,7 @@ export * from "./enroll.js";
 export * from "./msgtypes.js";
 export * from "./names.js";
 export * from "./document.js";
+export * from "./fingerprint.js";
 export * from "./ids.js";
 export * from "./pow.js";
 export * from "./http.js";

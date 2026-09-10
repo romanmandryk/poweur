@@ -78,6 +78,24 @@ In the MVP, the DNS provider and its API token are supplied **by the client** du
 
 Set any value to `0` to disable that window's check. Set to `-1` to block all messages (maintenance mode).
 
+#### Per-sender-relay request metering
+
+Contact-request admissions are additionally metered against the relay accountable for
+the sender — cheap identities cluster on relays, so a flood of one-request strangers is
+invisible to a per-identity cap and obvious to a per-relay one. This relay's own users
+are exempt (it meters and gates them directly), and conversation between accepted
+contacts is never metered here. See
+[Relay reputation & abuse pressure](../trust/relay-reputation).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REQUEST_RELAY_LIMIT_MINUTE` | `10` | Contact-request attempts per sending relay per minute |
+| `REQUEST_RELAY_LIMIT_HOUR` | `60` | …per hour |
+| `REQUEST_RELAY_LIMIT_DAY` | `300` | …per day |
+
+`0` disables a window; all three at `0` turns the meter off. Rejections are `429` with
+`"scope": "sender_relay"`.
+
 ### TLS
 
 | Variable | Default | Description |

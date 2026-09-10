@@ -1,0 +1,35 @@
+[
+  {
+    "name": "two-entries",
+    "blocklist": {
+      "version": 1,
+      "publisher": "Alice.Poweur.NET",
+      "name": "alice's list",
+      "entries": [
+        {
+          "identity": "Zoe.example.org",
+          "reason": "phishing",
+          "added_at": "2026-01-15T09:30:00Z"
+        },
+        {
+          "identity": " spamco.example.test ",
+          "reason": "spam"
+        }
+      ],
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "Vl33zONxkfgWHoTJZ1wSleeMriggG7TxkZew6bQsd-7-IqxhSqGWCZC23TX2z5h54S_syiq7WvMP7oV4MdKUDQ"
+    },
+    "canonical": "poweur-blocklist\nalice.poweur.net\nalice's list\nspamco.example.test:spam,zoe.example.org:phishing\n2026-01-15T09:30:00Z"
+  },
+  {
+    "name": "empty",
+    "blocklist": {
+      "version": 1,
+      "publisher": "alice.poweur.net",
+      "entries": [],
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "rksP-XWvThyZBYCOv9SGUuksHl2-saP-I6RRzUeHCF7Oyrm2mNiU6fvdsvqdu9xFDZtuLk7SuyhfsZo3f54SBA"
+    },
+    "canonical": "poweur-blocklist\nalice.poweur.net\n\n\n2026-01-15T09:30:00Z"
+  }
+]

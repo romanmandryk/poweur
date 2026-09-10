@@ -162,13 +162,26 @@ poweur identity dns alice.poweur.net
 
 Resolve an identity using the **web-first** chain (HTTPS
 `/.well-known/poweur/id.json`, then DNS TXT). Prints source (`web` / `dns` /
-`both`), keys, relay, and capabilities. Prefer this over `identity dns` for
-hosted identities that have no per-user TXT records.
+`both`), keys, the safety number, and the relay. Prefer this over `identity dns`
+for hosted identities that have no per-user TXT records.
+
+It also reads the identity's public self-description from the same well-known
+route — `profile.json` (display name, bio, locale, avatar, links) and
+`capabilities.json` (features and endpoint hints), both served world-readable
+out of `poweur-sys/public/`. Both are optional: an identity that publishes
+neither still looks up fine, and only an unreachable host (as opposed to a 404)
+prints a note on stderr. When there is no `capabilities.json`, the identity
+document's own `capabilities` list is shown instead — the same fallback the web
+client uses, so the two surfaces degrade to the same answer.
 
 ```bash
 poweur identity lookup alice.poweur.net
 poweur identity lookup alice.poweur.net --json
 ```
+
+In `--json`, `capabilities` stays the identity document's string list and
+`capabilities_document` carries `capabilities.json` when one is published;
+`profile` is the profile document or `null`.
 
 ---
 
@@ -638,6 +651,61 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 | `--anon-max-per-day <n>` | Max accepted anonymous messages per day (0 = default 20) |
 | `--use-identity <subdomain>` | Override identity |
 | `--json` | Machine-readable output |
+
+---
+
+### `poweur report <identity>`
+
+Report an identity to the relay operator who hosts them (`sys.abuse.report`). The
+report is signed by you and carries message IDs, a reason and an optional note — never
+message content, which is end-to-end encrypted and which the operator could not read
+anyway.
+
+```bash
+poweur report loud.cheapco.test --reason=spam --note="twelve identical messages" --message-ids=m-1,m-2
+```
+
+| Flag | Description |
+|------|-------------|
+| `--reason <kind>` | `spam` \| `harassment` \| `phishing` \| `malware` \| `impersonation` \| `other` |
+| `--note <text>` | Free text for the operator (max 2048 bytes) |
+| `--message-ids <ids>` | Comma-separated message IDs as evidence (max 32) |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+One report per reporter per subject per day counts; repeats answer `duplicate`. A relay
+only accepts reports about identities it hosts.
+
+---
+
+### `poweur blocks <export|import>`
+
+Blocklists are block decisions made portable: a signed document a community can pool.
+Export publishes `shared/blocks.json` in your own tree, where a
+[share](../files/sharing) hands it to a chosen audience. Import verifies the
+publisher's signature and merges into your own contacts, where you can see and undo it.
+
+```bash
+poweur blocks export --name "my list"
+poweur share add /shared/blocks.json --with bob.example.org --perm read
+poweur blocks import alice.example.org --dry-run
+poweur blocks import --file list.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name <text>` | Human label for an exported list |
+| `--out <file>` | Also write the signed document locally |
+| `--no-publish` | Do not write it into your own tree |
+| `--file <path>` | Import from a local file instead of a publisher's tree |
+| `--path <tree path>` | Tree path to read from the publisher (default `shared/blocks.json`) |
+| `--force` | Also block identities you have accepted as contacts |
+| `--dry-run` | Show what would change without writing |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+Identities you have accepted as contacts are skipped and named unless `--force`, and an
+unsigned or altered list is refused outright.
 
 ---
 

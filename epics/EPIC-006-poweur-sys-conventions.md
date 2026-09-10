@@ -1,6 +1,6 @@
 # EPIC-006 — `/poweur-sys` layout & application data conventions
 
-- **Status:** core complete (T1/T3/T4 shipped; T2 partial, T5 deferred)
+- **Status:** core complete (T1–T4 shipped; T5 deferred)
 - **Priority:** P1
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-007 (contacts file), EPIC-010 (app ecosystem), every third-party app
@@ -10,7 +10,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E06-T1 Normative spec + validation | **done** | [`apps/docs/docs/conventions/poweur-sys.md`](../apps/docs/docs/conventions/poweur-sys.md); JSON Schemas in `conventions/schemas/poweur-sys/` (CI-validated); enforced validators are Go (`packages/identity`), run on DAV PUT (`422 invalid_document`, `TestSysWriteValidation`); unknown files preserved; bootstrap = EnsureTree skeleton + registration-written `id.json` |
-| E06-T2 profile.json + capabilities.json | **partial** | Schemas + write validation shipped; `poweur-sys/public/*` now world-served via `/.well-known/poweur/` (no new endpoints); web profile card + editor shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T5. **Open:** CLI `poweur lookup` showing profile/capabilities. (The Host-routed well-known path is *not* a gap: in production `https://bob.poweur.net/.well-known/poweur/profile.json` is what a browser fetches, Host set for it and CORS `*`. Only dev/e2e, where one relay hosts many identities that are not in DNS and the browser must use its IP, falls back to the identity document.) |
+| E06-T2 profile.json + capabilities.json | **done** | Schemas + write validation shipped; `poweur-sys/public/*` world-served via `/.well-known/poweur/` (no new endpoints); web profile card + editor shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T5. **Closed since:** `poweur identity lookup` now reads both documents over that same route (`identity.FetchProfile`/`FetchCapabilities` in `packages/identity/publicfiles.go`, reusing the resolver's SSRF hardening — no redirects, 64 KB cap, no private IPs without the test flag). Best-effort by design: a 404 is the normal "publishes no profile" and stays silent, only an unreachable host notes on stderr, and an absent `capabilities.json` falls back to the identity document's own list exactly as the web client does. `--json` keeps `capabilities` as the document's string list and adds `capabilities_document` + `profile` (`TestINT_PROFILE_01/_02`). (The Host-routed well-known path is *not* a gap: in production `https://bob.poweur.net/.well-known/poweur/profile.json` is what a browser fetches, Host set for it and CORS `*`. Only dev/e2e, where one relay hosts many identities that are not in DNS and the browser must use its IP, falls back to the identity document; the CLI's dial override preserves Host, so it reads the real route even there.) |
 | E06-T3 `/apps` namespace rules | **done** | [`apps/docs/docs/conventions/app-data.md`](../apps/docs/docs/conventions/app-data.md); `manifest.json` validated on write (app_id must match directory); shared-app-data = EPIC-005 share of an `/apps` subtree (`TestShareAppsSubtree` is the worked example) |
 | E06-T4 PCP process + registry | **done** | `conventions/README.md`, `pcp-0001-process.md`, `registry.json` (validated in CI incl. code-emitted `sys.*` types), seed PCPs 0002–0005 filed |
 | E06-T5 Tasks-domain dogfood | **deferred** | reference app + tasks PCP not started; `net.poweur.tasks` app-id reserved in the registry |
@@ -98,11 +98,16 @@ The human-facing and machine-facing "who am I" files.
       (messaging version, files/DAV, sync, sign-in) — supersedes the `_poweur-caps` TXT
       sketch in `apps/docs/docs/future/capabilities.md` for web-resolved identities; keep TXT
       record as the DNS-equivalent
-- [ ] Resolver library (E01-T3) optionally fetches capabilities; CLI `poweur lookup` shows
-      them — **open** (files are already world-served via `/.well-known/poweur/`)
+- [x] Resolver library (E01-T3) optionally fetches capabilities; CLI `poweur identity
+      lookup` shows profile *and* capabilities, read from the world-served
+      `/.well-known/poweur/` route with the resolver's own fetch hardening
+      (`packages/identity/publicfiles.go`). Both documents are optional and fetched
+      best-effort, so a lookup never fails because someone published no profile
 
 **Acceptance:** web app shows a contact's profile card resolved purely from their home; CLI
-prints capabilities.
+prints capabilities. **Met** — `TestINT_PROFILE_01` writes both documents over DAV as the
+owner and reads them back through `poweur identity lookup` as an unrelated identity holding
+no credentials on that tree.
 
 ### E06-T3 — `/apps/<app-id>` namespace rules
 

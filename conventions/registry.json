@@ -56,7 +56,7 @@
       "type": "sys.abuse.report",
       "owner": "poweur core",
       "pcp": null,
-      "status": "reserved"
+      "status": "experimental"
     }
   ],
   "schema_namespaces": [
