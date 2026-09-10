@@ -431,6 +431,12 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 			bools: map[string]bool{"--json": true},
 			want:  []string{"--ephemeral-key", "secret", "--json", "--", "alice.poweur.net", "-jeCR-4zJRkkEUe3K70Erw"},
 		},
+		{
+			name:  "value flag keeps a dash-prefixed base64url argument",
+			in:    []string{"alice.poweur.net", "rid", "--ephemeral-key", "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU", "--json"},
+			bools: map[string]bool{"--json": true},
+			want:  []string{"--ephemeral-key", "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU", "--json", "--", "alice.poweur.net", "rid"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -466,6 +472,25 @@ func TestNormalizeArgsDashPrefixedRendezvousParses(t *testing.T) {
 	}
 	if *ephemeral != "secret" || *relay != "http://127.0.0.1:8080" || !*jsonOut {
 		t.Fatalf("flags ephemeral=%q relay=%q json=%v", *ephemeral, *relay, *jsonOut)
+	}
+}
+
+func TestNormalizeArgsDashPrefixedFlagValueParses(t *testing.T) {
+	fs := flag.NewFlagSet("key claim", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	ephemeral := fs.String("ephemeral-key", "", "")
+	_ = fs.Bool("json", false, "")
+	const key = "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU"
+	args := normalizeArgs([]string{
+		"tsenroll.poweur.net", "0uix_IswSd_Geu6AVxKbRA",
+		"--ephemeral-key", key, "--json",
+	}, map[string]bool{"--json": true})
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse: %v (%s)", err, buf.String())
+	}
+	if *ephemeral != key {
+		t.Fatalf("ephemeral-key=%q want %q (args=%v)", *ephemeral, key, args)
 	}
 }
 

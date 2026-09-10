@@ -2019,7 +2019,10 @@ func normalizeArgs(args []string, boolFlags map[string]bool) []string {
 		if isBoolFlag(arg, boolFlags) || strings.Contains(arg, "=") {
 			continue
 		}
-		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+		// Value flags consume the next word even when it starts with `-`
+		// (X25519 keys and rendezvous ids are base64url). Do not swallow a
+		// following real flag or the `--` terminator.
+		if i+1 < len(args) && args[i+1] != "--" && !looksLikeFlag(args[i+1]) {
 			flags = append(flags, args[i+1])
 			i++
 		}
