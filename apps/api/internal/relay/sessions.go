@@ -83,6 +83,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, req.Identity)
 
 	token, err := randomToken(18)
 	if err != nil {
@@ -165,6 +166,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, req.Identity)
 
 	s.sessions.Delete(id)
 	w.WriteHeader(http.StatusNoContent)

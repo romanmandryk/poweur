@@ -95,7 +95,14 @@ Everything but the last is installed by Android Studio's first-run wizard. Then,
 from the **repo root** (not `apps/mobile/android`):
 
 ```bash
-pnpm mobile:android   # stage, cap sync, assembleDebug
+pnpm android          # stage, cap sync, assembleDebug, adb install -r, launch
+```
+
+That is the usual loop against a USB phone or a running emulator. `pnpm mobile:android`
+stops after the APK; `ANDROID_SERIAL` picks a device when more than one is connected.
+
+```bash
+pnpm mobile:android   # stage, cap sync, assembleDebug only
 adb install -r apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 

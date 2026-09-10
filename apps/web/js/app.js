@@ -16,8 +16,9 @@
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
   EnrollApi, RelayClient, sendAnonymous, clampPowBits,
+  normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
-  streamForever,
+  streamForever, SDK_VERSION, SDK_BUILD_TIME,
 } from "@poweur/client";
 
 import {
@@ -37,7 +38,7 @@ import {
   loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
   defaultRelayUrl, hasRelayUrl, relayUrlFor, isShellRuntime,
-  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor,
+  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor, identityOriginUrl,
 } from "./storage.js";
 
 import {
@@ -46,7 +47,7 @@ import {
 } from "./native.js";
 
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
-import { modeNow, resolveMode } from "./mode.js";
+import { modeNow, resolveMode, addIdOptions } from "./mode.js";
 
 import { resolveProfile, clearProfileCache, primeProfile } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
@@ -58,6 +59,8 @@ import {
   recoveryKitEligibility, buildRecoveryKit, verifyRecoveryKit,
   recoverFromKeystore, restoreLocalRecord, rewrap,
 } from "./keystore.js";
+import { APP_VERSION, APP_BUILD_TIME } from "./build-info.js";
+import { startJoinPoll, describeJoinError } from "./enroll-wait.js";
 
 // ─── Router & State ───────────────────────────────────────────────────────────
 
@@ -214,9 +217,35 @@ const iconGearFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.
 
 // ─── Render orchestration ─────────────────────────────────────────────────────
 
+/**
+ * Find this node again after `innerHTML` replacement.
+ *
+ * The shell paints from strings, so a focused node is detached on the next
+ * paint. Settings rows have ids; file and conversation rows have data
+ * attributes. Without putting focus back, a DAV read that lands while
+ * someone is on a row swallows the Enter that should have opened it —
+ * which is what CI saw on the Files `shared` row (E15-T5).
+ */
+function focusSelector(el) {
+  if (!el || el === document.body || el === document.documentElement) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el.dataset?.openDir != null) return `[data-open-dir="${CSS.escape(el.dataset.openDir)}"]`;
+  if (el.dataset?.download != null) return `[data-download="${CSS.escape(el.dataset.download)}"]`;
+  if (el.dataset?.composeTo != null) return `[data-compose-to="${CSS.escape(el.dataset.composeTo)}"]`;
+  if (el.dataset?.contactOpen != null) return `[data-contact-open="${CSS.escape(el.dataset.contactOpen)}"]`;
+  if (el.dataset?.openOwner != null) return `[data-open-owner="${CSS.escape(el.dataset.openOwner)}"]`;
+  if (el.dataset?.page != null && el.classList.contains("nav-tab")) {
+    return `.nav-tab[data-page="${CSS.escape(el.dataset.page)}"]`;
+  }
+  return null;
+}
+
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
+  const restore = app.contains(document.activeElement)
+    ? focusSelector(document.activeElement)
+    : null;
 
   if (R.sub && !DETAIL_SUBS.has(R.sub)) {
     app.innerHTML = renderSubPage();
@@ -234,6 +263,7 @@ function render() {
   }
   flushMounts();
   attachEvents();
+  if (restore) app.querySelector(restore)?.focus();
 }
 
 // ─── Header ───────────────────────────────────────────────────────────────────
@@ -588,7 +618,8 @@ function renderIdentityDoor(info) {
         <div class="door-name">${esc(idHandle(subject))}</div>
         <div class="door-domain">${esc(idDomain(subject))}</div>
         <button class="btn btn-passkey door-primary" id="btn-door-signin">🔑 Sign in with passkey</button>
-        <button class="btn btn-secondary door-secondary" id="opt-join-device">📱 Add this device</button>
+        <button class="btn btn-secondary door-secondary" id="opt-join-device"
+                data-join-identity="${esc(subject)}">📱 Add this device</button>
         <p class="form-note small">
           This name is taken. If it is yours, your passkey opens it — on this device or a
           device you already use.
@@ -1161,6 +1192,9 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">Inbox</div>
       <div class="settings-rows">
+        <div class="settings-row" role="button" tabindex="0" id="row-analytics">
+          <span class="settings-row-icon">📊</span><span class="settings-row-label">Relay analytics</span><span class="settings-row-arrow">›</span>
+        </div>
         <div class="settings-row" role="button" tabindex="0" id="row-policy">
           <span class="settings-row-icon">🛡️</span>
           <span class="settings-row-label">Who can message you</span>
@@ -1226,19 +1260,76 @@ function renderSettings() {
     <div class="settings-group">
       <div class="settings-group-label">About</div>
       <div class="settings-rows">
-        <div class="settings-row no-action">
-          <span class="settings-row-icon">📋</span>
-          <span class="settings-row-label">Protocol</span>
-          <span class="settings-row-value">Poweur ID v1</span>
-        </div>
-        <div class="settings-row no-action">
-          <span class="settings-row-icon">💻</span>
-          <span class="settings-row-label">Client</span>
-          <span class="settings-row-value">Web</span>
-        </div>
+        ${aboutRow("📋", "Protocol", "Poweur ID v1")}
+        ${aboutRow("💻", "App", APP_VERSION, `${buildStamp(APP_BUILD_TIME)}${isShellRuntime() ? " · Mobile" : " · Web"}`, { value: "about-app-version", meta: "about-app-build" })}
+        ${aboutRow("📦", "SDK", SDK_VERSION, buildStamp(SDK_BUILD_TIME), { value: "about-sdk-version", meta: "about-sdk-build" })}
+        ${aboutRelayRow()}
       </div>
     </div>
     <div style="height:32px"></div>`;
+}
+
+function buildStamp(time, extra) {
+  const bits = [time, extra].filter(Boolean);
+  return bits.join(" · ");
+}
+
+function aboutRow(icon, label, value, meta = "", ids = {}) {
+  const valueId = ids.value ? ` id="${esc(ids.value)}"` : "";
+  const metaId = ids.meta ? ` id="${esc(ids.meta)}"` : "";
+  return `
+        <div class="settings-row no-action settings-row-about">
+          <span class="settings-row-icon">${icon}</span>
+          <div class="settings-row-stack">
+            <div class="settings-row-stack-top">
+              <span class="settings-row-label">${esc(label)}</span>
+              <span class="settings-row-value"${valueId}>${esc(value)}</span>
+            </div>
+            ${meta || ids.meta ? `<span class="settings-row-meta"${metaId}>${esc(meta)}</span>` : ""}
+          </div>
+        </div>`;
+}
+
+function aboutRelayRow() {
+  const identity = S.identity || modeNow().subject || "";
+  const relayUrl = identity ? relayUrlFor(identity) : defaultRelayUrl();
+  const meta = [identity, relayUrl].filter(Boolean).join(" · ") || "…";
+  return aboutRow("🔗", "Relay", "…", meta, {
+    value: "about-relay-version",
+    meta: "about-relay-meta",
+  });
+}
+
+/**
+ * Fill the connected relay's advertised version after Settings renders.
+ * The URL is the active identity's home relay (or the identity-host subject
+ * on the web when that is all we have).
+ */
+function fillAboutRelay() {
+  const versionEl = q("#about-relay-version");
+  const metaEl = q("#about-relay-meta");
+  if (!versionEl || !metaEl) return;
+  const identity = S.identity || modeNow().subject || "";
+  const relayUrl = identity ? relayUrlFor(identity) : defaultRelayUrl();
+  if (!relayUrl) {
+    versionEl.textContent = "—";
+    metaEl.textContent = "Not connected";
+    return;
+  }
+  identityApiFor(relayUrl).root().then(root => {
+    if (!q("#about-relay-version")) return;
+    versionEl.textContent = root.version || "unknown";
+    metaEl.textContent = [
+      identity,
+      relayUrl,
+      root.buildTime,
+      root.versionHash && String(root.versionHash).slice(0, 7),
+    ].filter(Boolean).join(" · ");
+  }).catch(() => {
+    if (!q("#about-relay-version")) return;
+    versionEl.textContent = "—";
+    metaEl.textContent = [identity, relayUrl, "unreachable"].filter(Boolean).join(" · ");
+  });
 }
 
 /**
@@ -1277,13 +1368,14 @@ function renderSubPage() {
  * `bob.poweur.net` the subject is in the URL bar, so the typed-identity field
  * would be an invitation to sign into someone else's name from Bob's page —
  * and creating a *different* identity belongs on the launcher, not here.
+ * Passkeys are a browser authenticator, so the shell does not offer them.
  */
 function renderAddId() {
   const info = modeNow();
-  const subject = info.mode === "identity" ? info.subject : "";
-  // Only where the identity genuinely is not knowable: a shell, an unknown
-  // host, or a launcher that stands for no one in particular.
+  const opts = addIdOptions(info);
+  const subject = opts.joinSubject;
   const asksWhichIdentity = !subject;
+  const here = isShellRuntime() ? "device" : "browser";
 
   return `
     <div class="sub-page">
@@ -1294,18 +1386,20 @@ function renderAddId() {
       <div class="sub-body">
         <p class="muted small" style="margin-bottom:20px">
           ${subject
-            ? `Sign in to <strong>${esc(subject)}</strong> on this device.`
-            : "Connect or create a Poweur ID identity on this device."}
+            ? `Sign in to <strong>${esc(subject)}</strong> on this ${here}.`
+            : opts.create
+              ? "Connect or create a Poweur ID identity on this device."
+              : "Sign in with the passkey this browser already has for your identity."}
         </p>
         ${renderRelayPrompt()}
         <div class="option-list">
-          ${asksWhichIdentity ? `
+          ${opts.passkey && asksWhichIdentity ? `
           <div class="option-card option-card-form-wrap">
             <div class="option-card-top">
               <div class="option-icon-wrap">🔑</div>
               <div class="option-body">
                 <div class="option-title">Sign in with existing passkey</div>
-                <div class="option-desc">Enter your identity to authenticate on this device</div>
+                <div class="option-desc">Enter your identity to authenticate in this browser</div>
               </div>
             </div>
             <div class="option-inline-form">
@@ -1314,34 +1408,40 @@ function renderAddId() {
                 autocomplete="off" spellcheck="false" inputmode="url" />
               <button class="btn btn-primary" id="btn-signin-passkey">Sign in</button>
             </div>
-          </div>` : `
+          </div>` : ""}
+          ${opts.passkey && !asksWhichIdentity ? `
           <button class="option-card" id="btn-door-signin">
             <div class="option-icon-wrap">🔑</div>
             <div class="option-body">
               <div class="option-title">Sign in with passkey</div>
-              <div class="option-desc">Unlock ${esc(subject)} on this device</div>
+              <div class="option-desc">Unlock ${esc(subject)} in this browser</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>`}
+          </button>` : ""}
 
-          <button class="option-card" id="opt-join-device">
+          ${opts.join ? `
+          <button class="option-card" id="opt-join-device"${subject ? ` data-join-identity="${esc(subject)}"` : ""}>
             <div class="option-icon-wrap">📱</div>
             <div class="option-body">
-              <div class="option-title">Add this device to an existing ID</div>
-              <div class="option-desc">Show a code, approve it on a device you already use</div>
+              <div class="option-title">Add this ${here} to an existing ID</div>
+              <div class="option-desc">${subject
+                ? `Show a code, approve it on a device you already use`
+                : "Enter your ID, show a code, approve it on a device you already use"}</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>
+          </button>` : ""}
 
-          ${subject ? "" : `
+          ${opts.create ? `
           <button class="option-card" id="opt-create-new">
             <div class="option-icon-wrap">✨</div>
             <div class="option-body">
               <div class="option-title">Add new ID</div>
-              <div class="option-desc">Create a fresh identity with a passkey</div>
+              <div class="option-desc">${isShellRuntime()
+                ? "Create a fresh identity on this device"
+                : "Create a fresh identity with a passkey"}</div>
             </div>
             <span class="option-arrow">›</span>
-          </button>`}
+          </button>` : ""}
         </div>
       </div>
     </div>`;
@@ -1961,7 +2061,9 @@ function attachEvents() {
 
   // Add ID options
   attachRelayPrompt();
-  q("#opt-join-device")?.addEventListener("click", showJoinDevicePanel);
+  q("#opt-join-device")?.addEventListener("click", (event) => {
+    showJoinDevicePanel(event.currentTarget.dataset.joinIdentity ?? "");
+  });
   q("#btn-signin-passkey")?.addEventListener("click", () => doSignInWithPasskey());
   q("#signin-id-input")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignInWithPasskey(); });
   q("#opt-create-new")?.addEventListener("click", () => R.push("claim"));
@@ -2047,12 +2149,14 @@ function attachEvents() {
   // Settings rows
   q("#settings-add-id")?.addEventListener("click", () => R.push("add-id"));
   q("#row-switch-id")?.addEventListener("click", () => R.push("add-id"));
+  fillAboutRelay();
   q("#row-identity-keys")?.addEventListener("click", showIdentityKeysPanel);
   q("#row-relay")?.addEventListener("click", showRelayPanel);
   q("#row-lookup")?.addEventListener("click", showLookupPanel);
   q("#row-session")?.addEventListener("click", showSessionPanel);
   q("#row-dns")?.addEventListener("click", showDnsPanel);
   q("#row-profile")?.addEventListener("click", showProfilePanel);
+  q("#row-analytics")?.addEventListener("click", showAnalyticsPanel);
   q("#row-policy")?.addEventListener("click", showPolicyPanel);
   q("#row-policy-anon")?.addEventListener("click", showPolicyPanel);
   q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
@@ -2326,43 +2430,127 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
 }
 
 /**
- * The joining half of the enrollment ceremony (E11-T3), run on the **new**
- * device.
+ * The identity this new device is asking to join.
  *
- * This device generates the ephemeral keypair, so the six-digit code
- * authenticates a public key and protects no secret — which is why the
- * ceremony needs no PAKE. It polls until the other device approves.
+ * On an identity host the URL already named it — asking again is how people
+ * type `alice` when the door said `alice.poweur.net`, and the offer then
+ * lands under a name the approving device will never look up. Elsewhere we
+ * still need a typed name, and a bare handle is completed with the host's
+ * domain so it matches what the unlocked device holds.
  */
-function showJoinDevicePanel() {
+function joinIdentityFromForm() {
+  const info = modeNow();
+  if (info.mode === "identity" && info.subject) return info.subject;
+  const raw = (q("#join-identity")?.value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw.includes(".")) return raw;
+  const domain = (info.domain || getConfig().parentDomain || "").replace(/^\./, "");
+  return domain ? `${raw}.${domain}` : raw;
+}
+
+/** API base for an identity this device does not yet hold. */
+async function enrollApiForJoin(identity) {
+  const fallback = defaultRelayUrl();
+  const origin = identityOriginUrl(identity, fallback);
+  let fallbackHost = "";
+  try {
+    fallbackHost = new URL(fallback).hostname.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  // Already on this identity's host — stay there (web at alice.poweur.net/app/).
+  if (origin && fallbackHost === String(identity).toLowerCase()) {
+    return { enroll: new EnrollApi(new RelayClient(origin)), relayUrl: origin };
+  }
+  // Hosted identity hosts *are* the relay (Caddy wildcard). Probe GET / so a
+  // self-hosted website that only serves well-known is not treated as one.
+  if (origin) {
+    try {
+      const root = await identityApiFor(origin, { timeoutMs: 4000 }).root();
+      if (root?.service === "poweur-relay") {
+        return { enroll: new EnrollApi(new RelayClient(origin)), relayUrl: origin };
+      }
+    } catch {
+      /* identity host is a website, not a relay */
+    }
+  }
+  try {
+    const relayUrl = await resolveRecipientRelayUrl(
+      identity,
+      fallback.startsWith("http://") ? "http" : "https",
+      resolveOptionsForRelay(fallback),
+    );
+    return { enroll: new EnrollApi(new RelayClient(relayUrl)), relayUrl };
+  } catch {
+    return { enroll: new EnrollApi(new RelayClient(fallback)), relayUrl: fallback };
+  }
+}
+
+function showJoinDevicePanel(knownIdentity = "") {
+  // Joining half of E11-T3: this device has no key yet. It opens a rendezvous
+  // and polls until a device that already holds the seed approves.
   let session = null;
   let joining = null;
-  let polling = null;
-  const relayUrl = defaultRelayUrl();
-  const enroll = new EnrollApi(new RelayClient(relayUrl));
+  let poller = null;
+  let enroll = null;
+  let relayUrl = defaultRelayUrl();
+  // Prefer the identity the door already named (the URL bar, or a
+  // `data-join-identity` on the button) over re-reading mode — a first visit
+  // to `bob.poweur.net` has no cached root for a moment, and asking Bob to
+  // type `bob.poweur.net` is the bug this exists to close (E15-T9).
+  const known = String(knownIdentity || "").trim().toLowerCase()
+    || (modeNow().mode === "identity" ? modeNow().subject : "");
+  const here = isShellRuntime() ? "device" : "browser";
 
-  const stop = () => { clearInterval(polling); polling = null; };
+  const stop = () => { poller?.stop(); poller = null; };
+
+  const abandon = () => {
+    stop();
+    if (session && joining) {
+      enroll?.cancel(joining, session).catch(() => {});
+      session = null;
+    }
+  };
+
+  const showJoinRetry = (message, again) => {
+    const state = q("#join-state");
+    if (!state) return;
+    state.innerHTML = `
+      <p class="form-note small val-warn">${esc(message)}</p>
+      <button class="btn btn-primary" id="btn-join-start" style="width:100%">Try again</button>`;
+    q("#btn-join-start")?.addEventListener("click", again);
+  };
 
   showPanel("Add this device", `
     <p class="muted small" style="margin-bottom:12px">
-      Enter your identity. This device will show a code to type on a device you already use.
+      ${known
+        ? `This ${here} will show a code to type on a device that already has <strong>${esc(known)}</strong>.`
+        : "Enter your identity. This device will show a code to type on a device you already use."}
     </p>
+    ${known ? "" : `
     <div class="form-group">
       <label class="form-label" for="join-identity">Your Poweur ID</label>
       <input id="join-identity" class="input" type="text" placeholder="alice.poweur.net"
              autocapitalize="none" autocorrect="off"
              autocomplete="off" spellcheck="false" inputmode="url" />
     </div>
-    <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>
-    <div id="join-state"></div>`,
+    <button class="btn btn-primary" id="btn-join-start" style="width:100%">Show my code</button>`}
+    <div id="join-state">${known ? `<p class="small muted" id="join-wait">Opening a secure channel…</p>` : ""}</div>`,
   () => {
-    q("#btn-join-start")?.addEventListener("click", async () => {
-      const identity = q("#join-identity")?.value.trim().toLowerCase();
+    const start = async () => {
+      const identity = known || joinIdentityFromForm();
       if (!identity) return toast("Enter your identity", "warning");
+      // A second tap (or Try again) must not leave the previous interval
+      // firing — that is how a stack of identical error toasts starts.
+      abandon();
 
       setLoading(true, "Opening a secure channel…");
       try {
         // offer/claim/cancel are unauthenticated by necessity — this device has
-        // no key yet — so they need the endpoint, not a signer.
+        // no key yet. Prefer the identity host when it is a relay, so a phone
+        // adding johnjohn.poweur.net talks to that host rather than poweur.net.
+        // Self-hosted websites fall through to the document's `relay`.
+        ({ enroll, relayUrl } = await enrollApiForJoin(identity));
         session = await enroll.offer(identity, deviceLabel());
         joining = identity;
         setLoading(false);
@@ -2377,7 +2565,9 @@ function showJoinDevicePanel() {
                really this device:</p>
             <p class="sas-code">${esc(session.sas)}</p>
           </div>
-          <p class="small muted" id="join-wait">Waiting for approval…</p>`;
+          <p class="small muted" id="join-wait">Waiting for approval…</p>
+          <p class="small muted" id="join-expiry"></p>
+          <button class="btn btn-sm btn-ghost" id="btn-join-check" style="margin-top:8px">Check now</button>`;
         q("#btn-copy-rendezvous")?.addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(session.rendezvousId);
@@ -2386,47 +2576,63 @@ function showJoinDevicePanel() {
             toast("Copy failed — select the code and copy it manually", "warning");
           }
         });
+        q("#btn-join-check")?.addEventListener("click", () => poller?.checkNow());
 
-        polling = setInterval(async () => {
-          let seedBytes;
-          try {
-            seedBytes = await enroll.claim(identity, session);
-          } catch (error) {
-            stop();
-            toast(error.message, "error", 8000);
-            return;
-          }
-          if (!seedBytes) return;
-          stop();
-          closePanel();
-          try {
-            const derived = jwksFromSeed(seedBytes);
-            await adoptIdentity({
-              identity, relayUrl,
-              signingJWK: derived.signingJWK,
-              encJWK: derived.encJWK,
-              seed: toBase64url(seedBytes),
-              label: deviceLabel(),
-            });
-            toast(`${identity} is set up on this device`, "success", 5000);
-          } catch (error) {
-            toast(error.message, "error", 9000);
-          }
-        }, 2000);
+        const deadlineMs = Date.parse(session.expiresAt)
+          ? Math.max(0, Date.parse(session.expiresAt) - Date.now())
+          : undefined;
+        poller = startJoinPoll({
+          claim: () => enroll.claim(identity, session),
+          deadlineMs,
+          onTick: (text) => {
+            const expiry = q("#join-expiry");
+            if (expiry) expiry.textContent = text;
+          },
+          onSeed: async (seedBytes) => {
+            session = null;
+            closePanel();
+            try {
+              const derived = jwksFromSeed(seedBytes);
+              await adoptIdentity({
+                identity, relayUrl,
+                signingJWK: derived.signingJWK,
+                encJWK: derived.encJWK,
+                seed: toBase64url(seedBytes),
+                label: deviceLabel(),
+              });
+              toast(`${identity} is set up on this device`, "success", 5000);
+            } catch (error) {
+              toast(error.message, "error", 9000);
+            }
+          },
+          onError: (error, { terminal }) => {
+            const detail = describeJoinError(error);
+            const wait = q("#join-wait");
+            if (!terminal) {
+              if (wait) wait.textContent = detail;
+              return;
+            }
+            toast(detail, "error", 9000);
+            showJoinRetry(detail, start);
+          },
+        });
       } catch (error) {
         setLoading(false);
-        toast(error.message, "error", 8000);
+        const detail = error.message || "Could not open a secure channel";
+        toast(detail, "error", 8000);
+        if (known) showJoinRetry(detail, start);
       }
-    });
+    };
+
+    q("#btn-join-start")?.addEventListener("click", start);
+    // The identity host already named the subject — skip the form and the
+    // extra tap, and just show the code (E15-T9).
+    if (known) start();
   },
   () => {
     // Panel closed: free the rendezvous so the relay's per-identity cap does
     // not fill with abandoned ceremonies.
-    stop();
-    if (session && joining) {
-      enroll.cancel(joining, session).catch(() => {});
-      session = null;
-    }
+    abandon();
   });
 }
 
@@ -2878,7 +3084,17 @@ function startEventStream() {
     signal: streamAbort.signal,
     onEvent: (event) => {
       if (identity !== S.identity) return; // the user switched identities
-      if (event.type === "ready") return;  // nothing new by itself
+      // `ready` is the catch-up cue: the stream carries no backlog, so a
+      // client that connected (or reconnected) after something was queued
+      // has to read from its cursor rather than wait for the next event.
+      // streamForever's contract is the same — ignore this and a request
+      // parked while the socket was down stays invisible until a click.
+      if (event.type === "ready") {
+        loadInbox();
+        loadRequests({ force: true });
+        if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
+        return;
+      }
       // Each queue has its own event, because each is read by a different
       // call: told the wrong one, the app fetches an empty inbox and leaves
       // the tray that actually has something silent until the user happens to
@@ -3555,7 +3771,12 @@ function loadRequests({ force = false } = {}) {
   // queue has anything new, so "already loaded once" is not a reason to skip
   // it — an acceptance we never re-fetch is a handshake that never completes.
   // A short floor keeps a burst of renders from becoming a burst of requests.
-  if (Q.loading) return Promise.resolve();
+  if (Q.loading) {
+    // A push that lands mid-drain must not be dropped: the in-flight GET
+    // may have left the relay before the item was queued.
+    if (force) Q.pendingForce = true;
+    return Q.inFlight ?? Promise.resolve();
+  }
   if (!force && Q.fetchedAt && Date.now() - Q.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
     return Promise.resolve();
   }
@@ -3563,7 +3784,7 @@ function loadRequests({ force = false } = {}) {
   if (!client) return Promise.resolve();
 
   Q.loading = true;
-  return challengeSerial(async () => {
+  Q.inFlight = challengeSerial(async () => {
     try {
       // `GET /requests/{id}` drains the same way the inbox does.
       mergeInto(Q.incoming, await client.requests());
@@ -3576,13 +3797,20 @@ function loadRequests({ force = false } = {}) {
     } finally {
       Q.loading = false;
       Q.fetchedAt = Date.now();
+      Q.inFlight = null;
+      const again = Q.pendingForce;
+      Q.pendingForce = false;
       // Repaint for the whole destination, not just this tray: the count is
       // on the tray *bar*, which is visible from every tray. Repainting only
       // when the Requests tray was open meant a request that arrived by push
       // was fetched and then not shown.
       if (R.page === "messages" && !R.sub) render();
+      // Schedule outside this serial task: chaining another challenge-signed
+      // drain from here waits on a promise that cannot resolve until we do.
+      if (again) queueMicrotask(() => loadRequests({ force: true }));
     }
   });
+  return Q.inFlight;
 }
 
 /** Refresh everything a contact write invalidates, then repaint. */
@@ -3976,14 +4204,17 @@ function showPolicyPanel() {
 /** Drain the anonymous queue — challenge-signed, so serialized like the rest. */
 function loadAnon({ force = false } = {}) {
   const A = S.anon;
-  if (A.loading) return Promise.resolve();
+  if (A.loading) {
+    if (force) A.pendingForce = true;
+    return A.inFlight ?? Promise.resolve();
+  }
   if (!force && A.fetchedAt && Date.now() - A.fetchedAt < REQUEST_DRAIN_INTERVAL_MS) {
     return Promise.resolve();
   }
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
   A.loading = true;
-  return challengeSerial(async () => {
+  A.inFlight = challengeSerial(async () => {
     try {
       // `GET /anon/{id}` drains like the inbox: what we are handed here is
       // handed here once, so it is archived in the same step.
@@ -3997,9 +4228,14 @@ function loadAnon({ force = false } = {}) {
     } finally {
       A.loading = false;
       A.fetchedAt = Date.now();
+      A.inFlight = null;
+      const again = A.pendingForce;
+      A.pendingForce = false;
       if (R.page === "messages" && !R.sub) render();
+      if (again) queueMicrotask(() => loadAnon({ force: true }));
     }
   });
+  return A.inFlight;
 }
 
 // ─── Profile (EPIC-006 E06-T2) ───────────────────────────────────────────────
@@ -4190,15 +4426,17 @@ async function showKeysAndDevicesPanel() {
 
   const record = loadIdentityRecord(identity);
   const thisBrowserEnrolled = enrollments.some(e => e.current);
+  const here = isShellRuntime() ? "device" : "browser";
+  const loseHow = isShellRuntime() ? "clearing app data" : "clearing site data";
 
   showPanel("Keys & devices", `
     ${thisBrowserEnrolled ? "" : `
       <div class="notice notice-warn">
-        <strong>This browser is not backed up.</strong> Its copy of your keys exists only here,
-        so clearing site data would destroy this identity. Registering it stores an encrypted
+        <strong>This ${here} is not backed up.</strong> Its copy of your keys exists only here,
+        so ${loseHow} would destroy this identity. Registering it stores an encrypted
         copy the relay cannot read.
         <button class="btn btn-sm btn-primary" id="btn-enroll-this" style="margin-top:10px">
-          Back up this browser
+          Back up this ${here}
         </button>
       </div>`}
     ${enrollments.length ? `
@@ -4233,11 +4471,11 @@ async function showKeysAndDevicesPanel() {
   () => {
     q("#btn-enroll-this")?.addEventListener("click", async () => {
       closePanel();
-      setLoading(true, "Backing up this browser…");
+      setLoading(true, `Backing up this ${here}…`);
       try {
         await enrollThisBrowser(clientFor(identity), identity);
         setLoading(false);
-        toast("This browser is backed up", "success", 3500);
+        toast(`This ${here} is backed up`, "success", 3500);
         showKeysAndDevicesPanel();
       } catch (error) {
         setLoading(false);
@@ -4294,13 +4532,14 @@ function showApproveDevicePanel() {
     <div class="form-group">
       <label class="form-label" for="enroll-rendezvous">Request code from the new device</label>
       <input id="enroll-rendezvous" class="input mono" type="text"
-             autocomplete="off" spellcheck="false" placeholder="paste it here" />
+             autocapitalize="none" autocorrect="off" autocomplete="off"
+             spellcheck="false" inputmode="text" placeholder="paste it here" />
     </div>
     <button class="btn btn-primary" id="btn-enroll-lookup" style="width:100%">Continue</button>
     <div id="enroll-confirm"></div>`,
   () => {
     q("#btn-enroll-lookup")?.addEventListener("click", async () => {
-      const rendezvousId = q("#enroll-rendezvous")?.value.trim();
+      const rendezvousId = normalizeRendezvousId(q("#enroll-rendezvous")?.value ?? "");
       if (!rendezvousId) return toast("Enter the request code from the new device", "warning");
 
       const client = clientFor(identity);
@@ -4312,7 +4551,8 @@ function showApproveDevicePanel() {
 
       setLoading(true, "Finding the new device…");
       try {
-        const pending = await client.enroll.pending(client.signer, identity, rendezvousId);
+        const { enroll } = await enrollApiForJoin(identity);
+        const pending = await enroll.pending(client.signer, identity, rendezvousId);
         setLoading(false);
         const host = q("#enroll-confirm");
         host.innerHTML = `
@@ -4327,7 +4567,7 @@ function showApproveDevicePanel() {
         q("#btn-enroll-approve")?.addEventListener("click", async () => {
           setLoading(true, "Sending keys…");
           try {
-            await client.enroll.approve(client.signer, identity, pending, fromBase64url(keys.seed));
+            await enroll.approve(client.signer, identity, pending, fromBase64url(keys.seed));
             setLoading(false);
             closePanel();
             toast("The new device can now finish setting up", "success", 6000);
@@ -4710,8 +4950,13 @@ function closePanel() {
 function toast(msg, type = "info", duration = 3500) {
   const root = document.getElementById("toast-root");
   if (!root) return;
+  // A backgrounded join poller used to dump the same 404 a dozen times when
+  // the phone woke up. Same message + kind already on screen stays one toast.
+  const key = `${type}:${msg}`;
+  if ([...root.querySelectorAll(".toast")].some((el) => el.dataset.toastKey === key)) return;
   const el = document.createElement("div");
   el.className = `toast ${type}`;
+  el.dataset.toastKey = key;
   el.innerHTML = `<span class="toast-icon"></span><span>${esc(msg)}</span>`;
   root.appendChild(el);
   setTimeout(() => el.remove(), duration + 400);
@@ -4808,3 +5053,31 @@ function setDocumentIdentity(info) {
 }
 
 boot();
+
+
+function showAnalyticsPanel() {
+  const identity = S.identity;
+  const client = clientFor(identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  showPanel("Relay analytics", `<p>When your relay exports analytics, timestamps and actions are recorded. With detailed analytics off, your identity is hashed and your IP is omitted. Turning it on includes your raw identity and IP. Message contents and keys are never included.</p><div id="analytics-host" role="status">Loading…</div>`, async (close) => {
+    const host = q("#analytics-host");
+    try {
+      const pref = await client.analyticsPreference();
+      if (!host?.isConnected || S.identity !== identity) return;
+      host.innerHTML = `<label><input id="analytics-consent" type="checkbox" ${pref?.granted ? "checked" : ""}> Allow detailed relay analytics for ${esc(identity)}</label><p class="small muted">Changes affect future exports. Existing records expire under the relay's retention settings.</p><button class="btn btn-primary" id="analytics-save">Save</button>`;
+      q("#analytics-save").addEventListener("click", async (event) => {
+        if (S.identity !== identity) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await client.setAnalyticsConsent(q("#analytics-consent").checked);
+          toast("Analytics preference saved", "success");
+          close();
+        } catch (error) {
+          toast(error.message, "error");
+          button.disabled = false;
+        }
+      });
+    } catch (error) { if (host?.isConnected) host.textContent = `Could not load preference: ${error.message}`; }
+  });
+}

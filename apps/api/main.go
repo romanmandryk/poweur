@@ -1,32 +1,55 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/dns"
 	"github.com/poweur/api/internal/relay"
 )
 
-func main() {
+func main() { os.Exit(run()) }
+func run() int {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := config.LoadDotEnv(".env"); err != nil {
-		log.Printf("failed to load .env: %v", err)
+		logger.Warn("dotenv unavailable")
 	}
 	cfg := config.FromEnv()
 	if err := cfg.Validate(); err != nil {
-		log.Printf("config error: %v", err)
-		log.Printf("set required values in .env or environment")
-		os.Exit(1)
+		logger.Error("invalid relay configuration", "error", err.Error())
+		return 1
 	}
-	resolver := dns.NewNetResolver()
-	providers := dns.NewProviderFactory(cfg)
-
-	server := relay.NewServer(cfg, resolver, providers)
-
-	log.Printf("relay listening on %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, server.Router()); err != nil {
-		log.Fatalf("server error: %v", err)
+	server := relay.NewServer(cfg, dns.NewNetResolver(), dns.NewProviderFactory(cfg))
+	if err := server.StartTelemetry(context.Background(), os.Stdout); err != nil {
+		logger.Error("telemetry initialization failed")
+		return 1
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	httpServer := &http.Server{Addr: cfg.ListenAddr, Handler: server.Router(), ReadHeaderTimeout: 10 * time.Second}
+	failures := make(chan error, 1)
+	go func() { failures <- httpServer.ListenAndServe() }()
+	code := 0
+	select {
+	case <-ctx.Done():
+	case err := <-failures:
+		if !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("HTTP server stopped")
+			code = 1
+		}
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdown)
+	flush, finish := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finish()
+	_ = server.Close(flush)
+	return code
 }

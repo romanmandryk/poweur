@@ -35,6 +35,27 @@ import (
 
 const enrollSASDigits = 6
 
+// normalizeRendezvousID strips transcription noise from a request code.
+// The id is case-sensitive base64url; we never fold case, only whitespace
+// and the unicode dashes mobile keyboards substitute for ASCII hyphen.
+func normalizeRendezvousID(id string) string {
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		switch r {
+		case '\t', '\n', '\r', ' ', '\u00a0', '\u202f', '\u2007',
+			'\u200b', '\u200c', '\u200d', '\ufeff':
+			continue
+		case '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015',
+			'\u2212', '\ufe58', '\ufe63', '\uff0d':
+			b.WriteByte('-')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // computeEnrollSAS mirrors relay.ComputeSAS. Both ends derive it from the
 // ephemeral key so neither trusts the relay's copy.
 func computeEnrollSAS(ephemeralPublicKey string) string {
@@ -196,7 +217,7 @@ func runKeyClaim(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url>")
 		return 1
 	}
-	identityValue, rendezvousID := fs.Arg(0), fs.Arg(1)
+	identityValue, rendezvousID := fs.Arg(0), normalizeRendezvousID(fs.Arg(1))
 	if *ephemeral == "" {
 		fmt.Fprintln(stderr, "--ephemeral-key is required (printed by `poweur key enroll`)")
 		return 1
@@ -290,7 +311,7 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur key approve <rendezvous-id> [--sas 123456]")
 		return 1
 	}
-	rendezvousID := fs.Arg(0)
+	rendezvousID := normalizeRendezvousID(fs.Arg(0))
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
 	if identityValue == "" || *relayURL == "" {
 		fmt.Fprintln(stderr, "identity and relay url required")

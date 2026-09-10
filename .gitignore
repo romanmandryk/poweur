@@ -24,6 +24,10 @@ apps/ios/android/
 apps/android/build/
 apps/android/.gradle/
 
+# Python leftovers (deployment helpers are Bash/Node)
+__pycache__/
+*.pyc
+
 # Go
 apps/api/coverage/
 apps/integration/coverage/
@@ -61,3 +65,13 @@ Thumbs.db
 *.swo
 apps/docs/build/
 apps/docs/.docusaurus/
+
+# Local E13 deployment state/secrets
+.observability.env
+.releases/
+.current
+.current.next
+.previous-release
+.deploy.lock
+.smoke/
+

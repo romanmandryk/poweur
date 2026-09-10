@@ -1,6 +1,7 @@
 name: Deploy
 
 on:
+  workflow_dispatch:
   push:
     branches: [master]
 
@@ -8,14 +9,22 @@ env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository_owner }}/poweur-relay
 
+concurrency:
+  group: poweur-production-deploy
+  cancel-in-progress: false
+
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      image: ${{ env.IMAGE }}:${{ github.sha }}
+      image: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,13 +35,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build timestamp
+        id: stamp
+        run: echo "time=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/api/Dockerfile
           push: true
-          build-args: VERSION=${{ github.sha }}
+          build-args: |
+            VERSION_HASH=${{ github.sha }}
+            BUILD_TIME=${{ steps.stamp.outputs.time }}
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
@@ -41,27 +57,51 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: read
     steps:
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Add server to known hosts
-        run: ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+      - name: Install pinned SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-      - name: Deploy
+      - name: Compose up relay and observability
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_IMAGE: ${{ needs.build.outputs.image }}
         run: |
-          echo "$GHCR_TOKEN" | ssh poweur@${{ secrets.DEPLOY_HOST }} \
-            "docker login ghcr.io -u $GHCR_USER --password-stdin"
-          ssh poweur@${{ secrets.DEPLOY_HOST }} bash << 'EOF'
-            set -euo pipefail
-            cd /opt/apps/poweur
-            git pull --ff-only origin master
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            echo "Deployed $(git rev-parse --short HEAD)"
+          printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "poweur@$DEPLOY_HOST" env RELEASE_SHA="$RELEASE_SHA" RELEASE_IMAGE="$RELEASE_IMAGE" bash -s <<'EOF'
+          set -euo pipefail
+          cd /opt/apps/poweur
+          git fetch origin "$RELEASE_SHA"
+          git reset --hard "$RELEASE_SHA"
+          export RELAY_IMAGE="$RELEASE_IMAGE"
+          export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
+          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
+          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
+            exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+          export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
+          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
+          for _ in $(seq 1 30); do
+            if docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health >/dev/null; then
+              echo "Relay /health ok"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Relay /health not ready; stack is up" >&2
+          docker logs --tail 40 poweur-relay >&2 || true
+          exit 1
           EOF

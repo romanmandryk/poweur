@@ -32,6 +32,10 @@ describe("relay root document", () => {
       "example.org",
     ]);
     expect(root.launcher_host).toBe("id.poweur.net");
+    expect(root.version).toMatch(/^\d+\.\d+\.\d+$/);
+    if (root.buildTime) {
+      expect(root.buildTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    }
   });
 
   it("still answers relayAddress(), which reads the same document", async () => {

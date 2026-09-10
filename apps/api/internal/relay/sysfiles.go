@@ -23,6 +23,7 @@ const maxSysDocBytes = 64 * 1024
 
 // sysValidators maps exact tree paths to their validators.
 var sysValidators = map[string]func([]byte) error{
+	analyticsPath: func(b []byte) error { _, err := parseAnalytics(b); return err },
 	files.SysRelay + "/contacts.json": func(b []byte) error {
 		_, err := idpkg.ParseContactsFile(b)
 		return err

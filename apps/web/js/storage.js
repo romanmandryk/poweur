@@ -22,6 +22,8 @@ const IDENTITY_PREFIX = "poweur:identity:";
 const ACTIVE_KEY = "poweur:active";
 const CONFIG_KEY = "poweur:config";
 const SESSION_PREFIX = "poweur:session:";
+/** Last `GET /` document. Shared with `mode.js` so hosted names can use their own origin. */
+export const ROOT_SESSION_KEY = "poweur:root";
 
 // ─── Relay URLs ───────────────────────────────────────────────────────────────
 
@@ -97,13 +99,91 @@ export function hasRelayUrl() {
   return Boolean(defaultRelayUrl());
 }
 
+function cachedRoot() {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(ROOT_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `https://alice.poweur.net` (scheme and port taken from `fallbackUrl`).
+ *
+ * Identity-scoped calls should hit this host when it *is* the relay — hosted
+ * names on this operator already are, via Host-routing. A shell's seed
+ * (`poweur.net`) is only for claiming a new name, not for talking to one.
+ */
+export function identityOriginUrl(identity, fallbackUrl) {
+  const name = String(identity || "").trim().toLowerCase().replace(/\.$/, "");
+  if (!name.includes(".") || name.includes("/") || name.includes(":") || isPrivateHost(name)) {
+    return "";
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) return "";
+  try {
+    const next = new URL(new URL(fallbackUrl).origin);
+    next.hostname = name;
+    return next.origin;
+  } catch {
+    return "";
+  }
+}
+
+function hostedDomains() {
+  const fromRoot = cachedRoot()?.hosted_domains;
+  if (Array.isArray(fromRoot) && fromRoot.length) {
+    return fromRoot.map((d) => String(d).toLowerCase().replace(/\.$/, ""));
+  }
+  try {
+    return [new URL(PRODUCTION_RELAY_URL).hostname.toLowerCase()];
+  } catch {
+    return [];
+  }
+}
+
+function isHostedIdentity(identity) {
+  const id = String(identity || "").toLowerCase().replace(/\.$/, "");
+  if (!id) return false;
+  return hostedDomains().some((domain) => id === domain || id.endsWith("." + domain));
+}
+
+/**
+ * Prefer the identity host for hosted names so enroll/DAV/sessions do not
+ * bounce to the operator apex. Loopback stored relays stay put — local tests
+ * have no public DNS for `alice.poweur.net`.
+ */
+export function apiBaseForIdentity(identity, relayUrl) {
+  const stored = String(relayUrl || "").replace(/\/+$/, "");
+  if (!stored) return stored;
+  const origin = identityOriginUrl(identity, stored);
+  if (!origin) return stored;
+  let storedHost;
+  try {
+    storedHost = new URL(stored).hostname.toLowerCase();
+  } catch {
+    return stored;
+  }
+  const id = String(identity || "").toLowerCase().replace(/\.$/, "");
+  if (storedHost === id) return stored;
+  if (isPrivateHost(storedHost)) return stored;
+  // Only rewrite when the stored URL is this operator (apex or a sibling like
+  // relay.poweur.net). A configured custom relay for a hosted-looking name is
+  // left alone — E15-T1: the record's relay is source of truth across operators.
+  const operator = hostedDomains().some(
+    (domain) => storedHost === domain || storedHost.endsWith("." + domain),
+  );
+  if (operator && isHostedIdentity(id)) return origin;
+  return stored;
+}
+
 /**
  * The relay this identity actually lives on. Identity records carry their own
  * relay, so one client can hold identities across several relays.
  */
 export function relayUrlFor(identity) {
   const record = identity ? loadIdentityRecord(identity) : null;
-  return record?.relay || defaultRelayUrl();
+  return apiBaseForIdentity(identity, record?.relay || defaultRelayUrl());
 }
 
 /**

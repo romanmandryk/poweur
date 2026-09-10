@@ -12,6 +12,7 @@
     "mobile:stage": "pnpm --filter @poweur/mobile run stage",
     "mobile:sync": "pnpm --filter @poweur/mobile run sync",
     "mobile:android": "pnpm --filter @poweur/mobile run build:android",
+    "android": "pnpm --filter @poweur/mobile run install:android",
     "mobile:test": "pnpm --filter @poweur/mobile test",
     "client": "pnpm --filter @poweur/client build",
     "client:build": "pnpm --filter @poweur/client build",

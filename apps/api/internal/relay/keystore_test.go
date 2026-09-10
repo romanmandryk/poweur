@@ -79,11 +79,11 @@ func (f *keystoreFixture) do(t *testing.T, method, path string, body any) (int, 
 // testCredential is a stand-in authenticator: an ES256 key plus the ability to
 // produce assertions over relay challenges.
 type testCredential struct {
-	id     string
-	key    *ecdsa.PrivateKey
-	spki   string
-	rpID   string
-	alg    int
+	id   string
+	key  *ecdsa.PrivateKey
+	spki string
+	rpID string
+	alg  int
 }
 
 func newTestCredential(t *testing.T, rpID string) *testCredential {

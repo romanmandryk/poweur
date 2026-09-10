@@ -66,6 +66,7 @@ func (s *Server) handleIdentityExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "export signature invalid")
 		return
 	}
+	verifiedActor(r, identity)
 
 	home, err := s.identities.IdentityHomeDir(identity)
 	if err != nil {
@@ -173,6 +174,7 @@ func (s *Server) handleIdentityRotate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "rotation signature invalid")
 		return
 	}
+	verifiedActor(r, identity)
 
 	doc, err := idpkg.ParseDocument(req.IdentityDocument, true)
 	if err != nil {

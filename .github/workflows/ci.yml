@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [master]
   pull_request:
@@ -121,3 +122,18 @@ jobs:
       # Both suites spawn a real Go relay (`go run`).
       - run: pnpm web:test
       - run: pnpm web:test:e2e
+
+  observability:
+    name: Observability and deployment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test deploy/tests/*.test.mjs
+      - run: for script in deploy/*.sh; do bash -n "$script"; done
+      - name: Validate Caddy
+        run: docker run --rm -v "$PWD/deploy/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile
+      - name: Real ingest and dashboard smoke test
+        run: node deploy/tests/stack-smoke.mjs

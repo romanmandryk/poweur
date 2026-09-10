@@ -41,7 +41,11 @@
 >   mints a fresh credential. Covered against a real relay in
 >   `apps/web/test/keystore-relay.test.js`.
 > - **The T3 ceremony has both halves**, covered by a two-browser-context Playwright test
->   that asserts the six digits match on both screens before approval.
+>   that asserts the six digits match on both screens before approval. Join and
+>   approve prefer the identity host (`https://alice.poweur.net`) when `GET /`
+>   says that origin is a relay, so a phone adding an identity does not bounce
+>   identity-scoped calls through `poweur.net`. The operator apex stays the
+>   seed for claiming a *new* name.
 >
 > **Two gaps found and closed while adopting it:** `POST /keystore/list` was Go-only — the
 > relay verified `CanonicalKeystoreList` and `poweur keys ls` signed it, but there was no
@@ -410,13 +414,18 @@ table. Ship **two transports plus one optimisation**, sharing a single enrollmen
 - [x] Short expiry; **number matching** on both screens as the confirmation step. Comparing the
       code *is* the authentication — `poweur key approve --sas` refuses a mismatch outright
       rather than only printing it
+- [x] Web join polling is one-in-flight (2 s, 10 min, claim immediately), retries network
+      blips, wakes on `visibilitychange` / focus, and has a **Check now** button. A
+      backgrounded phone used to fire every missed `setInterval` at once and stack 404 toasts
 - [ ] Number matching is a **confirmation, never a transport.** A standalone "approve on your
       other device" prompt is an MFA-fatigue surface: the identity name is public, so anyone
       could trigger prompts. Approval is only ever offered inside a ceremony the user started
 - [ ] Enrollment notification to **all** existing devices, including the device fingerprint
       and transport used, so an unexpected enrollment is visible after the fact
 - [x] CLI: `poweur key enroll` prints the rendezvous id and code; `key claim` completes it
-      later, so headless boxes can separate the two halves
+      later, so headless boxes can separate the two halves. TypeScript CLI has the same
+      commands. Go↔TS interop covers both directions, including a pasted id with wrapping
+      whitespace (the mobile-app failure mode: "rendezvous not found or expired")
 - [ ] Notify all existing devices when an enrollment completes — needs the typed-message
       channel (EPIC-009); today the inventory (`key ls`) shows it after the fact
 

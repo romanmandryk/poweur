@@ -155,6 +155,11 @@ export function IdentityInput({
   }
 
   async function lookup() {
+    // A forced lookup (Send, Enter) must cancel the input debounce. Leaving
+    // it armed starts a second resolve ~400ms later, which bumps resolveToken
+    // and makes this call return null — the submit then toasts "we can find"
+    // even though the identity resolved. CI lost contact requests that way.
+    clearTimeout(debounce);
     const identity = current();
     clear(previewSlot);
     resolved = null;

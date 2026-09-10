@@ -40,6 +40,8 @@ func TestFromEnv(t *testing.T) {
 	t.Setenv("RELAY_ADDRESS", "relay.fromenv")
 	t.Setenv("RELAY_SCHEME", "http")
 	t.Setenv("VERSION", "9.9.9")
+	t.Setenv("BUILD_TIME", "2026-09-10T12:00:00Z")
+	t.Setenv("VERSION_HASH", "abc1234")
 	t.Setenv("RATE_LIMIT_MINUTE", "7")
 	t.Setenv("GLOBAL_RATE_LIMIT_MINUTE", "3")
 	t.Setenv("DNS_TTL", "120s")
@@ -48,6 +50,8 @@ func TestFromEnv(t *testing.T) {
 		_ = os.Unsetenv("RELAY_ADDRESS")
 		_ = os.Unsetenv("RELAY_SCHEME")
 		_ = os.Unsetenv("VERSION")
+		_ = os.Unsetenv("BUILD_TIME")
+		_ = os.Unsetenv("VERSION_HASH")
 		_ = os.Unsetenv("RATE_LIMIT_MINUTE")
 		_ = os.Unsetenv("GLOBAL_RATE_LIMIT_MINUTE")
 		_ = os.Unsetenv("DNS_TTL")
@@ -61,6 +65,9 @@ func TestFromEnv(t *testing.T) {
 	}
 	if c.Version != "9.9.9" {
 		t.Fatalf("version %q", c.Version)
+	}
+	if c.BuildTime != "2026-09-10T12:00:00Z" || c.VersionHash != "abc1234" {
+		t.Fatalf("build metadata %q / %q", c.BuildTime, c.VersionHash)
 	}
 	if c.DNSTTL != 120*time.Second {
 		t.Fatalf("dnsttl %v", c.DNSTTL)

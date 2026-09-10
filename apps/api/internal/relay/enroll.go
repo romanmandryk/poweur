@@ -140,7 +140,7 @@ func (s *Server) handleEnrollOffer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEnrollFetch(w http.ResponseWriter, r *http.Request) {
 	identity := r.PathValue("identity")
-	rid := r.PathValue("rendezvous")
+	rid := strings.TrimSpace(r.PathValue("rendezvous"))
 	var req EnrollFetchRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		return
@@ -166,7 +166,7 @@ func (s *Server) handleEnrollFetch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEnrollDeliver(w http.ResponseWriter, r *http.Request) {
 	identity := r.PathValue("identity")
-	rid := r.PathValue("rendezvous")
+	rid := strings.TrimSpace(r.PathValue("rendezvous"))
 	var req EnrollDeliverRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		return
@@ -194,7 +194,7 @@ func (s *Server) handleEnrollDeliver(w http.ResponseWriter, r *http.Request) {
 // private key the new device never shared.
 func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 	identity := r.PathValue("identity")
-	rid := r.PathValue("rendezvous")
+	rid := strings.TrimSpace(r.PathValue("rendezvous"))
 	if _, ok := s.identities.Get(identity); !ok {
 		writeError(w, http.StatusNotFound, "not_found", "identity not found")
 		return
@@ -218,7 +218,7 @@ func (s *Server) handleEnrollClaim(w http.ResponseWriter, r *http.Request) {
 // who mistyped once would be locked out for the TTL.
 func (s *Server) handleEnrollCancel(w http.ResponseWriter, r *http.Request) {
 	identity := r.PathValue("identity")
-	rid := r.PathValue("rendezvous")
+	rid := strings.TrimSpace(r.PathValue("rendezvous"))
 	if _, ok := s.identities.Get(identity); !ok {
 		writeError(w, http.StatusNotFound, "not_found", "identity not found")
 		return
@@ -250,6 +250,10 @@ func (s *Server) verifyEnrollAdmin(
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature invalid")
 		return storage.Identity{}, false
 	}
+	if tw, ok := w.(*responseTelemetry); ok {
+		tw.state.actor = strings.ToLower(identity)
+		tw.state.direct = true
+	}
 	return ident, true
 }
 
@@ -260,4 +264,3 @@ func trimLabel(label string) string {
 	}
 	return label
 }
-

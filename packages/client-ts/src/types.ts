@@ -118,6 +118,8 @@ export interface IdentityResponse {
 export interface HealthResponse {
   status: string;
   version: string;
+  buildTime?: string;
+  versionHash?: string;
   storage?: {
     configured: boolean;
     path?: string;
@@ -242,6 +244,12 @@ export interface RelayRoot {
   launcher_hosts?: string[];
   hosted_domains?: string[];
   web_ui?: string;
+  /** Relay semver (EPIC-013 E13-T6). */
+  version?: string;
+  /** UTC `YYYY-MM-DD HH:MM` when the binary was built. */
+  buildTime?: string;
+  /** Git revision the binary was built from. */
+  versionHash?: string;
 }
 
 /** `GET /hosted/availability` (EPIC-018 E18-T2). */

@@ -66,7 +66,7 @@ type Ack struct {
 }
 
 const (
-	AckTypeDeliveryAck     = "ack"
+	AckTypeDeliveryAck      = "ack"
 	AckStateDeliveredClient = "delivered_client"
 )
 
@@ -177,6 +177,10 @@ type IdentityResponse struct {
 type HealthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
+	// BuildTime is UTC "2006-01-02 15:04" when known (EPIC-013 E13-T6).
+	BuildTime string `json:"buildTime,omitempty"`
+	// VersionHash is the git revision the binary was built from.
+	VersionHash string `json:"versionHash,omitempty"`
 	// Storage reports POWEUR_DATA health when configured.
 	Storage *StorageHealth `json:"storage,omitempty"`
 }

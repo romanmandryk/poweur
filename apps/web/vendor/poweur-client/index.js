@@ -11,7 +11,9 @@
  * Go stays canonical (`packages/identity`); this implementation conforms to
  * it via the vectors in `test/conformance.test.ts`.
  */
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.1.2";
+/** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
+export const SDK_BUILD_TIME = "2026-09-10 12:36";
 export * from "./types.js";
 export * from "./errors.js";
 export * from "./encoding.js";
@@ -40,3 +42,4 @@ export * from "./apppass.js";
 export * from "./client.js";
 export * as crypto from "./crypto/index.js";
 export { LocalDecryptor, LocalSigner, MemoryKeyStore, generateIdentityKeys, identityKeysFromSeed, signerFor, requireKeys, } from "./crypto/keys.js";
+export * from "./analytics.js";

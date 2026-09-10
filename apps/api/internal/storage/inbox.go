@@ -89,3 +89,14 @@ func (s *InboxStore) Expire(before time.Time) []ExpiredEntry[StoredMessage] {
 
 // Pending is how many messages are waiting for an identity.
 func (s *InboxStore) Pending(identity string) int { return s.spool.count(identity) }
+
+// Depth is the aggregate queue size; it reveals no identity names.
+func (s *InboxStore) Depth() int64 {
+	s.spool.mu.Lock()
+	defer s.spool.mu.Unlock()
+	var n int64
+	for _, entries := range s.spool.entries {
+		n += int64(len(entries))
+	}
+	return n
+}

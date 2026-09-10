@@ -28,7 +28,7 @@ import { identityApiFor } from "./client.js";
 // ordinary "localhost", and iOS's `capacitor://` is not the only shape a shell
 // takes — Android serves the same bundle from `https://localhost`, which every
 // syntactic test calls an ordinary web host.
-import { defaultRelayUrl, isShellRuntime } from "./storage.js";
+import { defaultRelayUrl, isShellRuntime, ROOT_SESSION_KEY } from "./storage.js";
 
 /** @typedef {"launcher" | "identity" | "shell" | "unknown"} AppMode */
 
@@ -47,7 +47,7 @@ import { defaultRelayUrl, isShellRuntime } from "./storage.js";
  * @property {boolean} reachable     false when the relay could not be asked
  */
 
-const SESSION_KEY = "poweur:root";
+const SESSION_KEY = ROOT_SESSION_KEY;
 
 /** Cached for the page's lifetime; `resolveMode()` is called from every render path. */
 let current = null;
@@ -142,6 +142,34 @@ function hostedParentOf(host, hostedDomains) {
     if (label && !label.includes(".")) return domain;
   }
   return "";
+}
+
+/**
+ * Which "Add identity" actions belong on this door.
+ *
+ * Passkeys are a browser authenticator (WebAuthn + an origin). The native
+ * shell wraps keys in the OS keystore, so offering "sign in with passkey"
+ * there is a ceremony that cannot succeed — or would mint a second,
+ * origin-bound wrapper the app then ignores. Optional passkey enrollment
+ * on hosted names is E19-T3, not this screen.
+ *
+ * Joining from a launcher host would store the keys on the wrong origin
+ * (`poweur.net` instead of `alice.poweur.net`). The identity host already
+ * named the subject; the shell has no origin, so it has to ask. Creating a
+ * new ID is the landing's job on the web and the shell's job in the app.
+ *
+ * @param {ModeInfo} info
+ * @returns {{ passkey: boolean, join: boolean, create: boolean, joinSubject: string }}
+ */
+export function addIdOptions(info) {
+  const identityHost = info.mode === "identity" && Boolean(info.subject);
+  const native = info.mode === "shell";
+  return {
+    passkey: !native,
+    join: native || identityHost || info.mode === "unknown",
+    create: native || info.mode === "unknown",
+    joinSubject: identityHost ? info.subject : "",
+  };
 }
 
 function normalizeHost(value) {

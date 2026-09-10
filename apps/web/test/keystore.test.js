@@ -171,11 +171,20 @@ describe("restoreLocalRecord", () => {
 
 describe("deviceLabel", () => {
   it("names something a person would recognise in a device list", () => {
-    expect(deviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0 Safari/537.36"))
+    expect(deviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0 Safari/537.36", { native: false }))
       .toBe("Chrome on Mac");
-    expect(deviceLabel("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Safari/605.1"))
+    expect(deviceLabel("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Safari/605.1", { native: false }))
       .toBe("Safari on iOS");
-    expect(deviceLabel("Mozilla/5.0 (Windows NT 10.0) Firefox/121.0")).toBe("Firefox on Windows");
-    expect(deviceLabel("")).toBe("browser on Device");
+    expect(deviceLabel("Mozilla/5.0 (Windows NT 10.0) Firefox/121.0", { native: false })).toBe("Firefox on Windows");
+    expect(deviceLabel("", { native: false })).toBe("browser on Device");
+  });
+
+  it("does not name the WebView as a browser inside the native shell", () => {
+    const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Safari/605.1";
+    const android = "Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile Safari/537.36";
+    const desktop = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0 Safari/537.36";
+    expect(deviceLabel(iphone, { native: true })).toBe("iPhone");
+    expect(deviceLabel(android, { native: true })).toBe("Android");
+    expect(deviceLabel(desktop, { native: true })).toBe("This device");
   });
 });

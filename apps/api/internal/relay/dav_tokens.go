@@ -156,6 +156,7 @@ func (s *Server) handleDAVTokenPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "signature invalid")
 			return
 		}
+		verifiedActor(r, req.Identity)
 		if session.ExpiresAt.Before(expiresAt) {
 			expiresAt = session.ExpiresAt // token never outlives the session
 		}
@@ -170,6 +171,7 @@ func (s *Server) handleDAVTokenPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "signature invalid")
 			return
 		}
+		verifiedActor(r, req.Identity)
 	}
 
 	token, err := randomToken(32)

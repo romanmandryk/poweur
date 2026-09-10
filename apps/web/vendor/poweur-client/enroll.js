@@ -28,6 +28,21 @@ import { newNonce } from "./ids.js";
 /** Digits in the short authentication string shown on both screens. */
 export const SAS_DIGITS = 6;
 /**
+ * Strip transcription noise from a request code.
+ *
+ * The id is 16 random bytes as base64url — case-sensitive, hyphen-bearing —
+ * and it is what a human copies between devices. Mobile keyboards inject
+ * leading capitals, smart dashes and wrapping spaces; a single extra
+ * character makes the relay answer "rendezvous not found or expired".
+ * Whitespace and unicode dashes are noise; case is not, so we never fold it.
+ */
+export function normalizeRendezvousId(value) {
+    return value
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/[\s\u00A0\u202F\u2007]+/g, "")
+        .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-");
+}
+/**
  * Derive the code both devices display. Computed independently on each side
  * from the ephemeral public key, so the relay is never trusted to report it —
  * the value it echoes is a convenience, not an authority.
@@ -75,10 +90,11 @@ export class EnrollApi {
      * confirm it matches the new device's screen before calling `approve`.
      */
     async pending(signer, identity, rendezvousId) {
-        const body = await this.#signed(signer, "enroll-fetch", identity, rendezvousId);
+        const id = normalizeRendezvousId(rendezvousId);
+        const body = await this.#signed(signer, "enroll-fetch", identity, id);
         const pending = await this.#relay.request({
             method: "POST",
-            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(rendezvousId)}/fetch`,
+            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(id)}/fetch`,
             body,
         });
         const sas = computeSas(pending.ephemeral_public_key);
@@ -95,14 +111,15 @@ export class EnrollApi {
      * opened the rendezvous.
      */
     async approve(signer, identity, pending, seed) {
+        const id = normalizeRendezvousId(pending.rendezvous_id);
         const sealed = seal(pending.ephemeral_public_key, seed);
         const body = {
-            ...(await this.#signed(signer, "enroll-deliver", identity, pending.rendezvous_id)),
+            ...(await this.#signed(signer, "enroll-deliver", identity, id)),
             sealed: JSON.stringify(sealed),
         };
         await this.#relay.request({
             method: "POST",
-            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(pending.rendezvous_id)}/deliver`,
+            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(id)}/deliver`,
             body,
             allowStatus: [204],
         });
@@ -114,9 +131,10 @@ export class EnrollApi {
      * id being replayed.
      */
     async claim(identity, session) {
+        const id = normalizeRendezvousId(session.rendezvousId);
         const result = await this.#relay.request({
             method: "GET",
-            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(session.rendezvousId)}`,
+            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(id)}`,
         });
         if (!result.ready || !result.sealed)
             return null;
@@ -141,9 +159,10 @@ export class EnrollApi {
      * ceremonies would lock the identity out until they expired.
      */
     async cancel(identity, session) {
+        const id = normalizeRendezvousId(session.rendezvousId);
         await this.#relay.request({
             method: "DELETE",
-            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(session.rendezvousId)}`,
+            path: `/identities/${encodeURIComponent(identity)}/enroll/${encodeURIComponent(id)}`,
             allowStatus: [204],
         });
     }

@@ -10,6 +10,7 @@
     "android": "pnpm run sync && cap open android",
     "build:ios": "pnpm run sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
     "build:android": "pnpm run sync && ./android/gradlew -p android :app:assembleDebug",
+    "install:android": "pnpm run build:android && node scripts/adb-install.mjs",
     "test": "node --test --test-reporter=spec test/stage.test.mjs"
   },
   "dependencies": {

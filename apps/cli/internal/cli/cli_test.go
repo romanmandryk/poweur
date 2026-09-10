@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -401,28 +402,40 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 		{
 			name: "value flag after positional",
 			in:   []string{"bob.poweur.net", "--petname", "Bob"},
-			want: []string{"--petname", "Bob", "bob.poweur.net"},
+			want: []string{"--petname", "Bob", "--", "bob.poweur.net"},
 		},
 		{
 			name: "equals form needs no value pickup",
 			in:   []string{"bob.poweur.net", "--petname=Bob"},
-			want: []string{"--petname=Bob", "bob.poweur.net"},
+			want: []string{"--petname=Bob", "--", "bob.poweur.net"},
 		},
 		{
 			name:  "bool flag does not swallow the next positional",
 			in:    []string{"bob.poweur.net", "--json"},
 			bools: map[string]bool{"--json": true},
-			want:  []string{"--json", "bob.poweur.net"},
+			want:  []string{"--json", "--", "bob.poweur.net"},
 		},
 		{
 			name: "two positionals keep their order",
 			in:   []string{"bob.poweur.net", "hi there", "--use-identity", "me.poweur.net"},
-			want: []string{"--use-identity", "me.poweur.net", "bob.poweur.net", "hi there"},
+			want: []string{"--use-identity", "me.poweur.net", "--", "bob.poweur.net", "hi there"},
 		},
 		{
-			name: "already normalised is unchanged",
+			name: "already normalised keeps a terminator before positionals",
 			in:   []string{"--petname", "Bob", "bob.poweur.net"},
-			want: []string{"--petname", "Bob", "bob.poweur.net"},
+			want: []string{"--petname", "Bob", "--", "bob.poweur.net"},
+		},
+		{
+			name:  "dash-prefixed base64url stays positional",
+			in:    []string{"alice.poweur.net", "-jeCR-4zJRkkEUe3K70Erw", "--ephemeral-key", "secret", "--json"},
+			bools: map[string]bool{"--json": true},
+			want:  []string{"--ephemeral-key", "secret", "--json", "--", "alice.poweur.net", "-jeCR-4zJRkkEUe3K70Erw"},
+		},
+		{
+			name:  "value flag keeps a dash-prefixed base64url argument",
+			in:    []string{"alice.poweur.net", "rid", "--ephemeral-key", "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU", "--json"},
+			bools: map[string]bool{"--json": true},
+			want:  []string{"--ephemeral-key", "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU", "--json", "--", "alice.poweur.net", "rid"},
 		},
 	}
 	for _, tt := range tests {
@@ -437,5 +450,59 @@ func TestNormalizeArgsMovesFlagsAheadOfPositionals(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNormalizeArgsDashPrefixedRendezvousParses(t *testing.T) {
+	fs := flag.NewFlagSet("key claim", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	ephemeral := fs.String("ephemeral-key", "", "")
+	relay := fs.String("relay", "", "")
+	jsonOut := fs.Bool("json", false, "")
+	args := normalizeArgs([]string{
+		"tsenroll.poweur.net", "-jeCR-4zJRkkEUe3K70Erw",
+		"--ephemeral-key", "secret", "--relay", "http://127.0.0.1:8080", "--json",
+	}, map[string]bool{"--json": true})
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse: %v (%s)", err, buf.String())
+	}
+	if fs.Arg(0) != "tsenroll.poweur.net" || fs.Arg(1) != "-jeCR-4zJRkkEUe3K70Erw" {
+		t.Fatalf("positionals %v", fs.Args())
+	}
+	if *ephemeral != "secret" || *relay != "http://127.0.0.1:8080" || !*jsonOut {
+		t.Fatalf("flags ephemeral=%q relay=%q json=%v", *ephemeral, *relay, *jsonOut)
+	}
+}
+
+func TestNormalizeArgsDashPrefixedFlagValueParses(t *testing.T) {
+	fs := flag.NewFlagSet("key claim", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	ephemeral := fs.String("ephemeral-key", "", "")
+	_ = fs.Bool("json", false, "")
+	const key = "-kaAdNETajiziu797SRGfEhxo6hf23QrPF7i4D80RdU"
+	args := normalizeArgs([]string{
+		"tsenroll.poweur.net", "0uix_IswSd_Geu6AVxKbRA",
+		"--ephemeral-key", key, "--json",
+	}, map[string]bool{"--json": true})
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse: %v (%s)", err, buf.String())
+	}
+	if *ephemeral != key {
+		t.Fatalf("ephemeral-key=%q want %q (args=%v)", *ephemeral, key, args)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	for _, arg := range []string{"version", "--version", "-v"} {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{arg}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("%s: exit %d: %s", arg, code, stderr.String())
+		}
+		if !bytes.Contains(stdout.Bytes(), []byte("poweur ")) {
+			t.Fatalf("%s: output %q", arg, stdout.String())
+		}
 	}
 }

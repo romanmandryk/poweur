@@ -25,7 +25,7 @@ import {
 } from "@poweur/client";
 
 import { assertChallenge, credentialRpId, wrapKeysWithPRF } from "./passkey.js";
-import { loadIdentityRecord, relayUrlFor, rpIdFor, saveIdentityRecord } from "./storage.js";
+import { loadIdentityRecord, relayUrlFor, rpIdFor, saveIdentityRecord, isShellRuntime } from "./storage.js";
 import { jwksFromSeed, publicKeyFromJwk } from "./vault.js";
 
 /** A stable id for an enrollment, independent of the credential it wraps. */
@@ -101,8 +101,20 @@ export async function enrollThisBrowser(client, identity, { label = deviceLabel(
   return { enrollmentId, canBootstrap: kdf === "prf" };
 }
 
-/** A name a person will recognise in a device list, from the user agent. */
-export function deviceLabel(userAgent = globalThis.navigator?.userAgent ?? "") {
+/**
+ * A name a person will recognise in a device list, from the user agent.
+ *
+ * The shell's WebView still reports Safari or Chrome. That is the wrapper,
+ * not the product — the key lives in the OS keystore, so the inventory
+ * should say "iPhone", not "Safari on iOS".
+ */
+export function deviceLabel(userAgent = globalThis.navigator?.userAgent ?? "", { native = isShellRuntime() } = {}) {
+  if (native) {
+    if (/iPad/i.test(userAgent)) return "iPad";
+    if (/iPhone/i.test(userAgent)) return "iPhone";
+    if (/Android/i.test(userAgent)) return "Android";
+    return "This device";
+  }
   const platform =
     /iPhone|iPad/i.test(userAgent) ? "iOS" :
     /Android/i.test(userAgent) ? "Android" :

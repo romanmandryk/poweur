@@ -10,19 +10,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/poweur/api/internal/buildinfo"
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
 	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
+	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
 	"golang.org/x/net/webdav"
 )
@@ -32,24 +33,29 @@ const (
 )
 
 type Server struct {
-	cfg        config.Config
-	resolver   dns.Resolver
-	providers  *dns.ProviderFactory
-	identities *storage.IdentityStore
-	inbox      *storage.InboxStore
-	requests   *storage.RequestStore
-	anonInbox  *storage.InboxStore
-	anon       *anonState
-	powSecret  []byte
-	acks       *storage.AckStore
-	challenges *storage.ChallengeStore
-	keystore   *storage.KeystoreStore
-	rendezvous *storage.RendezvousStore
-	sessions   *storage.SessionStore
-	rateLimit  *ratelimit.Limiter
-	regGate    *RegistrationGate
-	client     *http.Client
-	idCache    *idpkg.Cache
+	telemetry       *telemetry.Runtime
+	startupFailures []string
+	stop            chan struct{}
+	closeOnce       sync.Once
+	pruneOnce       sync.Once
+	cfg             config.Config
+	resolver        dns.Resolver
+	providers       *dns.ProviderFactory
+	identities      *storage.IdentityStore
+	inbox           *storage.InboxStore
+	requests        *storage.RequestStore
+	anonInbox       *storage.InboxStore
+	anon            *anonState
+	powSecret       []byte
+	acks            *storage.AckStore
+	challenges      *storage.ChallengeStore
+	keystore        *storage.KeystoreStore
+	rendezvous      *storage.RendezvousStore
+	sessions        *storage.SessionStore
+	rateLimit       *ratelimit.Limiter
+	regGate         *RegistrationGate
+	client          *http.Client
+	idCache         *idpkg.Cache
 
 	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
@@ -79,49 +85,56 @@ type cachedRelay struct {
 }
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
+	var startupFailures []string
 	store, err := storage.OpenIdentityStore(cfg.DataDir)
 	if err != nil {
 		// Fall back to memory-only rather than crashing constructors used in tests.
 		store = storage.NewIdentityStore()
+		startupFailures = append(startupFailures, "identity_storage_open_failed")
 	}
 	keystore, err := storage.OpenKeystoreStore(cfg.DataDir)
 	if err != nil {
 		keystore = storage.NewKeystoreStore()
+		startupFailures = append(startupFailures, "keystore_open_failed")
 	}
 	// Undelivered mail survives a restart (EPIC-009 E09-T1); a relay with no
 	// data dir keeps the old memory-only behaviour rather than refusing to run.
 	inbox, err := storage.OpenInboxStore(cfg.DataDir)
 	if err != nil {
 		inbox = storage.NewInboxStore()
+		startupFailures = append(startupFailures, "inbox_storage_open_failed")
 	}
 	acks, err := storage.OpenAckStore(cfg.DataDir)
 	if err != nil {
 		acks = storage.NewAckStore()
+		startupFailures = append(startupFailures, "ack_storage_open_failed")
 	}
 	s := &Server{
-		cfg:           cfg,
-		resolver:      resolver,
-		providers:     providers,
-		identities:    store,
-		inbox:         inbox,
-		requests:      storage.NewRequestStore(),
-		anonInbox:     storage.NewInboxStore(),
-		anon:          newAnonState(),
-		powSecret:     newPowSecret(),
-		acks:          acks,
-		challenges:    storage.NewChallengeStore(),
-		keystore:      keystore,
-		rendezvous:    storage.NewRendezvousStore(),
-		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
-		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
-		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
-		client:        &http.Client{Timeout: 10 * time.Second},
-		idCache:       idpkg.NewCache(),
-		davTokens:     newDAVTokenStore(),
-		davLocks:      make(map[string]webdav.LockSystem),
-		hub:           newHub(),
-		relayCache:    make(map[string]cachedRelay),
-		localityCache: make(map[string]cachedLocality),
+		startupFailures: startupFailures,
+		stop:            make(chan struct{}),
+		cfg:             cfg,
+		resolver:        resolver,
+		providers:       providers,
+		identities:      store,
+		inbox:           inbox,
+		requests:        storage.NewRequestStore(),
+		anonInbox:       storage.NewInboxStore(),
+		anon:            newAnonState(),
+		powSecret:       newPowSecret(),
+		acks:            acks,
+		challenges:      storage.NewChallengeStore(),
+		keystore:        keystore,
+		rendezvous:      storage.NewRendezvousStore(),
+		sessions:        storage.NewSessionStore(), // sessions remain memory-only by design
+		rateLimit:       ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		regGate:         NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
+		client:          &http.Client{Timeout: 10 * time.Second},
+		idCache:         idpkg.NewCache(),
+		davTokens:       newDAVTokenStore(),
+		davLocks:        make(map[string]webdav.LockSystem),
+		hub:             newHub(),
+		relayCache:      make(map[string]cachedRelay),
+		localityCache:   make(map[string]cachedLocality),
 	}
 	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
 	// only ever talks to the StorageProvider interface.
@@ -135,10 +148,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 				id, ok := store.Get(owner)
 				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
 			},
-			Logf: log.Printf,
+			Logf: func(string, ...any) { s.event(context.Background(), "grant.validation", "rejected") },
 		}
 	}
-	go s.runPruner()
 	return s
 }
 
@@ -146,12 +158,19 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 func (s *Server) runPruner() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+		}
+		s.sampleTelemetry()
 		s.sessions.Prune()
 		s.davTokens.Prune()
 		s.anon.prune()
 		s.pruneLocalityCache()
 		s.expireSpool()
+		s.event(context.Background(), "maintenance.prune", "success")
 	}
 }
 
@@ -168,8 +187,7 @@ func (s *Server) expireSpool() {
 	}
 	cutoff := time.Now().Add(-s.cfg.SpoolTTL)
 	for _, expired := range s.inbox.Expire(cutoff) {
-		log.Printf("spool: expired message %s for %s after %s",
-			expired.Item.ID, expired.Identity, s.cfg.SpoolTTL)
+		s.event(context.Background(), "message.expire", "success")
 		if expired.Item.Sender == "" {
 			continue // anonymous senders have no inbox to notify
 		}
@@ -185,8 +203,8 @@ func (s *Server) expireSpool() {
 	}
 	// An undelivered *receipt* is only worth so much; expiring it silently is
 	// right, because notifying about a notification has no bottom.
-	for _, expired := range s.acks.Expire(cutoff) {
-		log.Printf("spool: expired ack %s for %s", expired.Item.ID, expired.Identity)
+	for range s.acks.Expire(cutoff) {
+		s.event(context.Background(), "ack.expire", "success")
 	}
 }
 
@@ -202,6 +220,7 @@ func (s *Server) pruneLocalityCache() {
 }
 
 func (s *Server) Router() http.Handler {
+	s.pruneOnce.Do(func() { go s.runPruner() })
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleRoot)
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -253,7 +272,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
-	return corsMiddleware(mux)
+	return s.instrument(mux, corsMiddleware(mux))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +292,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	version, buildTime, versionHash := s.releaseInfo()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":       "poweur-relay",
 		"relay_address": s.cfg.RelayAddress,
@@ -285,7 +305,28 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"launcher_hosts": s.cfg.LauncherHosts,
 		"hosted_domains": s.cfg.HostedDomains,
 		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
+		"version":        version,
+		"buildTime":      buildTime,
+		"versionHash":    versionHash,
 	})
+}
+
+// releaseInfo is the semver + build stamp advertised on GET / and /health.
+func (s *Server) releaseInfo() (version, buildTime, versionHash string) {
+	version = s.cfg.Version
+	if version == "" {
+		version = buildinfo.Version
+	}
+	rawTime := s.cfg.BuildTime
+	if rawTime == "" {
+		rawTime = buildinfo.Time
+	}
+	buildTime = buildinfo.FormatTime(rawTime)
+	versionHash = s.cfg.VersionHash
+	if versionHash == "" {
+		versionHash = buildinfo.Hash
+	}
+	return
 }
 
 // wantsJSON reports whether the caller asked for the root document itself.
@@ -296,7 +337,14 @@ func wantsJSON(r *http.Request) bool {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	resp := HealthResponse{Status: "ok", Version: s.cfg.Version, Storage: s.storageHealth()}
+	version, buildTime, versionHash := s.releaseInfo()
+	resp := HealthResponse{
+		Status:      "ok",
+		Version:     version,
+		BuildTime:   buildTime,
+		VersionHash: versionHash,
+		Storage:     s.storageHealth(),
+	}
 	if resp.Storage != nil && resp.Storage.Configured && !resp.Storage.Writable {
 		resp.Status = "degraded"
 	}
@@ -416,6 +464,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, req.Identity)
 
 	var docJSON []byte
 	if len(req.IdentityDocument) > 0 {
@@ -559,6 +608,7 @@ func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
 		return
 	}
+	verifiedActor(r, identityValue)
 
 	provider, err := s.providers.Provider(req.DNSProvider)
 	if err != nil {
@@ -722,6 +772,15 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
+	verifiedActor(r, msg.Sender)
+	if senderLocal {
+		requestAction(r, "message.submit")
+	} else {
+		requestAction(r, "message.receive")
+		if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
+			st.direct = false
+		}
+	}
 
 	// Rate limit by verified sender only — charging an unverified sender field
 	// before sig check would let any attacker exhaust another identity's quota.
@@ -755,6 +814,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			// A queued request is a delivery too: without this, a contact
 			// request waits silently until the recipient happens to open the
 			// app, which is exactly the wait push exists to remove.
+			s.event(r.Context(), "contact.queue", "success")
 			s.notify(msg.Recipient, "request", msg.ID)
 			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
 			return
@@ -767,6 +827,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		// Tell anyone listening that there is something to pick up (E09-T2).
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
+		s.event(r.Context(), "message.enqueue", "success")
 		s.notify(msg.Recipient, "message", msg.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
@@ -830,6 +891,7 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "ack signature verification failed (key source: "+source+")")
 		return
 	}
+	verifiedActor(r, ack.Sender)
 
 	decision := s.rateLimit.Allow(ack.Sender)
 	if !decision.Allowed {
@@ -935,6 +997,7 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
 		return false
 	}
+	verifiedActor(r, identity)
 	return true
 }
 
@@ -1225,7 +1288,14 @@ func (s *Server) resolveRelayHost(ctx context.Context, identity string) (string,
 	return host, nil
 }
 
-func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
+func (s *Server) forwardMessage(ctx context.Context, msg Message) (result error) {
+	defer func() {
+		outcome := "success"
+		if result != nil {
+			outcome = "failure"
+		}
+		s.event(ctx, "message.forward", outcome)
+	}()
 	relayHost, err := s.resolveRelayHost(ctx, msg.Recipient)
 	if err != nil {
 		return err
@@ -1272,7 +1342,14 @@ func (s *Server) forwardMessage(ctx context.Context, msg Message) error {
 // the ack-sender is local but the ack-recipient lives on another relay,
 // the home relay POSTs the ack onward. Used only in privacy-proxy mode;
 // normal direct sends never trigger this path.
-func (s *Server) forwardAck(ctx context.Context, ack Ack) error {
+func (s *Server) forwardAck(ctx context.Context, ack Ack) (result error) {
+	defer func() {
+		outcome := "success"
+		if result != nil {
+			outcome = "failure"
+		}
+		s.event(ctx, "ack.forward", outcome)
+	}()
 	relayHost, err := s.resolveRelayHost(ctx, ack.Recipient)
 	if err != nil {
 		return err
@@ -1336,6 +1413,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 }
 
 func writeError(w http.ResponseWriter, status int, code, detail string) {
+	if tw, ok := w.(interface{ telemetryError(string) }); ok {
+		tw.telemetryError(code)
+	}
 	writeJSON(w, status, ErrorResponse{Error: code, Detail: detail})
 }
 

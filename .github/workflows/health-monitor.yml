@@ -1,0 +1,16 @@
+name: External relay health
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  contents: read
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe from outside the VM
+        run: |
+          curl --fail --silent --show-error --max-time 15 --retry 3 --retry-delay 10 https://relay.poweur.net/health > /tmp/health.json
+          jq -e '.storage.writable != false and (.version | type == "string" and length > 0)' /tmp/health.json > /dev/null

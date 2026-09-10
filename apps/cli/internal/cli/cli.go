@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/poweur/cli/internal/buildinfo"
 	"github.com/poweur/cli/internal/config"
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	"github.com/poweur/cli/internal/identity"
@@ -64,6 +65,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runContacts(args[1:], stdout, stderr)
 	case "requests":
 		return runRequests(args[1:], stdout, stderr)
+	case "analytics":
+		return runAnalytics(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
 	case "anon":
@@ -72,6 +75,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
 		return runAuth(args[1:], stdout, stderr)
+	case "version", "--version", "-v":
+		buildinfo.Write(stdout)
+		return 0
 	case "-h", "--help", "help":
 		printHelp(stdout)
 		return 0
@@ -1292,10 +1298,20 @@ func runRelayStatus(args []string, stdout, stderr io.Writer) int {
 		"status":  health.Status,
 		"version": health.Version,
 	}
+	if health.BuildTime != "" {
+		output["buildTime"] = health.BuildTime
+	}
+	if health.VersionHash != "" {
+		output["versionHash"] = health.VersionHash
+	}
 	if health.Storage != nil {
 		output["storage"] = health.Storage
 	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version))
+	line := fmt.Sprintf("relay %s (version %s)\n", health.Status, health.Version)
+	if health.BuildTime != "" {
+		line = fmt.Sprintf("relay %s (version %s, %s)\n", health.Status, health.Version, health.BuildTime)
+	}
+	return writeOutput(stdout, *jsonOut, output, line)
 }
 
 func runRelaySet(args []string, stdout, stderr io.Writer) int {
@@ -1938,11 +1954,13 @@ func printHelp(w io.Writer) {
   poweur share group remove <name>
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
+  poweur analytics <show|on|off> [--use-identity=...] [--json]
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
+  poweur version
 `)
 }
 
@@ -1953,27 +1971,66 @@ func resolveIdentity(flagValue string, fallback string) string {
 	return fallback
 }
 
+// looksLikeFlag reports CLI flags (`--relay`, `-json`) without treating
+// dash-prefixed positionals as flags. Enrollment rendezvous ids are base64url
+// and often start with `-` or `--`; Go's flag package would otherwise reject
+// `key claim <identity> -jeCR-...`.
+func looksLikeFlag(arg string) bool {
+	if arg == "-" || arg == "--" || !strings.HasPrefix(arg, "-") {
+		return false
+	}
+	name := strings.TrimLeft(arg, "-")
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, r := range name[1:] {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isBoolFlag(arg string, boolFlags map[string]bool) bool {
+	if boolFlags[arg] {
+		return true
+	}
+	name := strings.TrimLeft(arg, "-")
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	return boolFlags["--"+name] || boolFlags["-"+name]
+}
+
 func normalizeArgs(args []string, boolFlags map[string]bool) []string {
 	var flags []string
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if boolFlags[arg] || strings.Contains(arg, "=") {
-				continue
-			}
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
+		if !looksLikeFlag(arg) {
+			positional = append(positional, arg)
 			continue
 		}
-		positional = append(positional, arg)
+		flags = append(flags, arg)
+		if isBoolFlag(arg, boolFlags) || strings.Contains(arg, "=") {
+			continue
+		}
+		// Value flags consume the next word even when it starts with `-`
+		// (X25519 keys and rendezvous ids are base64url). Do not swallow a
+		// following real flag or the `--` terminator.
+		if i+1 < len(args) && args[i+1] != "--" && !looksLikeFlag(args[i+1]) {
+			flags = append(flags, args[i+1])
+			i++
+		}
 	}
-
-	return append(flags, positional...)
+	if len(positional) == 0 {
+		return flags
+	}
+	return append(append(flags, "--"), positional...)
 }
 
 func resolveDNSProvider(flagValue string) string {

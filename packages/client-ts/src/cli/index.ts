@@ -8,10 +8,8 @@
 
 import { UsageError } from "./args.js";
 import { defaultStreams, fail, type Streams } from "./output.js";
-import {
-  identityCommand,
-  keyRotate,
-} from "./commands/identity.js";
+import { identityCommand } from "./commands/identity.js";
+import { keyCommand } from "./commands/enroll.js";
 import {
   anon,
   inbox,
@@ -23,6 +21,7 @@ import {
 } from "./commands/messaging.js";
 import { davCommand, shareCommand, syncCommand } from "./commands/files.js";
 import {
+  analyticsCommand,
   authCommand,
   contactsCommand,
   policyCommand,
@@ -39,6 +38,9 @@ export const HELP = `Usage:
   poweur identity lookup <identity> [--json]
   poweur identity export [--use-identity=...] [--out=<file.tar.gz>]
   poweur key rotate [--use-identity=...] [--grace=168h] [--json]
+  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]
+  poweur key approve <rendezvous-id> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--json]
+  poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url> [--relay=...] [--json]
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur inbox [--use-identity=...] [--json]
@@ -59,6 +61,7 @@ export const HELP = `Usage:
   poweur requests [--use-identity=...] [--json]
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
   poweur auth <inspect|sign> <request-file-or-url> [--use-identity=...] [--json]
+  poweur analytics <show|on|off> [--use-identity=...] [--json]
   poweur version
 `;
 
@@ -73,11 +76,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
   try {
     switch (command) {
       case "identity": return await identityCommand(rest, streams);
-      case "key":
-        if (rest[0] !== "rotate") {
-          throw new UsageError("usage: poweur key rotate [--use-identity <id>] [--grace 168h]");
-        }
-        return await keyRotate(rest.slice(1), streams);
+      case "key": return await keyCommand(rest, streams);
       case "send": return await send(rest, streams);
       case "inbox": return await inbox(rest, streams);
       case "listen": return await listen(rest, streams);
@@ -93,12 +92,14 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "contacts": return await contactsCommand(rest, streams);
       case "requests": return await requestsCommand(rest, streams);
       case "policy": return await policyCommand(rest, streams);
+      case "analytics": return await analyticsCommand(rest, streams);
       case "auth": return await authCommand(rest, streams);
       case "version":
       case "--version":
       case "-v": {
-        const { SDK_VERSION } = await import("../index.js");
+        const { SDK_VERSION, SDK_BUILD_TIME } = await import("../index.js");
         streams.stdout(`poweur (@poweur/client) ${SDK_VERSION}\n`);
+        if (SDK_BUILD_TIME) streams.stdout(`built ${SDK_BUILD_TIME}\n`);
         return 0;
       }
       case "help":

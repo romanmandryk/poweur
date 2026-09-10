@@ -10,11 +10,13 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/dns"
 	irelay "github.com/poweur/api/internal/relay"
+	"github.com/poweur/api/internal/telemetry"
 )
 
 type (
 	// Config matches the production relay config shape.
-	Config = config.Config
+	Config          = config.Config
+	TelemetryConfig = telemetry.Config
 	// RateLimits configures the relay's per-sender rate limits.
 	RateLimits = config.RateLimits
 	// Resolver is the DNS read contract used by the relay.

@@ -173,6 +173,7 @@ func (s *Server) handleKeystorePut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "enrollment signature invalid")
 		return
 	}
+	verifiedActor(r, identity)
 
 	role := req.Role
 	if role == "" {
@@ -251,6 +252,7 @@ func (s *Server) handleKeystoreList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "list signature invalid")
 		return
 	}
+	verifiedActor(r, identity)
 	entries := s.keystore.List(identity)
 	out := make([]KeystoreSummary, 0, len(entries))
 	for _, e := range entries {
@@ -325,6 +327,7 @@ func (s *Server) handleKeystoreFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "assertion rejected")
 		return
 	}
+	verifiedActor(r, identity)
 
 	s.keystore.TouchLastUsed(identity, entry.EnrollmentID, time.Now())
 	writeJSON(w, http.StatusOK, KeystoreFetchResponse{
@@ -359,6 +362,7 @@ func (s *Server) handleKeystoreDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "removal signature invalid")
 		return
 	}
+	verifiedActor(r, identity)
 	entries := s.keystore.List(identity)
 	if _, ok := s.keystore.Get(identity, enrollmentID); !ok {
 		writeError(w, http.StatusNotFound, "not_found", "enrollment not found")

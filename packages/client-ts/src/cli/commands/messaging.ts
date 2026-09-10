@@ -375,13 +375,22 @@ export async function relayCommand(argv: string[], streams: Streams): Promise<nu
     const health = await new RelayClient(config.relay_url).request<{
       status: string;
       version: string;
+      buildTime?: string;
+      versionHash?: string;
       storage?: unknown;
     }>({ method: "GET", path: "/health" });
+    const extra = health.buildTime ? `, ${health.buildTime}` : "";
     return write(
       streams,
       flagBool(args, "json"),
-      { status: health.status, version: health.version, ...(health.storage ? { storage: health.storage } : {}) },
-      `relay ${health.status} (version ${health.version})\n`,
+      {
+        status: health.status,
+        version: health.version,
+        ...(health.buildTime ? { buildTime: health.buildTime } : {}),
+        ...(health.versionHash ? { versionHash: health.versionHash } : {}),
+        ...(health.storage ? { storage: health.storage } : {}),
+      },
+      `relay ${health.status} (version ${health.version}${extra})\n`,
     );
   }
   if (sub === "set") {

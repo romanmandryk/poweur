@@ -1,10 +1,18 @@
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.10.2-alpine
     container_name: infra-caddy
     restart: unless-stopped
+    logging: *logging
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -16,39 +24,60 @@ services:
     image: postgres:16-alpine
     container_name: infra-postgres
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
     networks:
       - infra_net
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v3.5.0
     container_name: infra-prometheus
     restart: unless-stopped
+    logging: *logging
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
+      - --web.enable-remote-write-receiver
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus:/etc/prometheus:ro
       - prometheus_data:/prometheus
     networks:
       - infra_net
 
   grafana:
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:12.2.0
     container_name: infra-grafana
     restart: unless-stopped
+    logging: *logging
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SECURITY_COOKIE_SECURE: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_SMTP_ENABLED: ${GRAFANA_SMTP_ENABLED:-false}
+      GF_SMTP_HOST: ${GRAFANA_SMTP_HOST:-localhost:587}
+      GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
+      GF_SMTP_FROM_ADDRESS: ${GRAFANA_SMTP_FROM_ADDRESS:-alerts@poweur.net}
+      ALERT_EMAIL: ${ALERT_EMAIL:-admin@poweur.net}
       GF_SERVER_ROOT_URL: https://grafana.poweur.net
       GF_DATABASE_TYPE: postgres
       GF_DATABASE_HOST: infra-postgres:5432
@@ -59,8 +88,53 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - infra_net
+
+  alloy:
+    image: grafana/alloy:v1.19.0
+    container_name: infra-alloy
+    restart: unless-stopped
+    logging: *logging
+    command: [run, --server.http.listen-addr=0.0.0.0:12345, --storage.path=/var/lib/alloy, /etc/alloy/config.alloy]
+    environment:
+      OTLP_HTPASSWD: ${OTLP_HTPASSWD:?Run deploy/setup-observability.sh first}
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy
+    networks: [infra_net]
+
+  loki:
+    image: grafana/loki:3.5.5
+    container_name: infra-loki
+    restart: unless-stopped
+    logging: *logging
+    command: [-config.file=/etc/loki/loki.yml]
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    networks: [infra_net]
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: infra-node-exporter
+    restart: unless-stopped
+    logging: *logging
+    command: [--path.rootfs=/host, --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)]
+    volumes:
+      - /:/host:ro,rslave
+    networks: [infra_net]
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.27.0
+    container_name: infra-blackbox
+    restart: unless-stopped
+    logging: *logging
+    command: [--config.file=/etc/blackbox/blackbox.yml]
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks: [infra_net]
 
 volumes:
   caddy_data:
@@ -68,6 +142,8 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  alloy_data:
+  loki_data:
 
 networks:
   infra_net:

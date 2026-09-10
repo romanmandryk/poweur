@@ -211,13 +211,13 @@ func TestForwardAckCrossRelay(t *testing.T) {
 	defer tsB.Close()
 
 	ack := Ack{
-		Type:        AckTypeDeliveryAck,
-		ID:          "ack_fwd_1",
-		MessageID:   "msg_x",
-		State:       AckStateDeliveredClient,
-		Sender:      "bob.poweur.net",
-		Recipient:   "carol.poweur.net",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Type:      AckTypeDeliveryAck,
+		ID:        "ack_fwd_1",
+		MessageID: "msg_x",
+		State:     AckStateDeliveredClient,
+		Sender:    "bob.poweur.net",
+		Recipient: "carol.poweur.net",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	canonical := crypto.CanonicalAck(ack.ID, ack.MessageID, ack.State, ack.Sender, ack.Recipient, ack.Timestamp, ack.SessionID)
 	ack.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(bobPriv, []byte(canonical)))
@@ -290,7 +290,7 @@ func TestMessageAcceptedWhenRecipientLocalViaSharedIP(t *testing.T) {
 		},
 		hosts: map[string][]string{
 			"bob.edge.poweur.net": {shared},
-			"relay.edge":           {shared},
+			"relay.edge":          {shared},
 		},
 	}
 	cfg := config.Config{

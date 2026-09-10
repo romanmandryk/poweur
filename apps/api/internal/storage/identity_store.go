@@ -263,3 +263,14 @@ func ValidateDocumentJSON(raw []byte) error {
 	var v json.RawMessage
 	return json.Unmarshal(raw, &v)
 }
+
+// Names is a snapshot for aggregate operational gauges, never telemetry labels.
+func (s *IdentityStore) Names() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, 0, len(s.identities))
+	for id := range s.identities {
+		out = append(out, id)
+	}
+	return out
+}

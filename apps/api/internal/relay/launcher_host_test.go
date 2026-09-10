@@ -128,6 +128,63 @@ func TestRootServesBannerOnIdentityHost(t *testing.T) {
 	}
 }
 
+// GET / is the document clients (and Settings → About) read for the relay's
+// release identity (EPIC-013 E13-T6). The three fields are always present.
+func TestRootDocumentIncludesReleaseFields(t *testing.T) {
+	cfg := config.Config{
+		ListenAddr:    ":0",
+		RelayAddress:  "relay.test",
+		RelayScheme:   "http",
+		DNSTTL:        time.Minute,
+		ChallengeTTL:  time.Minute,
+		Version:       "9.9.9",
+		BuildTime:     "2026-09-10T12:00:00Z",
+		VersionHash:   "deadbeefcafebabe",
+		HostedDomains: []string{"poweur.net"},
+		RateLimits:    config.RateLimits{PerMinute: 100, PerHour: 1000, PerDay: 10000},
+	}
+	s := NewServer(cfg, &fakeResolver{}, dns.NewProviderFactory(cfg))
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["version"] != "9.9.9" {
+		t.Errorf("version = %v", body["version"])
+	}
+	if body["buildTime"] != "2026-09-10 12:00" {
+		t.Errorf("buildTime = %v", body["buildTime"])
+	}
+	if body["versionHash"] != "deadbeefcafebabe" {
+		t.Errorf("versionHash = %v", body["versionHash"])
+	}
+
+	health, err := http.Get(ts.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer health.Body.Close()
+	var h map[string]any
+	if err := json.NewDecoder(health.Body).Decode(&h); err != nil {
+		t.Fatal(err)
+	}
+	if h["version"] != "9.9.9" || h["buildTime"] != "2026-09-10 12:00" || h["versionHash"] != "deadbeefcafebabe" {
+		t.Fatalf("health = %v", h)
+	}
+}
+
 // Without a static tree there is no app to redirect to, so the banner is the
 // only honest answer even on the launcher host.
 func TestRootDoesNotRedirectWithoutStaticDir(t *testing.T) {
