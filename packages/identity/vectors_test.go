@@ -612,3 +612,178 @@ func TestVectors_AbuseAndBlocks(t *testing.T) {
 	}
 	WriteVectors(t, vectorsDir, "blocklists", lists)
 }
+
+// --- Sign in with Poweur ID (EPIC-008 E08-T1) --------------------------------
+
+// signInVector pins one case of the sign-in protocol. `valid` is what a
+// verifier standing at `origin` at VectorTime must decide; `reason` names the
+// rule a rejected case exercises so a conforming implementation can assert it
+// failed for the right reason rather than by accident.
+type signInVector struct {
+	Name      string         `json:"name"`
+	Origin    string         `json:"origin"`
+	Response  SignInResponse `json:"response"`
+	Canonical string         `json:"canonical"`
+	Valid     bool           `json:"valid"`
+	Reason    string         `json:"reason,omitempty"`
+	// ReplayOf names an earlier vector whose nonce this one re-presents.
+	ReplayOf string `json:"replay_of,omitempty"`
+}
+
+func TestVectors_SignIn(t *testing.T) {
+	priv := vectorKey()
+	identityKey := FormatEd25519PublicKey(priv.Public().(ed25519.PublicKey))
+	// A distinct session key, so the delegated vector cannot pass by
+	// accidentally being the identity key.
+	sessionSeed := make([]byte, 32)
+	for i := range sessionSeed {
+		sessionSeed[i] = byte(200 - i)
+	}
+	sessionPriv := ed25519.NewKeyFromSeed(sessionSeed)
+	sessionPubRaw := base64.RawURLEncoding.EncodeToString(sessionPriv.Public().(ed25519.PublicKey))
+
+	const (
+		origin   = "https://guestbook.poweur.net"
+		who      = "alice.poweur.net"
+		appScope = "dav:rw:apps/net.poweur.guestbook"
+	)
+
+	sign := func(resp SignInResponse, key ed25519.PrivateKey) SignInResponse {
+		resp.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(resp.Canonical())))
+		return resp
+	}
+
+	base := func() SignInResponse {
+		return SignInResponse{
+			PoweurAuth: SignInVersion,
+			RequestID:  "req_vector_001",
+			Identity:   who,
+			Audience:   origin,
+			Nonce:      "bm9uY2UtdmVjdG9yLTAwMQ",
+			IssuedAt:   "2026-01-15T09:29:00Z",
+			ExpiresAt:  "2026-01-15T09:31:00Z",
+			Action:     SignInActionSignin,
+			Statement:  "Sign in to the Poweur Guestbook",
+			Scopes:     []string{appScope},
+			KeyID:      SignInKeyIDIdentity,
+		}
+	}
+
+	// The delegation proof the relay would also accept on a forwarded message.
+	proofIssued, proofExpires := "2026-01-15T08:00:00Z", "2026-01-15T20:00:00Z"
+	proofNonce := "c2Vzc2lvbi1ub25jZQ"
+	proof := SignInSessionProof{
+		SessionPublicKey: sessionPubRaw,
+		IssuedAt:         proofIssued,
+		ExpiresAt:        proofExpires,
+		Nonce:            proofNonce,
+		IdentitySignature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv,
+			[]byte(CanonicalSessionRegistration(who, sessionPubRaw, proofIssued, proofExpires, proofNonce)))),
+	}
+
+	delegated := base()
+	delegated.RequestID = "req_vector_session"
+	delegated.Nonce = "bm9uY2UtdmVjdG9yLXNlc3M"
+	delegated.KeyID = SignInKeyIDSessionPrefix + "sess_vector"
+	delegated = sign(delegated, sessionPriv)
+	delegated.SessionProof = &proof
+
+	noScopes := base()
+	noScopes.RequestID = "req_vector_login_only"
+	noScopes.Nonce = "bm9uY2UtdmVjdG9yLWxvZ2lu"
+	noScopes.Scopes = nil
+	noScopes.Statement = ""
+
+	expired := base()
+	expired.RequestID = "req_vector_expired"
+	expired.Nonce = "bm9uY2UtdmVjdG9yLWV4cA"
+	expired.IssuedAt = "2026-01-15T09:20:00Z"
+	expired.ExpiresAt = "2026-01-15T09:22:00Z"
+
+	longWindow := base()
+	longWindow.RequestID = "req_vector_ttl"
+	longWindow.Nonce = "bm9uY2UtdmVjdG9yLXR0bA"
+	longWindow.ExpiresAt = "2026-01-15T09:40:00Z" // 11 minutes
+
+	elsewhere := base()
+	elsewhere.RequestID = "req_vector_audience"
+	elsewhere.Nonce = "bm9uY2UtdmVjdG9yLWF1ZA"
+	elsewhere.Audience = "https://evil.example"
+
+	outOfNamespace := base()
+	outOfNamespace.RequestID = "req_vector_scope"
+	outOfNamespace.Nonce = "bm9uY2UtdmVjdG9yLXNjb3Bl"
+	outOfNamespace.Scopes = []string{"dav:rw:apps/net.poweur.mail"}
+
+	unsorted := base()
+	unsorted.RequestID = "req_vector_unsorted"
+	unsorted.Nonce = "bm9uY2UtdmVjdG9yLXVucw"
+	unsorted.Scopes = []string{"profile:read", appScope} // sorted order puts dav: first
+
+	// Signed over one statement, delivered with another: the signature must
+	// fail, which is the whole point of putting the statement in the string.
+	tampered := sign(base(), priv)
+	tampered.RequestID = "req_vector_tampered"
+	tampered.Nonce = "bm9uY2UtdmVjdG9yLXRhbXA"
+	tampered.Statement = "Sign in and transfer everything"
+
+	replay := sign(base(), priv) // byte-identical to valid-identity
+
+	vectors := []signInVector{
+		{Name: "valid-identity", Origin: origin, Response: sign(base(), priv), Valid: true},
+		{Name: "valid-session-delegated", Origin: origin, Response: delegated, Valid: true},
+		{Name: "valid-no-scopes", Origin: origin, Response: sign(noScopes, priv), Valid: true},
+		{Name: "expired", Origin: origin, Response: sign(expired, priv), Valid: false, Reason: "expired"},
+		{Name: "ttl-exceeded", Origin: origin, Response: sign(longWindow, priv), Valid: false, Reason: "ttl"},
+		{Name: "wrong-audience", Origin: origin, Response: sign(elsewhere, priv), Valid: false, Reason: "audience"},
+		{Name: "scope-out-of-namespace", Origin: origin, Response: sign(outOfNamespace, priv), Valid: false, Reason: "scope"},
+		{Name: "scopes-unsorted", Origin: origin, Response: sign(unsorted, priv), Valid: false, Reason: "scope"},
+		{Name: "tampered-statement", Origin: origin, Response: tampered, Valid: false, Reason: "signature"},
+		{Name: "replayed-nonce", Origin: origin, Response: replay, Valid: false, Reason: "replay", ReplayOf: "valid-identity"},
+	}
+	for i := range vectors {
+		vectors[i].Canonical = vectors[i].Response.Canonical()
+	}
+
+	// Self-check: the signatures we emit must actually verify (or not) with
+	// the key the vector names, so a broken generator cannot ship a fixture
+	// that pins the wrong bytes.
+	pub, err := ParseEd25519PublicKey(identityKey)
+	if err != nil {
+		t.Fatalf("parse identity key: %v", err)
+	}
+	for _, v := range vectors {
+		key := pub
+		if v.Name == "valid-session-delegated" {
+			key = sessionPriv.Public().(ed25519.PublicKey)
+		}
+		sig, err := DecodeAnyBase64(v.Response.Signature)
+		if err != nil {
+			t.Fatalf("%s: signature not base64: %v", v.Name, err)
+		}
+		ok := ed25519.Verify(key, []byte(v.Canonical), sig)
+		if v.Name == "tampered-statement" {
+			if ok {
+				t.Fatalf("%s: expected the signature to fail over the edited statement", v.Name)
+			}
+			continue
+		}
+		if !ok {
+			t.Fatalf("%s: signature does not verify over its own canonical string", v.Name)
+		}
+	}
+
+	WriteVectors(t, vectorsDir, "signin", struct {
+		IdentityKey  string         `json:"identity_key"`
+		SessionKey   string         `json:"session_key"`
+		SessionProof string         `json:"session_registration_canonical"`
+		Now          string         `json:"now"`
+		Vectors      []signInVector `json:"vectors"`
+	}{
+		IdentityKey:  identityKey,
+		SessionKey:   "ed25519:" + sessionPubRaw,
+		SessionProof: CanonicalSessionRegistration(who, sessionPubRaw, proofIssued, proofExpires, proofNonce),
+		Now:          VectorTime,
+		Vectors:      vectors,
+	})
+}
