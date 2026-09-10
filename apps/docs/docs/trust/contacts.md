@@ -63,6 +63,20 @@ any     ──recipient blocks───► blocked (silent)
 CLI: `poweur contacts request/accept/block/rm/ls`, `poweur requests`, `poweur policy
 show/set`.
 
+`poweur requests` decrypts each pending intro before printing it. That is not a
+convenience: `contacts_and_requests` exists so a stranger can say who they are before you
+decide, and a queue showing a name and a timestamp asks you to accept or block someone on
+no evidence at all.
+
+**A rejected send offers to become a request.** When the relay answers `policy_rejected`,
+`poweur send` asks whether to send a contact request instead and carries the message
+across as the intro — the intro is an ordinary short E2E-encrypted message, which is
+exactly what the sender already typed. `--request-on-reject` answers yes up front (scripts,
+and a non-TTY stdin, take this path or none). Two rules keep it honest: it never fires for
+`sys.*` envelopes, so a rejected contact request cannot answer itself with another one; and
+a message too long to be an intro (over 2 KB of plaintext) sends a plain request and still
+exits non-zero, because that message genuinely did not go anywhere.
+
 Web app (EPIC-015 E15-T2): **Contacts** lists the same document with its states and
 petnames; **Messages → Requests** merges the relay's request queue with contact requests
 that arrived in the inbox — under the default `open` policy the very same envelope is

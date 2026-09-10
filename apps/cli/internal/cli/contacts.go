@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poweur/cli/internal/config"
+	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
 )
@@ -336,6 +337,11 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 	}
 	promoteAcceptedContacts(ctx, *useIdentity, accepts, stdout, stderr)
 
+	// Show what the stranger actually said (E07-T3): accept-or-block is a
+	// judgement, and the intro is the only evidence the format carries.
+	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	decryptRequestIntros(pending, encPriv)
+
 	if *jsonOut {
 		return writeOutput(stdout, true, map[string]any{"requests": pending, "accepted": accepts}, "")
 	}
@@ -346,18 +352,55 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 	for _, req := range pending {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n",
 			req.Sender, req.Type, req.Timestamp, req.Sender)
+		if req.Plaintext != "" {
+			fmt.Fprintf(stdout, "  🔒 %s\n", req.Plaintext)
+		}
 	}
 	return 0
 }
 
-// requestEntry mirrors the relay's stored request envelope.
+// requestEntry mirrors the relay's stored request envelope. Plaintext is
+// filled in locally by decryptRequestIntros — it is never on the wire.
 type requestEntry struct {
-	ID        string `json:"id"`
-	Sender    string `json:"sender"`
-	Recipient string `json:"recipient"`
-	Timestamp string `json:"timestamp"`
-	Type      string `json:"type,omitempty"`
-	Payload   string `json:"payload"`
+	ID         string          `json:"id"`
+	Sender     string          `json:"sender"`
+	Recipient  string          `json:"recipient"`
+	Timestamp  string          `json:"timestamp"`
+	Type       string          `json:"type,omitempty"`
+	Payload    string          `json:"payload"`
+	Encryption *EncryptionMeta `json:"encryption,omitempty"`
+	Plaintext  string          `json:"plaintext,omitempty"`
+}
+
+// decryptRequestIntros opens each request's E2E-encrypted intro in place.
+//
+// The intro is the entire point of the requests queue: `contacts_and_requests`
+// exists so a stranger can say who they are before you decide, and a queue
+// that shows a name and a timestamp asks you to accept or block someone on
+// nothing at all. Failures are written into Plaintext rather than returned —
+// one unreadable intro must not hide the rest of the queue, and the drain
+// means there is no second chance to look.
+func decryptRequestIntros(requests []requestEntry, encPriv []byte) {
+	for i := range requests {
+		req := &requests[i]
+		if req.Encryption == nil || req.Encryption.Alg == "" {
+			continue
+		}
+		if encPriv == nil {
+			req.Plaintext = "[encrypted: no local encryption key]"
+			continue
+		}
+		plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
+			Ciphertext:         req.Payload,
+			EphemeralPublicKey: req.Encryption.EphemeralPublicKey,
+			Nonce:              req.Encryption.Nonce,
+		})
+		if err != nil {
+			req.Plaintext = fmt.Sprintf("[decrypt failed: %v]", err)
+			continue
+		}
+		req.Plaintext = string(plaintext)
+	}
 }
 
 // challengeSignedGet performs an owner-drain GET (requests / anon queues):

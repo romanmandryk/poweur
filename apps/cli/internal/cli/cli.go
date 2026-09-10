@@ -643,8 +643,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	msgType := fs.String("type", "", "envelope message type (sys.* system messages, e.g. sys.contact.request)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
 	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
+	requestOnReject := fs.Bool("request-on-reject", false, "if the recipient's inbox policy rejects the message, send it as a contact request instead (no prompt)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
@@ -761,6 +762,14 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 				fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 			fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+			// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+			if offerContactRequest(contactRequestOffer{
+				recipient: recipient, plaintext: plaintext, msgType: *msgType,
+				useIdentity: identityValue, status: resp.StatusCode, body: body,
+				auto: *requestOnReject, jsonOut: *jsonOut,
+			}, stdout, stderr) {
+				return 0
+			}
 			return 1
 		}
 
@@ -855,6 +864,14 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 			fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+		if offerContactRequest(contactRequestOffer{
+			recipient: recipient, plaintext: plaintext, msgType: *msgType,
+			useIdentity: identityValue, status: resp.StatusCode, body: body,
+			auto: *requestOnReject, jsonOut: *jsonOut,
+		}, stdout, stderr) {
+			return 0
+		}
 		return 1
 	}
 
@@ -1920,7 +1937,7 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
+  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
   poweur inbox [--use-identity=...] [--json]
   poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
