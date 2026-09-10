@@ -225,6 +225,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
 	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
+	mux.HandleFunc("GET /groups/{group}", s.handleGroupGet)
+	mux.HandleFunc("POST /groups/{group}/messages", s.handleGroupMessagesPost)
 	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
@@ -752,6 +754,12 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 	// verification — an envelope whose metadata carries a control character
 	// has no unambiguous canonical string to verify against.
 	if !validateEnvelopeExtensions(w, msg) {
+		return
+	}
+	// Group provenance is not something a direct send may claim about a
+	// group this relay hosts (E09-T5); that path is POST /groups/{group}/messages,
+	// where membership and epoch are actually checked.
+	if !s.refuseForgedLocalGroup(w, r, msg) {
 		return
 	}
 

@@ -147,9 +147,26 @@ group messaging adds nothing to `CanonicalMessageEnvelope`: a group message is b
 message any existing implementation already knows how to verify, and a client that has never
 heard of groups renders it as a direct message from its actual sender rather than failing.
 
-Both keys are **reserved**: the relay refuses a `metadata.group` on the ordinary `POST
-/messages` path, so a sender cannot forge group provenance on a direct message and have a
-recipient's client file it into a group conversation.
+`metadata.group` is **reserved**, and enforced where it can be: a relay refuses a direct `POST
+/messages` carrying `metadata.group` for a group **it hosts**, so nobody can forge their way
+into a local group's conversation by sending an ordinary message — that address only accepts
+mail through the fan-out endpoint, which checks membership and epoch.
+
+For a group hosted **elsewhere** the check is deliberately not made, and that is not a gap
+being papered over. A relay cannot resolve another relay's membership document (cross-relay
+group resolution is deferred), so refusing on the strength of a claim it cannot check would
+break the legitimate case — a forwarded fan-out is exactly a message carrying
+`metadata.group` for a group the receiving relay does not host. So:
+
+> **For a group's own relay, `metadata.group` is enforced. For everyone else it is a hint,
+> and the recipient's client is what verifies it.**
+
+Client-side verification is cheap and every member can do it: read the roster (you are a
+member, so you are authorized), and confirm the sender is in `members` at the claimed epoch.
+`(group, epoch)` is a cache key, so this is one fetch per membership change, not one per
+message. A client that cannot verify must render the message as what it provably is — a
+direct message from its actual sender — rather than filing it into a group on the strength
+of an unchecked label.
 
 An envelope in a fan-out therefore looks like:
 
