@@ -88,17 +88,31 @@ export function canonicalSessionRevocation(identity, sessionId, issuedAt, nonce)
 }
 /**
  * Share-grant audience rendering (identity.canonicalAudience): each entry
- * becomes `id:<lowercased>` or `group:<lowercased>`, sorted, comma-joined.
+ * becomes `id:<lowercased>`, `group:<lowercased>` or `link:<token>`, sorted,
+ * comma-joined.
  */
 export function canonicalAudience(audience) {
-    const parts = audience.map((entry) => entry.id ? `id:${entry.id.trim().toLowerCase()}` : `group:${(entry.group ?? "").trim().toLowerCase()}`);
+    const parts = audience.map((entry) => {
+        if (entry.id)
+            return `id:${entry.id.trim().toLowerCase()}`;
+        if (entry.link)
+            return `link:${entry.link.trim().toLowerCase()}`;
+        return `group:${(entry.group ?? "").trim().toLowerCase()}`;
+    });
     parts.sort();
     return parts.join(",");
 }
-/** Share-grant signing input (ShareGrant.Canonical). */
+/**
+ * Share-grant signing input (ShareGrant.Canonical).
+ *
+ * A grant carrying link options (E05-T4) appends three more lines — the
+ * marker, the password hash and the download cap. A grant with no `link`
+ * object signs exactly the eight lines it always did, so adding link shares
+ * invalidated no existing signature.
+ */
 export function canonicalShareGrant(grant) {
     const permissions = [...grant.permissions].sort();
-    return [
+    const fields = [
         "poweur-share-grant",
         grant.share_id.trim(),
         grant.owner.trim().toLowerCase(),
@@ -107,7 +121,11 @@ export function canonicalShareGrant(grant) {
         permissions.join(","),
         grant.created_at ?? "",
         grant.expires_at ?? "",
-    ].join("\n");
+    ];
+    if (grant.link) {
+        fields.push("poweur-share-link", grant.link.password ?? "", String(grant.link.max_downloads ?? 0));
+    }
+    return fields.join("\n");
 }
 /** Share-group signing input (ShareGroup.Canonical). */
 export function canonicalShareGroup(group) {
