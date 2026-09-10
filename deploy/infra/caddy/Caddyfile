@@ -32,7 +32,10 @@ http://relay.poweur.net {
         header_up X-Forwarded-For {client_ip}
     }
 }
-grafana.poweur.net {
+# HTTP as well as HTTPS: Cloudflare currently delivers identity hosts (and
+# this name, via the wildcard) to origin over HTTP. HTTPS-only grafana would
+# miss those requests and http://*.poweur.net would send them to the relay.
+http://grafana.poweur.net grafana.poweur.net {
     reverse_proxy infra-grafana:3000
 }
 http://poweur.net http://*.poweur.net {
