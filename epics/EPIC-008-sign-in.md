@@ -1,9 +1,19 @@
 # EPIC-008 — Sign in with Poweur ID (third-party auth)
 
-- **Status:** proposed
+- **Status:** in progress (T1 shipped)
 - **Priority:** P1
 - **Depends on:** EPIC-001 (resolver chain); interacts with EPIC-003 (scoped resource access)
 - **Unlocks:** EPIC-010 (apps acting on user homes), ecosystem adoption
+
+## Progress
+
+| Task | Status | Notes |
+|------|--------|-------|
+| E08-T1 Protocol spec | **done** | [`apps/docs/docs/auth/sign-in.md`](../apps/docs/docs/auth/sign-in.md); wire objects, canonical string, origin normalization and scope vocabulary in `packages/identity/signin.go`; reference verifier/signer/metadata in `packages/identity/signin/`. Session delegation **reuses** the relay's proof chain — `CanonicalSessionRegistration` and `VerifySessionProof` moved into `packages/identity` and the relay's `acceptSessionProof` now calls them, so there is one implementation, not two. Vectors: `packages/identity/testdata/vectors/signin.json` (10 cases incl. expired, wrong audience, replayed nonce, session-delegated) |
+| E08-T2 Verifier SDKs + reference RP | open | |
+| E08-T3 Signer UX | open | |
+| E08-T4 Scoped resource grants | open | |
+| E08-T5 Interop bridges | open | |
 
 ## Goal
 
@@ -41,19 +51,29 @@ authorization grant (deliberately rhymes with OAuth so the OIDC bridge is thin).
 
 ### E08-T1 — Sign-In protocol spec
 
-- [ ] Spec `apps/docs/docs/auth/sign-in.md`: request object (canonical JSON + the fields
+- [x] Spec `apps/docs/docs/auth/sign-in.md`: request object (canonical JSON + the fields
       already listed in capabilities.md), response object (signed payload incl. audience
       binding + key id), transport bindings (QR, deep link `poweur://auth?…`, redirect,
       cross-device polling endpoint), replay rules (nonce single-use, expiry ≤ 5 min),
       phishing analysis (origin binding: signed payload includes the *verified* RP origin;
       compare WebAuthn's clientDataJSON approach)
-- [ ] Session-key delegation: allow signing by a registered session key + `SessionProof`
+- [x] Session-key delegation: allow signing by a registered session key + `SessionProof`
       (verifier validates the proof chain to the identity key — reuse the exact logic from
       `resolveSigningKey`) so daily sign-ins don't touch the long-lived key
-- [ ] Verifier metadata at `/.well-known/poweur.json` (RP side) per the existing docs sketch
-- [ ] Test vectors: valid flow, expired, wrong audience, replayed nonce, session-delegated
+- [x] Verifier metadata at `/.well-known/poweur.json` (RP side) per the existing docs sketch
+- [x] Test vectors: valid flow, expired, wrong audience, replayed nonce, session-delegated
 
 **Acceptance:** spec merged with vectors; security review issue checklist closed.
+
+**Shipped.** The canonical string is `CanonicalSignInResponse` (line-oriented,
+`poweur-signin` tagged). Two decisions worth recording:
+
+- The **RP does not sign the request.** An RP signature proves nothing a TLS-served
+  `/.well-known/poweur.json` does not, and would put every RP into key management.
+  Authenticity comes from the signer fetching RP metadata at `audience`, no redirects.
+- The **app namespace is derived from the signed audience**, not declared. `dav:` scopes
+  are capped to `apps/<reverse-DNS of the audience host>`, which makes cross-app escalation
+  structurally impossible rather than policy-enforced.
 
 ### E08-T2 — Verifier SDKs + reference RP
 

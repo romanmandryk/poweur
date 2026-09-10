@@ -76,6 +76,17 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Sign in with Poweur ID',
+      collapsed: false,
+      items: [
+        'auth/sign-in',
+        'auth/add-sign-in',
+        'auth/connected-apps',
+        'auth/interop-bridges',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Security',
       collapsed: false,
       items: [

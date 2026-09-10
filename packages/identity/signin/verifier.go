@@ -76,7 +76,19 @@ func NewVerifier(origin string) (*Verifier, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Verifier{Origin: norm, Nonces: NewMemoryNonceCache()}, nil
+	v := &Verifier{Origin: norm}
+	v.Nonces = v.newNonceCache()
+	return v, nil
+}
+
+// newNonceCache returns an in-process cache that reads the clock through the
+// verifier, so an injected Now (tests, a deliberately skewed deployment) does
+// not leave the replay guard measuring a different timeline than the checks
+// it is guarding.
+func (v *Verifier) newNonceCache() *MemoryNonceCache {
+	c := NewMemoryNonceCache()
+	c.Now = v.now
+	return c
 }
 
 func (v *Verifier) now() time.Time {
@@ -295,7 +307,7 @@ func (v *Verifier) VerifyResponse(ctx context.Context, resp identity.SignInRespo
 	// several RPs stays correct.
 	nonces := v.Nonces
 	if nonces == nil {
-		nonces = NewMemoryNonceCache()
+		nonces = v.newNonceCache()
 		v.Nonces = nonces
 	}
 	key := strings.Join([]string{audience, resp.Identity, resp.RequestID, resp.Nonce}, "|")
@@ -327,15 +339,22 @@ func (v *Verifier) VerifyResponse(ctx context.Context, resp identity.SignInRespo
 		if sessionID == "" {
 			return nil, fmt.Errorf("%w: session_proof attached but key_id is %q", identity.ErrSignInSessionKey, resp.KeyID)
 		}
-		identityKey, err := identityKeyAt(doc, resp.SessionProof.IssuedAt)
+		identityKeys, err := identityKeysAt(doc, resp.SessionProof.IssuedAt)
 		if err != nil {
 			return nil, err
 		}
 		// Exactly the chain the relay runs on a forwarded session-signed
 		// message (identity.VerifySessionProof is the single implementation).
-		verified, err := identity.VerifySessionProof(identityKey, resp.Identity, *resp.SessionProof, now)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", identity.ErrSignInSessionKey, err)
+		var verified identity.VerifiedSessionProof
+		var proofErr error
+		for _, key := range identityKeys {
+			verified, proofErr = identity.VerifySessionProof(key, resp.Identity, *resp.SessionProof, now)
+			if proofErr == nil {
+				break
+			}
+		}
+		if proofErr != nil {
+			return nil, fmt.Errorf("%w: %v", identity.ErrSignInSessionKey, proofErr)
 		}
 		if !ed25519.Verify(verified.PublicKeyBytes, []byte(canonical), sig) {
 			return nil, identity.ErrSignInSignature
@@ -345,11 +364,18 @@ func (v *Verifier) VerifyResponse(ctx context.Context, resp identity.SignInRespo
 		return nil, fmt.Errorf("%w: key_id must be %q or %q<session id>", identity.ErrSignInMalformed,
 			identity.SignInKeyIDIdentity, identity.SignInKeyIDSessionPrefix)
 	} else {
-		key, err := identityKeyAt(doc, resp.IssuedAt)
+		keys, err := identityKeysAt(doc, resp.IssuedAt)
 		if err != nil {
 			return nil, err
 		}
-		if !ed25519.Verify(key, []byte(canonical), sig) {
+		ok := false
+		for _, key := range keys {
+			if ed25519.Verify(key, []byte(canonical), sig) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
 			return nil, identity.ErrSignInSignature
 		}
 	}
@@ -397,23 +423,35 @@ func validateResponseWindow(resp identity.SignInResponse, now time.Time) error {
 	return nil
 }
 
-// identityKeyAt returns the identity's signing key that was valid at `at`,
-// so a sign-in signed moments before a key rotation still verifies inside
-// the rotation grace window the document itself declares.
-func identityKeyAt(doc identity.IdentityDocument, at string) (ed25519.PublicKey, error) {
+// identityKeysAt returns every signing key the document says was valid at
+// `at`: the current one first, then any retired key still inside the
+// rotation grace window the document itself declares. A sign-in signed
+// moments before a rotation therefore still verifies, and one signed with a
+// key whose grace window has closed does not.
+//
+// It returns a list rather than one key because a response carries no key
+// hint — the verifier learns which key signed it by trying them.
+func identityKeysAt(doc identity.IdentityDocument, at string) ([]ed25519.PublicKey, error) {
 	when, err := time.Parse(time.RFC3339, at)
 	if err != nil {
 		when = time.Now().UTC()
 	}
-	if doc.KeyValidAt(doc.PublicKey, when) {
-		return identity.ParseEd25519PublicKey(doc.PublicKey)
+	var keys []ed25519.PublicKey
+	if key, err := identity.ParseEd25519PublicKey(doc.PublicKey); err == nil {
+		keys = append(keys, key)
 	}
 	for _, prev := range doc.PreviousKeys {
-		if doc.KeyValidAt(prev.PublicKey, when) {
-			return identity.ParseEd25519PublicKey(prev.PublicKey)
+		if !doc.KeyValidAt(prev.PublicKey, when) {
+			continue
+		}
+		if key, err := identity.ParseEd25519PublicKey(prev.PublicKey); err == nil {
+			keys = append(keys, key)
 		}
 	}
-	return nil, errors.New("identity document has no key valid at " + at)
+	if len(keys) == 0 {
+		return nil, errors.New("identity document has no usable key valid at " + at)
+	}
+	return keys, nil
 }
 
 func sameStrings(a, b []string) bool {
