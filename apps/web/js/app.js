@@ -38,7 +38,7 @@ import {
   loadSessionRecord, removeSessionRecord, rpIdFor,
   setUnlockedKeys, getUnlockedKeys, clearUnlockedKeys,
   defaultRelayUrl, hasRelayUrl, relayUrlFor, isShellRuntime,
-  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor,
+  PRODUCTION_RELAY_URL, localDevRelayUrl, relayPresetFor, identityOriginUrl,
 } from "./storage.js";
 
 import {
@@ -2408,9 +2408,32 @@ function joinIdentityFromForm() {
   return domain ? `${raw}.${domain}` : raw;
 }
 
-/** Home relay for an identity this device does not yet hold. */
+/** API base for an identity this device does not yet hold. */
 async function enrollApiForJoin(identity) {
   const fallback = defaultRelayUrl();
+  const origin = identityOriginUrl(identity, fallback);
+  let fallbackHost = "";
+  try {
+    fallbackHost = new URL(fallback).hostname.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  // Already on this identity's host — stay there (web at alice.poweur.net/app/).
+  if (origin && fallbackHost === String(identity).toLowerCase()) {
+    return { enroll: new EnrollApi(new RelayClient(origin)), relayUrl: origin };
+  }
+  // Hosted identity hosts *are* the relay (Caddy wildcard). Probe GET / so a
+  // self-hosted website that only serves well-known is not treated as one.
+  if (origin) {
+    try {
+      const root = await identityApiFor(origin, { timeoutMs: 4000 }).root();
+      if (root?.service === "poweur-relay") {
+        return { enroll: new EnrollApi(new RelayClient(origin)), relayUrl: origin };
+      }
+    } catch {
+      /* identity host is a website, not a relay */
+    }
+  }
   try {
     const relayUrl = await resolveRecipientRelayUrl(
       identity,
@@ -2458,10 +2481,9 @@ function showJoinDevicePanel() {
       setLoading(true, "Opening a secure channel…");
       try {
         // offer/claim/cancel are unauthenticated by necessity — this device has
-        // no key yet — so they need the identity's home relay, not a signer.
-        // Posting to this page's origin while the unlocked device talks to the
-        // stored relay (poweur.net vs alice.poweur.net) is how a live offer
-        // looks expired.
+        // no key yet. Prefer the identity host when it is a relay, so a phone
+        // adding johnjohn.poweur.net talks to that host rather than poweur.net.
+        // Self-hosted websites fall through to the document's `relay`.
         ({ enroll, relayUrl } = await enrollApiForJoin(identity));
         session = await enroll.offer(identity, deviceLabel());
         joining = identity;
@@ -4413,7 +4435,8 @@ function showApproveDevicePanel() {
 
       setLoading(true, "Finding the new device…");
       try {
-        const pending = await client.enroll.pending(client.signer, identity, rendezvousId);
+        const { enroll } = await enrollApiForJoin(identity);
+        const pending = await enroll.pending(client.signer, identity, rendezvousId);
         setLoading(false);
         const host = q("#enroll-confirm");
         host.innerHTML = `
@@ -4428,7 +4451,7 @@ function showApproveDevicePanel() {
         q("#btn-enroll-approve")?.addEventListener("click", async () => {
           setLoading(true, "Sending keys…");
           try {
-            await client.enroll.approve(client.signer, identity, pending, fromBase64url(keys.seed));
+            await enroll.approve(client.signer, identity, pending, fromBase64url(keys.seed));
             setLoading(false);
             closePanel();
             toast("The new device can now finish setting up", "success", 6000);

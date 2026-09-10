@@ -58,8 +58,8 @@ export function clientFor(identity) {
 }
 
 /** Registration, health and key publication — the calls that predate a signer. */
-export function identityApiFor(relayUrl) {
-  return new IdentityApi(relayUrl);
+export function identityApiFor(relayUrl, options) {
+  return new IdentityApi(relayUrl, options);
 }
 
 /**

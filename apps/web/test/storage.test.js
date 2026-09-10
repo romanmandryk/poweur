@@ -22,6 +22,9 @@ import {
   defaultRelayUrl,
   hasRelayUrl,
   relayUrlFor,
+  identityOriginUrl,
+  apiBaseForIdentity,
+  ROOT_SESSION_KEY,
   PRODUCTION_RELAY_URL,
   localDevRelayUrl,
   relayPresetFor,
@@ -89,6 +92,36 @@ describe("storage — relay URL comes from the identity record (E15-T1)", () => 
     saveConfig({ relayUrl: "https://config.example" });
     expect(defaultRelayUrl()).toBe("https://config.example");
     expect(relayUrlFor("unknown.poweur.net")).toBe("https://config.example");
+  });
+
+  it("builds an identity origin from the fallback's scheme and port", () => {
+    expect(identityOriginUrl("johnjohn.poweur.net", "https://poweur.net"))
+      .toBe("https://johnjohn.poweur.net");
+    expect(identityOriginUrl("alice.poweur.net", "http://127.0.0.1:8080"))
+      .toBe("http://alice.poweur.net:8080");
+    expect(identityOriginUrl("127.0.0.1", "http://127.0.0.1:8080")).toBe("");
+  });
+
+  it("prefers the identity host for hosted names stored on the operator apex", () => {
+    sessionStorage.setItem(ROOT_SESSION_KEY, JSON.stringify({
+      relay_address: "poweur.net",
+      hosted_domains: ["poweur.net"],
+    }));
+    saveIdentityRecord("johnjohn.poweur.net", record("johnjohn.poweur.net", "https://poweur.net"));
+    expect(apiBaseForIdentity("johnjohn.poweur.net", "https://poweur.net"))
+      .toBe("https://johnjohn.poweur.net");
+    expect(relayUrlFor("johnjohn.poweur.net")).toBe("https://johnjohn.poweur.net");
+    // Already on the identity host — do not bounce to the apex.
+    saveIdentityRecord("johnjohn.poweur.net", record("johnjohn.poweur.net", "https://johnjohn.poweur.net"));
+    expect(relayUrlFor("johnjohn.poweur.net")).toBe("https://johnjohn.poweur.net");
+  });
+
+  it("leaves a loopback stored relay alone so local tests keep talking to 127.0.0.1", () => {
+    sessionStorage.setItem(ROOT_SESSION_KEY, JSON.stringify({
+      hosted_domains: ["poweur.net"],
+    }));
+    saveIdentityRecord("alice.poweur.net", record("alice.poweur.net", "http://127.0.0.1:8080"));
+    expect(relayUrlFor("alice.poweur.net")).toBe("http://127.0.0.1:8080");
   });
 
   it("relaxes the SSRF guard only for local/private relays", () => {

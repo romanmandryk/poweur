@@ -28,7 +28,7 @@ import { identityApiFor } from "./client.js";
 // ordinary "localhost", and iOS's `capacitor://` is not the only shape a shell
 // takes — Android serves the same bundle from `https://localhost`, which every
 // syntactic test calls an ordinary web host.
-import { defaultRelayUrl, isShellRuntime } from "./storage.js";
+import { defaultRelayUrl, isShellRuntime, ROOT_SESSION_KEY } from "./storage.js";
 
 /** @typedef {"launcher" | "identity" | "shell" | "unknown"} AppMode */
 
@@ -47,7 +47,7 @@ import { defaultRelayUrl, isShellRuntime } from "./storage.js";
  * @property {boolean} reachable     false when the relay could not be asked
  */
 
-const SESSION_KEY = "poweur:root";
+const SESSION_KEY = ROOT_SESSION_KEY;
 
 /** Cached for the page's lifetime; `resolveMode()` is called from every render path. */
 let current = null;

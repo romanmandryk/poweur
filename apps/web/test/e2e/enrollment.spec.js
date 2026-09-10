@@ -109,10 +109,9 @@ test.describe("new-device enrollment", () => {
   });
 
   test("the identity-host door joins without re-typing the name", async ({ browser }) => {
-    // This is the production shape: the new device is at alice.poweur.net/app/,
-    // the unlocked one talks to the stored relay URL (127.0.0.1 here, poweur.net
-    // in prod). A lookup that posts the offer to the page origin and fetches
-    // from the stored relay is how "rendezvous not found" shows up in 15 seconds.
+    // This is the production shape: the new device is at alice.poweur.net/app/.
+    // Join prefers that identity host when GET / says it is a relay, so the
+    // offer and the approving device (also probing that host) meet.
     const laptop = await browser.newContext({ viewport: { width: 375, height: 812 } });
     const phone = await browser.newContext({ viewport: { width: 375, height: 812 } });
     const laptopPage = await laptop.newPage();
@@ -142,6 +141,55 @@ test.describe("new-device enrollment", () => {
 
     const laptopSas = await laptopPage.locator(".sas-code").innerText();
     expect(laptopSas.trim()).toBe(phoneSas.trim());
+
+    await laptop.close();
+    await phone.close();
+  });
+
+  test("a shell posts the join offer to the identity host, not the operator apex", async ({ browser }) => {
+    // Capacitor has no origin of its own, so first-run talks to poweur.net
+    // (127.0.0.1 here). Once the user names the identity, enroll must call
+    // that host — block the home-relay hostname so this cannot pass only
+    // because both names share one Go process.
+    const laptop = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    const phone = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    const laptopPage = await laptop.newPage();
+    const phonePage = await phone.newPage();
+    await stubPasskeys(laptopPage);
+    await stubPasskeys(phonePage);
+
+    const identity = await registerIdentity(laptopPage, relay, `host2${Date.now().toString(36)}`);
+    const homeHosts = new Set(["127.0.0.1", "localhost", "poweur.net"]);
+    const blockHomeEnroll = (route) => {
+      const host = new URL(route.request().url()).hostname.toLowerCase();
+      if (homeHosts.has(host)) {
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "not_found", detail: "home relay" }),
+        });
+      }
+      return route.continue();
+    };
+    await phonePage.route(`**/${identity}/enroll/**`, blockHomeEnroll);
+    await laptopPage.route(`**/${identity}/enroll/**`, blockHomeEnroll);
+
+    await openApp(phonePage, relay);
+    await phonePage.click("#btn-welcome-start");
+    await phonePage.click("#opt-join-device");
+    await phonePage.fill("#join-identity", identity);
+    await phonePage.click("#btn-join-start");
+
+    const requestCode = await phonePage.locator(".rendezvous-code").innerText();
+    expect(requestCode.trim()).not.toBe("");
+
+    await laptopPage.click('.nav-tab[data-page="settings"]');
+    await laptopPage.click("#row-keys-devices");
+    await laptopPage.click("#btn-enroll-device");
+    await laptopPage.fill("#enroll-rendezvous", requestCode.trim());
+    await laptopPage.click("#btn-enroll-lookup");
+
+    await expect(laptopPage.locator(".sas-code")).toHaveText(/^\d{6}$/, { timeout: 15_000 });
 
     await laptop.close();
     await phone.close();

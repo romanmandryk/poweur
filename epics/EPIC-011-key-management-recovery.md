@@ -41,7 +41,11 @@
 >   mints a fresh credential. Covered against a real relay in
 >   `apps/web/test/keystore-relay.test.js`.
 > - **The T3 ceremony has both halves**, covered by a two-browser-context Playwright test
->   that asserts the six digits match on both screens before approval.
+>   that asserts the six digits match on both screens before approval. Join and
+>   approve prefer the identity host (`https://alice.poweur.net`) when `GET /`
+>   says that origin is a relay, so a phone adding an identity does not bounce
+>   identity-scoped calls through `poweur.net`. The operator apex stays the
+>   seed for claiming a *new* name.
 >
 > **Two gaps found and closed while adopting it:** `POST /keystore/list` was Go-only — the
 > relay verified `CanonicalKeystoreList` and `poweur keys ls` signed it, but there was no
