@@ -138,10 +138,24 @@ export interface DavTokenResponse {
 export interface ShareAudience {
   id?: string;
   group?: string;
+  /** Capability-URL token for a public-link share (E05-T4). */
+  link?: string;
 }
 
 export const PERM_READ = "read";
 export const PERM_WRITE = "write";
+
+/**
+ * Options that only make sense for a link share (E05-T4). They are part of
+ * the canonical signing string, so the relay that stores the grant cannot
+ * strip the password or the download cap off it.
+ */
+export interface ShareLink {
+  /** PHC-format argon2id hash — never a plaintext password. */
+  password?: string;
+  /** Cap on successful downloads through the link; 0/absent = unlimited. */
+  max_downloads?: number;
+}
 
 export interface ShareGrant {
   share_id: string;
@@ -151,6 +165,8 @@ export interface ShareGrant {
   permissions: string[];
   created_at: string;
   expires_at?: string;
+  /** Set only on link-share grants (audience = one link token). */
+  link?: ShareLink;
   signature: string;
 }
 

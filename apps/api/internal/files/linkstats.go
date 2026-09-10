@@ -108,11 +108,19 @@ func (ls *LinkStats) Get(identity, shareID string) LinkStat {
 	return LinkStat{ShareID: shareID}
 }
 
-// Record charges one download of n bytes to a share and returns the
-// updated counters.
-func (ls *LinkStats) Record(identity, shareID string, n int64) LinkStat {
+// Reserve claims one download slot against a share's cap (max <= 0 means
+// unlimited), returning the updated counters and whether the download may
+// proceed.
+//
+// Check-and-increment happens under one lock because that is the only way
+// the cap means anything: two visitors clicking the last download of a
+// "max_downloads: 10" link at the same moment must not both get through.
+// The slot is charged *before* the bytes flow, so a cap can never be
+// overrun — an aborted transfer costs the visitor a slot, which is the
+// safe direction to be wrong in for a capability URL.
+func (ls *LinkStats) Reserve(identity, shareID string, max int) (LinkStat, bool) {
 	if ls == nil {
-		return LinkStat{ShareID: shareID}
+		return LinkStat{ShareID: shareID}, true
 	}
 	now := time.Now().UTC()
 	ls.mu.Lock()
@@ -123,13 +131,32 @@ func (ls *LinkStats) Record(identity, shareID string, n int64) LinkStat {
 		st = &LinkStat{ShareID: shareID, FirstAt: now}
 		tree.Shares[shareID] = st
 	}
-	st.Downloads++
-	if n > 0 {
-		st.Bytes += n
+	if max > 0 && st.Downloads >= int64(max) {
+		return *st, false
 	}
+	st.Downloads++
 	st.LastAt = now
 	ls.persistLocked(identity)
-	return *st
+	return *st, true
+}
+
+// AddBytes charges transferred bytes to a share — the bandwidth half of the
+// accounting, recorded after the copy so it reflects what actually left the
+// relay rather than what was requested.
+func (ls *LinkStats) AddBytes(identity, shareID string, n int64) {
+	if ls == nil || n <= 0 {
+		return
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	tree := ls.treeLocked(identity)
+	st, ok := tree.Shares[shareID]
+	if !ok {
+		st = &LinkStat{ShareID: shareID, FirstAt: time.Now().UTC()}
+		tree.Shares[shareID] = st
+	}
+	st.Bytes += n
+	ls.persistLocked(identity)
 }
 
 // All returns every share's counters, share-id ordered.

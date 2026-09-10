@@ -7,15 +7,23 @@
  * alongside at `poweur-sys/relay/groups/<name>.json`.
  */
 
+import { hashAppPassword } from "./apppass.js";
 import { canonicalShareGrant, canonicalShareGroup, normalizeGrantPath } from "./canonical.js";
 import { parseEd25519PublicKey, verifyCanonical } from "./crypto/index.js";
 import type { Signer } from "./crypto/keys.js";
-import { rfc3339 } from "./encoding.js";
+import { randomBytes, rfc3339 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
 import type { DavClient } from "./files.js";
 import { newShareId } from "./ids.js";
 import type { SyncClient } from "./sync.js";
-import { PERM_READ, PERM_WRITE, type ShareAudience, type ShareGrant, type ShareGroup } from "./types.js";
+import {
+  PERM_READ,
+  PERM_WRITE,
+  type ShareAudience,
+  type ShareGrant,
+  type ShareGroup,
+  type ShareLink,
+} from "./types.js";
 
 export { normalizeGrantPath };
 
@@ -24,6 +32,65 @@ export const GROUPS_DIR = "poweur-sys/relay/groups";
 
 export const MAX_GRANT_AUDIENCE = 100;
 export const MAX_GROUP_MEMBERS = 1000;
+
+/**
+ * Link-share tokens (E05-T4) — 16 random bytes as lowercase unpadded
+ * base32: 26 characters of [a-z2-7], 128 bits of entropy, URL-path safe and
+ * free of look-alike characters. Mirrors identity.GenerateLinkToken.
+ */
+export const LINK_TOKEN_BYTES = 16;
+export const LINK_TOKEN_LEN = 26;
+export const MAX_LINK_DOWNLOADS = 1_000_000;
+
+const LINK_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+
+/** A fresh capability-URL token. */
+export function generateLinkToken(): string {
+  // 16 bytes → 26 base32 characters, emitted five bits at a time so the
+  // result matches Go's encoder byte for byte.
+  const bytes = randomBytes(LINK_TOKEN_BYTES);
+  let out = "";
+  let buffer = 0;
+  let bits = 0;
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += LINK_ALPHABET[(buffer >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += LINK_ALPHABET[(buffer << (5 - bits)) & 31];
+  return out;
+}
+
+/** Throws unless `token` has the exact shape a link grant may carry. */
+export function validateLinkToken(token: string): void {
+  if (token.length !== LINK_TOKEN_LEN) {
+    throw new PoweurError("invalid_argument", `link token must be ${LINK_TOKEN_LEN} characters`);
+  }
+  for (const character of token) {
+    if (!LINK_ALPHABET.includes(character)) {
+      throw new PoweurError(
+        "invalid_argument",
+        `link token contains an invalid character "${character}"`,
+      );
+    }
+  }
+}
+
+/** The grant's capability token, or undefined when it is not a link grant. */
+export function linkToken(grant: Pick<ShareGrant, "audience">): string | undefined {
+  for (const entry of grant.audience ?? []) {
+    const token = entry.link?.trim();
+    if (token) return token.toLowerCase();
+  }
+  return undefined;
+}
+
+export function grantIsLink(grant: Pick<ShareGrant, "audience">): boolean {
+  return linkToken(grant) !== undefined;
+}
 
 /** Structural validation — everything except the signature. */
 export function validateGrant(grant: Omit<ShareGrant, "signature">): void {
@@ -34,16 +101,22 @@ export function validateGrant(grant: Omit<ShareGrant, "signature">): void {
   if (grant.audience.length > MAX_GRANT_AUDIENCE) {
     throw new PoweurError("invalid_argument", `audience exceeds ${MAX_GRANT_AUDIENCE} entries`);
   }
+  let links = 0;
   for (const entry of grant.audience) {
-    const hasId = Boolean(entry.id?.trim());
-    const hasGroup = Boolean(entry.group?.trim());
-    if (hasId === hasGroup) {
+    const set = [entry.id, entry.group, entry.link].filter((v) => Boolean(v?.trim())).length;
+    if (set !== 1) {
       throw new PoweurError(
         "invalid_argument",
-        "each audience entry needs exactly one of id or group",
+        "each audience entry needs exactly one of id, group or link",
       );
     }
+    const token = entry.link?.trim();
+    if (token) {
+      links += 1;
+      validateLinkToken(token);
+    }
   }
+  validateGrantLink(grant, links);
   if (!grant.permissions?.length) {
     throw new PoweurError("invalid_argument", "permissions is empty");
   }
@@ -54,6 +127,45 @@ export function validateGrant(grant: Omit<ShareGrant, "signature">): void {
         `unknown permission "${permission}" (v1 vocabulary: read, write)`,
       );
     }
+  }
+}
+
+/**
+ * The link-share rules (identity.validateLink). A link grant is a
+ * *capability*: whoever holds the URL is the audience. v1 therefore keeps it
+ * narrow — one token per grant, never mixed with identity or group entries,
+ * and read-only, so a leaked URL can never mutate the owner's tree.
+ */
+function validateGrantLink(grant: Omit<ShareGrant, "signature">, links: number): void {
+  if (links > 1) {
+    throw new PoweurError("invalid_argument", "a grant carries at most one link token");
+  }
+  if (links === 1) {
+    if (grant.audience.length !== 1) {
+      throw new PoweurError(
+        "invalid_argument",
+        "a link grant's audience is the link alone (no ids or groups)",
+      );
+    }
+    if (grant.permissions?.includes(PERM_WRITE)) {
+      throw new PoweurError("invalid_argument", "link shares are read-only in v1");
+    }
+  } else if (grant.link) {
+    throw new PoweurError("invalid_argument", "link options require a link audience entry");
+  }
+  if (!grant.link) return;
+  if (grant.link.password && !grant.link.password.startsWith("$argon2id$")) {
+    throw new PoweurError(
+      "invalid_argument",
+      "link password must be a PHC argon2id hash, never a plaintext password",
+    );
+  }
+  const max = grant.link.max_downloads ?? 0;
+  if (max < 0 || max > MAX_LINK_DOWNLOADS) {
+    throw new PoweurError(
+      "invalid_argument",
+      `max_downloads must be between 0 (unlimited) and ${MAX_LINK_DOWNLOADS}`,
+    );
   }
 }
 
@@ -123,6 +235,47 @@ export async function buildGrant(
   return { ...draft, signature };
 }
 
+export interface CreateLinkShareOptions {
+  /** Plaintext password; hashed with argon2id before it enters the grant. */
+  password?: string;
+  /** Cap on successful downloads; 0/absent = unlimited. */
+  maxDownloads?: number;
+  expiresAt?: string;
+  shareId?: string;
+  /** Supply the token (tests, or re-issuing a known link). */
+  token?: string;
+}
+
+/**
+ * Build and sign a public-link grant (E05-T4) without writing it. The
+ * returned token is the whole credential: it appears nowhere else, so a
+ * caller that loses it has to issue a new link.
+ */
+export async function buildLinkGrant(
+  signer: Signer,
+  path: string,
+  options: CreateLinkShareOptions = {},
+): Promise<{ grant: ShareGrant; token: string }> {
+  const token = (options.token ?? generateLinkToken()).toLowerCase();
+  validateLinkToken(token);
+  const link: ShareLink = {};
+  if (options.password) link.password = await hashAppPassword(options.password);
+  if (options.maxDownloads) link.max_downloads = options.maxDownloads;
+  const draft = {
+    share_id: options.shareId ?? newShareId(),
+    owner: signer.identity,
+    path: normalizeGrantPath(path),
+    audience: [{ link: token }],
+    permissions: [PERM_READ],
+    created_at: rfc3339(),
+    ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
+    ...(link.password || link.max_downloads ? { link } : {}),
+  };
+  validateGrant(draft);
+  const signature = await signer.sign(canonicalShareGrant(draft), "base64url");
+  return { grant: { ...draft, signature }, token };
+}
+
 /** CRUD over an owner's grant and group documents. */
 export class Shares {
   readonly #dav: DavClient;
@@ -138,6 +291,20 @@ export class Shares {
     const grant = await buildGrant(signer, path, options);
     await this.#dav.writeJson(`${SHARES_DIR}/${grant.share_id}.json`, grant);
     return grant;
+  }
+
+  /**
+   * Create, sign and store a public-link grant, returning the grant and the
+   * capability token to put in `https://<owner>/s/<token>` (E05-T4).
+   */
+  async addLink(
+    signer: Signer,
+    path: string,
+    options: CreateLinkShareOptions = {},
+  ): Promise<{ grant: ShareGrant; token: string }> {
+    const built = await buildLinkGrant(signer, path, options);
+    await this.#dav.writeJson(`${SHARES_DIR}/${built.grant.share_id}.json`, built.grant);
+    return built;
   }
 
   /**
