@@ -48,6 +48,7 @@ test.describe("first run", () => {
     const aliceId = await register(alice, relay, `oba${suffix}`);
     const bobId = await register(bob, relay, `obb${suffix}`);
     await bob.click("#btn-onboard-skip");
+    await expect(bob.locator(".dest-title")).toHaveText("Messages", { timeout: 20_000 });
 
     // ── Step 1: the inbox policy, which is why the flow exists ─────────────
     await expect(alice.locator(".onboard-title")).toHaveText("Who can message you?");
@@ -80,6 +81,9 @@ test.describe("first run", () => {
     await alice.fill(".idin input", bobId);
     await expect(alice.locator("#btn-add-contact-go")).toBeEnabled({ timeout: 20_000 });
     await alice.click("#btn-add-contact-go");
+    // The send is async behind a loading overlay; polling Bob before this
+    // lands is why CI timed out on an empty requests tray.
+    await expect(alice.locator(".contact-row .chip")).toHaveText("Requested", { timeout: 20_000 });
 
     await expect
       .poll(async () => {

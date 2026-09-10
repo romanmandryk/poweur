@@ -4978,9 +4978,16 @@ function showAnalyticsPanel() {
       host.innerHTML = `<label><input id="analytics-consent" type="checkbox" ${pref?.granted ? "checked" : ""}> Allow detailed relay analytics for ${esc(identity)}</label><p class="small muted">Changes affect future exports. Existing records expire under the relay's retention settings.</p><button class="btn btn-primary" id="analytics-save">Save</button>`;
       q("#analytics-save").addEventListener("click", async (event) => {
         if (S.identity !== identity) return;
-        event.target.disabled = true;
-        try { await client.setAnalyticsConsent(q("#analytics-consent").checked); toast("Analytics preference saved", "success"); close(); }
-        catch (error) { toast(error.message, "error"); event.target.disabled = false; }
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await client.setAnalyticsConsent(q("#analytics-consent").checked);
+          toast("Analytics preference saved", "success");
+          close();
+        } catch (error) {
+          toast(error.message, "error");
+          button.disabled = false;
+        }
       });
     } catch (error) { if (host?.isConnected) host.textContent = `Could not load preference: ${error.message}`; }
   });
