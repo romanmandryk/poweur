@@ -3,6 +3,8 @@ package files
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	gopath "path"
@@ -112,40 +114,82 @@ func (s *GrantStore) loadGroupIdentities(ctx context.Context, set *GrantSet) {
 				continue
 			}
 			seen[name] = true
-			// An owner-local group of the same name would be ambiguous, but
-			// cannot exist: owner-local names may not contain a dot.
-			pub, ok := s.OwnerKey(name)
-			if !ok {
-				s.logf("grant engine: group identity %s is not resolvable here (cross-relay groups are deferred)", name)
-				continue
-			}
-			raw, ok := s.readDoc(ctx, name, idpkg.GroupSelfDoc)
-			if !ok {
-				s.logf("grant engine: group identity %s has no %s", name, idpkg.GroupSelfDoc)
-				continue
-			}
-			gr, err := idpkg.ParseShareGroup(raw)
+			gr, err := s.GroupIdentity(ctx, name)
 			if err != nil {
-				s.logf("grant engine: rejecting group identity %s: %v", name, err)
-				continue
-			}
-			if !gr.IsGroupIdentity() {
-				s.logf("grant engine: rejecting group identity %s: %s is an owner-local group document", name, idpkg.GroupSelfDoc)
-				continue
-			}
-			// The document must claim to be this group, or one group's
-			// membership could be served for another.
-			if !strings.EqualFold(gr.Group, name) || !strings.EqualFold(gr.Owner, name) {
-				s.logf("grant engine: rejecting group identity %s: document names %q/%q", name, gr.Group, gr.Owner)
-				continue
-			}
-			if err := gr.VerifySignature(pub); err != nil {
-				s.logf("grant engine: rejecting group identity %s: %v", name, err)
+				s.logf("grant engine: %v", err)
 				continue
 			}
 			set.groups[name] = gr
 		}
 	}
+}
+
+// ErrGroupNotResolvable is returned when this relay cannot produce a
+// verified membership document for a group identity — it does not host it,
+// the document is missing, malformed, unsigned by the group's own key, or is
+// an owner-local group wearing the group-identity path.
+//
+// Callers must treat every one of those the same way: deny, and say nothing
+// more specific. Distinguishing "no such group" from "not a group" from "not
+// for you" turns the endpoint into the membership oracle that cross-relay
+// group resolution was deferred to avoid.
+var ErrGroupNotResolvable = errors.New("group identity is not resolvable on this relay")
+
+// GroupIdentity loads and verifies one group identity's membership document
+// out of the group's own tree (E05-T5).
+//
+// It is the single place that answers "who is in this group, according to
+// the group itself": the permission engine uses it for grants, and EPIC-009
+// group messaging uses it to expand a fan-out. Both need the same four
+// guarantees, so neither gets its own opinion about them:
+//
+//   - the document is read from the *group's* tree, never an owner's, so
+//     naming a group confers no power over it;
+//   - it is verified with the *group's* key, so the relay that stores it
+//     cannot edit an admin off the list;
+//   - it must name itself, so one group's membership cannot be served for
+//     another;
+//   - it must carry an admin list, so an owner-local document cannot
+//     masquerade as a group identity.
+//
+// v1 resolves only groups hosted here. A group whose key this relay cannot
+// produce fails closed — cross-relay resolution needs a membership-check
+// endpoint with its own caching, rate limiting and privacy story, and is
+// deferred (apps/docs/docs/files/group-identities.md).
+func (s *GrantStore) GroupIdentity(ctx context.Context, name string) (idpkg.ShareGroup, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if s == nil || s.Provider == nil || s.OwnerKey == nil {
+		return idpkg.ShareGroup{}, ErrGroupNotResolvable
+	}
+	if name == "" || !idpkg.IsGroupIdentityName(name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %q is not a group identity name", ErrGroupNotResolvable, name)
+	}
+	// An owner-local group of the same name would be ambiguous, but cannot
+	// exist: owner-local names may not contain a dot.
+	pub, ok := s.OwnerKey(name)
+	if !ok {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s is not hosted here (cross-relay groups are deferred)", ErrGroupNotResolvable, name)
+	}
+	raw, ok := s.readDoc(ctx, name, idpkg.GroupSelfDoc)
+	if !ok {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s has no %s", ErrGroupNotResolvable, name, idpkg.GroupSelfDoc)
+	}
+	gr, err := idpkg.ParseShareGroup(raw)
+	if err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", ErrGroupNotResolvable, name, err)
+	}
+	if !gr.IsGroupIdentity() {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %s is an owner-local group document", ErrGroupNotResolvable, name, idpkg.GroupSelfDoc)
+	}
+	// The document must claim to be this group, or one group's membership
+	// could be served for another.
+	if !strings.EqualFold(gr.Group, name) || !strings.EqualFold(gr.Owner, name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: document names %q/%q", ErrGroupNotResolvable, name, gr.Group, gr.Owner)
+	}
+	if err := gr.VerifySignature(pub); err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", ErrGroupNotResolvable, name, err)
+	}
+	return gr, nil
 }
 
 // Snapshot loads and verifies the owner's grant + group documents once; the

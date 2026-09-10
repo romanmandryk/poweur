@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,9 @@ func newGroupIdentityFixture(t *testing.T, identities ...string) *groupIdentityF
 			pub, ok := fx.pubs[strings.ToLower(owner)]
 			return pub, ok
 		},
-		Logf: func(format string, args ...any) { fx.logs = append(fx.logs, format) },
+		// Capture the rendered line, not the format string: the reason a
+		// group was refused now arrives as an argument.
+		Logf: func(format string, args ...any) { fx.logs = append(fx.logs, fmt.Sprintf(format, args...)) },
 	}
 	return fx
 }
