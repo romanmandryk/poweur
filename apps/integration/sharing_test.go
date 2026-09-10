@@ -358,3 +358,162 @@ func TestINT_SHARE_03_PublicLinkShare(t *testing.T) {
 		t.Fatalf("past the download cap: %d want 410", code)
 	}
 }
+
+// TestINT_SHARE_04: addressable group identities (E05-T5) end to end.
+//
+// The group is a hosted identity of its own. `poweur group create` registers
+// it and signs poweur-sys/relay/groups/self.json with the *group's* key;
+// alice's grant names the group by its Poweur ID; the relay resolves the
+// membership out of the group's own tree and lets members through. Adding
+// and removing a member is one signed update against the group, never a
+// change to alice's grant.
+func TestINT_SHARE_04_GroupIdentityShare(t *testing.T) {
+	zone := newZone(t)
+	tsA, addrA := newHostedRelay(t, zone, t.TempDir())
+	defer tsA.Close()
+
+	relayA := "http://" + addrA
+	clipkg.ConfigureIdentityResolver("http", true, addrA)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	carolHome := t.TempDir()
+	daveHome := t.TempDir()
+	for home, id := range map[string]string{
+		aliceHome: "gidalice.poweur.net",
+		bobHome:   "gidbob.poweur.net",
+		carolHome: "gidcarol.poweur.net",
+		daveHome:  "giddave.poweur.net",
+	} {
+		runCLI(t, home, "identity", "create", id, "--hosted", "--relay", relayA, "--json")
+	}
+
+	aliceToken := mintTokenViaCLI(t, aliceHome, "--use-identity", "gidalice.poweur.net")
+	base := relayA + "/dav/gidalice.poweur.net"
+	resp := davDo(t, "MKCOL", base+"/shared/crew-docs", aliceToken, nil, nil)
+	resp.Body.Close()
+	resp = davDo(t, http.MethodPut, base+"/shared/crew-docs/handbook.md", aliceToken, []byte("crew handbook"), nil)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("seed: %d", resp.StatusCode)
+	}
+
+	// Alice creates the group identity with bob in it. Creating a group must
+	// not switch which identity the next command speaks as.
+	createOut, _ := runCLI(t, aliceHome, "group", "create", "gidcrew.poweur.net",
+		"--member", "gidbob.poweur.net", "--relay", relayA)
+	if !strings.Contains(createOut, "gidcrew.poweur.net") {
+		t.Fatalf("group create output: %s", createOut)
+	}
+	whoami, _ := runCLI(t, aliceHome, "identity", "show", "--json")
+	if !strings.Contains(whoami, "gidalice.poweur.net") {
+		t.Fatalf("creating a group must leave the active identity alone: %s", whoami)
+	}
+
+	// The group's membership document lives in the *group's* tree, signed by
+	// the group's own key — not in alice's.
+	showOut, _ := runCLI(t, aliceHome, "group", "show", "gidcrew.poweur.net", "--json")
+	var doc struct {
+		Group   string   `json:"group"`
+		Owner   string   `json:"owner"`
+		Members []string `json:"members"`
+		Admins  []string `json:"admins"`
+		Epoch   int      `json:"epoch"`
+	}
+	if err := json.Unmarshal([]byte(showOut), &doc); err != nil {
+		t.Fatalf("group show --json: %v (%s)", err, showOut)
+	}
+	if doc.Group != "gidcrew.poweur.net" || doc.Owner != "gidcrew.poweur.net" {
+		t.Fatalf("a group identity is its own owner, got %q/%q", doc.Group, doc.Owner)
+	}
+	if doc.Epoch != 1 {
+		t.Fatalf("fresh group epoch = %d want 1", doc.Epoch)
+	}
+	if strings.Join(doc.Admins, ",") != "gidalice.poweur.net" {
+		t.Fatalf("admins = %v want alice", doc.Admins)
+	}
+	// `admins` is an authority list, not a membership list: alice can change
+	// the group without being in it, and access follows `members` alone.
+	if strings.Join(doc.Members, ",") != "gidbob.poweur.net" {
+		t.Fatalf("members = %v want bob alone", doc.Members)
+	}
+
+	// One grant, addressed to the group by its Poweur ID.
+	runCLI(t, aliceHome, "share", "add", "/shared/crew-docs",
+		"--with-group", "gidcrew.poweur.net", "--perm", "read")
+
+	visitorToken := func(home, id string) string {
+		return mintTokenViaCLI(t, home, "--use-identity", id,
+			"--audience", "gidalice.poweur.net", "--relay", relayA)
+	}
+	bobToken := visitorToken(bobHome, "gidbob.poweur.net")
+	carolToken := visitorToken(carolHome, "gidcarol.poweur.net")
+	daveToken := visitorToken(daveHome, "giddave.poweur.net")
+
+	read := func(t *testing.T, token string) int {
+		t.Helper()
+		r := davDo(t, http.MethodGet, base+"/shared/crew-docs/handbook.md", token, nil, nil)
+		r.Body.Close()
+		return r.StatusCode
+	}
+
+	if code := read(t, bobToken); code != http.StatusOK {
+		t.Fatalf("group member read: %d want 200", code)
+	}
+	if code := read(t, carolToken); code != http.StatusForbidden {
+		t.Fatalf("non-member read: %d want 403", code)
+	}
+
+	// Membership changes are signed updates against the group, and the grant
+	// is never touched.
+	runCLI(t, aliceHome, "group", "add", "gidcrew.poweur.net", "--member", "gidcarol.poweur.net")
+	if code := read(t, carolToken); code != http.StatusOK {
+		t.Fatalf("added member read: %d want 200", code)
+	}
+	runCLI(t, aliceHome, "group", "remove", "gidcrew.poweur.net", "--member", "gidbob.poweur.net")
+	if code := read(t, bobToken); code != http.StatusForbidden {
+		t.Fatalf("removed member read: %d want 403", code)
+	}
+	if code := read(t, daveToken); code != http.StatusForbidden {
+		t.Fatalf("outsider read: %d want 403", code)
+	}
+
+	// Two real changes, so the epoch has moved twice. E09-T5 binds group keys
+	// to this number, so a no-op update must not move it.
+	showOut, _ = runCLI(t, aliceHome, "group", "show", "gidcrew.poweur.net", "--json")
+	if err := json.Unmarshal([]byte(showOut), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Epoch != 3 {
+		t.Fatalf("epoch = %d want 3", doc.Epoch)
+	}
+	noop, _ := runCLI(t, aliceHome, "group", "add", "gidcrew.poweur.net", "--member", "gidcarol.poweur.net")
+	if !strings.Contains(noop, "no change") {
+		t.Fatalf("re-adding an existing member should be a no-op: %s", noop)
+	}
+	showOut, _ = runCLI(t, aliceHome, "group", "show", "gidcrew.poweur.net", "--json")
+	if err := json.Unmarshal([]byte(showOut), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Epoch != 3 {
+		t.Fatalf("a no-op update moved the epoch to %d", doc.Epoch)
+	}
+
+	// Dave holds no group key, so he cannot administer the group — the CLI
+	// stops before it signs anything, and the membership is unchanged.
+	if code := runCLICode(t, daveHome, "group", "add", "gidcrew.poweur.net", "--member", "giddave.poweur.net"); code == 0 {
+		t.Fatal("a non-admin without the group key must not be able to update the group")
+	}
+	if code := read(t, daveToken); code != http.StatusForbidden {
+		t.Fatalf("outsider read after a refused update: %d want 403", code)
+	}
+
+	// A grant naming a group this relay cannot resolve fails closed rather
+	// than opening up: cross-relay group resolution is deferred.
+	runCLI(t, aliceHome, "share", "add", "/shared/crew-docs",
+		"--with-group", "nosuchgroup.poweur.net", "--perm", "read")
+	if code := read(t, daveToken); code != http.StatusForbidden {
+		t.Fatalf("unresolvable group grant: %d want 403", code)
+	}
+}
