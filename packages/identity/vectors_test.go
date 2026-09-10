@@ -221,6 +221,24 @@ func TestVectors_Grants(t *testing.T) {
 			UpdatedAt: VectorTime,
 		}},
 		{"empty", ShareGroup{Group: "nobody", Owner: "alice.poweur.net", UpdatedAt: VectorTime}},
+		// Group identities (E05-T5): the same document, signed by the
+		// group's own key, with an admin list and a membership epoch. The
+		// two vectors above have no admins and so must keep signing the
+		// exact five lines they always did.
+		{"group-identity", ShareGroup{
+			Group: "Team.acme.poweur.net", Owner: "team.ACME.poweur.net",
+			Members:   []string{"Zoe.example.org", "bob.example.org", " carol.poweur.net "},
+			Admins:    []string{"Zoe.example.org", "bob.example.org"},
+			Epoch:     3,
+			UpdatedAt: VectorTime,
+		}},
+		{"group-identity-founding", ShareGroup{
+			Group: "solo.acme.poweur.net", Owner: "solo.acme.poweur.net",
+			Members:   []string{"alice.poweur.net"},
+			Admins:    []string{"alice.poweur.net"},
+			Epoch:     1,
+			UpdatedAt: VectorTime,
+		}},
 	} {
 		group := entry.group
 		if err := group.Sign(priv); err != nil {
