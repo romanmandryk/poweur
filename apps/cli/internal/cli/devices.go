@@ -278,6 +278,18 @@ func runDeviceList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// printJSON emits payload as indented JSON, reporting a marshal failure on
+// stderr rather than printing a half-written document.
+func printJSON(stdout, stderr io.Writer, payload any) int {
+	encoded, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(encoded))
+	return 0
+}
+
 func orDash(v string) string {
 	if v == "" {
 		return "never"
