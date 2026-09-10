@@ -163,8 +163,13 @@ func (s *Server) senderRelayKey(ctx context.Context, sender string) string {
 	return sender
 }
 
-// meterRequestRelay charges one requests-queue admission to the sender's
-// relay. ok=false means the caller must reject with the returned decision.
+// meterRequestRelay charges one requests-queue attempt to the sender's relay.
+// ok=false means the caller must reject with the returned decision.
+//
+// The attempt is charged, not the admission: a meter that only counted the
+// requests it let through would be bypassed by sending requests designed to
+// fail (a duplicate, a sender in cooldown) — the relay does the resolution
+// work either way, which is the work being rationed.
 func (s *Server) meterRequestRelay(ctx context.Context, sender string) (ratelimit.Decision, bool) {
 	decision := s.requestRelayLimit.Allow(s.senderRelayKey(ctx, sender))
 	return decision, decision.Allowed

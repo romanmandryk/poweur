@@ -66,3 +66,25 @@ func TestFromEnv(t *testing.T) {
 		t.Fatalf("dnsttl %v", c.DNSTTL)
 	}
 }
+
+// EPIC-007 E07-T5: the per-sender-relay request meter ships on by default —
+// an operator who never sets the env vars still gets one — and 0 is how they
+// turn a window off, the same convention every other relay-wide knob uses.
+func TestRequestRelayLimitsFromEnv(t *testing.T) {
+	t.Setenv("RELAY_ADDRESS", "relay.fromenv")
+
+	defaults := FromEnv().RequestRelayLimits
+	if defaults.PerMinute != DefaultRequestRelayMinuteLimit ||
+		defaults.PerHour != DefaultRequestRelayHourLimit ||
+		defaults.PerDay != DefaultRequestRelayDayLimit {
+		t.Fatalf("defaults: %+v", defaults)
+	}
+
+	t.Setenv("REQUEST_RELAY_LIMIT_MINUTE", "4")
+	t.Setenv("REQUEST_RELAY_LIMIT_HOUR", "0")
+	t.Setenv("REQUEST_RELAY_LIMIT_DAY", "40")
+	got := FromEnv().RequestRelayLimits
+	if got.PerMinute != 4 || got.PerHour != 0 || got.PerDay != 40 {
+		t.Fatalf("overrides: %+v", got)
+	}
+}
