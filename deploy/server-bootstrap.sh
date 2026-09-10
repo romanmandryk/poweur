@@ -187,5 +187,5 @@ echo -e "${CYAN}Name: DEPLOY_HOST   Value: $(curl -4 -s ifconfig.me 2>/dev/null 
 echo -e "\n${YELLOW}Finish with deploy/OPS.md:${NC}"
 echo -e "  ${CYAN}sudo bash deploy/setup-observability.sh --file .observability.env --import-env /opt/infra/.env${NC}"
 echo -e "  ${CYAN}nano /opt/apps/poweur/apps/api/.env.prod${NC}   (app config)"
-echo -e "  Then run the Deploy workflow (manual dispatch)."
+echo -e "  Then push to master (Deploy runs on that push)."
 echo ""

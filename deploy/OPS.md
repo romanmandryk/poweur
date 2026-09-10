@@ -35,7 +35,7 @@ node deploy/tests/stack-smoke.mjs  # requires Docker; isolated containers and vo
 
    Docker's `restart: unless-stopped` now handles reboot. Do not restart the legacy units or run `docker compose up` from the old checkout or `/opt/infra`. Ansible now prepares the host and secrets; release Actions own application startup.
 4. In GitHub Actions secrets configure `DEPLOY_HOST`, `DEPLOY_SSH_KEY` and **`DEPLOY_KNOWN_HOSTS`**. The last value is the server's known_hosts entry, verified against its SSH host-key fingerprint through your provider console. Existing server→GitHub read access must still work. GHCR uses the workflow's token; no image password is committed.
-5. Before rollout, ensure `grafana.poweur.net` is routed to Grafana (HTTP origin via Caddy, or DNS-only / per-host Full strict). Then run **Deploy** (manual dispatch only). It runs CI, builds the relay image, `git reset --hard` on the VM, and `docker compose up`. A red `/health` check does not compose an older stack. Watch the first rollout, then verify private dashboards.
+5. Before rollout, ensure `grafana.poweur.net` is routed to Grafana (HTTP origin via Caddy, or DNS-only / per-host Full strict). A push to `master` (or manual dispatch) runs **Deploy**: CI, relay image, `git reset --hard` on the VM, `docker compose up`. No smoke identity. A red `/health` check does not compose an older stack.
 6. Set `GRAFANA_SMTP_ENABLED`, `GRAFANA_SMTP_HOST`, `GRAFANA_SMTP_USER`, `GRAFANA_SMTP_PASSWORD`, `GRAFANA_SMTP_FROM_ADDRESS` and `ALERT_EMAIL` in `.observability.env`. Redeploy and send a test notification in Grafana → Alerting → Contact points. Alerts exist without SMTP, but email cannot arrive until configured. Enable GitHub Actions failure notifications for **External relay health**; it probes from GitHub every 15 minutes. Scheduled Actions can be delayed or disabled after inactivity; it is a basic external monitor, not an uptime SLA.
 7. In Grafana, open **Poweur Growth**, choose **Share → Share externally**, and enable a public link. Share only that generated link. Keep anonymous access disabled. **Poweur Relay Ops**, Explore and Loki remain behind login. The public dashboard has aggregate Prometheus panels only; do not add log panels or actor fields to it.
 
@@ -51,7 +51,7 @@ Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to th
 
 ## Routine deployment
 
-Manual **Deploy** workflow: CI, push a GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no `.releases` pointer and no rollback script. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
+Push to `master` (or manual dispatch) runs Deploy: CI, GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no smoke step, `.releases` pointer, or rollback. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
 
 ## Fresh VM
 
@@ -65,7 +65,7 @@ docker compose -p infra --env-file .observability.env -f deploy/infra/docker-com
 docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
 ```
 
-Then run the Deploy workflow (manual dispatch). Caddy/Grafana DNS and existing Cloudflare identity routing still need the original host setup. Do not expose internal backend ports.
+Then push to `master` (or dispatch Deploy). Caddy/Grafana DNS and existing Cloudflare identity routing still need the original host setup. Do not expose internal backend ports.
 
 ## Dashboards, retention and failures
 
