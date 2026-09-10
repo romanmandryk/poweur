@@ -157,6 +157,7 @@ func (s *Server) runPruner() {
 		s.sessions.Prune()
 		s.davTokens.Prune()
 		s.anon.prune()
+		s.abuse.prune(time.Now().UTC())
 		s.pruneLocalityCache()
 		s.expireSpool()
 	}

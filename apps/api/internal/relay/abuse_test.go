@@ -225,3 +225,48 @@ func TestMeterRequestRelayDisabledByDefault(t *testing.T) {
 		}
 	}
 }
+
+// The counter is fed by remote input, so it has to forget. What it must not
+// do is forget *asymmetrically*: dropping a reporter from the dedup ledger
+// while keeping the subject's counter would make the next report lower the
+// reporter count, which is the one number an operator would act on.
+func TestAbuseLogPruneRetiresWholeSubjects(t *testing.T) {
+	logStore := newAbuseLog()
+	now := time.Now().UTC()
+
+	stale := idpkg.NewAbuseReport("a.test", "stale.test", idpkg.AbuseReasonSpam, nil, "")
+	logStore.Record(stale, now.Add(-abuseRetention-time.Hour))
+
+	for _, reporter := range []string{"a.test", "b.test"} {
+		report := idpkg.NewAbuseReport(reporter, "current.test", idpkg.AbuseReasonSpam, nil, "")
+		if !logStore.Record(report, now.Add(-2*abuseReportDedup)) {
+			t.Fatalf("distinct reporters must count (%s)", reporter)
+		}
+	}
+
+	logStore.prune(now)
+
+	if _, ok := logStore.Subject("stale.test"); ok {
+		t.Fatal("a subject nobody has reported in the retention window must be retired")
+	}
+	// Its dedup ledger goes with it — otherwise the key leaks forever.
+	if _, ok := logStore.lastSeen["stale.test"]; ok {
+		t.Fatal("the retired subject's dedup ledger must go with it")
+	}
+
+	entry, ok := logStore.Subject("current.test")
+	if !ok || entry.Total != 2 || entry.Reporters != 2 {
+		t.Fatalf("a live subject must survive prune intact: %+v (found %v)", entry, ok)
+	}
+
+	// The ledger entries are past the dedup window, so a third reporter is
+	// admitted — and must *raise* the reporter count, not reset it to 1.
+	third := idpkg.NewAbuseReport("c.test", "current.test", idpkg.AbuseReasonSpam, nil, "")
+	if !logStore.Record(third, now) {
+		t.Fatal("a new reporter must be counted after prune")
+	}
+	entry, _ = logStore.Subject("current.test")
+	if entry.Total != 3 || entry.Reporters != 3 {
+		t.Fatalf("prune must not make the next report undercount reporters: %+v", entry)
+	}
+}

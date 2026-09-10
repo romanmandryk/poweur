@@ -48,6 +48,17 @@ const abuseReportDedup = 24 * time.Hour
 // never content.
 const maxAbuseReportBytes = 16 * 1024
 
+// abuseRetention is how long a subject's counter survives with no new report.
+//
+// It has to be finite: this map is fed by remote input, and a counter that is
+// never evicted is a slow memory leak with a signature on it. Thirty days is
+// chosen against what the number is *for* — an operator asking "is there a
+// problem with this account now" — and a count nobody has added to in a month
+// is not evidence of a current problem. The dedup ledger is pruned on its own,
+// much shorter, window: once a reporter can report again, remembering that
+// they once did suppresses nothing.
+const abuseRetention = 30 * 24 * time.Hour
+
 // abuseSubject is what the relay knows about complaints against one identity.
 type abuseSubject struct {
 	Subject   string         `json:"subject"`
@@ -140,6 +151,34 @@ func (a *abuseLog) Subjects() []abuseSubject {
 		return out[i].Subject < out[j].Subject
 	})
 	return out
+}
+
+// prune retires subjects nobody has reported in abuseRetention. Called from
+// the relay's janitor.
+//
+// The counter and its dedup ledger are dropped together, never separately.
+// `Reporters` is derived from the ledger — the number of distinct people who
+// have reported this subject — so evicting a reporter from the ledger while
+// keeping the counter would make the next report *lower* the reporter count.
+// A ledger entry outliving its 24-hour dedup window is a few dozen bytes; a
+// count that quietly under-reports how many people complained is the one
+// number an operator would actually act on being wrong.
+func (a *abuseLog) prune(now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for subject, entry := range a.subjects {
+		if now.Sub(entry.LastAt) > abuseRetention {
+			delete(a.subjects, subject)
+			delete(a.lastSeen, subject)
+		}
+	}
+	// A ledger with no counter behind it can only come from a subject whose
+	// every report was pruned; drop it too rather than leak the key.
+	for subject := range a.lastSeen {
+		if _, ok := a.subjects[subject]; !ok {
+			delete(a.lastSeen, subject)
+		}
+	}
 }
 
 // handleAbuseReport accepts a signed `sys.abuse.report` about an identity this
