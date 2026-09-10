@@ -128,21 +128,67 @@ produced no notification at all (the relay notified only on the inbox path), and
 fetched it without repainting, because the loader only re-rendered when its own tray was
 open while the badge lives on the tray bar.
 
-### E09-T3 — Typed messages & threads (activate reserved fields)
+### E09-T3 — Typed messages & threads (activate reserved fields) — **done**
 
-- [ ] Spec update: `type` (default `chat.text`; `sys.*` reserved for platform, registry in
-      EPIC-006), `thread_id`, `expires_at`, `metadata` (signed — extend the canonical string,
-      version the signing scheme carefully: new fields only signed when present, exactly like
-      the existing optional-line pattern)
-- [ ] Relay: opaque handling of all types except `sys.*` it owns; per-type inbox-policy hooks
-      (EPIC-007 needs `sys.contact.request` special-cased)
-- [ ] Clients: render `chat.text`, generic fallback for unknown types ("app message from …"),
-      thread grouping in web UI
-- [ ] Migrate the in-flight definitions from other epics (`sys.share.*`, `sys.contact.*`,
-      `sys.sync.changed`) onto this foundation and register them
+- [x] Spec update: `type` (default `chat.text`; `sys.*` reserved for the platform, registry in
+      `conventions/registry.json`), `thread_id`, `expires_at`, `metadata` — all signed, all
+      appended to the canonical string only when present. Rules live in
+      `packages/identity/msgtypes.go` (canonical) with the string itself in
+      `crypto.CanonicalMessageEnvelope`; documented in
+      `apps/docs/docs/protocol/message-format.md` under **Typed Messages** and **Ordering
+      rules**. No wire version number: the *presence of a field*, not a version, selects the
+      new behaviour
+- [x] Relay: opaque handling of every type outside `sys.*`; an unregistered `sys.*` is
+      refused with `400 unsupported_type` rather than forwarded. Per-type inbox-policy hooks
+      in `apps/api/internal/relay/typed.go` — the EPIC-007 contact special-case became the
+      first two entries in a hook table (`inboxTypeHooks`) rather than a parallel path, and a
+      type with no hook falls to the closed-inbox default
+- [x] Clients: `chat.text` renders as before; anything a client does not implement gets
+      "app message from &lt;sender&gt; (&lt;type&gt;)". Go CLI (`--type/--thread/--expires/--meta`,
+      thread marker in `inbox`), `@poweur/client` (`msgtypes.ts`, `describeMessage`,
+      `groupByThread`), and the web app, which renders one tray row per (contact, thread) and
+      keeps replies inside the thread they came from
+- [x] `sys.contact.*` migrated onto the hook foundation. `sys.share.*` and `sys.sync.changed`
+      are registered in the code's closed set, accepted and routed opaquely by the relay, and
+      have the hook seam waiting — but nothing **emits** them yet; their senders are
+      EPIC-005 and EPIC-004 work. `TestConventionsRegistryValid` now asserts the registry and
+      the code agree in *both* directions, so adding one without the other fails a test
 
-**Acceptance:** old clients interop with new relays (compat tests); typed system flows from
-EPIC-005/007 ride on `type` end to end.
+**Acceptance:** met. `apps/integration/typed_test.go` proves both directions of compatibility
+against the pre-E09-T3 canonical string written out longhand: an old-shaped envelope is
+accepted by a new relay and delivered readable (`TYPED_02`), a new client's plain message
+verifies against what an old relay would rebuild (`TYPED_03`), and a threaded envelope does
+**not** — an old relay fails closed rather than accepting and silently dropping the thread
+(`TYPED_04`). Conformance vectors `message-threaded` and `message-full-envelope` pin the
+TypeScript client to Go.
+
+**Canonical line order (downstream tasks build against this).** Optional lines appear only
+when the field is set, and the list is append-only — a future field goes at the end, never
+between:
+
+```
+<sender>
+<recipient>
+<timestamp>
+<payload>
+id:<message_id>
+session:<session_id>
+enc:<alg>:<ephemeral_public_key>:<nonce>
+type:<type>
+thread:<thread_id>
+expires:<expires_at>
+meta:<key>:<value>          # one line per entry, keys ascending
+```
+
+**Deferred, on purpose:**
+
+- `expires_at` is carried and signed but **not enforced** — refusing delivery past it is
+  E09-T6, which already owns that line item.
+- Per-thread unread counts. The read mark in `poweur-sys/private/messages/` is a
+  conversation-level cursor (E09-T1); a per-thread one would be a second, disagreeing answer.
+  The badge stays per contact and shows on that contact's newest row.
+- Thread creation UI in the web app (naming a new thread). Replying inside an existing thread
+  works; starting one is a compose-screen affordance nobody has asked for yet.
 
 ### E09-T4 — File attachments via the home filesystem
 
