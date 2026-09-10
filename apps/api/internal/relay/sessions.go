@@ -91,6 +91,15 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := "sess_" + token
 
+	// The device this session belongs to (EPIC-004 E04-T6). The body field
+	// has always existed; the header is what every other endpoint uses, so a
+	// client that sets only the header still gets a registry row — and, more
+	// importantly, a session that device revocation can find and delete.
+	obs := deviceFromRequest(r)
+	if fp := strings.TrimSpace(req.DeviceFingerprint); fp != "" {
+		obs.Fingerprint = fp
+	}
+
 	session := storage.Session{
 		ID:                sessionID,
 		Identity:          req.Identity,
@@ -98,7 +107,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		PublicKeyBytes:    sessionPubBytes,
 		IssuedAt:          issuedAt.UTC(),
 		ExpiresAt:         expiresAt.UTC(),
-		DeviceFingerprint: strings.TrimSpace(req.DeviceFingerprint),
+		DeviceFingerprint: obs.Fingerprint,
 		IssuedAtRaw:       req.IssuedAt,
 		ExpiresAtRaw:      req.ExpiresAt,
 		Nonce:             req.Nonce,
@@ -106,13 +115,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.Put(session)
 
-	// Register the device this session belongs to (EPIC-004 E04-T6). The
-	// fingerprint has always been here; until now nothing wrote it down.
-	if fp := session.DeviceFingerprint; fp != "" {
-		obs := deviceFromRequest(r)
-		obs.Fingerprint = fp
-		s.touchDevice(r.Context(), req.Identity, obs)
-	}
+	s.touchDevice(r.Context(), req.Identity, obs)
 
 	writeJSON(w, http.StatusCreated, SessionResponse{
 		SessionID:        sessionID,
