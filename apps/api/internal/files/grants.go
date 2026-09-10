@@ -136,6 +136,12 @@ var _ GrantChecker = (*GrantSet)(nil)
 
 func (gs *GrantSet) audienceMatches(g idpkg.ShareGrant, visitor string) bool {
 	for _, a := range g.Audience {
+		if a.Link != "" {
+			// A capability token is not an identity: link grants are
+			// reachable only through /s/<token>, never by an authenticated
+			// visitor whose id happens to look like the token.
+			continue
+		}
 		if a.ID != "" && strings.EqualFold(strings.TrimSpace(a.ID), visitor) {
 			return true
 		}
@@ -187,6 +193,31 @@ func (gs *GrantSet) VisibleShares(visitor string) []idpkg.ShareGrant {
 		}
 	}
 	return out
+}
+
+// LinkGrant returns the verified link grant whose capability token matches
+// (E05-T4). Tokens are compared in constant time, so a wrong guess reveals
+// nothing about how close it was.
+//
+// Expired link grants are reported separately: whoever holds the token
+// already knows the link existed, so telling them "this link has expired"
+// leaks nothing and is the difference between a usable error page and a
+// mystery 404. A *revoked* grant is simply gone and is indistinguishable
+// from one that never existed.
+func (gs *GrantSet) LinkGrant(token string) (grant idpkg.ShareGrant, found, expired bool) {
+	if gs == nil || token == "" {
+		return idpkg.ShareGrant{}, false, false
+	}
+	for _, g := range gs.grants {
+		if !g.MatchesLinkToken(token) {
+			continue
+		}
+		if !g.Expired(gs.now) {
+			return g, true, false // a live grant always wins
+		}
+		grant, found, expired = g, true, true
+	}
+	return grant, found, expired
 }
 
 // isAncestorDir reports whether path is a strict ancestor directory of

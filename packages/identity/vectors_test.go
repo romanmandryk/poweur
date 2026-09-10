@@ -135,6 +135,12 @@ func TestVectors_Documents(t *testing.T) {
 	WriteVectors(t, vectorsDir, "documents", vectors)
 }
 
+// Fixed link-share inputs for the grant vectors (E05-T4).
+const (
+	vectorLinkToken        = "k7m4qz2rt6vwx3ab5cdefghijn"
+	vectorLinkPasswordHash = "$argon2id$v=19$m=65536,t=1,p=4$eMqI4VYMYTc/H1SPsG5UbQ$Lg5Zrc+Mil5yDeAaWMyivDMdKiTmndk543TXv4rurPE"
+)
+
 type grantVector struct {
 	Name      string     `json:"name"`
 	Grant     ShareGrant `json:"grant"`
@@ -175,6 +181,22 @@ func TestVectors_Grants(t *testing.T) {
 			Audience:    []ShareAudience{{Group: "Team"}, {ID: "Zoe.example.org"}, {ID: "bob.example.org"}},
 			Permissions: []string{PermWrite, PermRead},
 			CreatedAt:   VectorTime, ExpiresAt: "2026-06-01T00:00:00Z",
+		}},
+		// Link shares (E05-T4). The token is fixed (not generated) so the
+		// fixture is stable, and the password hash is a literal PHC string
+		// for the same reason — argon2id salts are random, and a vector
+		// that changed on every run would pin nothing.
+		{"link-plain", ShareGrant{
+			ShareID: "shr_link0011223344", Owner: "alice.poweur.net",
+			Path: "/shared/project-x/", Audience: []ShareAudience{{Link: vectorLinkToken}},
+			Permissions: []string{PermRead}, CreatedAt: VectorTime,
+		}},
+		{"link-password-capped", ShareGrant{
+			ShareID: "shr_link5566778899", Owner: "alice.poweur.net",
+			Path: "shared/project-x/handout.pdf", Audience: []ShareAudience{{Link: vectorLinkToken}},
+			Permissions: []string{PermRead}, CreatedAt: VectorTime,
+			ExpiresAt: "2026-06-01T00:00:00Z",
+			Link:      &ShareLink{Password: vectorLinkPasswordHash, MaxDownloads: 25},
 		}},
 	} {
 		grant := entry.grant
