@@ -106,6 +106,14 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.Put(session)
 
+	// Register the device this session belongs to (EPIC-004 E04-T6). The
+	// fingerprint has always been here; until now nothing wrote it down.
+	if fp := session.DeviceFingerprint; fp != "" {
+		obs := deviceFromRequest(r)
+		obs.Fingerprint = fp
+		s.touchDevice(r.Context(), req.Identity, obs)
+	}
+
 	writeJSON(w, http.StatusCreated, SessionResponse{
 		SessionID:        sessionID,
 		Identity:         req.Identity,

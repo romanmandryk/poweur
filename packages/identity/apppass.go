@@ -24,6 +24,10 @@ type AppPassword struct {
 	Hash      string `json:"hash"` // PHC-format argon2id
 	Scope     string `json:"scope,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
+	// DeviceID links the credential to a row of devices.json (EPIC-004
+	// E04-T6). Optional and absent on every pre-registry file; when set,
+	// revoking that device deletes this entry.
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 // AppPasswordsFile is the schema of poweur-sys/relay/app-passwords.json.

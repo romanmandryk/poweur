@@ -136,6 +136,16 @@ func (s *Server) handleSyncChanges(w http.ResponseWriter, r *http.Request) {
 	if recs == nil {
 		recs = []files.JournalRecord{}
 	}
+	// Per-device sync cursor (E04-T6): record where this device got to, so
+	// "phone last synced 3 days ago" is answerable from the owner's own
+	// registry rather than by asking the phone. Only for the owner's own
+	// devices — a visitor reading a shared folder is not one of them.
+	if principal.Owner {
+		obs := deviceFromRequest(r)
+		obs.SyncScopes = prefixes
+		obs.SyncCursor = formatCursor(next)
+		s.touchDevice(r.Context(), owner, obs)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"identity":    owner,
 		"since":       formatCursor(since),

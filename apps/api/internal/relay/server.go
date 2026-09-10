@@ -62,6 +62,9 @@ type Server struct {
 	davLocks map[string]webdav.LockSystem
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
+	// deviceLocks serializes read-modify-write on each identity's
+	// poweur-sys/relay/devices.json (E04-T6).
+	deviceLocks *deviceLocks
 
 	cacheMu       sync.Mutex
 	relayCache    map[string]cachedRelay
@@ -120,6 +123,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		davTokens:     newDAVTokenStore(),
 		davLocks:      make(map[string]webdav.LockSystem),
 		hub:           newHub(),
+		deviceLocks:   newDeviceLocks(),
 		relayCache:    make(map[string]cachedRelay),
 		localityCache: make(map[string]cachedLocality),
 	}
@@ -234,6 +238,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
 	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
 	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
+	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
 	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
 	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)

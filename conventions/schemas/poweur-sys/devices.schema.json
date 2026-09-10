@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/devices.schema.json",
+  "title": "devices.json — poweur-sys/relay/devices.json (relay-written, owner-readable)",
+  "description": "Device registry (EPIC-004 E04-T6). The relay writes this document from its own observations; owner DAV writes are refused and sync clients pull it without pushing. Device ids are derived from the client-supplied device fingerprint, which is a label rather than a credential.",
+  "type": "object",
+  "required": [
+    "devices"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^dev_[a-z2-7]{16}$",
+            "description": "derived from the device fingerprint: dev_ + 16 lowercase base32 chars"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "kind": {
+            "enum": [
+              "laptop",
+              "desktop",
+              "phone",
+              "tablet",
+              "browser",
+              "agent",
+              "unknown"
+            ]
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sync_scopes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "sync_cursor": {
+            "type": "string",
+            "description": "opaque changes cursor the device last acknowledged"
+          },
+          "synced_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "app_passwords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "names of app-passwords.json entries this device holds; deleted when the device is revoked"
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

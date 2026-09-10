@@ -136,6 +136,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	log.Printf("stream: %s opened (%d open for this identity)", identity, s.hub.count(identity))
 	defer func() { log.Printf("stream: %s closed", identity) }()
 
+	// Presence side-effect (E04-T6 unblocks it). A client that names its
+	// device gets a last_seen in the owner's own devices.json — and nowhere
+	// else. The privacy decision this task recorded stands: presence is not
+	// user-visible in v1, meaning no peer can learn it. There is no endpoint
+	// that reports another identity's presence, nothing lands in the public
+	// tree, and the row is readable only with owner credentials.
+	s.touchDevice(r.Context(), identity, deviceFromRequest(r))
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

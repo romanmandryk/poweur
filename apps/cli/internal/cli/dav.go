@@ -93,6 +93,9 @@ func MintDAVToken(ctx context.Context, relayURL, identityValue, audience, scope 
 		return DAVTokenResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Identify this device so the relay can bind the token to a devices.json
+	// row and revoking the device actually kills it (EPIC-004 E04-T6).
+	applyDeviceHeaders(req.Header)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

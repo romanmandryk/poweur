@@ -93,6 +93,11 @@ type Permissions struct {
 // relayManagedFiles are files only the relay may write (owner writes 403).
 var relayManagedFiles = map[string]bool{
 	SysPublic + "/id.json": true, // changed via registration/rotation endpoints only
+	// The device registry records the relay's own observations (EPIC-004
+	// E04-T6). Owner reads are normal; owner writes are refused, which is
+	// what makes "pull-only for sync clients" enforcement rather than
+	// etiquette. Owner-driven changes go through POST /devices/…/revoke.
+	SysRelay + "/devices.json": true,
 }
 
 // Allowed reports whether principal p may perform access on path within
