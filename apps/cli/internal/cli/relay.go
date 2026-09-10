@@ -403,6 +403,9 @@ func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequ
 		return SessionResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	// Name this device so the session lands in devices.json and revoking the
+	// device can find the session again (EPIC-004 E04-T6).
+	applyDeviceHeaders(httpReq.Header)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {

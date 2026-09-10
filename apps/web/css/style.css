@@ -1262,6 +1262,19 @@ input, textarea, select { font-family: inherit; }
 .enrollment-label { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .enrollment-meta { margin-top: 2px; }
 
+/* Device registry (EPIC-004 E04-T6), shown under the key enrollments. A
+   revoked row stays visible as an audit trail, dimmed rather than removed:
+   seeing that the lost phone was cut off, and when, is the point. */
+.panel-subhead {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--t2);
+  margin: 28px 0 6px;
+}
+.enrollment-row.is-revoked { opacity: .55; }
+
 /* Touch targets: the mobile-first floor, applied everywhere rather than
    per-component, since EPIC-019 wraps this UI verbatim. */
 .settings-row, .conv-row, .option-card { min-height: 52px; }

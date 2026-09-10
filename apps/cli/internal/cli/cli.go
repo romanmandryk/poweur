@@ -47,6 +47,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSend(args[1:], stdout, stderr)
 	case "inbox":
 		return runInbox(args[1:], stdout, stderr)
+	case "listen":
+		return runListen(args[1:], stdout, stderr)
+	case "devices":
+		return runDevices(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
 	case "messages":
@@ -1012,112 +1016,19 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *jsonOut {
-		fmt.Fprintln(stdout, string(payload))
-		return 0
-	}
-
-	var inbox struct {
-		Messages []struct {
-			ID         string          `json:"id"`
-			Sender     string          `json:"sender"`
-			Recipient  string          `json:"recipient"`
-			Timestamp  string          `json:"timestamp"`
-			Payload    string          `json:"payload"`
-			Signature  string          `json:"signature"`
-			Type       string          `json:"type,omitempty"`
-			ThreadID   string          `json:"thread_id,omitempty"`
-			SessionID  string          `json:"session_id,omitempty"`
-			Encryption *EncryptionMeta `json:"encryption,omitempty"`
-		} `json:"messages"`
-		Acks []Ack `json:"acks"`
-	}
-	if err := json.Unmarshal(payload, &inbox); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	// Under `open` an accept arrives as an ordinary typed message, so the
-	// inbox drain is where the handshake we started gets finished. Under a
-	// closed policy the same envelope rides the requests queue instead;
-	// `runRequests` does this on its side.
-	var accepts []string
-	for _, msg := range inbox.Messages {
-		if msg.Type == idpkg.MsgTypeContactAccept && msg.Sender != "" {
-			accepts = append(accepts, msg.Sender)
-		}
-	}
-	promoteAcceptedContacts(context.Background(), *useIdentity, accepts, stdout, stderr)
-
-	// Surface tick-2 (delivered_client) acks for previously-sent messages
-	// before printing inbound payloads. The ack stream is independent of
-	// the message stream — an empty inbox can still carry acks.
-	for _, ack := range inbox.Acks {
-		applyInboundAck(identityValue, ack)
-		fmt.Fprintf(stdout, "✓✓ [%s] %s delivered to %s (msg %s)\n", ack.Timestamp, ack.State, ack.Sender, ack.MessageID)
-	}
-
-	if len(inbox.Messages) == 0 && len(inbox.Acks) == 0 {
-		fmt.Fprintln(stdout, "no messages")
-		return 0
-	}
-
-	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
-
-	// What the drain hands over exists nowhere else once this call returns,
-	// so everything that opens is archived before the function can fail.
-	var archive []idpkg.HistoryRecord
-	defer func() { archiveRecords(*useIdentity, archive, stderr) }()
-
-	for _, msg := range inbox.Messages {
-		display := msg.Payload
-		decrypted := false
-		if msg.Encryption != nil && msg.Encryption.Alg != "" {
-			if encPriv == nil {
-				display = "[encrypted: no local encryption key]"
-			} else {
-				plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
-					Ciphertext:         msg.Payload,
-					EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
-					Nonce:              msg.Encryption.Nonce,
-				})
-				if err != nil {
-					display = fmt.Sprintf("[decrypt failed: %v]", err)
-				} else {
-					display = string(plaintext)
-					decrypted = true
-				}
-			}
-		}
-		prefix := "  "
-		if decrypted {
-			prefix = "🔒"
-		}
-		// `chat.text` reads as it always has; anything else gets the generic
-		// line, because the CLI cannot present an application's payload and
-		// showing the raw plaintext would be showing someone else's JSON.
-		fmt.Fprintf(stdout, "%s [%s] %s: %s%s\n", prefix, msg.Timestamp, msg.Sender,
-			describeTypedMessage(msg.Sender, msg.Type, display, decrypted), threadSuffix(msg.ThreadID))
-
-		if decrypted {
-			archive = append(archive, historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
-				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display))
-		}
-
-		// Tick-2 ack: only emit when we actually decrypted the message,
-		// i.e. we have proof the inbound message reached the client.
-		// Failed decrypts (no key, wrong key, corruption) intentionally
-		// stay at tick 1 on the sender's side.
-		if decrypted && msg.ID != "" && msg.Sender != "" {
-			recipientForAck := msg.Recipient
-			if recipientForAck == "" {
-				recipientForAck = identityValue
-			}
-			if err := emitDeliveredClientAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, sess); err != nil {
-				fmt.Fprintf(stderr, "warning: failed to send delivery ack for %s: %v\n", msg.ID, err)
-			}
-		}
-	}
+	// Printing, decrypting, acking and archiving the pickup is shared with
+	// `poweur listen` (EPIC-009 E09-T2), which drains the same way when the
+	// push stream says something arrived.
+	// An empty inbox is not an error, so the "did anything arrive" answer is
+	// only of interest to `poweur listen --once`.
+	renderInboxPayload(payload, inboxRender{
+		cfg:          cfg,
+		identity:     identityValue,
+		useIdentity:  *useIdentity,
+		identityPriv: identityPriv,
+		session:      sess,
+		jsonOut:      *jsonOut,
+	}, stdout, stderr)
 	return 0
 }
 
@@ -1978,6 +1889,8 @@ func printHelp(w io.Writer) {
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
   poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
   poweur inbox [--use-identity=...] [--json]
+  poweur listen [--use-identity=...] [--json] [--once]
+  poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
   poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
   poweur session refresh [--use-identity=...] [--json]

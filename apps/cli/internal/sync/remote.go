@@ -27,6 +27,12 @@ type HTTPRemote struct {
 	Token    string // DAV bearer token
 	Client   *http.Client
 
+	// DeviceHeaders name this machine to the relay (EPIC-004 E04-T6), so
+	// the changes feed can record a per-device sync cursor and the owner
+	// can see how stale each device is. Optional: nil keeps the device
+	// anonymous, which is the pre-registry behaviour.
+	DeviceHeaders map[string]string
+
 	// ChunkThreshold/ChunkSize override the chunked-upload defaults
 	// (0 = default). Tests use tiny values.
 	ChunkThreshold int64
@@ -46,10 +52,18 @@ func (r *HTTPRemote) do(ctx context.Context, method, u string, body io.Reader, h
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Token)
+	r.applyDevice(req)
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
 	return r.client().Do(req)
+}
+
+// applyDevice attaches the optional device identification headers.
+func (r *HTTPRemote) applyDevice(req *http.Request) {
+	for k, v := range r.DeviceHeaders {
+		req.Header.Set(k, v)
+	}
 }
 
 func (r *HTTPRemote) davURL(path string) string {
@@ -177,6 +191,7 @@ func (r *HTTPRemote) Put(ctx context.Context, path string, body io.Reader, size 
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+r.Token)
+	r.applyDevice(req)
 	req.ContentLength = size // relay requires Content-Length for quota checks
 	resp, err := r.client().Do(req)
 	if err != nil {
