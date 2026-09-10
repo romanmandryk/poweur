@@ -124,3 +124,57 @@ func TestIdentityStore(t *testing.T) {
 		t.Fatal("get missing")
 	}
 }
+
+// DeleteMatching backs device revocation (EPIC-004 E04-T6): a revocation
+// names a device, but sessions are keyed by id, so the store has to be able
+// to sweep an identity's sessions by predicate.
+func TestSessionStoreDeleteMatching(t *testing.T) {
+	s := NewSessionStore()
+	now := time.Now().UTC()
+	put := func(id, identity, fingerprint string) {
+		s.Put(Session{
+			ID: id, Identity: identity, DeviceFingerprint: fingerprint,
+			IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		})
+	}
+	put("s1", "alice.example.org", "laptop")
+	put("s2", "alice.example.org", "laptop")
+	put("s3", "alice.example.org", "phone")
+	// Same identity, different casing — a session carries whatever spelling
+	// its registration used, so the match has to fold case or a revocation
+	// silently misses half the sessions.
+	put("s4", "ALICE.example.org", "laptop")
+	put("s5", "bob.example.org", "laptop")
+
+	removed := s.DeleteMatching("alice.example.org", func(sess Session) bool {
+		return sess.DeviceFingerprint == "laptop"
+	})
+	if removed != 3 {
+		t.Fatalf("removed %d, want 3", removed)
+	}
+	for _, gone := range []string{"s1", "s2", "s4"} {
+		if _, ok := s.Get(gone); ok {
+			t.Fatalf("%s survived", gone)
+		}
+	}
+	for _, kept := range []string{"s3", "s5"} {
+		if _, ok := s.Get(kept); !ok {
+			t.Fatalf("%s was taken", kept)
+		}
+	}
+	// The per-identity index has to shrink with it, or ListForIdentity
+	// keeps naming sessions that no longer exist.
+	if got := s.ListForIdentity("alice.example.org"); len(got) != 1 || got[0].ID != "s3" {
+		t.Fatalf("ListForIdentity after sweep: %+v", got)
+	}
+	if got := s.ListForIdentity("bob.example.org"); len(got) != 1 {
+		t.Fatalf("bob lost a session: %+v", got)
+	}
+	// A second sweep is a no-op, and an unknown identity removes nothing.
+	if n := s.DeleteMatching("alice.example.org", func(Session) bool { return false }); n != 0 {
+		t.Fatalf("predicate that matches nothing removed %d", n)
+	}
+	if n := s.DeleteMatching("nobody.example.org", func(Session) bool { return true }); n != 0 {
+		t.Fatalf("unknown identity removed %d", n)
+	}
+}

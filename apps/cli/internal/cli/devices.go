@@ -398,3 +398,30 @@ func deviceAuth(useIdentity, relayFlag string, stderr io.Writer) (relayURL, iden
 	}
 	return strings.TrimSuffix(relayURL, "/"), identityValue, tok.Token, true
 }
+
+// resolveAppPasswordDevice turns the `--device` flag into the id stamped on a
+// new app-password entry (EPIC-004 E04-T6).
+//
+//	""     this machine, so revoking it here revokes the password
+//	"none" no link at all — the password outlives every revocation
+//	dev_…  an explicit device, for minting a phone's password from a laptop
+//
+// An unreadable local device record is not fatal: the password is still
+// worth having, it just cannot be revoked by device.
+func resolveAppPasswordDevice(flagValue string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(flagValue))
+	switch {
+	case value == "none":
+		return "", nil
+	case value == "":
+		d, err := loadDevice()
+		if err != nil {
+			return "", nil
+		}
+		return d.DeviceID(), nil
+	case idpkg.ValidDeviceID(value):
+		return value, nil
+	default:
+		return "", fmt.Errorf("--device must be a dev_… device id, or 'none' (got %q)", flagValue)
+	}
+}

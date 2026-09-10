@@ -192,18 +192,15 @@ func streamLoop(ctx context.Context, base, max time.Duration,
 
 	delay := base
 	for ctx.Err() == nil {
-		connected := false
-		err := connect(ctx, func() { connected = true; delay = base })
+		// onOpen resets the backoff, so a stream that opened at all — even
+		// one that later dropped mid-read — retries from base rather than
+		// from wherever the last outage left the delay.
+		err := connect(ctx, func() { delay = base })
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil && onError != nil {
 			onError(err)
-		}
-		// A stream that opened and then ended cleanly (idle timeout, relay
-		// restart) is not a failure; retry promptly rather than punishing it.
-		if connected && err == nil {
-			delay = base
 		}
 		if ctx.Err() != nil {
 			return

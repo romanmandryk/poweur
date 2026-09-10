@@ -271,6 +271,11 @@ func runDAVPassword(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity")
 	name := fs.String("name", "", "app password name (e.g. finder, phone)")
 	scope := fs.String("scope", "dav:full", "scope granted to this password")
+	// Linking the credential to a device is what makes `poweur devices
+	// revoke` able to kill it (EPIC-004 E04-T6). Defaults to this machine;
+	// `--device=none` mints an unlinked password, which then outlives any
+	// device revocation.
+	device := fs.String("device", "", "device id to bind this password to (default: this machine; 'none' to skip)")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})); err != nil {
 		return 1
@@ -313,15 +318,22 @@ func runDAVPassword(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		deviceID, derr := resolveAppPasswordDevice(*device)
+		if derr != nil {
+			fmt.Fprintln(stderr, derr)
+			return 1
+		}
 		file.Passwords = append(file.Passwords, idpkg.AppPassword{
 			Name: *name, Hash: hash, Scope: *scope,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			DeviceID:  deviceID,
 		})
 		if err := putAppPasswords(ctx, cfg.RelayURL, identityValue, tok.Token, file); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		out := map[string]any{"name": *name, "password": password, "scope": *scope, "username": identityValue}
+		out := map[string]any{"name": *name, "password": password, "scope": *scope,
+			"username": identityValue, "device_id": deviceID}
 		return writeOutput(stdout, *jsonOut, out, fmt.Sprintf(
 			"app password %q created.\n  username: %s\n  password: %s\nStore it now — it is shown only once.\n",
 			*name, identityValue, password))

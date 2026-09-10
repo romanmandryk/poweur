@@ -85,9 +85,15 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	state.Identity = owner
+	// Naming the device is what gives the owner a per-device sync cursor to
+	// look at — "phone last synced 3 days ago" (EPIC-004 E04-T6).
+	remote := &sync.HTTPRemote{
+		RelayURL: relayURL, Identity: owner, Token: tok.Token,
+		DeviceHeaders: deviceHeaders(),
+	}
 	engine := &sync.Engine{
 		Root:   root,
-		Remote: &sync.HTTPRemote{RelayURL: relayURL, Identity: owner, Token: tok.Token},
+		Remote: remote,
 		State:  state,
 		Ignore: sync.LoadIgnore(root),
 		Roots:  pathFilters,

@@ -67,8 +67,6 @@ type deviceObservation struct {
 	Kind        string
 	SyncScopes  []string
 	SyncCursor  string
-	// AppPassword links a freshly minted app password to the device.
-	AppPassword string
 }
 
 // deviceLocks serializes the read-modify-write of one identity's registry.
@@ -219,10 +217,6 @@ func (s *Server) touchDevice(ctx context.Context, owner string, obs deviceObserv
 		device.SyncedAt = stamp
 		changed = true
 	}
-	if obs.AppPassword != "" && !containsFold(device.AppPasswords, obs.AppPassword) {
-		device.AppPasswords = append(device.AppPasswords, obs.AppPassword)
-		changed = true
-	}
 	// last_seen alone is only worth a write once the old value has gone
 	// stale; otherwise a chatty client rewrites the document per request.
 	if !changed {
@@ -312,7 +306,7 @@ func (s *Server) revokeDevice(ctx context.Context, owner, deviceID string) (devi
 	out.DAVTokens = s.davTokens.RevokeMatching(func(t davToken) bool {
 		return strings.EqualFold(t.Audience, owner) && t.DeviceID == deviceID
 	})
-	out.AppPasswords = s.deleteAppPasswords(ctx, owner, device.AppPasswords)
+	out.AppPasswords = s.deleteAppPasswords(ctx, owner, deviceID, device.AppPasswords)
 
 	if doc.Revoke(deviceID, time.Now()) {
 		if err := s.writeDevices(ctx, owner, doc); err != nil {
@@ -323,32 +317,64 @@ func (s *Server) revokeDevice(ctx context.Context, owner, deviceID string) (devi
 	return out, true
 }
 
-// deleteAppPasswords rewrites app-passwords.json without the named entries,
-// and without any entry that names the device directly. Re-reading the file
-// per DAV request (the existing design) is what makes this take effect on
-// the next request rather than the next restart.
-func (s *Server) deleteAppPasswords(ctx context.Context, owner string, names []string) int {
+// appPasswordsPath is where the owner keeps their DAV app passwords.
+var appPasswordsPath = files.SysRelay + "/app-passwords.json"
+
+// readAppPasswords loads app-passwords.json, or an empty file when it is
+// absent or unreadable.
+func (s *Server) readAppPasswords(ctx context.Context, owner string) idpkg.AppPasswordsFile {
 	if !s.davEnabled() {
-		return 0
+		return idpkg.AppPasswordsFile{}
 	}
-	path := files.SysRelay + "/app-passwords.json"
-	f, err := s.filesProvider.OpenFile(ctx, owner, path, os.O_RDONLY, 0)
+	f, err := s.filesProvider.OpenFile(ctx, owner, appPasswordsPath, os.O_RDONLY, 0)
 	if err != nil {
-		return 0
+		return idpkg.AppPasswordsFile{}
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, maxDevicesDocBytes+1))
 	_ = f.Close()
-	if err != nil {
-		return 0
+	if err != nil || len(raw) > maxDevicesDocBytes {
+		return idpkg.AppPasswordsFile{}
 	}
 	parsed, err := idpkg.ParseAppPasswordsFile(raw)
 	if err != nil {
+		return idpkg.AppPasswordsFile{}
+	}
+	return parsed
+}
+
+// appPasswordsForDevice names the entries currently linked to a device.
+//
+// Read from app-passwords.json rather than mirrored into devices.json,
+// because that file is the owner's and they may edit it by hand at any
+// moment: a copy in the registry would be a second truth that goes stale
+// the first time someone removes a password with a text editor.
+func appPasswordsForDevice(file idpkg.AppPasswordsFile, deviceID string) []string {
+	var names []string
+	for _, entry := range file.Passwords {
+		if deviceID != "" && strings.EqualFold(entry.DeviceID, deviceID) {
+			names = append(names, entry.Name)
+		}
+	}
+	return names
+}
+
+// deleteAppPasswords rewrites app-passwords.json without any entry linked to
+// deviceID, and without the entries the registry row named. Re-reading the
+// file per DAV request (the existing design) is what makes this take effect
+// on the next request rather than the next restart.
+func (s *Server) deleteAppPasswords(ctx context.Context, owner, deviceID string, names []string) int {
+	if !s.davEnabled() {
 		return 0
 	}
+	path := appPasswordsPath
+	parsed := s.readAppPasswords(ctx, owner)
 	kept := make([]idpkg.AppPassword, 0, len(parsed.Passwords))
 	removed := 0
 	for _, entry := range parsed.Passwords {
-		if containsFold(names, entry.Name) {
+		// Either link is enough. `device_id` on the entry is what a client
+		// sets when it mints the password; the name list on the row is the
+		// relay's own record. Neither is required for the other to work.
+		if (deviceID != "" && strings.EqualFold(entry.DeviceID, deviceID)) || containsFold(names, entry.Name) {
 			removed++
 			continue
 		}
@@ -392,6 +418,16 @@ func (s *Server) handleDevicesGet(w http.ResponseWriter, r *http.Request) {
 	doc := s.readDevices(r.Context(), owner)
 	if doc.Devices == nil {
 		doc.Devices = []idpkg.Device{}
+	}
+	// Fill in the credentials each device currently holds at read time, from
+	// the owner's own app-passwords.json. A revoked row keeps whatever the
+	// revocation left on it — which is nothing.
+	passwords := s.readAppPasswords(r.Context(), owner)
+	for i, d := range doc.Devices {
+		if d.Revoked {
+			continue
+		}
+		doc.Devices[i].AppPasswords = appPasswordsForDevice(passwords, d.ID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"identity": owner,
