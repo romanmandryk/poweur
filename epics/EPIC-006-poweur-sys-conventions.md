@@ -13,7 +13,7 @@
 | E06-T2 profile.json + capabilities.json | **done** | Schemas + write validation shipped; `poweur-sys/public/*` world-served via `/.well-known/poweur/` (no new endpoints); web profile card + editor shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T5. **Closed since:** `poweur identity lookup` now reads both documents over that same route (`identity.FetchProfile`/`FetchCapabilities` in `packages/identity/publicfiles.go`, reusing the resolver's SSRF hardening — no redirects, 64 KB cap, no private IPs without the test flag). Best-effort by design: a 404 is the normal "publishes no profile" and stays silent, only an unreachable host notes on stderr, and an absent `capabilities.json` falls back to the identity document's own list exactly as the web client does. `--json` keeps `capabilities` as the document's string list and adds `capabilities_document` + `profile` (`TestINT_PROFILE_01/_02`). (The Host-routed well-known path is *not* a gap: in production `https://bob.poweur.net/.well-known/poweur/profile.json` is what a browser fetches, Host set for it and CORS `*`. Only dev/e2e, where one relay hosts many identities that are not in DNS and the browser must use its IP, falls back to the identity document; the CLI's dial override preserves Host, so it reads the real route even there.) |
 | E06-T3 `/apps` namespace rules | **done** | [`apps/docs/docs/conventions/app-data.md`](../apps/docs/docs/conventions/app-data.md); `manifest.json` validated on write (app_id must match directory); shared-app-data = EPIC-005 share of an `/apps` subtree (`TestShareAppsSubtree` is the worked example) |
 | E06-T4 PCP process + registry | **done** | `conventions/README.md`, `pcp-0001-process.md`, `registry.json` (validated in CI incl. code-emitted `sys.*` types), seed PCPs 0002–0005 filed |
-| E06-T5 Tasks-domain dogfood | **deferred** | reference app + tasks PCP not started; `net.poweur.tasks` app-id reserved in the registry |
+| E06-T5 Tasks-domain dogfood | **done** | [PCP-0007](../conventions/pcp-0007-tasks.md) + reference app [`apps/tasks/`](../apps/tasks/) (own module, no Poweur deps); two identities collaborate on a shared project with no server code (`TestINT_TASKS_01`); the [retrospective](../conventions/pcp-0007-tasks.md#retrospective-what-the-convention-process-missed) is the deliverable |
 
 ## Goal
 
@@ -140,12 +140,33 @@ integration test scenario.
 
 Prove the "apps converge on domain conventions" thesis with one real domain end-to-end.
 
-- [ ] PCP draft `pcp-XXXX-tasks.md`: minimal task/project JSON format informed by existing
-      open formats (todo.txt, iCalendar VTODO/jsCalendar Task — pick fields, stay convertible)
-- [ ] Tiny reference app (CLI `poweur-tasks` or a static web app) that reads/writes
-      `/apps/net.poweur.tasks/`, shares a project with another identity, and shows live
-      collaboration through sync
-- [ ] Write the retrospective into the PCP: what the convention process missed
+- [x] PCP draft [`pcp-0007-tasks.md`](../conventions/pcp-0007-tasks.md): task/project JSON
+      informed by todo.txt, iCalendar VTODO / jsCalendar Task and Taskwarrior, with a
+      normative mapping table so the format stays convertible; JSON Schemas under
+      `conventions/schemas/net.poweur.tasks/`
+- [x] Reference app [`apps/tasks/`](../apps/tasks/) — `poweur-tasks` CLI in its **own Go
+      module depending on nothing**: not `packages/identity`, not the CLI's internals, no
+      third-party HTTP/DAV library. Held to what an outside author has (the published
+      document, HTTP, and a token the user minted), because a convention only implementable
+      from inside this repo is not a convention
+- [x] Write the retrospective into the PCP: what the convention process missed —
+      [§Retrospective](../conventions/pcp-0007-tasks.md#retrospective-what-the-convention-process-missed)
 
-**Acceptance:** two identities collaborate on a shared task list using only the conventions +
-platform primitives (no custom server code) — this is the ecosystem's hello-world demo.
+**Acceptance:** met. `TestINT_TASKS_01_SharedProjectCollaboration` — alice inits the
+namespace, shares one project directory with `poweur share add`, bob's instance of the same
+app reads and writes the same documents through the grant, revocation ends it. No server
+code and no tasks-specific relay endpoint.
+
+**Tests:** `apps/tasks` unit suite (documents, path sanitization, DAV client, CLI, plus
+`schema_test.go` pinning the implementation against the published schema);
+`TestINT_TASKS_01`–`04` in `apps/integration`.
+
+**What the dogfood found** (detail in the retrospective; three fixed in this change set):
+
+| Finding | Status |
+|---------|--------|
+| The PCP's prose and its own JSON Schema contradicted each other on `status`; nothing in the process compares them | fixed — schema corrected, `if`/`then` added for the `done`→`completed` coupling, drift test added |
+| `Init` MKCOL'd `/apps`, which an app-scoped token can never do; no document said who creates the namespace or that `/apps` pre-exists | fixed in the app + written up |
+| A share recipient's view was unspecified. Discovery works (grant ancestors are readable) — but `manifest.json` is a sibling, stays 403, so every shared namespace looks "abandoned" per `app-data.md` | pinned by `TestINT_TASKS_04`; needs a wording decision in `app-data.md` |
+| `stable` needs two implementations, but the process ships no conformance vectors for the second one to test against | **open** — the largest thing still missing; PCP-0001 should require a `testdata/` before `draft` ends |
+| "Unknown fields MUST be preserved" is one line in PCP-0001 and the largest part of the implementation; every struct-based JSON binding violates it by default | **open** — PCP-0001 needs an implementer's note |
