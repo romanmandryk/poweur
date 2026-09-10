@@ -15,6 +15,7 @@ import { rfc3339 } from "./encoding.js";
 import { ChallengeRequiredError, PoweurError, RelayError } from "./errors.js";
 import { RelayClient } from "./http.js";
 import { newAckId, newMessageId } from "./ids.js";
+import { SYSTEM_MESSAGE_TYPES, isKnownSystemType, isSystemType, validateEnvelopeExtensions, } from "./msgtypes.js";
 import { solvePow } from "./pow.js";
 import { resolveEncryptionKey, resolveIdentity } from "./resolve.js";
 import { isSessionValid, sessionProofFrom, sessionSigner, } from "./session.js";
@@ -84,6 +85,15 @@ export class Messaging {
      */
     async send(signer, recipient, plaintext, options = {}) {
         const mode = assertSignWith(options.signWith ?? "session");
+        // Check the envelope before encrypting or resolving: the relay validates
+        // these too, but a caller deserves the error before a round trip, and a
+        // metadata value with a newline in it has no unambiguous signing input.
+        const envelopeError = validateEnvelopeExtensions(options);
+        if (envelopeError)
+            throw new PoweurError("invalid_argument", envelopeError);
+        if (isSystemType(options.type) && !isKnownSystemType(options.type)) {
+            throw new PoweurError("invalid_argument", `"${options.type}" is not a known system message type (sys.* is reserved; known: ${SYSTEM_MESSAGE_TYPES.join(", ")})`);
+        }
         const recipientKey = await this.#recipientEncryptionKey(recipient);
         const { payload, encryption } = encryptMessage(recipientKey, plaintext);
         const targetRelay = options.targetRelayUrl ??
@@ -128,6 +138,9 @@ export class Messaging {
                 ...(current.session_id ? { sessionId: current.session_id } : {}),
                 encryption: current.encryption ?? null,
                 ...(current.type ? { type: current.type } : {}),
+                ...(current.thread_id ? { threadId: current.thread_id } : {}),
+                ...(current.expires_at ? { expiresAt: current.expires_at } : {}),
+                ...(current.metadata ? { metadata: current.metadata } : {}),
             });
             const keyHolder = active ? sessionSigner(active) : signer;
             return keyHolder.sign(canonical, "base64std");

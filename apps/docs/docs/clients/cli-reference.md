@@ -232,7 +232,19 @@ poweur send bob.example.org "Hey Bob, are you there?"
 | `--use-identity <identity>` | Send from a specific identity (overrides active identity) |
 | `--via-home-relay` | Privacy proxy: POST to the configured home relay (`relay_url`) instead of directly to the recipient's relay. The home relay accepts because the sender is locally hosted, then forwards to the recipient relay. Hides the sender's IP from the recipient relay at the cost of an extra hop. |
 | `--sign-with <session\|identity>` | Choose the signing key (default `session`). Identity-signed sends omit `session_id`/`session_proof`. |
+| `--type <type>` | Envelope message type. Omit for ordinary chat: absent means `chat.text`, and the absent form is what keeps the signed canonical string identical to a pre-typing client's. `sys.*` is reserved — an unregistered one is refused locally. |
+| `--thread <id>` | Group this message into a conversation thread. Opaque to the relay. |
+| `--expires <rfc3339>` | When the message stops being meaningful. Signed; relay-side enforcement is a later task. |
+| `--meta <key=value>` | Envelope metadata, repeatable. **Plaintext** — addressing, not content. A duplicate key is an error rather than a silent overwrite. |
 | `--json` | Machine-readable output |
+
+`--type`, `--thread`, `--expires` and `--meta` are validated before the message is encrypted, signed or journalled, so a typo never becomes a recorded send attempt. They cannot be combined with `--anon`: an unsigned envelope binds nothing, so the fields would be routing metadata nobody could trust. See [Typed Messages](/protocol/message-format#typed-messages).
+
+```bash
+poweur send bob.example.org "the logo, v3" \
+  --thread thr_rebrand --type chat.attachment \
+  --meta mime=image/png --meta bytes=20480
+```
 
 If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing. If the relay returns `400 encryption_required` the CLI surfaces the error — this indicates a client bug, since the CLI always encrypts. Network/HTTP errors during the send write a `failed` entry to the journal (sticky).
 

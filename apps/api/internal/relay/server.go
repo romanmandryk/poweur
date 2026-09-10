@@ -738,6 +738,13 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			"messages must be end-to-end encrypted (alg, ephemeral_public_key, nonce required)")
 		return
 	}
+	// Typed envelope extensions (E09-T3): shape checks and the reserved
+	// `sys.*` namespace. Cheap, plaintext, and ahead of signature
+	// verification — an envelope whose metadata carries a control character
+	// has no unambiguous canonical string to verify against.
+	if !validateEnvelopeExtensions(w, msg) {
+		return
+	}
 
 	senderLocal := s.isLocalIdentity(r.Context(), msg.Sender)
 	recipientLocal := s.isLocalIdentity(r.Context(), msg.Recipient)
@@ -758,7 +765,9 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canonical := crypto.CanonicalMessageTyped(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, msg.Type, encMeta)
+	canonical := crypto.CanonicalMessageEnvelope(
+		msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload,
+		msg.ID, msg.SessionID, msg.Type, msg.ThreadID, msg.ExpiresAt, msg.Metadata, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return

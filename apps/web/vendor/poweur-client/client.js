@@ -109,6 +109,7 @@ export class PoweurClient {
             recipient: m.recipient || this.signer.identity,
             timestamp: m.timestamp,
             ...(m.type ? { type: m.type } : {}),
+            ...(m.thread_id ? { thread_id: m.thread_id } : {}),
             queue: HISTORY_QUEUE_INBOX,
             body: m.plaintext ?? "",
         })));
@@ -124,6 +125,7 @@ export class PoweurClient {
                 recipient: result.message.recipient,
                 timestamp: result.message.timestamp,
                 ...(options.type ? { type: options.type } : {}),
+                ...(options.threadId ? { thread_id: options.threadId } : {}),
                 queue: HISTORY_QUEUE_SENT,
                 body: plaintext,
             },

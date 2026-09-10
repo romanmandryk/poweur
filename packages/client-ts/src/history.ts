@@ -65,6 +65,12 @@ export interface HistoryRecord {
   /** RFC3339. */
   timestamp: string;
   type?: string;
+  /**
+   * Carried so a client redrawing from the archive after a reload groups the
+   * conversation the way the live inbox did (E09-T3). Optional: a record
+   * written before threads existed simply has none.
+   */
+  thread_id?: string;
   queue: HistoryQueue;
   /** The decrypted text. Ciphertext nobody holds an ephemeral key for is not an archive. */
   body: string;

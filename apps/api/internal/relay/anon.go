@@ -172,6 +172,12 @@ func (s *Server) handleAnonMessage(w http.ResponseWriter, r *http.Request, msg M
 			"messages must be end-to-end encrypted (alg, ephemeral_public_key, nonce required)")
 		return
 	}
+	// The same envelope rules as a signed message (E09-T3) — and the
+	// `sys.*` guard matters more here, not less: an anonymous sender has no
+	// identity to hold responsible for claiming to be a system message.
+	if !validateEnvelopeExtensions(w, msg) {
+		return
+	}
 	if !s.isLocalIdentity(r.Context(), msg.Recipient) {
 		writeError(w, http.StatusForbidden, "not_authorized", "anonymous messages are only accepted for locally hosted recipients")
 		return

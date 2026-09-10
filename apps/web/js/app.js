@@ -21,6 +21,8 @@ import {
   streamForever, SDK_VERSION, SDK_BUILD_TIME,
 } from "@poweur/client";
 
+import { buildConversationRows, threadLabel } from "./threads.js";
+
 import {
   createPasskey, authenticatePasskey,
   wrapKeysWithPRF, unwrapKeysWithPRF, checkPasskeySupport, PRF_UNAVAILABLE_MESSAGE,
@@ -710,10 +712,12 @@ function renderTray() {
   return `
     <div class="conv-list">
       ${conversations.map(c => `
-        <div class="conv-row" data-compose-to="${esc(c.contact)}" role="button" tabindex="0">
+        <div class="conv-row" data-compose-to="${esc(c.contact)}" data-thread="${esc(c.threadId)}" role="button" tabindex="0">
           ${avatarHtml(c.contact, "md")}
           <div class="conv-info">
-            <div class="conv-name">${esc(c.petname || idHandle(c.contact))}</div>
+            <div class="conv-name">${esc(c.petname || idHandle(c.contact))}${
+              c.threaded ? ` <span class="conv-thread">#${esc(threadLabel(c.threadId))}</span>` : ""
+            }</div>
             <div class="conv-preview">${esc(c.preview)}</div>
           </div>
           <div class="conv-meta">
@@ -859,38 +863,25 @@ function emptyState(icon, title, body, actionHtml = "") {
     </div>`;
 }
 
+/**
+ * Rows for the messages tray: one per (contact, thread).
+ *
+ * The grouping and the preview text live in `js/threads.js` — including the
+ * generic "app message from …" line an unknown `type` gets, so a chat UI
+ * never shows a user someone else's JSON. Here we only add what needs app
+ * state: petnames and the unread mark.
+ */
 function buildConversations() {
-  const byContact = {};
-  for (const raw of S.messages) {
-    const m = typeof raw === "string" ? JSON.parse(raw) : raw;
-    // An unsigned message has nobody to thread under; it belongs to the
-    // anonymous tray, which renders it as a different kind of object.
-    if (!m.sender) continue;
-    const contact = m.sender === S.identity ? m.recipient : m.sender;
-    if (!contact) continue;
-    if (!byContact[contact]) byContact[contact] = [];
-    byContact[contact].push(m);
-  }
-  return Object.entries(byContact)
-    .map(([contact, msgs]) => {
-      const lastMsg = msgs.at(-1);
-      const known = contactFor(contact);
-      return {
-        contact,
-        lastMsg,
-        petname: known?.petname ?? null,
-        // Someone we have no entry for at all: adding them is one tap from
-        // the message that made us want to.
-        stranger: !known,
-        // Messages past the read mark — a count that reaches zero when the
-        // conversation is opened, rather than the total held forever.
-        unread: unreadFor(contact),
-        // The SDK decrypts in place, so show the message rather than a padlock
-        // when we could actually read it.
-        preview: lastMsg.plaintext ?? "🔒 Could not decrypt",
-      };
-    })
-    .sort((a, b) => new Date(b.lastMsg.timestamp) - new Date(a.lastMsg.timestamp));
+  return buildConversationRows(S.messages, S.identity, unreadFor).map(row => {
+    const known = contactFor(row.contact);
+    return {
+      ...row,
+      petname: known?.petname ?? null,
+      // Someone we have no entry for at all: adding them is one tap from
+      // the message that made us want to.
+      stranger: !known,
+    };
+  });
 }
 
 // ─── Contacts destination ─────────────────────────────────────────────────────
@@ -1993,7 +1984,10 @@ function attachEvents() {
     r.addEventListener("click", () => {
       const peer = r.dataset.composeTo;
       markConversationRead(peer).catch(() => {});
-      R.push("compose", { to: peer });
+      // Replying from a threaded row stays in that thread; from the default
+      // row it starts nothing, which is what an unthreaded reply has always
+      // been.
+      R.push("compose", { to: peer, thread: r.dataset.thread || "" });
     }));
 
   // A push stream costs one connection and saves every poll after it.
@@ -3073,6 +3067,9 @@ function recordToMessage(record) {
     recipient: record.recipient,
     timestamp: record.timestamp,
     type: record.type ?? "",
+    // Carried so a reload regroups the conversation into the same threads
+    // the live inbox showed.
+    thread_id: record.thread_id ?? "",
     queue: record.queue,
     plaintext: record.body,
   };
@@ -3186,6 +3183,10 @@ async function doSend() {
     setStatus("Sending…");
     const sent = await client.sendAndArchive(to, body, {
       signWith: sessionIsValid(sess) ? "session" : "identity",
+      // Only when we are replying inside one: an absent thread_id is what
+      // keeps the envelope (and its canonical string) identical to what
+      // every pre-threads client sends.
+      ...(R.params.thread ? { threadId: R.params.thread } : {}),
     });
     setStatus("✓ Sent", "ok");
     // Keep our own copy on screen too: the relay never hands a sender their
@@ -3198,6 +3199,7 @@ async function doSend() {
       timestamp: sent.message.timestamp,
       queue: "sent",
       plaintext: body,
+      ...(R.params.thread ? { thread_id: R.params.thread } : {}),
     }]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
     if (q("#c-body")) q("#c-body").value = "";

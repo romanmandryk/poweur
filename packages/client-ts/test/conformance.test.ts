@@ -91,6 +91,8 @@ describe("canonical signing strings match Go", () => {
       case "message-minimal":
       case "message-session-encrypted":
       case "message-typed":
+      case "message-threaded":
+      case "message-full-envelope":
         return canonicalMessage({
           sender: string(i, "sender"),
           recipient: string(i, "recipient"),
@@ -100,6 +102,9 @@ describe("canonical signing strings match Go", () => {
           sessionId: string(i, "session_id"),
           encryption: (i["encryption"] as EncryptionMeta | undefined) ?? null,
           type: string(i, "type"),
+          threadId: string(i, "thread_id"),
+          expiresAt: string(i, "expires_at"),
+          metadata: (i["metadata"] as Record<string, string> | undefined) ?? undefined,
         });
       case "ack":
       case "ack-session":

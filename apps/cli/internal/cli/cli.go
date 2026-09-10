@@ -646,7 +646,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	signWith := fs.String("sign-with", "session", "signing key to use: session (default) or identity")
 	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
-	msgType := fs.String("type", "", "envelope message type (sys.* system messages, e.g. sys.contact.request)")
+	msgType := fs.String("type", "", "envelope message type (default chat.text; sys.* reserved for the platform)")
+	threadID := fs.String("thread", "", "group this message into a conversation thread")
+	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
+	meta := &metaFlag{}
+	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
 	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
 	jsonOut := fs.Bool("json", false, "output json")
@@ -657,7 +661,21 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
 		return 1
 	}
+	// Check the envelope before anything is encrypted, signed, journalled or
+	// posted: a `sys.*` typo should not become a recorded send attempt.
+	if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	if *anonFlag {
+		// An anonymous envelope carries no signature, so nothing binds these
+		// fields to a sender — any relay on the path could add, drop or
+		// rewrite them. Rather than ship routing metadata nobody can trust,
+		// the combination is refused.
+		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil {
+			fmt.Fprintln(stderr, "--anon cannot carry --type/--thread/--expires/--meta: an unsigned envelope binds nothing")
+			return 1
+		}
 		return runSendAnon(cfg, fs.Arg(0), fs.Arg(1), *jsonOut, stdout, stderr)
 	}
 	mode := strings.ToLower(strings.TrimSpace(*signWith))
@@ -751,6 +769,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			Timestamp:  timestamp,
 			Payload:    payloadString,
 			Type:       *msgType,
+			ThreadID:   *threadID,
+			ExpiresAt:  *expiresAt,
+			Metadata:   meta.Map(),
 			Encryption: encMeta,
 		}
 		msg.Signature = signMessage(identityPriv, msg)
@@ -774,9 +795,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		// The relay never hands a sender their own message back, so this copy
 		// is the only record that the conversation has two sides.
-		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-			recipient, timestamp, *msgType, plaintext)}, stderr)
+			recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 		output := map[string]any{
 			"id":             messageID,
@@ -817,6 +838,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		Timestamp:    timestamp,
 		Payload:      payloadString,
 		Type:         *msgType,
+		ThreadID:     *threadID,
+		ExpiresAt:    *expiresAt,
+		Metadata:     meta.Map(),
 		SessionID:    sess.SessionID,
 		SessionProof: sessionProofFrom(sess),
 		Encryption:   encMeta,
@@ -866,9 +890,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
 
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-		recipient, timestamp, *msgType, plaintext)}, stderr)
+		recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,
@@ -1000,6 +1024,7 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 			Payload    string          `json:"payload"`
 			Signature  string          `json:"signature"`
 			Type       string          `json:"type,omitempty"`
+			ThreadID   string          `json:"thread_id,omitempty"`
 			SessionID  string          `json:"session_id,omitempty"`
 			Encryption *EncryptionMeta `json:"encryption,omitempty"`
 		} `json:"messages"`
@@ -1066,11 +1091,15 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		if decrypted {
 			prefix = "🔒"
 		}
-		fmt.Fprintf(stdout, "%s [%s] %s: %s\n", prefix, msg.Timestamp, msg.Sender, display)
+		// `chat.text` reads as it always has; anything else gets the generic
+		// line, because the CLI cannot present an application's payload and
+		// showing the raw plaintext would be showing someone else's JSON.
+		fmt.Fprintf(stdout, "%s [%s] %s: %s%s\n", prefix, msg.Timestamp, msg.Sender,
+			describeTypedMessage(msg.Sender, msg.Type, display, decrypted), threadSuffix(msg.ThreadID))
 
 		if decrypted {
-			archive = append(archive, historyRecordFrom(identityValue, idpkg.HistoryQueueInbox,
-				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, display))
+			archive = append(archive, historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
+				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display))
 		}
 
 		// Tick-2 ack: only emit when we actually decrypted the message,
@@ -1695,6 +1724,11 @@ func sessionProofFrom(sess session.Session) *SessionProof {
 // caller chooses which Ed25519 private key to pass: the short-lived session
 // key (normal path, SessionID is set) or the long-lived identity key
 // (headless/opt-out path, SessionID is empty).
+//
+// The optional lines are appended in a fixed order and only when the field is
+// set (crypto.CanonicalMessageEnvelope on the relay, canonicalMessage() in
+// @poweur/client): id, session, enc, type, thread, expires, meta:<key> in
+// ascending key order.
 func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	parts := []string{msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload}
 	if msg.ID != "" {
@@ -1709,6 +1743,13 @@ func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	if msg.Type != "" {
 		parts = append(parts, "type:"+msg.Type)
 	}
+	if msg.ThreadID != "" {
+		parts = append(parts, "thread:"+msg.ThreadID)
+	}
+	if msg.ExpiresAt != "" {
+		parts = append(parts, "expires:"+msg.ExpiresAt)
+	}
+	parts = append(parts, idpkg.MetadataLines(msg.Metadata)...)
 	canonical := strings.Join(parts, "\n")
 	sig := ed25519.Sign(priv, []byte(canonical))
 	return base64.StdEncoding.EncodeToString(sig)

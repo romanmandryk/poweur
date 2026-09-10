@@ -35,18 +35,31 @@ export interface Message {
   timestamp: string;
   payload: string;
   signature: string;
-  /** Envelope-level type (`sys.contact.*`); bound into the signature. */
+  /**
+   * Envelope-level type; bound into the signature. Absent means
+   * `chat.text` — see `normalizeMessageType`. `sys.*` is reserved for the
+   * platform and a relay refuses an unregistered one.
+   */
   type?: string;
   session_id?: string;
   session_proof?: SessionProof;
   encryption?: EncryptionMeta;
   /**
-   * Reserved by EPIC-009, typed now so adding them is a minor version.
-   * The relay ignores unknown fields today.
+   * Groups messages into a conversation thread (EPIC-009 E09-T3). Opaque to
+   * the relay: it never invents one and never rewrites one. Signed.
    */
   thread_id?: string;
+  /**
+   * When the sender says this message stops being meaningful (RFC3339).
+   * Signed and carried; refusing delivery past it is E09-T6.
+   */
   expires_at?: string;
-  metadata?: Record<string, unknown>;
+  /**
+   * Small, flat, signed and **plaintext** — addressing, not content. Values
+   * are strings so two implementations cannot disagree about how to
+   * serialize the map for signing. Put nothing private here.
+   */
+  metadata?: Record<string, string>;
 }
 
 /** A message from the inbox, with the decrypt attempt folded in. */
