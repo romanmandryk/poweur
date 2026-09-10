@@ -20,12 +20,14 @@
  * `packages/identity/testdata/vectors/signin.json` via `test/conformance.test.ts`.
  */
 
+import { canonicalSessionRegistration } from "./canonical.js";
 import {
   parseEd25519PublicKey,
   signCanonical,
   verifyCanonical,
 } from "./crypto/index.js";
-import { rfc3339 } from "./encoding.js";
+import { keyValidAt } from "./document.js";
+import { fromBase64, fromUtf8, randomBytes, rfc3339, toBase64url, utf8 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
 import { validateIdentityName } from "./names.js";
 import { resolveIdentity, type ResolveOptions } from "./resolve.js";
@@ -292,23 +294,9 @@ export function signInResponseCanonical(resp: SignInResponse): string {
   });
 }
 
-/** What the long-lived identity key signs to authorize a session key. */
-export function canonicalSessionRegistration(
-  identity: string,
-  sessionPublicKey: string,
-  issuedAt: string,
-  expiresAt: string,
-  nonce: string,
-): string {
-  return [
-    "session-registration",
-    identity,
-    sessionPublicKey,
-    issuedAt,
-    expiresAt,
-    nonce,
-  ].join("\n");
-}
+// The session-registration string is defined once, in `canonical.ts`: the
+// relay, the CLI and this module all sign the same bytes. It is re-exported
+// from the package root there, not here.
 
 // ── Field validation ─────────────────────────────────────────────────────────
 
@@ -393,20 +381,13 @@ export function validateSignInRequest(req: SignInRequest, nowMs = Date.now()): S
 // ── Encoding ─────────────────────────────────────────────────────────────────
 
 function b64urlEncodeJson(value: unknown): string {
-  const json = JSON.stringify(value);
-  const bytes = new TextEncoder().encode(json);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return toBase64url(utf8(JSON.stringify(value)));
 }
 
 function b64urlDecodeToText(value: string): string {
-  let s = value.replace(/-/g, "+").replace(/_/g, "/");
-  while (s.length % 4 !== 0) s += "=";
-  const bin = atob(s);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+  // fromBase64 accepts every variant the protocol has emitted (raw/padded,
+  // std/url) — a user pasting a code should not have to know which they copied.
+  return fromUtf8(fromBase64(value));
 }
 
 function decodeBlob<T>(encoded: string, what: string): T {
@@ -494,7 +475,7 @@ export function verifySessionProof(
   const pub = parseEd25519PublicKey(proof.session_public_key);
   // The proof is signed over the *normalized* key encoding, so re-encode
   // rather than trusting whatever variant travelled on the wire.
-  const normalized = toBase64urlRaw(pub);
+  const normalized = toBase64url(pub);
   const canonical = canonicalSessionRegistration(
     identityName,
     normalized,
@@ -506,12 +487,6 @@ export function verifySessionProof(
     fail("session proof signature invalid");
   }
   return { publicKey: pub, issuedAtMs: iat, expiresAtMs: exp };
-}
-
-function toBase64urlRaw(bytes: Uint8Array): string {
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** The session id in `key_id`, or "" when the identity key signed. */
@@ -951,8 +926,8 @@ export class SignInVerifier {
  * it by trying them.
  */
 function identityKeysAt(doc: IdentityDocument, at: string): Uint8Array[] {
-  const when = Date.parse(at ?? "");
-  const at_ms = Number.isNaN(when) ? Date.now() : when;
+  const parsed = Date.parse(at ?? "");
+  const when = new Date(Number.isNaN(parsed) ? Date.now() : parsed);
   const keys: Uint8Array[] = [];
   try {
     keys.push(parseEd25519PublicKey(doc.public_key));
@@ -960,9 +935,9 @@ function identityKeysAt(doc: IdentityDocument, at: string): Uint8Array[] {
     /* a document with an unusable current key still has previous ones */
   }
   for (const prev of doc.previous_keys ?? []) {
-    if (!prev.valid_until) continue;
-    const until = Date.parse(prev.valid_until);
-    if (Number.isNaN(until) || at_ms > until) continue;
+    // Same grace-window rule the rest of the SDK uses (`document.keyValidAt`),
+    // so a rotation is judged by one implementation everywhere.
+    if (!keyValidAt(doc, prev.public_key, when)) continue;
     try {
       keys.push(parseEd25519PublicKey(prev.public_key));
     } catch {
@@ -973,8 +948,6 @@ function identityKeysAt(doc: IdentityDocument, at: string): Uint8Array[] {
   return keys;
 }
 
-function randomToken(bytes: number): string {
-  const buf = new Uint8Array(bytes);
-  globalThis.crypto.getRandomValues(buf);
-  return toBase64urlRaw(buf);
+function randomToken(size: number): string {
+  return toBase64url(randomBytes(size));
 }
