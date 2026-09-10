@@ -216,9 +216,35 @@ const iconGearFill = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.
 
 // ─── Render orchestration ─────────────────────────────────────────────────────
 
+/**
+ * Find this node again after `innerHTML` replacement.
+ *
+ * The shell paints from strings, so a focused node is detached on the next
+ * paint. Settings rows have ids; file and conversation rows have data
+ * attributes. Without putting focus back, a DAV read that lands while
+ * someone is on a row swallows the Enter that should have opened it —
+ * which is what CI saw on the Files `shared` row (E15-T5).
+ */
+function focusSelector(el) {
+  if (!el || el === document.body || el === document.documentElement) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  if (el.dataset?.openDir != null) return `[data-open-dir="${CSS.escape(el.dataset.openDir)}"]`;
+  if (el.dataset?.download != null) return `[data-download="${CSS.escape(el.dataset.download)}"]`;
+  if (el.dataset?.composeTo != null) return `[data-compose-to="${CSS.escape(el.dataset.composeTo)}"]`;
+  if (el.dataset?.contactOpen != null) return `[data-contact-open="${CSS.escape(el.dataset.contactOpen)}"]`;
+  if (el.dataset?.openOwner != null) return `[data-open-owner="${CSS.escape(el.dataset.openOwner)}"]`;
+  if (el.dataset?.page != null && el.classList.contains("nav-tab")) {
+    return `.nav-tab[data-page="${CSS.escape(el.dataset.page)}"]`;
+  }
+  return null;
+}
+
 function render() {
   const app = document.getElementById("app");
   if (!app) return;
+  const restore = app.contains(document.activeElement)
+    ? focusSelector(document.activeElement)
+    : null;
 
   if (R.sub && !DETAIL_SUBS.has(R.sub)) {
     app.innerHTML = renderSubPage();
@@ -236,6 +262,7 @@ function render() {
   }
   flushMounts();
   attachEvents();
+  if (restore) app.querySelector(restore)?.focus();
 }
 
 // ─── Header ───────────────────────────────────────────────────────────────────

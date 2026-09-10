@@ -180,8 +180,9 @@ test.describe("first run", () => {
 
     // A row with role="button" is operable from the keyboard.
     await page.click('.nav-tab[data-page="files"]');
-    await page.locator('[data-open-dir="shared"]').first().focus();
-    await page.keyboard.press("Enter");
+    const folder = page.locator('[data-open-dir="shared"]').first();
+    await expect(folder).toBeVisible({ timeout: 20_000 });
+    await folder.press("Enter");
     await expect(page.locator(".breadcrumbs")).toContainText("shared", { timeout: 20_000 });
   });
 

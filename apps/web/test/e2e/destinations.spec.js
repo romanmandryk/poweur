@@ -187,7 +187,7 @@ test.describe("five destinations at 375px", () => {
     const identity = await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="settings"]');
-    await expect(page.locator("#about-app-version")).toHaveText("0.1.6");
+    await expect(page.locator("#about-app-version")).toHaveText("0.1.7");
     await expect(page.locator("#about-sdk-version")).toHaveText("0.1.2");
     await expect(page.locator("#about-app-build")).toContainText("2026-09-10");
     await expect(page.locator("#about-relay-version")).toHaveText("0.1.2", { timeout: 15_000 });
