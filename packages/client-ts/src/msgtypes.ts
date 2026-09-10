@@ -258,17 +258,28 @@ export function validateEnvelopeExtensions(input: {
 }
 
 /**
+ * Types whose payload a general-purpose client knows is prose written to be
+ * read: `chat.text`, and `sys.contact.request` — whose payload is the intro a
+ * stranger wrote to introduce themselves, the one thing that helps the
+ * recipient decide.
+ */
+export const TEXT_RENDERED_TYPES: readonly string[] = [
+  MSG_TYPE_CHAT_TEXT,
+  MSG_TYPE_CONTACT_REQUEST,
+];
+
+/**
  * How a generic client should present a message body.
  *
- * `chat.text` (and an absent type, which means the same thing) is shown as
- * written. Anything else gets a generic line naming the sender and the type,
- * because a chat UI has no idea how to render an application's payload and
- * showing the raw plaintext would show the user someone else's JSON. An app
- * that understands a type renders it itself and never calls this.
+ * A type in {@link TEXT_RENDERED_TYPES} is shown as written. Anything else
+ * gets a generic line naming the sender and the type, because a chat UI has
+ * no idea how to render an application's payload and showing the raw
+ * plaintext would show the user someone else's JSON. An app that understands
+ * a type renders it itself and never calls this.
  */
 export function describeMessage(sender: string, type: string | undefined, body: string): string {
   const normalized = normalizeMessageType(type);
-  if (normalized === MSG_TYPE_CHAT_TEXT) return body;
+  if (TEXT_RENDERED_TYPES.includes(normalized)) return body;
   return `app message from ${sender} (${normalized})`;
 }
 

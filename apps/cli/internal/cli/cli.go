@@ -789,9 +789,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		// The relay never hands a sender their own message back, so this copy
 		// is the only record that the conversation has two sides.
-		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-			recipient, timestamp, *msgType, plaintext)}, stderr)
+			recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 		output := map[string]any{
 			"id":             messageID,
@@ -884,9 +884,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
 
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-		recipient, timestamp, *msgType, plaintext)}, stderr)
+		recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,
@@ -1092,8 +1092,8 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 			describeTypedMessage(msg.Sender, msg.Type, display, decrypted), threadSuffix(msg.ThreadID))
 
 		if decrypted {
-			archive = append(archive, historyRecordFrom(identityValue, idpkg.HistoryQueueInbox,
-				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, display))
+			archive = append(archive, historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
+				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display))
 		}
 
 		// Tick-2 ack: only emit when we actually decrypted the message,

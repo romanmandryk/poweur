@@ -160,9 +160,13 @@ func TestDescribeTypedMessage(t *testing.T) {
 	}{
 		"absent type is chat.text": {"", "hello", true, "hello"},
 		"explicit chat.text":       {"chat.text", "hello", true, "hello"},
-		"unknown app type":         {"net.example.widget.poked", `{"widget":1}`, true, "app message from carol.poweur.net (net.example.widget.poked)"},
-		"system type":              {idpkg.MsgTypeSyncChanged, "{}", true, "app message from carol.poweur.net (sys.sync.changed)"},
-		"undecrypted keeps body":   {"net.example.widget.poked", "[decrypt failed: bad key]", false, "[decrypt failed: bad key]"},
+		// A contact request's payload is the intro a stranger wrote to
+		// introduce themselves: hiding it behind the fallback would hide the
+		// one thing that helps the recipient decide.
+		"contact request intro":  {idpkg.MsgTypeContactRequest, "hi, it's carol", true, "hi, it's carol"},
+		"unknown app type":       {"net.example.widget.poked", `{"widget":1}`, true, "app message from carol.poweur.net (net.example.widget.poked)"},
+		"system type":            {idpkg.MsgTypeSyncChanged, "{}", true, "app message from carol.poweur.net (sys.sync.changed)"},
+		"undecrypted keeps body": {"net.example.widget.poked", "[decrypt failed: bad key]", false, "[decrypt failed: bad key]"},
 	} {
 		got := describeTypedMessage("carol.poweur.net", tc.msgType, tc.body, tc.decrypted)
 		if got != tc.want {

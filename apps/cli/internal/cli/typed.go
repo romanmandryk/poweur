@@ -55,13 +55,25 @@ func (m *metaFlag) Map() map[string]string {
 	return m.values
 }
 
+// textRenderedTypes are the types whose payload this client knows is prose
+// meant for a human to read.
+//
+// `chat.text` is the obvious one. `sys.contact.request` is the other: its
+// payload is the intro a stranger wrote to introduce themselves, and hiding
+// it behind a generic line would hide the only thing that helps the
+// recipient decide. Every other type — an application's own, a `sys.*`
+// notification whose payload is machine-readable — gets the fallback.
+var textRenderedTypes = map[string]bool{
+	idpkg.MsgTypeChatText:       true,
+	idpkg.MsgTypeContactRequest: true,
+}
+
 // describeTypedMessage renders one inbound message body for a human.
 //
-// `chat.text` (and an absent type, which means the same thing) shows the
-// decrypted text as it always has. Anything else gets a generic line naming
-// the sender and the type, because the CLI has no idea how to present an
-// application's payload and pretending otherwise would show a user a blob of
-// someone else's JSON.
+// A type this client implements shows its text as it always has. Anything
+// else gets a generic line naming the sender and the type, because the CLI
+// has no idea how to present an application's payload and pretending
+// otherwise would show a user a blob of someone else's JSON.
 //
 // `decrypted` matters: a message we could not open has nothing to render
 // whatever its type says, so the decrypt-failure text wins.
@@ -69,10 +81,11 @@ func describeTypedMessage(sender, msgType, body string, decrypted bool) string {
 	if !decrypted {
 		return body
 	}
-	if idpkg.NormalizeMessageType(msgType) == idpkg.MsgTypeChatText {
+	normalized := idpkg.NormalizeMessageType(msgType)
+	if textRenderedTypes[normalized] {
 		return body
 	}
-	return fmt.Sprintf("app message from %s (%s)", sender, idpkg.NormalizeMessageType(msgType))
+	return fmt.Sprintf("app message from %s (%s)", sender, normalized)
 }
 
 // threadSuffix renders the thread marker appended to an inbox line. Empty for

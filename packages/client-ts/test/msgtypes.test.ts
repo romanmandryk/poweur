@@ -225,6 +225,10 @@ describe("display fallback", () => {
   it("renders chat.text as written and everything else generically", () => {
     expect(describeMessage("carol.poweur.net", undefined, "hello")).toBe("hello");
     expect(describeMessage("carol.poweur.net", "chat.text", "hello")).toBe("hello");
+    // A contact request's payload is prose written to be read.
+    expect(describeMessage("carol.poweur.net", "sys.contact.request", "hi, it's carol")).toBe(
+      "hi, it's carol",
+    );
     expect(describeMessage("carol.poweur.net", "net.example.widget.poked", '{"w":1}')).toBe(
       "app message from carol.poweur.net (net.example.widget.poked)",
     );
