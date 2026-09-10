@@ -987,7 +987,9 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 	// Printing, decrypting, acking and archiving the pickup is shared with
 	// `poweur listen` (EPIC-009 E09-T2), which drains the same way when the
 	// push stream says something arrived.
-	return renderInboxPayload(payload, inboxRender{
+	// An empty inbox is not an error, so the "did anything arrive" answer is
+	// only of interest to `poweur listen --once`.
+	renderInboxPayload(payload, inboxRender{
 		cfg:          cfg,
 		identity:     identityValue,
 		useIdentity:  *useIdentity,
@@ -995,6 +997,7 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		session:      sess,
 		jsonOut:      *jsonOut,
 	}, stdout, stderr)
+	return 0
 }
 
 // applyInboundAck advances the local pending journal when an ack arrives

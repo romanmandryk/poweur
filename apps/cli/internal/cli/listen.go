@@ -255,19 +255,20 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 	// The drain is exactly what `poweur inbox` does — same decryption, same
 	// tick-2 acks, same history archive. A notification must not mean a
 	// weaker pickup than a poll, or `listen` would quietly consume messages
-	// the journal never records.
-	drain := func() {
+	// the journal never records. It reports whether anything arrived, which
+	// is what `--once` exits on.
+	drain := func() bool {
 		sess, err := ensureSession(ctx, cfg.RelayURL, identityValue, identityPriv)
 		if err != nil {
 			fmt.Fprintln(stderr, "session error:", err)
-			return
+			return false
 		}
 		payload, err := fetchInboxWithSessionRetry(ctx, cfg.RelayURL, identityValue, identityPriv, sess)
 		if err != nil {
 			fmt.Fprintln(stderr, "pickup failed:", err)
-			return
+			return false
 		}
-		renderInboxPayload(payload, inboxRender{
+		delivered := renderInboxPayload(payload, inboxRender{
 			cfg:          cfg,
 			identity:     identityValue,
 			useIdentity:  *useIdentity,
@@ -278,6 +279,7 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 			// every heartbeat-adjacent event would drown the real output.
 			quietWhenEmpty: true,
 		}, stdout, stderr)
+		return delivered
 	}
 
 	fmt.Fprintf(stderr, "listening as %s (ctrl-c to stop)\n", identityValue)
@@ -288,8 +290,13 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 				func() {
 					onOpen()
 					// Catch up on connect: anything that arrived while the
-					// stream was down is already sitting at the cursor.
-					drain()
+					// stream was down is already sitting at the cursor. For
+					// `--once` that catch-up counts as the notification —
+					// otherwise a script would wait for a second message it
+					// has no reason to expect.
+					if drain() && *once {
+						stop()
+					}
 				},
 				func(event StreamEvent) {
 					if event.Type == "ready" {
@@ -328,13 +335,12 @@ type inboxRender struct {
 // decrypt what it can, emit tick-2 acks for what decrypted, archive to
 // history. Shared by `poweur inbox` and `poweur listen` so a push-driven
 // pickup is never weaker than a polled one.
-func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer) int {
+//
+// Reports whether the pickup carried anything. `poweur inbox` ignores that
+// (it exits 0 either way — an empty inbox is not an error); `poweur listen`
+// uses it for `--once`.
+func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer) bool {
 	cfg, identityValue, identityPriv, sess := r.cfg, r.identity, r.identityPriv, r.session
-
-	if r.jsonOut {
-		fmt.Fprintln(stdout, string(payload))
-		return 0
-	}
 
 	var inbox struct {
 		Messages []struct {
@@ -352,7 +358,16 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 	}
 	if err := json.Unmarshal(payload, &inbox); err != nil {
 		fmt.Fprintln(stderr, err)
-		return 1
+		return false
+	}
+	delivered := len(inbox.Messages) > 0 || len(inbox.Acks) > 0
+
+	// --json hands the raw response over untouched: a script asked for the
+	// wire shape, not for this function's rendering of it. The acks and
+	// history archiving below are the human path only.
+	if r.jsonOut {
+		fmt.Fprintln(stdout, string(payload))
+		return delivered
 	}
 
 	// Under `open` an accept arrives as an ordinary typed message, so the
@@ -375,11 +390,11 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		fmt.Fprintf(stdout, "✓✓ [%s] %s delivered to %s (msg %s)\n", ack.Timestamp, ack.State, ack.Sender, ack.MessageID)
 	}
 
-	if len(inbox.Messages) == 0 && len(inbox.Acks) == 0 {
+	if !delivered {
 		if !r.quietWhenEmpty {
 			fmt.Fprintln(stdout, "no messages")
 		}
-		return 0
+		return false
 	}
 
 	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
@@ -434,5 +449,5 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			}
 		}
 	}
-	return 0
+	return true
 }
