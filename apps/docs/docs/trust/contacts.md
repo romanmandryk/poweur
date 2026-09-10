@@ -159,6 +159,9 @@ Pinning is client-side defense-in-depth: it fails open when contacts are unreach
 - `sys.contact.*` client auto-processing (the accept notification is delivered but
   clients handle it manually — both clients pin on accept, neither acts on an inbound
   `sys.contact.accept` by itself).
-- E07-T5 abuse pressure: per-sender-relay request metering, shared blocklists,
-  `sys.abuse.report` handling (type reserved in the registry), PoW on requests from
-  unknown relays (primitive from EPIC-014).
+- PoW on contact requests from unknown relays: the `stranger_challenge` /
+  `stranger_pow_bits` seam is specified (EPIC-014 E14-T3) and not yet wired.
+
+Beyond the individual inbox — per-sender-relay request metering, `sys.abuse.report`,
+and shareable signed blocklists — is
+[Relay reputation & abuse pressure](relay-reputation).

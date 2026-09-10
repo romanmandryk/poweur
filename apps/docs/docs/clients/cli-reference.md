@@ -642,6 +642,61 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 
 ---
 
+### `poweur report <identity>`
+
+Report an identity to the relay operator who hosts them (`sys.abuse.report`). The
+report is signed by you and carries message IDs, a reason and an optional note — never
+message content, which is end-to-end encrypted and which the operator could not read
+anyway.
+
+```bash
+poweur report loud.cheapco.test --reason=spam --note="twelve identical messages" --message-ids=m-1,m-2
+```
+
+| Flag | Description |
+|------|-------------|
+| `--reason <kind>` | `spam` \| `harassment` \| `phishing` \| `malware` \| `impersonation` \| `other` |
+| `--note <text>` | Free text for the operator (max 2048 bytes) |
+| `--message-ids <ids>` | Comma-separated message IDs as evidence (max 32) |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+One report per reporter per subject per day counts; repeats answer `duplicate`. A relay
+only accepts reports about identities it hosts.
+
+---
+
+### `poweur blocks <export|import>`
+
+Blocklists are block decisions made portable: a signed document a community can pool.
+Export publishes `shared/blocks.json` in your own tree, where a
+[share](../files/sharing) hands it to a chosen audience. Import verifies the
+publisher's signature and merges into your own contacts, where you can see and undo it.
+
+```bash
+poweur blocks export --name "my list"
+poweur share add /shared/blocks.json --with bob.example.org --perm read
+poweur blocks import alice.example.org --dry-run
+poweur blocks import --file list.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name <text>` | Human label for an exported list |
+| `--out <file>` | Also write the signed document locally |
+| `--no-publish` | Do not write it into your own tree |
+| `--file <path>` | Import from a local file instead of a publisher's tree |
+| `--path <tree path>` | Tree path to read from the publisher (default `shared/blocks.json`) |
+| `--force` | Also block identities you have accepted as contacts |
+| `--dry-run` | Show what would change without writing |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+Identities you have accepted as contacts are skipped and named unless `--force`, and an
+unsigned or altered list is refused outright.
+
+---
+
 ### `poweur anon`
 
 Read the anonymous queue — messages accepted under the policy's `anonymous` block. These are
