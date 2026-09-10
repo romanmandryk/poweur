@@ -6,6 +6,7 @@ sha=${1:?Usage: release.sh COMMIT IMAGE}
 image=${2:?Usage: release.sh COMMIT IMAGE}
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected a full git commit' >&2; exit 1; }
 [[ $image =~ ^ghcr.io/[a-zA-Z0-9_./-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'Expected a GHCR digest' >&2; exit 1; }
+command -v jq >/dev/null || { echo 'jq is required; see OPS.md' >&2; exit 1; }
 cd "$root"
 exec 9>"$root/.deploy.lock"
 flock -n 9 || { echo 'A deploy is already running' >&2; exit 1; }
@@ -18,6 +19,11 @@ git archive "$sha" | tar -x -C "$release"
 printf '%s\n' "$image" > "$release/.relay-image"
 export RELAY_ENV_FILE="$root/apps/api/.env.prod"
 previous=$(readlink "$root/.current" || true)
+if [[ -z "$previous" ]] && docker inspect poweur-relay >/dev/null 2>&1; then
+  echo 'Capture the existing deployment with deploy/capture-baseline.sh first' >&2
+  exit 1
+fi
+[[ -f "$root/.smoke/config.toml" ]] || { echo 'Configure the smoke identity before deployment; see OPS.md' >&2; exit 1; }
 compose_infra() { docker compose -p infra --env-file "$secrets" -f "$1/deploy/infra/docker-compose.yml" "${@:2}"; }
 compose_relay() { RELAY_IMAGE=$(cat "$1/.relay-image") docker compose -p poweur --env-file "$secrets" -f "$1/docker-compose.prod.yml" "${@:2}"; }
 rollback() {
@@ -26,6 +32,7 @@ rollback() {
   if [[ -n "$previous" && -f "$previous/.relay-image" ]]; then
     compose_infra "$previous" up -d --remove-orphans
     compose_infra "$previous" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+    export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
     compose_relay "$previous" up -d --remove-orphans
     echo "Restored $previous" >&2
   else
@@ -41,11 +48,14 @@ compose_relay "$release" pull
 trap rollback ERR
 compose_infra "$release" up -d --remove-orphans
 compose_infra "$release" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+# Trust only Caddy's current bridge address, never arbitrary forwarded headers.
+export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
+printf '%s\n' "$TELEMETRY_TRUSTED_PROXIES" > "$release/.trusted-proxies"
 compose_relay "$release" up -d --remove-orphans
 # A network namespace curl checks services without publishing backend ports.
 for attempt in $(seq 1 30); do
   if docker run --rm --network infra_net curlimages/curl:8.16.0 -fsS http://poweur-relay:8080/health > "$release/.health.json"; then
-    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));sys.exit(0 if d.get("versionHash")==sys.argv[2] and d.get("storage",{}).get("writable",True) else 1)' "$release/.health.json" "$sha"; then break; fi
+    if jq -e --arg sha "$sha" '.versionHash == $sha and .storage.writable != false' "$release/.health.json" >/dev/null; then break; fi
   fi
   [[ $attempt -lt 30 ]] || false
   sleep 2

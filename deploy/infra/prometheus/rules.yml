@@ -1,13 +1,13 @@
 groups:
   - name: poweur-growth
     rules:
-      - record: poweur_growth_registrations_total
-        expr: sum(poweur_actions_total{action="registration.create",outcome="success",deployment_environment_name="production"})
-      - record: poweur_growth_submissions_total
-        expr: sum(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"})
-      - record: poweur_growth_uploads_total
-        expr: sum(poweur_actions_total{action="upload.complete",outcome="success",deployment_environment_name="production"})
+      - record: poweur_growth_registrations_24h
+        expr: sum(increase(poweur_actions_total{action="registration.create",outcome="success",deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_submissions_24h
+        expr: sum(increase(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_uploads_24h
+        expr: sum(increase(poweur_actions_total{action="upload.complete",outcome="success",deployment_environment_name="production"}[1d]))
       - record: poweur_growth_hosted_identities
-        expr: sum(poweur_state{state="hosted_identities",deployment_environment_name="production"})
+        expr: max(poweur_state{state="hosted_identities",deployment_environment_name="production"})
       - record: poweur_growth_storage_bytes
-        expr: sum(poweur_state{state="storage_bytes",deployment_environment_name="production"})
+        expr: max(poweur_state{state="storage_bytes",deployment_environment_name="production"})

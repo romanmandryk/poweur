@@ -67,6 +67,9 @@ func (s *Server) StartTelemetry(ctx context.Context, output io.Writer) error {
 		return err
 	}
 	s.telemetry = t
+	for _, code := range s.startupFailures {
+		t.Record(ctx, telemetry.Event{Kind: "diagnostic", Action: "storage.open", Outcome: "failure", ErrorCode: code, Level: slog.LevelWarn}, "", "")
+	}
 	s.event(context.Background(), "startup", "success")
 	s.sampleTelemetry()
 	return nil
@@ -78,6 +81,7 @@ func (s *Server) Close(ctx context.Context) error {
 }
 
 type requestTelemetry struct {
+	ip     string
 	actor  string
 	direct bool
 	action string
@@ -99,8 +103,14 @@ func (s *Server) event(ctx context.Context, action, outcome string) {
 	actor, ip := "", ""
 	if st, ok := ctx.Value(telemetryKey{}).(*requestTelemetry); ok {
 		actor = st.actor
+		if st.direct {
+			ip = st.ip
+		}
 	}
 	s.telemetry.Record(ctx, telemetry.Event{Kind: "action", Action: action, Outcome: outcome}, actor, ip)
+	if outcome == "failure" {
+		s.telemetry.Record(ctx, telemetry.Event{Kind: "diagnostic", Action: action, Outcome: outcome, ErrorCode: "operation_failed", Level: slog.LevelWarn}, actor, ip)
+	}
 }
 
 // responseTelemetry supports streaming through ResponseController/Unwrap and
@@ -150,7 +160,7 @@ func (s *Server) instrument(mux *http.ServeMux, next http.Handler) http.Handler 
 		default:
 			method = "OTHER"
 		}
-		st := &requestTelemetry{action: routeActions[route]}
+		st := &requestTelemetry{action: routeActions[route], ip: s.telemetry.ClientIP(r)}
 		r = r.WithContext(context.WithValue(r.Context(), telemetryKey{}, st))
 		rw := &responseTelemetry{ResponseWriter: w, state: st}
 		defer func() {
@@ -187,8 +197,8 @@ func (s *Server) instrument(mux *http.ServeMux, next http.Handler) http.Handler 
 				ip = s.telemetry.ClientIP(r)
 			}
 			s.telemetry.Record(context.Background(), telemetry.Event{Kind: "request", Action: "http.request", Outcome: outcome, Route: route, Method: method, Status: rw.status, ErrorCode: rw.code, DurationMS: float64(time.Since(start).Microseconds()) / 1000}, st.actor, ip)
-			if st.action != "" && rw.status < 400 {
-				s.event(r.Context(), st.action, "success")
+			if st.action != "" {
+				s.event(r.Context(), st.action, outcome)
 			}
 			if rw.status >= 500 || stack != "" {
 				code := rw.code

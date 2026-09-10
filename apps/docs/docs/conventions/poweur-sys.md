@@ -67,3 +67,7 @@ identities:
 
 Unknown feature names are allowed (forward compatibility); consumers ignore what they
 don't speak. The DNS TXT equivalent remains for DNS-only identities.
+
+## Relay analytics preference
+
+`poweur-sys/relay/analytics.json` stores the owner-authenticated, versioned analytics preference. See [Observability](../relay/observability.md) for its schema and the raw/hashed data modes. Missing preference defaults to off.

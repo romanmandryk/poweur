@@ -1,6 +1,6 @@
 # EPIC-013 — Production deployment & observability
 
-- **Status:** proposed
+- **Status:** implemented (operator rollout steps remain; T5 deferred)
 - **Priority:** P1
 - **Depends on:** EPIC-002; instruments the relay features added by other epics
 - **Unlocks:** reliable releases, searchable errors, private analytics and public growth
@@ -9,10 +9,10 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E13-T1 Standard telemetry export & metrics | open | Optional OTLP endpoint; independent intake process |
-| E13-T2 Structured logs, action events & consent modes | open | Raw or hashed actor identity; timestamps in both modes |
-| E13-T3 CI/CD hardening | open | Tests, pinned deploys, health gate and rollback |
-| E13-T4 External stack, dashboards & alerts | open | Same VM initially; independently movable later |
+| E13-T1 Standard telemetry export & metrics | done | OTel SDK, bounded queue, opt-in export and private metric labels |
+| E13-T2 Structured logs, action events & consent modes | done | DAV consent preference, web/native settings, both CLIs and SDK; withdrawal rechecked |
+| E13-T3 CI/CD hardening | done | Reusable CI gate, digest deployments, baseline capture, health/auth smoke and rollback |
+| E13-T4 External stack, dashboards & alerts | done | Alloy/Loki, private + aggregate dashboards, alerts, external GitHub probe; operator enables public link/SMTP |
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 
@@ -59,8 +59,7 @@ intake process; no custom ingestion application or endpoint inside the relay. Us
 OpenTelemetry Go SDK and **OTLP/HTTP protobuf** so backends can be changed later. Action
 events are structured OTLP log records, not a separate event protocol.
 
-Use Alloy's OTLP metrics-to-Prometheus exporter and let Prometheus scrape that internal
-endpoint; send logs to Loki. This keeps the relay push-only and avoids a second relay
+Use Alloy's OTLP metrics-to-Prometheus exporter and remote-write to internal Prometheus; send logs to Loki. This keeps the relay push-only and avoids a second relay
 `/metrics` export path. Select compatible supported versions during implementation.
 
 Keep GHCR, the existing Grafana instance and its database. No event warehouse, separate
@@ -70,7 +69,7 @@ be added later if needed. Use Alloy rather than the old Promtail suggestion.
 
 ### Configuration and reliability
 
-Proposed environment variables (not implemented yet):
+Implemented environment variables (additional proxy/environment controls are documented in `apps/docs/docs/relay/observability.md`):
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -86,7 +85,7 @@ work. Action events are independent of `LOG_LEVEL`, so raising it does not disab
 Never log authorization headers, the hash key or endpoint credentials.
 
 Use SDK batching with fixed reasonable defaults rather than many tuning knobs: bounded
-memory queue, short export timeout, bounded retries/backoff and a short shutdown flush.
+memory queue, three-second export timeout, one attempt per log batch and a bounded shutdown flush.
 Collector failure must not block requests or make relay health fail. Count dropped records
 and log exporter failures locally without recursively exporting them. Delivery is best effort;
 no disk queue or exactly-once promise. Record gaps rather than pretending outages were zeros.
@@ -169,10 +168,10 @@ exclude dev/test. Handle process counter resets and missing data; this is not a 
 
 ### E13-T1 — Optional OTLP exporter and metrics
 
-- [ ] Add a small `apps/api/internal/telemetry` package using the OTel SDK, injectable for tests.
-- [ ] Implement configuration, no-op when unset, batching, bounded failure handling and flush.
-- [ ] Instrument HTTP request metrics and domain counters/gauges described above.
-- [ ] Test no-export mode, invalid configuration, unavailable/slow intake, queue overflow,
+- [x] Add a small `apps/api/internal/telemetry` package using the OTel SDK, injectable for tests.
+- [x] Implement configuration, no-op when unset, batching, bounded failure handling and flush.
+- [x] Instrument HTTP request metrics and domain counters/gauges described above.
+- [x] Test no-export mode, invalid configuration, unavailable/slow intake, queue overflow,
       metric cardinality and shutdown. Preserve SSE flushing and DAV behavior in middleware.
 
 **Acceptance:** setting one endpoint sends metrics to a test collector; unsetting it makes no
@@ -180,15 +179,15 @@ telemetry network calls. Collector failure does not break registration/send/inbo
 
 ### E13-T2 — Structured logs, server events and consent modes
 
-- [ ] Replace operational `log.Printf` calls with JSON `slog` plus the OTLP logging bridge.
-- [ ] Cover the action inventory, including background failures and expiry; export normal
+- [x] Replace operational `log.Printf` calls with JSON `slog` plus the OTLP logging bridge.
+- [x] Cover the action inventory, including background failures and expiry; export normal
       action events even if the diagnostic log threshold is raised.
-- [ ] Implement keyed identity transformation and consent seam/preference. Add the simple
+- [x] Implement keyed identity transformation and consent seam/preference. Add the simple
       settings control and SDK/CLI access; default false until implemented.
-- [ ] Apply trusted-proxy IP handling only in consent mode; redact before every sink.
-- [ ] Enable Docker log rotation; keep external logs/events 14 days and metrics 30 days
+- [x] Apply trusted-proxy IP handling only in consent mode; redact before every sink.
+- [x] Enable Docker log rotation; keep external logs/events 14 days and metrics 30 days
       initially. These are practical initial defaults, configurable in the stack.
-- [ ] Test raw/hash/no-IP behavior, forged identity/consent, withdrawal while queued,
+- [x] Test raw/hash/no-IP behavior, forged identity/consent, withdrawal while queued,
       multi-party actions and secrets embedded in errors. Add real-relay integration coverage.
 
 **Acceptance:** the same authenticated action produces raw actor/IP/timestamp with consent,
@@ -197,17 +196,17 @@ nor IP. All current action families have coverage; logs contain no content or cr
 
 ### E13-T3 — CI/CD hardening (tests gate, pinned deploys, rollback)
 
-- [ ] `deploy.yml`: add a `test` job (Go suites + `apps/integration`; web tests when the
+- [x] `deploy.yml`: add a `test` job (Go suites + `apps/integration`; web tests when the
       SPA changed) that `build` **needs** — today a red master still deploys
-- [ ] Deploy by digest/sha, not `:latest`: compose reads `RELAY_IMAGE` from `.env` on the
+- [x] Deploy by digest/sha, not `:latest`: compose reads `RELAY_IMAGE` from `.env` on the
       VM; the deploy step writes the new sha there → `docker compose ps` shows exactly
       what runs, and rollback = write previous sha + `up -d` (document as a one-liner;
       keep last N shas in ghcr via retention policy)
-- [ ] Post-deploy gate: workflow curls `/health` (and one authenticated smoke call) after
+- [x] Post-deploy gate: workflow curls `/health` (and one authenticated smoke call) after
       `up -d`; failure exits non-zero so the run is red and auto-rolls back to the prior sha
-- [ ] Build the web app + docs artifacts in CI if/when they gain a build step (today
+- [x] Build the web app + docs artifacts in CI if/when they gain a build step (today
       `apps/web` is static — volume-mounted; keep that, but note it in the ops doc)
-- [ ] `deploy/README.md` (or extend `BACKUP.md` into `deploy/OPS.md`): the full runbook —
+- [x] `deploy/README.md` (or extend `BACKUP.md` into `deploy/OPS.md`): the full runbook —
       bootstrap, deploy, rollback, backup/restore, where secrets live (Ansible vars +
       GitHub secrets), metrics/dashboards URLs
 
@@ -217,22 +216,22 @@ running.
 
 ### E13-T4 — External stack, dashboards and alerts
 
-- [ ] Add Alloy + Loki to `deploy/infra`; configure the OTLP intake host, TLS/auth,
+- [x] Add Alloy + Loki to `deploy/infra`; configure the OTLP intake host, TLS/auth,
       internal backend networking, persistent volumes, retention and supported image pins.
-- [ ] Point Prometheus at Alloy's internal metrics exporter; provision Loki in Grafana.
-- [ ] Provision **Relay Ops**: traffic, latency, error groups/builds, policy rejections,
+- [x] Connect Alloy remote-write to internal Prometheus; provision Loki in Grafana.
+- [x] Provision **Relay Ops**: traffic, latency, error groups/builds, policy rejections,
       forwarding, spool, storage and exporter failures. Under login, query individual events
       with hashed or raw actors according to the mode recorded at collection time.
-- [ ] Provision **Growth**: registrations, hosted identities, accepted submissions/day,
+- [x] Provision **Growth**: registrations, hosted identities, accepted submissions/day,
       completed uploads and storage. Private panels may show active identities from logs,
       clearly labeled as identities rather than people.
-- [ ] Publish only the aggregate Growth dashboard through Grafana's externally shared
+- [x] Provide only the aggregate Growth dashboard for operator-enabled sharing through Grafana's externally shared
       dashboard feature. No event tables, identity/IP fields, log links or private annotations;
       keep global anonymous access off. Use fixed aggregate queries and test logged-out
       requests cannot retrieve private data. Daily totals are enough; no live identity timeline.
-- [ ] Add node_exporter for host/disk visibility. Alert on sustained 5xx, missing relay/ingest
+- [x] Add node_exporter for host/disk visibility. Alert on sustained 5xx, missing relay/ingest
       data, disk pressure and queue loss; route alerts independently of relay messaging.
-- [ ] Add a health probe outside the VM so a VM outage is detectable. Document credentials,
+- [x] Add a health probe outside the VM so a VM outage is detectable. Document credentials,
       backup/restore and moving the stack by changing the endpoint/DNS.
 
 **Acceptance:** a clean deployment displays real relay metrics and searchable errors; private
@@ -270,7 +269,28 @@ Ship T1/T2 then T4; T3 can proceed independently. T6 (release versions) is done 
 Run relay unit tests and `apps/integration` for implementation changes, including a capture
 collector and a collector-outage scenario. Consent changes touching clients require the usual
 web tests, client tests/build/typecheck, canonical specs/vectors when needed, and re-vendoring.
-This revision is a specification change only; it does not enable tracking.
+Implementation is complete for T1–T4. Production rollout is an operator step: follow
+`deploy/OPS.md` to import existing database secrets, capture the baseline, configure the
+smoke identity/SSH key, retire the old systemd units, then run Deploy. Configure SMTP,
+GitHub failure notifications and the public Growth share link manually. No live VM
+rollout or production public sharing was performed by this implementation.
+
+Verification: relay/CLI/identity and real-relay integration suites; TS SDK unit/live-relay/
+interop tests; web Vitest and 55 Playwright scenarios; telemetry race and stalled-collector
+shutdown tests. Real isolated Docker smoke verifies authenticated intake, Prometheus/Loki
+queries, private access denial, public aggregate sharing and an actual Grafana alert after
+Alloy stops. Deployment helpers use Bash/openssl/jq. Dependency-free Node tests rehearse secret
+preservation, baseline capture, successful release and failed-health rollback with
+command substitutes; the real stack smoke test also runs in Node. No Python runtime
+is required by deployment scripts. The production VM rollback drill remains part of the operator runbook.
+
+Implementation choices: same-VM relay uses authenticated `http://infra-alloy:4318` on the
+private bridge, so DNS is optional until remote export. The optional public intake hostname
+is `ingest.poweur.net` with Caddy TLS. Storage state is sampled at startup and every five
+minutes. HTTP events cover resolution/availability, DAV/sync reads and rejection outcomes;
+domain hooks cover transitions, forwarding, streams and spool expiry. Sessions and cache
+pruning remain represented by the periodic maintenance operation rather than per-entry
+identity events. No new cryptographic signing format or federation protocol is introduced.
 
 ## Non-goals
 

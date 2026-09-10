@@ -33,27 +33,29 @@ const (
 )
 
 type Server struct {
-	telemetry  *telemetry.Runtime
-	stop       chan struct{}
-	closeOnce  sync.Once
-	cfg        config.Config
-	resolver   dns.Resolver
-	providers  *dns.ProviderFactory
-	identities *storage.IdentityStore
-	inbox      *storage.InboxStore
-	requests   *storage.RequestStore
-	anonInbox  *storage.InboxStore
-	anon       *anonState
-	powSecret  []byte
-	acks       *storage.AckStore
-	challenges *storage.ChallengeStore
-	keystore   *storage.KeystoreStore
-	rendezvous *storage.RendezvousStore
-	sessions   *storage.SessionStore
-	rateLimit  *ratelimit.Limiter
-	regGate    *RegistrationGate
-	client     *http.Client
-	idCache    *idpkg.Cache
+	telemetry       *telemetry.Runtime
+	startupFailures []string
+	stop            chan struct{}
+	closeOnce       sync.Once
+	pruneOnce       sync.Once
+	cfg             config.Config
+	resolver        dns.Resolver
+	providers       *dns.ProviderFactory
+	identities      *storage.IdentityStore
+	inbox           *storage.InboxStore
+	requests        *storage.RequestStore
+	anonInbox       *storage.InboxStore
+	anon            *anonState
+	powSecret       []byte
+	acks            *storage.AckStore
+	challenges      *storage.ChallengeStore
+	keystore        *storage.KeystoreStore
+	rendezvous      *storage.RendezvousStore
+	sessions        *storage.SessionStore
+	rateLimit       *ratelimit.Limiter
+	regGate         *RegistrationGate
+	client          *http.Client
+	idCache         *idpkg.Cache
 
 	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
@@ -83,50 +85,56 @@ type cachedRelay struct {
 }
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
+	var startupFailures []string
 	store, err := storage.OpenIdentityStore(cfg.DataDir)
 	if err != nil {
 		// Fall back to memory-only rather than crashing constructors used in tests.
 		store = storage.NewIdentityStore()
+		startupFailures = append(startupFailures, "identity_storage_open_failed")
 	}
 	keystore, err := storage.OpenKeystoreStore(cfg.DataDir)
 	if err != nil {
 		keystore = storage.NewKeystoreStore()
+		startupFailures = append(startupFailures, "keystore_open_failed")
 	}
 	// Undelivered mail survives a restart (EPIC-009 E09-T1); a relay with no
 	// data dir keeps the old memory-only behaviour rather than refusing to run.
 	inbox, err := storage.OpenInboxStore(cfg.DataDir)
 	if err != nil {
 		inbox = storage.NewInboxStore()
+		startupFailures = append(startupFailures, "inbox_storage_open_failed")
 	}
 	acks, err := storage.OpenAckStore(cfg.DataDir)
 	if err != nil {
 		acks = storage.NewAckStore()
+		startupFailures = append(startupFailures, "ack_storage_open_failed")
 	}
 	s := &Server{
-		stop:          make(chan struct{}),
-		cfg:           cfg,
-		resolver:      resolver,
-		providers:     providers,
-		identities:    store,
-		inbox:         inbox,
-		requests:      storage.NewRequestStore(),
-		anonInbox:     storage.NewInboxStore(),
-		anon:          newAnonState(),
-		powSecret:     newPowSecret(),
-		acks:          acks,
-		challenges:    storage.NewChallengeStore(),
-		keystore:      keystore,
-		rendezvous:    storage.NewRendezvousStore(),
-		sessions:      storage.NewSessionStore(), // sessions remain memory-only by design
-		rateLimit:     ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
-		regGate:       NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
-		client:        &http.Client{Timeout: 10 * time.Second},
-		idCache:       idpkg.NewCache(),
-		davTokens:     newDAVTokenStore(),
-		davLocks:      make(map[string]webdav.LockSystem),
-		hub:           newHub(),
-		relayCache:    make(map[string]cachedRelay),
-		localityCache: make(map[string]cachedLocality),
+		startupFailures: startupFailures,
+		stop:            make(chan struct{}),
+		cfg:             cfg,
+		resolver:        resolver,
+		providers:       providers,
+		identities:      store,
+		inbox:           inbox,
+		requests:        storage.NewRequestStore(),
+		anonInbox:       storage.NewInboxStore(),
+		anon:            newAnonState(),
+		powSecret:       newPowSecret(),
+		acks:            acks,
+		challenges:      storage.NewChallengeStore(),
+		keystore:        keystore,
+		rendezvous:      storage.NewRendezvousStore(),
+		sessions:        storage.NewSessionStore(), // sessions remain memory-only by design
+		rateLimit:       ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		regGate:         NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
+		client:          &http.Client{Timeout: 10 * time.Second},
+		idCache:         idpkg.NewCache(),
+		davTokens:       newDAVTokenStore(),
+		davLocks:        make(map[string]webdav.LockSystem),
+		hub:             newHub(),
+		relayCache:      make(map[string]cachedRelay),
+		localityCache:   make(map[string]cachedLocality),
 	}
 	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
 	// only ever talks to the StorageProvider interface.
@@ -143,7 +151,6 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 			Logf: func(string, ...any) { s.event(context.Background(), "grant.validation", "rejected") },
 		}
 	}
-	go s.runPruner()
 	return s
 }
 
@@ -163,6 +170,7 @@ func (s *Server) runPruner() {
 		s.anon.prune()
 		s.pruneLocalityCache()
 		s.expireSpool()
+		s.event(context.Background(), "maintenance.prune", "success")
 	}
 }
 
@@ -212,6 +220,7 @@ func (s *Server) pruneLocalityCache() {
 }
 
 func (s *Server) Router() http.Handler {
+	s.pruneOnce.Do(func() { go s.runPruner() })
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleRoot)
 	mux.HandleFunc("GET /health", s.handleHealth)

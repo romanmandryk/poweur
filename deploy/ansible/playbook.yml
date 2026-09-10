@@ -25,7 +25,7 @@
 
     - name: Install base packages
       ansible.builtin.apt:
-        name: [git, curl, ca-certificates, gnupg, lsb-release, rsync, ufw]
+        name: [git, curl, ca-certificates, gnupg, lsb-release, rsync, ufw, jq, openssl]
         state: present
         update_cache: true
 
@@ -114,10 +114,10 @@
         group: infra
         mode: preserve
 
-    - name: Ensure postgres init script is executable
+    - name: Ensure postgres init SQL is readable
       ansible.builtin.file:
-        path: "{{ infra_dir }}/postgres/init.sh"
-        mode: '0755'
+        path: "{{ infra_dir }}/postgres/init.sql"
+        mode: '0644'
 
     - name: Write infra .env from template
       ansible.builtin.template:
@@ -211,75 +211,27 @@
         mode: '0600'
       when: api_dir.stat.exists
 
-    # ── 8. Systemd services ────────────────────────────────────────────────────
+    # Releases are now owned by the tested GitHub deployment, with Docker's
+    # restart policies handling reboot. Do not install competing compose units.
+    - name: Initialize observability secrets preserving existing database passwords
+      ansible.builtin.command:
+        argv:
+          - bash
+          - "{{ app_dir }}/deploy/setup-observability.sh"
+          - --file
+          - "{{ app_dir }}/.observability.env"
+          - --import-env
+          - "{{ infra_dir }}/.env"
+        creates: "{{ app_dir }}/.observability.env"
+      when: api_dir.stat.exists
+      no_log: true
 
-    - name: Write poweur-infra systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/poweur-infra.service
-        mode: '0644'
-        content: |
-          [Unit]
-          Description=Poweur Infrastructure (Caddy, Postgres, Prometheus, Grafana)
-          After=docker.service
-          Requires=docker.service
-
-          [Service]
-          Type=simple
-          User=infra
-          Group=infra
-          WorkingDirectory={{ infra_dir }}
-          ExecStart=/usr/bin/docker compose up --remove-orphans
-          ExecStop=/usr/bin/docker compose down
-          Restart=on-failure
-          RestartSec=10
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Write poweur-app systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/poweur-app.service
-        mode: '0644'
-        content: |
-          [Unit]
-          Description=Poweur App Stack
-          After=docker.service poweur-infra.service
-          Requires=docker.service
-          Wants=poweur-infra.service
-
-          [Service]
-          Type=simple
-          User=poweur
-          Group=poweur
-          WorkingDirectory={{ app_dir }}
-          ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up --remove-orphans
-          ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
-          Restart=on-failure
-          RestartSec=10
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Enable systemd services
-      ansible.builtin.systemd_service:
-        name: "{{ item }}"
-        enabled: true
-        daemon_reload: true
-      loop:
-        - poweur-infra
-        - poweur-app
-
-    # ── 9. Start services ──────────────────────────────────────────────────────
-
-    - name: Start poweur-infra
-      ansible.builtin.systemd_service:
-        name: poweur-infra
-        state: started
-
-    - name: Start poweur-app (relay)
-      ansible.builtin.systemd_service:
-        name: poweur-app
-        state: started
+    - name: Restrict observability secrets to deploy user
+      ansible.builtin.file:
+        path: "{{ app_dir }}/.observability.env"
+        owner: poweur
+        group: poweur
+        mode: '0600'
       when: api_dir.stat.exists
 
     # ── 10. Firewall ──────────────────────────────────────────────────────────
@@ -333,5 +285,5 @@
           {{
             'Repo clone failed — add the deploy key to GitHub, then re-run.'
             if repo_clone.failed | default(false) else
-            'Done. Start services: systemctl start poweur-infra && systemctl start poweur-app'
+            'Done. Follow deploy/OPS.md for the first release and legacy systemd migration'
           }}

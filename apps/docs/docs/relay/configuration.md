@@ -183,3 +183,7 @@ Where `/etc/poweur/relay.env` contains the environment variables listed above.
 - [Relay Overview](/relay/overview)
 - [DNS Management](/relay/dns-management)
 - [TLS Configuration](/security/tls)
+
+## Optional telemetry
+
+See [Observability](observability.md) for OTLP export configuration, trusted proxies and per-identity analytics preferences.

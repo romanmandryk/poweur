@@ -10,7 +10,7 @@
         {
           "uid": "relay-down",
           "title": "Relay health probe failed",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -21,10 +21,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "min(probe_success{job=\"blackbox\"}) < 1",
+                "expr": "(min(probe_success{job=\"blackbox\"}) < bool 1) or absent(probe_success{job=\"blackbox\"})",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],
@@ -42,7 +78,7 @@
         {
           "uid": "telemetry-missing",
           "title": "Relay telemetry is missing",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -53,10 +89,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "(time() - max(poweur_heartbeat_timestamp_seconds) > 120) or absent(poweur_heartbeat_timestamp_seconds)",
+                "expr": "(time() - max(poweur_heartbeat_timestamp_seconds) > bool 120) or absent(poweur_heartbeat_timestamp_seconds)",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],
@@ -74,7 +146,7 @@
         {
           "uid": "ingest-down",
           "title": "Alloy is down",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -85,10 +157,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "up{job=\"alloy\"} < 1",
+                "expr": "(up{job=\"alloy\"} < bool 1) or absent(up{job=\"alloy\"})",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],
@@ -106,7 +214,7 @@
         {
           "uid": "disk-pressure",
           "title": "Disk has less than 20% free",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -117,10 +225,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "min(node_filesystem_avail_bytes{mountpoint=\"/\"}/node_filesystem_size_bytes{mountpoint=\"/\"}) < 0.2",
+                "expr": "min(node_filesystem_avail_bytes{mountpoint=\"/\"}/node_filesystem_size_bytes{mountpoint=\"/\"}) < bool 0.2",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],
@@ -138,7 +282,7 @@
         {
           "uid": "http-errors",
           "title": "Sustained relay server errors",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -149,10 +293,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "sum(rate(poweur_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(poweur_http_requests_total[5m])), 0.01) > 0.05",
+                "expr": "sum(rate(poweur_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(poweur_http_requests_total[5m])), 0.01) > bool 0.05",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],
@@ -170,7 +350,7 @@
         {
           "uid": "export-loss",
           "title": "Telemetry records were lost",
-          "condition": "A",
+          "condition": "B",
           "data": [
             {
               "refId": "A",
@@ -181,10 +361,46 @@
               "datasourceUid": "prometheus",
               "model": {
                 "refId": "A",
-                "expr": "increase(poweur_telemetry_dropped[5m]) > 0",
+                "expr": "increase(poweur_telemetry_dropped[5m]) > bool 0",
                 "instant": true,
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
               }
             }
           ],

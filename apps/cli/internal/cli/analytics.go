@@ -21,7 +21,7 @@ func runAnalytics(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	identity := fs.String("use-identity", "", "identity")
 	jsonOut := fs.Bool("json", false, "JSON output")
-	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
+	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil || fs.NArg() != 0 {
 		return 1
 	}
 	relayURL, id, token, ok := loadShareSession(*identity, stderr)

@@ -3,3 +3,7 @@
 !packages/identity/**
 !apps/api/**
 !apps/cli/**
+
+# Never send local environment secrets to the image builder.
+**/.env
+**/.env.*

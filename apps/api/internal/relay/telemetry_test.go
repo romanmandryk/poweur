@@ -1,10 +1,13 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,5 +69,21 @@ func TestTelemetryStateSnapshots(t *testing.T) {
 	inbox.Drain("alice.example")
 	if inbox.Depth() != 0 {
 		t.Fatal("drain depth")
+	}
+}
+
+func TestTelemetryReportsStorageFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(config.Config{DataDir: path}, nil, nil)
+	var logs bytes.Buffer
+	if err := s.StartTelemetry(context.Background(), &logs); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	if !strings.Contains(logs.String(), "identity_storage_open_failed") || strings.Contains(logs.String(), path) {
+		t.Fatal("storage fallback missing or leaked path")
 	}
 }

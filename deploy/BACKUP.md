@@ -1,45 +1,7 @@
-# Backing up and restoring Poweur relay data
+# Backing up and restoring Poweur
 
-Hosted identities are durable under `$POWEUR_DATA` (compose: volume `poweur_data` → `/data`).
+Use the [operations runbook](OPS.md#backup-restore-and-moving-the-stack) for the current deployment, including observability backups and immutable release rollback.
 
-## What to back up
+The relay's `poweur_poweur_data` volume contains identity documents, files, consent preferences and durable inbox/ack spool data. Sessions remain memory-only. Do not back up only `id.json` or assume messages are memory-only. Snapshot the entire volume while writers are stopped, and keep encrypted backups off the VM. Never run production `docker compose down -v`.
 
-Snapshot the entire `POWEUR_DATA` directory (or Docker volume). The important tree is:
-
-```
-$POWEUR_DATA/identities/<sanitized-id>/poweur-sys/public/id.json
-```
-
-Inbox, acks, and sessions are **memory-only** today (see EPIC-009) — they are not in this tree.
-
-## Consistent snapshot
-
-1. Prefer a filesystem/volume snapshot while the relay is stopped, **or**
-2. Use a crash-consistent copy (e.g. `rsync -a` / `tar`) of `$POWEUR_DATA` while the relay
-   runs — identity docs are written atomically (temp + rename), so a mid-write copy may skip a
-   brand-new registration but should not corrupt an existing `id.json`.
-
-Example:
-
-```bash
-# stop relay (compose)
-docker compose -f docker-compose.prod.yml stop relay
-
-# archive the volume mount or bind path
-tar -C /var/lib/docker/volumes/poweur_poweur_data/_data -czf poweur-data-$(date +%F).tar.gz .
-
-docker compose -f docker-compose.prod.yml start relay
-```
-
-## Restore drill
-
-1. Stop the relay.
-2. Replace `$POWEUR_DATA` with the backup contents.
-3. Start the relay with the same `HOSTED_DOMAINS` / `RELAY_ADDRESS`.
-4. Confirm `GET /health` reports `storage.writable: true`.
-5. Confirm `GET /identities/<id>` returns a known identity (integration: `TestINT_OPS_01_RestoreDataDir`).
-
-## Quotas
-
-`MAX_IDENTITY_BYTES` is scaffolding for per-identity disk limits (enforced in EPIC-003). It does
-not yet reject writes.
+After restoring the volume with the matching release and configuration, verify `/health` storage writability, a known identity, authenticated inbox retrieval, and a DAV file. `TestINT_OPS_01_RestoreDataDir` covers the relay data-directory restore path. Grafana/Postgres and metrics/log backends have their own volumes and credentials; restoring relay storage alone does not restore those dashboards/history.

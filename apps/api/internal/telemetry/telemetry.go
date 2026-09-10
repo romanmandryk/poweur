@@ -47,24 +47,26 @@ type Event struct {
 }
 
 type Runtime struct {
-	batch    *bufferedExporter
-	cfg      Config
-	consent  func(string) bool
-	local    *slog.Logger
-	queue    chan Event
-	done     chan struct{}
-	stop     chan struct{}
-	once     sync.Once
-	mu       sync.RWMutex
-	closed   bool
-	dropped  atomic.Int64
-	lp       *sdklog.LoggerProvider
-	mp       *sdkmetric.MeterProvider
-	logger   logapi.Logger
-	actions  metricapi.Int64Counter
-	requests metricapi.Int64Counter
-	duration metricapi.Float64Histogram
-	gauges   metricapi.Int64Gauge
+	exportCtx    context.Context
+	exportCancel context.CancelFunc
+	batch        *bufferedExporter
+	cfg          Config
+	consent      func(string) bool
+	local        *slog.Logger
+	queue        chan Event
+	done         chan struct{}
+	stop         chan struct{}
+	once         sync.Once
+	mu           sync.RWMutex
+	closed       bool
+	dropped      atomic.Int64
+	lp           *sdklog.LoggerProvider
+	mp           *sdkmetric.MeterProvider
+	logger       logapi.Logger
+	actions      metricapi.Int64Counter
+	requests     metricapi.Int64Counter
+	duration     metricapi.Float64Histogram
+	gauges       metricapi.Int64Gauge
 }
 
 // New creates private providers, never global auto-instrumentation. No endpoint
@@ -120,6 +122,7 @@ func New(ctx context.Context, c Config, version string, consent func(string) boo
 	t.queue = make(chan Event, 512)
 	t.done = make(chan struct{})
 	t.stop = make(chan struct{})
+	t.exportCtx, t.exportCancel = context.WithCancel(context.Background())
 	go t.run()
 	return t, nil
 }
@@ -218,7 +221,7 @@ func (t *Runtime) run() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	flush := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(t.exportCtx, 3*time.Second)
 		defer cancel()
 		_ = t.batch.flush(ctx)
 	}
@@ -300,8 +303,11 @@ func (t *Runtime) Shutdown(ctx context.Context) error {
 	select {
 	case <-t.done:
 	case <-ctx.Done():
-		return ctx.Err()
+		t.exportCancel()
+		<-t.done
+		return errors.Join(ctx.Err(), t.lp.Shutdown(ctx), t.mp.Shutdown(ctx))
 	}
+	t.exportCancel()
 	return errors.Join(t.lp.Shutdown(ctx), t.mp.Shutdown(ctx))
 }
 

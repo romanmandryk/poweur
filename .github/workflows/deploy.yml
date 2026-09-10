@@ -35,6 +35,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build timestamp
+        id: stamp
+        run: echo "time=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         id: image
         uses: docker/build-push-action@v6
@@ -44,7 +48,7 @@ jobs:
           push: true
           build-args: |
             VERSION_HASH=${{ github.sha }}
-            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+            BUILD_TIME=${{ steps.stamp.outputs.time }}
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
@@ -53,6 +57,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: read
     steps:
       - uses: webfactory/ssh-agent@v0.9.0

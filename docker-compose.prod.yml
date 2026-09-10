@@ -10,12 +10,14 @@ services:
       - ${RELAY_ENV_FILE:-apps/api/.env.prod}
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      TELEMETRY_ENVIRONMENT: ${TELEMETRY_ENVIRONMENT:-production}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
       TELEMETRY_HASH_KEY: ${TELEMETRY_HASH_KEY:-}
       TELEMETRY_ALLOW_HTTP: ${TELEMETRY_ALLOW_HTTP:-0}
       TELEMETRY_TRUSTED_PROXIES: ${TELEMETRY_TRUSTED_PROXIES:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      NAME_RESERVED: ingest,metrics,grafana,stats
+      NAME_RESERVED: "ingest,metrics,grafana,stats,${NAME_RESERVED:-}"
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
       # Which domains this relay hosts names under. Without it `GET /` answers

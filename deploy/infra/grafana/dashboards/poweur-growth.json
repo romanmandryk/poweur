@@ -1,7 +1,7 @@
 {
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "1m",
+  "refresh": "1h",
   "timezone": "utc",
   "editable": false,
   "annotations": {
@@ -64,11 +64,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "increase(poweur_growth_submissions_total[1d])",
+          "expr": "poweur_growth_submissions_24h",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          }
+          },
+          "interval": "1d"
         }
       ],
       "fieldConfig": {
@@ -94,11 +95,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "increase(poweur_growth_registrations_total[1d])",
+          "expr": "poweur_growth_registrations_24h",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          }
+          },
+          "interval": "1d"
         }
       ],
       "fieldConfig": {
@@ -124,11 +126,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "increase(poweur_growth_uploads_total[1d])",
+          "expr": "poweur_growth_uploads_24h",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          }
+          },
+          "interval": "1d"
         }
       ],
       "fieldConfig": {

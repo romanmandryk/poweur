@@ -157,3 +157,43 @@ func TestUnavailableNonBlockingAndDrops(t *testing.T) {
 		t.Fatal("loss unreported")
 	}
 }
+
+func TestSlowCollectorBoundedShutdown(t *testing.T) {
+	started := make(chan struct{}, 1)
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer collector.Close()
+	r, err := New(context.Background(), Config{Endpoint: collector.URL, AllowHTTP: true, HashKey: strings.Repeat("x", 32)}, "test", nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 128; i++ {
+		r.Record(context.Background(), Event{Kind: "action", Action: "test"}, "", "")
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("export did not start")
+	}
+	for i := 0; i < 1000; i++ {
+		r.Record(context.Background(), Event{Kind: "action", Action: "test"}, "", "")
+	}
+	if r.dropped.Load() == 0 {
+		t.Fatal("full queue did not report drops")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if r.Shutdown(ctx) == nil {
+		t.Fatal("expected shutdown deadline")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("shutdown exceeded bounded deadline")
+	}
+}
