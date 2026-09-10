@@ -212,13 +212,7 @@ func runGroupCreate(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 1
 	}
-	group := idpkg.ShareGroup{
-		Group:   groupID,
-		Owner:   groupID, // a group identity is its own owner
-		Members: normalizeIDs(members),
-		Admins:  normalizeIDs(admins),
-		Epoch:   1,
-	}
+	group := newGroupDocument(groupID, admins, members)
 	if err := group.Validate(); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -308,28 +302,16 @@ func runGroupUpdate(args []string, stdout, stderr io.Writer, add bool) int {
 		return 1
 	}
 
-	before := len(group.Members) + len(group.Admins)
-	if add {
-		group.Members = normalizeIDs(append(group.Members, members...))
-		group.Admins = normalizeIDs(append(group.Admins, admins...))
-	} else {
-		group.Members = removeIDs(group.Members, members)
-		group.Admins = removeIDs(group.Admins, admins)
-	}
-	if len(group.Admins) == 0 {
-		fmt.Fprintln(stderr, "refusing to remove the last admin: nobody could change the group again")
+	group, changed, err := applyGroupUpdate(group, add, members, admins)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if before == len(group.Members)+len(group.Admins) {
+	if !changed {
 		// Nothing changed, so there is nothing to sign. Bumping the epoch
 		// anyway would churn EPIC-009's key agreement for no reason.
 		fmt.Fprintln(stdout, "no change")
 		return 0
-	}
-	group.Epoch++
-	if err := group.Validate(); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
 	}
 	if !gs.store(group, stderr) {
 		return 1
@@ -338,6 +320,52 @@ func runGroupUpdate(args []string, stdout, stderr io.Writer, add bool) int {
 		"group %s updated (epoch %d)\n  admins:  %s\n  members: %s\n",
 		group.Group, group.Epoch,
 		strings.Join(group.Admins, ", "), strings.Join(group.Members, ", ")))
+}
+
+// newGroupDocument builds the membership document a freshly created group
+// identity starts life with: it is its own owner, because the document
+// lives in its tree and is signed by its key, and epoch 1 is the first
+// membership EPIC-009 could bind a group key to.
+func newGroupDocument(groupID string, admins, members []string) idpkg.ShareGroup {
+	groupID = strings.ToLower(strings.TrimSpace(groupID))
+	return idpkg.ShareGroup{
+		Group:   groupID,
+		Owner:   groupID,
+		Members: normalizeIDs(members),
+		Admins:  normalizeIDs(admins),
+		Epoch:   1,
+	}
+}
+
+// applyGroupUpdate applies one membership change to a group document and
+// reports whether anything actually moved. add == false removes.
+//
+// The epoch advances only on a real change: it is the membership version
+// EPIC-009's group key agreement binds to, so a no-op `group add` must not
+// invalidate everyone's keys. The returned document is validated but not
+// signed — signing belongs to whoever holds the group key.
+func applyGroupUpdate(group idpkg.ShareGroup, add bool, members, admins []string) (idpkg.ShareGroup, bool, error) {
+	before := strings.Join(normalizeIDs(group.Members), ",") + "|" + strings.Join(normalizeIDs(group.Admins), ",")
+	if add {
+		group.Members = normalizeIDs(append(append([]string(nil), group.Members...), members...))
+		group.Admins = normalizeIDs(append(append([]string(nil), group.Admins...), admins...))
+	} else {
+		group.Members = removeIDs(group.Members, members)
+		group.Admins = removeIDs(group.Admins, admins)
+	}
+	if len(group.Admins) == 0 {
+		// A group with no admin is a group nobody can ever change again —
+		// including to put an admin back.
+		return group, false, fmt.Errorf("refusing to remove the last admin of %s: nobody could change the group again", group.Group)
+	}
+	if before == strings.Join(group.Members, ",")+"|"+strings.Join(group.Admins, ",") {
+		return group, false, nil
+	}
+	group.Epoch++
+	if err := group.Validate(); err != nil {
+		return group, false, err
+	}
+	return group, true, nil
 }
 
 // normalizeIDs lowercases, trims, de-duplicates and sorts a list of Poweur
