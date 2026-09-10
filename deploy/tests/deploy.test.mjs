@@ -135,15 +135,13 @@ for (const health of ['healthy', 'http-failure', 'wrong-sha', 'readonly', 'inval
     if (health === 'healthy') {
       success(result);
       assert.equal(realpathSync(join(root, '.current')), join(root, '.releases', sha));
-      assert.equal(readFileSync(join(root, '.previous-release'), 'utf8').trim(), previous);
       assert.ok(calls.includes('--entrypoint /poweur-smoke'));
-      success(run('rollback.sh', [], env));
-      assert.equal(realpathSync(join(root, '.current')), previous);
+      assert.ok(!existsSync(join(root, '.previous-release')));
     } else {
       assert.notEqual(result.status, 0);
       assert.equal(realpathSync(join(root, '.current')), previous);
-      assert.ok(calls.includes(`${previous}/docker-compose.prod.yml up`));
-      assert.ok(result.stderr.includes('Restored'));
+      assert.ok(!calls.includes(`${previous}/docker-compose.prod.yml up`));
+      assert.ok(!result.stderr.includes('Restored'));
     }
   });
 }

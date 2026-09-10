@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Executed from the tested commit by Actions. No remote git pull/latest race.
+# A failed health check leaves this release running. It does not compose an older stack.
 set -euo pipefail
 root=${POWEUR_APP_DIR:-/opt/apps/poweur}
 sha=${1:?Usage: release.sh COMMIT IMAGE}
@@ -18,34 +19,13 @@ mkdir -p "$release"
 git archive "$sha" | tar -x -C "$release"
 printf '%s\n' "$image" > "$release/.relay-image"
 export RELAY_ENV_FILE="$root/apps/api/.env.prod"
-previous=$(readlink "$root/.current" || true)
-if [[ -z "$previous" ]] && docker inspect poweur-relay >/dev/null 2>&1; then
-  echo 'Capture the existing deployment with deploy/capture-baseline.sh first' >&2
-  exit 1
-fi
 [[ -f "$root/.smoke/config.toml" ]] || { echo 'Configure the smoke identity before deployment; see OPS.md' >&2; exit 1; }
 compose_infra() { docker compose -p infra --env-file "$secrets" -f "$1/deploy/infra/docker-compose.yml" "${@:2}"; }
 compose_relay() { RELAY_IMAGE=$(cat "$1/.relay-image") docker compose -p poweur --env-file "$secrets" -f "$1/docker-compose.prod.yml" "${@:2}"; }
-rollback() {
-  trap - ERR
-  echo 'Deployment failed; restoring previous release' >&2
-  if [[ -n "$previous" && -f "$previous/.relay-image" ]]; then
-    compose_infra "$previous" up -d --remove-orphans
-    compose_infra "$previous" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
-    export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
-    compose_relay "$previous" up -d --remove-orphans
-    echo "Restored $previous" >&2
-  else
-    echo 'No recorded previous release. Inspect containers; see first-upgrade instructions.' >&2
-  fi
-  exit 1
-}
-# Validate and pull before changing any running container.
 compose_infra "$release" config --quiet
 compose_relay "$release" config --quiet
 compose_infra "$release" pull
 compose_relay "$release" pull
-trap rollback ERR
 compose_infra "$release" up -d --remove-orphans
 compose_infra "$release" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
 # Trust only Caddy's current bridge address, never arbitrary forwarded headers.
@@ -106,6 +86,4 @@ else
 fi
 ln -sfn "$release" "$root/.current.next"
 mv -Tf "$root/.current.next" "$root/.current"
-printf '%s\n' "$previous" > "$root/.previous-release"
-trap - ERR
 echo "Deployed relay + observability from $sha"

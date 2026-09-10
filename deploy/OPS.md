@@ -47,13 +47,14 @@ node deploy/tests/stack-smoke.mjs  # requires Docker; isolated containers and vo
    ```sh
    sudo systemctl disable --now poweur-app.service poweur-infra.service
    sudo systemctl enable docker.service
-   # Bring the captured baseline back immediately:
-   sudo -u poweur bash deploy/restore.sh "$(readlink .current)"
+   # Start the current compose files (Grafana 12 stack), not an old snapshot:
+   sudo docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
+   sudo docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
    ```
 
    Docker's `restart: unless-stopped` now handles reboot. Do not restart the legacy units or run `docker compose up` from the old checkout or `/opt/infra`. Ansible now prepares the host and secrets; release Actions own application startup.
 6. In GitHub Actions secrets configure `DEPLOY_HOST`, `DEPLOY_SSH_KEY` and **`DEPLOY_KNOWN_HOSTS`**. The last value is the server's known_hosts entry, verified against its SSH host-key fingerprint through your provider console. Existing server→GitHub read access must still work. GHCR uses the workflow's token; no image password is committed.
-7. Before rollout, ensure `grafana.poweur.net` points to the VM and uses HTTPS. Caddy now obtains its origin certificate too; use DNS-only or a **per-host Cloudflare Full (strict)** rule for Grafana. Then run **Deploy** (manual dispatch or merge to `master`). It runs all CI suites, builds the relay/CLI image, deploys by immutable digest, updates both Compose stacks, checks the exact release hash, stack readiness, and authenticated inbox access. Failed gates restore previous configuration/image. Watch the first rollout, then verify private dashboards.
+7. Before rollout, ensure `grafana.poweur.net` points to the VM and uses HTTPS. Caddy now obtains its origin certificate too; use DNS-only or a **per-host Cloudflare Full (strict)** rule for Grafana. Then run **Deploy** (manual dispatch or merge to `master`). It runs all CI suites, builds the relay/CLI image, deploys by immutable digest, and compose-ups that commit. A failed health check leaves this release running; it does not compose an older Grafana or relay image. Watch the first rollout, then verify private dashboards.
 8. Set `GRAFANA_SMTP_ENABLED`, `GRAFANA_SMTP_HOST`, `GRAFANA_SMTP_USER`, `GRAFANA_SMTP_PASSWORD`, `GRAFANA_SMTP_FROM_ADDRESS` and `ALERT_EMAIL` in `.observability.env`. Redeploy and send a test notification in Grafana → Alerting → Contact points. Alerts exist without SMTP, but email cannot arrive until configured. Enable GitHub Actions failure notifications for **External relay health**; it probes from GitHub every 15 minutes. Scheduled Actions can be delayed or disabled after inactivity; it is a basic external monitor, not an uptime SLA.
 9. In Grafana, open **Poweur Growth**, choose **Share → Share externally**, and enable a public link. Share only that generated link. Keep anonymous access disabled. **Poweur Relay Ops**, Explore and Loki remain behind login. The public dashboard has aggregate Prometheus panels only; do not add log panels or actor fields to it.
 
@@ -67,18 +68,11 @@ If proxying ingest through Cloudflare, use a **per-host** Full (strict) origin r
 
 Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to the resolved client IP. Release scripts trust only Caddy's current Docker address on the relay. If recreating Caddy manually, redeploy the relay to refresh that address. Review Cloudflare range changes periodically. CDN request logs are separate from relay consent mode.
 
-## Routine deployment and rollback
+## Routine deployment
 
-`.current` points to `.releases/<commit>`. That directory holds the matching static web files, stack config and `.relay-image` digest. `docker inspect poweur-relay` and `/health` identify the running release. No application data is stored under the release directory.
+`.current` points to `.releases/<commit>` after a successful release. That directory holds the matching static web files, stack config and `.relay-image` digest. `docker inspect poweur-relay` and `/health` identify the running release. No application data is stored under the release directory.
 
-Rollback (run as `poweur`):
-
-```sh
-cd /opt/apps/poweur
-bash deploy/rollback.sh
-```
-
-Rollback retains database/data volumes and restores configuration/images, not data/schema changes. Keep at least the current and previous release directories and images; do not use `docker system prune -a` or registry cleanup that deletes their digests. The automated release tests rehearse success and failed-health rollback with command substitutes; `stack-smoke.mjs` boots the real services and verifies ingest/auth/dashboard access. Rehearse the one-liner on your VM after its first successful rollout. A completely new VM has no previous release to restore.
+There is no automatic or scripted rollback to an older stack. A failed gate leaves the compose that just started. The only images in `deploy/infra/docker-compose.yml` are the current ones (Grafana 12.2.0). Delete leftover `.releases/baseline-*` directories on the VM if they are still present; they are unused snapshots of Grafana 11.
 
 ## Fresh VM
 
