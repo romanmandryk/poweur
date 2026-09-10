@@ -138,4 +138,124 @@ test.describe("files sharing", () => {
     // No click, no navigation: the poll notices and the listing catches up.
     await expect(page.locator(".conv-list")).toContainText("from-elsewhere.txt", { timeout: 30_000 });
   });
+
+  /**
+   * E05-T4 acceptance: a capability URL works in a browser with no auth at
+   * all, and revocation kills it.
+   *
+   * The visitor gets a brand-new context with no storage, no identity and no
+   * service worker — the closest thing to "a stranger opened the link you
+   * mailed them" that a test can be. The grant itself is signed in the page
+   * by the owner's own key, exactly as the share dialog will do it.
+   */
+  test("a public link opens with no account, and revoking it kills the page", async ({ browser }) => {
+    test.slow();
+    const ownerCtx = await browser.newContext({ viewport: MOBILE });
+    const owner = await ownerCtx.newPage();
+    await stubPasskeys(owner);
+
+    const suffix = Date.now().toString(36);
+    const ownerId = await registerIdentity(owner, relay, `shl${suffix}`);
+    await seedSharedFolder(owner, "handouts");
+
+    const { shareId, token } = await owner.evaluate(async ({ folder }) => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      const client = clientFor(getActiveIdentity());
+      const shares = await client.shares();
+      const { grant, token } = await shares.addLink(client.signer, `shared/${folder}`, {});
+      return { shareId: grant.share_id, token };
+    }, { folder: "handouts" });
+
+    expect(token).toMatch(/^[a-z2-7]{26}$/);
+
+    // A visitor with nothing: no identity, no cookies, no local storage.
+    const strangerCtx = await browser.newContext({ viewport: MOBILE });
+    const stranger = await strangerCtx.newPage();
+    const linkUrl = `${relay.baseUrl}/s/${ownerId}/${token}`;
+
+    const listing = await stranger.goto(linkUrl);
+    expect(listing.status()).toBe(200);
+    await expect(stranger.locator("body")).toContainText("notes.txt");
+    await expect(stranger.locator("body")).toContainText(ownerId);
+
+    // The page must not carry the token onward in a Referer, or be indexed.
+    expect(listing.headers()["referrer-policy"]).toBe("no-referrer");
+    expect(listing.headers()["x-robots-tag"]).toContain("noindex");
+
+    // The file itself downloads.
+    const file = await stranger.request.get(`${linkUrl}/notes.txt`);
+    expect(file.status()).toBe(200);
+    expect(await file.text()).toBe("owner wrote this");
+
+    // Nothing outside the shared folder is reachable through the link.
+    const outside = await stranger.request.get(`${linkUrl}/../../private/diary.txt`);
+    expect(outside.status()).not.toBe(200);
+
+    // ── The owner revokes it; the next load is a dead end ─────────────────
+    await owner.evaluate(async ({ shareId }) => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      const shares = await clientFor(getActiveIdentity()).shares();
+      await shares.revoke(shareId);
+    }, { shareId });
+
+    const afterRevoke = await stranger.goto(linkUrl);
+    expect(afterRevoke.status()).toBe(404);
+    // A revoked link is indistinguishable from one that never existed, so it
+    // must not admit that it has "expired".
+    await expect(stranger.locator("body")).not.toContainText(/expired/i);
+
+    await strangerCtx.close();
+    await ownerCtx.close();
+  });
+
+  test("a password-protected link asks before it shows anything", async ({ browser }) => {
+    test.slow();
+    const ownerCtx = await browser.newContext({ viewport: MOBILE });
+    const owner = await ownerCtx.newPage();
+    await stubPasskeys(owner);
+
+    const suffix = Date.now().toString(36);
+    const ownerId = await registerIdentity(owner, relay, `shp${suffix}`);
+    await seedSharedFolder(owner, "guarded");
+
+    const token = await owner.evaluate(async () => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      const client = clientFor(getActiveIdentity());
+      const shares = await client.shares();
+      const { token } = await shares.addLink(client.signer, "shared/guarded", {
+        password: "correct horse",
+      });
+      return token;
+    });
+
+    const strangerCtx = await browser.newContext({ viewport: MOBILE });
+    const stranger = await strangerCtx.newPage();
+    const linkUrl = `${relay.baseUrl}/s/${ownerId}/${token}`;
+
+    const gate = await stranger.goto(linkUrl);
+    expect(gate.status()).toBe(401);
+    await expect(stranger.locator('input[type="password"]')).toBeVisible();
+    // The gate shows the form and nothing else.
+    await expect(stranger.locator("body")).not.toContainText("notes.txt");
+
+    // A wrong password gets the form back, not the files.
+    await stranger.fill('input[type="password"]', "hunter2");
+    await stranger.click('button[type="submit"]');
+    await expect(stranger.locator('input[type="password"]')).toBeVisible();
+    await expect(stranger.locator("body")).not.toContainText("notes.txt");
+
+    // The right one opens it, and the session sticks for the next page.
+    await stranger.fill('input[type="password"]', "correct horse");
+    await stranger.click('button[type="submit"]');
+    await expect(stranger.locator("body")).toContainText("notes.txt", { timeout: 20_000 });
+
+    await stranger.goto(linkUrl);
+    await expect(stranger.locator("body")).toContainText("notes.txt");
+
+    await strangerCtx.close();
+    await ownerCtx.close();
+  });
 });

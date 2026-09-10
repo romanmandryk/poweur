@@ -61,6 +61,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSync(args[1:], stdout, stderr)
 	case "share":
 		return runShare(args[1:], stdout, stderr)
+	case "group":
+		return runGroup(args[1:], stdout, stderr)
 	case "contacts":
 		return runContacts(args[1:], stdout, stderr)
 	case "requests":
@@ -1993,6 +1995,12 @@ func printHelp(w io.Writer) {
   poweur share group set <name> --members=<id,id,...> [--json]
   poweur share group ls [--json]
   poweur share group remove <name>
+  poweur share link add <path> [--password=... | --password-stdin] [--expires=<rfc3339>] [--max-downloads=N] [--json]
+  poweur share link ls [--json]      (revoke with: poweur share revoke <share-id>)
+  poweur group create <group-id> [--admin=<id> ...] [--member=<id> ...] [--json]
+  poweur group show <group-id> [--json]
+  poweur group add <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
+  poweur group remove <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]

@@ -135,6 +135,12 @@ func TestVectors_Documents(t *testing.T) {
 	WriteVectors(t, vectorsDir, "documents", vectors)
 }
 
+// Fixed link-share inputs for the grant vectors (E05-T4).
+const (
+	vectorLinkToken        = "k7m4qz2rt6vwx3ab5cdefghijn"
+	vectorLinkPasswordHash = "$argon2id$v=19$m=65536,t=1,p=4$eMqI4VYMYTc/H1SPsG5UbQ$Lg5Zrc+Mil5yDeAaWMyivDMdKiTmndk543TXv4rurPE"
+)
+
 type grantVector struct {
 	Name      string     `json:"name"`
 	Grant     ShareGrant `json:"grant"`
@@ -176,6 +182,22 @@ func TestVectors_Grants(t *testing.T) {
 			Permissions: []string{PermWrite, PermRead},
 			CreatedAt:   VectorTime, ExpiresAt: "2026-06-01T00:00:00Z",
 		}},
+		// Link shares (E05-T4). The token is fixed (not generated) so the
+		// fixture is stable, and the password hash is a literal PHC string
+		// for the same reason — argon2id salts are random, and a vector
+		// that changed on every run would pin nothing.
+		{"link-plain", ShareGrant{
+			ShareID: "shr_link0011223344", Owner: "alice.poweur.net",
+			Path: "/shared/project-x/", Audience: []ShareAudience{{Link: vectorLinkToken}},
+			Permissions: []string{PermRead}, CreatedAt: VectorTime,
+		}},
+		{"link-password-capped", ShareGrant{
+			ShareID: "shr_link5566778899", Owner: "alice.poweur.net",
+			Path: "shared/project-x/handout.pdf", Audience: []ShareAudience{{Link: vectorLinkToken}},
+			Permissions: []string{PermRead}, CreatedAt: VectorTime,
+			ExpiresAt: "2026-06-01T00:00:00Z",
+			Link:      &ShareLink{Password: vectorLinkPasswordHash, MaxDownloads: 25},
+		}},
 	} {
 		grant := entry.grant
 		if err := grant.Sign(priv); err != nil {
@@ -199,6 +221,24 @@ func TestVectors_Grants(t *testing.T) {
 			UpdatedAt: VectorTime,
 		}},
 		{"empty", ShareGroup{Group: "nobody", Owner: "alice.poweur.net", UpdatedAt: VectorTime}},
+		// Group identities (E05-T5): the same document, signed by the
+		// group's own key, with an admin list and a membership epoch. The
+		// two vectors above have no admins and so must keep signing the
+		// exact five lines they always did.
+		{"group-identity", ShareGroup{
+			Group: "Team.acme.poweur.net", Owner: "team.ACME.poweur.net",
+			Members:   []string{"Zoe.example.org", "bob.example.org", " carol.poweur.net "},
+			Admins:    []string{"Zoe.example.org", "bob.example.org"},
+			Epoch:     3,
+			UpdatedAt: VectorTime,
+		}},
+		{"group-identity-founding", ShareGroup{
+			Group: "solo.acme.poweur.net", Owner: "solo.acme.poweur.net",
+			Members:   []string{"alice.poweur.net"},
+			Admins:    []string{"alice.poweur.net"},
+			Epoch:     1,
+			UpdatedAt: VectorTime,
+		}},
 	} {
 		group := entry.group
 		if err := group.Sign(priv); err != nil {

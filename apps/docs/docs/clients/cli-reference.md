@@ -667,14 +667,43 @@ poweur share add /private/reports --with bob.poweur.net --perm rw --expires 2026
 | Flag | Description |
 |------|-------------|
 | `--with <id>` | Recipient Poweur ID (repeatable) |
-| `--with-group <name>` | Recipient group name (repeatable) |
+| `--with-group <name>` | Recipient group: an owner-local name (`team`) or a group identity's Poweur ID (`crew.acme.poweur.net`); repeatable |
 | `--perm <read\|rw>` | Permission level (default `read`) |
 | `--expires <rfc3339>` | Expiry; empty means never |
 | `--use-identity <subdomain>` | Identity to share from |
 | `--json` | Machine-readable output |
 
-Related: `poweur share ls`, `poweur share revoke <share-id>`, and the group commands
-`poweur share group set <name> --members=<id,id,...>`, `group ls`, `group remove <name>`.
+Related: `poweur share ls`, `poweur share revoke <share-id>`, and the owner-local group
+commands `poweur share group set <name> --members=<id,id,...>`, `group ls`,
+`group remove <name>`.
+
+---
+
+### `poweur group <create|show|add|remove> <group-id>`
+
+Create and administer a **group identity** — a group with its own Poweur ID, usable in any
+owner's grants. See [Group identities](/files/group-identities).
+
+```bash
+poweur group create crew.acme.poweur.net --member bob.example.org
+poweur group show   crew.acme.poweur.net --json
+poweur group add    crew.acme.poweur.net --member carol.poweur.net
+poweur group remove crew.acme.poweur.net --member bob.example.org
+poweur share add /shared/crew-docs --with-group crew.acme.poweur.net --perm read
+```
+
+| Flag | Description |
+|------|-------------|
+| `--member <id>` | Member Poweur ID (repeatable) |
+| `--admin <id>` | Admin Poweur ID (repeatable); defaults to the active identity on `create` |
+| `--relay <url>` | Relay to register the group on (`create` only) |
+| `--use-identity <id>` | Identity performing the operation |
+| `--json` | Machine-readable output |
+
+`create` registers the group as a hosted identity, signs its membership document with the
+group's own key, and restores the active identity. Membership updates bump the group's
+`epoch` only when something actually changed, and the last admin cannot be removed. The
+group name must be a full Poweur ID; for an owner-local group use `poweur share group set`.
 
 ---
 

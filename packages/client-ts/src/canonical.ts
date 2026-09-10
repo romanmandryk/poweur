@@ -9,7 +9,7 @@
  */
 
 import { metadataLines } from "./msgtypes.js";
-import type { EncryptionMeta, ShareAudience } from "./types.js";
+import type { EncryptionMeta, ShareAudience, ShareLink } from "./types.js";
 
 /**
  * Message signing input (`crypto.CanonicalMessageEnvelope` in Go). Optional
@@ -179,17 +179,27 @@ export function canonicalSessionRevocation(
 
 /**
  * Share-grant audience rendering (identity.canonicalAudience): each entry
- * becomes `id:<lowercased>` or `group:<lowercased>`, sorted, comma-joined.
+ * becomes `id:<lowercased>`, `group:<lowercased>` or `link:<token>`, sorted,
+ * comma-joined.
  */
 export function canonicalAudience(audience: ShareAudience[]): string {
-  const parts = audience.map((entry) =>
-    entry.id ? `id:${entry.id.trim().toLowerCase()}` : `group:${(entry.group ?? "").trim().toLowerCase()}`,
-  );
+  const parts = audience.map((entry) => {
+    if (entry.id) return `id:${entry.id.trim().toLowerCase()}`;
+    if (entry.link) return `link:${entry.link.trim().toLowerCase()}`;
+    return `group:${(entry.group ?? "").trim().toLowerCase()}`;
+  });
   parts.sort();
   return parts.join(",");
 }
 
-/** Share-grant signing input (ShareGrant.Canonical). */
+/**
+ * Share-grant signing input (ShareGrant.Canonical).
+ *
+ * A grant carrying link options (E05-T4) appends three more lines — the
+ * marker, the password hash and the download cap. A grant with no `link`
+ * object signs exactly the eight lines it always did, so adding link shares
+ * invalidated no existing signature.
+ */
 export function canonicalShareGrant(grant: {
   share_id: string;
   owner: string;
@@ -198,9 +208,10 @@ export function canonicalShareGrant(grant: {
   permissions: string[];
   created_at?: string;
   expires_at?: string;
+  link?: ShareLink | null;
 }): string {
   const permissions = [...grant.permissions].sort();
-  return [
+  const fields = [
     "poweur-share-grant",
     grant.share_id.trim(),
     grant.owner.trim().toLowerCase(),
@@ -209,26 +220,61 @@ export function canonicalShareGrant(grant: {
     permissions.join(","),
     grant.created_at ?? "",
     grant.expires_at ?? "",
-  ].join("\n");
+  ];
+  if (grant.link) {
+    fields.push(
+      "poweur-share-link",
+      grant.link.password ?? "",
+      String(grant.link.max_downloads ?? 0),
+    );
+  }
+  return fields.join("\n");
 }
 
-/** Share-group signing input (ShareGroup.Canonical). */
+/**
+ * Share-group signing input (ShareGroup.Canonical).
+ *
+ * A group *identity* (E05-T5) appends three more lines — the marker, the
+ * sorted admin list and the membership epoch. A group with no admins signs
+ * exactly the five lines it always did, so introducing group identities
+ * invalidated no existing owner-local group signature.
+ */
 export function canonicalShareGroup(group: {
   group: string;
   owner: string;
   // A group with no members serializes as `null` from Go's nil slice, so an
   // empty group must canonicalize the same on both sides.
   members: string[] | null | undefined;
+  admins?: string[] | null;
+  epoch?: number;
   updated_at?: string;
 }): string {
   const members = (group.members ?? []).map((m) => m.trim().toLowerCase()).sort();
-  return [
+  const fields = [
     "poweur-share-group",
     group.group.trim().toLowerCase(),
     group.owner.trim().toLowerCase(),
     members.join(","),
     group.updated_at ?? "",
-  ].join("\n");
+  ];
+  if (group.admins?.length) {
+    const admins = group.admins.map((a) => a.trim().toLowerCase()).sort();
+    fields.push("poweur-group-identity", admins.join(","), String(group.epoch ?? 0));
+  }
+  return fields.join("\n");
+}
+
+/** Where a group identity keeps its own membership (identity.GroupSelfDoc). */
+export const GROUP_SELF_DOC = "poweur-sys/relay/groups/self.json";
+
+/**
+ * Does this grant-audience group name refer to an addressable group
+ * *identity* rather than an owner-local group? The rule is the presence of
+ * a dot: a Poweur ID is a domain name and always has one, and owner-local
+ * group names are forbidden from having one.
+ */
+export function isGroupIdentityName(name: string): boolean {
+  return name.trim().includes(".");
 }
 
 /** Tree roots a grant may cover (identity.ShareRoots). */

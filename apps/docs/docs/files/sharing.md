@@ -95,6 +95,118 @@ Writes through a share are journaled with `actor` = the visitor's identity (EPIC
 journal), so the owner's changes feed shows who changed what. Cross-identity requests are
 additionally logged to `poweur-sys/relay/logs/access.log`.
 
+## Public links (capability URLs)
+
+For sharing with people who have no Poweur ID, a grant may name a **link token**
+instead of an identity or group:
+
+```json
+{
+  "share_id": "shr_link0011223344",
+  "owner": "alice.poweur.net",
+  "path": "shared/project-x",
+  "audience": [{"link": "k7m4qz2rt6vwx3ab5cdefghijn"}],
+  "permissions": ["read"],
+  "created_at": "2026-07-17T10:00:00Z",
+  "expires_at": "2026-12-31T00:00:00Z",
+  "link": {"password": "$argon2id$…", "max_downloads": 25},
+  "signature": "…"
+}
+```
+
+The token is 16 random bytes as lowercase unpadded base32 — 26 characters of
+`[a-z2-7]`, 128 bits of entropy. Lowercase and base32 are deliberate: the URL
+survives a mail client that lowercases it, and the alphabet has no `0`/`1`/`8`
+to be misread when a link is copied by hand.
+
+Visit it at **`https://<owner-identity>/s/<token>`** — read-only browse and
+download, no account, no client software. (`https://<relay>/s/<owner>/<token>`
+addresses the same share where the owner has no vanity host. The two forms
+cannot be confused: a token never contains a dot, and an identity always does.)
+
+### Rules the format enforces
+
+- **One token per grant, and nothing else in the audience.** Identity/group
+  audiences and link tokens are enforced on completely different code paths;
+  mixing them in one document would mean one grant with two very different
+  meanings.
+- **Read-only in v1.** A grant that names a link and asks for `write` is
+  rejected at signing and on load, so a leaked URL can never mutate the tree.
+- **Options are signed.** `link.password` and `link.max_downloads` are part of
+  the canonical string, so the relay that *stores* the grant cannot strip the
+  password off it or raise the cap. Passwords are argon2id PHC hashes (the same
+  encoding app passwords use); a grant carrying a plaintext password is refused.
+- A grant with no `link` object signs exactly the eight lines it always did, so
+  introducing link shares invalidated no existing signature:
+
+```
+poweur-share-grant
+…the eight lines above…
+poweur-share-link                  ← only when a `link` object is present
+<password hash, or empty>
+<max_downloads, 0 = unlimited>
+```
+
+### Threat model
+
+A capability URL is a **bearer credential in a string**. That is the whole point
+— it is what lets someone with no Poweur ID read the file — and it is also the
+whole risk. Treat one like a password you have mailed to someone.
+
+| Leak path | What happens | What the system does |
+|-----------|--------------|----------------------|
+| **Referrer** | A shared HTML page links out; the browser sends the capability URL in `Referer` | Every `/s/` response sends `Referrer-Policy: no-referrer` and the page carries `<meta name="referrer" content="no-referrer">`. The viewer is one self-contained document with **no scripts and no external references** under `default-src 'none'`, so nothing it renders can phone the URL out |
+| **Browser history / shared devices** | The URL persists on any machine that opened it | Not preventable. `Cache-Control: private, no-store` keeps the *content* out of shared caches; expiry and revocation are the real answer |
+| **Forwarding** | The recipient forwards the mail; now a stranger has it | Not preventable by design — the token is the audience. Use a password, a download cap, and an expiry for anything that matters |
+| **Crawlers and link previews** | A chat client or crawler fetches the URL | `X-Robots-Tag: noindex, nofollow, noarchive` and a matching meta tag. Note that a link-preview fetch still **spends a download** against a `max_downloads` cap |
+| **Guessing** | Someone enumerates tokens | 128 bits of entropy, constant-time comparison, and per-IP rate limiting on the endpoint (password attempts cost far more budget than page views) |
+| **Relay operator** | The relay stores the grant files | It cannot forge one (owner signature) and cannot edit the password or the cap off one (both are signed). It *can* read the shared bytes — the same trust the rest of the file layer assumes |
+| **Stored XSS on an identity origin** | A shared `.html` file executing on `https://alice.poweur.net` | Active content (HTML/SVG/XML/JS) is served as `text/plain` with `Content-Disposition: attachment` and `nosniff`, exactly as `/pub` does it |
+| **Bandwidth abuse** | A popular link becomes someone else's CDN | Per-share download and byte counters, persisted per identity, plus the optional `max_downloads` cap |
+
+Error pages are part of the model: a **revoked** link and a token that never
+existed render the *identical* page, so a link cannot be used to probe what an
+identity once shared. Only **expiry** says what it is — whoever holds the token
+already knows the link existed, so that admission leaks nothing and is the
+difference between a usable page and a mystery 404. No error page ever echoes
+the token back.
+
+### Expiry, caps and revocation
+
+- **Revocation is deleting the grant file** — the same verb as any other share
+  (`poweur share revoke <share-id>`). Grants are re-read per request, so the
+  next click is dead. **There is no cache window**, and no separate token store
+  to fall out of sync with the grant.
+- **`expires_at`** works exactly as it does for identity shares; an unparseable
+  expiry fails closed. Re-issuing a link with a live grant beats a stale one
+  carrying the same token, so replacing a link does the obvious thing.
+- **`max_downloads`** counts successful *file* downloads, not page views;
+  browsing a folder is free. The slot is claimed before any bytes move, so the
+  cap holds when several visitors click at once — an aborted transfer costs the
+  visitor a slot, which is the safe direction to be wrong in.
+- **Passwords** gate the share behind an argon2id check. A correct password sets
+  an HMAC session cookie bound to the owner, the token, the share id **and the
+  password hash**, scoped to that share's URL prefix — so changing the password
+  invalidates every session issued under the old one, and one share's cookie
+  never opens another. Sessions last 12 hours, never outlive the grant's own
+  expiry, and end on a relay restart.
+- Counters live outside the visible tree (next to the metadata index) and
+  survive restarts, so a cap that was reached stays reached.
+
+### CLI
+
+```
+poweur share link add /shared/project-x [--password … | --password-stdin] \
+    [--expires 2026-12-31T00:00:00Z] [--max-downloads 25]
+poweur share link ls
+poweur share revoke shr_…            # revoking a link is the ordinary verb
+```
+
+The URL is printed **once**, at creation. The relay stores only the token inside
+the signed grant and the CLI keeps nothing, so a lost URL means issuing a new
+link. `poweur share ls` shows a link share's audience as `link` rather than
+printing the token.
+
 ## Groups
 
 `poweur-sys/relay/groups/<name>.json` — an owner-local, owner-signed member list:
@@ -109,8 +221,14 @@ A grant with `{"group": "team"}` in its audience follows the *current* member li
 a member grants access with one signed file update and no new grant; removing a member
 revokes theirs. Limits: 1000 members per group, 100 audience entries per grant, 64 KB per
 document. Group membership is visible to the relay (it must be, to enforce) but never to
-other users. Cross-owner *group identities* (a group with its own Poweur ID, usable across
-owners and as a message recipient) are designed in E05-T5 and deferred.
+other users.
+
+Cross-owner **group identities** — a group with its own Poweur ID, usable in *any* owner's
+grants — are the same document with an `admins` list and an `epoch`, kept in the group's own
+tree and signed by the group's own key. They get their own page:
+[Group identities](group-identities.md). An owner-local group name may not contain a dot,
+which is what keeps `{"group": "team"}` and `{"group": "team.acme.poweur.net"}` from ever
+meaning the same thing.
 
 ## Revocation & expiry
 
@@ -131,6 +249,9 @@ poweur share group set team --members bob.example.org,carol.poweur.net
 poweur share group ls
 poweur share group remove team
 ```
+
+Group identities have their own verbs (`poweur group create|show|add|remove`) and are
+addressed with `--with-group <poweur-id>` — see [Group identities](group-identities.md).
 
 The recipient needs no ceremony in v1: they mint a DAV token for the owner's tree at the
 owner's relay (`poweur dav token --audience alice.poweur.net --scope dav:full --relay …`)
@@ -172,5 +293,8 @@ changing that is the `sys.share.offer` work below.
   `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages). Until then a
   recipient has to be told *who* shared with them out of band — the web app's
   "Shared with me" asks for the owner by name for exactly this reason.
-- Public-link (capability URL) shares — E05-T4.
-- Group identities — E05-T5 (design only).
+- Link shares in the **web app's** share dialog — E05-T4 ships the format, the
+  `/s/<token>` endpoint and the CLI; the browser-side dialog for issuing one is
+  still to come (the grant is signed client-side, so it is UI work, not protocol).
+- Write access through a link, and per-link revocation without deleting the
+  grant. Both are deliberate v1 omissions, not oversights.

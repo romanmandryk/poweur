@@ -60,7 +60,12 @@ type Server struct {
 	filesIndex    *files.Index
 	uploads       *files.Uploads
 	grants        *files.GrantStore
+	linkStats     *files.LinkStats
 	davTokens     *davTokenStore
+	// linkSecret authenticates password-gated link sessions (E05-T4). It is
+	// per-process on purpose: a restart ends every link session, which costs
+	// a visitor one password re-entry.
+	linkSecret []byte
 
 	locksMu  sync.Mutex
 	davLocks map[string]webdav.LockSystem
@@ -123,6 +128,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		client:        &http.Client{Timeout: 10 * time.Second},
 		idCache:       idpkg.NewCache(),
 		davTokens:     newDAVTokenStore(),
+		linkSecret:    newPowSecret(), // 32 random bytes; see linkSecret above
 		davLocks:      make(map[string]webdav.LockSystem),
 		hub:           newHub(),
 		relayCache:    make(map[string]cachedRelay),
@@ -134,6 +140,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
 		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
 		s.uploads = files.NewUploads(store.IdentityHomeDir)
+		s.linkStats = files.NewLinkStats(store.IdentityHomeDir)
 		s.grants = &files.GrantStore{
 			Provider: s.filesProvider,
 			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
@@ -261,6 +268,8 @@ func (s *Server) Router() http.Handler {
 		mux.HandleFunc(m+" /dav", s.handleDAV)
 	}
 	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
+	mux.HandleFunc("GET /s/{path...}", s.handleShareLink)
+	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))

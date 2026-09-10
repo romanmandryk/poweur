@@ -153,10 +153,24 @@ export interface DavTokenResponse {
 export interface ShareAudience {
   id?: string;
   group?: string;
+  /** Capability-URL token for a public-link share (E05-T4). */
+  link?: string;
 }
 
 export const PERM_READ = "read";
 export const PERM_WRITE = "write";
+
+/**
+ * Options that only make sense for a link share (E05-T4). They are part of
+ * the canonical signing string, so the relay that stores the grant cannot
+ * strip the password or the download cap off it.
+ */
+export interface ShareLink {
+  /** PHC-format argon2id hash — never a plaintext password. */
+  password?: string;
+  /** Cap on successful downloads through the link; 0/absent = unlimited. */
+  max_downloads?: number;
+}
 
 export interface ShareGrant {
   share_id: string;
@@ -166,13 +180,30 @@ export interface ShareGrant {
   permissions: string[];
   created_at: string;
   expires_at?: string;
+  /** Set only on link-share grants (audience = one link token). */
+  link?: ShareLink;
   signature: string;
 }
 
+/**
+ * A signed member list. The same document covers both kinds of group:
+ *
+ * - **Owner-local** — `group` is a bare name like "team", stored at
+ *   `poweur-sys/relay/groups/<name>.json` in the owner's tree and signed by
+ *   the owner. It means something only inside that owner's grants.
+ * - **Group identity** (E05-T5) — `group` and `owner` are both the group's
+ *   own Poweur ID, stored at `GROUP_SELF_DOC` in the *group's* tree and
+ *   signed by the group's identity key. It is addressable: any owner can
+ *   name it in a grant.
+ */
 export interface ShareGroup {
   group: string;
   owner: string;
   members: string[];
+  /** Identities entitled to update membership; present only on group identities. */
+  admins?: string[];
+  /** Monotonic membership version; EPIC-009 group keys bind to it. */
+  epoch?: number;
   updated_at: string;
   signature: string;
 }
