@@ -19,6 +19,7 @@ const sidebars: SidebarsConfig = {
         'protocol/message-format',
         'protocol/routing',
         'protocol/delivery-acks',
+        'protocol/group-messaging',
         'protocol/interoperability',
         'protocol/rate-limiting',
       ],
@@ -91,6 +92,7 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         'future/capabilities',
+        'future/mls-adoption',
       ],
     },
   ],
