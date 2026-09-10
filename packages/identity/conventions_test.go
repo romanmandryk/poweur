@@ -73,7 +73,7 @@ func TestConventionsRegistryValid(t *testing.T) {
 		}
 	}
 	// Message types the code emits must be registered.
-	for _, mustHave := range []string{MsgTypeContactRequest, MsgTypeContactAccept, MsgTypeContactBlock} {
+	for _, mustHave := range []string{MsgTypeContactRequest, MsgTypeContactAccept, MsgTypeContactBlock, MsgTypeAbuseReport} {
 		if !seen[mustHave] {
 			t.Fatalf("message type %q used in code but missing from registry.json", mustHave)
 		}

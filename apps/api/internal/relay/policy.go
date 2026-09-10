@@ -11,6 +11,7 @@ import (
 
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/files"
+	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
 )
@@ -132,6 +133,41 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	default:
 		return policyAllow, ""
 	}
+}
+
+// senderRelayKey names the relay accountable for a sender, for metering
+// (E07-T5). Returns "" when the sender is one of ours.
+//
+// Local senders are deliberately not metered here. This relay already knows
+// exactly who they are, meters them per identity, and gates their creation
+// (invite codes or proof-of-work, EPIC-014) — it has levers over its own
+// users. Against a *peer* relay it has none of that, which is precisely why
+// the peer, and not the identity behind it, is the unit that gets a budget.
+//
+// The key is the host that serves the sender's identity — the same lookup
+// (and the same DNS-TTL cache) the forwarding path already uses to find a
+// recipient's relay, so metering costs one map read in the common case. When
+// that lookup fails, the sender's parent domain stands in: everyone on a
+// hosted domain still shares one bucket, which is the property that matters.
+func (s *Server) senderRelayKey(ctx context.Context, sender string) string {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	if sender == "" || s.isLocalIdentity(ctx, sender) {
+		return ""
+	}
+	if host, err := s.resolveRelayHost(ctx, sender); err == nil && host != "" {
+		return strings.ToLower(strings.TrimSuffix(host, "."))
+	}
+	if i := strings.Index(sender, "."); i >= 0 && i+1 < len(sender) {
+		return sender[i+1:]
+	}
+	return sender
+}
+
+// meterRequestRelay charges one requests-queue admission to the sender's
+// relay. ok=false means the caller must reject with the returned decision.
+func (s *Server) meterRequestRelay(ctx context.Context, sender string) (ratelimit.Decision, bool) {
+	decision := s.requestRelayLimit.Allow(s.senderRelayKey(ctx, sender))
+	return decision, decision.Allowed
 }
 
 // storedFromMessage converts the wire envelope for queue storage.

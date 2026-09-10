@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/blocks.schema.json",
+  "title": "blocks.json — poweur-sys/relay/blocks.json (owner + relay; shared by grant, never world-readable)",
+  "type": "object",
+  "required": [
+    "publisher",
+    "entries",
+    "updated_at",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": [
+          "identity"
+        ],
+        "properties": {
+          "identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "enum": [
+              "spam",
+              "harassment",
+              "phishing",
+              "malware",
+              "impersonation",
+              "other"
+            ]
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

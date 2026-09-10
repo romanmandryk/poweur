@@ -66,6 +66,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runRequests(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
+	case "blocks":
+		return runBlocks(args[1:], stdout, stderr)
+	case "report":
+		return runReport(args[1:], stdout, stderr)
 	case "anon":
 		return runAnon(args[1:], stdout, stderr)
 	case "session":
@@ -1975,6 +1979,9 @@ func printHelp(w io.Writer) {
   poweur share group remove <name>
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
+  poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
+  poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
+  poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
