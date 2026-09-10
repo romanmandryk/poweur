@@ -21,6 +21,7 @@ export * from "./canonical.js";
 export * from "./keystore.js";
 export * from "./kit.js";
 export * from "./enroll.js";
+export * from "./msgtypes.js";
 export * from "./names.js";
 export * from "./document.js";
 export * from "./ids.js";

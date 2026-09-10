@@ -8,12 +8,35 @@
  * changing it here and CI goes red.
  */
 
+import { metadataLines } from "./msgtypes.js";
 import type { EncryptionMeta, ShareAudience } from "./types.js";
 
 /**
- * Message signing input (crypto.CanonicalMessageTyped). Optional lines are
- * appended only when the field is non-empty, in this fixed order:
- * id, session, enc, type.
+ * Message signing input (`crypto.CanonicalMessageEnvelope` in Go). Optional
+ * lines are appended only when the field is non-empty, in this fixed order:
+ *
+ * ```
+ * <sender>
+ * <recipient>
+ * <timestamp>
+ * <payload>
+ * id:<id>                          // when id is set
+ * session:<session_id>             // when sessionId is set
+ * enc:<alg>:<eph>:<nonce>          // when encryption is set
+ * type:<type>                      // when type is set
+ * thread:<thread_id>               // when threadId is set
+ * expires:<expires_at>             // when expiresAt is set
+ * meta:<key>:<value>               // one line per entry, keys ascending
+ * ```
+ *
+ * The append-only rule is the whole compatibility story. A client that sets
+ * none of the newer fields produces the byte-identical string every previous
+ * protocol revision produced, so an old relay verifies a new client and a new
+ * relay verifies an old one. Never insert a line between the existing ones.
+ *
+ * Metadata is a flat map of printable strings (see `msgtypes.ts`): keys are
+ * ASCII, so JavaScript's sort and Go's byte-wise sort agree, and values carry
+ * no control characters, so `meta:` lines need no escaping.
  */
 export function canonicalMessage(input: {
   sender: string;
@@ -24,6 +47,9 @@ export function canonicalMessage(input: {
   sessionId?: string;
   encryption?: EncryptionMeta | null;
   type?: string;
+  threadId?: string;
+  expiresAt?: string;
+  metadata?: Record<string, string>;
 }): string {
   const parts = [input.sender, input.recipient, input.timestamp, input.payload];
   if (input.id) parts.push(`id:${input.id}`);
@@ -34,6 +60,9 @@ export function canonicalMessage(input: {
     );
   }
   if (input.type) parts.push(`type:${input.type}`);
+  if (input.threadId) parts.push(`thread:${input.threadId}`);
+  if (input.expiresAt) parts.push(`expires:${input.expiresAt}`);
+  parts.push(...metadataLines(input.metadata));
   return parts.join("\n");
 }
 

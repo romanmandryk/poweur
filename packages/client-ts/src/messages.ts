@@ -17,6 +17,12 @@ import { rfc3339 } from "./encoding.js";
 import { ChallengeRequiredError, PoweurError, RelayError } from "./errors.js";
 import { RelayClient } from "./http.js";
 import { newAckId, newMessageId } from "./ids.js";
+import {
+  SYSTEM_MESSAGE_TYPES,
+  isKnownSystemType,
+  isSystemType,
+  validateEnvelopeExtensions,
+} from "./msgtypes.js";
 import { solvePow } from "./pow.js";
 import { resolveEncryptionKey, resolveIdentity, type ResolveOptions } from "./resolve.js";
 import {
@@ -61,15 +67,25 @@ export interface MessagingOptions {
 
 export interface SendOptions {
   signWith?: SignWith;
-  /** Envelope type (`sys.contact.request` and friends); bound into the signature. */
+  /**
+   * Envelope type. Leave unset for ordinary chat: absent means `chat.text`,
+   * and the absent form is what keeps the canonical string identical to what
+   * every pre-typing client produces. Bound into the signature.
+   */
   type?: string;
   /** Route via the sender's home relay instead of straight to the recipient's. */
   viaHomeRelay?: boolean;
   /** Skip resolution and POST here. */
   targetRelayUrl?: string;
+  /** Conversation thread this message belongs to. Signed; opaque to the relay. */
   threadId?: string;
+  /** RFC3339 instant after which the message stops being meaningful. Signed. */
   expiresAt?: string;
-  metadata?: Record<string, unknown>;
+  /**
+   * Flat, signed, **plaintext** routing metadata. Visible to both relays on
+   * the path — addressing, not content.
+   */
+  metadata?: Record<string, string>;
 }
 
 export interface SendResult {
@@ -154,6 +170,17 @@ export class Messaging {
     options: SendOptions = {},
   ): Promise<SendResult> {
     const mode = assertSignWith(options.signWith ?? "session");
+    // Check the envelope before encrypting or resolving: the relay validates
+    // these too, but a caller deserves the error before a round trip, and a
+    // metadata value with a newline in it has no unambiguous signing input.
+    const envelopeError = validateEnvelopeExtensions(options);
+    if (envelopeError) throw new PoweurError("invalid_argument", envelopeError);
+    if (isSystemType(options.type) && !isKnownSystemType(options.type)) {
+      throw new PoweurError(
+        "invalid_argument",
+        `"${options.type}" is not a known system message type (sys.* is reserved; known: ${SYSTEM_MESSAGE_TYPES.join(", ")})`,
+      );
+    }
     const recipientKey = await this.#recipientEncryptionKey(recipient);
     const { payload, encryption } = encryptMessage(recipientKey, plaintext);
 
@@ -201,6 +228,9 @@ export class Messaging {
         ...(current.session_id ? { sessionId: current.session_id } : {}),
         encryption: current.encryption ?? null,
         ...(current.type ? { type: current.type } : {}),
+        ...(current.thread_id ? { threadId: current.thread_id } : {}),
+        ...(current.expires_at ? { expiresAt: current.expires_at } : {}),
+        ...(current.metadata ? { metadata: current.metadata } : {}),
       });
       const keyHolder = active ? sessionSigner(active) : signer;
       return keyHolder.sign(canonical, "base64std");
