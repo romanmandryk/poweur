@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	idpkg "github.com/poweur/identity"
 )
 
 // EncryptionMeta matches the encryption envelope attached to a message.
@@ -42,6 +44,63 @@ func CanonicalMessage(sender, recipient, timestamp, payload string) string {
 // When id, sessionID and enc are all empty/nil the output equals
 // CanonicalMessage.
 func CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID string, enc *EncryptionMeta) string {
+	return CanonicalMessageEnvelope(sender, recipient, timestamp, payload, id, sessionID, "", "", "", nil, enc)
+}
+
+// CanonicalMessageTyped extends CanonicalMessageFull with the envelope-level
+// message type (EPIC-007 `sys.contact.*`; empty type keeps the exact
+// pre-type canonical string, so untyped clients stay compatible).
+//
+// The trailing line, only when msgType != "":
+//
+//	type:<msgType>
+//
+// Retained as the narrow form; CanonicalMessageEnvelope is the full one.
+func CanonicalMessageTyped(sender, recipient, timestamp, payload, id, sessionID, msgType string, enc *EncryptionMeta) string {
+	return CanonicalMessageEnvelope(sender, recipient, timestamp, payload, id, sessionID, msgType, "", "", nil, enc)
+}
+
+// MessageExtensions carries the E09-T3 envelope fields that are signed only
+// when the sender set them.
+type MessageExtensions struct {
+	ThreadID  string
+	ExpiresAt string
+	Metadata  map[string]string
+}
+
+// CanonicalMessageEnvelope is the full canonical signing input for a message
+// (EPIC-009 E09-T3). Every optional field contributes a line **only when it
+// is set**, and new lines are appended after the existing ones — never
+// inserted between them:
+//
+//	<sender>
+//	<recipient>
+//	<timestamp>
+//	<payload>
+//	id:<message_id>            (only when id != "")
+//	session:<session_id>       (only when sessionID != "")
+//	enc:<alg>:<eph>:<nonce>    (only when enc != nil)
+//	type:<msgType>             (only when msgType != "")
+//	thread:<threadID>          (only when threadID != "")
+//	expires:<expiresAt>        (only when expiresAt != "")
+//	meta:<key>:<value>         (one line per entry, keys ascending)
+//
+// That append-only rule is the whole compatibility story. A client that knows
+// nothing about threads, expiry or metadata sends none of them, its canonical
+// string is byte-identical to the one the previous protocol revision produced,
+// and a relay running this code verifies it unchanged. Symmetrically, a
+// pre-E09-T3 relay verifies a new client's envelope as long as the client set
+// none of the new fields — so the new fields, not a version number, are what
+// gates the new behaviour.
+//
+// Metadata keys are ASCII-only and values carry no control characters
+// (idpkg.ValidateMetadata), so `meta:<key>:<value>` needs no escaping and Go's
+// byte-wise key sort matches JavaScript's.
+func CanonicalMessageEnvelope(
+	sender, recipient, timestamp, payload, id, sessionID, msgType, threadID, expiresAt string,
+	metadata map[string]string,
+	enc *EncryptionMeta,
+) string {
 	parts := []string{sender, recipient, timestamp, payload}
 	if id != "" {
 		parts = append(parts, "id:"+id)
@@ -52,22 +111,17 @@ func CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID s
 	if enc != nil && enc.Alg != "" {
 		parts = append(parts, "enc:"+enc.Alg+":"+enc.EphemeralPublicKey+":"+enc.Nonce)
 	}
-	return strings.Join(parts, "\n")
-}
-
-// CanonicalMessageTyped extends CanonicalMessageFull with the envelope-level
-// message type (EPIC-007 `sys.contact.*`; empty type keeps the exact
-// pre-type canonical string, so untyped clients stay compatible).
-//
-// The trailing line, only when msgType != "":
-//
-//	type:<msgType>
-func CanonicalMessageTyped(sender, recipient, timestamp, payload, id, sessionID, msgType string, enc *EncryptionMeta) string {
-	s := CanonicalMessageFull(sender, recipient, timestamp, payload, id, sessionID, enc)
 	if msgType != "" {
-		s += "\ntype:" + msgType
+		parts = append(parts, "type:"+msgType)
 	}
-	return s
+	if threadID != "" {
+		parts = append(parts, "thread:"+threadID)
+	}
+	if expiresAt != "" {
+		parts = append(parts, "expires:"+expiresAt)
+	}
+	parts = append(parts, idpkg.MetadataLines(metadata)...)
+	return strings.Join(parts, "\n")
 }
 
 // CanonicalAck is the signing input for a delivery acknowledgement. Acks
@@ -182,9 +236,12 @@ func CanonicalSessionRevocation(identity, sessionID, issuedAt, nonce string) str
 
 // CanonicalSessionRegistration is the string signed by the long-lived identity
 // key to authorize a short-lived session public key.
+//
+// The definition lives in packages/identity so the relay, the sign-in
+// verifier (EPIC-008) and any third-party Go backend derive the same bytes
+// from one place rather than from two copies that can drift.
 func CanonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce string) string {
-	return fmt.Sprintf("session-registration\n%s\n%s\n%s\n%s\n%s",
-		identity, sessionPublicKey, issuedAt, expiresAt, nonce)
+	return idpkg.CanonicalSessionRegistration(identity, sessionPublicKey, issuedAt, expiresAt, nonce)
 }
 
 func ParsePublicKey(publicKey string) (ed25519.PublicKey, error) {

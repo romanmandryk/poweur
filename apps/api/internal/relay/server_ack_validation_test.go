@@ -27,10 +27,16 @@ func TestPostAcksValidationErrors(t *testing.T) {
 	if code := postJSON(t, url, a); code != http.StatusBadRequest {
 		t.Fatalf("type: %d", code)
 	}
-	// wrong state
+	// read is the third-tick state and must pass state validation (it will
+	// fail later because these fixture identities are not local).
 	a = map[string]any{"type": "ack", "id": "1", "message_id": "m", "state": "read", "sender": "a", "recipient": "b", "timestamp": time.Now().UTC().Format(time.RFC3339), "signature": "e30="}
+	if code := postJSON(t, url, a); code != http.StatusForbidden {
+		t.Fatalf("read state: %d", code)
+	}
+	// unknown states are rejected.
+	a["state"] = "seen-ish"
 	if code := postJSON(t, url, a); code != http.StatusBadRequest {
-		t.Fatalf("state: %d", code)
+		t.Fatalf("unknown state: %d", code)
 	}
 	// bad timestamp
 	a = map[string]any{"type": "ack", "id": "1", "message_id": "m", "state": "delivered_client", "sender": "a", "recipient": "b", "timestamp": "not-rfc3339", "signature": "e30="}

@@ -11,6 +11,7 @@ contacts…), the convention gets written down here and matures into a standard.
 |------|----------|
 | `pcp-XXXX-*.md` | Poweur Convention Proposals — the RFC-style documents |
 | `schemas/poweur-sys/*.schema.json` | JSON Schemas for the `/poweur-sys` system documents (normative shape; Go validators in `packages/identity` are the enforced implementation) |
+| `schemas/<namespace>/*.schema.json` | JSON Schemas for any other claimed namespace (e.g. `net.poweur.tasks/`). For app-domain conventions the schema **is** the normative artifact — the relay does not validate `/apps` payloads. Every namespace listed in `registry.json` is CI-validated. |
 | `registry.json` | Claimed app-ids, `sys.*` message types and schema namespaces (first-come + PR review) |
 
 ## Process (PCP)
@@ -31,4 +32,6 @@ app-namespace rules are in
 | [pcp-0003](pcp-0003-share-grant.md) | Share grant & group documents | experimental |
 | [pcp-0004](pcp-0004-contacts.md) | Contacts, inbox policy & `sys.contact.*` | experimental |
 | [pcp-0005](pcp-0005-sync-journal.md) | Sync journal record & changes cursor | experimental |
+| [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |
+| [pcp-0007](pcp-0007-tasks.md) | Tasks & projects (`net.poweur.tasks`) | draft |
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |

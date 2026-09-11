@@ -3,7 +3,51 @@ package identity
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
+
+// ReadReceiptPolicy controls third-tick receipts. Absence means enabled for
+// backward-compatible messaging UX; users may disable them globally or for
+// specific contacts. The list is intentionally identity names, not petnames.
+type ReadReceiptPolicy struct {
+	Enabled     bool     `json:"enabled"`
+	DisabledFor []string `json:"disabled_for,omitempty"`
+}
+
+func (p ReadReceiptPolicy) Validate() error {
+	if len(p.DisabledFor) > 1000 {
+		return fmt.Errorf("read_receipts.disabled_for has too many entries (max 1000)")
+	}
+	seen := make(map[string]bool, len(p.DisabledFor))
+	for _, raw := range p.DisabledFor {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if err := ValidateIdentityName(name); err != nil {
+			return fmt.Errorf("read_receipts.disabled_for: %w", err)
+		}
+		if seen[name] {
+			return fmt.Errorf("read_receipts.disabled_for contains duplicate %q", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// SendsReadReceiptsTo applies the opt-out policy for one peer.
+func (p InboxPolicy) SendsReadReceiptsTo(peer string) bool {
+	if p.ReadReceipts == nil {
+		return true
+	}
+	if !p.ReadReceipts.Enabled {
+		return false
+	}
+	peer = strings.ToLower(strings.TrimSpace(peer))
+	for _, disabled := range p.ReadReceipts.DisabledFor {
+		if strings.EqualFold(strings.TrimSpace(disabled), peer) {
+			return false
+		}
+	}
+	return true
+}
 
 // Inbox policy modes (EPIC-007). The relay evaluates the recipient's policy
 // after signature verification on every inbound message.
@@ -107,6 +151,8 @@ type InboxPolicy struct {
 	Mode    string `json:"mode"`
 	// Anonymous opts into unsigned senders (EPIC-014); nil = deny.
 	Anonymous *AnonymousPolicy `json:"anonymous,omitempty"`
+	// ReadReceipts controls third-tick acknowledgements; nil = enabled.
+	ReadReceipts *ReadReceiptPolicy `json:"read_receipts,omitempty"`
 }
 
 // Validate checks the policy document.
@@ -122,6 +168,11 @@ func (p InboxPolicy) Validate() error {
 	}
 	if p.Anonymous != nil {
 		if err := p.Anonymous.Validate(); err != nil {
+			return err
+		}
+	}
+	if p.ReadReceipts != nil {
+		if err := p.ReadReceipts.Validate(); err != nil {
 			return err
 		}
 	}

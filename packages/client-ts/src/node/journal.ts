@@ -17,6 +17,7 @@ export const STATE_QUEUED = "queued";
 export const STATE_DELIVERED_HOME_RELAY = "delivered_home_relay";
 export const STATE_DELIVERED_RECIPIENT_RELAY = "delivered_recipient_relay";
 export const STATE_DELIVERED_CLIENT = "delivered_client";
+export const STATE_READ = "read";
 export const STATE_FAILED = "failed";
 
 export type JournalState =
@@ -24,6 +25,7 @@ export type JournalState =
   | typeof STATE_DELIVERED_HOME_RELAY
   | typeof STATE_DELIVERED_RECIPIENT_RELAY
   | typeof STATE_DELIVERED_CLIENT
+  | typeof STATE_READ
   | typeof STATE_FAILED;
 
 export interface JournalEntry {
@@ -56,7 +58,8 @@ function stateRank(state: JournalState): number {
     case STATE_DELIVERED_HOME_RELAY: return 2;
     case STATE_DELIVERED_RECIPIENT_RELAY: return 3;
     case STATE_DELIVERED_CLIENT: return 4;
-    case STATE_FAILED: return 5;
+    case STATE_READ: return 5;
+    case STATE_FAILED: return 6;
     default: return 0;
   }
 }
@@ -110,13 +113,14 @@ export function journalStatuses(identity: string, dir = journalDir()): JournalSt
   return out;
 }
 
-/** Compact terminal indicator: ✓ relay accepted, ✓✓ client decrypted. */
+/** Compact terminal indicator: ✓ relay, ✓✓ client, ✓✓✓ read. */
 export function tickGlyph(state: JournalState): string {
   switch (state) {
     case STATE_QUEUED: return " · ";
     case STATE_DELIVERED_HOME_RELAY:
     case STATE_DELIVERED_RECIPIENT_RELAY: return " ✓ ";
     case STATE_DELIVERED_CLIENT: return " ✓✓";
+    case STATE_READ: return "✓✓✓";
     case STATE_FAILED: return " ✗ ";
     default: return "   ";
   }

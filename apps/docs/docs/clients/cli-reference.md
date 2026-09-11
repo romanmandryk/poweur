@@ -162,13 +162,26 @@ poweur identity dns alice.poweur.net
 
 Resolve an identity using the **web-first** chain (HTTPS
 `/.well-known/poweur/id.json`, then DNS TXT). Prints source (`web` / `dns` /
-`both`), keys, relay, and capabilities. Prefer this over `identity dns` for
-hosted identities that have no per-user TXT records.
+`both`), keys, the safety number, and the relay. Prefer this over `identity dns`
+for hosted identities that have no per-user TXT records.
+
+It also reads the identity's public self-description from the same well-known
+route — `profile.json` (display name, bio, locale, avatar, links) and
+`capabilities.json` (features and endpoint hints), both served world-readable
+out of `poweur-sys/public/`. Both are optional: an identity that publishes
+neither still looks up fine, and only an unreachable host (as opposed to a 404)
+prints a note on stderr. When there is no `capabilities.json`, the identity
+document's own `capabilities` list is shown instead — the same fallback the web
+client uses, so the two surfaces degrade to the same answer.
 
 ```bash
 poweur identity lookup alice.poweur.net
 poweur identity lookup alice.poweur.net --json
 ```
+
+In `--json`, `capabilities` stays the identity document's string list and
+`capabilities_document` carries `capabilities.json` when one is published;
+`profile` is the profile document or `null`.
 
 ---
 
@@ -232,9 +245,20 @@ poweur send bob.example.org "Hey Bob, are you there?"
 | `--use-identity <identity>` | Send from a specific identity (overrides active identity) |
 | `--via-home-relay` | Privacy proxy: POST to the configured home relay (`relay_url`) instead of directly to the recipient's relay. The home relay accepts because the sender is locally hosted, then forwards to the recipient relay. Hides the sender's IP from the recipient relay at the cost of an extra hop. |
 | `--sign-with <session\|identity>` | Choose the signing key (default `session`). Identity-signed sends omit `session_id`/`session_proof`. |
+| `--type <type>` | Envelope message type. Omit for ordinary chat: absent means `chat.text`, and the absent form is what keeps the signed canonical string identical to a pre-typing client's. `sys.*` is reserved — an unregistered one is refused locally. |
+| `--thread <id>` | Group this message into a conversation thread. Opaque to the relay. |
+| `--expires <rfc3339>` | When the message stops being meaningful. Expired envelopes are refused with HTTP 410. |
+| `--attach <file>` | Upload (max 20 MB), grant read to the recipient, and send a `chat.attachment` reference. The caption is optional. |
+| `--meta <key=value>` | Envelope metadata, repeatable. **Plaintext** — addressing, not content. A duplicate key is an error rather than a silent overwrite. |
 | `--json` | Machine-readable output |
 
-If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing. If the relay returns `400 encryption_required` the CLI surfaces the error — this indicates a client bug, since the CLI always encrypts. Network/HTTP errors during the send write a `failed` entry to the journal (sticky).
+`--type`, `--thread`, `--expires` and `--meta` are validated before the message is encrypted, signed or journalled, so a typo never becomes a recorded send attempt. They cannot be combined with `--anon`: an unsigned envelope binds nothing, so the fields would be routing metadata nobody could trust. See [Typed Messages](/protocol/message-format#typed-messages).
+
+```bash
+poweur send bob.example.org "the logo, v3" --thread thr_rebrand --attach ./logo.png
+```
+
+If the relay reports the session expired, the CLI silently re-registers a session and retries once. Network failures, 429s and 5xx responses queue an identity-signed encrypted envelope with capped exponential backoff; `poweur listen` retries on reconnect and `poweur outbox list|retry` exposes it explicitly. Permanent 4xx responses still write a sticky `failed` entry.
 
 Note that `cfg.RelayURL` (the configured `relay_url`) is the **home** relay — it is used for inbox polling, ack delivery, identity admin, and (only when `--via-home-relay` is set) outbound sends.
 
@@ -629,6 +653,61 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 
 ---
 
+### `poweur report <identity>`
+
+Report an identity to the relay operator who hosts them (`sys.abuse.report`). The
+report is signed by you and carries message IDs, a reason and an optional note — never
+message content, which is end-to-end encrypted and which the operator could not read
+anyway.
+
+```bash
+poweur report loud.cheapco.test --reason=spam --note="twelve identical messages" --message-ids=m-1,m-2
+```
+
+| Flag | Description |
+|------|-------------|
+| `--reason <kind>` | `spam` \| `harassment` \| `phishing` \| `malware` \| `impersonation` \| `other` |
+| `--note <text>` | Free text for the operator (max 2048 bytes) |
+| `--message-ids <ids>` | Comma-separated message IDs as evidence (max 32) |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+One report per reporter per subject per day counts; repeats answer `duplicate`. A relay
+only accepts reports about identities it hosts.
+
+---
+
+### `poweur blocks <export|import>`
+
+Blocklists are block decisions made portable: a signed document a community can pool.
+Export publishes `shared/blocks.json` in your own tree, where a
+[share](../files/sharing) hands it to a chosen audience. Import verifies the
+publisher's signature and merges into your own contacts, where you can see and undo it.
+
+```bash
+poweur blocks export --name "my list"
+poweur share add /shared/blocks.json --with bob.example.org --perm read
+poweur blocks import alice.example.org --dry-run
+poweur blocks import --file list.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name <text>` | Human label for an exported list |
+| `--out <file>` | Also write the signed document locally |
+| `--no-publish` | Do not write it into your own tree |
+| `--file <path>` | Import from a local file instead of a publisher's tree |
+| `--path <tree path>` | Tree path to read from the publisher (default `shared/blocks.json`) |
+| `--force` | Also block identities you have accepted as contacts |
+| `--dry-run` | Show what would change without writing |
+| `--use-identity <subdomain>` | Override identity |
+| `--json` | Machine-readable output |
+
+Identities you have accepted as contacts are skipped and named unless `--force`, and an
+unsigned or altered list is refused outright.
+
+---
+
 ### `poweur anon`
 
 Read the anonymous queue — messages accepted under the policy's `anonymous` block. These are
@@ -655,14 +734,43 @@ poweur share add /private/reports --with bob.poweur.net --perm rw --expires 2026
 | Flag | Description |
 |------|-------------|
 | `--with <id>` | Recipient Poweur ID (repeatable) |
-| `--with-group <name>` | Recipient group name (repeatable) |
+| `--with-group <name>` | Recipient group: an owner-local name (`team`) or a group identity's Poweur ID (`crew.acme.poweur.net`); repeatable |
 | `--perm <read\|rw>` | Permission level (default `read`) |
 | `--expires <rfc3339>` | Expiry; empty means never |
 | `--use-identity <subdomain>` | Identity to share from |
 | `--json` | Machine-readable output |
 
-Related: `poweur share ls`, `poweur share revoke <share-id>`, and the group commands
-`poweur share group set <name> --members=<id,id,...>`, `group ls`, `group remove <name>`.
+Related: `poweur share ls`, `poweur share revoke <share-id>`, and the owner-local group
+commands `poweur share group set <name> --members=<id,id,...>`, `group ls`,
+`group remove <name>`.
+
+---
+
+### `poweur group <create|show|add|remove> <group-id>`
+
+Create and administer a **group identity** — a group with its own Poweur ID, usable in any
+owner's grants. See [Group identities](/files/group-identities).
+
+```bash
+poweur group create crew.acme.poweur.net --member bob.example.org
+poweur group show   crew.acme.poweur.net --json
+poweur group add    crew.acme.poweur.net --member carol.poweur.net
+poweur group remove crew.acme.poweur.net --member bob.example.org
+poweur share add /shared/crew-docs --with-group crew.acme.poweur.net --perm read
+```
+
+| Flag | Description |
+|------|-------------|
+| `--member <id>` | Member Poweur ID (repeatable) |
+| `--admin <id>` | Admin Poweur ID (repeatable); defaults to the active identity on `create` |
+| `--relay <url>` | Relay to register the group on (`create` only) |
+| `--use-identity <id>` | Identity performing the operation |
+| `--json` | Machine-readable output |
+
+`create` registers the group as a hosted identity, signs its membership document with the
+group's own key, and restores the active identity. Membership updates bump the group's
+`epoch` only when something actually changed, and the last admin cannot be removed. The
+group name must be a full Poweur ID; for an owner-local group use `poweur share group set`.
 
 ---
 

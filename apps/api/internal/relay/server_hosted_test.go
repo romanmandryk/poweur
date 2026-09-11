@@ -97,6 +97,32 @@ func TestHostedRegistrationAndWellKnown(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A conforming did:web resolver turns did:web:<host> into this exact
+	// well-known request, then requires the returned document id to match.
+	didReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/.well-known/did.json", nil)
+	didReq.Host = identity
+	didResp, err := http.DefaultClient.Do(didReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer didResp.Body.Close()
+	if didResp.StatusCode != http.StatusOK {
+		t.Fatalf("did:web well-known %d", didResp.StatusCode)
+	}
+	if ct := didResp.Header.Get("Content-Type"); ct != "application/did+json" {
+		t.Fatalf("did:web content type = %q", ct)
+	}
+	var did idpkg.DIDWebDocument
+	if err := json.NewDecoder(didResp.Body).Decode(&did); err != nil {
+		t.Fatal(err)
+	}
+	if did.ID != "did:web:"+identity {
+		t.Fatalf("resolved DID id = %q", did.ID)
+	}
+	if gotKey := did.VerificationMethod[0].PublicKeyJWK.X; gotKey != pubB64 {
+		t.Fatalf("DID signing key = %q, identity document key = %q", gotKey, pubB64)
+	}
+
 	// durable reload
 	server2 := NewServer(cfg, dns.NewNetResolver(), dns.NewProviderFactory(cfg))
 	server2.cfg.RelayAddress = server.cfg.RelayAddress

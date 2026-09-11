@@ -108,6 +108,9 @@ func (s *Server) authenticateDAV(r *http.Request, owner string) (files.Principal
 		if !strings.EqualFold(tok.Audience, owner) {
 			return files.Principal{}, false, "token audience does not match tree"
 		}
+		if tok.AppID != "" && !s.connectedAppActive(r.Context(), owner, tok.AppID) {
+			return files.Principal{}, false, "connected app grant has been revoked or expired"
+		}
 		verifiedActor(r, tok.Identity)
 		return files.Principal{
 			Identity: tok.Identity,

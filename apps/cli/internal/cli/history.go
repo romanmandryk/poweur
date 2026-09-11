@@ -390,6 +390,12 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 // decrypted. Body is the plaintext — an archive of ciphertext nobody holds an
 // ephemeral key for is not an archive.
 func historyRecordFrom(owner, queue, id, sender, recipient, timestamp, msgType, body string) idpkg.HistoryRecord {
+	return historyRecordThreaded(owner, queue, id, sender, recipient, timestamp, msgType, "", body)
+}
+
+// historyRecordThreaded is the same with the conversation thread carried
+// through, so `poweur history` regroups the way the live inbox did.
+func historyRecordThreaded(owner, queue, id, sender, recipient, timestamp, msgType, threadID, body string) idpkg.HistoryRecord {
 	if recipient == "" {
 		recipient = owner
 	}
@@ -398,6 +404,6 @@ func historyRecordFrom(owner, queue, id, sender, recipient, timestamp, msgType, 
 	}
 	return idpkg.HistoryRecord{
 		Version: idpkg.HistoryVersion, ID: id, Sender: sender, Recipient: recipient,
-		Timestamp: timestamp, Type: msgType, Queue: queue, Body: body,
+		Timestamp: timestamp, Type: msgType, ThreadID: threadID, Queue: queue, Body: body,
 	}
 }

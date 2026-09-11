@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** in progress — T1 and T2 done; T3–T6 open
+- **Status:** complete — T1–T6 done
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -31,7 +31,7 @@ not crypto changes (except groups, which get their own carefully-scoped task).
 
 ## Tasks
 
-### E09-T1 — Persistent inbox & message history — **done** (history still open)
+### E09-T1 — Persistent inbox & message history — **done**
 
 - [x] Inbox and acks moved onto a durable spool: one file per entry, ordered by a
       per-identity sequence number that doubles as the pickup cursor. **Not** under
@@ -103,10 +103,12 @@ browser, after a reload each time — which is the failure people actually hit.
       `@poweur/client`, with the backoff reset on every successful connection
 - [x] Web client subscribes while unlocked; `poweur listen` on the TS CLI
 - [x] Connection limits (`MAX_STREAMS_PER_IDENTITY`) and idle timeout (`STREAM_IDLE_TIMEOUT`)
-- [ ] **Deferred:** presence side-effect on `devices.json` — that document is EPIC-004 T6
-      and does not exist yet. The privacy decision it records (not user-visible in v1)
-      stands unchanged
-- [ ] **Open:** the Go CLI has no `listen`; the sync daemon does not subscribe
+- [x] Presence side-effect on `devices.json`: an authenticated stream with a device id updates
+      only that device's `last_seen` in the owner's relay-managed document; no public presence
+      endpoint exists
+- [x] Go CLI `poweur listen` subscribes with the same catch-up semantics as the TS CLI
+- [x] **Deliberately deferred to EPIC-004 E04-T4:** the event-driven sync daemon does not yet
+      exist; shipped sync remains one-shot/cron-driven, so there is no daemon subscription to wire
 
 **Server-Sent Events rather than a WebSocket, deliberately.** The channel only ever pushes
 one way — this epic's own rule is "the socket is notification, the cursor is truth" — and
@@ -128,65 +130,134 @@ produced no notification at all (the relay notified only on the inbox path), and
 fetched it without repainting, because the loader only re-rendered when its own tray was
 open while the badge lives on the tray bar.
 
-### E09-T3 — Typed messages & threads (activate reserved fields)
+### E09-T3 — Typed messages & threads (activate reserved fields) — **done**
 
-- [ ] Spec update: `type` (default `chat.text`; `sys.*` reserved for platform, registry in
-      EPIC-006), `thread_id`, `expires_at`, `metadata` (signed — extend the canonical string,
-      version the signing scheme carefully: new fields only signed when present, exactly like
-      the existing optional-line pattern)
-- [ ] Relay: opaque handling of all types except `sys.*` it owns; per-type inbox-policy hooks
-      (EPIC-007 needs `sys.contact.request` special-cased)
-- [ ] Clients: render `chat.text`, generic fallback for unknown types ("app message from …"),
-      thread grouping in web UI
-- [ ] Migrate the in-flight definitions from other epics (`sys.share.*`, `sys.contact.*`,
-      `sys.sync.changed`) onto this foundation and register them
+- [x] Spec update: `type` (default `chat.text`; `sys.*` reserved for the platform, registry in
+      `conventions/registry.json`), `thread_id`, `expires_at`, `metadata` — all signed, all
+      appended to the canonical string only when present. Rules live in
+      `packages/identity/msgtypes.go` (canonical) with the string itself in
+      `crypto.CanonicalMessageEnvelope`; documented in
+      `apps/docs/docs/protocol/message-format.md` under **Typed Messages** and **Ordering
+      rules**. No wire version number: the *presence of a field*, not a version, selects the
+      new behaviour
+- [x] Relay: opaque handling of every type outside `sys.*`; an unregistered `sys.*` is
+      refused with `400 unsupported_type` rather than forwarded. Per-type inbox-policy hooks
+      in `apps/api/internal/relay/typed.go` — the EPIC-007 contact special-case became the
+      first two entries in a hook table (`inboxTypeHooks`) rather than a parallel path, and a
+      type with no hook falls to the closed-inbox default
+- [x] Clients: `chat.text` renders as before; anything a client does not implement gets
+      "app message from &lt;sender&gt; (&lt;type&gt;)". Go CLI (`--type/--thread/--expires/--meta`,
+      thread marker in `inbox`), `@poweur/client` (`msgtypes.ts`, `describeMessage`,
+      `groupByThread`), and the web app, which renders one tray row per (contact, thread) and
+      keeps replies inside the thread they came from
+- [x] `sys.contact.*` migrated onto the hook foundation. `sys.share.*` and `sys.sync.changed`
+      are registered in the code's closed set, accepted and routed opaquely by the relay, and
+      have the hook seam waiting — but nothing **emits** them yet; their senders are
+      EPIC-005 and EPIC-004 work. `TestConventionsRegistryValid` now asserts the registry and
+      the code agree in *both* directions, so adding one without the other fails a test
 
-**Acceptance:** old clients interop with new relays (compat tests); typed system flows from
-EPIC-005/007 ride on `type` end to end.
+**Acceptance:** met. `apps/integration/typed_test.go` proves both directions of compatibility
+against the pre-E09-T3 canonical string written out longhand: an old-shaped envelope is
+accepted by a new relay and delivered readable (`TYPED_02`), a new client's plain message
+verifies against what an old relay would rebuild (`TYPED_03`), and a threaded envelope does
+**not** — an old relay fails closed rather than accepting and silently dropping the thread
+(`TYPED_04`). Conformance vectors `message-threaded` and `message-full-envelope` pin the
+TypeScript client to Go.
+
+**Canonical line order (downstream tasks build against this).** Optional lines appear only
+when the field is set, and the list is append-only — a future field goes at the end, never
+between:
+
+```
+<sender>
+<recipient>
+<timestamp>
+<payload>
+id:<message_id>
+session:<session_id>
+enc:<alg>:<ephemeral_public_key>:<nonce>
+type:<type>
+thread:<thread_id>
+expires:<expires_at>
+meta:<key>:<value>          # one line per entry, keys ascending
+```
+
+**Deferred, on purpose:**
+
+- `expires_at` enforcement shipped in E09-T6: the relay now rejects expired envelopes and
+  clients do not retry them. It remains listed here because T3 defined and signed the field.
+- Per-thread unread counts. The read mark in `poweur-sys/private/messages/` is a
+  conversation-level cursor (E09-T1); a per-thread one would be a second, disagreeing answer.
+  The badge stays per contact and shows on that contact's newest row.
+- Thread creation UI in the web app (naming a new thread). Replying inside an existing thread
+  works; starting one is a compose-screen affordance nobody has asked for yet.
 
 ### E09-T4 — File attachments via the home filesystem
 
 Keep the 512 KB envelope; attachments are **references** to files + share grants.
 
-- [ ] Convention `chat.attachment` metadata: file path/share pointer, size, MIME, content hash
+- [x] Convention `chat.attachment` metadata: file path/share pointer, size, MIME, content hash
       (the existing E03 etag), optional thumbnail inline (≤ 64 KB, encrypted in payload)
-- [ ] Sender flow: upload to `/shared/.attachments/<id>` (or reuse existing path), auto-grant
+- [x] Sender flow: upload to `/shared/.attachments/<id>` (or reuse existing path), auto-grant
       read to recipient (EPIC-005 grant), send message referencing it — one CLI/web action
-- [ ] Recipient flow: fetch via DAV with their own token; offline copies via sync
-- [ ] Garbage collection: attachment grants/files for deleted conversations (policy: sender
+- [x] Recipient flow: fetch via DAV with their own token; offline copies via sync
+- [x] Garbage collection: attachment grants/files for deleted conversations (policy: sender
       owns the file; document retention defaults)
 
 **Acceptance:** send-a-photo demo: 20 MB file alice→bob across relays, bob views it in web
 app; spool stays small (envelope only).
 
+**Shipped.** Go CLI and web upload, issue a recipient read grant, and send a signed seven-field
+reference. Downloads mint the recipient's own DAV token and verify size plus SHA-256 before
+opening. `TestINT_ATTACHMENT_01` moves a 20 MB file across two relays and asserts the JSON
+envelope remains below 512 KB; the browser E2E then uploads, opens and byte-compares a real
+attachment through the UI. Retention is sender-owned: attachments remain until explicit
+conversation/file deletion; CLI `attachment rm` and SDK `removeAttachment` revoke the grant
+before deleting bytes. Inline thumbnails remain an optional rendering optimization, not a
+second storage format.
+
 ### E09-T5 — Group messaging
 
 The hard one — scope tightly, lean on EPIC-005 group identities for membership.
 
-- [ ] v1 design decision (write it up first): **server-fanout with per-member encryption** —
+- [x] v1 design decision (write it up first): **server-fanout with per-member encryption** —
       sender's client encrypts the payload separately per member (N× X25519+AEAD, fine to
       ~100 members) and posts one envelope per member; the group identity's relay fans out.
       No new cryptography. Sender-keys/MLS deferred with an explicit revisit threshold
       (member count / message volume)
-- [ ] Group addressing: send to `team.acme.poweur.net` (EPIC-005 group identity); relay
+- [x] Group addressing: send to `team.acme.poweur.net` (EPIC-005 group identity); relay
       expands membership at delivery time; membership changes mid-thread documented
       (new member sees nothing before join — forward secrecy by construction here)
-- [ ] `thread_id` semantics in groups; ack semantics (per-member ticks vs aggregate — spec it)
-- [ ] CLI + web minimal group chat UI
-- [ ] Design doc for v2: MLS (RFC 9420) adoption study — what we'd inherit (PCS, scale) and
+- [x] `thread_id` semantics in groups; ack semantics (per-member ticks vs aggregate — spec it)
+- [x] CLI + web minimal group chat UI
+- [x] Design doc for v2: MLS (RFC 9420) adoption study — what we'd inherit (PCS, scale) and
       what it demands (group state coordination); explicit criteria for switching
 
 **Acceptance:** 5-member cross-relay group chat integration test (delivery + late-join
 behavior); v2 design doc merged.
 
+**Shipped.** The relay exposes an authenticated signed-roster read and an epoch-checked batch
+fan-out. The Go CLI and `@poweur/client` encrypt once per recipient; the web compose screen
+uses the SDK path and only files inbound group hints after verifying the current signed roster.
+`TestINT_GROUP_01` covers five members on two relays plus a late join. The wire and operational
+decisions are in [`group-messaging.md`](../apps/docs/docs/protocol/group-messaging.md), with the
+switch criteria in [`mls-adoption.md`](../apps/docs/docs/future/mls-adoption.md).
+
 ### E09-T6 — Delivery semantics & offline UX polish
 
-- [ ] Read receipts as a third tick (`AckState` extension — the `State` field was reserved for
+- [x] Read receipts as a third tick (`AckState` extension — the `State` field was reserved for
       exactly this), per-contact opt-out in inbox policy
-- [ ] Outbox with retry/backoff in CLI and web (currently sends fail hard; see error paths in
+- [x] Outbox with retry/backoff in CLI and web (currently sends fail hard; see error paths in
       `packages/client-ts/src/http.ts`) — queued-while-offline UX
-- [ ] Message expiry honored (`expires_at`): relay refuses delivery after expiry, clients
+- [x] Message expiry honored (`expires_at`): relay refuses delivery after expiry, clients
       render countdown for ephemeral messages
 
 **Acceptance:** offline-send test (relay down → up) delivers queued mail; read receipts
 respect opt-out.
+
+**Shipped.** `read` is a signed third ack state, controlled globally or per contact in inbox
+policy and emitted only at the UI's read boundary. CLI and browser outboxes retain encrypted
+sends, refresh relay routing, and retry with capped exponential backoff; permanent 4xx and
+expired entries are not retried. `expires_at` is enforced after signature verification with
+`410 message_expired`, and clients render countdowns. `TestINT_OUTBOX_01` covers a relay going
+down, returning at a new address, and receiving the queued message.

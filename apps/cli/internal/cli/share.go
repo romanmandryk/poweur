@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +34,7 @@ const (
 
 func runShare(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: poweur share <add|ls|revoke|group>")
+		fmt.Fprintln(stderr, "usage: poweur share <add|ls|revoke|group|link>")
 		return 1
 	}
 	switch args[0] {
@@ -44,8 +46,10 @@ func runShare(args []string, stdout, stderr io.Writer) int {
 		return runShareRevoke(args[1:], stdout, stderr)
 	case "group":
 		return runShareGroup(args[1:], stdout, stderr)
+	case "link":
+		return runShareLink(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "unknown share subcommand (want add, ls, revoke, group)")
+		fmt.Fprintln(stderr, "unknown share subcommand (want add, ls, revoke, group, link)")
 		return 1
 	}
 }
@@ -252,13 +256,253 @@ func runShareAdd(args []string, stdout, stderr io.Writer) int {
 func describeAudience(audience []idpkg.ShareAudience) string {
 	var parts []string
 	for _, a := range audience {
-		if a.ID != "" {
+		switch {
+		case a.ID != "":
 			parts = append(parts, a.ID)
-		} else {
+		case a.Link != "":
+			// The token is the credential, so `share ls` shows that this is
+			// a link and not what the link is. Anyone who needs the URL
+			// itself has it already; anyone reading over a shoulder does not.
+			parts = append(parts, "link")
+		default:
 			parts = append(parts, "group:"+a.Group)
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// --- public-link shares (E05-T4) ---
+
+// runShareLink handles `poweur share link <add|ls>`. Revoking a link is
+// `poweur share revoke <share-id>` like any other grant — a link share is
+// an ordinary grant document with a token for an audience, and giving it a
+// second revocation verb would only invite the two to drift apart.
+func runShareLink(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: poweur share link <add|ls>  (revoke with: poweur share revoke <share-id>)")
+		return 1
+	}
+	switch args[0] {
+	case "add":
+		return runShareLinkAdd(args[1:], stdout, stderr)
+	case "ls":
+		return runShareLinkLs(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "unknown share link subcommand (want add, ls)")
+		return 1
+	}
+}
+
+// linkShareResult is the JSON shape of `share link add`. The URL is
+// reported once and never again: the relay stores only the token inside a
+// signed grant, and the CLI keeps nothing.
+type linkShareResult struct {
+	ShareID      string `json:"share_id"`
+	Path         string `json:"path"`
+	URL          string `json:"url"`
+	Token        string `json:"token"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
+	MaxDownloads int    `json:"max_downloads,omitempty"`
+	Password     bool   `json:"password"`
+}
+
+func runShareLinkAdd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("share link add", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity to share from")
+	password := fs.String("password", "", "password for the link (hashed with argon2id before it is stored)")
+	passwordStdin := fs.Bool("password-stdin", false, "read the link password from stdin instead of the command line")
+	expires := fs.String("expires", "", "expiry (RFC3339), empty = never")
+	maxDownloads := fs.Int("max-downloads", 0, "cap on successful downloads (0 = unlimited)")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--password-stdin": true})); err != nil {
+		return 1
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(stderr, "usage: poweur share link add <path> [--password ... | --password-stdin] [--expires ...] [--max-downloads N]")
+		return 1
+	}
+	path, err := idpkg.NormalizeGrantPath(rest[0])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if *expires != "" {
+		if _, err := time.Parse(time.RFC3339, *expires); err != nil {
+			fmt.Fprintf(stderr, "invalid --expires: %v\n", err)
+			return 1
+		}
+	}
+	if *passwordStdin {
+		if *password != "" {
+			fmt.Fprintln(stderr, "use either --password or --password-stdin, not both")
+			return 1
+		}
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		*password = strings.TrimRight(string(raw), "\r\n")
+		if *password == "" {
+			fmt.Fprintln(stderr, "--password-stdin got an empty password")
+			return 1
+		}
+	}
+
+	// Build the link options first: a validation failure here should cost
+	// nothing, and in particular should not leave a half-made grant behind.
+	var link *idpkg.ShareLink
+	if *password != "" || *maxDownloads > 0 {
+		link = &idpkg.ShareLink{MaxDownloads: *maxDownloads}
+		if *password != "" {
+			hash, err := idpkg.HashLinkPassword(*password)
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			link.Password = hash
+		}
+	}
+	token, err := idpkg.GenerateLinkToken()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	cfg, identityValue, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	if !ok {
+		return 1
+	}
+	shareID, err := newShareID()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	grant := idpkg.ShareGrant{
+		ShareID:     shareID,
+		Owner:       identityValue,
+		Path:        path,
+		Audience:    []idpkg.ShareAudience{{Link: token}},
+		Permissions: []string{idpkg.PermRead}, // link shares are read-only in v1
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		ExpiresAt:   *expires,
+		Link:        link,
+	}
+	if err := grant.Sign(priv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	raw, err := json.MarshalIndent(grant, "", "  ")
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	ctx := context.Background()
+	tok, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, "", "dav:full", priv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := davPutBytes(ctx, cfg.RelayURL, identityValue, tok.Token, sharesTreeDir+"/"+shareID+".json", raw); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	result := linkShareResult{
+		ShareID: shareID, Path: path,
+		URL:          shareLinkURL(identityValue, token),
+		Token:        token,
+		ExpiresAt:    *expires,
+		MaxDownloads: *maxDownloads,
+		Password:     link != nil && link.Password != "",
+	}
+	var text strings.Builder
+	fmt.Fprintf(&text, "link share %s created\n  %s\n", shareID, result.URL)
+	fmt.Fprintf(&text, "  path: /%s\n", path)
+	if result.ExpiresAt != "" {
+		fmt.Fprintf(&text, "  expires: %s\n", result.ExpiresAt)
+	}
+	if result.MaxDownloads > 0 {
+		fmt.Fprintf(&text, "  downloads: %d max\n", result.MaxDownloads)
+	}
+	if result.Password {
+		fmt.Fprintln(&text, "  password: required")
+	}
+	// Said plainly, because a capability URL behaves unlike every other
+	// share in the system and the moment of creation is when that matters.
+	fmt.Fprintln(&text, "\nAnyone with this URL can read the share — it is the whole credential.")
+	fmt.Fprintf(&text, "Revoke it with: poweur share revoke %s\n", shareID)
+	return writeOutput(stdout, *jsonOut, result, text.String())
+}
+
+// shareLinkURL is where a link share lives: the owner's own host.
+func shareLinkURL(identity, token string) string {
+	return "https://" + identity + "/s/" + token
+}
+
+func runShareLinkLs(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("share link ls", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	useIdentity := fs.String("use-identity", "", "identity")
+	jsonOut := fs.Bool("json", false, "output json")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+		return 1
+	}
+	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	if !ok {
+		return 1
+	}
+	ctx := context.Background()
+	names, err := listTreeDir(ctx, relayURL, identityValue, token, sharesTreeDir)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var links []linkShareResult
+	for _, name := range names {
+		raw, status, err := davGetBytes(ctx, relayURL, identityValue, token, sharesTreeDir+"/"+name)
+		if err != nil || status != http.StatusOK {
+			continue
+		}
+		g, err := idpkg.ParseShareGrant(raw)
+		if err != nil {
+			continue
+		}
+		linkTok, isLink := g.LinkToken()
+		if !isLink {
+			continue
+		}
+		links = append(links, linkShareResult{
+			ShareID: g.ShareID, Path: g.Path,
+			URL:          shareLinkURL(g.Owner, linkTok),
+			Token:        linkTok,
+			ExpiresAt:    g.ExpiresAt,
+			MaxDownloads: g.MaxDownloads(),
+			Password:     g.RequiresPassword(),
+		})
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, links, "")
+	}
+	if len(links) == 0 {
+		fmt.Fprintln(stdout, "no link shares")
+		return 0
+	}
+	for _, l := range links {
+		expiry := l.ExpiresAt
+		if expiry == "" {
+			expiry = "never"
+		}
+		limit := "unlimited"
+		if l.MaxDownloads > 0 {
+			limit = strconv.Itoa(l.MaxDownloads)
+		}
+		fmt.Fprintf(stdout, "%s\t/%s\t%s\texpires=%s\tmax=%s\tpassword=%t\n",
+			l.ShareID, l.Path, l.URL, expiry, limit, l.Password)
+	}
+	return 0
 }
 
 func runShareLs(args []string, stdout, stderr io.Writer) int {

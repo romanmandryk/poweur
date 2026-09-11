@@ -7,6 +7,7 @@
  * layer you have to go through.
  */
 import { readAnalyticsPreference, writeAnalyticsPreference } from "./analytics.js";
+import { attachmentMetadata, downloadAttachment, uploadAttachment } from "./attachments.js";
 import { PoweurError } from "./errors.js";
 import { Contacts, fetchRequests } from "./contacts.js";
 import { DavClient, mintDavToken } from "./files.js";
@@ -14,6 +15,7 @@ import { RelayClient } from "./http.js";
 import { EnrollApi } from "./enroll.js";
 import { HISTORY_QUEUE_ANONYMOUS, HISTORY_QUEUE_INBOX, HISTORY_QUEUE_SENT, MessageHistory, } from "./history.js";
 import { IdentityApi } from "./identity.js";
+import { GroupMessaging } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
@@ -35,6 +37,7 @@ export class PoweurClient {
     enroll;
     sessions;
     messages;
+    groups;
     #resolveOptions;
     #dav = null;
     constructor(options) {
@@ -52,6 +55,7 @@ export class PoweurClient {
             sessions: this.sessions,
             resolve: this.#resolveOptions,
         });
+        this.groups = new GroupMessaging({ client: this.relay, resolve: this.#resolveOptions });
     }
     get identityName() {
         return this.signer.identity;
@@ -59,6 +63,38 @@ export class PoweurClient {
     /** Send an encrypted message (session-signed by default). */
     send(recipient, plaintext, options = {}) {
         return this.messages.send(this.signer, recipient, plaintext, options);
+    }
+    /** Upload, grant, and send a small encrypted reference in one action. */
+    async sendAttachment(recipient, bytes, options) {
+        const ref = await uploadAttachment(await this.dav(), this.signer, recipient, bytes, options);
+        const sent = await this.sendAndArchive(recipient, options.caption || ref.name, {
+            type: "chat.attachment", metadata: attachmentMetadata(ref),
+            ...(options.threadId ? { threadId: options.threadId } : {}),
+        });
+        return { ref, ...sent };
+    }
+    downloadAttachment(metadata) {
+        return downloadAttachment(this.signer, metadata, this.#resolveOptions);
+    }
+    /** Send one per-member-encrypted message through an addressable group. */
+    sendGroup(group, plaintext, options = {}) {
+        return this.groups.send(this.signer, group, plaintext, options);
+    }
+    /** Send to a group and archive one sender-side conversation record. */
+    async sendGroupAndArchive(group, plaintext, options = {}) {
+        const result = await this.sendGroup(group, plaintext, options);
+        const first = result.envelopes[0];
+        const { archived, lost } = await this.archive([{
+                id: first.id,
+                sender: this.signer.identity,
+                recipient: result.group.group,
+                timestamp: first.timestamp,
+                ...(options.type ? { type: options.type } : {}),
+                thread_id: first.thread_id,
+                queue: HISTORY_QUEUE_SENT,
+                body: plaintext,
+            }]);
+        return { ...result, archived, lost };
     }
     /** Fetch and decrypt the inbox. */
     inbox() {
@@ -112,6 +148,9 @@ export class PoweurClient {
             recipient: m.recipient || this.signer.identity,
             timestamp: m.timestamp,
             ...(m.type ? { type: m.type } : {}),
+            ...(m.thread_id ? { thread_id: m.thread_id } : {}),
+            ...(m.expires_at ? { expires_at: m.expires_at } : {}),
+            ...(m.metadata ? { metadata: m.metadata } : {}),
             queue: HISTORY_QUEUE_INBOX,
             body: m.plaintext ?? "",
         })));
@@ -127,6 +166,9 @@ export class PoweurClient {
                 recipient: result.message.recipient,
                 timestamp: result.message.timestamp,
                 ...(options.type ? { type: options.type } : {}),
+                ...(options.threadId ? { thread_id: options.threadId } : {}),
+                ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
+                ...(options.metadata ? { metadata: options.metadata } : {}),
                 queue: HISTORY_QUEUE_SENT,
                 body: plaintext,
             },
@@ -258,8 +300,8 @@ export class PoweurClient {
     async policy() {
         return readInboxPolicy(await this.dav());
     }
-    async setPolicy(mode, anonymous) {
-        return writeInboxPolicy(await this.dav(), mode, anonymous);
+    async setPolicy(mode, anonymous, readReceipts) {
+        return writeInboxPolicy(await this.dav(), mode, anonymous, readReceipts);
     }
     /** Our own public profile document, and whether one has been written. */
     async profile() {

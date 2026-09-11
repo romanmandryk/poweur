@@ -51,6 +51,51 @@
       "signature": "Pj3csqCEYOtoZSnYJw4jmIpkaT_sffU_yTu0mL9kRDE9jWH3lJvFZNtBlOP8WfoSB16CsfukoEiIWs0ZyjiJDQ"
     },
     {
+      "name": "message-threaded",
+      "inputs": {
+        "encryption": {
+          "alg": "x25519-chacha20-poly1305",
+          "ephemeral_public_key": "ZXBoZW1lcmFsLXB1YmxpYy1rZXk",
+          "nonce": "bm9uY2UtMTIzNDU2Nzg"
+        },
+        "id": "msg_1768469400000_abcdefghi",
+        "payload": "Y2lwaGVydGV4dA",
+        "recipient": "bob.example.org",
+        "sender": "alice.poweur.net",
+        "session_id": "sess_0011",
+        "thread_id": "thr_1768469400000_project",
+        "timestamp": "2026-01-15T09:30:00Z"
+      },
+      "canonical": "alice.poweur.net\nbob.example.org\n2026-01-15T09:30:00Z\nY2lwaGVydGV4dA\nid:msg_1768469400000_abcdefghi\nsession:sess_0011\nenc:x25519-chacha20-poly1305:ZXBoZW1lcmFsLXB1YmxpYy1rZXk:bm9uY2UtMTIzNDU2Nzg\nthread:thr_1768469400000_project",
+      "signature": "wGxLMeXTwHV6hIcDOzJHjJLpwyeJMisS9qi5ewIWZIBBTb-EMUnkog6sMyKggMDAjSkdwbou663lpS-5MuRSCQ"
+    },
+    {
+      "name": "message-full-envelope",
+      "inputs": {
+        "encryption": {
+          "alg": "x25519-chacha20-poly1305",
+          "ephemeral_public_key": "ZXBoZW1lcmFsLXB1YmxpYy1rZXk",
+          "nonce": "bm9uY2UtMTIzNDU2Nzg"
+        },
+        "expires_at": "2026-01-16T09:30:00Z",
+        "id": "msg_1768469400000_abcdefghi",
+        "metadata": {
+          "bytes": "20480",
+          "mime": "image/png",
+          "share.path": "shared/.attachments/a1"
+        },
+        "payload": "Y2lwaGVydGV4dA",
+        "recipient": "bob.example.org",
+        "sender": "alice.poweur.net",
+        "session_id": "sess_0011",
+        "thread_id": "thr_1768469400000_project",
+        "timestamp": "2026-01-15T09:30:00Z",
+        "type": "chat.attachment"
+      },
+      "canonical": "alice.poweur.net\nbob.example.org\n2026-01-15T09:30:00Z\nY2lwaGVydGV4dA\nid:msg_1768469400000_abcdefghi\nsession:sess_0011\nenc:x25519-chacha20-poly1305:ZXBoZW1lcmFsLXB1YmxpYy1rZXk:bm9uY2UtMTIzNDU2Nzg\ntype:chat.attachment\nthread:thr_1768469400000_project\nexpires:2026-01-16T09:30:00Z\nmeta:bytes:20480\nmeta:mime:image/png\nmeta:share.path:shared/.attachments/a1",
+      "signature": "CBiViYLleDJ7roU42V1SOMg-igZC9iL4JpniSOsYUyYdfLjPYva9DM6NBx4suanCKKNsCvwlYL9SttklwUXlCg"
+    },
+    {
       "name": "ack",
       "inputs": {
         "id": "ack_1768469400000_jklmnopqr",

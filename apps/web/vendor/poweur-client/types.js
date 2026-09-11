@@ -9,6 +9,7 @@ export const PROTOCOL_VERSION = 1;
 export const ENCRYPTION_ALG = "x25519-chacha20-poly1305";
 export const ACK_TYPE_DELIVERY = "ack";
 export const ACK_STATE_DELIVERED_CLIENT = "delivered_client";
+export const ACK_STATE_READ = "read";
 export const PERM_READ = "read";
 export const PERM_WRITE = "write";
 export const CONTACT_REQUESTED = "requested";

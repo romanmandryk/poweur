@@ -4,14 +4,13 @@ sidebar_position: 7
 title: Delivery Acks
 ---
 
-# Delivery Acks (Two-Tick Model)
+# Delivery Acks (Three-Tick Model)
 
 Poweur ID tracks message delivery in WhatsApp-style ticks so a sender can
 tell, after the fact, whether a message reached the recipient's relay,
 whether the recipient's client actually decrypted it, and whether something
-went wrong along the way. The model intentionally has only two ticks in
-v1; a future "read" tick is reserved as a third state without changing the
-transport.
+went wrong along the way. A third tick distinguishes delivery to a decrypting
+client from the user opening the conversation.
 
 ## Tick states
 
@@ -19,10 +18,10 @@ transport.
 |------|-------|--------|---------|
 | Tick 1 | `delivered_recipient_relay` | HTTP | The recipient's relay returned `202 Accepted` to `POST /messages` |
 | Tick 2 | `delivered_client` | Recipient client | The recipient successfully decrypted the message and emitted a signed ack |
+| Tick 3 | `read` | Recipient client | The user opened the conversation and their inbox policy permits a receipt |
 
-Tick 1 is a property of the HTTP exchange — there is no on-wire ack
-object. Tick 2 is a real signed envelope, carried back to the sender's
-home relay over `POST /acks`.
+Tick 1 is a property of the HTTP exchange — there is no on-wire ack object.
+Ticks 2 and 3 are signed envelopes carried back over `POST /acks`.
 
 The CLI also tracks two local-only states for its own bookkeeping:
 
@@ -33,9 +32,7 @@ The CLI also tracks two local-only states for its own bookkeeping:
 
 ## Ack envelope
 
-Acks are short, signed JSON objects. The protocol pins a single `state`
-value in v1 (`delivered_client`); future versions may extend the enum
-without changing the envelope shape.
+Acks are short, signed JSON objects. `state` is `delivered_client` or `read`.
 
 ```json
 {
@@ -131,8 +128,12 @@ JSON-Lines file at `~/.poweur/pending/<identity>.jsonl`. One line per
 transition; reads collapse the log into the latest state per
 `message_id`. The `poweur messages status [--id <msg_id>] [--json]`
 command renders this view with WhatsApp-style tick glyphs (`·` queued,
-`✓` tick 1, `✓✓` tick 2, `✗` failed). See
+`✓` tick 1, `✓✓` tick 2, `✓✓✓` read, `✗` failed). See
 [CLI Reference](/clients/cli-reference) for usage.
+
+Read receipts default on for compatibility. `poweur-sys/relay/inbox-policy.json`
+may set `read_receipts.enabled` false globally or list identities under
+`read_receipts.disabled_for`; inability to load policy fails closed and emits no read receipt.
 
 ## Related
 

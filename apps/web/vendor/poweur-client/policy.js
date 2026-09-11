@@ -8,6 +8,7 @@
  * separate opt-in block that always defaults to deny.
  */
 import { PoweurError } from "./errors.js";
+import { validateIdentityName } from "./names.js";
 import { ANON_CHALLENGE_NONE, ANON_CHALLENGE_PAYMENT, ANON_CHALLENGE_POW, ANON_CHALLENGE_VERIFIED, DEFAULT_INBOX_MODE, INBOX_CONTACTS_AND_REQUESTS, INBOX_CONTACTS_ONLY, INBOX_OPEN, } from "./types.js";
 export const INBOX_POLICY_PATH = "poweur-sys/relay/inbox-policy.json";
 export const ANON_DEFAULT_MAX_BYTES = 4096;
@@ -53,6 +54,39 @@ export function validateInboxPolicy(policy) {
     }
     if (policy.anonymous)
         validateAnonymousPolicy(policy.anonymous);
+    if (policy.read_receipts) {
+        if (typeof policy.read_receipts.enabled !== "boolean") {
+            throw new PoweurError("invalid_document", "read_receipts.enabled must be a boolean");
+        }
+        if (!Array.isArray(policy.read_receipts.disabled_for ?? [])) {
+            throw new PoweurError("invalid_document", "read_receipts.disabled_for must be an array");
+        }
+        if ((policy.read_receipts.disabled_for?.length ?? 0) > 1000) {
+            throw new PoweurError("invalid_document", "read_receipts.disabled_for has too many entries (max 1000)");
+        }
+        const seen = new Set();
+        for (const identity of policy.read_receipts.disabled_for ?? []) {
+            const normalized = identity.trim().toLowerCase();
+            try {
+                validateIdentityName(normalized);
+            }
+            catch {
+                throw new PoweurError("invalid_document", `invalid read-receipt identity "${identity}"`);
+            }
+            if (seen.has(normalized)) {
+                throw new PoweurError("invalid_document", `duplicate read-receipt identity "${normalized}"`);
+            }
+            seen.add(normalized);
+        }
+    }
+}
+export function sendsReadReceiptsTo(policy, peer) {
+    if (!policy.read_receipts)
+        return true;
+    if (!policy.read_receipts.enabled)
+        return false;
+    const wanted = peer.trim().toLowerCase();
+    return !(policy.read_receipts.disabled_for ?? []).some((name) => name.trim().toLowerCase() === wanted);
 }
 /** Read the policy, or the relay default when no file exists. */
 export async function readInboxPolicy(dav) {
@@ -64,10 +98,12 @@ export async function readInboxPolicy(dav) {
     validateInboxPolicy(policy);
     return { policy, explicit: true };
 }
-export async function writeInboxPolicy(dav, mode, anonymous) {
+export async function writeInboxPolicy(dav, mode, anonymous, readReceipts) {
     const policy = { version: 1, mode };
     if (anonymous)
         policy.anonymous = anonymous;
+    if (readReceipts)
+        policy.read_receipts = readReceipts;
     validateInboxPolicy(policy);
     await dav.writeJson(INBOX_POLICY_PATH, policy);
     return policy;

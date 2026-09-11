@@ -8,6 +8,7 @@
  */
 
 import { readAnalyticsPreference, writeAnalyticsPreference } from "./analytics.js";
+import { attachmentMetadata, downloadAttachment, uploadAttachment, type AttachmentRef } from "./attachments.js";
 import type { Decryptor, Signer } from "./crypto/keys.js";
 import { PoweurError } from "./errors.js";
 import { Contacts, fetchRequests } from "./contacts.js";
@@ -22,6 +23,7 @@ import {
   type HistoryRecord,
 } from "./history.js";
 import { IdentityApi } from "./identity.js";
+import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
@@ -69,6 +71,7 @@ export class PoweurClient {
   readonly enroll: EnrollApi;
   readonly sessions: SessionManager;
   readonly messages: Messaging;
+  readonly groups: GroupMessaging;
   readonly #resolveOptions: ResolveOptions;
   #dav: DavClient | null = null;
 
@@ -87,6 +90,7 @@ export class PoweurClient {
       sessions: this.sessions,
       resolve: this.#resolveOptions,
     });
+    this.groups = new GroupMessaging({ client: this.relay, resolve: this.#resolveOptions });
   }
 
   get identityName(): string {
@@ -96,6 +100,42 @@ export class PoweurClient {
   /** Send an encrypted message (session-signed by default). */
   send(recipient: string, plaintext: string, options: SendOptions = {}): Promise<SendResult> {
     return this.messages.send(this.signer, recipient, plaintext, options);
+  }
+
+  /** Upload, grant, and send a small encrypted reference in one action. */
+  async sendAttachment(recipient: string, bytes: Uint8Array, options: { name: string; mime?: string; caption?: string; threadId?: string }) {
+    const ref = await uploadAttachment(await this.dav(), this.signer, recipient, bytes, options);
+    const sent = await this.sendAndArchive(recipient, options.caption || ref.name, {
+      type: "chat.attachment", metadata: attachmentMetadata(ref),
+      ...(options.threadId ? { threadId: options.threadId } : {}),
+    });
+    return { ref, ...sent };
+  }
+
+  downloadAttachment(metadata: Record<string, string>) {
+    return downloadAttachment(this.signer, metadata, this.#resolveOptions);
+  }
+
+  /** Send one per-member-encrypted message through an addressable group. */
+  sendGroup(group: string, plaintext: string, options: GroupSendOptions = {}): Promise<GroupSendResult> {
+    return this.groups.send(this.signer, group, plaintext, options);
+  }
+
+  /** Send to a group and archive one sender-side conversation record. */
+  async sendGroupAndArchive(group: string, plaintext: string, options: GroupSendOptions = {}) {
+    const result = await this.sendGroup(group, plaintext, options);
+    const first = result.envelopes[0]!;
+    const { archived, lost } = await this.archive([{
+      id: first.id,
+      sender: this.signer.identity,
+      recipient: result.group.group,
+      timestamp: first.timestamp,
+      ...(options.type ? { type: options.type } : {}),
+      thread_id: first.thread_id,
+      queue: HISTORY_QUEUE_SENT,
+      body: plaintext,
+    }]);
+    return { ...result, archived, lost };
   }
 
   /** Fetch and decrypt the inbox. */
@@ -158,6 +198,9 @@ export class PoweurClient {
           recipient: m.recipient || this.signer.identity,
           timestamp: m.timestamp,
           ...(m.type ? { type: m.type } : {}),
+          ...(m.thread_id ? { thread_id: m.thread_id } : {}),
+          ...(m.expires_at ? { expires_at: m.expires_at } : {}),
+          ...(m.metadata ? { metadata: m.metadata } : {}),
           queue: HISTORY_QUEUE_INBOX as typeof HISTORY_QUEUE_INBOX,
           body: m.plaintext ?? "",
         })),
@@ -179,6 +222,9 @@ export class PoweurClient {
         recipient: result.message.recipient,
         timestamp: result.message.timestamp,
         ...(options.type ? { type: options.type } : {}),
+        ...(options.threadId ? { thread_id: options.threadId } : {}),
+        ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
+        ...(options.metadata ? { metadata: options.metadata } : {}),
         queue: HISTORY_QUEUE_SENT,
         body: plaintext,
       },
@@ -326,8 +372,8 @@ export class PoweurClient {
     return readInboxPolicy(await this.dav());
   }
 
-  async setPolicy(mode: InboxMode, anonymous?: AnonymousPolicy): Promise<InboxPolicy> {
-    return writeInboxPolicy(await this.dav(), mode, anonymous);
+  async setPolicy(mode: InboxMode, anonymous?: AnonymousPolicy, readReceipts?: InboxPolicy["read_receipts"]): Promise<InboxPolicy> {
+    return writeInboxPolicy(await this.dav(), mode, anonymous, readReceipts);
   }
 
   /** Our own public profile document, and whether one has been written. */

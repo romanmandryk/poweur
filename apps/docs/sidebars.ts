@@ -19,6 +19,7 @@ const sidebars: SidebarsConfig = {
         'protocol/message-format',
         'protocol/routing',
         'protocol/delivery-acks',
+        'protocol/group-messaging',
         'protocol/interoperability',
         'protocol/rate-limiting',
       ],
@@ -42,6 +43,7 @@ const sidebars: SidebarsConfig = {
         'files/storage-model',
         'files/webdav',
         'files/sharing',
+        'files/group-identities',
         'files/sync-protocol',
         'files/e2ee-design',
       ],
@@ -63,6 +65,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'trust/contacts',
         'trust/anonymous-and-challenges',
+        'trust/relay-reputation',
       ],
     },
     {
@@ -72,6 +75,18 @@ const sidebars: SidebarsConfig = {
       items: [
         'web/walkthrough',
         'web/claim-your-id',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Sign in with Poweur ID',
+      collapsed: false,
+      items: [
+        'auth/sign-in',
+        'auth/add-sign-in',
+        'auth/connected-apps',
+        'auth/mobile-signer',
+        'auth/interop-bridges',
       ],
     },
     {
@@ -90,6 +105,7 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         'future/capabilities',
+        'future/mls-adoption',
       ],
     },
   ],

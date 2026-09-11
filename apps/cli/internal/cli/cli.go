@@ -47,6 +47,14 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSend(args[1:], stdout, stderr)
 	case "inbox":
 		return runInbox(args[1:], stdout, stderr)
+	case "listen":
+		return runListen(args[1:], stdout, stderr)
+	case "outbox":
+		return runOutbox(args[1:], stdout, stderr)
+	case "attachment":
+		return runAttachment(args[1:], stdout, stderr)
+	case "devices":
+		return runDevices(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
 	case "messages":
@@ -61,6 +69,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSync(args[1:], stdout, stderr)
 	case "share":
 		return runShare(args[1:], stdout, stderr)
+	case "group":
+		return runGroup(args[1:], stdout, stderr)
 	case "contacts":
 		return runContacts(args[1:], stdout, stderr)
 	case "requests":
@@ -69,6 +79,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runAnalytics(args[1:], stdout, stderr)
 	case "policy":
 		return runPolicy(args[1:], stdout, stderr)
+	case "blocks":
+		return runBlocks(args[1:], stdout, stderr)
+	case "report":
+		return runReport(args[1:], stdout, stderr)
 	case "anon":
 		return runAnon(args[1:], stdout, stderr)
 	case "session":
@@ -646,18 +660,50 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	signWith := fs.String("sign-with", "session", "signing key to use: session (default) or identity")
 	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
-	msgType := fs.String("type", "", "envelope message type (sys.* system messages, e.g. sys.contact.request)")
+	msgType := fs.String("type", "", "envelope message type (default chat.text; sys.* reserved for the platform)")
+	threadID := fs.String("thread", "", "group this message into a conversation thread")
+	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
+	attachPath := fs.String("attach", "", "upload and attach a file (max 20 MB)")
+	meta := &metaFlag{}
+	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
 	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
+	requestOnReject := fs.Bool("request-on-reject", false, "if the recipient's inbox policy rejects the message, send it as a contact request instead (no prompt)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
+	if fs.NArg() < 1 || (fs.NArg() < 2 && *attachPath == "") {
+		fmt.Fprintln(stderr, "usage: poweur send <to> [message] [--attach file] [--sign-with=session|identity] [--via-home-relay] [--anon]")
+		return 1
+	}
+	if *attachPath != "" && *msgType != "" && *msgType != idpkg.MsgTypeChatAttachment {
+		fmt.Fprintln(stderr, "--attach sets --type=chat.attachment")
+		return 1
+	}
+	if *attachPath != "" {
+		for key := range meta.Map() {
+			if strings.HasPrefix(key, "attachment_") {
+				fmt.Fprintf(stderr, "attachment metadata key %s is generated automatically\n", key)
+				return 1
+			}
+		}
+	}
+	// Check the envelope before anything is encrypted, signed, journalled or
+	// posted: a `sys.*` typo should not become a recorded send attempt.
+	if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if *anonFlag {
+		// An anonymous envelope carries no signature, so nothing binds these
+		// fields to a sender — any relay on the path could add, drop or
+		// rewrite them. Rather than ship routing metadata nobody can trust,
+		// the combination is refused.
+		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil || *attachPath != "" {
+			fmt.Fprintln(stderr, "--anon cannot carry --type/--thread/--expires/--meta: an unsigned envelope binds nothing")
+			return 1
+		}
 		return runSendAnon(cfg, fs.Arg(0), fs.Arg(1), *jsonOut, stdout, stderr)
 	}
 	mode := strings.ToLower(strings.TrimSpace(*signWith))
@@ -683,13 +729,41 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 
 	recipient := fs.Arg(0)
-	plaintext := fs.Arg(1)
+	plaintext := ""
+	if fs.NArg() > 1 {
+		plaintext = fs.Arg(1)
+	}
 
 	// Key pinning (E07-T4): when the recipient is a pinned contact, the
 	// resolved signing key must match the pin (or be covered by a signed
 	// rotation statement) — the known-hosts / safety-number model.
 	if code := checkPinnedKey(cfg, identityValue, identityPriv, recipient, *acceptNewKey, stderr); code != 0 {
 		return code
+	}
+	if *attachPath != "" {
+		ref, err := prepareAttachment(context.Background(), cfg, identityValue, identityPriv, recipient, *attachPath)
+		if err != nil {
+			fmt.Fprintln(stderr, "attachment:", err)
+			return 1
+		}
+		if meta.values == nil {
+			meta.values = map[string]string{}
+		}
+		for key, value := range ref.Metadata() {
+			if _, exists := meta.values[key]; exists {
+				fmt.Fprintf(stderr, "attachment metadata key %s cannot be overridden\n", key)
+				return 1
+			}
+			meta.values[key] = value
+		}
+		*msgType = idpkg.MsgTypeChatAttachment
+		if plaintext == "" {
+			plaintext = ref.Name
+		}
+		if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -751,22 +825,37 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			Timestamp:  timestamp,
 			Payload:    payloadString,
 			Type:       *msgType,
+			ThreadID:   *threadID,
+			ExpiresAt:  *expiresAt,
+			Metadata:   meta.Map(),
 			Encryption: encMeta,
 		}
 		msg.Signature = signMessage(identityPriv, msg)
 
 		resp, err := SendMessage(context.Background(), targetURL, msg)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-			fmt.Fprintln(stderr, err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(resp.Body)
+			if retryableStatus(resp.StatusCode) {
+				return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+					plaintext, *useIdentity, *jsonOut,
+					fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), stdout, stderr)
+			}
 			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 				fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 			fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+			// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+			if offerContactRequest(contactRequestOffer{
+				recipient: recipient, plaintext: plaintext, msgType: *msgType,
+				useIdentity: identityValue, status: resp.StatusCode, body: body,
+				auto: *requestOnReject, jsonOut: *jsonOut,
+			}, stdout, stderr) {
+				return 0
+			}
 			return 1
 		}
 
@@ -774,9 +863,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		// The relay never hands a sender their own message back, so this copy
 		// is the only record that the conversation has two sides.
-		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-			recipient, timestamp, *msgType, plaintext)}, stderr)
+			recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 		output := map[string]any{
 			"id":             messageID,
@@ -799,9 +888,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	sess, err := ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
 	if err != nil {
-		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error: "+err.Error())
-		fmt.Fprintln(stderr, "session error:", err)
-		return 1
+		msg := Message{ID: messageID, Sender: identityValue, Recipient: recipient, Timestamp: timestamp,
+			Payload: payloadString, Type: *msgType, ThreadID: *threadID, ExpiresAt: *expiresAt,
+			Metadata: meta.Map(), Encryption: encMeta}
+		return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+			plaintext, *useIdentity, *jsonOut, fmt.Errorf("session unavailable: %w", err), stdout, stderr)
 	}
 
 	sessionPriv, err := sess.PrivateKey()
@@ -817,6 +908,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		Timestamp:    timestamp,
 		Payload:      payloadString,
 		Type:         *msgType,
+		ThreadID:     *threadID,
+		ExpiresAt:    *expiresAt,
+		Metadata:     meta.Map(),
 		SessionID:    sess.SessionID,
 		SessionProof: sessionProofFrom(sess),
 		Encryption:   encMeta,
@@ -825,9 +919,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	resp, err := SendMessage(context.Background(), targetURL, msg)
 	if err != nil {
-		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-		fmt.Fprintln(stderr, err)
-		return 1
+		return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+			plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
@@ -836,9 +929,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		}
 		sess, err = ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error (retry): "+err.Error())
-			fmt.Fprintln(stderr, "session error (after retry):", err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, fmt.Errorf("session unavailable after retry: %w", err), stdout, stderr)
 		}
 		sessionPriv, err = sess.PrivateKey()
 		if err != nil {
@@ -850,25 +942,37 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		msg.Signature = signMessage(sessionPriv, msg)
 		resp, err = SendMessage(context.Background(), targetURL, msg)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-			fmt.Fprintln(stderr, err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
+		if retryableStatus(resp.StatusCode) {
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut,
+				fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), stdout, stderr)
+		}
 		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 			fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
+		// E07-T3: a `policy_rejected` refusal is an invitation to ask.
+		if offerContactRequest(contactRequestOffer{
+			recipient: recipient, plaintext: plaintext, msgType: *msgType,
+			useIdentity: identityValue, status: resp.StatusCode, body: body,
+			auto: *requestOnReject, jsonOut: *jsonOut,
+		}, stdout, stderr) {
+			return 0
+		}
 		return 1
 	}
 
 	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
 
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordFrom(
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
 		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-		recipient, timestamp, *msgType, plaintext)}, stderr)
+		recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,
@@ -986,107 +1090,19 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *jsonOut {
-		fmt.Fprintln(stdout, string(payload))
-		return 0
-	}
-
-	var inbox struct {
-		Messages []struct {
-			ID         string          `json:"id"`
-			Sender     string          `json:"sender"`
-			Recipient  string          `json:"recipient"`
-			Timestamp  string          `json:"timestamp"`
-			Payload    string          `json:"payload"`
-			Signature  string          `json:"signature"`
-			Type       string          `json:"type,omitempty"`
-			SessionID  string          `json:"session_id,omitempty"`
-			Encryption *EncryptionMeta `json:"encryption,omitempty"`
-		} `json:"messages"`
-		Acks []Ack `json:"acks"`
-	}
-	if err := json.Unmarshal(payload, &inbox); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	// Under `open` an accept arrives as an ordinary typed message, so the
-	// inbox drain is where the handshake we started gets finished. Under a
-	// closed policy the same envelope rides the requests queue instead;
-	// `runRequests` does this on its side.
-	var accepts []string
-	for _, msg := range inbox.Messages {
-		if msg.Type == idpkg.MsgTypeContactAccept && msg.Sender != "" {
-			accepts = append(accepts, msg.Sender)
-		}
-	}
-	promoteAcceptedContacts(context.Background(), *useIdentity, accepts, stdout, stderr)
-
-	// Surface tick-2 (delivered_client) acks for previously-sent messages
-	// before printing inbound payloads. The ack stream is independent of
-	// the message stream — an empty inbox can still carry acks.
-	for _, ack := range inbox.Acks {
-		applyInboundAck(identityValue, ack)
-		fmt.Fprintf(stdout, "✓✓ [%s] %s delivered to %s (msg %s)\n", ack.Timestamp, ack.State, ack.Sender, ack.MessageID)
-	}
-
-	if len(inbox.Messages) == 0 && len(inbox.Acks) == 0 {
-		fmt.Fprintln(stdout, "no messages")
-		return 0
-	}
-
-	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
-
-	// What the drain hands over exists nowhere else once this call returns,
-	// so everything that opens is archived before the function can fail.
-	var archive []idpkg.HistoryRecord
-	defer func() { archiveRecords(*useIdentity, archive, stderr) }()
-
-	for _, msg := range inbox.Messages {
-		display := msg.Payload
-		decrypted := false
-		if msg.Encryption != nil && msg.Encryption.Alg != "" {
-			if encPriv == nil {
-				display = "[encrypted: no local encryption key]"
-			} else {
-				plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
-					Ciphertext:         msg.Payload,
-					EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
-					Nonce:              msg.Encryption.Nonce,
-				})
-				if err != nil {
-					display = fmt.Sprintf("[decrypt failed: %v]", err)
-				} else {
-					display = string(plaintext)
-					decrypted = true
-				}
-			}
-		}
-		prefix := "  "
-		if decrypted {
-			prefix = "🔒"
-		}
-		fmt.Fprintf(stdout, "%s [%s] %s: %s\n", prefix, msg.Timestamp, msg.Sender, display)
-
-		if decrypted {
-			archive = append(archive, historyRecordFrom(identityValue, idpkg.HistoryQueueInbox,
-				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, display))
-		}
-
-		// Tick-2 ack: only emit when we actually decrypted the message,
-		// i.e. we have proof the inbound message reached the client.
-		// Failed decrypts (no key, wrong key, corruption) intentionally
-		// stay at tick 1 on the sender's side.
-		if decrypted && msg.ID != "" && msg.Sender != "" {
-			recipientForAck := msg.Recipient
-			if recipientForAck == "" {
-				recipientForAck = identityValue
-			}
-			if err := emitDeliveredClientAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, sess); err != nil {
-				fmt.Fprintf(stderr, "warning: failed to send delivery ack for %s: %v\n", msg.ID, err)
-			}
-		}
-	}
+	// Printing, decrypting, acking and archiving the pickup is shared with
+	// `poweur listen` (EPIC-009 E09-T2), which drains the same way when the
+	// push stream says something arrived.
+	// An empty inbox is not an error, so the "did anything arrive" answer is
+	// only of interest to `poweur listen --once`.
+	renderInboxPayload(payload, inboxRender{
+		cfg:          cfg,
+		identity:     identityValue,
+		useIdentity:  *useIdentity,
+		identityPriv: identityPriv,
+		session:      sess,
+		jsonOut:      *jsonOut,
+	}, stdout, stderr)
 	return 0
 }
 
@@ -1095,7 +1111,13 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 // an unknown message_id is silently ignored (could be from a different
 // device or a client-side journal that was reset).
 func applyInboundAck(localIdentity string, ack Ack) {
-	if ack.State != AckStateDeliveredClient || ack.MessageID == "" {
+	if ack.MessageID == "" {
+		return
+	}
+	state := journal.StateDeliveredClient
+	if ack.State == AckStateRead {
+		state = journal.StateRead
+	} else if ack.State != AckStateDeliveredClient {
 		return
 	}
 	_ = journal.Append(journal.Entry{
@@ -1103,7 +1125,7 @@ func applyInboundAck(localIdentity string, ack Ack) {
 		Sender:    localIdentity,
 		Recipient: ack.Sender,
 		Timestamp: time.Now().UTC(),
-		State:     journal.StateDeliveredClient,
+		State:     state,
 		Detail:    "ack id=" + ack.ID,
 	})
 }
@@ -1117,7 +1139,7 @@ func applyInboundAck(localIdentity string, ack Ack) {
 // session is loaded we fall back to the long-lived identity key. The
 // canonical layout is identical in both cases (matches relay's
 // crypto.CanonicalAck).
-func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentity string, identityPriv ed25519.PrivateKey, messageID, originalSender, originalRecipient string, sess session.Session) error {
+func emitMessageAck(ctx context.Context, cfg config.Config, localIdentity string, identityPriv ed25519.PrivateKey, messageID, originalSender, originalRecipient, state string, sess session.Session) error {
 	if messageID == "" || originalSender == "" {
 		return errors.New("ack requires message id and original sender")
 	}
@@ -1131,7 +1153,7 @@ func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentit
 		Type:      AckTypeDeliveryAck,
 		ID:        identity.NewAckID(),
 		MessageID: messageID,
-		State:     AckStateDeliveredClient,
+		State:     state,
 		Sender:    originalRecipient,
 		Recipient: originalSender,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -1493,12 +1515,14 @@ func runAuth(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	switch args[0] {
+	case "approve":
+		return runAuthApprove(args[1:], stdout, stderr)
 	case "inspect":
 		return runAuthInspect(args[1:], stdout, stderr)
 	case "sign":
 		return runAuthSign(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "unknown auth subcommand")
+		fmt.Fprintln(stderr, "unknown auth subcommand (want approve, inspect, sign)")
 		return 1
 	}
 }
@@ -1695,6 +1719,11 @@ func sessionProofFrom(sess session.Session) *SessionProof {
 // caller chooses which Ed25519 private key to pass: the short-lived session
 // key (normal path, SessionID is set) or the long-lived identity key
 // (headless/opt-out path, SessionID is empty).
+//
+// The optional lines are appended in a fixed order and only when the field is
+// set (crypto.CanonicalMessageEnvelope on the relay, canonicalMessage() in
+// @poweur/client): id, session, enc, type, thread, expires, meta:<key> in
+// ascending key order.
 func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	parts := []string{msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload}
 	if msg.ID != "" {
@@ -1709,6 +1738,13 @@ func signMessage(priv ed25519.PrivateKey, msg Message) string {
 	if msg.Type != "" {
 		parts = append(parts, "type:"+msg.Type)
 	}
+	if msg.ThreadID != "" {
+		parts = append(parts, "thread:"+msg.ThreadID)
+	}
+	if msg.ExpiresAt != "" {
+		parts = append(parts, "expires:"+msg.ExpiresAt)
+	}
+	parts = append(parts, idpkg.MetadataLines(msg.Metadata)...)
 	canonical := strings.Join(parts, "\n")
 	sig := ed25519.Sign(priv, []byte(canonical))
 	return base64.StdEncoding.EncodeToString(sig)
@@ -1777,13 +1813,26 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// The identity document answers "which keys"; profile.json and
+	// capabilities.json answer "who" and "what do they speak" (E06-T2).
+	// Both are optional and live on a host we do not control, so they are
+	// fetched best-effort: a lookup that can verify a stranger's keys but
+	// cannot show the user their name is a lookup that stops half way.
+	profile, capabilities, profileNote := lookupPublicFiles(ctx, res)
+
 	out := map[string]any{
 		"identity":              res.Document.Identity,
 		"source":                res.Source,
 		"public_key":            res.Document.PublicKey,
 		"encryption_public_key": res.Document.EncryptionPublicKey,
 		"relay":                 res.Document.Relay,
+		// `capabilities` stays the identity document's own string list (its
+		// wire shape is a contract); `capabilities_document` is the richer
+		// capabilities.json when the identity publishes one.
 		"capabilities":          res.Document.Capabilities,
+		"capabilities_document": capabilities,
+		"profile":               profile,
+		"fingerprint":           idpkg.FingerprintOrKey(res.Document.PublicKey),
 	}
 	if *jsonOut {
 		return writeOutput(stdout, true, out, "")
@@ -1791,8 +1840,15 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
 	fmt.Fprintf(stdout, "source: %s\n", res.Source)
 	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
+	// The safety number (E07-T4) is the form a human can compare out of band.
+	fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(res.Document.PublicKey))
 	fmt.Fprintf(stdout, "encryption_public_key: %s\n", res.Document.EncryptionPublicKey)
 	fmt.Fprintf(stdout, "relay: %s\n", res.Document.Relay)
+	printProfile(stdout, res.Document.Identity, profile)
+	printCapabilities(stdout, capabilities)
+	if profileNote != "" {
+		fmt.Fprintln(stderr, profileNote)
+	}
 	return 0
 }
 
@@ -1933,8 +1989,13 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--json]
+  poweur send <to> [message] [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
   poweur inbox [--use-identity=...] [--json]
+  poweur listen [--use-identity=...] [--json] [--once]
+  poweur outbox [list|retry]
+  poweur attachment get <owner> <shared-path> [--sha256=<hex>] [--output=<file>]
+  poweur attachment rm <share-id> <shared-path>
+  poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
   poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
   poweur session refresh [--use-identity=...] [--json]
@@ -1952,9 +2013,18 @@ func printHelp(w io.Writer) {
   poweur share group set <name> --members=<id,id,...> [--json]
   poweur share group ls [--json]
   poweur share group remove <name>
+  poweur share link add <path> [--password=... | --password-stdin] [--expires=<rfc3339>] [--max-downloads=N] [--json]
+  poweur share link ls [--json]      (revoke with: poweur share revoke <share-id>)
+  poweur group create <group-id> [--admin=<id> ...] [--member=<id> ...] [--json]
+  poweur group show <group-id> [--json]
+  poweur group add <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
+  poweur group remove <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
   poweur requests [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]
+  poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
+  poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
+  poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)

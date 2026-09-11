@@ -56,18 +56,32 @@ type Server struct {
 	regGate         *RegistrationGate
 	client          *http.Client
 	idCache         *idpkg.Cache
+	// requestRelayLimit meters contact-request admissions per sending relay
+	// (E07-T5). Nil when the operator caps no window.
+	requestRelayLimit *ratelimit.PeerLimiter
+	// abuse counts verified sys.abuse.report submissions (E07-T5).
+	abuse *abuseLog
 
 	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
 	filesProvider files.StorageProvider
 	filesIndex    *files.Index
 	uploads       *files.Uploads
 	grants        *files.GrantStore
+	linkStats     *files.LinkStats
 	davTokens     *davTokenStore
+	connectedMu   sync.Mutex
+	// linkSecret authenticates password-gated link sessions (E05-T4). It is
+	// per-process on purpose: a restart ends every link session, which costs
+	// a visitor one password re-entry.
+	linkSecret []byte
 
 	locksMu  sync.Mutex
 	davLocks map[string]webdav.LockSystem
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
+	// deviceLocks serializes read-modify-write on each identity's
+	// poweur-sys/relay/devices.json (E04-T6).
+	deviceLocks *deviceLocks
 
 	cacheMu       sync.Mutex
 	relayCache    map[string]cachedRelay
@@ -110,31 +124,35 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		startupFailures = append(startupFailures, "ack_storage_open_failed")
 	}
 	s := &Server{
-		startupFailures: startupFailures,
-		stop:            make(chan struct{}),
-		cfg:             cfg,
-		resolver:        resolver,
-		providers:       providers,
-		identities:      store,
-		inbox:           inbox,
-		requests:        storage.NewRequestStore(),
-		anonInbox:       storage.NewInboxStore(),
-		anon:            newAnonState(),
-		powSecret:       newPowSecret(),
-		acks:            acks,
-		challenges:      storage.NewChallengeStore(),
-		keystore:        keystore,
-		rendezvous:      storage.NewRendezvousStore(),
-		sessions:        storage.NewSessionStore(), // sessions remain memory-only by design
-		rateLimit:       ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
-		regGate:         NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
-		client:          &http.Client{Timeout: 10 * time.Second},
-		idCache:         idpkg.NewCache(),
-		davTokens:       newDAVTokenStore(),
-		davLocks:        make(map[string]webdav.LockSystem),
-		hub:             newHub(),
-		relayCache:      make(map[string]cachedRelay),
-		localityCache:   make(map[string]cachedLocality),
+		startupFailures:   startupFailures,
+		stop:              make(chan struct{}),
+		cfg:               cfg,
+		resolver:          resolver,
+		providers:         providers,
+		identities:        store,
+		inbox:             inbox,
+		requests:          storage.NewRequestStore(),
+		anonInbox:         storage.NewInboxStore(),
+		anon:              newAnonState(),
+		powSecret:         newPowSecret(),
+		acks:              acks,
+		challenges:        storage.NewChallengeStore(),
+		keystore:          keystore,
+		rendezvous:        storage.NewRendezvousStore(),
+		sessions:          storage.NewSessionStore(), // sessions remain memory-only by design
+		rateLimit:         ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		requestRelayLimit: ratelimit.NewPeerLimiter(cfg.RequestRelayLimits),
+		abuse:             newAbuseLog(),
+		regGate:           NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
+		client:            &http.Client{Timeout: 10 * time.Second},
+		idCache:           idpkg.NewCache(),
+		davTokens:         newDAVTokenStore(),
+		linkSecret:        newPowSecret(), // 32 random bytes; see linkSecret above
+		davLocks:          make(map[string]webdav.LockSystem),
+		hub:               newHub(),
+		deviceLocks:       newDeviceLocks(),
+		relayCache:        make(map[string]cachedRelay),
+		localityCache:     make(map[string]cachedLocality),
 	}
 	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
 	// only ever talks to the StorageProvider interface.
@@ -142,6 +160,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
 		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
 		s.uploads = files.NewUploads(store.IdentityHomeDir)
+		s.linkStats = files.NewLinkStats(store.IdentityHomeDir)
 		s.grants = &files.GrantStore{
 			Provider: s.filesProvider,
 			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
@@ -168,6 +187,7 @@ func (s *Server) runPruner() {
 		s.sessions.Prune()
 		s.davTokens.Prune()
 		s.anon.prune()
+		s.abuse.prune(time.Now().UTC())
 		s.pruneLocalityCache()
 		s.expireSpool()
 		s.event(context.Background(), "maintenance.prune", "success")
@@ -227,9 +247,12 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /messages", s.handleMessagesPost)
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
 	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
+	mux.HandleFunc("GET /groups/{group}", s.handleGroupGet)
+	mux.HandleFunc("POST /groups/{group}/messages", s.handleGroupMessagesPost)
 	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
 	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
+	mux.HandleFunc("POST /abuse", s.handleAbuseReport)
 	mux.HandleFunc("POST /acks", s.handleAcksPost)
 	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
 	mux.HandleFunc("GET /auth/pow", s.handleAuthPow)
@@ -252,7 +275,10 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
 	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
+	mux.HandleFunc("POST /auth/grant", s.handleSignInGrantPost)
 	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
+	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
 	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
 	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)
@@ -270,6 +296,9 @@ func (s *Server) Router() http.Handler {
 		mux.HandleFunc(m+" /dav", s.handleDAV)
 	}
 	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
+	mux.HandleFunc("GET /s/{path...}", s.handleShareLink)
+	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
+	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))
@@ -747,6 +776,19 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			"messages must be end-to-end encrypted (alg, ephemeral_public_key, nonce required)")
 		return
 	}
+	// Typed envelope extensions (E09-T3): shape checks and the reserved
+	// `sys.*` namespace. Cheap, plaintext, and ahead of signature
+	// verification — an envelope whose metadata carries a control character
+	// has no unambiguous canonical string to verify against.
+	if !validateEnvelopeExtensions(w, msg) {
+		return
+	}
+	// Group provenance is not something a direct send may claim about a
+	// group this relay hosts (E09-T5); that path is POST /groups/{group}/messages,
+	// where membership and epoch are actually checked.
+	if !s.refuseForgedLocalGroup(w, r, msg) {
+		return
+	}
 
 	senderLocal := s.isLocalIdentity(r.Context(), msg.Sender)
 	recipientLocal := s.isLocalIdentity(r.Context(), msg.Recipient)
@@ -767,9 +809,14 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		EphemeralPublicKey: msg.Encryption.EphemeralPublicKey,
 		Nonce:              msg.Encryption.Nonce,
 	}
-	canonical := crypto.CanonicalMessageTyped(msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload, msg.ID, msg.SessionID, msg.Type, encMeta)
+	canonical := crypto.CanonicalMessageEnvelope(
+		msg.Sender, msg.Recipient, msg.Timestamp, msg.Payload,
+		msg.ID, msg.SessionID, msg.Type, msg.ThreadID, msg.ExpiresAt, msg.Metadata, encMeta)
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
+		return
+	}
+	if !refuseExpiredEnvelope(w, msg) {
 		return
 	}
 	verifiedActor(r, msg.Sender)
@@ -805,6 +852,19 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "policy_rejected", detail)
 			return
 		case policyQueueRequest:
+			// The requests queue is the one door open to strangers, so it is
+			// the one door a flood of cheap identities comes through. Meter
+			// the relay that carried them (E07-T5), not just the identity.
+			if decision, ok := s.meterRequestRelay(r.Context(), msg.Sender); !ok {
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{
+					"error":    "rate_limit_exceeded",
+					"scope":    decision.Scope,
+					"window":   decision.Window,
+					"limit":    decision.Limit,
+					"reset_at": decision.ResetAt.UTC().Format(time.RFC3339),
+				})
+				return
+			}
 			outcome := s.requests.Add(msg.Recipient, msg.Sender, storedFromMessage(msg), requestCooldown)
 			if outcome != storage.RequestQueued {
 				writeError(w, http.StatusConflict, outcome,
@@ -864,8 +924,8 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_ack", "missing required ack fields")
 		return
 	}
-	if ack.State != AckStateDeliveredClient {
-		writeError(w, http.StatusBadRequest, "invalid_ack", "unsupported ack state (v1 only emits delivered_client)")
+	if ack.State != AckStateDeliveredClient && ack.State != AckStateRead {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "unsupported ack state (want delivered_client or read)")
 		return
 	}
 	if _, err := time.Parse(time.RFC3339, ack.Timestamp); err != nil {
@@ -1107,47 +1167,32 @@ func (s *Server) resolveSigningKey(ctx context.Context, sender, sessionID string
 // identity key and, on success, caches the resulting session so subsequent
 // messages on the same relay take the fast path.
 func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID string, proof *SessionProof) (storage.Session, error) {
-	if proof.SessionPublicKey == "" || proof.IssuedAt == "" || proof.ExpiresAt == "" ||
-		proof.Nonce == "" || proof.IdentitySignature == "" {
-		return storage.Session{}, errors.New("session proof incomplete")
-	}
-	issuedAt, err := time.Parse(time.RFC3339, proof.IssuedAt)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof issued_at invalid")
-	}
-	expiresAt, err := time.Parse(time.RFC3339, proof.ExpiresAt)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof expires_at invalid")
-	}
-	now := time.Now().UTC()
-	if now.After(expiresAt) {
-		return storage.Session{}, errors.New("session proof expired")
-	}
-	if expiresAt.Sub(issuedAt) > maxSessionTTL {
-		return storage.Session{}, errors.New("session proof exceeds max TTL")
-	}
-
-	normalizedPub, pubBytes, err := crypto.NormalizePublicKey(proof.SessionPublicKey)
-	if err != nil {
-		return storage.Session{}, errors.New("session proof public key invalid: " + err.Error())
-	}
-
 	identityPub, err := s.resolveIdentityPublicKey(ctx, sender)
 	if err != nil {
 		return storage.Session{}, errors.New("cannot resolve identity key: " + err.Error())
 	}
-	canonical := crypto.CanonicalSessionRegistration(sender, normalizedPub, proof.IssuedAt, proof.ExpiresAt, proof.Nonce)
-	if err := crypto.VerifySignature(identityPub, canonical, proof.IdentitySignature); err != nil {
-		return storage.Session{}, errors.New("session proof signature invalid")
+	// One implementation of the proof chain, shared with the sign-in
+	// verifier (EPIC-008 E08-T1): completeness, RFC3339 timestamps, expiry,
+	// the 24h TTL cap, key encoding and the identity signature over
+	// CanonicalSessionRegistration.
+	verified, err := idpkg.VerifySessionProof(identityPub, sender, idpkg.SignInSessionProof{
+		SessionPublicKey:  proof.SessionPublicKey,
+		IssuedAt:          proof.IssuedAt,
+		ExpiresAt:         proof.ExpiresAt,
+		Nonce:             proof.Nonce,
+		IdentitySignature: proof.IdentitySignature,
+	}, time.Now().UTC())
+	if err != nil {
+		return storage.Session{}, err
 	}
 
 	sess := storage.Session{
 		ID:                sessionID,
 		Identity:          sender,
-		PublicKey:         normalizedPub,
-		PublicKeyBytes:    pubBytes,
-		IssuedAt:          issuedAt.UTC(),
-		ExpiresAt:         expiresAt.UTC(),
+		PublicKey:         verified.PublicKey,
+		PublicKeyBytes:    verified.PublicKeyBytes,
+		IssuedAt:          verified.IssuedAt,
+		ExpiresAt:         verified.ExpiresAt,
 		IssuedAtRaw:       proof.IssuedAt,
 		ExpiresAtRaw:      proof.ExpiresAt,
 		Nonce:             proof.Nonce,

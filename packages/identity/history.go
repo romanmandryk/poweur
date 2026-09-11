@@ -74,7 +74,14 @@ type HistoryRecord struct {
 	Recipient string `json:"recipient"`
 	Timestamp string `json:"timestamp"` // RFC3339
 	Type      string `json:"type,omitempty"`
-	Queue     string `json:"queue"`
+	// ThreadID is carried so a client that redraws from the archive after a
+	// reload can group the conversation the same way the live inbox did
+	// (EPIC-009 E09-T3). `omitempty` keeps every record written before this
+	// field existed byte-identical.
+	ThreadID  string            `json:"thread_id,omitempty"`
+	ExpiresAt string            `json:"expires_at,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Queue     string            `json:"queue"`
 	// Body is the *decrypted* message text. History is the plaintext archive;
 	// keeping ciphertext would mean re-deriving a shared secret with an
 	// ephemeral key nobody kept.
@@ -113,6 +120,9 @@ func (r HistoryRecord) Validate() error {
 	}
 	if _, err := time.Parse(time.RFC3339, r.Timestamp); err != nil {
 		return fmt.Errorf("history record: timestamp must be RFC3339: %w", err)
+	}
+	if err := ValidateEnvelopeExtensions(r.Type, r.ThreadID, r.ExpiresAt, r.Metadata); err != nil {
+		return fmt.Errorf("history record: %w", err)
 	}
 	switch r.Queue {
 	case HistoryQueueInbox, HistoryQueueAnonymous, HistoryQueueRequests, HistoryQueueSent:

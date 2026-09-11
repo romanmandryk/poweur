@@ -24,5 +24,42 @@
       "signature": "mUsH6202JXfaS6WG8lc5ql103xZDN7mLJE6_JPOxMOfmNNCG-WBQRq6V4c3_J7tXd6GXGK6n-nc9hZMDh_eTDA"
     },
     "canonical": "poweur-share-group\nnobody\nalice.poweur.net\n\n2026-01-15T09:30:00Z"
+  },
+  {
+    "name": "group-identity",
+    "group": {
+      "group": "Team.acme.poweur.net",
+      "owner": "team.ACME.poweur.net",
+      "members": [
+        "Zoe.example.org",
+        "bob.example.org",
+        " carol.poweur.net "
+      ],
+      "admins": [
+        "Zoe.example.org",
+        "bob.example.org"
+      ],
+      "epoch": 3,
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "B7q1E1p6l9xCkbFtqNKaabYwwxZS6fDBl9ZigGqt4-v_xDjvSc6ntu-I-CaVlD4cw6QCEEGhaYa4YHWCxG_3AA"
+    },
+    "canonical": "poweur-share-group\nteam.acme.poweur.net\nteam.acme.poweur.net\nbob.example.org,carol.poweur.net,zoe.example.org\n2026-01-15T09:30:00Z\npoweur-group-identity\nbob.example.org,zoe.example.org\n3"
+  },
+  {
+    "name": "group-identity-founding",
+    "group": {
+      "group": "solo.acme.poweur.net",
+      "owner": "solo.acme.poweur.net",
+      "members": [
+        "alice.poweur.net"
+      ],
+      "admins": [
+        "alice.poweur.net"
+      ],
+      "epoch": 1,
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "OlV26iD2EzUgW3Sx9d-25siMGhhvS05eQ2MQB5uVW0ubcGvEpG5QcSW5hZ-vddzR364a85prTigXw1PJLoxOAw"
+    },
+    "canonical": "poweur-share-group\nsolo.acme.poweur.net\nsolo.acme.poweur.net\nalice.poweur.net\n2026-01-15T09:30:00Z\npoweur-group-identity\nalice.poweur.net\n1"
   }
 ]
