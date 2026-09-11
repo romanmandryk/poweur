@@ -1,6 +1,6 @@
 # EPIC-005 — Sharing, ACLs, groups & public-to-any-valid-ID
 
-- **Status:** core complete (grant engine + CLI shipped; offer/accept UX, link shares, group identities deferred)
+- **Status:** complete except the offer/accept UX (grant engine, CLI, web dialog, link shares and group identities shipped; `sys.share.offer/accept` messages and recipient mounts deferred to EPIC-009)
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
@@ -12,8 +12,8 @@
 | E05-T1 Sharing & permissions spec | **done** | [`apps/docs/docs/files/sharing.md`](../apps/docs/docs/files/sharing.md); grant/group canonical signing in `packages/identity/grants.go`; inheritance = whole-subtree, no per-file exceptions (documented why); mount model deferred with T3 |
 | E05-T2 Relay grant engine | **done** | `apps/api/internal/files/grants.go`: per-request verified snapshot (revocation immediate, no ≤60 s window — app-password pattern); enforced on DAV + changes + manifest + chunked upload; visitor writes journal `actor`; forged/replayed/malformed grants rejected loudly; extensive scenario matrix in `apps/api/internal/relay/shares_test.go` + cross-relay `TestINT_SHARE_01` |
 | E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest); web share dialog, revoke view and received-shares browser shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. **Deferred:** `sys.share.offer/accept/revoked` messages and recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages) — until then a recipient must be told who shared with them; unaccepted-offer policy (EPIC-007) |
-| E05-T4 Public-link shares | **deferred** | not started; `link` audience field reserved in the grant format |
-| E05-T5 Group identities | **deferred** | owner-local groups shipped (same document format); addressable group identities not started |
+| E05-T4 Public-link shares | **done** | `audience: [{"link": …}]` grant variant (26-char base32 token, argon2id password, expiry, download cap) in `packages/identity/grants.go`; `/s/<token>` endpoint in `apps/api/internal/relay/`; `poweur share link add/ls` (revoke via `share revoke`); spec + threat model in [`sharing.md`](../apps/docs/docs/files/sharing.md); cross-relay `TestINT_SHARE_03` + web e2e |
+| E05-T5 Group identities | **done** | design doc [`group-identities.md`](../apps/docs/docs/files/group-identities.md); `admins` + `epoch` on `ShareGroup`, group's own tree at `poweur-sys/relay/groups/self.json` signed by the group's key; engine resolves named group identities out of their own trees (`apps/api/internal/files/grants.go`); `poweur group create/show/add/remove`; `TestINT_SHARE_04`. **Deferred:** cross-relay group resolution (needs a membership-check endpoint — enumeration oracle); per-admin signed updates; group messaging fan-out + key agreement = EPIC-009 E09-T5 |
 
 ## Goal
 
@@ -46,8 +46,9 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
   to the owner's devices like any other file — the filesystem stays the source of truth.
 - **Groups are files too**: `poweur-sys/relay/groups/<name>.json` = signed member list owned
   by whoever administers the group. v1 groups are owner-local (alice's groups, used in alice's
-  grants). Cross-owner "group identities" (a group with its own Poweur ID) are a later layer on
-  the same format.
+  grants). Cross-owner "group identities" (a group with its own Poweur ID) shipped in E05-T5 as
+  a layer on the same format: `poweur-sys/relay/groups/self.json` in the **group's** tree, signed
+  by the group's own key, carrying an `admins` list and a monotonic `epoch`.
 - **Share notification & acceptance ride on messaging**: the owner's relay sends a
   `sys.share.offer` message to each audience member; the recipient accepts, and the share gets
   mounted at `/shared/<owner-id>/<name>/` in *their* namespace (a mount-reference, not a copy).
@@ -115,11 +116,11 @@ edits a file, alice sees the edit + audit trail; alice revokes, bob loses access
 
 For sharing with people *outside* the network (no Poweur ID yet) — also the on-ramp funnel.
 
-- [ ] Link-share grant variant: `audience: [{"link": "<token>"}]`, optional password
+- [x] Link-share grant variant: `audience: [{"link": "<token>"}]`, optional password
       (argon2id-hashed in grant), optional expiry + download-count limit
-- [ ] `https://<identity>/s/<token>` web endpoint: read-only browse/download with a minimal
+- [x] `https://<identity>/s/<token>` web endpoint: read-only browse/download with a minimal
       viewer page; "claim a Poweur ID to get edit access" upsell hook
-- [ ] Rate limiting + bandwidth accounting on link endpoints
+- [x] Rate limiting + bandwidth accounting on link endpoints
 
 **Acceptance:** link share with password + expiry works in a browser with no auth; revocation
 kills the link.
@@ -129,12 +130,35 @@ kills the link.
 Groups that are *addressable* (`team.acme.poweur.net` as a share audience AND message
 recipient) unify EPIC-005 and EPIC-009 group messaging.
 
-- [ ] Design doc: a group as a hosted identity whose `poweur-sys/relay/groups/self.json`
-      holds members; admin operations are signed member-list updates; relays resolve
-      group→members server-side for shares and message fan-out
-- [ ] v1: create/admin group identities via CLI; usable as share audience
-- [ ] Defer/coordinate: group E2EE messaging key agreement is EPIC-009's problem — keep
-      formats compatible
+- [x] Design doc: [`apps/docs/docs/files/group-identities.md`](../apps/docs/docs/files/group-identities.md) —
+      a group as a hosted identity whose `poweur-sys/relay/groups/self.json` holds members;
+      admin operations are member-list updates signed by the group's own key; relays resolve
+      group→members server-side out of the group's own tree for shares and (E09-T5) message
+      fan-out
+- [x] v1: create/admin group identities via CLI (`poweur group create/show/add/remove` in
+      `apps/cli/internal/cli/groups.go`); usable as a share audience with
+      `poweur share add --with-group <poweur-id>` — no grant-format change
+- [x] Defer/coordinate: group E2EE messaging key agreement is EPIC-009's problem (E09-T5).
+      `epoch` is the membership version it binds keys to; `members` is the fan-out list and
+      `admins` is authority only, implying no membership either way
 
-**Acceptance:** a grant to a group identity gives all members access; adding a member is one
-signed update; design doc covers messaging fan-out for EPIC-009 to consume.
+**Acceptance:** met — `TestINT_SHARE_04_GroupIdentityShare` grants one folder to
+`gidcrew.poweur.net`, lets its members in and everyone else out, and moves membership with a
+single signed update that never touches the grant; the design doc states the membership and
+addressing model E09-T5 consumes.
+
+**Deferred within T5:**
+
+- **Cross-relay group resolution** — v1 resolves only group identities hosted on the same
+  relay as the grant's owner; anything else fails closed and logs why. A relay would have to
+  fetch and verify another relay's membership document on the permission path, which needs a
+  membership-check endpoint with its own caching, rate limiting and privacy story ("is X in
+  your group?" is an enumeration oracle).
+- **Per-admin signed updates** — v1 authority is possession of the group's identity key; the
+  `admins` list is recorded authority the CLI enforces client-side. Making it cryptographic
+  changes who signs, not what the document says.
+- **Web UI for group identities** — v1 is CLI-only. The web share dialog's audience picker
+  expands owner-local groups to their members and turns a free-typed name into
+  `{"id": …}`, so typing a group identity there would produce a grant addressed to the
+  group *as a visitor* rather than to its members. Creating, administering and addressing
+  group identities in the SPA is a follow-up in EPIC-015.

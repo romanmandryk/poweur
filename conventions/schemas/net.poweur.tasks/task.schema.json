@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/net.poweur.tasks/task.schema.json",
+  "title": "task.json — /apps/net.poweur.tasks/projects/<project-id>/tasks/<task-id>.json (PCP-0007)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "status",
+    "created",
+    "updated"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "opaque; must equal the filename without .json"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "examples": [
+        "todo",
+        "doing",
+        "done",
+        "cancelled"
+      ],
+      "description": "Vocabulary: todo | doing | done | cancelled. NOT an enum on purpose: the PCP requires readers to treat an unknown value as todo and preserve it verbatim on write, so a document carrying one is valid, not malformed. Writers SHOULD stay inside the vocabulary."
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "due": {
+      "type": "string",
+      "description": "YYYY-MM-DD (all-day, floating) or RFC 3339 timestamp"
+    },
+    "start": {
+      "type": "string",
+      "description": "YYYY-MM-DD (all-day, floating) or RFC 3339 timestamp"
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9,
+      "description": "jsCalendar semantics: 0 undefined, 1 highest, 9 lowest"
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "parent": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "task id in the same project; cycles are invalid"
+    },
+    "assignee": {
+      "type": "string",
+      "description": "Poweur identity (e.g. bob.example.org)"
+    },
+    "completed": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "RFC 3339; set when status becomes done, cleared otherwise"
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "done"
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "then": {
+    "required": [
+      "completed"
+    ],
+    "properties": {
+      "completed": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "description": "Unknown top-level fields MUST be preserved on read-modify-write (additionalProperties is true for that reason, not by oversight).",
+  "additionalProperties": true
+}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poweur/cli/internal/config"
+	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
 )
@@ -142,6 +143,11 @@ func runContactsSet(args []string, stdout, stderr io.Writer, state, verb string)
 		return 1
 	}
 	fmt.Fprintf(stdout, "%s %s\n", verb, target)
+	// Pinning is trust-on-first-use, so this is the moment the pin is worth
+	// verifying — print the safety number while the user is still here.
+	if entry.PinnedKey != "" {
+		fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(entry.PinnedKey))
+	}
 	return 0
 }
 
@@ -283,7 +289,14 @@ func runContactsLs(args []string, stdout, stderr io.Writer) int {
 		if c.Petname != "" {
 			name = fmt.Sprintf("%s (%s)", c.Petname, c.Identity)
 		}
-		fmt.Fprintf(stdout, "%s\t%s\tpinned=%v\n", name, c.State, c.PinnedKey != "")
+		// The fingerprint is the pin's user-facing form (E07-T4): the point
+		// of a pin is that somebody compared it out of band, and nobody
+		// compares 43 characters of base64.
+		pin := "not pinned"
+		if c.PinnedKey != "" {
+			pin = idpkg.FingerprintOrKey(c.PinnedKey)
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", name, c.State, pin)
 	}
 	return 0
 }
@@ -324,6 +337,11 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 	}
 	promoteAcceptedContacts(ctx, *useIdentity, accepts, stdout, stderr)
 
+	// Show what the stranger actually said (E07-T3): accept-or-block is a
+	// judgement, and the intro is the only evidence the format carries.
+	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	decryptRequestIntros(pending, encPriv)
+
 	if *jsonOut {
 		return writeOutput(stdout, true, map[string]any{"requests": pending, "accepted": accepts}, "")
 	}
@@ -334,18 +352,55 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 	for _, req := range pending {
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n",
 			req.Sender, req.Type, req.Timestamp, req.Sender)
+		if req.Plaintext != "" {
+			fmt.Fprintf(stdout, "  🔒 %s\n", req.Plaintext)
+		}
 	}
 	return 0
 }
 
-// requestEntry mirrors the relay's stored request envelope.
+// requestEntry mirrors the relay's stored request envelope. Plaintext is
+// filled in locally by decryptRequestIntros — it is never on the wire.
 type requestEntry struct {
-	ID        string `json:"id"`
-	Sender    string `json:"sender"`
-	Recipient string `json:"recipient"`
-	Timestamp string `json:"timestamp"`
-	Type      string `json:"type,omitempty"`
-	Payload   string `json:"payload"`
+	ID         string          `json:"id"`
+	Sender     string          `json:"sender"`
+	Recipient  string          `json:"recipient"`
+	Timestamp  string          `json:"timestamp"`
+	Type       string          `json:"type,omitempty"`
+	Payload    string          `json:"payload"`
+	Encryption *EncryptionMeta `json:"encryption,omitempty"`
+	Plaintext  string          `json:"plaintext,omitempty"`
+}
+
+// decryptRequestIntros opens each request's E2E-encrypted intro in place.
+//
+// The intro is the entire point of the requests queue: `contacts_and_requests`
+// exists so a stranger can say who they are before you decide, and a queue
+// that shows a name and a timestamp asks you to accept or block someone on
+// nothing at all. Failures are written into Plaintext rather than returned —
+// one unreadable intro must not hide the rest of the queue, and the drain
+// means there is no second chance to look.
+func decryptRequestIntros(requests []requestEntry, encPriv []byte) {
+	for i := range requests {
+		req := &requests[i]
+		if req.Encryption == nil || req.Encryption.Alg == "" {
+			continue
+		}
+		if encPriv == nil {
+			req.Plaintext = "[encrypted: no local encryption key]"
+			continue
+		}
+		plaintext, err := cryptoe2e.Decrypt(encPriv, cryptoe2e.EncryptedPayload{
+			Ciphertext:         req.Payload,
+			EphemeralPublicKey: req.Encryption.EphemeralPublicKey,
+			Nonce:              req.Encryption.Nonce,
+		})
+		if err != nil {
+			req.Plaintext = fmt.Sprintf("[decrypt failed: %v]", err)
+			continue
+		}
+		req.Plaintext = string(plaintext)
+	}
 }
 
 // challengeSignedGet performs an owner-drain GET (requests / anon queues):
@@ -543,12 +598,20 @@ func checkPinnedKey(cfg config.Config, identityValue string, priv ed25519.Privat
 		repinContact(ctx, cfg, identityValue, priv, contacts, contact, res.Document.PublicKey, stderr)
 		return 0
 	}
+	// Print the fingerprints first and the full keys after: the fingerprint
+	// is what the user can actually read to their contact over the phone,
+	// which is the verification this message is asking them to perform.
 	fmt.Fprintf(stderr,
 		"REFUSING TO SEND: %s's current key does not match the pinned key and no rotation statement covers it.\n"+
-			"  pinned:   %s\n  resolved: %s\n"+
+			"  pinned safety number:   %s\n"+
+			"  resolved safety number: %s\n"+
+			"  pinned key:   %s\n  resolved key: %s\n"+
 			"This can mean a compromised relay or registrar impersonating your contact.\n"+
-			"Verify out of band, then re-send with --accept-new-key to trust the new key.\n",
-		recipient, contact.PinnedKey, res.Document.PublicKey)
+			"Read the safety numbers to %s over a channel you already trust; if they match theirs,\n"+
+			"re-send with --accept-new-key to trust the new key.\n",
+		recipient,
+		idpkg.FingerprintOrKey(contact.PinnedKey), idpkg.FingerprintOrKey(res.Document.PublicKey),
+		contact.PinnedKey, res.Document.PublicKey, recipient)
 	return 1
 }
 

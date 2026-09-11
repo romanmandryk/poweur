@@ -63,6 +63,20 @@ any     ──recipient blocks───► blocked (silent)
 CLI: `poweur contacts request/accept/block/rm/ls`, `poweur requests`, `poweur policy
 show/set`.
 
+`poweur requests` decrypts each pending intro before printing it. That is not a
+convenience: `contacts_and_requests` exists so a stranger can say who they are before you
+decide, and a queue showing a name and a timestamp asks you to accept or block someone on
+no evidence at all.
+
+**A rejected send offers to become a request.** When the relay answers `policy_rejected`,
+`poweur send` asks whether to send a contact request instead and carries the message
+across as the intro — the intro is an ordinary short E2E-encrypted message, which is
+exactly what the sender already typed. `--request-on-reject` answers yes up front (scripts,
+and a non-TTY stdin, take this path or none). Two rules keep it honest: it never fires for
+`sys.*` envelopes, so a rejected contact request cannot answer itself with another one; and
+a message too long to be an intro (over 2 KB of plaintext) sends a plain request and still
+exits non-zero, because that message genuinely did not go anywhere.
+
 Web app (EPIC-015 E15-T2): **Contacts** lists the same document with its states and
 petnames; **Messages → Requests** merges the relay's request queue with contact requests
 that arrived in the inbox — under the default `open` policy the very same envelope is
@@ -79,12 +93,52 @@ every `poweur send`, the resolved key is compared against the pin:
 - **Mismatch, but the new identity document lists the pinned key in `previous_keys`**
   (a signed rotation statement, PCP-0002) → legitimate rotation: re-pin automatically,
   note to the user.
-- **Mismatch with no rotation statement** → **refuse to send**, print both key
-  fingerprints, and require explicit `--accept-new-key` after out-of-band verification.
-  This is what a compromised relay or registrar swapping a contact's key looks like.
+- **Mismatch with no rotation statement** → **refuse to send**, print both safety
+  numbers and both keys, and require explicit `--accept-new-key` after out-of-band
+  verification. This is what a compromised relay or registrar swapping a contact's key
+  looks like.
 
 The web app runs the same three-way check before every send; the mismatch case is a
-blocking dialog showing both keys, and "Trust new key" is its `--accept-new-key`.
+blocking dialog showing both safety numbers, and "Trust new key" is its
+`--accept-new-key`.
+
+### Safety numbers (the fingerprint format)
+
+A pin is only worth what the out-of-band comparison that bootstrapped it is worth, and
+nobody compares 43 characters of base64url. Every Poweur client therefore renders a key
+as a **safety number**: four groups of five digits.
+
+```
+safety number: 56963 45073 70021 85367
+```
+
+Derivation — canonical, identical in Go, `@poweur/client` and the web app, and pinned by
+the `fingerprints` conformance vectors:
+
+```
+canonical   = "poweur-fingerprint-v1" LF <normalized key string>
+digest      = SHA-256(canonical)
+group i     = uint40(digest[5i .. 5i+5]) mod 100000, zero-padded to 5 digits
+fingerprint = groups 0..3, joined by single spaces
+```
+
+The normalized key string keeps its algorithm prefix (`ed25519:…`, `x25519:…`), so a
+signing key and an encryption key with identical bytes never share a safety number, and
+every base64 variant of one key converges on one value. 20 digits is ≈66 bits — a
+second-preimage search an attacker must run against one specific victim's pin.
+
+**Why digits and not emoji.** Emoji short-auth-strings are friendlier on a phone screen
+and denser per symbol, but they lose everywhere this protocol needs them to hold:
+Poweur's primary comparison surface is a terminal (emoji there range from correct to
+double-width-misaligned to tofu, and the CLI cannot tell which it got); the comparison is
+usually *spoken*, and digits are pronounceable identically in any language two contacts
+share while emoji names are not; digits can be typed back in, searched for in a log, and
+written on paper; and an emoji alphabet is a versioned dependency — adding or reordering
+one symbol silently changes everybody's fingerprint. Digits need no such table.
+
+Where they appear: `poweur contacts ls`, `poweur contacts add/accept` (at pin time, when
+verification is still cheap), `poweur identity lookup`, the send-time mismatch refusal,
+the web contact panel, and the web key-mismatch dialog.
 
 Pinning is client-side defense-in-depth: it fails open when contacts are unreachable
 (the resolver chain still applies), and it fails **closed** on an actual mismatch.
@@ -105,6 +159,9 @@ Pinning is client-side defense-in-depth: it fails open when contacts are unreach
 - `sys.contact.*` client auto-processing (the accept notification is delivered but
   clients handle it manually — both clients pin on accept, neither acts on an inbound
   `sys.contact.accept` by itself).
-- E07-T5 abuse pressure: per-sender-relay request metering, shared blocklists,
-  `sys.abuse.report` handling (type reserved in the registry), PoW on requests from
-  unknown relays (primitive from EPIC-014).
+- PoW on contact requests from unknown relays: the `stranger_challenge` /
+  `stranger_pow_bits` seam is specified (EPIC-014 E14-T3) and not yet wired.
+
+Beyond the individual inbox — per-sender-relay request metering, `sys.abuse.report`,
+and shareable signed blocklists — is
+[Relay reputation & abuse pressure](relay-reputation).

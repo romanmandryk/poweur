@@ -125,3 +125,83 @@ func TestINT_CONTACTS_02_KeyPinning(t *testing.T) {
 		t.Fatalf("pin must have been replaced by bob's real key: %s", stdout)
 	}
 }
+
+// TestINT_CONTACTS_05: a policy rejection converts itself into a contact
+// request (E07-T3). The relay already knew a request would be accepted; the
+// CLI stops making the user retype their message into a second command, and
+// carries what they wrote across as the intro so the recipient can decide on
+// evidence rather than on a bare identity name.
+func TestINT_CONTACTS_05_SendAutoRequestOnPolicyRejection(t *testing.T) {
+	zone := newZone(t)
+	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	defer ts.Close()
+	relayURL := ts.URL
+	zone.SetHost("aralice.poweur.net", addr)
+	zone.SetHost("arbob.poweur.net", addr)
+
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	runCLI(t, aliceHome, "identity", "create", "aralice.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, bobHome, "identity", "create", "arbob.poweur.net", "--hosted", "--relay", relayURL, "--json")
+
+	runCLI(t, aliceHome, "policy", "set", "contacts_and_requests")
+
+	// Bob writes to a stranger. The send is refused — and becomes a request.
+	const intro = "hi alice, bob here, we met at the conference"
+	if code := runCLICode(t, bobHome, "send", "aralice.poweur.net", intro, "--request-on-reject"); code != 0 {
+		t.Fatalf("send with --request-on-reject should succeed as a request, exited %d", code)
+	}
+
+	// Bob's own contacts now record the pending request, exactly as if he
+	// had run `contacts request` himself.
+	stdout, _ := runCLI(t, bobHome, "contacts", "ls")
+	if !strings.Contains(stdout, "aralice.poweur.net") || !strings.Contains(stdout, "requested") {
+		t.Fatalf("bob's contacts should hold a requested entry: %s", stdout)
+	}
+
+	// Alice sees the request *and* reads what he said before deciding.
+	stdout, _ = runCLI(t, aliceHome, "requests")
+	if !strings.Contains(stdout, "arbob.poweur.net") || !strings.Contains(stdout, "sys.contact.request") {
+		t.Fatalf("requests output: %s", stdout)
+	}
+	if !strings.Contains(stdout, intro) {
+		t.Fatalf("the request intro must be decrypted for the recipient: %s", stdout)
+	}
+}
+
+// TestINT_CONTACTS_06: without the flag and without a TTY the send still
+// fails, and nothing is written to either side. A rejected send must never
+// silently pin a key and file a request on the user's behalf.
+func TestINT_CONTACTS_06_NoAutoRequestWithoutConsent(t *testing.T) {
+	zone := newZone(t)
+	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	defer ts.Close()
+	relayURL := ts.URL
+	zone.SetHost("nralice.poweur.net", addr)
+	zone.SetHost("nrbob.poweur.net", addr)
+
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	runCLI(t, aliceHome, "identity", "create", "nralice.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, bobHome, "identity", "create", "nrbob.poweur.net", "--hosted", "--relay", relayURL, "--json")
+
+	runCLI(t, aliceHome, "policy", "set", "contacts_and_requests")
+
+	if code := runCLICode(t, bobHome, "send", "nralice.poweur.net", "unasked-for hello"); code == 0 {
+		t.Fatal("a rejected send without --request-on-reject must fail")
+	}
+	stdout, _ := runCLI(t, bobHome, "contacts", "ls")
+	if strings.Contains(stdout, "nralice.poweur.net") {
+		t.Fatalf("no contact should have been written: %s", stdout)
+	}
+	stdout, _ = runCLI(t, aliceHome, "requests")
+	if strings.Contains(stdout, "nrbob.poweur.net") {
+		t.Fatalf("no request should have been filed: %s", stdout)
+	}
+}

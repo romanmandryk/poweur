@@ -2,10 +2,14 @@ package identity
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,16 +34,77 @@ const (
 	MaxGroupMembers  = 1000
 )
 
+// Link-share tokens (E05-T4). A token is 16 random bytes rendered as
+// lowercase unpadded base32 — 26 characters of [a-z2-7], 128 bits of
+// entropy, safe in a URL path, case-insensitive by construction (so a mail
+// client that lowercases the URL cannot break it) and free of the
+// look-alike characters that make hand-copied links fail.
+const (
+	LinkTokenBytes = 16
+	LinkTokenLen   = 26
+	// MaxLinkDownloads bounds the download counter a grant may ask the
+	// relay to track.
+	MaxLinkDownloads = 1_000_000
+)
+
+var linkTokenEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
+
+// GenerateLinkToken returns a fresh capability-URL token.
+func GenerateLinkToken() (string, error) {
+	buf := make([]byte, LinkTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return linkTokenEncoding.EncodeToString(buf), nil
+}
+
+// ValidateLinkToken checks a token's shape. Tokens are lowercase by
+// definition: the canonical signing string lowercases the audience, so a
+// mixed-case token would sign as something other than what is stored.
+func ValidateLinkToken(token string) error {
+	if len(token) != LinkTokenLen {
+		return fmt.Errorf("link token must be %d characters", LinkTokenLen)
+	}
+	for _, r := range token {
+		if !(r >= 'a' && r <= 'z') && !(r >= '2' && r <= '7') {
+			return fmt.Errorf("link token contains an invalid character %q", r)
+		}
+	}
+	return nil
+}
+
+// HashLinkPassword hashes a link-share password. Link passwords reuse the
+// PHC argon2id encoding app passwords already use (E03-T3): one hash
+// format in the system, one verifier to audit.
+func HashLinkPassword(password string) (string, error) { return HashAppPassword(password) }
+
+// VerifyLinkPassword checks a password against a PHC argon2id hash.
+func VerifyLinkPassword(password, encoded string) bool { return VerifyAppPassword(password, encoded) }
+
 // ShareRoots are the top-level tree roots a grant may cover. /private and
 // /poweur-sys are never shareable; /public is already readable by any valid
 // ID (write-sharing /public is not supported in v1).
 var ShareRoots = []string{"shared", "apps"}
 
-// ShareAudience is one audience entry: a direct identity or an owner-local
-// group name. ("link" is reserved for capability-URL shares, E05-T4.)
+// ShareAudience is one audience entry: a direct identity, an owner-local
+// group name, or a capability-URL token (E05-T4 link shares).
 type ShareAudience struct {
 	ID    string `json:"id,omitempty"`
 	Group string `json:"group,omitempty"`
+	Link  string `json:"link,omitempty"`
+}
+
+// ShareLink carries the options that only make sense for a link share
+// (E05-T4). Its presence in a grant is what makes the canonical string
+// cover them, so the relay cannot strip the password or the download cap
+// off a signed grant.
+type ShareLink struct {
+	// Password is a PHC-format argon2id hash (same encoding app passwords
+	// use). Empty = no password.
+	Password string `json:"password,omitempty"`
+	// MaxDownloads caps successful file downloads through the link.
+	// 0 = unlimited.
+	MaxDownloads int `json:"max_downloads,omitempty"`
 }
 
 // ShareGrant is the signed grant document.
@@ -51,7 +116,9 @@ type ShareGrant struct {
 	Permissions []string        `json:"permissions"`
 	CreatedAt   string          `json:"created_at"`
 	ExpiresAt   string          `json:"expires_at,omitempty"`
-	Signature   string          `json:"signature"`
+	// Link is set only on link-share grants (audience = one link token).
+	Link      *ShareLink `json:"link,omitempty"`
+	Signature string     `json:"signature"`
 }
 
 // NormalizeGrantPath validates and normalizes a grant path: slashes trimmed,
@@ -99,12 +166,26 @@ func (g ShareGrant) Validate() error {
 	if len(g.Audience) > MaxGrantAudience {
 		return fmt.Errorf("audience exceeds %d entries", MaxGrantAudience)
 	}
+	links := 0
 	for _, a := range g.Audience {
-		hasID := strings.TrimSpace(a.ID) != ""
-		hasGroup := strings.TrimSpace(a.Group) != ""
-		if hasID == hasGroup { // neither or both
-			return fmt.Errorf("each audience entry needs exactly one of id or group")
+		set := 0
+		for _, v := range []string{a.ID, a.Group, a.Link} {
+			if strings.TrimSpace(v) != "" {
+				set++
+			}
 		}
+		if set != 1 {
+			return fmt.Errorf("each audience entry needs exactly one of id, group or link")
+		}
+		if strings.TrimSpace(a.Link) != "" {
+			links++
+			if err := ValidateLinkToken(strings.TrimSpace(a.Link)); err != nil {
+				return err
+			}
+		}
+	}
+	if err := g.validateLink(links); err != nil {
+		return err
 	}
 	if len(g.Permissions) == 0 {
 		return fmt.Errorf("permissions is empty")
@@ -125,6 +206,87 @@ func (g ShareGrant) Validate() error {
 		}
 	}
 	return nil
+}
+
+// validateLink applies the link-share rules (E05-T4). links is how many
+// audience entries carry a token.
+//
+// A link grant is a *capability*: whoever holds the URL is the audience.
+// That is why v1 keeps it deliberately narrow — one token per grant, no
+// mixing with identity/group audiences (the two are enforced on completely
+// different code paths), and read-only, so a leaked URL can never mutate
+// the owner's tree.
+func (g ShareGrant) validateLink(links int) error {
+	switch {
+	case links > 1:
+		return fmt.Errorf("a grant carries at most one link token")
+	case links == 1:
+		if len(g.Audience) != 1 {
+			return fmt.Errorf("a link grant's audience is the link alone (no ids or groups)")
+		}
+		if g.AllowsWrite() {
+			return fmt.Errorf("link shares are read-only in v1")
+		}
+	case g.Link != nil:
+		return fmt.Errorf("link options require a link audience entry")
+	}
+	if g.Link == nil {
+		return nil
+	}
+	if g.Link.Password != "" && !strings.HasPrefix(g.Link.Password, "$argon2id$") {
+		return fmt.Errorf("link password must be a PHC argon2id hash, never a plaintext password")
+	}
+	if g.Link.MaxDownloads < 0 || g.Link.MaxDownloads > MaxLinkDownloads {
+		return fmt.Errorf("max_downloads must be between 0 (unlimited) and %d", MaxLinkDownloads)
+	}
+	return nil
+}
+
+// LinkToken returns the grant's capability token, if it is a link grant.
+func (g ShareGrant) LinkToken() (string, bool) {
+	for _, a := range g.Audience {
+		if tok := strings.TrimSpace(a.Link); tok != "" {
+			return strings.ToLower(tok), true
+		}
+	}
+	return "", false
+}
+
+// IsLink reports whether this is a link-share grant.
+func (g ShareGrant) IsLink() bool {
+	_, ok := g.LinkToken()
+	return ok
+}
+
+// MatchesLinkToken compares a presented token against the grant's in
+// constant time (the token is the whole credential).
+func (g ShareGrant) MatchesLinkToken(presented string) bool {
+	tok, ok := g.LinkToken()
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(tok), []byte(strings.ToLower(strings.TrimSpace(presented)))) == 1
+}
+
+// RequiresPassword reports whether the link is password-protected.
+func (g ShareGrant) RequiresPassword() bool {
+	return g.Link != nil && g.Link.Password != ""
+}
+
+// CheckLinkPassword verifies a submitted link password.
+func (g ShareGrant) CheckLinkPassword(password string) bool {
+	if !g.RequiresPassword() {
+		return true
+	}
+	return VerifyLinkPassword(password, g.Link.Password)
+}
+
+// MaxDownloads returns the grant's download cap (0 = unlimited).
+func (g ShareGrant) MaxDownloads() int {
+	if g.Link == nil {
+		return 0
+	}
+	return g.Link.MaxDownloads
 }
 
 // Expired reports whether the grant is past its expiry at now.
@@ -153,9 +315,12 @@ func (g ShareGrant) AllowsWrite() bool {
 func canonicalAudience(audience []ShareAudience) string {
 	parts := make([]string, 0, len(audience))
 	for _, a := range audience {
-		if a.ID != "" {
+		switch {
+		case a.ID != "":
 			parts = append(parts, "id:"+strings.ToLower(strings.TrimSpace(a.ID)))
-		} else {
+		case a.Link != "":
+			parts = append(parts, "link:"+strings.ToLower(strings.TrimSpace(a.Link)))
+		default:
 			parts = append(parts, "group:"+strings.ToLower(strings.TrimSpace(a.Group)))
 		}
 	}
@@ -165,11 +330,17 @@ func canonicalAudience(audience []ShareAudience) string {
 
 // Canonical returns the string the owner signs. Field order is fixed;
 // audience and permissions are sorted so JSON ordering doesn't matter.
+//
+// A grant carrying link options (E05-T4) appends three more lines — the
+// marker, the password hash and the download cap — so those cannot be
+// edited off a signed grant by whoever stores the file. Grants without a
+// `link` object sign exactly the eight lines they always did, so adding
+// link shares did not invalidate a single existing signature.
 func (g ShareGrant) Canonical() string {
 	perms := append([]string(nil), g.Permissions...)
 	sort.Strings(perms)
 	path, _ := NormalizeGrantPath(g.Path)
-	return strings.Join([]string{
+	fields := []string{
 		"poweur-share-grant",
 		strings.TrimSpace(g.ShareID),
 		strings.ToLower(strings.TrimSpace(g.Owner)),
@@ -178,7 +349,15 @@ func (g ShareGrant) Canonical() string {
 		strings.Join(perms, ","),
 		g.CreatedAt,
 		g.ExpiresAt,
-	}, "\n")
+	}
+	if g.Link != nil {
+		fields = append(fields,
+			"poweur-share-link",
+			g.Link.Password,
+			strconv.Itoa(g.Link.MaxDownloads),
+		)
+	}
+	return strings.Join(fields, "\n")
 }
 
 // Sign fills Signature using the owner's identity key.
@@ -218,14 +397,67 @@ func ParseShareGrant(raw []byte) (ShareGrant, error) {
 	return g, nil
 }
 
-// ShareGroup is an owner-local named member list (v1 groups). Cross-owner
-// group identities are a later layer on the same format (E05-T5).
+// GroupSelfDoc is where a group identity keeps its own membership: the
+// group is a hosted identity, and this is the one document in its tree
+// that makes it a group (E05-T5).
+const GroupSelfDoc = "poweur-sys/relay/groups/self.json"
+
+// ShareGroup is a signed member list. It covers both kinds of group,
+// because they are the same document:
+//
+//   - **Owner-local groups** (v1, shipped): `Group` is a bare name like
+//     "team", the document lives at poweur-sys/relay/groups/<name>.json in
+//     the owner's tree, and it is signed by the owner. It means something
+//     only inside that owner's grants.
+//   - **Group identities** (E05-T5): `Group` and `Owner` are both the
+//     group's own Poweur ID, the document lives at GroupSelfDoc in the
+//     *group's* tree, and it is signed by the group's identity key. It is
+//     addressable — any owner can name it in a grant, and (EPIC-009) it can
+//     receive messages.
+//
+// A group identity additionally carries Admins and Epoch. Those two fields
+// append to the canonical string only when Admins is set, so every
+// owner-local group signs exactly the five lines it always did.
 type ShareGroup struct {
-	Group     string   `json:"group"`
-	Owner     string   `json:"owner"`
-	Members   []string `json:"members"`
-	UpdatedAt string   `json:"updated_at"`
-	Signature string   `json:"signature"`
+	Group   string   `json:"group"`
+	Owner   string   `json:"owner"`
+	Members []string `json:"members"`
+	// Admins are the identities entitled to update this group's membership.
+	// Present only on group identities; its presence is what marks the
+	// document as one.
+	Admins []string `json:"admins,omitempty"`
+	// Epoch is a monotonic membership version. It exists so a relay can
+	// refuse a rollback to an older member list, and so EPIC-009's group
+	// key agreement (E09-T5) has a membership version to bind keys to
+	// without inventing a second counter.
+	Epoch     int    `json:"epoch,omitempty"`
+	UpdatedAt string `json:"updated_at"`
+	Signature string `json:"signature"`
+}
+
+// IsGroupIdentity reports whether this document describes an addressable
+// group identity rather than an owner-local group.
+func (gr ShareGroup) IsGroupIdentity() bool { return len(gr.Admins) > 0 }
+
+// IsGroupIdentityName reports whether a grant audience's group name refers
+// to a group *identity* rather than an owner-local group.
+//
+// The rule is the presence of a dot: a Poweur ID is a domain name and
+// always has one, and owner-local group names are forbidden from having
+// one (see Validate). So the two namespaces cannot collide, and an existing
+// grant naming "team" keeps meaning alice's own "team" forever.
+func IsGroupIdentityName(name string) bool {
+	return strings.Contains(strings.TrimSpace(name), ".")
+}
+
+// HasAdmin reports whether identity may update this group's membership.
+func (gr ShareGroup) HasAdmin(identity string) bool {
+	for _, a := range gr.Admins {
+		if strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(identity)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks everything except the signature.
@@ -247,23 +479,80 @@ func (gr ShareGroup) Validate() error {
 			return fmt.Errorf("invalid updated_at: %w", err)
 		}
 	}
+	return gr.validateIdentityFields()
+}
+
+// validateIdentityFields applies the group-identity rules (E05-T5).
+func (gr ShareGroup) validateIdentityFields() error {
+	name := strings.TrimSpace(gr.Group)
+	if !gr.IsGroupIdentity() {
+		// An owner-local group name must stay out of the identity
+		// namespace, or a grant saying {"group": "team.acme.poweur.net"}
+		// would be ambiguous.
+		if IsGroupIdentityName(name) {
+			return fmt.Errorf("an owner-local group name must not look like a Poweur ID (no dots); a group identity needs an admins list")
+		}
+		if gr.Epoch != 0 {
+			return fmt.Errorf("epoch belongs to group identities, which need an admins list")
+		}
+		return nil
+	}
+	// A group identity is its own owner: the membership document lives in
+	// the group's tree and is signed by the group's identity key, so there
+	// is nobody else it could belong to.
+	if !strings.EqualFold(name, strings.TrimSpace(gr.Owner)) {
+		return fmt.Errorf("a group identity's group and owner must both be its own Poweur ID")
+	}
+	if !IsGroupIdentityName(name) {
+		return fmt.Errorf("a group identity's name must be a Poweur ID")
+	}
+	if len(gr.Admins) > MaxGroupMembers {
+		return fmt.Errorf("group exceeds %d admins", MaxGroupMembers)
+	}
+	if gr.Epoch < 0 {
+		return fmt.Errorf("epoch must not be negative")
+	}
+	for _, a := range gr.Admins {
+		if strings.TrimSpace(a) == "" {
+			return fmt.Errorf("admins must not contain an empty entry")
+		}
+	}
 	return nil
 }
 
-// Canonical returns the string the owner signs (members sorted).
+// Canonical returns the string the signer commits to (members sorted).
+//
+// A group identity appends three more lines — the marker, the sorted admin
+// list and the epoch — so an admin list or a membership version cannot be
+// edited off a signed document by whoever stores it. A group with no
+// admins signs exactly the five lines it always did, so introducing group
+// identities invalidated no existing owner-local group signature.
 func (gr ShareGroup) Canonical() string {
 	members := make([]string, 0, len(gr.Members))
 	for _, m := range gr.Members {
 		members = append(members, strings.ToLower(strings.TrimSpace(m)))
 	}
 	sort.Strings(members)
-	return strings.Join([]string{
+	fields := []string{
 		"poweur-share-group",
 		strings.ToLower(strings.TrimSpace(gr.Group)),
 		strings.ToLower(strings.TrimSpace(gr.Owner)),
 		strings.Join(members, ","),
 		gr.UpdatedAt,
-	}, "\n")
+	}
+	if gr.IsGroupIdentity() {
+		admins := make([]string, 0, len(gr.Admins))
+		for _, a := range gr.Admins {
+			admins = append(admins, strings.ToLower(strings.TrimSpace(a)))
+		}
+		sort.Strings(admins)
+		fields = append(fields,
+			"poweur-group-identity",
+			strings.Join(admins, ","),
+			strconv.Itoa(gr.Epoch),
+		)
+	}
+	return strings.Join(fields, "\n")
 }
 
 // Sign fills Signature using the owner's identity key.

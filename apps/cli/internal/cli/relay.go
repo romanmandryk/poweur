@@ -72,11 +72,18 @@ type Message struct {
 	Signature string `json:"signature"`
 	// Type is the optional envelope-level message type (EPIC-007
 	// sys.contact.*); plaintext so the recipient relay can route on it,
-	// and bound into the signature.
-	Type         string          `json:"type,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	SessionProof *SessionProof   `json:"session_proof,omitempty"`
-	Encryption   *EncryptionMeta `json:"encryption,omitempty"`
+	// and bound into the signature. Absent means `chat.text`.
+	Type string `json:"type,omitempty"`
+	// ThreadID, ExpiresAt and Metadata are the rest of the E09-T3 envelope
+	// extensions: plaintext, signed, and opaque to the relay. Each one only
+	// appears in the canonical string when it is set, which is what keeps an
+	// envelope that uses none of them byte-identical to a pre-E09-T3 one.
+	ThreadID     string            `json:"thread_id,omitempty"`
+	ExpiresAt    string            `json:"expires_at,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	SessionID    string            `json:"session_id,omitempty"`
+	SessionProof *SessionProof     `json:"session_proof,omitempty"`
+	Encryption   *EncryptionMeta   `json:"encryption,omitempty"`
 }
 
 // Ack is the wire format of a delivery acknowledgement. v1 carries a
@@ -396,6 +403,9 @@ func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequ
 		return SessionResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	// Name this device so the session lands in devices.json and revoking the
+	// device can find the session again (EPIC-004 E04-T6).
+	applyDeviceHeaders(httpReq.Header)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {

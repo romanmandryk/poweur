@@ -3,6 +3,8 @@ package files
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	gopath "path"
@@ -77,6 +79,119 @@ func (s *GrantStore) readDocs(ctx context.Context, owner, dir string) map[string
 	return out
 }
 
+// readDoc returns the raw bytes of one document in an identity's tree.
+func (s *GrantStore) readDoc(ctx context.Context, identity, path string) ([]byte, bool) {
+	f, err := s.Provider.OpenFile(ctx, identity, path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, false
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxGrantDocSize+1))
+	_ = f.Close()
+	if err != nil || len(raw) > maxGrantDocSize {
+		return nil, false
+	}
+	return raw, true
+}
+
+// loadGroupIdentities resolves the addressable group identities a grant set
+// names (E05-T5).
+//
+// A group identity is a hosted identity whose own tree carries
+// idpkg.GroupSelfDoc, signed by the *group's* identity key — so the relay
+// verifies it exactly as it verifies any other identity's document, and an
+// owner naming a group in a grant confers no power to edit that group.
+//
+// v1 resolves only groups hosted on this relay: a group whose key this
+// relay cannot produce is skipped, so the grant denies. Cross-relay
+// resolution needs a membership-check endpoint and is deferred — see
+// apps/docs/docs/files/group-identities.md.
+func (s *GrantStore) loadGroupIdentities(ctx context.Context, set *GrantSet) {
+	seen := map[string]bool{}
+	for _, g := range set.grants {
+		for _, a := range g.Audience {
+			name := strings.ToLower(strings.TrimSpace(a.Group))
+			if name == "" || !idpkg.IsGroupIdentityName(name) || seen[name] {
+				continue
+			}
+			seen[name] = true
+			gr, err := s.GroupIdentity(ctx, name)
+			if err != nil {
+				s.logf("grant engine: %v", err)
+				continue
+			}
+			set.groups[name] = gr
+		}
+	}
+}
+
+// ErrGroupNotResolvable is returned when this relay cannot produce a
+// verified membership document for a group identity — it does not host it,
+// the document is missing, malformed, unsigned by the group's own key, or is
+// an owner-local group wearing the group-identity path.
+//
+// Callers must treat every one of those the same way: deny, and say nothing
+// more specific. Distinguishing "no such group" from "not a group" from "not
+// for you" turns the endpoint into the membership oracle that cross-relay
+// group resolution was deferred to avoid.
+var ErrGroupNotResolvable = errors.New("group identity is not resolvable on this relay")
+
+// GroupIdentity loads and verifies one group identity's membership document
+// out of the group's own tree (E05-T5).
+//
+// It is the single place that answers "who is in this group, according to
+// the group itself": the permission engine uses it for grants, and EPIC-009
+// group messaging uses it to expand a fan-out. Both need the same four
+// guarantees, so neither gets its own opinion about them:
+//
+//   - the document is read from the *group's* tree, never an owner's, so
+//     naming a group confers no power over it;
+//   - it is verified with the *group's* key, so the relay that stores it
+//     cannot edit an admin off the list;
+//   - it must name itself, so one group's membership cannot be served for
+//     another;
+//   - it must carry an admin list, so an owner-local document cannot
+//     masquerade as a group identity.
+//
+// v1 resolves only groups hosted here. A group whose key this relay cannot
+// produce fails closed — cross-relay resolution needs a membership-check
+// endpoint with its own caching, rate limiting and privacy story, and is
+// deferred (apps/docs/docs/files/group-identities.md).
+func (s *GrantStore) GroupIdentity(ctx context.Context, name string) (idpkg.ShareGroup, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if s == nil || s.Provider == nil || s.OwnerKey == nil {
+		return idpkg.ShareGroup{}, ErrGroupNotResolvable
+	}
+	if name == "" || !idpkg.IsGroupIdentityName(name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %q is not a group identity name", ErrGroupNotResolvable, name)
+	}
+	// An owner-local group of the same name would be ambiguous, but cannot
+	// exist: owner-local names may not contain a dot.
+	pub, ok := s.OwnerKey(name)
+	if !ok {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s is not hosted here (cross-relay groups are deferred)", ErrGroupNotResolvable, name)
+	}
+	raw, ok := s.readDoc(ctx, name, idpkg.GroupSelfDoc)
+	if !ok {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s has no %s", ErrGroupNotResolvable, name, idpkg.GroupSelfDoc)
+	}
+	gr, err := idpkg.ParseShareGroup(raw)
+	if err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", ErrGroupNotResolvable, name, err)
+	}
+	if !gr.IsGroupIdentity() {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %s is an owner-local group document", ErrGroupNotResolvable, name, idpkg.GroupSelfDoc)
+	}
+	// The document must claim to be this group, or one group's membership
+	// could be served for another.
+	if !strings.EqualFold(gr.Group, name) || !strings.EqualFold(gr.Owner, name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: document names %q/%q", ErrGroupNotResolvable, name, gr.Group, gr.Owner)
+	}
+	if err := gr.VerifySignature(pub); err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", ErrGroupNotResolvable, name, err)
+	}
+	return gr, nil
+}
+
 // Snapshot loads and verifies the owner's grant + group documents once; the
 // returned GrantSet answers every permission probe for one request.
 func (s *GrantStore) Snapshot(ctx context.Context, owner string) *GrantSet {
@@ -121,6 +236,9 @@ func (s *GrantStore) Snapshot(ctx context.Context, owner string) *GrantSet {
 		}
 		set.groups[strings.ToLower(gr.Group)] = gr
 	}
+	// Group identities named by those grants resolve out of their own trees,
+	// verified with their own keys (E05-T5).
+	s.loadGroupIdentities(ctx, set)
 	return set
 }
 
@@ -136,6 +254,12 @@ var _ GrantChecker = (*GrantSet)(nil)
 
 func (gs *GrantSet) audienceMatches(g idpkg.ShareGrant, visitor string) bool {
 	for _, a := range g.Audience {
+		if a.Link != "" {
+			// A capability token is not an identity: link grants are
+			// reachable only through /s/<token>, never by an authenticated
+			// visitor whose id happens to look like the token.
+			continue
+		}
 		if a.ID != "" && strings.EqualFold(strings.TrimSpace(a.ID), visitor) {
 			return true
 		}
@@ -187,6 +311,31 @@ func (gs *GrantSet) VisibleShares(visitor string) []idpkg.ShareGrant {
 		}
 	}
 	return out
+}
+
+// LinkGrant returns the verified link grant whose capability token matches
+// (E05-T4). Tokens are compared in constant time, so a wrong guess reveals
+// nothing about how close it was.
+//
+// Expired link grants are reported separately: whoever holds the token
+// already knows the link existed, so telling them "this link has expired"
+// leaks nothing and is the difference between a usable error page and a
+// mystery 404. A *revoked* grant is simply gone and is indistinguishable
+// from one that never existed.
+func (gs *GrantSet) LinkGrant(token string) (grant idpkg.ShareGrant, found, expired bool) {
+	if gs == nil || token == "" {
+		return idpkg.ShareGrant{}, false, false
+	}
+	for _, g := range gs.grants {
+		if !g.MatchesLinkToken(token) {
+			continue
+		}
+		if !g.Expired(gs.now) {
+			return g, true, false // a live grant always wins
+		}
+		grant, found, expired = g, true, true
+	}
+	return grant, found, expired
 }
 
 // isAncestorDir reports whether path is a strict ancestor directory of

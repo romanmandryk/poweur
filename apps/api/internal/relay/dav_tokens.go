@@ -20,6 +20,15 @@ type davToken struct {
 	Scope     files.Scope
 	ScopeRaw  string
 	ExpiresAt time.Time
+	// DeviceID binds the token to a devices.json row (EPIC-004 E04-T6) so
+	// revoking that device kills it. Empty when the client claimed no
+	// device — the pre-registry behaviour, and still the common case for
+	// third-party DAV clients.
+	DeviceID string
+	// AppID is set only for a Sign-In resource grant. Its connected-apps
+	// record is re-read on every use so revoking the file cuts access without
+	// waiting for this in-memory token to expire.
+	AppID string
 }
 
 type davTokenStore struct {
@@ -54,6 +63,22 @@ func (st *davTokenStore) Revoke(token string) bool {
 	_, ok := st.tokens[token]
 	delete(st.tokens, token)
 	return ok
+}
+
+// RevokeMatching drops every token pred accepts, returning how many went.
+// Device revocation uses it; possession of the token stays the credential,
+// so there is nothing else to invalidate.
+func (st *davTokenStore) RevokeMatching(pred func(davToken) bool) int {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	removed := 0
+	for k, t := range st.tokens {
+		if pred(t) {
+			delete(st.tokens, k)
+			removed++
+		}
+	}
+	return removed
 }
 
 func (st *davTokenStore) Prune() {
@@ -174,6 +199,21 @@ func (s *Server) handleDAVTokenPost(w http.ResponseWriter, r *http.Request) {
 		verifiedActor(r, req.Identity)
 	}
 
+	// Device binding (E04-T6). Only for owner tokens: a visitor's device is
+	// their own business and the tree owner has no registry row for it.
+	// A revoked device is refused outright — otherwise revocation would only
+	// last until the device asked again.
+	obs := deviceFromRequest(r)
+	deviceID := ""
+	if owner && obs.Fingerprint != "" {
+		if s.deviceRevoked(r.Context(), audience, obs.Fingerprint) {
+			writeError(w, http.StatusForbidden, "device_revoked",
+				"this device has been revoked by the identity owner")
+			return
+		}
+		deviceID = s.touchDevice(r.Context(), audience, obs)
+	}
+
 	token, err := randomToken(32)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token_failed", "failed to generate token")
@@ -186,6 +226,7 @@ func (s *Server) handleDAVTokenPost(w http.ResponseWriter, r *http.Request) {
 		Scope:     scope,
 		ScopeRaw:  scopeRaw,
 		ExpiresAt: expiresAt,
+		DeviceID:  deviceID,
 	})
 	writeJSON(w, http.StatusCreated, DAVTokenResponse{
 		Token:     "dav_" + token,

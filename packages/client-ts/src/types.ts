@@ -35,18 +35,31 @@ export interface Message {
   timestamp: string;
   payload: string;
   signature: string;
-  /** Envelope-level type (`sys.contact.*`); bound into the signature. */
+  /**
+   * Envelope-level type; bound into the signature. Absent means
+   * `chat.text` — see `normalizeMessageType`. `sys.*` is reserved for the
+   * platform and a relay refuses an unregistered one.
+   */
   type?: string;
   session_id?: string;
   session_proof?: SessionProof;
   encryption?: EncryptionMeta;
   /**
-   * Reserved by EPIC-009, typed now so adding them is a minor version.
-   * The relay ignores unknown fields today.
+   * Groups messages into a conversation thread (EPIC-009 E09-T3). Opaque to
+   * the relay: it never invents one and never rewrites one. Signed.
    */
   thread_id?: string;
+  /**
+   * When the sender says this message stops being meaningful (RFC3339).
+   * Signed and carried; refusing delivery past it is E09-T6.
+   */
   expires_at?: string;
-  metadata?: Record<string, unknown>;
+  /**
+   * Small, flat, signed and **plaintext** — addressing, not content. Values
+   * are strings so two implementations cannot disagree about how to
+   * serialize the map for signing. Put nothing private here.
+   */
+  metadata?: Record<string, string>;
 }
 
 /** A message from the inbox, with the decrypt attempt folded in. */
@@ -140,10 +153,24 @@ export interface DavTokenResponse {
 export interface ShareAudience {
   id?: string;
   group?: string;
+  /** Capability-URL token for a public-link share (E05-T4). */
+  link?: string;
 }
 
 export const PERM_READ = "read";
 export const PERM_WRITE = "write";
+
+/**
+ * Options that only make sense for a link share (E05-T4). They are part of
+ * the canonical signing string, so the relay that stores the grant cannot
+ * strip the password or the download cap off it.
+ */
+export interface ShareLink {
+  /** PHC-format argon2id hash — never a plaintext password. */
+  password?: string;
+  /** Cap on successful downloads through the link; 0/absent = unlimited. */
+  max_downloads?: number;
+}
 
 export interface ShareGrant {
   share_id: string;
@@ -153,15 +180,46 @@ export interface ShareGrant {
   permissions: string[];
   created_at: string;
   expires_at?: string;
+  /** Set only on link-share grants (audience = one link token). */
+  link?: ShareLink;
   signature: string;
 }
 
+/**
+ * A signed member list. The same document covers both kinds of group:
+ *
+ * - **Owner-local** — `group` is a bare name like "team", stored at
+ *   `poweur-sys/relay/groups/<name>.json` in the owner's tree and signed by
+ *   the owner. It means something only inside that owner's grants.
+ * - **Group identity** (E05-T5) — `group` and `owner` are both the group's
+ *   own Poweur ID, stored at `GROUP_SELF_DOC` in the *group's* tree and
+ *   signed by the group's identity key. It is addressable: any owner can
+ *   name it in a grant.
+ */
 export interface ShareGroup {
   group: string;
   owner: string;
   members: string[];
+  /** Identities entitled to update membership; present only on group identities. */
+  admins?: string[];
+  /** Monotonic membership version; EPIC-009 group keys bind to it. */
+  epoch?: number;
   updated_at: string;
   signature: string;
+}
+
+export interface GroupDelivery {
+  recipient: string;
+  id: string;
+  status: string;
+  detail?: string;
+}
+
+export interface GroupFanoutResponse {
+  group: string;
+  epoch: number;
+  delivered: GroupDelivery[];
+  failed: GroupDelivery[];
 }
 
 export const CONTACT_REQUESTED = "requested";
@@ -328,6 +386,43 @@ export interface QuotaResponse {
   quota_bytes: number;
   provider?: string;
   change_id?: string;
+}
+
+/**
+ * One row of `poweur-sys/relay/devices.json` (EPIC-004 E04-T6): a machine
+ * using this identity, as the relay observed it. Written by the relay and
+ * read by the owner; a client never pushes this document.
+ */
+export interface DeviceEntry {
+  id: string;
+  name?: string;
+  /** laptop | desktop | phone | tablet | browser | agent | unknown. */
+  kind?: string;
+  added_at?: string;
+  last_seen?: string;
+  /** Tree prefixes this device syncs; empty means the whole tree. */
+  sync_scopes?: string[];
+  /** The last changes cursor the device acknowledged. */
+  sync_cursor?: string;
+  synced_at?: string;
+  /** Names of app-passwords.json entries this device holds. */
+  app_passwords?: string[];
+  revoked?: boolean;
+  revoked_at?: string;
+}
+
+/** GET /devices/{identity}. */
+export interface DeviceListResponse {
+  identity: string;
+  devices: DeviceEntry[];
+}
+
+/** POST /devices/{identity}/revoke — what the revocation actually cost. */
+export interface DeviceRevokeResponse {
+  device_id: string;
+  sessions_revoked: number;
+  dav_tokens_revoked: number;
+  app_passwords_revoked: number;
 }
 
 /** One line of the sync manifest / changes feed. */

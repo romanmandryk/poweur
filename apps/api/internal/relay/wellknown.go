@@ -41,6 +41,44 @@ func (s *Server) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleDIDWeb(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if h, _, err := splitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	raw, ok := s.identities.DocumentJSON(host)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "identity document not found")
+		return
+	}
+	var doc idpkg.IdentityDocument
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_identity", "stored identity document is invalid")
+		return
+	}
+	did, err := idpkg.DIDWeb(doc)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid_identity", err.Error())
+		return
+	}
+	body, err := json.Marshal(did)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to encode DID document")
+		return
+	}
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/did+json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("ETag", etag)
+	_, _ = w.Write(body)
+}
+
 // serveSysPublicFile serves poweur-sys/public/<sub> for a hosted identity.
 func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, identity, sub string) {
 	if !s.davEnabled() || !s.identities.Exists(identity) {

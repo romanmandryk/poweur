@@ -2,6 +2,7 @@ package storage
 
 import (
 	"crypto/ed25519"
+	"strings"
 	"sync"
 	"time"
 )
@@ -75,6 +76,31 @@ func (s *SessionStore) Delete(id string) {
 			delete(s.byIdentity, session.Identity)
 		}
 	}
+}
+
+// DeleteMatching removes every live session of an identity that pred
+// accepts, returning how many went. Device revocation (EPIC-004 E04-T6)
+// needs it: sessions are keyed by id, but a revocation names a device, and
+// the identity match has to be case-insensitive because the session carries
+// whatever spelling its registration request used.
+func (s *SessionStore) DeleteMatching(identity string, pred func(Session) bool) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for id, session := range s.sessions {
+		if !strings.EqualFold(session.Identity, identity) || !pred(session) {
+			continue
+		}
+		delete(s.sessions, id)
+		if set, ok := s.byIdentity[session.Identity]; ok {
+			delete(set, id)
+			if len(set) == 0 {
+				delete(s.byIdentity, session.Identity)
+			}
+		}
+		removed++
+	}
+	return removed
 }
 
 func (s *SessionStore) ListForIdentity(identity string) []Session {

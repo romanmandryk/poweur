@@ -36,6 +36,15 @@ var sysValidators = map[string]func([]byte) error{
 		_, err := idpkg.ParseAppPasswordsFile(b)
 		return err
 	},
+	// devices.json is relay-managed, so an owner PUT is refused by the
+	// permission engine before it ever gets here. The validator is
+	// registered anyway: it is the one enforced definition of the schema,
+	// and it means the relay's own writes and a hand-repaired file are held
+	// to the same standard.
+	files.SysRelay + "/devices.json": func(b []byte) error {
+		_, err := idpkg.ParseDevicesFile(b)
+		return err
+	},
 	files.SysPublic + "/profile.json": func(b []byte) error {
 		_, err := idpkg.ParseProfile(b)
 		return err

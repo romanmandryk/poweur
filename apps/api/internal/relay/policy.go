@@ -11,6 +11,7 @@ import (
 
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/files"
+	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
 )
@@ -84,54 +85,70 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	policy, contacts := s.recipientPolicy(ctx, msg.Recipient)
 	contact, known := contacts.Find(msg.Sender)
 
-	const rejected = "recipient does not accept messages from this sender (send a contact request if their policy allows it)"
-
 	if known && contact.State == idpkg.ContactBlocked {
-		return policyReject, rejected
+		return policyReject, rejectedDetail
 	}
 	if known && contact.State == idpkg.ContactAccepted {
 		return policyAllow, ""
 	}
 
 	// Non-contact (or pending request state) from here on.
-	//
-	// One rule spans both closed modes: an accept is the answer to a request
-	// *we* sent, so it is admitted whenever we already list the sender as
-	// `requested` — but only then, and only into the requests queue, never
-	// the message stream. Without it a `contacts_only` inbox could send a
-	// contact request and never hear back: their accept bounces off our
-	// policy, our contacts stay `requested`, and our policy then bounces
-	// every message they send. Both sides see silence and neither can tell
-	// it apart from being ignored.
-	answersOurRequest := msg.Type == idpkg.MsgTypeContactAccept &&
-		known && contact.State == idpkg.ContactRequested
-
 	switch policy.Mode {
 	case idpkg.InboxOpen:
 		return policyAllow, ""
-	case idpkg.InboxContactsOnly:
-		if answersOurRequest {
-			return policyQueueRequest, ""
-		}
-		return policyReject, rejected
-	case idpkg.InboxContactsAndRequests:
-		switch msg.Type {
-		case idpkg.MsgTypeContactRequest:
-			if len(msg.Payload) > maxContactRequestPayload {
-				return policyReject, "contact request intro too large"
-			}
-			return policyQueueRequest, ""
-		case idpkg.MsgTypeContactAccept:
-			if answersOurRequest {
-				return policyQueueRequest, ""
-			}
-			return policyReject, rejected
-		default:
-			return policyReject, rejected
-		}
+	case idpkg.InboxContactsOnly, idpkg.InboxContactsAndRequests:
+		// A closed inbox is where the message *type* starts to matter, so
+		// the decision moves to the per-type hooks in typed.go. Everything
+		// without a hook is rejected — the default a closed inbox means.
+		return hookFor(msg.Type)(closedInboxCtx{
+			msg:          msg,
+			mode:         policy.Mode,
+			contact:      contact,
+			knownContact: known,
+		})
 	default:
 		return policyAllow, ""
 	}
+}
+
+// senderRelayKey names the relay accountable for a sender, for metering
+// (E07-T5). Returns "" when the sender is one of ours.
+//
+// Local senders are deliberately not metered here. This relay already knows
+// exactly who they are, meters them per identity, and gates their creation
+// (invite codes or proof-of-work, EPIC-014) — it has levers over its own
+// users. Against a *peer* relay it has none of that, which is precisely why
+// the peer, and not the identity behind it, is the unit that gets a budget.
+//
+// The key is the host that serves the sender's identity — the same lookup
+// (and the same DNS-TTL cache) the forwarding path already uses to find a
+// recipient's relay, so metering costs one map read in the common case. When
+// that lookup fails, the sender's parent domain stands in: everyone on a
+// hosted domain still shares one bucket, which is the property that matters.
+func (s *Server) senderRelayKey(ctx context.Context, sender string) string {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	if sender == "" || s.isLocalIdentity(ctx, sender) {
+		return ""
+	}
+	if host, err := s.resolveRelayHost(ctx, sender); err == nil && host != "" {
+		return strings.ToLower(strings.TrimSuffix(host, "."))
+	}
+	if i := strings.Index(sender, "."); i >= 0 && i+1 < len(sender) {
+		return sender[i+1:]
+	}
+	return sender
+}
+
+// meterRequestRelay charges one requests-queue attempt to the sender's relay.
+// ok=false means the caller must reject with the returned decision.
+//
+// The attempt is charged, not the admission: a meter that only counted the
+// requests it let through would be bypassed by sending requests designed to
+// fail (a duplicate, a sender in cooldown) — the relay does the resolution
+// work either way, which is the work being rationed.
+func (s *Server) meterRequestRelay(ctx context.Context, sender string) (ratelimit.Decision, bool) {
+	decision := s.requestRelayLimit.Allow(s.senderRelayKey(ctx, sender))
+	return decision, decision.Allowed
 }
 
 // storedFromMessage converts the wire envelope for queue storage.
@@ -144,6 +161,9 @@ func storedFromMessage(msg Message) storage.StoredMessage {
 		Payload:   msg.Payload,
 		Signature: msg.Signature,
 		Type:      msg.Type,
+		ThreadID:  msg.ThreadID,
+		ExpiresAt: msg.ExpiresAt,
+		Metadata:  msg.Metadata,
 		SessionID: msg.SessionID,
 	}
 	if msg.Encryption != nil {

@@ -20,6 +20,15 @@ const (
 	DefaultMinuteLimit  = 20
 	DefaultHourLimit    = 200
 	DefaultDayLimit     = 1000
+	// Contact-request admissions charged to the *peer relay* that carried
+	// them (EPIC-007 E07-T5). Hosted identities are cheap, so a flood is a
+	// thousand fresh identities sending one request each — invisible to a
+	// per-identity cap and obvious to a per-relay one. The numbers are
+	// deliberately small: a contact request is a rare event per person, and
+	// this bucket counts only requests-queue admissions, never conversation.
+	DefaultRequestRelayMinuteLimit = 10
+	DefaultRequestRelayHourLimit   = 60
+	DefaultRequestRelayDayLimit    = 300
 	// Global default is roughly 10× the per-sender hourly cap times an
 	// expected-active-senders constant (here: 50). Tune per deployment via
 	// env vars; 0 disables the global cap entirely.
@@ -79,6 +88,10 @@ type Config struct {
 	VersionHash         string
 	RateLimits          RateLimits
 	GlobalRateLimits    GlobalRateLimits
+	// RequestRelayLimits caps contact-request admissions per *sending relay*
+	// (EPIC-007 E07-T5). Keyed on the relay accountable for the sender, not
+	// on the sender, because identities are cheap and relays are not.
+	RequestRelayLimits RateLimits
 	DNSProxyMode        string
 	MaxInboxPerIdentity int
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
@@ -245,6 +258,11 @@ func FromEnv() Config {
 			PerMinute: getenvInt("GLOBAL_RATE_LIMIT_MINUTE", DefaultGlobalMinuteLimit),
 			PerHour:   getenvInt("GLOBAL_RATE_LIMIT_HOUR", DefaultGlobalHourLimit),
 			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
+		},
+		RequestRelayLimits: RateLimits{
+			PerMinute: getenvInt("REQUEST_RELAY_LIMIT_MINUTE", DefaultRequestRelayMinuteLimit),
+			PerHour:   getenvInt("REQUEST_RELAY_LIMIT_HOUR", DefaultRequestRelayHourLimit),
+			PerDay:    getenvInt("REQUEST_RELAY_LIMIT_DAY", DefaultRequestRelayDayLimit),
 		},
 	}
 }

@@ -1,0 +1,65 @@
+[
+  {
+    "name": "vector-key",
+    "key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+    "kind": "signing",
+    "fingerprint": "56963 45073 70021 85367",
+    "valid": true
+  },
+  {
+    "name": "vector-key-bare",
+    "key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+    "kind": "signing",
+    "fingerprint": "56963 45073 70021 85367",
+    "valid": true
+  },
+  {
+    "name": "vector-key-padded",
+    "key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+    "kind": "signing",
+    "fingerprint": "56963 45073 70021 85367",
+    "valid": true
+  },
+  {
+    "name": "vector-key-std",
+    "key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+    "kind": "signing",
+    "fingerprint": "56963 45073 70021 85367",
+    "valid": true
+  },
+  {
+    "name": "one-bit-flip",
+    "key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmU",
+    "kind": "signing",
+    "fingerprint": "54062 27986 15166 43764",
+    "valid": true
+  },
+  {
+    "name": "all-zero-key",
+    "key": "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "kind": "signing",
+    "fingerprint": "78845 01019 90107 31707",
+    "valid": true
+  },
+  {
+    "name": "same-bytes-as-x25519",
+    "key": "x25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+    "kind": "encryption",
+    "fingerprint": "58389 80729 78269 32488",
+    "valid": true
+  },
+  {
+    "name": "malformed",
+    "key": "ed25519:not-base64!!",
+    "kind": "signing",
+    "fingerprint": "",
+    "valid": false
+  },
+  {
+    "name": "wrong-length",
+    "key": "ed25519:c2hvcnQ",
+    "kind": "signing",
+    "fingerprint": "",
+    "valid": false
+  }
+]
