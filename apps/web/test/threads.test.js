@@ -84,6 +84,27 @@ describe("buildConversationRows", () => {
     expect(rows[0].contact).toBe("carol.poweur.net");
   });
 
+  it("files verified fan-outs under the group rather than the speaking member", () => {
+    const rows = buildConversationRows([msg({
+      id: "m1",
+      thread_id: "crew.example.org",
+      metadata: { group: "crew.example.org", epoch: "3" },
+      group_verified: true,
+    })], ME);
+    expect(rows[0].contact).toBe("crew.example.org");
+    expect(rows[0].group).toBe(true);
+  });
+
+  it("does not trust an unverified group label", () => {
+    const rows = buildConversationRows([msg({
+      id: "m1",
+      thread_id: "crew.example.org",
+      metadata: { group: "crew.example.org", epoch: "3" },
+    })], ME);
+    expect(rows[0].contact).toBe("bob.example.org");
+    expect(rows[0].group).toBe(false);
+  });
+
   it("gives each thread its own row, sorted by last activity", () => {
     const rows = buildConversationRows(
       [

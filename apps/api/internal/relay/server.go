@@ -67,6 +67,7 @@ type Server struct {
 	grants        *files.GrantStore
 	linkStats     *files.LinkStats
 	davTokens     *davTokenStore
+	connectedMu   sync.Mutex
 	// linkSecret authenticates password-gated link sessions (E05-T4). It is
 	// per-process on purpose: a restart ends every link session, which costs
 	// a visitor one password re-entry.
@@ -265,6 +266,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
 	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
+	mux.HandleFunc("POST /auth/grant", s.handleSignInGrantPost)
 	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
@@ -287,6 +289,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
 	mux.HandleFunc("GET /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
+	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))

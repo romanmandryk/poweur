@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** in progress — T1 and T2 done; T3–T6 open
+- **Status:** in progress — T1–T5 done; T6 open
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -106,7 +106,8 @@ browser, after a reload each time — which is the failure people actually hit.
 - [ ] **Deferred:** presence side-effect on `devices.json` — that document is EPIC-004 T6
       and does not exist yet. The privacy decision it records (not user-visible in v1)
       stands unchanged
-- [ ] **Open:** the Go CLI has no `listen`; the sync daemon does not subscribe
+- [x] Go CLI `poweur listen` subscribes with the same catch-up semantics as the TS CLI
+- [ ] **Open:** the sync daemon does not subscribe
 
 **Server-Sent Events rather than a WebSocket, deliberately.** The channel only ever pushes
 one way — this epic's own rule is "the socket is notification, the cursor is truth" — and
@@ -209,21 +210,28 @@ app; spool stays small (envelope only).
 
 The hard one — scope tightly, lean on EPIC-005 group identities for membership.
 
-- [ ] v1 design decision (write it up first): **server-fanout with per-member encryption** —
+- [x] v1 design decision (write it up first): **server-fanout with per-member encryption** —
       sender's client encrypts the payload separately per member (N× X25519+AEAD, fine to
       ~100 members) and posts one envelope per member; the group identity's relay fans out.
       No new cryptography. Sender-keys/MLS deferred with an explicit revisit threshold
       (member count / message volume)
-- [ ] Group addressing: send to `team.acme.poweur.net` (EPIC-005 group identity); relay
+- [x] Group addressing: send to `team.acme.poweur.net` (EPIC-005 group identity); relay
       expands membership at delivery time; membership changes mid-thread documented
       (new member sees nothing before join — forward secrecy by construction here)
-- [ ] `thread_id` semantics in groups; ack semantics (per-member ticks vs aggregate — spec it)
-- [ ] CLI + web minimal group chat UI
-- [ ] Design doc for v2: MLS (RFC 9420) adoption study — what we'd inherit (PCS, scale) and
+- [x] `thread_id` semantics in groups; ack semantics (per-member ticks vs aggregate — spec it)
+- [x] CLI + web minimal group chat UI
+- [x] Design doc for v2: MLS (RFC 9420) adoption study — what we'd inherit (PCS, scale) and
       what it demands (group state coordination); explicit criteria for switching
 
 **Acceptance:** 5-member cross-relay group chat integration test (delivery + late-join
 behavior); v2 design doc merged.
+
+**Shipped.** The relay exposes an authenticated signed-roster read and an epoch-checked batch
+fan-out. The Go CLI and `@poweur/client` encrypt once per recipient; the web compose screen
+uses the SDK path and only files inbound group hints after verifying the current signed roster.
+`TestINT_GROUP_01` covers five members on two relays plus a late join. The wire and operational
+decisions are in [`group-messaging.md`](../apps/docs/docs/protocol/group-messaging.md), with the
+switch criteria in [`mls-adoption.md`](../apps/docs/docs/future/mls-adoption.md).
 
 ### E09-T6 — Delivery semantics & offline UX polish
 

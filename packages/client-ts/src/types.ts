@@ -208,6 +208,20 @@ export interface ShareGroup {
   signature: string;
 }
 
+export interface GroupDelivery {
+  recipient: string;
+  id: string;
+  status: string;
+  detail?: string;
+}
+
+export interface GroupFanoutResponse {
+  group: string;
+  epoch: number;
+  delivered: GroupDelivery[];
+  failed: GroupDelivery[];
+}
+
 export const CONTACT_REQUESTED = "requested";
 export const CONTACT_ACCEPTED = "accepted";
 export const CONTACT_BLOCKED = "blocked";

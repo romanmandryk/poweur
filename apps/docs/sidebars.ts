@@ -85,6 +85,7 @@ const sidebars: SidebarsConfig = {
         'auth/sign-in',
         'auth/add-sign-in',
         'auth/connected-apps',
+        'auth/mobile-signer',
         'auth/interop-bridges',
       ],
     },

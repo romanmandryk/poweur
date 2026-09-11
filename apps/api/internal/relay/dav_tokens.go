@@ -25,6 +25,10 @@ type davToken struct {
 	// device — the pre-registry behaviour, and still the common case for
 	// third-party DAV clients.
 	DeviceID string
+	// AppID is set only for a Sign-In resource grant. Its connected-apps
+	// record is re-read on every use so revoking the file cuts access without
+	// waiting for this in-memory token to expire.
+	AppID string
 }
 
 type davTokenStore struct {

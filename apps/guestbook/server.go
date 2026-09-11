@@ -208,6 +208,7 @@ func (s *Server) Metadata() signin.Metadata {
 }
 
 func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	writeJSON(w, http.StatusOK, s.Metadata())
 }
 
@@ -273,6 +274,7 @@ func signerBase(r *http.Request) string {
 // It accepts a JSON body, a form field, or the raw encoded string, because a
 // signer, a CLI and a paste box all end up here.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	encoded, err := readApproval(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

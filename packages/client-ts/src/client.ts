@@ -22,6 +22,7 @@ import {
   type HistoryRecord,
 } from "./history.js";
 import { IdentityApi } from "./identity.js";
+import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
@@ -69,6 +70,7 @@ export class PoweurClient {
   readonly enroll: EnrollApi;
   readonly sessions: SessionManager;
   readonly messages: Messaging;
+  readonly groups: GroupMessaging;
   readonly #resolveOptions: ResolveOptions;
   #dav: DavClient | null = null;
 
@@ -87,6 +89,7 @@ export class PoweurClient {
       sessions: this.sessions,
       resolve: this.#resolveOptions,
     });
+    this.groups = new GroupMessaging({ client: this.relay, resolve: this.#resolveOptions });
   }
 
   get identityName(): string {
@@ -96,6 +99,28 @@ export class PoweurClient {
   /** Send an encrypted message (session-signed by default). */
   send(recipient: string, plaintext: string, options: SendOptions = {}): Promise<SendResult> {
     return this.messages.send(this.signer, recipient, plaintext, options);
+  }
+
+  /** Send one per-member-encrypted message through an addressable group. */
+  sendGroup(group: string, plaintext: string, options: GroupSendOptions = {}): Promise<GroupSendResult> {
+    return this.groups.send(this.signer, group, plaintext, options);
+  }
+
+  /** Send to a group and archive one sender-side conversation record. */
+  async sendGroupAndArchive(group: string, plaintext: string, options: GroupSendOptions = {}) {
+    const result = await this.sendGroup(group, plaintext, options);
+    const first = result.envelopes[0]!;
+    const { archived, lost } = await this.archive([{
+      id: first.id,
+      sender: this.signer.identity,
+      recipient: result.group.group,
+      timestamp: first.timestamp,
+      ...(options.type ? { type: options.type } : {}),
+      thread_id: first.thread_id,
+      queue: HISTORY_QUEUE_SENT,
+      body: plaintext,
+    }]);
+    return { ...result, archived, lost };
   }
 
   /** Fetch and decrypt the inbox. */

@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/poweur/api v0.0.0
 	github.com/poweur/cli v0.0.0
+	github.com/poweur/guestbook v0.0.0
 	github.com/poweur/tasks v0.0.0
 )
 
@@ -18,6 +19,7 @@ require (
 replace (
 	github.com/poweur/api => ../api
 	github.com/poweur/cli => ../cli
+	github.com/poweur/guestbook => ../guestbook
 	github.com/poweur/tasks => ../tasks
 	github.com/poweur/identity => ../../packages/identity
 )

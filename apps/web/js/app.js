@@ -50,6 +50,10 @@ import {
 
 import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "./client.js";
 import { modeNow, resolveMode } from "./mode.js";
+import {
+  appendBrowserConsent, deliverBrowserApproval, loadSignInConsent,
+  readConnectedApps, readConsentLog, revokeConnectedApp, signBrowserApproval,
+} from "./signin.js";
 
 import { resolveProfile, clearProfileCache, primeProfile } from "./profiles.js";
 import { IdentityInput } from "./components/identity-input.js";
@@ -131,6 +135,7 @@ const S = {
   passkey: null,
   /** `chooseCustody()`, likewise: what will hold the keys, said before the name. */
   custody: null,
+  auth: { input: "", request: null, metadata: null, headline: "", scopes: [], loading: false, error: "", result: null },
   files: {
     dav: null, davExp: 0, path: "", entries: [], quota: null, loading: false, loaded: false,
     /** null = our own tree; an identity = browsing what they shared with us. */
@@ -713,10 +718,11 @@ function renderTray() {
   return `
     <div class="conv-list">
       ${conversations.map(c => `
-        <div class="conv-row" data-compose-to="${esc(c.contact)}" data-thread="${esc(c.threadId)}" role="button" tabindex="0">
-          ${avatarHtml(c.contact, "md")}
+        <div class="conv-row" data-compose-to="${esc(c.contact)}" data-thread="${esc(c.threadId)}"
+             data-group="${c.group ? "true" : "false"}" role="button" tabindex="0">
+          ${c.group ? `<div class="avatar avatar-md">👥</div>` : avatarHtml(c.contact, "md")}
           <div class="conv-info">
-            <div class="conv-name">${esc(c.petname || idHandle(c.contact))}${
+            <div class="conv-name">${esc(c.petname || idHandle(c.contact))}${c.group ? ` <span class="chip chip-green">Group</span>` : ""}${
               c.threaded ? ` <span class="conv-thread">#${esc(threadLabel(c.threadId))}</span>` : ""
             }</div>
             <div class="conv-preview">${esc(c.preview)}</div>
@@ -1141,6 +1147,16 @@ function renderSettings() {
           <span class="settings-row-label">Keys &amp; devices</span>
           <span class="settings-row-arrow">›</span>
         </div>
+        <div class="settings-row" role="button" tabindex="0" id="row-connected-apps">
+          <span class="settings-row-icon">🔐</span>
+          <span class="settings-row-label">Connected apps</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
+        <div class="settings-row" role="button" tabindex="0" id="row-auth-request">
+          <span class="settings-row-icon">✅</span>
+          <span class="settings-row-label">Approve sign-in request</span>
+          <span class="settings-row-arrow">›</span>
+        </div>
         <div class="settings-row" role="button" tabindex="0" id="row-recovery-kit">
           <span class="settings-row-icon">🧾</span>
           <span class="settings-row-label">Recovery kit</span>
@@ -1318,8 +1334,62 @@ function renderSubPage() {
     case "compose": return renderCompose();
     case "onboarding": return renderOnboarding();
     case "claim":   return renderClaim();
+    case "auth":    return renderSignInApproval();
     default:        return renderAddId();
   }
+}
+
+function renderSignInApproval() {
+  const A = S.auth;
+  if (A.loading) return `
+    <div class="sub-page"><div class="sub-header"><span class="sub-title">Sign in with Poweur ID</span></div>
+    <div class="sub-body"><p role="status">Verifying the app’s origin…</p></div></div>`;
+  if (A.result) {
+    const redirect = A.request?.response_uri
+      ? `${A.request.response_uri}${A.request.response_uri.includes("?") ? "&" : "?"}response=${encodeURIComponent(A.result.encoded)}`
+      : "";
+    return `
+      <div class="sub-page"><div class="sub-header"><span class="sub-title">Approved</span></div>
+      <div class="sub-body">
+        <div class="empty-icon">✓</div>
+        <h2>${esc(A.metadata?.name || A.request?.domain || "App")}</h2>
+        <p class="muted">${A.result.delivered ? "The signed approval was delivered." : "Copy this one-time response back to the app."}</p>
+        <textarea class="input" id="auth-response" readonly rows="5">${esc(A.result.encoded)}</textarea>
+        <div class="stack mt-md">
+          <button class="btn btn-secondary" id="btn-auth-copy">Copy response</button>
+          ${redirect ? `<a class="btn btn-primary" href="${esc(redirect)}">Continue to app</a>` : ""}
+        </div>
+      </div></div>`;
+  }
+  if (!A.request) return `
+    <div class="sub-page"><div class="sub-header"><button class="btn-back" id="btn-back">${svgBack}</button>
+      <span class="sub-title">Approve sign-in</span></div>
+      <div class="sub-body">
+        <p class="muted small">Paste the code or <code>poweur://auth</code> link shown by the app.</p>
+        <textarea class="input" id="auth-request-input" rows="7" placeholder="Paste sign-in request"></textarea>
+        ${A.error ? `<p class="compose-status err">${esc(A.error)}</p>` : ""}
+        <button class="btn btn-primary mt-md" id="btn-auth-load">Check request</button>
+      </div></div>`;
+  const unlocked = Boolean(getUnlockedKeys());
+  return `
+    <div class="sub-page"><div class="sub-header"><button class="btn-back" id="btn-back">${svgBack}</button>
+      <span class="sub-title">Approve sign-in</span></div>
+      <div class="sub-body">
+        <div class="settings-id-card">
+          <div class="settings-id-name">${esc(A.metadata.name)}</div>
+          <div class="settings-id-domain">${esc(A.request.audience)}</div>
+          <span class="chip chip-green">Origin verified</span>
+        </div>
+        <h2>${esc(A.headline)}</h2>
+        ${A.request.statement ? `<p>${esc(A.request.statement)}</p>` : ""}
+        ${A.scopes.length ? `<div class="settings-group"><div class="settings-group-label">Permissions</div>
+          <ul>${A.scopes.map(scope => `<li>${esc(scope)}</li>`).join("")}</ul></div>` : `<p class="muted">This app requests sign-in only, with no home access.</p>`}
+        <p class="form-note small">Signing as <strong>${esc(S.identity || "no identity selected")}</strong>.</p>
+        ${A.error ? `<p class="compose-status err">${esc(A.error)}</p>` : ""}
+        ${unlocked
+          ? `<button class="btn btn-primary mt-md" id="btn-auth-approve">Approve</button>`
+          : `<button class="btn btn-passkey mt-md" id="btn-auth-unlock">Unlock to approve</button>`}
+      </div></div>`;
 }
 
 // Add ID ───────────────────────────────────────────────────────────────────────
@@ -1591,6 +1661,15 @@ function renderCompose() {
             <div class="policy-toggle-detail muted small">
               Still encrypted to them, but unsigned and unattributed — they will not know it is you and
               cannot reply. Their policy decides whether it costs you proof-of-work.
+            </div>
+          </span>
+        </label>
+        <label class="policy-toggle compose-anon" for="c-group">
+          <input type="checkbox" id="c-group" class="policy-check"${R.params.group ? " checked" : ""} />
+          <span>
+            <div class="policy-toggle-label">Send to a group identity</div>
+            <div class="policy-toggle-detail muted small">
+              Encrypts a separate copy for every current member and sends the batch through the group’s relay.
             </div>
           </span>
         </label>
@@ -1988,7 +2067,7 @@ function attachEvents() {
       // Replying from a threaded row stays in that thread; from the default
       // row it starts nothing, which is what an unthreaded reply has always
       // been.
-      R.push("compose", { to: peer, thread: r.dataset.thread || "" });
+      R.push("compose", { to: peer, thread: r.dataset.thread || "", group: r.dataset.group === "true" });
     }));
 
   // A push stream costs one connection and saves every poll after it.
@@ -2055,6 +2134,15 @@ function attachEvents() {
   // Unlock sub-page
   q("#btn-do-unlock")?.addEventListener("click", doUnlock);
 
+  q("#btn-auth-load")?.addEventListener("click", () => beginSignInApproval(q("#auth-request-input")?.value));
+  q("#btn-auth-approve")?.addEventListener("click", doApproveSignIn);
+  q("#btn-auth-unlock")?.addEventListener("click", () => R.push("unlock", { returnTo: "auth" }));
+  q("#btn-auth-copy")?.addEventListener("click", async () => {
+    const value = q("#auth-response")?.value || S.auth.result?.encoded || "";
+    await navigator.clipboard?.writeText(value);
+    toast("Response copied", "success");
+  });
+
   // Compose send
   q("#btn-send-msg")?.addEventListener("click", doSend);
 
@@ -2115,6 +2203,11 @@ function attachEvents() {
   q("#row-policy")?.addEventListener("click", showPolicyPanel);
   q("#row-policy-anon")?.addEventListener("click", showPolicyPanel);
   q("#row-keys-devices")?.addEventListener("click", showKeysAndDevicesPanel);
+  q("#row-connected-apps")?.addEventListener("click", showConnectedAppsPanel);
+  q("#row-auth-request")?.addEventListener("click", () => {
+    S.auth = { input: "", request: null, metadata: null, headline: "", scopes: [], loading: false, error: "", result: null };
+    R.push("auth");
+  });
   if (R.page === "settings" && !R.sub && getUnlockedKeys()) {
     loadPolicy();
     loadProfile();
@@ -2214,13 +2307,46 @@ async function doUnlock() {
 
     setLoading(false);
     toast("Unlocked", "success");
-    R.sub = null; R.params = {};
+    const returnTo = R.params?.returnTo;
+    R.sub = returnTo || null; R.params = {};
     render(); // attachEvents starts the inbox fetch
 
   } catch (err) {
     setLoading(false);
     toast(err.message, "error");
   }
+}
+
+async function beginSignInApproval(input) {
+  S.auth = { ...S.auth, input: String(input ?? "").trim(), loading: true, error: "", result: null };
+  R.sub = "auth";
+  render();
+  try {
+    const consent = await loadSignInConsent(S.auth.input);
+    S.auth = { ...S.auth, ...consent, loading: false, error: "" };
+  } catch (error) {
+    S.auth = { ...S.auth, request: null, metadata: null, loading: false, error: error.message };
+  }
+  render();
+}
+
+async function doApproveSignIn() {
+  const client = clientFor(S.identity);
+  if (!client || !S.auth.request || !S.auth.metadata) {
+    return toast("Unlock your identity before approving", "warning");
+  }
+  S.auth = { ...S.auth, loading: true, error: "" };
+  render();
+  try {
+    const signed = await signBrowserApproval(S.auth.request, S.identity, client.signer);
+    const dav = await client.dav();
+    await appendBrowserConsent(dav, signed.response, S.auth.metadata);
+    const delivered = await deliverBrowserApproval(S.auth.request, signed.encoded);
+    S.auth = { ...S.auth, loading: false, result: { ...signed, delivered } };
+  } catch (error) {
+    S.auth = { ...S.auth, loading: false, error: error.message };
+  }
+  render();
 }
 
 /**
@@ -3003,6 +3129,7 @@ function loadInbox() {
       if (lost) {
         toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
       }
+      await verifyGroupInboxMessages(client, messages);
       mergeMessages(messages);
       mergeInto(S.acks, acks);
       if (R.page === "messages" && !R.sub) render();
@@ -3014,6 +3141,32 @@ function loadInbox() {
     }
   });
   return inboxInFlight;
+}
+
+/**
+ * A remote relay can forward any correctly signed direct message carrying a
+ * group label; only a member can read the group's signed roster. Verify that
+ * hint before using it to file a message into a group conversation.
+ */
+async function verifyGroupInboxMessages(client, messages) {
+  const byGroup = new Map();
+  for (const message of messages ?? []) {
+    const group = String(message.metadata?.group ?? "").toLowerCase();
+    if (group && !byGroup.has(group)) byGroup.set(group, []);
+    if (group) byGroup.get(group).push(message);
+  }
+  for (const [group, candidates] of byGroup) {
+    try {
+      const { document } = await client.groups.roster(client.signer, group);
+      const members = new Set((document.members ?? []).map(member => member.toLowerCase()));
+      for (const message of candidates) {
+        message.group_verified = members.has(String(message.sender).toLowerCase()) &&
+          String(message.metadata?.epoch) === String(document.epoch ?? 0);
+      }
+    } catch {
+      for (const message of candidates) message.group_verified = false;
+    }
+  }
 }
 
 /**
@@ -3106,7 +3259,8 @@ function unreadFor(peer) {
   for (const raw of S.messages) {
     const m = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!m.sender || m.sender.toLowerCase() === String(S.identity).toLowerCase()) continue;
-    if (m.sender.toLowerCase() !== wanted) continue;
+    const conversation = String(m.group_verified ? m.metadata?.group : m.sender).toLowerCase();
+    if (conversation !== wanted) continue;
     if (mark && markCovers(mark, m.timestamp, m.id ?? "")) continue;
     count += 1;
   }
@@ -3159,6 +3313,10 @@ async function doSend() {
   if (!to)   return toast("Enter a recipient", "warning");
   if (!body) return toast("Enter a message", "warning");
 
+  if (q("#c-anon")?.checked && q("#c-group")?.checked) {
+    return toast("A group message must be signed; turn off anonymous sending", "warning");
+  }
+
   const client = clientFor(S.identity);
   if (!client) return toast("Unlock your identity first", "warning");
   const sess = loadSessionRecord(S.identity);
@@ -3169,6 +3327,40 @@ async function doSend() {
   if (q("#c-anon")?.checked) {
     try {
       await doSendAnonymous(to, body, setStatus);
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+    return;
+  }
+
+  if (q("#c-group")?.checked) {
+    try {
+      setStatus("Reading the signed group roster…");
+      const sent = await client.sendGroupAndArchive(to, body, {
+        ...(R.params.thread ? { thread: R.params.thread } : {}),
+      });
+      const first = sent.envelopes[0];
+      mergeMessages([{
+        id: first.id,
+        sender: S.identity,
+        recipient: sent.group.group,
+        timestamp: first.timestamp,
+        queue: "sent",
+        plaintext: body,
+        thread_id: first.thread_id,
+        metadata: first.metadata,
+        group_verified: true,
+      }]);
+      const delivered = sent.response.delivered?.length ?? 0;
+      const total = sent.envelopes.length;
+      setStatus(`✓ ${delivered} of ${total} delivered`, delivered === total ? "ok" : "err");
+      if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+      if (q("#c-body")) q("#c-body").value = "";
+      toast(`Group message delivered to ${delivered} of ${total}`, delivered === total ? "success" : "warning");
+      setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+    } catch (err) {
+      setStatus(`✕ ${err.message}`, "err");
+      toast(err.message, "error");
     } finally {
       if (sendBtn) sendBtn.disabled = false;
     }
@@ -4268,6 +4460,55 @@ function showProfilePanel() {
 
 // ─── Keys & devices (EPIC-011) ───────────────────────────────────────────────
 
+async function showConnectedAppsPanel() {
+  const identity = S.identity;
+  const client = clientFor(identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  showPanel("Connected apps", `<div id="connected-apps-host" role="status">Loading…</div>`, async close => {
+    const host = q("#connected-apps-host");
+    try {
+      const davClient = await client.dav();
+      const [doc, consentLog] = await Promise.all([readConnectedApps(davClient), readConsentLog(davClient)]);
+      if (!host?.isConnected || S.identity !== identity) return;
+      const apps = [...doc.apps].sort((a, b) => String(a.app_id).localeCompare(String(b.app_id)));
+      const recent = consentLog.slice(-10).reverse();
+      host.innerHTML = `${apps.length ? `
+        <div class="settings-rows">${apps.map(app => `
+          <div class="settings-row">
+            <span class="settings-row-icon">🧩</span>
+            <span class="settings-row-label"><strong>${esc(app.name || app.app_id)}</strong><br>
+              <span class="small muted">${esc(app.audience)}<br>${esc((app.scopes || []).join(", "))}</span></span>
+            ${app.revoked_at
+              ? `<span class="settings-row-value muted">Revoked</span>`
+              : `<button class="btn btn-sm" data-revoke-app="${esc(app.app_id)}">Revoke</button>`}
+          </div>`).join("")}</div>`
+        : `<p class="muted">No apps have access to your home.</p>`}
+        <div class="section-label mt-md">Recent approvals</div>
+        ${recent.length ? `<div class="settings-rows">${recent.map(record => `
+          <div class="settings-row">
+            <span class="settings-row-icon">✓</span>
+            <span class="settings-row-label"><strong>${esc(record.app_name || record.app_id || record.audience)}</strong><br>
+              <span class="small muted">${esc(record.at || "")} · ${esc((record.scopes || []).join(", ") || "sign-in only")}</span></span>
+          </div>`).join("")}</div>` : `<p class="muted small">No approvals recorded yet.</p>`}`;
+      qAll("[data-revoke-app]").forEach(button => button.addEventListener("click", async () => {
+        if (!confirm(`Revoke ${button.dataset.revokeApp}? Its current tokens stop working immediately.`)) return;
+        button.disabled = true;
+        try {
+          await revokeConnectedApp(davClient, button.dataset.revokeApp);
+          toast("App access revoked", "success");
+          close();
+          showConnectedAppsPanel();
+        } catch (error) {
+          toast(error.message, "error");
+          button.disabled = false;
+        }
+      }));
+    } catch (error) {
+      if (host?.isConnected) host.textContent = `Could not load connected apps: ${error.message}`;
+    }
+  });
+}
+
 const ENROLLMENT_KIND_LABEL = {
   "passkey": "Passkey",
   "hardware-key": "Hardware key",
@@ -4918,12 +5159,17 @@ function boot() {
   initTheme();
   S.identity = getActiveIdentity();
   S.config   = getConfig();
+  const authInput = new URL(globalThis.location?.href ?? "http://localhost/").searchParams.get("auth") || "";
 
   // A hand-off from the launcher arrives as a fragment and is adopted before
   // anything else looks at storage (EPIC-018 E18-T3).
   const handedOver = adoptHandOff();
 
-  if (handedOver) {
+  if (authInput) {
+    R.page = "settings";
+    R.sub = "auth";
+    S.auth.input = authInput;
+  } else if (handedOver) {
     // Locked on arrival: the keys are wrapped, and the passkey that opens them
     // works here because it is scoped to the domain both hosts share (E18-T4).
     R.page = "messages";
@@ -4939,6 +5185,7 @@ function boot() {
   }
 
   render();
+  if (authInput) beginSignInApproval(authInput);
 
   // The door depends on the relay's answer, and the first paint above came
   // from the cached one (or from `unknown`, which renders the generic welcome

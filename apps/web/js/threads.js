@@ -71,7 +71,10 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     // An unsigned message has nobody to thread under; it belongs to the
     // anonymous tray, which renders it as a different kind of object.
     if (!message.sender) continue;
-    const contact = message.sender === selfIdentity ? message.recipient : message.sender;
+    // A verified fan-out carries the group in signed metadata. File it under
+    // that address rather than under whichever member happened to speak.
+    const contact = (message.group_verified ? message.metadata?.group : "") ||
+      (message.sender === selfIdentity ? message.recipient : message.sender);
     if (!contact) continue;
     if (!byContact.has(contact)) byContact.set(contact, []);
     byContact.get(contact).push(message);
@@ -95,6 +98,8 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
         lastMsg: thread.lastMsg,
         unread: index === 0 ? unread : 0,
         preview: previewFor(thread.lastMsg),
+        group: contactMessages.some(message => message.group_verified && message.metadata?.group === contact) ||
+          thread.threadId === contact || thread.threadId.startsWith(`${contact}:`),
       });
     });
   }

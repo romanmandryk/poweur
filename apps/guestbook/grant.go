@@ -70,6 +70,13 @@ func (s *Server) exchangeGrant(ctx context.Context, result *signin.Result, encod
 	if relay == "" {
 		return nil, fmt.Errorf("identity %s publishes no relay", result.Identity)
 	}
+	if !strings.HasPrefix(relay, "http://") && !strings.HasPrefix(relay, "https://") {
+		scheme := "https://"
+		if strings.HasPrefix(s.cfg.Origin, "http://") {
+			scheme = "http://"
+		}
+		relay = scheme + relay
+	}
 	body, err := json.Marshal(GrantRequest{Response: encoded})
 	if err != nil {
 		return nil, err
@@ -135,6 +142,9 @@ func (s *Server) writeToHome(ctx context.Context, sess *Session, entry Entry) (s
 	}
 	name := entryFileName(entry.At)
 	path := strings.Trim(grant.Path, "/") + "/entries/" + name
+	if err := s.ensureHomeCollection(ctx, grant, strings.Trim(grant.Path, "/")+"/entries"); err != nil {
+		return "", err
+	}
 	body, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
 		return "", err
@@ -156,6 +166,25 @@ func (s *Server) writeToHome(ctx context.Context, sess *Session, entry Entry) (s
 		return "", fmt.Errorf("relay refused the write (%d): %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	return "/" + path, nil
+}
+
+func (s *Server) ensureHomeCollection(ctx context.Context, grant *Grant, path string) error {
+	u := joinURL(grant.Relay, "/dav/"+grant.Identity+"/"+strings.Trim(path, "/"))
+	req, err := http.NewRequestWithContext(ctx, "MKCOL", u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+grant.Token)
+	resp, err := s.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 && resp.StatusCode != http.StatusMethodNotAllowed {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+		return fmt.Errorf("relay refused app directory (%d): %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
 }
 
 // entryFileName keeps entries sortable by time and confined to one path
