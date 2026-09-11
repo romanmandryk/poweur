@@ -19,7 +19,7 @@ import { SYSTEM_MESSAGE_TYPES, isKnownSystemType, isSystemType, validateEnvelope
 import { solvePow } from "./pow.js";
 import { resolveEncryptionKey, resolveIdentity } from "./resolve.js";
 import { isSessionValid, sessionProofFrom, sessionSigner, } from "./session.js";
-import { ACK_STATE_DELIVERED_CLIENT, ACK_TYPE_DELIVERY, ANON_CHALLENGE_POW, } from "./types.js";
+import { ACK_STATE_DELIVERED_CLIENT, ACK_STATE_READ, ACK_TYPE_DELIVERY, ANON_CHALLENGE_POW, } from "./types.js";
 /** Validate a sign-with mode (CLI: `--sign-with session|identity`). */
 export function assertSignWith(mode) {
     if (mode !== "session" && mode !== "identity") {
@@ -269,11 +269,15 @@ export class Messaging {
         if (!message.id || !message.sender) {
             throw new PoweurError("invalid_argument", "ack requires a message id and original sender");
         }
+        const state = options.state ?? ACK_STATE_DELIVERED_CLIENT;
+        if (state !== ACK_STATE_DELIVERED_CLIENT && state !== ACK_STATE_READ) {
+            throw new PoweurError("invalid_argument", `unsupported ack state: ${state}`);
+        }
         const ack = {
             type: ACK_TYPE_DELIVERY,
             id: newAckId(),
             message_id: message.id,
-            state: ACK_STATE_DELIVERED_CLIENT,
+            state,
             sender: message.recipient || signer.identity,
             recipient: message.sender,
             timestamp: rfc3339(),

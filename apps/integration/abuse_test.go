@@ -133,20 +133,21 @@ func TestINT_ABUSE_01_RequestFloodMeteredPerSenderRelay(t *testing.T) {
 	}
 
 	// The third identity is brand new and has sent nothing. Its relay has.
-	code, _, stderr := runCLIFull(t, cheapHomes[2], "contacts", "request", "floodalice.poweur.net", "hi there")
-	if code == 0 {
-		t.Fatal("a third request from the same relay must be throttled")
+	code, stdout, stderr := runCLIFull(t, cheapHomes[2], "contacts", "request", "floodalice.poweur.net", "hi there")
+	if code != 0 || !strings.Contains(stdout, "queued encrypted message") {
+		t.Fatalf("a throttled request should enter the durable outbox: code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "rate_limit_exceeded") && !strings.Contains(stderr, "sender_relay") {
-		t.Fatalf("the refusal should name the relay-scoped limit, got: %s", stderr)
+	outbox, _ := runCLI(t, cheapHomes[2], "outbox", "list")
+	if !strings.Contains(outbox, "status 429") || !strings.Contains(outbox, "sender_relay") {
+		t.Fatalf("the queued refusal should name the relay-scoped limit, got: %s", outbox)
 	}
 
 	// The bucket is the relay, not the name. Buying a second domain and
 	// hosting it in the same place is the cheapest evasion there is, so a
 	// fresh domain on the exhausted relay must still be throttled…
 	sameRelayHome, sameRelayName := newDNSIdentity(t, "fresh", "anotherco.test", addrCheap)
-	if code, _, _ := runCLIFull(t, sameRelayHome, "contacts", "request", "floodalice.poweur.net", "hi"); code == 0 {
-		t.Fatalf("%s shares a relay with the flood and must share its budget", sameRelayName)
+	if code, stdout, _ := runCLIFull(t, sameRelayHome, "contacts", "request", "floodalice.poweur.net", "hi"); code != 0 || !strings.Contains(stdout, "queued encrypted message") {
+		t.Fatalf("%s shares a relay with the flood and must enter the throttled outbox", sameRelayName)
 	}
 
 	// …and, the other way round, a name in the flood's own domain hosted
@@ -157,7 +158,7 @@ func TestINT_ABUSE_01_RequestFloodMeteredPerSenderRelay(t *testing.T) {
 	politeHome, politeName := newDNSIdentity(t, "polite", "cheapco.test", addrOther)
 	runCLI(t, politeHome, "contacts", "request", "floodalice.poweur.net", "hello")
 
-	stdout, _ := runCLI(t, aliceHome, "requests")
+	stdout, _ = runCLI(t, aliceHome, "requests")
 	for _, want := range []string{cheapNames[0], cheapNames[1], politeName} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("requests queue missing %s: %s", want, stdout)

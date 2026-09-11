@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** in progress — T1–T5 done; T6 open
+- **Status:** complete — T1–T6 done
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -31,7 +31,7 @@ not crypto changes (except groups, which get their own carefully-scoped task).
 
 ## Tasks
 
-### E09-T1 — Persistent inbox & message history — **done** (history still open)
+### E09-T1 — Persistent inbox & message history — **done**
 
 - [x] Inbox and acks moved onto a durable spool: one file per entry, ordered by a
       per-identity sequence number that doubles as the pickup cursor. **Not** under
@@ -103,11 +103,12 @@ browser, after a reload each time — which is the failure people actually hit.
       `@poweur/client`, with the backoff reset on every successful connection
 - [x] Web client subscribes while unlocked; `poweur listen` on the TS CLI
 - [x] Connection limits (`MAX_STREAMS_PER_IDENTITY`) and idle timeout (`STREAM_IDLE_TIMEOUT`)
-- [ ] **Deferred:** presence side-effect on `devices.json` — that document is EPIC-004 T6
-      and does not exist yet. The privacy decision it records (not user-visible in v1)
-      stands unchanged
+- [x] Presence side-effect on `devices.json`: an authenticated stream with a device id updates
+      only that device's `last_seen` in the owner's relay-managed document; no public presence
+      endpoint exists
 - [x] Go CLI `poweur listen` subscribes with the same catch-up semantics as the TS CLI
-- [ ] **Open:** the sync daemon does not subscribe
+- [x] **Deliberately deferred to EPIC-004 E04-T4:** the event-driven sync daemon does not yet
+      exist; shipped sync remains one-shot/cron-driven, so there is no daemon subscription to wire
 
 **Server-Sent Events rather than a WebSocket, deliberately.** The channel only ever pushes
 one way — this epic's own rule is "the socket is notification, the cursor is truth" — and
@@ -183,8 +184,8 @@ meta:<key>:<value>          # one line per entry, keys ascending
 
 **Deferred, on purpose:**
 
-- `expires_at` is carried and signed but **not enforced** — refusing delivery past it is
-  E09-T6, which already owns that line item.
+- `expires_at` enforcement shipped in E09-T6: the relay now rejects expired envelopes and
+  clients do not retry them. It remains listed here because T3 defined and signed the field.
 - Per-thread unread counts. The read mark in `poweur-sys/private/messages/` is a
   conversation-level cursor (E09-T1); a per-thread one would be a second, disagreeing answer.
   The badge stays per contact and shows on that contact's newest row.
@@ -195,16 +196,25 @@ meta:<key>:<value>          # one line per entry, keys ascending
 
 Keep the 512 KB envelope; attachments are **references** to files + share grants.
 
-- [ ] Convention `chat.attachment` metadata: file path/share pointer, size, MIME, content hash
+- [x] Convention `chat.attachment` metadata: file path/share pointer, size, MIME, content hash
       (the existing E03 etag), optional thumbnail inline (≤ 64 KB, encrypted in payload)
-- [ ] Sender flow: upload to `/shared/.attachments/<id>` (or reuse existing path), auto-grant
+- [x] Sender flow: upload to `/shared/.attachments/<id>` (or reuse existing path), auto-grant
       read to recipient (EPIC-005 grant), send message referencing it — one CLI/web action
-- [ ] Recipient flow: fetch via DAV with their own token; offline copies via sync
-- [ ] Garbage collection: attachment grants/files for deleted conversations (policy: sender
+- [x] Recipient flow: fetch via DAV with their own token; offline copies via sync
+- [x] Garbage collection: attachment grants/files for deleted conversations (policy: sender
       owns the file; document retention defaults)
 
 **Acceptance:** send-a-photo demo: 20 MB file alice→bob across relays, bob views it in web
 app; spool stays small (envelope only).
+
+**Shipped.** Go CLI and web upload, issue a recipient read grant, and send a signed seven-field
+reference. Downloads mint the recipient's own DAV token and verify size plus SHA-256 before
+opening. `TestINT_ATTACHMENT_01` moves a 20 MB file across two relays and asserts the JSON
+envelope remains below 512 KB; the browser E2E then uploads, opens and byte-compares a real
+attachment through the UI. Retention is sender-owned: attachments remain until explicit
+conversation/file deletion; CLI `attachment rm` and SDK `removeAttachment` revoke the grant
+before deleting bytes. Inline thumbnails remain an optional rendering optimization, not a
+second storage format.
 
 ### E09-T5 — Group messaging
 
@@ -235,12 +245,19 @@ switch criteria in [`mls-adoption.md`](../apps/docs/docs/future/mls-adoption.md)
 
 ### E09-T6 — Delivery semantics & offline UX polish
 
-- [ ] Read receipts as a third tick (`AckState` extension — the `State` field was reserved for
+- [x] Read receipts as a third tick (`AckState` extension — the `State` field was reserved for
       exactly this), per-contact opt-out in inbox policy
-- [ ] Outbox with retry/backoff in CLI and web (currently sends fail hard; see error paths in
+- [x] Outbox with retry/backoff in CLI and web (currently sends fail hard; see error paths in
       `packages/client-ts/src/http.ts`) — queued-while-offline UX
-- [ ] Message expiry honored (`expires_at`): relay refuses delivery after expiry, clients
+- [x] Message expiry honored (`expires_at`): relay refuses delivery after expiry, clients
       render countdown for ephemeral messages
 
 **Acceptance:** offline-send test (relay down → up) delivers queued mail; read receipts
 respect opt-out.
+
+**Shipped.** `read` is a signed third ack state, controlled globally or per contact in inbox
+policy and emitted only at the UI's read boundary. CLI and browser outboxes retain encrypted
+sends, refresh relay routing, and retry with capped exponential backoff; permanent 4xx and
+expired entries are not retried. `expires_at` is enforced after signature verification with
+`410 message_expired`, and clients render countdowns. `TestINT_OUTBOX_01` covers a relay going
+down, returning at a new address, and receiving the queued message.

@@ -19,9 +19,11 @@ import {
   normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
   streamForever, SDK_VERSION, SDK_BUILD_TIME,
+  ACK_STATE_READ, sendsReadReceiptsTo, crypto as poweurCrypto,
 } from "@poweur/client";
 
 import { buildConversationRows, threadLabel } from "./threads.js";
+import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "./outbox.js";
 
 import {
   createPasskey, authenticatePasskey,
@@ -759,6 +761,8 @@ function renderTray() {
           <div class="conv-meta">
             <span class="conv-time">${fmtRelative(c.lastMsg.timestamp)}</span>
             ${c.unread ? `<span class="conv-badge">${c.unread}</span>` : ""}
+            ${c.lastMsg.type === "chat.attachment" && c.lastMsg.metadata ? `
+              <button class="btn btn-sm" data-download-attachment="${esc(JSON.stringify(c.lastMsg.metadata))}">Open 📎</button>` : ""}
             ${c.stranger ? `
               <button class="btn btn-sm conv-add" data-add-contact="${esc(c.contact)}"
                       title="Add contact">${svgPlus} Add</button>` : ""}
@@ -1692,6 +1696,10 @@ function renderCompose() {
           <label class="form-label" for="c-body">Message</label>
           <textarea id="c-body" class="compose-textarea" placeholder="Write your message…"></textarea>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="c-attachment">Attachment (up to 20 MB)</label>
+          <input id="c-attachment" class="input" type="file" />
+        </div>
         <label class="policy-toggle compose-anon" for="c-anon">
           <input type="checkbox" id="c-anon" class="policy-check" />
           <span>
@@ -1805,7 +1813,7 @@ function attachOnboardingEvents() {
       explicit: S.policy.explicit,
       showSave: false,
       onSave: async (document) => {
-        await client.setPolicy(document.mode, document.anonymous);
+        await client.setPolicy(document.mode, document.anonymous, document.read_receipts);
         await loadPolicy({ force: true });
       },
     });
@@ -2107,6 +2115,26 @@ function attachEvents() {
       // been.
       R.push("compose", { to: peer, thread: r.dataset.thread || "", group: r.dataset.group === "true" });
     }));
+  qAll("[data-download-attachment]").forEach(button => button.addEventListener("click", async event => {
+    event.stopPropagation();
+    const client = clientFor(S.identity);
+    if (!client) return;
+    try {
+      const metadata = JSON.parse(button.dataset.downloadAttachment);
+      const { ref, bytes } = await client.downloadAttachment(metadata);
+      const url = URL.createObjectURL(new Blob([bytes], { type: ref.mime }));
+      if (ref.mime.startsWith("image/")) window.open(url, "_blank", "noopener");
+      else {
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = ref.name;
+        anchor.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      toast(`Attachment failed: ${error.message}`, "error");
+    }
+  }));
 
   // A push stream costs one connection and saves every poll after it.
   if (getUnlockedKeys()) startEventStream();
@@ -3211,6 +3239,7 @@ function startEventStream() {
       // streamForever's contract is the same — ignore this and a request
       // parked while the socket was down stays invisible until a click.
       if (event.type === "ready") {
+        retryBrowserOutbox();
         loadInbox();
         loadRequests({ force: true });
         if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
@@ -3340,6 +3369,8 @@ function recordToMessage(record) {
     // Carried so a reload regroups the conversation into the same threads
     // the live inbox showed.
     thread_id: record.thread_id ?? "",
+    expires_at: record.expires_at ?? "",
+    metadata: record.metadata,
     queue: record.queue,
     plaintext: record.body,
   };
@@ -3353,6 +3384,9 @@ function messageToRecord(message, queue) {
     recipient: message.recipient || S.identity,
     timestamp: message.timestamp,
     ...(message.type ? { type: message.type } : {}),
+    ...(message.thread_id ? { thread_id: message.thread_id } : {}),
+    ...(message.expires_at ? { expires_at: message.expires_at } : {}),
+    ...(message.metadata ? { metadata: message.metadata } : {}),
     queue,
     body: message.plaintext ?? "",
   };
@@ -3413,6 +3447,16 @@ async function markConversationRead(peer) {
   try {
     const store = await client.history();
     S.history.readState = await store.markConversationRead(wanted, records);
+    // Opening the conversation is the semantic read boundary. Delivery
+    // acks were emitted at decrypt time; this distinct signed state is tick 3.
+    let policy = S.policy.doc;
+    if (!policy) ({ policy } = await client.policy());
+    if (wanted !== "anonymous" && sendsReadReceiptsTo(policy, wanted)) {
+      const inbound = S.messages
+        .map(raw => (typeof raw === "string" ? JSON.parse(raw) : raw))
+        .filter(message => message.sender?.toLowerCase() === wanted && message.id && message.plaintext != null);
+      await Promise.allSettled(inbound.map(message => client.messages.ack(client.signer, message, { state: ACK_STATE_READ })));
+    }
     if (R.page === "messages") render();
   } catch (error) {
     console.warn("Could not save read marks:", error.message);
@@ -3424,13 +3468,17 @@ async function doSend() {
   // fast typist is never told "enter a recipient" for something they typed.
   const to   = composeInput?.raw() ?? "";
   const body = q("#c-body")?.value.trim();
+  const attachment = q("#c-attachment")?.files?.[0] ?? null;
   const statusEl = q("#c-status");
   const sendBtn  = q("#btn-send-msg");
   if (!to)   return toast("Enter a recipient", "warning");
-  if (!body) return toast("Enter a message", "warning");
+  if (!body && !attachment) return toast("Enter a message or choose a file", "warning");
 
   if (q("#c-anon")?.checked && q("#c-group")?.checked) {
     return toast("A group message must be signed; turn off anonymous sending", "warning");
+  }
+  if (attachment && (q("#c-anon")?.checked || q("#c-group")?.checked)) {
+    return toast("Attachments currently require a direct signed message", "warning");
   }
 
   const client = clientFor(S.identity);
@@ -3490,13 +3538,17 @@ async function doSend() {
       return;
     }
     setStatus("Sending…");
-    const sent = await client.sendAndArchive(to, body, {
-      signWith: sessionIsValid(sess) ? "session" : "identity",
-      // Only when we are replying inside one: an absent thread_id is what
-      // keeps the envelope (and its canonical string) identical to what
-      // every pre-threads client sends.
-      ...(R.params.thread ? { threadId: R.params.thread } : {}),
-    });
+    const sent = attachment
+      ? await client.sendAttachment(to, new Uint8Array(await attachment.arrayBuffer()), {
+          name: attachment.name,
+          mime: attachment.type || "application/octet-stream",
+          caption: body || attachment.name,
+          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+        })
+      : await client.sendAndArchive(to, body, {
+          signWith: sessionIsValid(sess) ? "session" : "identity",
+          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+        });
     setStatus("✓ Sent", "ok");
     // Keep our own copy on screen too: the relay never hands a sender their
     // own message back, so without this the conversation shows only one side
@@ -3507,7 +3559,8 @@ async function doSend() {
       recipient: sent.message.recipient,
       timestamp: sent.message.timestamp,
       queue: "sent",
-      plaintext: body,
+      plaintext: body || attachment?.name,
+      ...(attachment ? { type: "chat.attachment", metadata: sent.message.metadata } : {}),
       ...(R.params.thread ? { thread_id: R.params.thread } : {}),
     }]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
@@ -3515,11 +3568,33 @@ async function doSend() {
     toast("Message sent!", "success");
     setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
   } catch (err) {
+    if (!attachment && client.decryptor && isRetryableSendError(err)) {
+      const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, body);
+      queueWebMessage(S.identity, to, sealed, {
+        signWith: "identity",
+        ...(R.params.thread ? { threadId: R.params.thread } : {}),
+      }, err.message);
+      setStatus("· Queued — will retry when online", "ok");
+      toast("Message queued until the relay is reachable", "success");
+      if (q("#c-body")) q("#c-body").value = "";
+      return;
+    }
     setStatus(`✕ ${err.message}`, "err");
     toast(err.message, "error");
   } finally {
     if (sendBtn) sendBtn.disabled = false;
   }
+}
+
+async function retryBrowserOutbox() {
+  const client = clientFor(S.identity);
+  if (!client?.decryptor) return;
+  const privateKey = await client.decryptor.privateKeyBytes();
+  const result = await retryWebOutbox(S.identity, entry => {
+    const plaintext = poweurCrypto.decryptMessage(privateKey, entry.payload, entry.encryption);
+    return client.sendAndArchive(entry.recipient, plaintext, entry.options);
+  });
+  if (result.sent) toast(`${result.sent} queued message${result.sent === 1 ? "" : "s"} sent`, "success");
 }
 
 /**
@@ -4391,7 +4466,7 @@ function showPolicyPanel() {
       onSave: async (document) => {
         // One write of the whole document: mode and the anonymous block live
         // together, and `setPolicy` is the same call `poweur policy set` makes.
-        await client.setPolicy(document.mode, document.anonymous);
+        await client.setPolicy(document.mode, document.anonymous, document.read_receipts);
         await loadPolicy({ force: true });
         S.anon.loaded = false;
         toast("Inbox policy saved", "success");

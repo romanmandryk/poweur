@@ -87,9 +87,7 @@ type Message struct {
 }
 
 // Ack is the wire format of a delivery acknowledgement. v1 carries a
-// single state — `delivered_client` — emitted by the recipient client
-// after a successful decrypt of an inbound message; future protocol
-// versions can add `read` (or other states) without changing transport.
+// states `delivered_client` and `read`, emitted by the recipient client.
 //
 // `sender` is the producer of the ack (the recipient of the original
 // message). `recipient` is the original message's sender — this is who
@@ -113,6 +111,7 @@ type Ack struct {
 const (
 	AckTypeDeliveryAck      = "ack"
 	AckStateDeliveredClient = "delivered_client"
+	AckStateRead            = "read"
 )
 
 // InboxResponse is the shape returned by GET /messages/{identity}.

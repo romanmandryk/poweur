@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	idpkg "github.com/poweur/identity"
 )
@@ -28,6 +29,27 @@ func (m *metaFlag) String() string {
 		return ""
 	}
 	return strings.Join(idpkg.MetadataLines(m.values), " ")
+}
+
+func expirySuffix(value string) string {
+	if value == "" {
+		return ""
+	}
+	expires, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return ""
+	}
+	remaining := time.Until(expires)
+	if remaining <= 0 {
+		return " [expired]"
+	}
+	if remaining < time.Minute {
+		return fmt.Sprintf(" [expires in %ds]", int(remaining.Seconds())+1)
+	}
+	if remaining < time.Hour {
+		return fmt.Sprintf(" [expires in %dm]", int(remaining.Minutes())+1)
+	}
+	return fmt.Sprintf(" [expires in %dh]", int(remaining.Hours())+1)
 }
 
 func (m *metaFlag) Set(raw string) error {

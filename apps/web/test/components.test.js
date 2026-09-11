@@ -328,7 +328,9 @@ describe("PolicyControls", () => {
     const controls = PolicyControls({ policy: { mode: "open" }, onSave: save });
     // An absent block *is* deny — writing `allow: false` would say the same
     // thing in a way the relay has to interpret.
-    expect(controls.value()).toEqual({ version: 1, mode: "open" });
+    expect(controls.value()).toEqual({
+      version: 1, mode: "open", read_receipts: { enabled: true, disabled_for: [] },
+    });
   });
 
   it("keeps the difficulty dial out of the document unless the challenge is pow", () => {
@@ -389,8 +391,23 @@ describe("PolicyControls", () => {
     controls.el.querySelector("#policy-save").click();
     await settle();
 
-    expect(saves).toEqual([{ version: 1, mode: "contacts_and_requests" }]);
+    expect(saves).toEqual([{
+      version: 1, mode: "contacts_and_requests", read_receipts: { enabled: true, disabled_for: [] },
+    }]);
     expect(controls.el.querySelector(".idin-status").textContent).toBe("relay said no");
+  });
+
+  it("normalizes per-contact read-receipt opt-outs", () => {
+    const controls = PolicyControls({ policy: { mode: "open" }, onSave: save });
+    const input = controls.el.querySelector("#policy-read-disabled-for");
+    input.value = " Alice.Example, bob.example ";
+    input.dispatchEvent(new Event("input"));
+    const toggle = controls.el.querySelector("#policy-read-receipts");
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event("change"));
+    expect(controls.value().read_receipts).toEqual({
+      enabled: false, disabled_for: ["alice.example", "bob.example"],
+    });
   });
 });
 

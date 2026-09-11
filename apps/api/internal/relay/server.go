@@ -816,6 +816,9 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
+	if !refuseExpiredEnvelope(w, msg) {
+		return
+	}
 	verifiedActor(r, msg.Sender)
 	if senderLocal {
 		requestAction(r, "message.submit")
@@ -921,8 +924,8 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_ack", "missing required ack fields")
 		return
 	}
-	if ack.State != AckStateDeliveredClient {
-		writeError(w, http.StatusBadRequest, "invalid_ack", "unsupported ack state (v1 only emits delivered_client)")
+	if ack.State != AckStateDeliveredClient && ack.State != AckStateRead {
+		writeError(w, http.StatusBadRequest, "invalid_ack", "unsupported ack state (want delivered_client or read)")
 		return
 	}
 	if _, err := time.Parse(time.RFC3339, ack.Timestamp); err != nil {

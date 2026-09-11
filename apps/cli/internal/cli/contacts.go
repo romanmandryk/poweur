@@ -472,6 +472,9 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 	anonBits := fs.Int("anon-bits", 0, "proof-of-work difficulty in bits (0 = relay default; each +1 doubles the work)")
 	anonMaxBytes := fs.Int("anon-max-bytes", 0, "max anonymous payload bytes (0 = default 4096)")
 	anonMaxPerDay := fs.Int("anon-max-per-day", 0, "max accepted anonymous messages per day (0 = default 20)")
+	readReceipts := fs.Bool("read-receipts", true, "send read receipts")
+	var noReadFor stringList
+	fs.Var(&noReadFor, "no-read-receipt-for", "identity that must not receive read receipts (repeatable)")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--anon-allow": true})); err != nil {
 		return 1
@@ -512,6 +515,15 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		} else {
 			fmt.Fprintln(stdout, "anonymous: denied (default)")
 		}
+		if policy.ReadReceipts == nil {
+			fmt.Fprintln(stdout, "read receipts: enabled (default)")
+		} else {
+			fmt.Fprintf(stdout, "read receipts: enabled=%t", policy.ReadReceipts.Enabled)
+			if len(policy.ReadReceipts.DisabledFor) > 0 {
+				fmt.Fprintf(stdout, ", disabled for %s", strings.Join(policy.ReadReceipts.DisabledFor, ", "))
+			}
+			fmt.Fprintln(stdout)
+		}
 		return 0
 	case "set":
 		if fs.NArg() != 1 {
@@ -519,6 +531,7 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		policy := idpkg.InboxPolicy{Version: 1, Mode: fs.Arg(0)}
+		policy.ReadReceipts = &idpkg.ReadReceiptPolicy{Enabled: *readReceipts, DisabledFor: noReadFor}
 		if *anonAllow || *anonChallenge != "" || *anonBits > 0 {
 			policy.Anonymous = &idpkg.AnonymousPolicy{
 				Allow:     *anonAllow,

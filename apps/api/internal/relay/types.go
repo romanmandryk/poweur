@@ -61,7 +61,7 @@ type Message struct {
 // `Sender` is the party that produced the ack (Bob's client). `Recipient`
 // is who the ack is destined for (== the original message's sender, Alice).
 //
-// State is reserved for future expansion. v1 emits only `delivered_client`.
+// State progresses from `delivered_client` to `read`.
 type Ack struct {
 	Type         string        `json:"type"`
 	ID           string        `json:"id"`
@@ -78,6 +78,7 @@ type Ack struct {
 const (
 	AckTypeDeliveryAck      = "ack"
 	AckStateDeliveredClient = "delivered_client"
+	AckStateRead            = "read"
 )
 
 type InboxResponse struct {

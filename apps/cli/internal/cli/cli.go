@@ -49,6 +49,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runInbox(args[1:], stdout, stderr)
 	case "listen":
 		return runListen(args[1:], stdout, stderr)
+	case "outbox":
+		return runOutbox(args[1:], stdout, stderr)
+	case "attachment":
+		return runAttachment(args[1:], stdout, stderr)
 	case "devices":
 		return runDevices(args[1:], stdout, stderr)
 	case "history":
@@ -659,6 +663,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	msgType := fs.String("type", "", "envelope message type (default chat.text; sys.* reserved for the platform)")
 	threadID := fs.String("thread", "", "group this message into a conversation thread")
 	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
+	attachPath := fs.String("attach", "", "upload and attach a file (max 20 MB)")
 	meta := &metaFlag{}
 	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
@@ -668,9 +673,21 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
+	if fs.NArg() < 1 || (fs.NArg() < 2 && *attachPath == "") {
+		fmt.Fprintln(stderr, "usage: poweur send <to> [message] [--attach file] [--sign-with=session|identity] [--via-home-relay] [--anon]")
 		return 1
+	}
+	if *attachPath != "" && *msgType != "" && *msgType != idpkg.MsgTypeChatAttachment {
+		fmt.Fprintln(stderr, "--attach sets --type=chat.attachment")
+		return 1
+	}
+	if *attachPath != "" {
+		for key := range meta.Map() {
+			if strings.HasPrefix(key, "attachment_") {
+				fmt.Fprintf(stderr, "attachment metadata key %s is generated automatically\n", key)
+				return 1
+			}
+		}
 	}
 	// Check the envelope before anything is encrypted, signed, journalled or
 	// posted: a `sys.*` typo should not become a recorded send attempt.
@@ -683,7 +700,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		// fields to a sender — any relay on the path could add, drop or
 		// rewrite them. Rather than ship routing metadata nobody can trust,
 		// the combination is refused.
-		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil {
+		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil || *attachPath != "" {
 			fmt.Fprintln(stderr, "--anon cannot carry --type/--thread/--expires/--meta: an unsigned envelope binds nothing")
 			return 1
 		}
@@ -712,13 +729,41 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 
 	recipient := fs.Arg(0)
-	plaintext := fs.Arg(1)
+	plaintext := ""
+	if fs.NArg() > 1 {
+		plaintext = fs.Arg(1)
+	}
 
 	// Key pinning (E07-T4): when the recipient is a pinned contact, the
 	// resolved signing key must match the pin (or be covered by a signed
 	// rotation statement) — the known-hosts / safety-number model.
 	if code := checkPinnedKey(cfg, identityValue, identityPriv, recipient, *acceptNewKey, stderr); code != 0 {
 		return code
+	}
+	if *attachPath != "" {
+		ref, err := prepareAttachment(context.Background(), cfg, identityValue, identityPriv, recipient, *attachPath)
+		if err != nil {
+			fmt.Fprintln(stderr, "attachment:", err)
+			return 1
+		}
+		if meta.values == nil {
+			meta.values = map[string]string{}
+		}
+		for key, value := range ref.Metadata() {
+			if _, exists := meta.values[key]; exists {
+				fmt.Fprintf(stderr, "attachment metadata key %s cannot be overridden\n", key)
+				return 1
+			}
+			meta.values[key] = value
+		}
+		*msgType = idpkg.MsgTypeChatAttachment
+		if plaintext == "" {
+			plaintext = ref.Name
+		}
+		if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -789,13 +834,17 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		resp, err := SendMessage(context.Background(), targetURL, msg)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-			fmt.Fprintln(stderr, err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(resp.Body)
+			if retryableStatus(resp.StatusCode) {
+				return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+					plaintext, *useIdentity, *jsonOut,
+					fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), stdout, stderr)
+			}
 			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 				fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 			fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -839,9 +888,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	}
 	sess, err := ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
 	if err != nil {
-		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error: "+err.Error())
-		fmt.Fprintln(stderr, "session error:", err)
-		return 1
+		msg := Message{ID: messageID, Sender: identityValue, Recipient: recipient, Timestamp: timestamp,
+			Payload: payloadString, Type: *msgType, ThreadID: *threadID, ExpiresAt: *expiresAt,
+			Metadata: meta.Map(), Encryption: encMeta}
+		return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+			plaintext, *useIdentity, *jsonOut, fmt.Errorf("session unavailable: %w", err), stdout, stderr)
 	}
 
 	sessionPriv, err := sess.PrivateKey()
@@ -868,9 +919,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	resp, err := SendMessage(context.Background(), targetURL, msg)
 	if err != nil {
-		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-		fmt.Fprintln(stderr, err)
-		return 1
+		return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+			plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
@@ -879,9 +929,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		}
 		sess, err = ensureSession(context.Background(), sessionRelayURL, identityValue, identityPriv)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, "session error (retry): "+err.Error())
-			fmt.Fprintln(stderr, "session error (after retry):", err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, fmt.Errorf("session unavailable after retry: %w", err), stdout, stderr)
 		}
 		sessionPriv, err = sess.PrivateKey()
 		if err != nil {
@@ -893,14 +942,18 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		msg.Signature = signMessage(sessionPriv, msg)
 		resp, err = SendMessage(context.Background(), targetURL, msg)
 		if err != nil {
-			recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay, err.Error())
-			fmt.Fprintln(stderr, err)
-			return 1
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
+		if retryableStatus(resp.StatusCode) {
+			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
+				plaintext, *useIdentity, *jsonOut,
+				fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))), stdout, stderr)
+		}
 		recordSendFailure(identityValue, messageID, recipient, useViaHomeRelay,
 			fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		fmt.Fprintf(stderr, "relay rejected message (%d): %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
@@ -1058,7 +1111,13 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 // an unknown message_id is silently ignored (could be from a different
 // device or a client-side journal that was reset).
 func applyInboundAck(localIdentity string, ack Ack) {
-	if ack.State != AckStateDeliveredClient || ack.MessageID == "" {
+	if ack.MessageID == "" {
+		return
+	}
+	state := journal.StateDeliveredClient
+	if ack.State == AckStateRead {
+		state = journal.StateRead
+	} else if ack.State != AckStateDeliveredClient {
 		return
 	}
 	_ = journal.Append(journal.Entry{
@@ -1066,7 +1125,7 @@ func applyInboundAck(localIdentity string, ack Ack) {
 		Sender:    localIdentity,
 		Recipient: ack.Sender,
 		Timestamp: time.Now().UTC(),
-		State:     journal.StateDeliveredClient,
+		State:     state,
 		Detail:    "ack id=" + ack.ID,
 	})
 }
@@ -1080,7 +1139,7 @@ func applyInboundAck(localIdentity string, ack Ack) {
 // session is loaded we fall back to the long-lived identity key. The
 // canonical layout is identical in both cases (matches relay's
 // crypto.CanonicalAck).
-func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentity string, identityPriv ed25519.PrivateKey, messageID, originalSender, originalRecipient string, sess session.Session) error {
+func emitMessageAck(ctx context.Context, cfg config.Config, localIdentity string, identityPriv ed25519.PrivateKey, messageID, originalSender, originalRecipient, state string, sess session.Session) error {
 	if messageID == "" || originalSender == "" {
 		return errors.New("ack requires message id and original sender")
 	}
@@ -1094,7 +1153,7 @@ func emitDeliveredClientAck(ctx context.Context, cfg config.Config, localIdentit
 		Type:      AckTypeDeliveryAck,
 		ID:        identity.NewAckID(),
 		MessageID: messageID,
-		State:     AckStateDeliveredClient,
+		State:     state,
 		Sender:    originalRecipient,
 		Recipient: originalSender,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -1930,9 +1989,12 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
+  poweur send <to> [message] [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
   poweur inbox [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json] [--once]
+  poweur outbox [list|retry]
+  poweur attachment get <owner> <shared-path> [--sha256=<hex>] [--output=<file>]
+  poweur attachment rm <share-id> <shared-path>
   poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
   poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]

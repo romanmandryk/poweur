@@ -32,6 +32,7 @@ const (
 	StateDeliveredHomeRelay      State = "delivered_home_relay"
 	StateDeliveredRecipientRelay State = "delivered_recipient_relay"
 	StateDeliveredClient         State = "delivered_client"
+	StateRead                    State = "read"
 	StateFailed                  State = "failed"
 )
 
@@ -212,8 +213,10 @@ func stateRank(s State) int {
 		return 3
 	case StateDeliveredClient:
 		return 4
-	case StateFailed:
+	case StateRead:
 		return 5
+	case StateFailed:
+		return 6
 	}
 	return 0
 }

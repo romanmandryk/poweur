@@ -17,6 +17,7 @@ import {
   MSG_TYPE_CHAT_TEXT,
   SYSTEM_MESSAGE_TYPES,
   describeMessage,
+  expiryCountdown,
   groupByThread,
   isKnownSystemType,
   isSystemType,
@@ -102,6 +103,15 @@ describe("expires_at", () => {
     for (const bad of ["2026-01-15", "yesterday", "1768469400", "2026-01-15 09:30:00Z", "2026-01-15T09:30:00"]) {
       expect(validateExpiresAt(bad), bad).toBeTruthy();
     }
+  });
+
+  it("renders stable countdown buckets", () => {
+    const now = Date.parse("2026-01-15T09:30:00Z");
+    expect(expiryCountdown(undefined, now)).toBeNull();
+    expect(expiryCountdown("2026-01-15T09:29:59Z", now)).toBe("expired");
+    expect(expiryCountdown("2026-01-15T09:30:30Z", now)).toBe("30s left");
+    expect(expiryCountdown("2026-01-15T10:30:00Z", now)).toBe("1h left");
+    expect(expiryCountdown("2026-01-18T09:30:00Z", now)).toBe("3d left");
   });
 });
 

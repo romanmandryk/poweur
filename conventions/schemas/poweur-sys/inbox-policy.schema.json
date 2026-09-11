@@ -52,6 +52,21 @@
         "allow"
       ],
       "additionalProperties": false
+    },
+    "read_receipts": {
+      "type": "object",
+      "description": "third-tick receipt policy; absent means enabled",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "disabled_for": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "type": "string", "format": "hostname" }
+        }
+      },
+      "required": ["enabled"],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -11,9 +11,9 @@
  * Go stays canonical (`packages/identity`); this implementation conforms to
  * it via the vectors in `test/conformance.test.ts`.
  */
-export const SDK_VERSION = "0.1.3";
+export const SDK_VERSION = "0.1.4";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
-export const SDK_BUILD_TIME = "2026-09-10 22:05";
+export const SDK_BUILD_TIME = "2026-09-11 08:11";
 export * from "./types.js";
 export * from "./errors.js";
 export * from "./encoding.js";
@@ -32,6 +32,7 @@ export * from "./resolve.js";
 export * from "./identity.js";
 export * from "./session.js";
 export * from "./messages.js";
+export * from "./attachments.js";
 export * from "./groups.js";
 export * from "./events.js";
 export * from "./files.js";

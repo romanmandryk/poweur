@@ -2,9 +2,28 @@ package relay
 
 import (
 	"net/http"
+	"time"
 
 	idpkg "github.com/poweur/identity"
 )
+
+// refuseExpiredEnvelope enforces the signed expiry after authentication.
+// 410 tells an outbox this item is permanently undeliverable, not retryable.
+func refuseExpiredEnvelope(w http.ResponseWriter, msg Message) bool {
+	if msg.ExpiresAt == "" {
+		return true
+	}
+	expires, err := time.Parse(time.RFC3339, msg.ExpiresAt)
+	if err != nil { // validateEnvelopeExtensions normally catches this.
+		writeError(w, http.StatusBadRequest, "invalid_message", "expires_at must be RFC3339")
+		return false
+	}
+	if !time.Now().UTC().Before(expires) {
+		writeError(w, http.StatusGone, "message_expired", "message expiry has passed")
+		return false
+	}
+	return true
+}
 
 // Typed messages & threads at the relay (EPIC-009 E09-T3).
 //

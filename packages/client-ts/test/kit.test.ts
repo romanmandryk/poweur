@@ -69,7 +69,10 @@ describe("recovery kit — behaviour", () => {
   });
 
   it("rejects typos via the checksum", () => {
-    const words = seedToMnemonic(newSeed()).split(" ");
+    // Fixed vector: a random valid-word substitution has a 1/256 chance of
+    // accidentally producing another valid checksum, which made this test
+    // flaky even though the validator was correct.
+    const words = "absurd avoid scissors anxiety gather lottery category door army half long cage bachelor another expect people blade school educate curtain scrub monitor lady beyond".split(" ");
 
     const swapped = [...words];
     swapped[0] = swapped[0] === "zoo" ? "abandon" : "zoo";

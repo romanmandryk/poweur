@@ -178,6 +178,9 @@ func (s *Server) handleAnonMessage(w http.ResponseWriter, r *http.Request, msg M
 	if !validateEnvelopeExtensions(w, msg) {
 		return
 	}
+	if !refuseExpiredEnvelope(w, msg) {
+		return
+	}
 	if !s.isLocalIdentity(r.Context(), msg.Recipient) {
 		writeError(w, http.StatusForbidden, "not_authorized", "anonymous messages are only accepted for locally hosted recipients")
 		return

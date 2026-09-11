@@ -10,6 +10,7 @@
 
 import { PoweurError } from "./errors.js";
 import type { DavClient } from "./files.js";
+import { validateIdentityName } from "./names.js";
 import {
   ANON_CHALLENGE_NONE,
   ANON_CHALLENGE_PAYMENT,
@@ -79,6 +80,37 @@ export function validateInboxPolicy(policy: InboxPolicy): void {
     );
   }
   if (policy.anonymous) validateAnonymousPolicy(policy.anonymous);
+  if (policy.read_receipts) {
+    if (typeof policy.read_receipts.enabled !== "boolean") {
+      throw new PoweurError("invalid_document", "read_receipts.enabled must be a boolean");
+    }
+    if (!Array.isArray(policy.read_receipts.disabled_for ?? [])) {
+      throw new PoweurError("invalid_document", "read_receipts.disabled_for must be an array");
+    }
+    if ((policy.read_receipts.disabled_for?.length ?? 0) > 1000) {
+      throw new PoweurError("invalid_document", "read_receipts.disabled_for has too many entries (max 1000)");
+    }
+    const seen = new Set<string>();
+    for (const identity of policy.read_receipts.disabled_for ?? []) {
+      const normalized = identity.trim().toLowerCase();
+      try {
+        validateIdentityName(normalized);
+      } catch {
+        throw new PoweurError("invalid_document", `invalid read-receipt identity "${identity}"`);
+      }
+      if (seen.has(normalized)) {
+        throw new PoweurError("invalid_document", `duplicate read-receipt identity "${normalized}"`);
+      }
+      seen.add(normalized);
+    }
+  }
+}
+
+export function sendsReadReceiptsTo(policy: InboxPolicy, peer: string): boolean {
+  if (!policy.read_receipts) return true;
+  if (!policy.read_receipts.enabled) return false;
+  const wanted = peer.trim().toLowerCase();
+  return !(policy.read_receipts.disabled_for ?? []).some((name) => name.trim().toLowerCase() === wanted);
 }
 
 /** Read the policy, or the relay default when no file exists. */
@@ -98,9 +130,11 @@ export async function writeInboxPolicy(
   dav: DavClient,
   mode: InboxMode,
   anonymous?: AnonymousPolicy,
+  readReceipts?: InboxPolicy["read_receipts"],
 ): Promise<InboxPolicy> {
   const policy: InboxPolicy = { version: 1, mode };
   if (anonymous) policy.anonymous = anonymous;
+  if (readReceipts) policy.read_receipts = readReceipts;
   validateInboxPolicy(policy);
   await dav.writeJson(INBOX_POLICY_PATH, policy);
   return policy;

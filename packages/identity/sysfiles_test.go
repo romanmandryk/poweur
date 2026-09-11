@@ -66,6 +66,13 @@ func TestInboxPolicyValidation(t *testing.T) {
 	if _, err := ParseInboxPolicy([]byte(`{not json`)); err == nil {
 		t.Fatal("garbage must fail")
 	}
+	p, err := ParseInboxPolicy([]byte(`{"version":1,"mode":"open","read_receipts":{"enabled":true,"disabled_for":["bob.example.org"]}}`))
+	if err != nil || p.SendsReadReceiptsTo("bob.example.org") || !p.SendsReadReceiptsTo("carol.example.org") {
+		t.Fatalf("read receipt policy: %+v err=%v", p, err)
+	}
+	if _, err := ParseInboxPolicy([]byte(`{"version":1,"mode":"open","read_receipts":{"enabled":true,"disabled_for":["bad"]}}`)); err == nil {
+		t.Fatal("invalid read-receipt identity must fail")
+	}
 }
 
 func TestProfileValidation(t *testing.T) {
@@ -75,11 +82,11 @@ func TestProfileValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := []Profile{
-		{Avatar: "https://evil.example/x.png"},          // avatar must be a tree path
-		{Avatar: "private/secret.png"},                  // and under public/
-		{Bio: strings.Repeat("x", 5000)},                // too long
-		{Links: []ProfileLink{{Label: "no url"}}},       // empty url
-		{DisplayName: strings.Repeat("n", 300)},         // too long
+		{Avatar: "https://evil.example/x.png"},    // avatar must be a tree path
+		{Avatar: "private/secret.png"},            // and under public/
+		{Bio: strings.Repeat("x", 5000)},          // too long
+		{Links: []ProfileLink{{Label: "no url"}}}, // empty url
+		{DisplayName: strings.Repeat("n", 300)},   // too long
 	}
 	for i, p := range bad {
 		if err := p.Validate(); err == nil {
@@ -103,9 +110,9 @@ func TestAppManifestValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := []string{
-		`{"app_id":"tasks","name":"Tasks"}`,        // not reverse-DNS
-		`{"app_id":"net.poweur.tasks"}`,            // missing name
-		`{"app_id":"net/poweur","name":"x"}`,       // slash
+		`{"app_id":"tasks","name":"Tasks"}`,  // not reverse-DNS
+		`{"app_id":"net.poweur.tasks"}`,      // missing name
+		`{"app_id":"net/poweur","name":"x"}`, // slash
 	}
 	for i, raw := range bad {
 		if _, err := ParseAppManifest([]byte(raw)); err == nil {

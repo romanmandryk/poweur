@@ -251,6 +251,25 @@ func TestEnvelopeExtensionValidation(t *testing.T) {
 	})
 }
 
+func TestExpiredEnvelopeIsGone(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+
+	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		expiresAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+	})
+	out := mustStatus(t, resp, http.StatusGone, "expired envelope")
+	if out["error"] != "message_expired" {
+		t.Fatalf("expected message_expired, got %v", out)
+	}
+
+	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		expiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+	})
+	mustStatus(t, resp, http.StatusAccepted, "future envelope")
+}
+
 // TestClosedInboxTypeHooks: the per-type hook table is what a closed inbox
 // consults. A registered system type with no hook of its own gets the safe
 // default — rejected — while the contact types keep their own behaviour.

@@ -289,6 +289,7 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 			return streamEvents(ctx, cfg.RelayURL, identityValue, sess, identityPriv,
 				func() {
 					onOpen()
+					retryOutboxForIdentity(ctx, identityValue, false, stdout, stderr)
 					// Catch up on connect: anything that arrived while the
 					// stream was down is already sitting at the cursor. For
 					// `--once` that catch-up counts as the notification —
@@ -344,16 +345,18 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 
 	var inbox struct {
 		Messages []struct {
-			ID         string          `json:"id"`
-			Sender     string          `json:"sender"`
-			Recipient  string          `json:"recipient"`
-			Timestamp  string          `json:"timestamp"`
-			Payload    string          `json:"payload"`
-			Signature  string          `json:"signature"`
-			Type       string          `json:"type,omitempty"`
-			ThreadID   string          `json:"thread_id,omitempty"`
-			SessionID  string          `json:"session_id,omitempty"`
-			Encryption *EncryptionMeta `json:"encryption,omitempty"`
+			ID         string            `json:"id"`
+			Sender     string            `json:"sender"`
+			Recipient  string            `json:"recipient"`
+			Timestamp  string            `json:"timestamp"`
+			Payload    string            `json:"payload"`
+			Signature  string            `json:"signature"`
+			Type       string            `json:"type,omitempty"`
+			ThreadID   string            `json:"thread_id,omitempty"`
+			ExpiresAt  string            `json:"expires_at,omitempty"`
+			Metadata   map[string]string `json:"metadata,omitempty"`
+			SessionID  string            `json:"session_id,omitempty"`
+			Encryption *EncryptionMeta   `json:"encryption,omitempty"`
 		} `json:"messages"`
 		Acks []Ack `json:"acks"`
 	}
@@ -383,12 +386,17 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 	}
 	promoteAcceptedContacts(context.Background(), r.useIdentity, accepts, stdout, stderr)
 
-	// Surface tick-2 (delivered_client) acks for previously-sent messages
+	// Surface delivery/read acks for previously-sent messages
 	// before printing inbound payloads. The ack stream is independent of
 	// the message stream — an empty inbox can still carry acks.
 	for _, ack := range inbox.Acks {
 		applyInboundAck(identityValue, ack)
-		fmt.Fprintf(stdout, "✓✓ [%s] %s delivered to %s (msg %s)\n", ack.Timestamp, ack.State, ack.Sender, ack.MessageID)
+		ticks := "✓✓"
+		verb := "delivered to"
+		if ack.State == AckStateRead {
+			ticks, verb = "✓✓✓", "read by"
+		}
+		fmt.Fprintf(stdout, "%s [%s] %s %s %s (msg %s)\n", ticks, ack.Timestamp, ack.State, verb, ack.Sender, ack.MessageID)
 	}
 
 	if !delivered {
@@ -399,6 +407,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 	}
 
 	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	readPolicy, readPolicyOK := loadInboxPolicyForReceipts(context.Background(), cfg, identityValue, identityPriv)
 
 	// What the drain hands over exists nowhere else once this call returns,
 	// so everything that opens is archived before the function can fail.
@@ -432,12 +441,21 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		// `chat.text` reads as it always has; anything else gets the generic
 		// line, because the CLI cannot present an application's payload and
 		// showing the raw plaintext would be showing someone else's JSON.
-		fmt.Fprintf(stdout, "%s [%s] %s: %s%s\n", prefix, msg.Timestamp, msg.Sender,
-			describeTypedMessage(msg.Sender, msg.Type, display, decrypted), threadSuffix(msg.ThreadID))
+		rendered := describeTypedMessage(msg.Sender, msg.Type, display, decrypted)
+		if decrypted && idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeChatAttachment {
+			if ref, err := idpkg.ParseAttachmentMetadata(msg.Metadata); err == nil {
+				rendered = fmt.Sprintf("attachment %s (%s, %d bytes) — poweur attachment get %s %s --sha256 %s",
+					ref.Name, ref.MIME, ref.Size, ref.Owner, ref.Path, ref.SHA256)
+			}
+		}
+		fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
+			rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
 
 		if decrypted {
-			archive = append(archive, historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
-				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display))
+			record := historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
+				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display)
+			record.ExpiresAt, record.Metadata = msg.ExpiresAt, msg.Metadata
+			archive = append(archive, record)
 		}
 
 		// Tick-2 ack: only emit when we actually decrypted the message,
@@ -449,10 +467,40 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			if recipientForAck == "" {
 				recipientForAck = identityValue
 			}
-			if err := emitDeliveredClientAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, sess); err != nil {
+			if err := emitMessageAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, AckStateDeliveredClient, sess); err != nil {
 				fmt.Fprintf(stderr, "warning: failed to send delivery ack for %s: %v\n", msg.ID, err)
+			}
+			// The human CLI prints the body, so this pickup is also a read. If
+			// policy cannot be loaded, fail closed and disclose nothing.
+			if readPolicyOK && readPolicy.SendsReadReceiptsTo(msg.Sender) {
+				if err := emitMessageAck(context.Background(), cfg, identityValue, identityPriv, msg.ID, msg.Sender, recipientForAck, AckStateRead, sess); err != nil {
+					fmt.Fprintf(stderr, "warning: failed to send read receipt for %s: %v\n", msg.ID, err)
+				}
 			}
 		}
 	}
 	return true
+}
+
+func loadInboxPolicyForReceipts(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey) (idpkg.InboxPolicy, bool) {
+	policy := idpkg.InboxPolicy{Version: 1, Mode: idpkg.DefaultInboxMode}
+	token, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, identityValue, "dav:read", priv)
+	if err != nil {
+		return policy, false
+	}
+	raw, status, err := davGetBytes(ctx, cfg.RelayURL, identityValue, token.Token, inboxPolicyTreePath)
+	if err != nil {
+		return policy, false
+	}
+	if status == http.StatusNotFound {
+		return policy, true
+	}
+	if status != http.StatusOK {
+		return policy, false
+	}
+	parsed, err := idpkg.ParseInboxPolicy(raw)
+	if err != nil {
+		return policy, false
+	}
+	return parsed, true
 }

@@ -247,19 +247,18 @@ poweur send bob.example.org "Hey Bob, are you there?"
 | `--sign-with <session\|identity>` | Choose the signing key (default `session`). Identity-signed sends omit `session_id`/`session_proof`. |
 | `--type <type>` | Envelope message type. Omit for ordinary chat: absent means `chat.text`, and the absent form is what keeps the signed canonical string identical to a pre-typing client's. `sys.*` is reserved — an unregistered one is refused locally. |
 | `--thread <id>` | Group this message into a conversation thread. Opaque to the relay. |
-| `--expires <rfc3339>` | When the message stops being meaningful. Signed; relay-side enforcement is a later task. |
+| `--expires <rfc3339>` | When the message stops being meaningful. Expired envelopes are refused with HTTP 410. |
+| `--attach <file>` | Upload (max 20 MB), grant read to the recipient, and send a `chat.attachment` reference. The caption is optional. |
 | `--meta <key=value>` | Envelope metadata, repeatable. **Plaintext** — addressing, not content. A duplicate key is an error rather than a silent overwrite. |
 | `--json` | Machine-readable output |
 
 `--type`, `--thread`, `--expires` and `--meta` are validated before the message is encrypted, signed or journalled, so a typo never becomes a recorded send attempt. They cannot be combined with `--anon`: an unsigned envelope binds nothing, so the fields would be routing metadata nobody could trust. See [Typed Messages](/protocol/message-format#typed-messages).
 
 ```bash
-poweur send bob.example.org "the logo, v3" \
-  --thread thr_rebrand --type chat.attachment \
-  --meta mime=image/png --meta bytes=20480
+poweur send bob.example.org "the logo, v3" --thread thr_rebrand --attach ./logo.png
 ```
 
-If the relay reports the session expired, the CLI silently re-registers a session and retries once before failing. If the relay returns `400 encryption_required` the CLI surfaces the error — this indicates a client bug, since the CLI always encrypts. Network/HTTP errors during the send write a `failed` entry to the journal (sticky).
+If the relay reports the session expired, the CLI silently re-registers a session and retries once. Network failures, 429s and 5xx responses queue an identity-signed encrypted envelope with capped exponential backoff; `poweur listen` retries on reconnect and `poweur outbox list|retry` exposes it explicitly. Permanent 4xx responses still write a sticky `failed` entry.
 
 Note that `cfg.RelayURL` (the configured `relay_url`) is the **home** relay — it is used for inbox polling, ack delivery, identity admin, and (only when `--via-home-relay` is set) outbound sends.
 

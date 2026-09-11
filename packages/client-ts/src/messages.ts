@@ -34,6 +34,7 @@ import {
 } from "./session.js";
 import {
   ACK_STATE_DELIVERED_CLIENT,
+  ACK_STATE_READ,
   ACK_TYPE_DELIVERY,
   ANON_CHALLENGE_POW,
   type Ack,
@@ -372,16 +373,20 @@ export class Messaging {
   async ack(
     signer: Signer,
     message: { id: string; sender: string; recipient?: string },
-    options: { session?: StoredSession | null } = {},
+    options: { session?: StoredSession | null; state?: string } = {},
   ): Promise<Ack> {
     if (!message.id || !message.sender) {
       throw new PoweurError("invalid_argument", "ack requires a message id and original sender");
+    }
+    const state = options.state ?? ACK_STATE_DELIVERED_CLIENT;
+    if (state !== ACK_STATE_DELIVERED_CLIENT && state !== ACK_STATE_READ) {
+      throw new PoweurError("invalid_argument", `unsupported ack state: ${state}`);
     }
     const ack: Ack = {
       type: ACK_TYPE_DELIVERY,
       id: newAckId(),
       message_id: message.id,
-      state: ACK_STATE_DELIVERED_CLIENT,
+      state,
       sender: message.recipient || signer.identity,
       recipient: message.sender,
       timestamp: rfc3339(),

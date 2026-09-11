@@ -71,6 +71,8 @@ export interface HistoryRecord {
    * written before threads existed simply has none.
    */
   thread_id?: string;
+  expires_at?: string;
+  metadata?: Record<string, string>;
   queue: HistoryQueue;
   /** The decrypted text. Ciphertext nobody holds an ephemeral key for is not an archive. */
   body: string;

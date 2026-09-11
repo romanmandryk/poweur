@@ -10,7 +10,7 @@
  * `packages/identity/msgtypes.go`). This module must not restate them.
  */
 
-import { describeMessage, normalizeMessageType, MSG_TYPE_CHAT_TEXT } from "@poweur/client";
+import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT } from "@poweur/client";
 
 /**
  * What the tray shows as a conversation's one-line preview.
@@ -23,7 +23,11 @@ import { describeMessage, normalizeMessageType, MSG_TYPE_CHAT_TEXT } from "@powe
  */
 export function previewFor(message) {
   if (message.plaintext == null) return "🔒 Could not decrypt";
-  return describeMessage(message.sender ?? "", message.type, message.plaintext);
+  const preview = normalizeMessageType(message.type) === MSG_TYPE_CHAT_ATTACHMENT
+    ? `📎 ${message.metadata?.attachment_name || "Attachment"}`
+    : describeMessage(message.sender ?? "", message.type, message.plaintext);
+  const countdown = expiryCountdown(message.expires_at);
+  return countdown ? `${preview} · ⏳ ${countdown}` : preview;
 }
 
 /**

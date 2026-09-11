@@ -70,6 +70,7 @@ export interface InboxMessage extends Message {
 
 export const ACK_TYPE_DELIVERY = "ack";
 export const ACK_STATE_DELIVERED_CLIENT = "delivered_client";
+export const ACK_STATE_READ = "read";
 
 export interface Ack {
   type: string;
@@ -341,6 +342,8 @@ export interface InboxPolicy {
   version: number;
   mode: InboxMode;
   anonymous?: AnonymousPolicy;
+  /** Third-tick receipts; absent means enabled. */
+  read_receipts?: { enabled: boolean; disabled_for?: string[] };
 }
 
 /** System message types the relay routes on (EPIC-007). */

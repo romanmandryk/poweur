@@ -71,7 +71,7 @@ export function describePowBits(bits) {
 
 /**
  * @param {object} options
- * @param {{mode?: string, anonymous?: object}} [options.policy]  current document
+ * @param {{mode?: string, anonymous?: object, read_receipts?: object}} [options.policy] current document
  * @param {boolean} [options.explicit]   false when the relay default is standing in
  * @param {(policy: object) => Promise<void>|void} options.onSave
  * @param {boolean} [options.showSave]  false when the host supplies the button
@@ -86,6 +86,8 @@ export function PolicyControls({ policy = {}, explicit = true, onSave, showSave 
     bits: policy.anonymous?.pow_bits || 16,
     maxBytes: policy.anonymous?.max_bytes || 4096,
     maxPerDay: policy.anonymous?.max_per_day || 20,
+    readReceipts: policy.read_receipts?.enabled !== false,
+    disabledFor: (policy.read_receipts?.disabled_for ?? []).join(", "),
   };
 
   const modeList = el("div", { class: "policy-modes", role: "radiogroup", "aria-label": "Who can message you" });
@@ -104,6 +106,16 @@ export function PolicyControls({ policy = {}, explicit = true, onSave, showSave 
   });
 
   const save = el("button", { class: "btn btn-primary mt-md", id: "policy-save", text: "Save" });
+  const readToggle = el("input", {
+    type: "checkbox", id: "policy-read-receipts", class: "policy-check",
+    ...(state.readReceipts ? { checked: true } : {}),
+  });
+  readToggle.addEventListener("change", () => { state.readReceipts = readToggle.checked; });
+  const disabledFor = el("input", {
+    type: "text", class: "input", id: "policy-read-disabled-for",
+    value: state.disabledFor, placeholder: "private-contact.example (optional)",
+  });
+  disabledFor.addEventListener("input", () => { state.disabledFor = disabledFor.value; });
 
   async function submit() {
     save.disabled = true;
@@ -141,6 +153,18 @@ export function PolicyControls({ policy = {}, explicit = true, onSave, showSave 
       ]),
     ]),
     anonBody,
+    el("div", { class: "section-label", text: "Read receipts" }),
+    el("label", { class: "policy-toggle", for: "policy-read-receipts" }, [
+      readToggle,
+      el("span", {}, [
+        el("div", { class: "policy-toggle-label", text: "Send read receipts" }),
+        el("div", { class: "policy-toggle-detail muted small", text: "Adds a third tick only when you open a conversation." }),
+      ]),
+    ]),
+    el("div", { class: "form-group" }, [
+      el("label", { class: "form-label", for: "policy-read-disabled-for", text: "Never send to (comma-separated identities)" }),
+      disabledFor,
+    ]),
     showSave && save,
     status,
   ]);
@@ -248,6 +272,10 @@ export function PolicyControls({ policy = {}, explicit = true, onSave, showSave 
         ...(state.challenge === "pow" ? { pow_bits: state.bits } : {}),
       };
     }
+    document.read_receipts = {
+      enabled: state.readReceipts,
+      disabled_for: state.disabledFor.split(",").map(value => value.trim().toLowerCase()).filter(Boolean),
+    };
     return document;
   }
 

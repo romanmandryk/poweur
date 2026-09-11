@@ -10,7 +10,7 @@
  *
  * The payload is end-to-end encrypted and the relay must never read it. These
  * four are the deliberate exception: the relay routes on `type` (inbox
- * policy), will expire on `expires_at`, and `thread_id` is what lets a client
+ * policy), expires envelopes on `expires_at`, and `thread_id` is what lets a client
  * group a conversation without opening every message first. Everything here
  * is visible to both relays on the path — **put nothing private in
  * `metadata`**. It is addressing, not content.
@@ -149,9 +149,8 @@ export function validateThreadId(threadId: string): string | null {
 }
 
 /**
- * Validate the optional expiry stamp. Enforcement — refusing delivery past it
- * — is E09-T6; this revision fixes the format and binds it into the signature
- * so the value cannot be added, removed or moved by anyone on the path.
+ * Validate the optional expiry stamp. The relay refuses delivery past it; the
+ * signed format means nobody on the path can add, remove or move the cutoff.
  */
 export function validateExpiresAt(value: string): string | null {
   if (value === "") return null;
@@ -163,6 +162,20 @@ export function validateExpiresAt(value: string): string | null {
   }
   if (Number.isNaN(Date.parse(value))) return "expires_at must be RFC3339";
   return null;
+}
+
+/** Human countdown for an ephemeral envelope; null when it has no expiry. */
+export function expiryCountdown(value: string | undefined, now = Date.now()): string | null {
+  if (!value) return null;
+  const remaining = Date.parse(value) - now;
+  if (!Number.isFinite(remaining) || remaining <= 0) return "expired";
+  const seconds = Math.ceil(remaining / 1000);
+  if (seconds < 60) return `${seconds}s left`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes}m left`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) return `${hours}h left`;
+  return `${Math.ceil(hours / 24)}d left`;
 }
 
 function validateMetadataKey(key: string): string | null {

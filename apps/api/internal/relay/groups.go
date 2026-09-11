@@ -338,7 +338,7 @@ func (s *Server) deliverGroupEnvelope(ctx context.Context, group idpkg.ShareGrou
 // unrelated ones.
 //
 // first is the envelope the batch's shared fields are taken from; every
-// envelope must agree with it on sender, timestamp, type, thread and
+// envelope must agree with it on sender, timestamp, type, thread, expiry and
 // metadata. Only id, recipient, payload and encryption may differ — that is
 // what "one message, sealed N times" means, and without it a batch could
 // carry a different type or thread to each member under one authorization.
@@ -373,9 +373,9 @@ func (s *Server) validateGroupEnvelope(w http.ResponseWriter, r *http.Request, g
 		writeError(w, http.StatusBadRequest, "invalid_group_message", "every envelope in a batch must have the same sender")
 		return false
 	}
-	if msg.Timestamp != first.Timestamp || msg.Type != first.Type || msg.ThreadID != first.ThreadID {
+	if msg.Timestamp != first.Timestamp || msg.Type != first.Type || msg.ThreadID != first.ThreadID || msg.ExpiresAt != first.ExpiresAt {
 		writeError(w, http.StatusBadRequest, "invalid_group_message",
-			"every envelope in a batch must share the same timestamp, type and thread_id")
+			"every envelope in a batch must share the same timestamp, type, thread_id and expires_at")
 		return false
 	}
 	if !sameMetadata(msg.Metadata, first.Metadata) {
@@ -404,6 +404,9 @@ func (s *Server) validateGroupEnvelope(w http.ResponseWriter, r *http.Request, g
 	if err := crypto.VerifySignature(publicKey, canonical, msg.Signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized",
 			"signature verification failed for the envelope addressed to "+msg.Recipient+" (key source: "+source+")")
+		return false
+	}
+	if !refuseExpiredEnvelope(w, msg) {
 		return false
 	}
 	return true
