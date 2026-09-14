@@ -52,10 +52,13 @@ func (p InboxPolicy) SendsReadReceiptsTo(peer string) bool {
 // Inbox policy modes (EPIC-007). The relay evaluates the recipient's policy
 // after signature verification on every inbound message.
 //
-//   - open: any valid Poweur ID may message (today's behavior)
+//   - open: any valid Poweur ID may message (today's behavior). Contact
+//     request and accept envelopes still ride the requests queue, so the
+//     handshake does not depend on who may send chat
 //   - contacts_only: only accepted contacts; everyone else policy_rejected
+//     — including contact requests
 //   - contacts_and_requests: accepted contacts message normally; a
-//     non-contact's first sys.contact.request lands in the requests queue,
+//     stranger's first sys.contact.request lands in the requests queue,
 //     anything else is rejected until accepted
 //
 // Absence of inbox-policy.json means DefaultInboxMode — open, for backward

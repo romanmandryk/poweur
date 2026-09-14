@@ -149,6 +149,19 @@ describe("buildConversationRows", () => {
     expect(rows[0].preview).toBe("app message from bob.example.org (net.example.widget.poked)");
     expect(rows[0].preview).not.toContain("secret");
   });
+
+  it("keeps contact request and accept out of the chat list", () => {
+    const rows = buildConversationRows(
+      [
+        msg({ id: "m1", type: "sys.contact.request", plaintext: "hi, it's bob" }),
+        msg({ id: "m2", type: "sys.contact.accept", plaintext: "contact request accepted" }),
+        msg({ id: "m3", plaintext: "actual chat" }),
+      ],
+      ME,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].preview).toBe("actual chat");
+  });
 });
 
 describe("threadLabel", () => {

@@ -67,9 +67,11 @@ test.describe("contacts, requests and key pinning", () => {
     // The tray says how many are waiting, from any tray (E07-T3).
     await expect(bobPage.locator('.tray-tab[data-tray="requests"] .tray-badge')).toHaveText("1");
 
-    // The same stranger is one tap from being added in the inbox too.
+    // The same stranger is one tap from being added in the inbox too — but
+    // a contact request is not a conversation, so the inbox stays empty.
     await bobPage.click('.tray-tab[data-tray="inbox"]');
-    await expect(bobPage.locator(`[data-add-contact="${aliceId}"]`)).toHaveCount(1);
+    await expect(bobPage.locator(`[data-add-contact="${aliceId}"]`)).toHaveCount(0);
+    await expect(bobPage.locator(".empty-state-title")).toHaveText("No messages yet");
 
     await bobPage.click('.tray-tab[data-tray="requests"]');
     await accept.click();
@@ -146,6 +148,52 @@ test.describe("contacts, requests and key pinning", () => {
 
     await readerCtx.close();
     await senderCtx.close();
+  });
+
+  test("a request from someone already in contacts still shows in Requests", async ({ browser }) => {
+    test.slow();
+    const john = await browser.newContext({ viewport: MOBILE });
+    const bob = await browser.newContext({ viewport: MOBILE });
+    const johnPage = await john.newPage();
+    const bobPage = await bob.newPage();
+    await stubPasskeys(johnPage);
+    await stubPasskeys(bobPage);
+
+    const suffix = Date.now().toString(36);
+    const johnId = await registerIdentity(johnPage, relay, `ctj${suffix}`);
+    const bobId = await registerIdentity(bobPage, relay, `ctq${suffix}`);
+
+    // John already lists Bob as a contact — the green tick — before Bob asks.
+    await johnPage.evaluate(async (target) => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      const contacts = await clientFor(getActiveIdentity()).contacts();
+      await contacts.set(target, "accepted", {});
+    }, bobId);
+    await johnPage.click('.nav-tab[data-page="contacts"]');
+    await expect(johnPage.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 20_000 });
+
+    await bobPage.click('.nav-tab[data-page="contacts"]');
+    await bobPage.click("#btn-add-contact-empty");
+    await bobPage.fill(".idin input", johnId);
+    await expect(bobPage.locator("#btn-add-contact-go")).toBeEnabled({ timeout: 20_000 });
+    await bobPage.fill("#ac-intro", "please add me back");
+    await bobPage.click("#btn-add-contact-go");
+    await expect(bobPage.locator(".contact-row .chip")).toHaveText("Requested", { timeout: 20_000 });
+
+    const accept = await requestFrom(johnPage, bobId);
+    await expect(johnPage.locator(".request-intro")).toHaveText("please add me back");
+    await accept.click();
+
+    await expect
+      .poll(async () => {
+        await bobPage.click('.nav-tab[data-page="contacts"]');
+        return bobPage.locator(".contact-row .chip").innerText();
+      }, { timeout: 30_000, message: "Bob's side never promoted after John accepted" })
+      .toBe("Contact");
+
+    await john.close();
+    await bob.close();
   });
 
   test("a swapped key blocks the send until it is explicitly trusted", async ({ page }) => {

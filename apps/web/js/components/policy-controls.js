@@ -18,7 +18,7 @@ export const INBOX_MODES = [
   {
     id: "open",
     label: "Anyone",
-    detail: "Any Poweur ID can message you. Simple, and the default for identities that never set a policy.",
+    detail: "Any Poweur ID can message you. Contact requests still wait in Requests. Simple, and the default for identities that never set a policy.",
   },
   {
     id: "contacts_only",

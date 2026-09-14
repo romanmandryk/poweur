@@ -31,7 +31,7 @@ States: `requested` (an open request exists), `accepted`, `blocked`.
 
 | mode | behavior |
 |------|----------|
-| `open` | any valid Poweur ID may message (pre-policy behavior; **the default when no file exists**, for compatibility) |
+| `open` | any valid Poweur ID may message (pre-policy behavior; **the default when no file exists**, for compatibility). Contact request and accept envelopes still land in the **requests queue**, so the handshake does not depend on who may send chat |
 | `contacts_only` | accepted contacts only; everyone else `policy_rejected` — including contact requests |
 | `contacts_and_requests` | contacts message normally; a stranger's first `sys.contact.request` lands in the **requests queue**; everything else is rejected until accepted |
 
@@ -54,7 +54,9 @@ any     ──recipient blocks───► blocked (silent)
   which is capped at 4 KB). The type is **bound into the message signature**
   (`CanonicalMessageTyped`), so it cannot be forged onto a signed message.
 - The queue is separate from the inbox (`GET /requests/{identity}`, challenge-signed) —
-  requests never pollute the message stream, and `poweur requests` lists them.
+  requests never pollute the message stream, and `poweur requests` lists them. This is
+  true in every inbox mode, including `open`, and even when the recipient already lists
+  the sender as an accepted contact (so a one-sided handshake can still be answered).
 - `sys.contact.accept` is only accepted from a peer the recipient lists as `requested` —
   an unsolicited "accept" from a stranger is rejected.
 - Enforcement happens on the **recipient's relay**, which is where cross-relay forwarded
@@ -78,11 +80,10 @@ a message too long to be an intro (over 2 KB of plaintext) sends a plain request
 exits non-zero, because that message genuinely did not go anywhere.
 
 Web app (EPIC-015 E15-T2): **Contacts** lists the same document with its states and
-petnames; **Messages → Requests** merges the relay's request queue with contact requests
-that arrived in the inbox — under the default `open` policy the very same envelope is
-delivered as a normal typed message, so a tray that read only the queue would be empty
-for most users. Accept/Block act there, and a message from someone you hold no entry for
-carries a one-tap **Add**.
+petnames; **Messages → Requests** is the handshake tray — the relay parks contact
+requests there in every inbox mode except `contacts_only`, including when you already
+list the sender as a contact. Accept/Block act there, and a message from someone you
+hold no entry for carries a one-tap **Add**.
 
 ## Key pinning (the safety-number model)
 

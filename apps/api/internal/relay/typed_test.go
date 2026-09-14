@@ -177,11 +177,22 @@ func TestSysNamespaceIsReserved(t *testing.T) {
 		t.Fatalf("expected unsupported_type, got %v", out)
 	}
 
-	// Every registered one is accepted (alice's inbox is open by default),
-	// so the guard is about the namespace rather than about `sys.contact.*`.
+	// Registered `sys.*` types are not `unsupported_type`. Handshake
+	// envelopes have their own policy (a request is queued; an unsolicited
+	// accept is refused); everything else still lands in an open inbox.
 	for _, known := range idpkg.SystemMessageTypes() {
 		resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{msgType: known})
-		mustStatus(t, resp, http.StatusAccepted, "registered type "+known)
+		switch known {
+		case idpkg.MsgTypeContactRequest:
+			out := mustStatus(t, resp, http.StatusAccepted, "registered type "+known)
+			if out["status"] != "request_queued" {
+				t.Fatalf("%s: %v", known, out)
+			}
+		case idpkg.MsgTypeContactAccept:
+			mustStatus(t, resp, http.StatusForbidden, "unsolicited "+known)
+		default:
+			mustStatus(t, resp, http.StatusAccepted, "registered type "+known)
+		}
 	}
 }
 

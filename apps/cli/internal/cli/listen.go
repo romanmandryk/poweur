@@ -374,10 +374,10 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		return delivered
 	}
 
-	// Under `open` an accept arrives as an ordinary typed message, so the
-	// inbox drain is where the handshake we started gets finished. Under a
-	// closed policy the same envelope rides the requests queue instead;
-	// `runRequests` does this on its side.
+	// An accept arrives in the requests queue in every inbox mode; older
+	// relays under `open` delivered it as ordinary inbox chat, so the inbox
+	// drain still finishes a handshake we started. `runRequests` does the
+	// same on its side.
 	var accepts []string
 	for _, msg := range inbox.Messages {
 		if msg.Type == idpkg.MsgTypeContactAccept && msg.Sender != "" {

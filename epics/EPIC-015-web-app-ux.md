@@ -244,12 +244,11 @@ request code (E11-T3 Transport 2, unchecked there).
 - [x] Writes go through the file API (`@poweur/client`'s `Contacts`), so contacts sync
       across devices and to the CLI
 
-**The requests tray reads two sources, because a request arrives two ways.** Under
-`contacts_and_requests` the relay parks a stranger's first `sys.contact.request` in the
-requests queue; under the default `open` policy the identical envelope is delivered to the
-inbox as a typed message. A tray that read only the queue would be empty for every
-default-policy user, with their contact request buried among conversations — so the tray
-merges the queue with inbox messages of that type, minus anyone already accepted or blocked.
+**The requests tray is the handshake, independent of who may chat.** The relay parks a
+`sys.contact.request` in the requests queue in every inbox mode except `contacts_only`.
+The tray still merges leftover inbox copies from older relays, and it keeps showing a
+request even when the sender is already an accepted contact — that is how a one-sided
+handshake (they asked; you already listed them) gets answered. Blocked senders stay hidden.
 
 **Found and fixed here: the inbox list was losing messages.** `GET /inbox` and
 `GET /requests/{id}` both **drain** — the relay hands each entry over exactly once — and

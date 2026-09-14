@@ -131,7 +131,7 @@ describe("journey: the policy × sender matrix", () => {
   }> = [
     { name: "open/contact", policy: INBOX_OPEN, kind: "contact", want: "inbox" },
     { name: "open/stranger", policy: INBOX_OPEN, kind: "stranger", want: "inbox" },
-    { name: "open/request", policy: INBOX_OPEN, kind: "request", want: "inbox" },
+    { name: "open/request", policy: INBOX_OPEN, kind: "request", want: "requests" },
     { name: "contacts_only/contact", policy: INBOX_CONTACTS_ONLY, kind: "contact", want: "inbox" },
     { name: "contacts_only/stranger", policy: INBOX_CONTACTS_ONLY, kind: "stranger", want: "rejected" },
     { name: "contacts_only/request", policy: INBOX_CONTACTS_ONLY, kind: "request", want: "rejected" },

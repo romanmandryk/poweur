@@ -116,6 +116,79 @@ func TestPolicyDefaultOpenAndBlocked(t *testing.T) {
 	}
 }
 
+// Contact requests ride the requests queue even under the default `open`
+// policy. Chat from anyone still lands in the inbox; the handshake does not.
+func TestPolicyOpenQueuesContactRequest(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+
+	resp, reqID := postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "hi, it's bob")
+	out := mustStatus(t, resp, http.StatusAccepted, "request under default open")
+	if out["status"] != "request_queued" {
+		t.Fatalf("request outcome: %v", out)
+	}
+
+	inbox := challengeSigned(t, ts, alice, "/messages/"+alice.name)
+	if msgs, _ := inbox["messages"].([]any); len(msgs) != 0 {
+		t.Fatalf("request leaked into an open inbox: %v", msgs)
+	}
+	reqs := challengeSigned(t, ts, alice, "/requests/"+alice.name)
+	list, _ := reqs["requests"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("requests queue: %v", reqs)
+	}
+	first, _ := list[0].(map[string]any)
+	if first["sender"] != bob.name || first["type"] != "sys.contact.request" || first["id"] != reqID {
+		t.Fatalf("queued request: %v", first)
+	}
+
+	// Ordinary chat from the same stranger still reaches the open inbox.
+	resp, _ = postTypedMessage(t, ts, bob, alice.name, "", "hello anyway")
+	mustStatus(t, resp, http.StatusAccepted, "stranger chat under open")
+	inbox = challengeSigned(t, ts, alice, "/messages/"+alice.name)
+	if msgs, _ := inbox["messages"].([]any); len(msgs) != 1 {
+		t.Fatalf("open inbox after chat: %v", inbox)
+	}
+}
+
+// An accepted contact can still knock. John already listing Bob as a contact
+// must not swallow Bob's sys.contact.request into chat — that is the only
+// envelope that lets John answer and finish Bob's handshake.
+func TestPolicyAcceptedContactRequestStillQueued(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	aliceTok := mintDAVToken(t, ts, alice, "", "")
+
+	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"accepted"}]}`)
+
+	resp, reqID := postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "please add me back")
+	out := mustStatus(t, resp, http.StatusAccepted, "request from accepted contact")
+	if out["status"] != "request_queued" {
+		t.Fatalf("request outcome: %v", out)
+	}
+
+	inbox := challengeSigned(t, ts, alice, "/messages/"+alice.name)
+	if msgs, _ := inbox["messages"].([]any); len(msgs) != 0 {
+		t.Fatalf("accepted-contact request leaked into inbox: %v", msgs)
+	}
+	reqs := challengeSigned(t, ts, alice, "/requests/"+alice.name)
+	list, _ := reqs["requests"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("requests queue: %v", reqs)
+	}
+	first, _ := list[0].(map[string]any)
+	if first["id"] != reqID || first["type"] != "sys.contact.request" {
+		t.Fatalf("queued request: %v", first)
+	}
+
+	// Chat from the same contact still delivers.
+	resp, _ = postTypedMessage(t, ts, bob, alice.name, "", "still friends")
+	mustStatus(t, resp, http.StatusAccepted, "chat from accepted contact")
+}
+
 func TestPolicyContactsOnly(t *testing.T) {
 	server, ts := newDAVTestServer(t, 0, 0)
 	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")

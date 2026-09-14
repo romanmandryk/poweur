@@ -32,8 +32,9 @@ func refuseExpiredEnvelope(w http.ResponseWriter, msg Message) bool {
 //
 //  1. Ingress validation — the four plaintext envelope extensions are checked
 //     for shape, and the reserved `sys.*` namespace is defended.
-//  2. Per-type inbox policy — the hooks a closed inbox consults to decide
-//     whether an envelope of some particular type may pass.
+//  2. Per-type inbox policy — contact request/accept consult their hooks in
+//     every inbox mode; other types consult hooks only when the inbox is
+//     closed to the sender.
 //
 // Everything else is opaque. A `chat.text`, a `chat.attachment`, an
 // application's own `net.example.thing` — the relay stores and forwards them
@@ -75,9 +76,10 @@ type closedInboxCtx struct {
 	// mode is the recipient's inbox policy mode — a hook usually differs
 	// between contacts_only and contacts_and_requests.
 	mode string
-	// contact is the recipient's entry for the sender, if any. Blocked and
-	// accepted senders never reach a hook: evaluateInboxPolicy settles those
-	// before the type matters.
+	// contact is the recipient's entry for the sender, if any. Blocked
+	// senders never reach a hook. Accepted senders skip hooks for ordinary
+	// chat, but contact request/accept still run so the handshake does not
+	// depend on who may message.
 	contact      idpkg.Contact
 	knownContact bool
 }
@@ -116,16 +118,26 @@ func hookFor(msgType string) inboxTypeHook {
 	return rejectClosedInbox
 }
 
+func isContactHandshakeType(msgType string) bool {
+	switch idpkg.NormalizeMessageType(msgType) {
+	case idpkg.MsgTypeContactRequest, idpkg.MsgTypeContactAccept:
+		return true
+	default:
+		return false
+	}
+}
+
 func rejectClosedInbox(closedInboxCtx) (policyVerdict, string) {
 	return policyReject, rejectedDetail
 }
 
-// hookContactRequest: a stranger's opening gesture. Only
-// `contacts_and_requests` takes them, and only into the requests queue —
-// never the message stream, which is the difference between "someone asked"
-// and "someone messaged you".
+// hookContactRequest parks the opening gesture in the requests queue.
+// `contacts_only` is the one mode that refuses even that knock; `open` and
+// `contacts_and_requests` both queue, so the handshake does not depend on
+// who may send chat — and never the message stream, which is the difference
+// between "someone asked" and "someone messaged you".
 func hookContactRequest(c closedInboxCtx) (policyVerdict, string) {
-	if c.mode != idpkg.InboxContactsAndRequests {
+	if c.mode == idpkg.InboxContactsOnly {
 		return policyReject, rejectedDetail
 	}
 	if len(c.msg.Payload) > maxContactRequestPayload {

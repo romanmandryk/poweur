@@ -300,7 +300,7 @@ func TestINT_JOURNEY_03_SignedPolicyMatrix(t *testing.T) {
 	}{
 		{"open/contact", "open", asContact, "inbox", "moc"},
 		{"open/stranger", "open", asStranger, "inbox", "mos"},
-		{"open/request", "open", asRequest, "inbox", "mor"},
+		{"open/request", "open", asRequest, "requests", "mor"},
 
 		{"contacts_only/contact", "contacts_only", asContact, "inbox", "mcc"},
 		{"contacts_only/stranger", "contacts_only", asStranger, "rejected", "mcs"},
@@ -452,10 +452,10 @@ func TestINT_JOURNEY_04_AnonymousTiers(t *testing.T) {
 	assertDecryptedInbox(t, got.inbox, sender, "signed and known")
 }
 
-// TestINT_JOURNEY_05_OpenPolicyHandshake is journey 02's other half: under
-// the default `open` policy the accept arrives as an ordinary typed message,
-// so the inbox read — not the requests read — is what has to complete the
-// handshake. Both routes exist and both have to promote.
+// TestINT_JOURNEY_05_OpenPolicyHandshake is journey 02's other half: the
+// default `open` policy still parks the handshake in the requests queue,
+// never the inbox. Chat from anyone is a separate decision from "someone
+// asked to be a contact".
 func TestINT_JOURNEY_05_OpenPolicyHandshake(t *testing.T) {
 	const alice = "openalice.poweur.net"
 	const bob = "openbob.poweur.net"
@@ -468,22 +468,66 @@ func TestINT_JOURNEY_05_OpenPolicyHandshake(t *testing.T) {
 
 	runCLI(t, bobHome, "contacts", "request", alice, "hello from bob")
 
-	// Alice's inbox is open, so the request is just a typed message there.
+	stdout, _ := runCLI(t, aliceHome, "requests")
+	if !strings.Contains(stdout, bob) {
+		t.Fatalf("alice's open policy hid bob's request:\n%s", stdout)
+	}
 	inbox, _ := runCLI(t, aliceHome, "inbox")
-	if !strings.Contains(inbox, "hello from bob") {
-		t.Fatalf("alice's open inbox did not receive the request:\n%s", inbox)
+	if strings.Contains(inbox, "hello from bob") {
+		t.Fatalf("the contact request also landed in the open inbox:\n%s", inbox)
 	}
 	runCLI(t, aliceHome, "contacts", "accept", bob)
 
-	// Bob reads his inbox and is promoted by it.
 	if state := contactState(t, bobHome, bob, alice); state != "requested" {
 		t.Fatalf("precondition: bob should still be waiting, got %q", state)
 	}
-	inbox, _ = runCLI(t, bobHome, "inbox")
-	if !strings.Contains(inbox, "accepted your contact request") {
-		t.Fatalf("bob was not told the handshake completed:\n%s", inbox)
+	stdout, _ = runCLI(t, bobHome, "requests")
+	if !strings.Contains(stdout, alice) {
+		t.Fatalf("bob was not told the handshake completed:\n%s", stdout)
 	}
 	if state := contactState(t, bobHome, bob, alice); state != "accepted" {
 		t.Fatalf("bob records alice as %q after reading her accept", state)
+	}
+}
+
+// TestINT_JOURNEY_06_RequestReachesAcceptedContact is the asymmetric case:
+// Alice already lists Bob as a contact, Bob still asks. The request must
+// reach her requests queue so she can answer and finish *his* handshake.
+func TestINT_JOURNEY_06_RequestReachesAcceptedContact(t *testing.T) {
+	const alice = "havealice.poweur.net"
+	const bob = "havebob.poweur.net"
+	relayURL, _ := journeyRelay(t, alice, bob)
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	createIdentity(t, aliceHome, alice, relayURL)
+	createIdentity(t, bobHome, bob, relayURL)
+
+	runCLI(t, aliceHome, "contacts", "add", bob)
+	if state := contactState(t, aliceHome, alice, bob); state != "accepted" {
+		t.Fatalf("precondition: alice should already have bob, got %q", state)
+	}
+
+	runCLI(t, bobHome, "contacts", "request", alice, "please add me back")
+	if state := contactState(t, bobHome, bob, alice); state != "requested" {
+		t.Fatalf("bob's own record after requesting = %q, want requested", state)
+	}
+
+	stdout, _ := runCLI(t, aliceHome, "requests")
+	if !strings.Contains(stdout, bob) {
+		t.Fatalf("alice already listing bob as a contact hid his request:\n%s", stdout)
+	}
+	inbox, _ := runCLI(t, aliceHome, "inbox")
+	if strings.Contains(inbox, "please add me back") {
+		t.Fatalf("the contact request leaked into chat:\n%s", inbox)
+	}
+
+	runCLI(t, aliceHome, "contacts", "accept", bob)
+	stdout, _ = runCLI(t, bobHome, "requests")
+	if !strings.Contains(stdout, alice) {
+		t.Fatalf("bob was not told alice answered:\n%s", stdout)
+	}
+	if state := contactState(t, bobHome, bob, alice); state != "accepted" {
+		t.Fatalf("bob records alice as %q after her accept", state)
 	}
 }

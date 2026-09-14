@@ -641,7 +641,7 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 
 | Mode | Effect |
 |------|--------|
-| `open` | Anyone may send |
+| `open` | Anyone may send chat; contact requests still land in the requests queue |
 | `contacts_only` | Only accepted contacts |
 | `contacts_and_requests` | Contacts, plus strangers who may send a contact request |
 

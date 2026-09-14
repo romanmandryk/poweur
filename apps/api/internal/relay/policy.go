@@ -88,6 +88,22 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	if known && contact.State == idpkg.ContactBlocked {
 		return policyReject, rejectedDetail
 	}
+
+	hookCtx := closedInboxCtx{
+		msg:          msg,
+		mode:         policy.Mode,
+		contact:      contact,
+		knownContact: known,
+	}
+
+	// Contact request/accept is a consent handshake, not chat. It consults
+	// the type hooks in every inbox mode — including `open`, and even when
+	// the sender is already an accepted contact — so a knock is always a
+	// knock the recipient can answer, never a buried inbox line.
+	if isContactHandshakeType(msg.Type) {
+		return hookFor(msg.Type)(hookCtx)
+	}
+
 	if known && contact.State == idpkg.ContactAccepted {
 		return policyAllow, ""
 	}
@@ -100,12 +116,7 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 		// A closed inbox is where the message *type* starts to matter, so
 		// the decision moves to the per-type hooks in typed.go. Everything
 		// without a hook is rejected — the default a closed inbox means.
-		return hookFor(msg.Type)(closedInboxCtx{
-			msg:          msg,
-			mode:         policy.Mode,
-			contact:      contact,
-			knownContact: known,
-		})
+		return hookFor(msg.Type)(hookCtx)
 	default:
 		return policyAllow, ""
 	}
