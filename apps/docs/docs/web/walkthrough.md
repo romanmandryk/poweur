@@ -55,10 +55,11 @@ message arrives.
 - **Add** takes a Poweur ID, resolves it before anything is sent — a typo fails at the
   input, not silently later — and sends `sys.contact.request`. The key that resolves at
   that moment is pinned.
-- **Messages → Requests** merges two sources: the relay's requests queue (used under
-  `contacts_and_requests`) and contact requests that arrived in the inbox as typed
-  messages (what happens under `open`). Accept pins their key and sends
-  `sys.contact.accept`; Block writes `blocked` and sends nothing.
+- **Messages → Requests** is the handshake tray: the relay parks
+  `sys.contact.request` here in every inbox mode except `contacts_only`. Accept pins
+  their key and sends `sys.contact.accept`; Block writes `blocked` and sends nothing.
+  A request still shows if you already list them as a contact — that is how a
+  one-sided handshake (they asked; you already added them) gets answered.
 - When someone accepts a request **you** sent, reading your requests queue promotes them
   to `accepted` on your side too — without that, your own policy would keep refusing
   their first message.

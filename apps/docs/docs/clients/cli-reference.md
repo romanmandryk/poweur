@@ -91,7 +91,11 @@ uses a seed you already hold, and never re-prints it. Without either flag the CL
 independent random keys, as before; those identities cannot produce a recovery seed until they
 rotate to one.
 
-Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.enc`).
+Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.enc`). Existing
+files are never overwritten: a second `create` for a name this machine already holds fails and
+points you at `key enroll` / `key recover`. If the relay refuses the registration (name taken,
+policy, unreachable), the CLI deletes the key files it just wrote so they cannot shadow a later
+enroll or recover.
 
 **Flags:**
 
@@ -637,7 +641,7 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 
 | Mode | Effect |
 |------|--------|
-| `open` | Anyone may send |
+| `open` | Anyone may send chat; contact requests still land in the requests queue |
 | `contacts_only` | Only accepted contacts |
 | `contacts_and_requests` | Contacts, plus strangers who may send a contact request |
 

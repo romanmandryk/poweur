@@ -322,10 +322,10 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// The queue carries answers as well as questions: a closed policy routes
-	// `sys.contact.accept` here rather than into the message stream. Reading
-	// the queue is therefore the moment to finish those handshakes — and the
-	// drain means this is the only chance to see them.
+	// The queue carries answers as well as questions: a contact accept is
+	// routed here rather than into the message stream, in every inbox mode.
+	// Reading the queue is therefore the moment to finish those handshakes —
+	// and the drain means this is the only chance to see them.
 	var accepts []string
 	var pending []requestEntry
 	for _, req := range requests {
@@ -648,11 +648,11 @@ func repinContact(ctx context.Context, cfg config.Config, identityValue string, 
 // promoteAcceptedContacts finishes handshakes this identity started.
 //
 // `contacts request` records the target as `requested` and pins the key it
-// addressed. Their answer — a `sys.contact.accept` — arrives later, in the
-// inbox under `open` or in the requests queue under a closed policy, and
-// until something acts on it our own contacts still say `requested`. That
-// matters beyond cosmetics: our own policy reads the same file, so a
-// `contacts_only` inbox goes on bouncing the person who just accepted us.
+// addressed. Their answer — a `sys.contact.accept` — arrives later in the
+// requests queue (in every inbox mode), and until something acts on it our
+// own contacts still say `requested`. That matters beyond cosmetics: our
+// own policy reads the same file, so a `contacts_only` inbox goes on
+// bouncing the person who just accepted us.
 //
 // Promotion is deliberately narrow. Only someone we ourselves asked is
 // promoted, and only while the key we pinned when we asked is still theirs —

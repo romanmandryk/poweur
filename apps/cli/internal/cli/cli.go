@@ -11,7 +11,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,13 +215,26 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	keyPath, err := identity.SavePrivateKey(identityValue, priv)
+	keysDir, err := config.KeysDir()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	encKeyPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	keyPath := identity.KeyPath(keysDir, identityValue)
+	encKeyPath := identity.EncryptionKeyPath(keysDir, identityValue)
+	if identity.AnyKeyFileExists(keyPath, encKeyPath) {
+		fmt.Fprintf(stderr, "keys already exist for %s at %s — use `poweur key enroll` or `poweur key recover` to add this device, not `identity create`\n", identityValue, keyPath)
+		return 1
+	}
+
+	keyPath, err = identity.SavePrivateKey(identityValue, priv)
 	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encKeyPath, err = identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	if err != nil {
+		identity.RemoveKeyFiles(keyPath)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -228,6 +243,15 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
 	registered := false
 	if *relayURL != "" {
+		// Keys are written before the relay answers so a successful
+		// registration always has material on disk. If the relay refuses,
+		// drop those files — they are a different keypair, not this identity.
+		keepKeys := false
+		defer func() {
+			if !keepKeys {
+				identity.RemoveKeyFiles(keyPath, encKeyPath)
+			}
+		}()
 		if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -291,6 +315,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		registered = true
+		keepKeys = true
 	}
 
 	cfg.Identity = identityValue
@@ -991,23 +1016,76 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 // home relay's scheme by default (http for tests, https for prod) since
 // scheme is not carried in DNS records.
 func resolveRecipientRelayURL(ctx context.Context, recipient string, cfg config.Config) (string, error) {
+	scheme := schemeFromConfig(cfg)
+	host, _, err := lookupRelayHost(ctx, scheme, recipient)
+	if err != nil {
+		return "", err
+	}
+	return scheme + "://" + host, nil
+}
+
+// lookupRelayHost returns a hostname or host:port for the recipient's relay.
+// fromDNS is true when A/AAAA (or CNAME) records were actually present — outbox
+// retry uses that so it can follow a moved httptest listener without inventing
+// a hostname for identities DNS never answered.
+func lookupRelayHost(ctx context.Context, scheme, recipient string) (host string, fromDNS bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	dns, err := identity.LookupDNS(ctx, recipient)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	var host string
-	if len(dns.RelayHosts) > 0 {
-		host = dns.RelayHosts[0]
-	} else if dns.CNAME != "" {
-		host = strings.TrimSuffix(dns.CNAME, ".")
+	fromDNS = len(dns.RelayHosts) > 0
+	host, err = hostForRelayURL(scheme, recipient, dns)
+	return host, fromDNS, err
+}
+
+// hostForRelayURL picks a hostname (or host:port) to put in a relay URL.
+//
+// LookupHost returns A/AAAA addresses. Putting a bare IP into an https URL
+// fails TLS: production certificates are issued for names
+// (`relay.poweur.net`, `*.poweur.net`), not for Cloudflare anycast IPs. The
+// TypeScript client already posts to the identity hostname; this matches it.
+//
+// `host:port` answers (integration tests' httptest listeners) are kept —
+// ParseIP rejects them — so in-process relays stay reachable.
+func hostForRelayURL(scheme, recipient string, dns identity.DNSStatus) (string, error) {
+	var candidates []string
+	// HTTPS must start with a name (TLS SNI). HTTP tests start with DNS
+	// answers so httptest's `127.0.0.1:port` is used instead of a hostname
+	// the system resolver cannot see.
+	if scheme == "https" {
+		candidates = append(candidates, recipient)
 	}
-	if host == "" {
-		return "", errors.New("recipient relay host not resolvable")
+	if cname := strings.TrimSuffix(dns.CNAME, "."); cname != "" {
+		candidates = append(candidates, cname)
 	}
-	scheme := schemeFromConfig(cfg)
-	return scheme + "://" + host, nil
+	candidates = append(candidates, dns.RelayHosts...)
+	if scheme != "https" {
+		candidates = append(candidates, recipient)
+	}
+	for _, host := range candidates {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		if scheme == "https" && net.ParseIP(host) != nil {
+			continue
+		}
+		return host, nil
+	}
+	return "", errors.New("recipient relay host not resolvable")
+}
+
+// relayURLHostIsBareIP reports whether a stored outbox target is an IP with
+// no port — the broken https://172.67.x.x form. Those get rewritten on retry.
+// httptest URLs (`http://127.0.0.1:port`) keep their dial address.
+func relayURLHostIsBareIP(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return net.ParseIP(u.Host) != nil
 }
 
 // schemeFromConfig peels the http/https scheme off cfg.RelayURL so direct

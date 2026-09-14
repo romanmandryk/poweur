@@ -1,6 +1,6 @@
 # EPIC-006 — `/poweur-sys` layout & application data conventions
 
-- **Status:** core complete (T1–T4 shipped; T5 deferred)
+- **Status:** complete (T1–T5 shipped; T5 tasks dogfood = PCP-0007 + `apps/tasks/`)
 - **Priority:** P1
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-007 (contacts file), EPIC-010 (app ecosystem), every third-party app

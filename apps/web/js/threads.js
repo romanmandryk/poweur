@@ -10,7 +10,7 @@
  * `packages/identity/msgtypes.go`). This module must not restate them.
  */
 
-import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT } from "@poweur/client";
+import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST } from "@poweur/client";
 
 /**
  * What the tray shows as a conversation's one-line preview.
@@ -22,12 +22,89 @@ import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_A
  * not open shows the padlock whatever its type claims.
  */
 export function previewFor(message) {
-  if (message.plaintext == null) return "🔒 Could not decrypt";
-  const preview = normalizeMessageType(message.type) === MSG_TYPE_CHAT_ATTACHMENT
-    ? `📎 ${message.metadata?.attachment_name || "Attachment"}`
-    : describeMessage(message.sender ?? "", message.type, message.plaintext);
+  const preview = bodyFor(message);
+  if (message.plaintext == null) return preview;
   const countdown = expiryCountdown(message.expires_at);
   return countdown ? `${preview} · ⏳ ${countdown}` : preview;
+}
+
+/**
+ * What a message says, by the same rules as the preview but without the
+ * expiry suffix — the conversation view shows the countdown in the bubble's
+ * own meta line instead.
+ */
+export function bodyFor(message) {
+  if (message.plaintext == null) return "🔒 Could not decrypt";
+  return normalizeMessageType(message.type) === MSG_TYPE_CHAT_ATTACHMENT
+    ? `📎 ${message.metadata?.attachment_name || "Attachment"}`
+    : describeMessage(message.sender ?? "", message.type, message.plaintext);
+}
+
+/**
+ * The conversation a message belongs to: the other party, or the group a
+ * verified fan-out was addressed to. One definition, so the tray row and the
+ * conversation it opens can never disagree about which messages are in it.
+ */
+export function conversationPeer(message, selfIdentity) {
+  return (message.group_verified ? message.metadata?.group : "") ||
+    (message.sender === selfIdentity ? message.recipient : message.sender) || "";
+}
+
+/** How many messages the conversation view shows at first, and adds per "Load more". */
+export const THREAD_PAGE_SIZE = 10;
+
+/**
+ * Every message in one (conversation, thread), oldest first — the order the
+ * store already holds them in.
+ */
+export function threadMessages(messages, selfIdentity, peer, threadId = "") {
+  const wanted = String(peer ?? "").toLowerCase();
+  const out = [];
+  for (const raw of messages) {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!message.sender) continue;
+    // The handshake is not chat: the tray leaves it out, so the thread does too.
+    if (isContactHandshake(message.type)) continue;
+    if (conversationPeer(message, selfIdentity).toLowerCase() !== wanted) continue;
+    if ((message.thread_id || "") !== (threadId || "")) continue;
+    out.push(message);
+  }
+  return out;
+}
+
+/**
+ * The newest `shown` messages of an oldest-first list, and whether anything
+ * older is being held back — which is what decides if "Load more" appears.
+ */
+export function latestWindow(messages, shown) {
+  const count = Math.max(0, Math.min(messages.length, shown));
+  return {
+    visible: messages.slice(messages.length - count),
+    hidden: messages.length - count,
+    hasMore: messages.length > count,
+  };
+}
+
+/**
+ * The tick a message we sent has earned: `read` beats `delivered` beats
+ * `sent`. A relay's `sys.delivery.failed` notice means it gave up holding the
+ * message, which outranks any delivery claim for the same id.
+ */
+export function deliveryState(message, acks) {
+  let state = "sent";
+  for (const ack of acks ?? []) {
+    if (!message.id || ack.message_id !== message.id) continue;
+    if (ack.type === "sys.delivery.failed") return "failed";
+    if (ack.state === "read") state = "read";
+    else if (state !== "read") state = "delivered";
+  }
+  return state;
+}
+
+/** True for the consent handshake — those belong in Requests, never chat. */
+function isContactHandshake(type) {
+  const normalized = normalizeMessageType(type);
+  return normalized === MSG_TYPE_CONTACT_REQUEST || normalized === MSG_TYPE_CONTACT_ACCEPT;
 }
 
 /**
@@ -75,10 +152,10 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     // An unsigned message has nobody to thread under; it belongs to the
     // anonymous tray, which renders it as a different kind of object.
     if (!message.sender) continue;
+    if (isContactHandshake(message.type)) continue;
     // A verified fan-out carries the group in signed metadata. File it under
     // that address rather than under whichever member happened to speak.
-    const contact = (message.group_verified ? message.metadata?.group : "") ||
-      (message.sender === selfIdentity ? message.recipient : message.sender);
+    const contact = conversationPeer(message, selfIdentity);
     if (!contact) continue;
     if (!byContact.has(contact)) byContact.set(contact, []);
     byContact.get(contact).push(message);
@@ -111,6 +188,41 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
 }
 
 /**
+ * Whether a read mark covers a message. A mark is a *position* (timestamp and
+ * id): timestamps are RFC3339 to the second, so two messages a moment apart
+ * share one, and a timestamp-only mark would swallow the second.
+ */
+export function markCovers(mark, timestamp, id) {
+  if (!mark?.timestamp) return false;
+  if (mark.timestamp !== timestamp) return new Date(mark.timestamp) > new Date(timestamp);
+  return (mark.id ?? "") >= id;
+}
+
+/**
+ * Every unread signed message across all conversations — the number on the
+ * Messages nav badge. Same rule the per-conversation count uses: our own
+ * messages never count, and a conversation's read mark covers what is behind it.
+ *
+ * @param {Array<object|string>} messages
+ * @param {string} selfIdentity
+ * @param {Record<string, {timestamp: string, id?: string}>} conversations  read marks by conversation
+ */
+export function unreadTotal(messages, selfIdentity, conversations = {}) {
+  const self = String(selfIdentity ?? "").toLowerCase();
+  let count = 0;
+  for (const raw of messages) {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!message.sender || message.sender.toLowerCase() === self) continue;
+    // A request is counted once, on Contacts — not again as a message.
+    if (isContactHandshake(message.type)) continue;
+    const conversation = String(message.group_verified ? message.metadata?.group : message.sender).toLowerCase();
+    if (markCovers(conversations?.[conversation], message.timestamp, message.id ?? "")) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/**
  * A short label for a thread row. Empty for the default thread, so an
  * unthreaded conversation renders exactly as it did before.
  */
@@ -120,4 +232,4 @@ export function threadLabel(threadId) {
 }
 
 /** Re-exported so `app.js` has one import for the display rules. */
-export { describeMessage, normalizeMessageType, MSG_TYPE_CHAT_TEXT };
+export { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_TEXT };

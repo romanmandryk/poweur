@@ -47,14 +47,17 @@ async function composeTo(page, recipient, body) {
   // At 375px the header action is hidden and the FAB is the one on screen —
   // exactly one of the two is visible, never both (E15-T11).
   await page.click("#btn-compose");
-  // Scoped to the compose page: a bottom sheet opened earlier in the test can
-  // still hold its own identity input, and `.idin-status` would match both.
-  const compose = page.locator(".compose-body");
-  await compose.locator(".idin input").fill(recipient);
-  await expect(compose.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
-  await compose.locator("#c-body").fill(body);
-  await page.click("#btn-send-msg");
-  await expect(page.locator(".compose-status")).toContainText("Sent", { timeout: 30_000 });
+  // Scoped to the picker: a bottom sheet opened earlier in the test can still
+  // hold its own identity input, and `.idin-status` would match both.
+  const picker = page.locator(".new-chat");
+  await picker.locator(".idin input").fill(recipient);
+  await expect(picker.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
+  await page.click("#btn-open-chat");
+  await expect(page.locator(".thread-view")).toBeVisible({ timeout: 20_000 });
+  await page.fill("#thread-input", body);
+  await page.click("#btn-thread-send");
+  await expect(page.locator(".bubble-row.mine").last()).toContainText(body, { timeout: 30_000 });
+  await page.click("#btn-back");
 }
 
 /** Set the inbox policy through the SDK — Settings owns the UI for it. */
@@ -148,13 +151,14 @@ test.describe("browser journeys", () => {
     await setPolicy(ownerPage, "contacts_only");
     await strangerPage.click('.nav-tab[data-page="messages"]');
     await strangerPage.click("#btn-compose");
-    const compose = strangerPage.locator(".compose-body");
-    await compose.locator(".idin input").fill(ownerId);
-    await expect(compose.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
-    await compose.locator("#c-body").fill("contacts_only hello");
-    await strangerPage.click("#btn-send-msg");
+    const picker = strangerPage.locator(".new-chat");
+    await picker.locator(".idin input").fill(ownerId);
+    await expect(picker.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
+    await strangerPage.click("#btn-open-chat");
+    await strangerPage.fill("#thread-input", "contacts_only hello");
+    await strangerPage.click("#btn-thread-send");
     // The sender is told, rather than left believing it went.
-    await expect(strangerPage.locator(".compose-status")).toContainText("✕", { timeout: 30_000 });
+    await expect(strangerPage.locator(".thread-status")).toContainText("✕", { timeout: 30_000 });
     await strangerPage.click("#btn-back");
 
     // ── contacts_and_requests: a request lands in the requests tray ────────
@@ -213,7 +217,6 @@ test.describe("browser journeys", () => {
 
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
     await composeTo(strangerPage, ownerId, "signed and attributable");
-    await strangerPage.click("#btn-back").catch(() => {});
     await strangerPage.evaluate(async ({ identity, relayUrl }) => {
       const { sendAnonymous } = await import("@poweur/client");
       const { resolveOptionsForRelay } = await import("./js/client.js");

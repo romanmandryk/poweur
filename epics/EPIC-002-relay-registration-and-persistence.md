@@ -1,6 +1,6 @@
 # EPIC-002 — Relay-only registration, wildcard identities & durable relay storage
 
-- **Status:** complete (PoW gate shipped via EPIC-014: `REGISTRATION_GATE=pow`)
+- **Status:** complete (PoW gate shipped via EPIC-014: `REGISTRATION_GATE=pow`); one polish item open — E02-T1's SQLite/bbolt lookup index is not built
 - **Priority:** P0
 - **Depends on:** EPIC-001
 - **Unlocks:** EPIC-003 (file storage), EPIC-009 (message persistence)
@@ -87,7 +87,8 @@ tests show no traversal.
       validates signature against the embedded key before accepting
 - [x] Keep DNS mode fully working; route by request shape + config
 - [x] CLI: `poweur identity create name.poweur.net --hosted` (no token args); web app
-      registration flow updated (`apps/web/js/app.js`)
+      registration flow updated (`apps/web/js/app.js`). Failed registration no longer
+      leaves a leftover local keypair (autoclean + refuse overwrite).
 - [x] Update docs: `apps/docs/docs/relay/api-reference.md`, web-identity protocol page
 - [x] `dns-management.md` wording pass (hosted vs DNS dual-mode; lease = no expiry)
 

@@ -83,6 +83,33 @@ func EncryptionKeyPath(keysDir, identity string) string {
 	return filepath.Join(keysDir, identity+".enc")
 }
 
+// AnyKeyFileExists reports whether any of the paths is already on disk.
+// `identity create` uses this so it never overwrites a real keypair, then
+// deletes leftovers if the relay refuses the name.
+func AnyKeyFileExists(paths ...string) bool {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveKeyFiles deletes the given paths, ignoring missing files. Used to
+// unwind a failed `identity create` so a later enroll/recover is not
+// shadowed by a keypair the relay never accepted.
+func RemoveKeyFiles(paths ...string) {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		_ = os.Remove(path)
+	}
+}
+
 func PublicKeyString(publicKey ed25519.PublicKey) string {
 	return base64.RawURLEncoding.EncodeToString(publicKey)
 }

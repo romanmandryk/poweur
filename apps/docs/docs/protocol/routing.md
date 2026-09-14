@@ -67,7 +67,7 @@ Alice's client generates a client-side message id (ULID/UUID), constructs the ca
 
 ### 2. Client resolves recipient relay
 
-Alice's client resolves `bob.example.org`'s `A`/`CNAME` directly to find Bob's relay address.
+Alice's client resolves `bob.example.org`'s `A`/`CNAME` to find Bob's relay, then POSTs to a **hostname** (`https://bob.example.org` or the `relay` field on the identity document) — never a bare IP. Production TLS certificates are issued for names, not for the CDN addresses `LookupHost` returns.
 
 ### 3. Client posts directly
 

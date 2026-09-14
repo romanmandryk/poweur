@@ -27,14 +27,14 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | ID | Title | Theme | Status | Depends on |
 |----|-------|-------|--------|------------|
 | [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | complete | — |
-| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete | E01 |
+| [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (E02-T1 SQLite/bbolt index open) | E01 |
 | [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete (S3 provider deferred) | E02 |
-| [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | core complete (daemon, T5/T6 deferred) | E03 |
-| [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | core complete (offer UX, links, group IDs deferred) | E03 |
-| [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | core complete (lookup UX, tasks dogfood open) | E03 |
-| [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | core complete (web UX, T5 open) | E03, E06 |
-| [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | proposed | E01 |
-| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | in progress (T1 spool + T2 push done; typed messages, attachments, groups open) | E02, E03 |
+| [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | core complete (T1–T4, T6 device registry done; T5 desktop/mobile + fsnotify daemon deferred) | E03 |
+| [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | core complete (T4 links + T5 group identities done; **T3 share offer/accept + recipient mounts open, now unblocked**) | E03 |
+| [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | **complete** (T1–T5; tasks dogfood = PCP-0007) | E03 |
+| [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | **complete** (T1–T5; stranger PoW gate moved to E14-T3) | E03, E06 |
+| [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | **complete** (T1–T5; OIDC bridge is a design record) | E01 |
+| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | **complete** (T1–T6: spool, SSE push, typed messages, attachments, groups, receipts/outbox/expiry) | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | proposed | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
@@ -45,6 +45,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
+| [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
 
 ## Integration epics (`integrations/`)
 
@@ -119,6 +120,14 @@ EPIC-015 + EPIC-017 + EPIC-018 ──► EPIC-019 (Capacitor mobile shell)
                    │  no-`location.origin` constraints
                    └─ `kdf:"native"` key custody frees the store build from
                       associated-domains, so self-hosters need no fork
+
+EPIC-003/004/005/006/011/013 ──► EPIC-020 (storage v2: chunks, versions, capability sharing)
+                   ├─ Wave 0: files split out as a declared, separately deployable service;
+                   │  id + messaging stay one control-plane process
+                   ├─ WebDAV becomes a compatibility view, not the storage model
+                   ├─ message history v2 (supersedes E09-T1 layout) → E15-T13 paging
+                   └─ lands E03-T7 relay-blind storage, E05-T3 mounts, append/excerpt/
+                      time-boxed shares and delegation
 ```
 
 ## Architecture deltas at a glance

@@ -67,9 +67,11 @@ test.describe("contacts, requests and key pinning", () => {
     // The tray says how many are waiting, from any tray (E07-T3).
     await expect(bobPage.locator('.tray-tab[data-tray="requests"] .tray-badge')).toHaveText("1");
 
-    // The same stranger is one tap from being added in the inbox too.
+    // The same stranger is one tap from being added in the inbox too — but
+    // a contact request is not a conversation, so the inbox stays empty.
     await bobPage.click('.tray-tab[data-tray="inbox"]');
-    await expect(bobPage.locator(`[data-add-contact="${aliceId}"]`)).toHaveCount(1);
+    await expect(bobPage.locator(`[data-add-contact="${aliceId}"]`)).toHaveCount(0);
+    await expect(bobPage.locator(".empty-state-title")).toHaveText("No messages yet");
 
     await bobPage.click('.tray-tab[data-tray="requests"]');
     await accept.click();
@@ -88,9 +90,10 @@ test.describe("contacts, requests and key pinning", () => {
 
     // Bob replies through the UI; Alice reads it.
     await bobPage.click("[data-contact-open]");
-    await bobPage.fill("#c-body", "hello alice");
-    await bobPage.click("#btn-send-msg");
-    await expect(bobPage.locator("#c-status")).toHaveText("✓ Sent", { timeout: 20_000 });
+    await expect(bobPage.locator(".thread-view")).toBeVisible();
+    await bobPage.fill("#thread-input", "hello alice");
+    await bobPage.click("#btn-thread-send");
+    await expect(bobPage.locator(".bubble-row.mine").last()).toContainText("hello alice", { timeout: 20_000 });
 
     await expect
       .poll(async () => {
@@ -148,6 +151,53 @@ test.describe("contacts, requests and key pinning", () => {
     await senderCtx.close();
   });
 
+  test("a request from someone already in contacts still shows in Requests", async ({ browser }) => {
+    test.slow();
+    const john = await browser.newContext({ viewport: MOBILE });
+    const bob = await browser.newContext({ viewport: MOBILE });
+    const johnPage = await john.newPage();
+    const bobPage = await bob.newPage();
+    await stubPasskeys(johnPage);
+    await stubPasskeys(bobPage);
+
+    const suffix = Date.now().toString(36);
+    const johnId = await registerIdentity(johnPage, relay, `ctj${suffix}`);
+    const bobId = await registerIdentity(bobPage, relay, `ctq${suffix}`);
+
+    // John already lists Bob as a contact — the green tick — before Bob asks.
+    await johnPage.evaluate(async (target) => {
+      const { clientFor } = await import("./js/client.js");
+      const { getActiveIdentity } = await import("./js/storage.js");
+      const contacts = await clientFor(getActiveIdentity()).contacts();
+      await contacts.set(target, "accepted", {});
+    }, bobId);
+    await johnPage.click('.nav-tab[data-page="settings"]');
+    await johnPage.click('.nav-tab[data-page="contacts"]');
+    await expect(johnPage.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 20_000 });
+
+    await bobPage.click('.nav-tab[data-page="contacts"]');
+    await bobPage.click("#btn-add-contact-empty");
+    await bobPage.fill(".idin input", johnId);
+    await expect(bobPage.locator("#btn-add-contact-go")).toBeEnabled({ timeout: 20_000 });
+    await bobPage.fill("#ac-intro", "please add me back");
+    await bobPage.click("#btn-add-contact-go");
+    await expect(bobPage.locator(".contact-row .chip")).toHaveText("Requested", { timeout: 20_000 });
+
+    const accept = await requestFrom(johnPage, bobId);
+    await expect(johnPage.locator(".request-intro")).toHaveText("please add me back");
+    await accept.click();
+
+    await expect
+      .poll(async () => {
+        await bobPage.click('.nav-tab[data-page="contacts"]');
+        return bobPage.locator(".contact-row .chip").innerText();
+      }, { timeout: 30_000, message: "Bob's side never promoted after John accepted" })
+      .toBe("Contact");
+
+    await john.close();
+    await bob.close();
+  });
+
   test("a swapped key blocks the send until it is explicitly trusted", async ({ page }) => {
     test.slow();
     await stubPasskeys(page);
@@ -180,9 +230,11 @@ test.describe("contacts, requests and key pinning", () => {
 
     await page.click('.nav-tab[data-page="messages"]');
     await page.click("#btn-compose");
-    await page.fill(".idin input", peer);
-    await page.fill("#c-body", "are you still you?");
-    await page.click("#btn-send-msg");
+    await page.locator(".new-chat .idin input").fill(peer);
+    await expect(page.locator(".new-chat .idin-status")).toContainText("Found", { timeout: 20_000 });
+    await page.click("#btn-open-chat");
+    await page.fill("#thread-input", "are you still you?");
+    await page.click("#btn-thread-send");
 
     // Blocking dialog, both fingerprints, no send.
     await expect(page.locator("#km-trust")).toBeVisible({ timeout: 20_000 });
@@ -191,12 +243,14 @@ test.describe("contacts, requests and key pinning", () => {
     expect(shownPin).not.toBe(shownNow);
 
     await page.click("#km-cancel");
-    await expect(page.locator("#c-status")).toHaveText("✕ Not sent — key not trusted");
+    await expect(page.locator(".thread-status")).toHaveText("✕ Not sent — key not trusted");
+    await expect(page.locator(".bubble-row.mine")).toHaveCount(0);
 
-    // Trusting re-pins and lets the same message go.
-    await page.click("#btn-send-msg");
+    // Trusting re-pins and lets the same message go — the draft was kept.
+    await expect(page.locator("#thread-input")).toHaveValue("are you still you?");
+    await page.click("#btn-thread-send");
     await expect(page.locator("#km-trust")).toBeVisible({ timeout: 20_000 });
     await page.click("#km-trust");
-    await expect(page.locator("#c-status")).toHaveText("✓ Sent", { timeout: 20_000 });
+    await expect(page.locator(".bubble-row.mine").last()).toContainText("are you still you?", { timeout: 20_000 });
   });
 });

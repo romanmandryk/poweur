@@ -223,7 +223,7 @@ A relay implementing this revision:
 
 1. Validates the four fields for shape at ingress, **before** signature verification — these are cheap syntactic checks on plaintext, and an envelope whose metadata carries a newline has no unambiguous canonical string to verify against. Failures return `400 invalid_message` naming the field.
 2. Rejects an unregistered `sys.*` type with `400 unsupported_type`.
-3. Consults a **per-type inbox-policy hook** when the recipient's inbox is closed to the sender. A type with no hook is rejected, which is what a closed inbox means; `sys.contact.request` and `sys.contact.accept` have hooks that admit them into the requests queue under the conditions the recipient's `poweur-sys/relay/inbox-policy.json` sets.
+3. Consults a **per-type inbox-policy hook** for `sys.contact.request` and `sys.contact.accept` in every inbox mode (blocked senders are still rejected first; accepted contacts still deliver ordinary chat). Other types consult the hook only when the inbox is closed to the sender. A type with no hook is rejected, which is what a closed inbox means.
 4. Stores and returns all four fields **verbatim**. It must: the recipient recomputes the canonical string to verify the signature, so a relay that dropped `thread_id` would turn every threaded message into a downstream signature failure.
 
 ### Client behaviour

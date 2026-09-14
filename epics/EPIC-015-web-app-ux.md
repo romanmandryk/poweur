@@ -18,7 +18,7 @@
 | E15-T1 Information architecture & shared components | **done** | five destinations, IdentityInput / AudiencePicker / ProfileCard, relay URL off `location.origin` |
 | Keys, devices & recovery (E11's web surface) | **done** | seed-derived identities, keystore inventory, recovery kit, the E11-T3 ceremony |
 | E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog. **Friction fixed since manual testing:** a bare handle is completed with your own domain (a hosted relay puts everyone under one, so typing `alice` failed validation with "that does not look like a Poweur ID"); the add-contact buttons resolve on press instead of staying disabled behind a debounced lookup, which left someone who typed a name and pressed the button they were looking at with nothing at all; a queued request's intro is decrypted and shown |
-| E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send |
+| E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send (the send *toggle* left the signed-in UI with E15-T13; the SDK path stays) |
 | E15-T4 Files explorer & sharing | **done** | chunked upload, share dialog, received shares, changes-feed refresh |
 | E15-T5 Profile, first-run onboarding & polish | **done** | profile editor, three skippable steps, a11y pass, walkthrough docs |
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
@@ -29,6 +29,7 @@
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
+| **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
 
 ## Goal
 
@@ -243,12 +244,11 @@ request code (E11-T3 Transport 2, unchecked there).
 - [x] Writes go through the file API (`@poweur/client`'s `Contacts`), so contacts sync
       across devices and to the CLI
 
-**The requests tray reads two sources, because a request arrives two ways.** Under
-`contacts_and_requests` the relay parks a stranger's first `sys.contact.request` in the
-requests queue; under the default `open` policy the identical envelope is delivered to the
-inbox as a typed message. A tray that read only the queue would be empty for every
-default-policy user, with their contact request buried among conversations — so the tray
-merges the queue with inbox messages of that type, minus anyone already accepted or blocked.
+**The requests tray is the handshake, independent of who may chat.** The relay parks a
+`sys.contact.request` in the requests queue in every inbox mode except `contacts_only`.
+The tray still merges leftover inbox copies from older relays, and it keeps showing a
+request even when the sender is already an accepted contact — that is how a one-sided
+handshake (they asked; you already listed them) gets answered. Blocked senders stay hidden.
 
 **Found and fixed here: the inbox list was losing messages.** `GET /inbox` and
 `GET /requests/{id}` both **drain** — the relay hands each entry over exactly once — and
@@ -755,6 +755,79 @@ screenshot diffing across machines is a flake source this suite does not need.
 **Acceptance:** e2e covering a policy-rejected name shown before typing finishes, a
 taken-on-submit recovery that returns to the field, and an offline landing that refuses to
 pretend it checked.
+
+### E15-T13 — Conversation view & paged history
+
+**Background.** The Messages tray renders one row per (contact, thread) with only the latest
+message's preview ([`renderTray`](../apps/web/js/app.js)). Tapping a row marks it read and
+pushes the *compose* sub-page with `to`/`thread` preset — so nothing in the web app or the
+Capacitor shell ever shows an earlier message. The data is all there: `S.messages` holds both
+sides (the archive keeps sent copies, E09-T1), per-message acks including read ticks
+(E09-T6), attachments and `expires_at`.
+
+The archive itself does not scale as it is read today. Layout is
+`poweur-sys/private/messages/<YYYY-MM>/<sortkey>-<id>.json`, one sealed file per message
+([`packages/identity/history.go`](../packages/identity/history.go)). `MessageHistory.load()`
+in `@poweur/client` lists every shard and then issues **one GET + one unseal per message**,
+and the web app calls it on every unlock; the Go CLI's `Load` does the same over the sync
+manifest, and `poweur history [peer]` prints the entire result with no limit. At 10k messages
+that is 10k requests before the tray can draw. Filenames carry time but not the peer, so
+filtering a conversation still means opening everything.
+
+- [x] **Conversation screen** (`R.push("thread", { peer, thread, group })`): bubbles
+      oldest→newest, own messages right-aligned, day separators, sender name per bubble in
+      groups. Tapping a tray row opens this, not compose; "New message" stays compose
+- [ ] **Per-message state in the bubble:** sent / delivered / read ticks from `S.acks`,
+      outbox pending/failed with retry, expiry countdown, "Open 📎" on attachment bubbles,
+      the generic "app message (&lt;type&gt;)" line for unknown types (reuse `describeMessage`)
+- [x] **Inline reply composer** pinned to the bottom (safe-area aware in the shell), keeping
+      the thread id; attachment picker behind an icon. Sending appends optimistically
+- [ ] **Live:** push events already trigger `loadInbox()` → `render()`; the open thread must
+      re-render too (today it only repaints when `R.page === "messages" && !R.sub`), stick to
+      the bottom when already there, and show a "new messages ↓" pill when scrolled up
+- [ ] Read marks advance as the thread is viewed (to the newest visible message), not on the
+      row tap
+- [ ] **Paging comes from history v2, not the v1 layout** —
+      [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 (one append-only log per conversation
+      on chunked storage, `tail` / `before` APIs in both SDKs, CLI `--limit/--before`). The
+      conversation screen above can ship first on today's full load; the two items below wait
+      for E20-T8
+- [ ] Web: unlock loads one tail chunk per conversation for the tray; the thread view fetches
+      older chunks on scroll-to-top with the scroll position preserved; chunks cached in
+      IndexedDB (immutable, never revalidated)
+- [ ] Desktop (with E15-T11): the thread renders into the detail pane of the two-pane layout
+
+**Shipped so far (2026-09-14, web 0.1.12):**
+- The conversation screen shows the newest 10 messages first. "Load more (N earlier)" appears only while older messages exist, and adds 10 at a time.
+- Direct messages you sent show sent / delivered / read ticks, or "!" when the relay's `sys.delivery.failed` notice arrives. Group messages show no ticks.
+- Attachment bubbles have "Open 📎", expiring messages show a countdown, and unknown message types show the generic line.
+- The reply box is text only (Cmd/Ctrl+Enter sends); attachments still go through compose. Its sending code is shared with compose (`sendSigned`).
+- Push events repaint the open conversation. It stays pinned to the bottom while you're there, and stays in place after "Load more".
+- Open work from the list above:
+  - the "new messages ↓" pill;
+  - outbox pending/failed bubbles;
+  - read marks per visible message (still marked when the conversation opens);
+  - download paging (E20-T8).
+
+
+**Chat-style composer and nav badges (web 0.1.13):**
+- **The compose screen is gone.**
+  - "New message" is a To picker that opens the conversation; a group identity is recognised by its roster.
+  - Contact rows, the contact sheet's "Message" button and add-contact "Message" all open the conversation.
+  - Attachments send from the 📎 button beside the reply box, using any typed text as the caption.
+- **"Send anonymously" is no longer offered in the signed-in app.** The SDK path (`sendAnonymous`, PoW solved in-page) is unchanged and `policy.spec.js` drives it directly. A signed-out anonymous send surface belongs with EPIC-012's contact page.
+- **Nav badges:**
+  - Messages counts unread messages (signed, from read marks, plus unread anonymous).
+  - Contacts counts incoming requests waiting for an answer.
+  - History and requests load on every destination so the numbers are right wherever you are. A background load repaints another destination only when a badge number changed.
+- **Unlocking pulls everything immediately.** Passkey or native unlock (including web passkey sign-in), keystore recovery, restore on a new device and registration all call `pullAfterUnlock()`. It fetches history, inbox, requests (forced), contacts, policy and then the anonymous queue, and retries the outbox. It no longer depends on having returned to Messages or on the push stream's `ready` event. `nav-badges.spec.js` blocks the event stream, unlocks from Contacts and checks both badges.
+- **Found on the way: a push landing mid-drain was dropped.** `loadInbox` was single-flight, so an event arriving while a drain was in flight joined it and missed any message posted after its GET left. On Messages every render drained again, which hid the gap; anywhere else the message stayed on the relay until something unrelated happened. Push events and unlock now call `loadInbox({ force: true })`, which queues one more drain, the same pattern `loadRequests` already used. Renders never force, so a drain cannot schedule itself in a loop.
+
+**Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
+in order with ticks; A sends while B sits in the thread and it appears without interaction;
+after a reload the thread is intact. Once E20-T8 lands: a relay test seeds a 2k-message
+archive and asserts the tray paints having fetched at most one tail chunk per conversation,
+and that scrolling up fetches the previous one.
 
 ## Forward-looking (prepare for, don't build)
 

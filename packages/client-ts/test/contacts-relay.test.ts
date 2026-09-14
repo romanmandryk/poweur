@@ -47,12 +47,13 @@ describe("contact requests ↔ real relay", () => {
     expect(contact.pinned_key).toBe(bob.client.signer.publicKey);
     expect(result.message.type).toBe(MSG_TYPE_CONTACT_REQUEST);
 
-    // Bob's policy is open (the default), so the request arrives as a typed
-    // message in the inbox rather than in the requests queue.
-    const inbox = await bob.client.inbox();
-    const request = inbox.messages.find((m) => m.sender === alice.identity);
+    // The handshake is independent of inbox policy: even under `open` the
+    // request parks in the requests queue, never the message stream.
+    const queued = await bob.client.requests();
+    const request = queued.find((r) => r.sender === alice.identity);
     expect(request?.type).toBe(MSG_TYPE_CONTACT_REQUEST);
     expect(request?.plaintext).toBe("hi, it's alice");
+    expect((await bob.client.inbox()).messages.some((m) => m.sender === alice.identity)).toBe(false);
 
     const { contact: accepted, notified } = await bob.client.acceptContact(alice.identity, {
       petname: "Alice",
@@ -62,9 +63,9 @@ describe("contact requests ↔ real relay", () => {
     expect(accepted.pinned_key).toBe(alice.client.signer.publicKey);
     expect(notified).toBe(true);
 
-    const aliceInbox = await alice.client.inbox();
+    const aliceAnswers = await alice.client.requests();
     expect(
-      aliceInbox.messages.some(
+      aliceAnswers.some(
         (m) => m.sender === bob.identity && m.type === MSG_TYPE_CONTACT_ACCEPT,
       ),
     ).toBe(true);

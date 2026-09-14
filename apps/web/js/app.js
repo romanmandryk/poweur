@@ -6,7 +6,7 @@
  * `PoweurClient` that `js/client.js` builds for the active identity.
  *
  * Five destinations (E15-T1): messages | contacts | files | launcher | settings
- * Sub-pages (full-screen, back button): add-id | unlock | compose | onboarding | claim
+ * Sub-pages (full-screen, back button): add-id | unlock | new-chat | thread | onboarding | claim
  *
  * Before any of that there is a **front door** (E15-T7): with no identity on
  * this device the host decides what someone sees — a landing page that claims
@@ -15,14 +15,17 @@
 
 import {
   createIdentity, formatBytes, isSessionValid as sessionIsValid, ROOT_INFO,
-  EnrollApi, RelayClient, sendAnonymous, clampPowBits, fingerprintOrKey,
+  EnrollApi, RelayClient, clampPowBits, fingerprintOrKey,
   normalizeRendezvousId, resolveRecipientRelayUrl,
   SHARE_ROOTS, DEFAULT_CHUNK_THRESHOLD, grantExpired, grantAllowsWrite, SyncClient,
   streamForever, SDK_VERSION, SDK_BUILD_TIME,
   ACK_STATE_READ, sendsReadReceiptsTo, crypto as poweurCrypto,
 } from "@poweur/client";
 
-import { buildConversationRows, threadLabel } from "./threads.js";
+import {
+  buildConversationRows, threadLabel, threadMessages, latestWindow, deliveryState, bodyFor,
+  expiryCountdown, markCovers, unreadTotal, THREAD_PAGE_SIZE,
+} from "./threads.js";
 import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "./outbox.js";
 
 import {
@@ -78,7 +81,7 @@ const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"];
 
 const R = {
   page: "messages",      // messages | contacts | files | launcher | settings
-  sub: null,             // null | add-id | unlock | compose | onboarding | claim
+  sub: null,             // null | add-id | unlock | new-chat | thread | onboarding | claim
   params: {},
   go(page, params = {}) {
     this.page = page; this.sub = null; this.params = params;
@@ -104,7 +107,7 @@ const R = {
  * are not a detail of anything, and showing an inbox behind an unlock prompt
  * would suggest it is reachable.
  */
-const DETAIL_SUBS = new Set(["compose"]);
+const DETAIL_SUBS = new Set(["new-chat", "thread"]);
 
 const S = {
   config: getConfig(),
@@ -122,6 +125,12 @@ const S = {
    * drains on pickup and has nothing left to re-serve.
    */
   history: { loading: false, loaded: false, error: null, readState: { conversations: {} } },
+  /**
+   * The open conversation (E15-T13), or null. Kept outside the DOM because
+   * every render replaces it: the draft, how far back it is showing and
+   * where it was scrolled all have to survive a push event repainting.
+   */
+  thread: null,
   requests: { incoming: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   anon: { messages: [], loading: false, loaded: false, error: null, fetchedAt: 0 },
   policy: { doc: null, explicit: false, loading: false, loaded: false },
@@ -335,15 +344,52 @@ const NAV = [
 ];
 
 function renderBottomNav() {
+  const badges = navBadges();
+  lastNavBadges = navBadgeKey(badges);
   return `
     <nav class="bottom-nav" role="tablist" aria-label="Primary">
-      ${NAV.map(({ page, label, icon, iconFill }) => `
+      ${NAV.map(({ page, label, icon, iconFill }) => {
+        const count = badges[page] ?? 0;
+        return `
         <button class="nav-tab${R.page === page ? " active" : ""}" data-page="${page}"
-                role="tab" aria-selected="${R.page === page}" aria-label="${label}">
-          ${R.page === page ? iconFill : icon}
+                role="tab" aria-selected="${R.page === page}" aria-label="${label}${count ? `, ${count} new` : ""}">
+          <div class="nav-icon">${R.page === page ? iconFill : icon}${
+            count ? `<div class="nav-badge" aria-hidden="true">${count > 99 ? "99+" : count}</div>` : ""
+          }</div>
           <span>${label}</span>
-        </button>`).join("")}
+        </button>`;
+      }).join("")}
     </nav>`;
+}
+
+/**
+ * What the nav badges count (E15-T13): unread messages — signed and anonymous
+ * — on Messages, and contact requests waiting for an answer on Contacts. Both
+ * come from read marks and the requests queue, so they reach zero.
+ */
+function navBadges() {
+  if (!S.identity || !getUnlockedKeys()) return {};
+  return {
+    messages: unreadTotal(S.messages, S.identity, S.history.readState?.conversations) + unreadAnonymous(),
+    contacts: incomingRequests().length,
+  };
+}
+
+let lastNavBadges = "";
+
+function navBadgeKey(badges) {
+  return `${badges.messages ?? 0}|${badges.contacts ?? 0}`;
+}
+
+/**
+ * Repaint after a background load. Messages and an open conversation show
+ * what was loaded; everywhere else only a badge can have changed, so repaint
+ * only when one did — a push landing while someone works in Files should not
+ * redraw Files.
+ */
+function repaintAfterLoad() {
+  if (R.sub === "thread" || (R.page === "messages" && !R.sub)) return render();
+  if (!R.sub && navBadgeKey(navBadges()) !== lastNavBadges) render();
 }
 
 // ─── Top-level pages ──────────────────────────────────────────────────────────
@@ -772,19 +818,20 @@ function renderTray() {
 }
 
 /**
- * Incoming requests, from both places one can arrive.
+ * Incoming requests waiting for a decision.
  *
- * Under `contacts_and_requests` the relay parks a stranger's first
- * `sys.contact.request` in the requests queue; under the default `open` policy
- * the very same envelope is delivered to the inbox as a typed message. Showing
- * only the queue would leave every default-policy user with an empty tray and
- * a contact request buried among their conversations.
+ * The relay parks `sys.contact.request` in the requests queue in every inbox
+ * mode except `contacts_only` (which refuses the knock). Inbox copies are
+ * still merged so a request delivered as chat by an older relay is not lost.
+ * Blocked senders stay hidden; already-accepted senders stay visible so a
+ * one-sided handshake (they asked; we already listed them) can still be
+ * answered.
  */
 function incomingRequests() {
   const byRequester = new Map();
   const add = (entry) => {
     const state = contactFor(entry.sender)?.state;
-    if (state === "accepted" || state === "blocked") return;
+    if (state === "blocked") return;
     const existing = byRequester.get(entry.sender);
     if (!existing || new Date(entry.timestamp) > new Date(existing.timestamp)) {
       byRequester.set(entry.sender, { ...existing, ...entry });
@@ -805,6 +852,20 @@ function incomingRequests() {
     add({ sender: m.sender, timestamp: m.timestamp, intro: m.plaintext ?? null, queued: false });
   }
   return [...byRequester.values()].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+/** Drop a handshake we just answered so it does not linger after Accept/Block. */
+function dropIncomingRequest(identity) {
+  const wanted = String(identity ?? "").toLowerCase();
+  const remaining = S.requests.incoming.filter(entry => String(entry.sender ?? "").toLowerCase() !== wanted);
+  S.requests.incoming.length = 0;
+  S.requests.incoming.push(...remaining);
+  const kept = S.messages.filter(raw => {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return !(String(message.sender ?? "").toLowerCase() === wanted && message.type === "sys.contact.request");
+  });
+  S.messages.length = 0;
+  S.messages.push(...kept);
 }
 
 function renderRequestsTray() {
@@ -1364,7 +1425,8 @@ function renderSubPage() {
   switch (R.sub) {
     case "add-id":  return renderAddId();
     case "unlock":  return renderUnlock();
-    case "compose": return renderCompose();
+    case "new-chat": return renderNewChat();
+    case "thread":  return renderThread();
     case "onboarding": return renderOnboarding();
     case "claim":   return renderClaim();
     case "auth":    return renderSignInApproval();
@@ -1665,66 +1727,268 @@ function renderUnlock() {
     </div>`;
 }
 
-// Compose ─────────────────────────────────────────────────────────────────────
+// New message ─────────────────────────────────────────────────────────────────
 
-/** The live IdentityInput on the compose page, so doSend can read it. */
-let composeInput = null;
+/** The live IdentityInput on the new-message picker. */
+let newChatInput = null;
 
-function renderCompose() {
-  const preset = R.params.to || "";
+/**
+ * "New message" only asks who (E15-T13). Writing happens in the conversation
+ * itself, like every chat app — there is no separate compose form, and no
+ * anonymous option: someone signed in is talking as themselves.
+ */
+function renderNewChat() {
   return `
-    <div class="sub-page">
+    <div class="sub-page new-chat">
       <div class="sub-header">
         <button class="btn-back" id="btn-back">${svgBack}</button>
         <span class="sub-title">New message</span>
       </div>
-      <div class="sub-body compose-body">
-        <div class="form-group">
-          ${slot("c-to-slot", () => {
-            composeInput = IdentityInput({
-              resolve: resolveForComponents,
-              contacts: S.contacts.list,
-              value: preset,
-              defaultDomain: idDomain(S.identity),
-              label: "To",
-              onSubmit: () => q("#c-body")?.focus(),
-            });
-            return composeInput.el;
-          })}
-        </div>
-        <div class="form-group" style="flex:1">
-          <label class="form-label" for="c-body">Message</label>
-          <textarea id="c-body" class="compose-textarea" placeholder="Write your message…"></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="c-attachment">Attachment (up to 20 MB)</label>
-          <input id="c-attachment" class="input" type="file" />
-        </div>
-        <label class="policy-toggle compose-anon" for="c-anon">
-          <input type="checkbox" id="c-anon" class="policy-check" />
-          <span>
-            <div class="policy-toggle-label">Send anonymously</div>
-            <div class="policy-toggle-detail muted small">
-              Still encrypted to them, but unsigned and unattributed — they will not know it is you and
-              cannot reply. Their policy decides whether it costs you proof-of-work.
-            </div>
-          </span>
-        </label>
-        <label class="policy-toggle compose-anon" for="c-group">
-          <input type="checkbox" id="c-group" class="policy-check"${R.params.group ? " checked" : ""} />
-          <span>
-            <div class="policy-toggle-label">Send to a group identity</div>
-            <div class="policy-toggle-detail muted small">
-              Encrypts a separate copy for every current member and sends the batch through the group’s relay.
-            </div>
-          </span>
-        </label>
-        <p id="c-status" class="compose-status"></p>
+      <div class="sub-body new-chat-body">
+        ${slot("new-chat-slot", () => {
+          newChatInput = IdentityInput({
+            resolve: resolveForComponents,
+            contacts: S.contacts.list,
+            defaultDomain: idDomain(S.identity),
+            label: "To",
+            onSubmit: (identity) => openNewChat(identity),
+          });
+          return newChatInput.el;
+        })}
+        <p id="new-chat-status" class="compose-status"></p>
       </div>
       <div class="sub-footer">
-        <button class="btn btn-primary" id="btn-send-msg">Send →</button>
+        <button class="btn btn-primary" id="btn-open-chat">Open chat →</button>
       </div>
     </div>`;
+}
+
+async function doOpenNewChat() {
+  const result = await newChatInput?.lookup();
+  if (!result) return toast("Enter a Poweur ID we can find", "warning");
+  return openNewChat(result.identity);
+}
+
+/**
+ * Open a conversation with someone picked by name. A group identity is
+ * recognised by its roster answering, which is the same check sending to it
+ * would make — so nobody has to know to tick "this is a group".
+ */
+async function openNewChat(identity) {
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+  const button = q("#btn-open-chat");
+  if (button) button.disabled = true;
+  const status = q("#new-chat-status");
+  if (status) status.textContent = "Opening…";
+  let group = false;
+  try {
+    await client.groups.roster(client.signer, identity);
+    group = true;
+  } catch {
+    // Not a group, or not one we belong to: a direct conversation.
+  }
+  // A group's main thread is the group's own address (E09-T5), which is also
+  // what its tray row carries — so both open the same conversation.
+  openThread(identity, { thread: group ? identity : "", group });
+}
+
+// Conversation ────────────────────────────────────────────────────────────────
+
+/**
+ * One conversation, as chat bubbles (E15-T13).
+ *
+ * It renders from `S.messages`, which the archive already filled at unlock, so
+ * "Load more" reveals messages the app is holding rather than fetching them.
+ * Paging the *download* needs a history layout that can find one
+ * conversation's messages without opening everyone's (EPIC-020 E20-T8).
+ */
+function renderThread() {
+  const T = S.thread;
+  if (!T) return "";
+  const all = threadMessages(S.messages, S.identity, T.peer, T.threadId);
+  const { visible, hidden, hasMore } = latestWindow(all, T.shown);
+  const title = T.group ? idHandle(T.peer) : (contactFor(T.peer)?.petname || idHandle(T.peer));
+  const self = String(S.identity).toLowerCase();
+
+  let lastDay = "";
+  const bubbles = visible.map(m => {
+    const mine = String(m.sender).toLowerCase() === self;
+    const day = dayLabel(m.timestamp);
+    const separator = day && day !== lastDay ? `<div class="thread-day">${esc(day)}</div>` : "";
+    lastDay = day;
+    const countdown = expiryCountdown(m.expires_at);
+    return `${separator}
+      <div class="bubble-row ${mine ? "mine" : "theirs"}" data-message-id="${esc(m.id ?? "")}">
+        <div class="bubble">
+          ${T.group && !mine ? `<div class="bubble-sender">${esc(contactFor(m.sender)?.petname || idHandle(m.sender))}</div>` : ""}
+          <div class="bubble-text">${esc(bodyFor(m))}</div>
+          ${m.type === "chat.attachment" && m.metadata ? `
+            <button class="btn btn-sm bubble-attachment" data-download-attachment="${esc(JSON.stringify(m.metadata))}">Open 📎</button>` : ""}
+          <div class="bubble-meta">${countdown ? `⏳ ${esc(countdown)} · ` : ""}${esc(fmtClock(m.timestamp))}${
+            // Per-member ticks for a group are their own design (E09-T5); one
+            // tick would claim something about everyone.
+            mine && !T.group ? tickHtml(deliveryState(m, S.acks)) : ""
+          }</div>
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="sub-page thread-view">
+      <div class="sub-header">
+        <button class="btn-back" id="btn-back" aria-label="Back to messages">${svgBack}</button>
+        ${T.group ? `<div class="avatar">👥</div>` : avatarHtml(T.peer)}
+        <span class="sub-title thread-title">${esc(title)}${
+          T.threadId && !T.group ? ` <span class="conv-thread">#${esc(threadLabel(T.threadId))}</span>` : ""
+        }</span>
+      </div>
+      <div class="thread-body" id="thread-body" role="log" aria-label="Conversation with ${esc(title)}">
+        ${hasMore ? `
+          <div class="thread-more">
+            <button class="btn btn-sm" id="btn-thread-more">Load more (${hidden} earlier)</button>
+          </div>` : ""}
+        ${visible.length ? bubbles : emptyState("💬", "No messages yet", "Say hello below.")}
+      </div>
+      ${T.status ? `<p class="compose-status thread-status ${T.statusCls}">${esc(T.status)}</p>` : ""}
+      <div class="thread-composer">
+        ${T.group ? "" : `
+          <label class="thread-attach" for="thread-file" title="Attach a file (up to 20 MB)"
+                 aria-label="Attach a file">📎</label>
+          <input type="file" id="thread-file" hidden />`}
+        <textarea id="thread-input" class="thread-input" rows="1" placeholder="Message"
+                  aria-label="Message">${esc(T.draft)}</textarea>
+        <button class="btn btn-primary" id="btn-thread-send"${T.sending ? " disabled" : ""}>Send</button>
+      </div>
+    </div>`;
+}
+
+function tickHtml(state) {
+  const ticks = {
+    sent: ["✓", "Sent"],
+    delivered: ["✓✓", "Delivered"],
+    read: ["✓✓", "Read"],
+    failed: ["!", "Not delivered"],
+  };
+  const [glyph, label] = ticks[state] ?? ticks.sent;
+  return ` <span class="bubble-tick tick-${state}" title="${label}" aria-label="${label}">${glyph}</span>`;
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
+function fmtClock(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Open a conversation. Opening it is reading it, as the tray row always was. */
+function openThread(peer, { thread = "", group = false } = {}) {
+  S.thread = {
+    peer, threadId: thread, group,
+    shown: THREAD_PAGE_SIZE,
+    draft: "", sending: false, marking: false, status: "", statusCls: "",
+    atBottom: true, scrollTop: 0, anchor: null,
+  };
+  markConversationRead(peer).catch(() => {});
+  R.push("thread", { to: peer, thread, group });
+}
+
+function attachThreadEvents() {
+  const T = S.thread;
+  if (R.sub !== "thread" || !T) return;
+
+  // Every render replaces the list, so put the scroll position back: pinned to
+  // the newest message while the reader is there, held in place when they have
+  // scrolled up, and anchored to the same message after "Load more" prepends.
+  const body = q("#thread-body");
+  if (body) {
+    if (T.anchor) {
+      body.scrollTop = body.scrollHeight - T.anchor.height + T.anchor.top;
+      T.anchor = null;
+    } else if (T.atBottom) {
+      body.scrollTop = body.scrollHeight;
+    } else {
+      body.scrollTop = T.scrollTop;
+    }
+    body.addEventListener("scroll", () => {
+      T.scrollTop = body.scrollTop;
+      T.atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+    }, { passive: true });
+  }
+
+  q("#btn-thread-more")?.addEventListener("click", () => {
+    if (body) T.anchor = { height: body.scrollHeight, top: body.scrollTop };
+    T.shown += THREAD_PAGE_SIZE;
+    render();
+  });
+
+  const input = q("#thread-input");
+  if (input) {
+    if (document.activeElement === input) input.setSelectionRange(input.value.length, input.value.length);
+    input.addEventListener("input", () => { T.draft = input.value; });
+    // Enter is a newline on a phone keyboard; Cmd/Ctrl+Enter sends.
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        doThreadSend();
+      }
+    });
+  }
+  q("#btn-thread-send")?.addEventListener("click", () => doThreadSend());
+  // Picking a file sends it, with whatever is typed as its caption.
+  q("#thread-file")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) doThreadSend({ attachment: file });
+  });
+
+  // A message that arrives while the conversation is open has been read.
+  if (!T.marking && unreadFor(T.peer) > 0) {
+    T.marking = true;
+    markConversationRead(T.peer).finally(() => { T.marking = false; });
+  }
+}
+
+async function doThreadSend({ attachment = null } = {}) {
+  const T = S.thread;
+  if (!T || T.sending) return;
+  const body = (q("#thread-input")?.value ?? T.draft).trim();
+  if (!body && !attachment) return;
+  const client = clientFor(S.identity);
+  if (!client) return toast("Unlock your identity first", "warning");
+
+  T.draft = body;
+  T.sending = true;
+  const repaint = () => { if (R.sub === "thread" && S.thread === T) render(); };
+  const setStatus = (msg, cls = "") => { T.status = msg; T.statusCls = cls; repaint(); };
+  try {
+    const outcome = await sendSigned(client, {
+      to: T.peer, body, attachment, thread: T.threadId, group: T.group, setStatus,
+    });
+    if (outcome.status === "sent" || outcome.status === "queued") {
+      T.draft = "";
+      T.atBottom = true;
+    }
+    // The bubble and its tick say "sent"; a status line saying it too is noise.
+    // A partial group delivery or a queued send is worth keeping on screen.
+    if (outcome.status === "sent" && (!outcome.total || outcome.delivered === outcome.total)) {
+      T.status = "";
+    }
+  } finally {
+    T.sending = false;
+    repaint();
+  }
 }
 
 // Onboarding ──────────────────────────────────────────────────────────────────
@@ -2034,6 +2298,9 @@ function attachEvents() {
   // Bottom nav
   qAll(".nav-tab[data-page]").forEach(t => t.addEventListener("click", () => {
     S.dropdownOpen = false;
+    // Contacts live on DAV and change on other devices; opening the
+    // destination is the moment to look again, not a later pull-to-refresh.
+    if (t.dataset.page === "contacts") S.contacts.loaded = false;
     R.go(t.dataset.page);
   }));
 
@@ -2053,7 +2320,7 @@ function attachEvents() {
   qAll("[data-contact-open]").forEach(row => row.addEventListener("click", () => {
     // Messaging a blocked contact is not the action they meant.
     if (row.dataset.contactState === "blocked") showContactPanel(row.dataset.contactOpen);
-    else R.push("compose", { to: row.dataset.contactOpen });
+    else openThread(row.dataset.contactOpen);
   }));
   qAll("[data-accept-contact]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
@@ -2090,6 +2357,7 @@ function attachEvents() {
 
   // Back button (sub-pages)
   q("#btn-back")?.addEventListener("click", () => {
+    if (R.sub === "thread") S.thread = null;
     R.sub = null; R.params = {}; render();
   });
 
@@ -2101,19 +2369,15 @@ function attachEvents() {
 
   // Compose, from the thumb-reach button on a phone or the header on a wide
   // screen — one of the two is hidden by CSS, never both (E15-T11).
-  q("#btn-compose")?.addEventListener("click", () => R.push("compose"));
-  q("#btn-compose-top")?.addEventListener("click", () => R.push("compose"));
+  q("#btn-compose")?.addEventListener("click", () => R.push("new-chat"));
+  q("#btn-compose-top")?.addEventListener("click", () => R.push("new-chat"));
 
-  // Conversation row → compose to that contact. Opening it is reading it, so
-  // the badge clears here rather than waiting for a reply to be sent.
+  // Conversation row → that conversation (E15-T13). Replying from a threaded
+  // row stays in that thread; from the default row it starts nothing, which is
+  // what an unthreaded reply has always been.
   qAll(".conv-row[data-compose-to]").forEach(r =>
     r.addEventListener("click", () => {
-      const peer = r.dataset.composeTo;
-      markConversationRead(peer).catch(() => {});
-      // Replying from a threaded row stays in that thread; from the default
-      // row it starts nothing, which is what an unthreaded reply has always
-      // been.
-      R.push("compose", { to: peer, thread: r.dataset.thread || "", group: r.dataset.group === "true" });
+      openThread(r.dataset.composeTo, { thread: r.dataset.thread || "", group: r.dataset.group === "true" });
     }));
   qAll("[data-download-attachment]").forEach(button => button.addEventListener("click", async event => {
     event.stopPropagation();
@@ -2158,6 +2422,13 @@ function attachEvents() {
     if (S.tray === "anonymous" && unreadAnonymous() > 0) {
       markConversationRead("anonymous").catch(() => {});
     }
+  }
+  // The nav badges count from the archive and the requests queue whichever
+  // destination is open, so both load on every one — not only on Messages.
+  if (S.identity && getUnlockedKeys() && !(R.page === "messages" && !R.sub)) {
+    loadHistory();
+    loadRequests();
+    loadContacts();
   }
   q("#btn-anon-settings")?.addEventListener("click", () => R.go("settings"));
 
@@ -2212,7 +2483,10 @@ function attachEvents() {
   });
 
   // Compose send
-  q("#btn-send-msg")?.addEventListener("click", doSend);
+  q("#btn-open-chat")?.addEventListener("click", doOpenNewChat);
+
+  // Conversation view
+  attachThreadEvents();
 
   // First-run flow
   if (R.sub === "onboarding") attachOnboardingEvents();
@@ -2377,7 +2651,8 @@ async function doUnlock() {
     toast("Unlocked", "success");
     const returnTo = R.params?.returnTo;
     R.sub = returnTo || null; R.params = {};
-    render(); // attachEvents starts the inbox fetch
+    pullAfterUnlock();
+    render();
 
   } catch (err) {
     setLoading(false);
@@ -2447,6 +2722,7 @@ async function doRecoverFromKeystore(identity) {
     setLoading(false);
     toast(`${identity} restored on this device`, "success", 5000);
     R.sub = null; R.page = "messages"; R.params = {};
+    pullAfterUnlock();
     render();
   } catch (error) {
     setLoading(false);
@@ -2573,6 +2849,7 @@ async function adoptIdentity({ identity, relayUrl, signingJWK, encJWK, seed, lab
     toast("Restored, but this device is not backed up — see Settings → Keys & devices", "warning", 8000);
   });
 
+  pullAfterUnlock();
   setLoading(false);
   R.sub = null; R.page = "messages"; R.params = {};
   render();
@@ -3110,6 +3387,7 @@ async function doCreateIdentity(intent) {
       console.warn("Keystore enrollment failed:", error.message);
       toast("Identity created, but this device is not backed up yet — see Settings → Keys & devices", "warning", 8000);
     });
+    pullAfterUnlock();
 
     setLoading(false);
     toast(`${identity} created! 🎉`, "success");
@@ -3170,6 +3448,8 @@ async function ensureSession(identity) {
  * unlocking, so without this guard those two collide every time.
  */
 let inboxInFlight = null;
+/** A push that landed mid-drain: drain once more when this one finishes. */
+let inboxPending = false;
 
 /**
  * Fold a poll response into the message store.
@@ -3240,7 +3520,7 @@ function startEventStream() {
       // parked while the socket was down stays invisible until a click.
       if (event.type === "ready") {
         retryBrowserOutbox();
-        loadInbox();
+        loadInbox({ force: true });
         loadRequests({ force: true });
         if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
         return;
@@ -3251,10 +3531,29 @@ function startEventStream() {
       // open it.
       if (event.type === "request") loadRequests({ force: true });
       else if (event.type === "anon") loadAnon({ force: true });
-      else loadInbox();
+      else loadInbox({ force: true });
     },
     onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
   }).catch(() => {});
+}
+
+/**
+ * Everything waiting for this identity, fetched the moment it unlocks — on
+ * whichever screen unlocking returns to, and without waiting for the push
+ * stream's `ready`, which a proxy that blocks or buffers event streams can
+ * delay forever. Every loader is single-flight, so the renders that follow
+ * asking for the same things cost nothing extra.
+ */
+function pullAfterUnlock() {
+  if (!S.identity || !getUnlockedKeys()) return;
+  loadHistory();
+  loadInbox({ force: true });
+  loadRequests({ force: true });
+  loadContacts();
+  loadPolicy().then(() => {
+    if (S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
+  });
+  retryBrowserOutbox().catch(() => {});
 }
 
 function stopEventStream() {
@@ -3262,10 +3561,23 @@ function stopEventStream() {
   streamAbort = null;
 }
 
-function loadInbox() {
+/**
+ * Drain the inbox into the store.
+ *
+ * `force` is for callers that *know* something new is waiting — a push event,
+ * an unlock. Joining an in-flight drain would miss a message posted after that
+ * drain's GET left, and nothing else would come back for it off Messages (where
+ * every render drains again and hid the gap). Renders call without `force`, so
+ * a render a drain causes cannot schedule the next drain.
+ */
+function loadInbox({ force = false } = {}) {
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
-  inboxInFlight ??= challengeSerial(async () => {
+  if (inboxInFlight) {
+    if (force) inboxPending = true;
+    return inboxInFlight;
+  }
+  inboxInFlight = challengeSerial(async () => {
     try {
       // Read, receipt and *keep* in one step. Any gap between the pickup and
       // the archive write is a window where the relay has forgotten a message
@@ -3277,12 +3589,19 @@ function loadInbox() {
       await verifyGroupInboxMessages(client, messages);
       mergeMessages(messages);
       mergeInto(S.acks, acks);
-      if (R.page === "messages" && !R.sub) render();
+      // An open conversation repaints too: a reader sitting in it sees the
+      // message arrive, and ticks move on their own messages.
+      repaintAfterLoad();
       processContactAccepts().catch(e => console.warn("Accept processing failed:", e.message));
     } catch (e) {
       console.warn("Inbox error:", e.message);
     } finally {
       inboxInFlight = null;
+      const again = inboxPending;
+      inboxPending = false;
+      // Outside this serial task: a challenge-signed drain chained from here
+      // would wait on a promise that cannot resolve until this one does.
+      if (again) queueMicrotask(() => loadInbox({ force: true }));
     }
   });
   return inboxInFlight;
@@ -3352,7 +3671,7 @@ function loadHistory({ force = false } = {}) {
     } finally {
       H.loading = false;
       historyInFlight = null;
-      if (R.page === "messages" && !R.sub) render();
+      repaintAfterLoad();
     }
   })();
   return historyInFlight;
@@ -3423,11 +3742,6 @@ function unreadAnonymous() {
   return S.anon.messages.filter(m => !(mark && markCovers(mark, m.timestamp, m.id ?? ""))).length;
 }
 
-function markCovers(mark, timestamp, id) {
-  if (!mark?.timestamp) return false;
-  if (mark.timestamp !== timestamp) return new Date(mark.timestamp) > new Date(timestamp);
-  return (mark.id ?? "") >= id;
-}
 
 /**
  * Record that a conversation has been read, and repaint so the badge clears
@@ -3457,51 +3771,28 @@ async function markConversationRead(peer) {
         .filter(message => message.sender?.toLowerCase() === wanted && message.id && message.plaintext != null);
       await Promise.allSettled(inbound.map(message => client.messages.ack(client.signer, message, { state: ACK_STATE_READ })));
     }
-    if (R.page === "messages") render();
+    // A conversation opened from Contacts is not on Messages, and the nav
+    // badge it just cleared is on every destination.
+    if (R.page === "messages" || R.sub === "thread") render();
+    else repaintAfterLoad();
   } catch (error) {
     console.warn("Could not save read marks:", error.message);
   }
 }
 
-async function doSend() {
-  // The component may still be debouncing a lookup; take the raw text so a
-  // fast typist is never told "enter a recipient" for something they typed.
-  const to   = composeInput?.raw() ?? "";
-  const body = q("#c-body")?.value.trim();
-  const attachment = q("#c-attachment")?.files?.[0] ?? null;
-  const statusEl = q("#c-status");
-  const sendBtn  = q("#btn-send-msg");
-  if (!to)   return toast("Enter a recipient", "warning");
-  if (!body && !attachment) return toast("Enter a message or choose a file", "warning");
-
-  if (q("#c-anon")?.checked && q("#c-group")?.checked) {
-    return toast("A group message must be signed; turn off anonymous sending", "warning");
-  }
-  if (attachment && (q("#c-anon")?.checked || q("#c-group")?.checked)) {
-    return toast("Attachments currently require a direct signed message", "warning");
-  }
-
-  const client = clientFor(S.identity);
-  if (!client) return toast("Unlock your identity first", "warning");
-  const sess = loadSessionRecord(S.identity);
-
-  sendBtn.disabled = true;
-  const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
-
-  if (q("#c-anon")?.checked) {
-    try {
-      await doSendAnonymous(to, body, setStatus);
-    } finally {
-      if (sendBtn) sendBtn.disabled = false;
-    }
-    return;
-  }
-
-  if (q("#c-group")?.checked) {
+/**
+ * Send a signed message — direct or to a group — and keep our own copy in the
+ * store, reporting progress through `setStatus`. The conversation view owns
+ * what happens to the screen afterwards.
+ *
+ * @returns {Promise<{status: "sent"|"queued"|"blocked"|"failed", delivered?: number, total?: number}>}
+ */
+async function sendSigned(client, { to, body, attachment = null, thread = "", group = false, setStatus }) {
+  if (group) {
     try {
       setStatus("Reading the signed group roster…");
       const sent = await client.sendGroupAndArchive(to, body, {
-        ...(R.params.thread ? { thread: R.params.thread } : {}),
+        ...(thread ? { thread } : {}),
       });
       const first = sent.envelopes[0];
       mergeMessages([{
@@ -3519,35 +3810,32 @@ async function doSend() {
       const total = sent.envelopes.length;
       setStatus(`✓ ${delivered} of ${total} delivered`, delivered === total ? "ok" : "err");
       if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
-      if (q("#c-body")) q("#c-body").value = "";
-      toast(`Group message delivered to ${delivered} of ${total}`, delivered === total ? "success" : "warning");
-      setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+      return { status: "sent", delivered, total };
     } catch (err) {
       setStatus(`✕ ${err.message}`, "err");
       toast(err.message, "error");
-    } finally {
-      if (sendBtn) sendBtn.disabled = false;
+      return { status: "failed" };
     }
-    return;
   }
 
   try {
     setStatus("Checking their key…");
     if (!(await checkPinBeforeSend(client, to))) {
       setStatus("✕ Not sent — key not trusted", "err");
-      return;
+      return { status: "blocked" };
     }
     setStatus("Sending…");
+    const sess = loadSessionRecord(S.identity);
     const sent = attachment
       ? await client.sendAttachment(to, new Uint8Array(await attachment.arrayBuffer()), {
           name: attachment.name,
           mime: attachment.type || "application/octet-stream",
           caption: body || attachment.name,
-          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+          ...(thread ? { threadId: thread } : {}),
         })
       : await client.sendAndArchive(to, body, {
           signWith: sessionIsValid(sess) ? "session" : "identity",
-          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+          ...(thread ? { threadId: thread } : {}),
         });
     setStatus("✓ Sent", "ok");
     // Keep our own copy on screen too: the relay never hands a sender their
@@ -3561,28 +3849,24 @@ async function doSend() {
       queue: "sent",
       plaintext: body || attachment?.name,
       ...(attachment ? { type: "chat.attachment", metadata: sent.message.metadata } : {}),
-      ...(R.params.thread ? { thread_id: R.params.thread } : {}),
+      ...(thread ? { thread_id: thread } : {}),
     }]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
-    if (q("#c-body")) q("#c-body").value = "";
-    toast("Message sent!", "success");
-    setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+    return { status: "sent" };
   } catch (err) {
     if (!attachment && client.decryptor && isRetryableSendError(err)) {
       const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, body);
       queueWebMessage(S.identity, to, sealed, {
         signWith: "identity",
-        ...(R.params.thread ? { threadId: R.params.thread } : {}),
+        ...(thread ? { threadId: thread } : {}),
       }, err.message);
       setStatus("· Queued — will retry when online", "ok");
       toast("Message queued until the relay is reachable", "success");
-      if (q("#c-body")) q("#c-body").value = "";
-      return;
+      return { status: "queued" };
     }
     setStatus(`✕ ${err.message}`, "err");
     toast(err.message, "error");
-  } finally {
-    if (sendBtn) sendBtn.disabled = false;
+    return { status: "failed" };
   }
 }
 
@@ -3595,51 +3879,6 @@ async function retryBrowserOutbox() {
     return client.sendAndArchive(entry.recipient, plaintext, entry.options);
   });
   if (result.sent) toast(`${result.sent} queued message${result.sent === 1 ? "" : "s"} sent`, "success");
-}
-
-/**
- * Send with no identity attached (EPIC-014).
- *
- * Nothing here touches the signer: the point is that the message carries no
- * sender. What it can carry is a *cost* — if the recipient's policy demands
- * proof-of-work the relay answers 428 and the browser mines the solution,
- * which at the difficulties people actually set is seconds of work. So it
- * reports progress and stays cancellable; a frozen tab is how a user learns to
- * distrust the feature.
- */
-async function doSendAnonymous(to, body, setStatus) {
-  const cancel = new AbortController();
-  let bits = 0;
-  setStatus("Sending anonymously…");
-  try {
-    const relayUrl = relayUrlFor(S.identity);
-    const resolve = resolveOptionsForRelay(relayUrl);
-    await sendAnonymous(to, body, {
-      resolve,
-      // The recipient's relay is resolved from their document, not assumed to
-      // be ours — a stranger's home relay is usually somewhere else.
-      ...(resolve.scheme ? { scheme: resolve.scheme } : {}),
-      signal: cancel.signal,
-      onChallenge: ({ type, bits: demanded }) => {
-        bits = demanded;
-        if (type !== "pow") return;
-        setStatus(`${to} asks for proof of work (${bits} bits). Working…`);
-        if (bits > 20) {
-          toast(`${bits} bits is a big ask — this can take minutes in a browser`, "warning", 6000);
-        }
-      },
-      onSolveProgress: (attempts) => {
-        setStatus(`Proof of work (${bits} bits): ${attempts.toLocaleString()} attempts…`);
-      },
-    });
-    setStatus("✓ Sent anonymously", "ok");
-    if (q("#c-body")) q("#c-body").value = "";
-    toast("Anonymous message sent", "success");
-    setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
-  } catch (error) {
-    setStatus(`✕ ${error.message}`, "err");
-    toast(error.message, "error");
-  }
 }
 
 // ─── Files actions ────────────────────────────────────────────────────────────
@@ -4074,7 +4313,7 @@ function loadRequests({ force = false } = {}) {
       // on the tray *bar*, which is visible from every tray. Repainting only
       // when the Requests tray was open meant a request that arrived by push
       // was fetched and then not shown.
-      if (R.page === "messages" && !R.sub) render();
+      repaintAfterLoad();
       // Schedule outside this serial task: chaining another challenge-signed
       // drain from here waits on a promise that cannot resolve until we do.
       if (again) queueMicrotask(() => loadRequests({ force: true }));
@@ -4107,9 +4346,8 @@ async function processContactAccepts() {
   if (!client) return;
   await loadContacts();
 
-  // Under `contacts_and_requests` the relay routes an accept into the requests
-  // queue, not the inbox (it is the answer to a request, not a message); under
-  // `open` it lands in the inbox like anything else. Both, therefore.
+  // Under every inbox mode the relay parks an accept in the requests queue;
+  // older relays under `open` delivered it as inbox chat. Both, therefore.
   const senders = new Set([...S.messages, ...S.requests.incoming]
     .filter(entry => entry.type === "sys.contact.accept" && entry.sender !== S.identity)
     .map(entry => entry.sender)
@@ -4174,6 +4412,7 @@ async function doAcceptContact(identity, { silent = false, petname } = {}) {
         : `${identity} is now a contact — they could not be notified`,
         notified ? "success" : "warning");
     }
+    dropIncomingRequest(identity);
     await refreshContacts();
   } catch (error) {
     toast(error.message, "error");
@@ -4190,6 +4429,7 @@ async function doBlockContact(identity) {
   try {
     await client.blockContact(identity);
     toast(`${identity} blocked`, "success");
+    dropIncomingRequest(identity);
     await refreshContacts();
   } catch (error) {
     toast(error.message, "error");
@@ -4266,7 +4506,7 @@ function showContactPanel(identity) {
       close();
       doSetPetname(identity, value);
     });
-    q("#cp-message")?.addEventListener("click", () => { close(); R.push("compose", { to: identity }); });
+    q("#cp-message")?.addEventListener("click", () => { close(); openThread(identity); });
     q("#cp-block")?.addEventListener("click", () => { close(); doBlockContact(identity); });
     q("#cp-unblock")?.addEventListener("click", () => { close(); doAcceptContact(identity, { silent: true }); });
     q("#cp-remove")?.addEventListener("click", () => { close(); doRemoveContact(identity); });
@@ -4339,7 +4579,7 @@ function showAddContactPanel(preset = "") {
       const target = await resolveNow(msg);
       if (!target) return toast("Enter a Poweur ID we can find", "warning");
       close();
-      R.push("compose", { to: target.identity });
+      openThread(target.identity);
     });
   });
 }
@@ -4507,7 +4747,7 @@ function loadAnon({ force = false } = {}) {
       A.inFlight = null;
       const again = A.pendingForce;
       A.pendingForce = false;
-      if (R.page === "messages" && !R.sub) render();
+      repaintAfterLoad();
       if (again) queueMicrotask(() => loadAnon({ force: true }));
     }
   });

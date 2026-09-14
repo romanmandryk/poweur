@@ -7,7 +7,10 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { buildConversationRows, previewFor, threadLabel, threadsOf } from "../js/threads.js";
+import {
+  bodyFor, buildConversationRows, conversationPeer, deliveryState, latestWindow, markCovers, previewFor,
+  threadLabel, threadMessages, threadsOf, THREAD_PAGE_SIZE, unreadTotal,
+} from "../js/threads.js";
 
 const ME = "alice.poweur.net";
 
@@ -149,6 +152,19 @@ describe("buildConversationRows", () => {
     expect(rows[0].preview).toBe("app message from bob.example.org (net.example.widget.poked)");
     expect(rows[0].preview).not.toContain("secret");
   });
+
+  it("keeps contact request and accept out of the chat list", () => {
+    const rows = buildConversationRows(
+      [
+        msg({ id: "m1", type: "sys.contact.request", plaintext: "hi, it's bob" }),
+        msg({ id: "m2", type: "sys.contact.accept", plaintext: "contact request accepted" }),
+        msg({ id: "m3", plaintext: "actual chat" }),
+      ],
+      ME,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].preview).toBe("actual chat");
+  });
 });
 
 describe("threadLabel", () => {
@@ -157,5 +173,153 @@ describe("threadLabel", () => {
     expect(threadLabel("thr_x")).toBe("thr_x");
     expect(threadLabel("t".repeat(40))).toHaveLength(24);
     expect(threadLabel("t".repeat(40)).endsWith("…")).toBe(true);
+  });
+});
+
+describe("conversationPeer", () => {
+  it("is the other side of a direct message, and the group of a verified fan-out", () => {
+    expect(conversationPeer(msg({}), ME)).toBe("bob.example.org");
+    expect(conversationPeer(msg({ sender: ME, recipient: "bob.example.org" }), ME)).toBe("bob.example.org");
+    expect(conversationPeer(msg({ group_verified: true, metadata: { group: "crew.poweur.net" } }), ME))
+      .toBe("crew.poweur.net");
+    expect(conversationPeer(msg({ metadata: { group: "crew.poweur.net" } }), ME)).toBe("bob.example.org");
+  });
+});
+
+describe("threadMessages", () => {
+  const store = [
+    msg({ id: "m1", timestamp: "2026-01-15T09:00:00Z" }),
+    msg({ id: "m2", sender: ME, recipient: "bob.example.org", timestamp: "2026-01-15T09:01:00Z" }),
+    msg({ id: "m3", thread_id: "thr_a", timestamp: "2026-01-15T09:02:00Z" }),
+    msg({ id: "m4", sender: "carol.example.org", timestamp: "2026-01-15T09:03:00Z" }),
+    JSON.stringify(msg({ id: "m5", timestamp: "2026-01-15T09:04:00Z" })),
+    msg({ id: "anon", sender: "", timestamp: "2026-01-15T09:05:00Z" }),
+  ];
+
+  it("holds both sides of the default thread, oldest first, and nobody else", () => {
+    expect(threadMessages(store, ME, "bob.example.org").map((m) => m.id)).toEqual(["m1", "m2", "m5"]);
+  });
+
+  it("keeps a named thread apart from the default one", () => {
+    expect(threadMessages(store, ME, "bob.example.org", "thr_a").map((m) => m.id)).toEqual(["m3"]);
+  });
+
+  it("matches the peer case-insensitively", () => {
+    expect(threadMessages(store, ME, "Bob.Example.org").map((m) => m.id)).toEqual(["m1", "m2", "m5"]);
+  });
+});
+
+describe("latestWindow", () => {
+  const list = Array.from({ length: 23 }, (_, i) => i + 1);
+
+  it("shows the newest page and says more exist", () => {
+    const page = latestWindow(list, THREAD_PAGE_SIZE);
+    expect(page.visible).toEqual([14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+    expect(page.hidden).toBe(13);
+    expect(page.hasMore).toBe(true);
+  });
+
+  it("has nothing more once everything is shown, however far past the end", () => {
+    expect(latestWindow(list, 30)).toEqual({ visible: list, hidden: 0, hasMore: false });
+    expect(latestWindow(list.slice(0, 4), THREAD_PAGE_SIZE).hasMore).toBe(false);
+    expect(latestWindow([], THREAD_PAGE_SIZE)).toEqual({ visible: [], hidden: 0, hasMore: false });
+  });
+});
+
+describe("deliveryState", () => {
+  const sent = msg({ id: "out1", sender: ME, recipient: "bob.example.org" });
+
+  it("is sent until an ack names the message", () => {
+    expect(deliveryState(sent, [])).toBe("sent");
+    expect(deliveryState(sent, [{ message_id: "other", state: "read" }])).toBe("sent");
+  });
+
+  it("ranks read above delivered, in whatever order the acks arrived", () => {
+    expect(deliveryState(sent, [{ message_id: "out1", state: "delivered_client" }])).toBe("delivered");
+    expect(deliveryState(sent, [
+      { message_id: "out1", state: "read" },
+      { message_id: "out1", state: "delivered_client" },
+    ])).toBe("read");
+  });
+
+  it("reports the relay giving up over any delivery claim", () => {
+    expect(deliveryState(sent, [
+      { message_id: "out1", state: "delivered_client" },
+      { message_id: "out1", type: "sys.delivery.failed" },
+    ])).toBe("failed");
+  });
+
+  it("never matches a message without an id", () => {
+    expect(deliveryState(msg({ id: undefined }), [{ message_id: undefined, state: "read" }])).toBe("sent");
+  });
+});
+
+describe("bodyFor", () => {
+  it("is the preview without the expiry suffix", () => {
+    const expiring = msg({ plaintext: "soon gone", expires_at: new Date(Date.now() + 3_600_000).toISOString() });
+    expect(bodyFor(expiring)).toBe("soon gone");
+    expect(previewFor(expiring)).toMatch(/^soon gone · ⏳ /);
+    expect(bodyFor(msg({ type: "chat.attachment", metadata: { attachment_name: "a.pdf" } }))).toBe("📎 a.pdf");
+    expect(bodyFor(msg({ plaintext: null }))).toBe("🔒 Could not decrypt");
+  });
+});
+
+describe("markCovers", () => {
+  it("compares positions, breaking a shared second on id", () => {
+    const mark = { timestamp: "2026-01-15T09:00:00Z", id: "m2" };
+    expect(markCovers(mark, "2026-01-15T08:59:59Z", "zzz")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m1")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m2")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m3")).toBe(false);
+    expect(markCovers(mark, "2026-01-15T09:00:01Z", "a")).toBe(false);
+    expect(markCovers(null, "2026-01-15T09:00:00Z", "m1")).toBe(false);
+  });
+});
+
+describe("unreadTotal", () => {
+  const store = [
+    msg({ id: "b1", timestamp: "2026-01-15T09:00:00Z" }),
+    msg({ id: "b2", timestamp: "2026-01-15T09:01:00Z" }),
+    msg({ id: "mine", sender: ME, recipient: "bob.example.org", timestamp: "2026-01-15T09:02:00Z" }),
+    msg({ id: "c1", sender: "carol.example.org", timestamp: "2026-01-15T09:03:00Z" }),
+    msg({ id: "g1", sender: "dave.example.org", group_verified: true, metadata: { group: "crew.poweur.net" },
+      timestamp: "2026-01-15T09:04:00Z" }),
+    msg({ id: "anon", sender: "", timestamp: "2026-01-15T09:05:00Z" }),
+  ];
+
+  it("counts every signed message from someone else when nothing is read", () => {
+    expect(unreadTotal(store, ME)).toBe(4);
+    expect(unreadTotal(store, ME, undefined)).toBe(4);
+  });
+
+  it("stops counting what each conversation's mark covers, groups by group", () => {
+    expect(unreadTotal(store, ME, {
+      "bob.example.org": { timestamp: "2026-01-15T09:00:00Z", id: "b1" },
+      "crew.poweur.net": { timestamp: "2026-01-15T09:04:00Z", id: "g1" },
+    })).toBe(2);
+  });
+
+  it("reaches zero once everything is read", () => {
+    expect(unreadTotal(store, ME, {
+      "bob.example.org": { timestamp: "2026-01-15T09:01:00Z", id: "b2" },
+      "carol.example.org": { timestamp: "2026-01-15T09:03:00Z", id: "c1" },
+      "crew.poweur.net": { timestamp: "2026-01-15T09:04:00Z", id: "g1" },
+    })).toBe(0);
+  });
+});
+
+describe("contact handshakes stay out of chat counts", () => {
+  const store = [
+    msg({ id: "req", type: "sys.contact.request", plaintext: "hi, it's bob", timestamp: "2026-01-15T09:00:00Z" }),
+    msg({ id: "acc", type: "sys.contact.accept", plaintext: "accepted", timestamp: "2026-01-15T09:01:00Z" }),
+    msg({ id: "chat", plaintext: "actual chat", timestamp: "2026-01-15T09:02:00Z" }),
+  ];
+
+  it("counts a request on Contacts only, never as an unread message", () => {
+    expect(unreadTotal(store, ME)).toBe(1);
+  });
+
+  it("does not render the handshake as a bubble", () => {
+    expect(threadMessages(store, ME, "bob.example.org").map((m) => m.id)).toEqual(["chat"]);
   });
 });

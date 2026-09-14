@@ -65,13 +65,14 @@ test.describe("inbox policy, anonymous and PoW", () => {
     });
 
     // ── A stranger sends anonymously, solving the PoW in their browser ─────
+    // A signed-in app offers no anonymous toggle (E15-T13): someone signed in
+    // talks as themselves. The send path itself is the SDK's, run in-page.
     await strangerPage.click('.nav-tab[data-page="messages"]');
     await strangerPage.click("#btn-compose");
-    await strangerPage.fill(".idin input", ownerId);
-    await strangerPage.fill("#c-body", "from nobody in particular");
-    await strangerPage.check("#c-anon");
-    await strangerPage.click("#btn-send-msg");
-    await expect(strangerPage.locator("#c-status")).toHaveText("✓ Sent anonymously", { timeout: 60_000 });
+    await expect(strangerPage.locator(".new-chat")).toBeVisible();
+    await expect(strangerPage.locator("#c-anon")).toHaveCount(0);
+    await strangerPage.click("#btn-back");
+    await sendAnonymouslyFrom(strangerPage, ownerId, "from nobody in particular");
 
     // ── It lands in the anonymous tray, and nowhere else ───────────────────
     await expect
@@ -115,10 +116,12 @@ test.describe("inbox policy, anonymous and PoW", () => {
     await expect(reader.locator(".empty-state-title")).toHaveText("No messages yet");
 
     await sender.click("#btn-compose");
-    await sender.fill(".idin input", readerId);
-    await sender.fill("#c-body", "pushed, not polled");
-    await sender.click("#btn-send-msg");
-    await expect(sender.locator("#c-status")).toHaveText("✓ Sent", { timeout: 20_000 });
+    await sender.locator(".new-chat .idin input").fill(readerId);
+    await expect(sender.locator(".new-chat .idin-status")).toContainText("Found", { timeout: 20_000 });
+    await sender.click("#btn-open-chat");
+    await sender.fill("#thread-input", "pushed, not polled");
+    await sender.click("#btn-thread-send");
+    await expect(sender.locator(".bubble-row.mine").last()).toContainText("pushed, not polled", { timeout: 20_000 });
 
     await expect(reader.locator(".conv-preview")).toHaveText("pushed, not polled", { timeout: 30_000 });
 
@@ -141,13 +144,22 @@ test.describe("inbox policy, anonymous and PoW", () => {
       await createIdentity(identityApiFor(relayUrl), target, { hosted: true });
     }, { target: closed, relayUrl: relay.baseUrl });
 
-    await page.click("#btn-compose");
-    await page.fill(".idin input", closed);
-    await page.fill("#c-body", "let me in");
-    await page.check("#c-anon");
-    await page.click("#btn-send-msg");
-
-    // Refused, and said so on the compose screen rather than silently failing.
-    await expect(page.locator("#c-status")).toContainText("✕", { timeout: 30_000 });
+    // Refused by the relay, and reported as an error rather than silently dropped.
+    await expect(sendAnonymouslyFrom(page, closed, "let me in")).rejects.toThrow();
   });
 });
+
+/**
+ * Send with no identity attached, from inside the page: the SDK call the app
+ * used to make from compose, with the same relay resolution, so the proof of
+ * work is still mined in the browser.
+ */
+async function sendAnonymouslyFrom(page, to, body) {
+  await page.evaluate(async ({ to, body }) => {
+    const { sendAnonymous } = await import("@poweur/client");
+    const { resolveOptionsForRelay } = await import("./js/client.js");
+    const { getActiveIdentity, relayUrlFor } = await import("./js/storage.js");
+    const resolve = resolveOptionsForRelay(relayUrlFor(getActiveIdentity()));
+    await sendAnonymous(to, body, { resolve, ...(resolve.scheme ? { scheme: resolve.scheme } : {}) });
+  }, { to, body });
+}

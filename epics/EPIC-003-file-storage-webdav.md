@@ -5,6 +5,11 @@
 - **Depends on:** EPIC-002 (durable per-identity storage)
 - **Unlocks:** EPIC-004 (sync), EPIC-005 (sharing), EPIC-006 (conventions), EPIC-009 (attachments)
 
+> **Superseded as the storage model by [EPIC-020](EPIC-020-storage-protocol-v2.md).** Whole-file
+> storage with WebDAV as the model forced workarounds upstream (one file per message in E09-T1).
+> v2 stores files as versioned chunk lists; WebDAV stays as a compatibility view (E20-T4), and
+> E03-T7's relay-blind design lands as E20-T5's chunk format.
+
 ## Progress
 
 | Task | Status | Notes |

@@ -9,6 +9,11 @@
 > sessions remain memory-only** until this epic (E09-T1). Do not re-implement inbox durability
 > under EPIC-002.
 
+> **Outbound to EPIC-020:** E09-T1's history layout (one sealed file per message, month shards)
+> is v1. Reading it costs one request per message, so history v2 — one append-only log per
+> conversation on chunked storage — is [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8. Do not
+> add paging or compaction to the v1 layout.
+
 ## Goal
 
 Grow messaging from "polled, in-memory, 1:1 text" to the real-time collaboration substrate the

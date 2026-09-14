@@ -122,7 +122,7 @@ func queueOfflineSend(identityValue, target string, msg Message, viaHome bool, p
 		"sign_with": "identity", "target_relay": target, "via_home_relay": viaHome,
 	}
 	return writeOutput(stdout, jsonOut, output,
-		fmt.Sprintf("queued encrypted message to %s for retry (id=%s, offline ·)\n", msg.Recipient, msg.ID))
+		fmt.Sprintf("queued encrypted message to %s for retry (id=%s): %s\n", msg.Recipient, msg.ID, cause))
 }
 
 func retryableStatus(status int) bool {
@@ -160,13 +160,17 @@ func retryOutboxForIdentity(ctx context.Context, identityValue string, force boo
 			continue
 		}
 		// Relay addresses can change while we are offline (deploys and hosted
-		// migration). Refresh the route, retaining the stored URL only when
-		// resolution itself is unavailable.
+		// migration). Follow DNS when it actually answered; rewrite a stored
+		// bare-IP https URL even if we only have the identity name (TLS SNI).
 		if cfg, err := config.Load(); err == nil {
 			if entry.ViaHomeRelay && cfg.RelayURL != "" {
 				entry.TargetRelay = cfg.RelayURL
-			} else if target, err := resolveRecipientRelayURL(ctx, entry.Message.Recipient, cfg); err == nil {
-				entry.TargetRelay = target
+			} else {
+				scheme := schemeFromConfig(cfg)
+				host, fromDNS, err := lookupRelayHost(ctx, scheme, entry.Message.Recipient)
+				if err == nil && (fromDNS || relayURLHostIsBareIP(entry.TargetRelay)) {
+					entry.TargetRelay = scheme + "://" + host
+				}
 			}
 		}
 		resp, sendErr := SendMessage(ctx, entry.TargetRelay, entry.Message)

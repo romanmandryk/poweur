@@ -1990,3 +1990,109 @@ input, textarea, select { font-family: inherit; }
 /* The header action is the wide-screen twin of the FAB, so it is hidden until
    the FAB is (the rule above turns it back on at 768px). */
 .dest-action { display: none; }
+
+/* ─── E15-T13: conversation view ──────────────────────────────────────────── */
+.thread-title { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.thread-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 8px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.thread-more { display: flex; justify-content: center; padding: 4px 0 12px; }
+.thread-day {
+  align-self: center;
+  margin: 10px 0 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--t2);
+  font-size: 12px;
+}
+.bubble-row { display: flex; }
+.bubble-row.mine { justify-content: flex-end; }
+.bubble {
+  max-width: min(78%, 520px);
+  padding: 8px 12px 6px;
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--t1);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+.bubble-row.theirs .bubble { border-bottom-left-radius: 6px; }
+.bubble-row.mine .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 6px; }
+.bubble-sender { margin-bottom: 2px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.bubble-text { font-size: 16px; line-height: 1.35; white-space: pre-wrap; }
+.bubble-meta { margin-top: 2px; font-size: 11px; opacity: .75; text-align: right; }
+.bubble-tick { margin-left: 4px; letter-spacing: -2px; }
+.bubble-tick.tick-read { font-weight: 800; opacity: 1; }
+.bubble-tick.tick-failed { font-weight: 800; }
+.bubble-attachment { margin-top: 6px; }
+.thread-status { margin: 0; padding: 6px 16px 0; background: var(--bg); flex-shrink: 0; }
+.thread-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-bottom: calc(8px + var(--safe-bottom));
+  border-top: 1px solid var(--sep);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.thread-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  max-height: 140px;
+  padding: 9px 14px;
+  border: 1px solid var(--sep);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--t1);
+  font: inherit;
+  font-size: 16px;
+  resize: none;
+}
+.thread-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* Nav badges (E15-T13): unread messages on Messages, pending requests on
+   Contacts. Pinned to the icon, so the rail, the tab bar and the labelled
+   sidebar all show it in the same place. */
+.nav-icon { position: relative; display: inline-flex; }
+.nav-badge {
+  position: absolute;
+  top: -5px;
+  left: calc(100% - 9px);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--bg);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 17px;
+  text-align: center;
+}
+
+.thread-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 20px;
+  cursor: pointer;
+}
+.thread-attach:active { background: var(--surface-2); }
+.new-chat-body { display: flex; flex-direction: column; gap: 12px; }
