@@ -38,17 +38,21 @@ async function reloadAndUnlock(page) {
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
 }
 
-/** Send a message through the compose screen. */
+/** Send a message: pick the recipient, write at the bottom of the conversation, go back. */
 async function composeTo(page, recipient, body) {
   await page.click('.nav-tab[data-page="messages"]');
   // At 375px the header action is hidden and the FAB is the one on screen —
   // exactly one of the two is visible, never both (E15-T11).
   await page.click("#btn-compose");
-  await page.fill(".idin input", recipient);
-  await expect(page.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
-  await page.fill("#c-body", body);
-  await page.click("#btn-send-msg");
-  await expect(page.locator(".compose-status")).toContainText("Sent", { timeout: 30_000 });
+  const picker = page.locator(".new-chat");
+  await picker.locator(".idin input").fill(recipient);
+  await expect(picker.locator(".idin-status")).toContainText("Found", { timeout: 20_000 });
+  await page.click("#btn-open-chat");
+  await expect(page.locator(".thread-view")).toBeVisible({ timeout: 20_000 });
+  await page.fill("#thread-input", body);
+  await page.click("#btn-thread-send");
+  await expect(page.locator(".bubble-row.mine").last()).toContainText(body, { timeout: 30_000 });
+  await page.click("#btn-back");
   await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 20_000 });
 }
 

@@ -110,9 +110,10 @@ test.describe("first run", () => {
     await bob.click('.nav-tab[data-page="contacts"]');
     await expect(bob.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 20_000 });
     await bob.click("[data-contact-open]");
-    await bob.fill("#c-body", "hello from bob");
-    await bob.click("#btn-send-msg");
-    await expect(bob.locator("#c-status")).toHaveText("✓ Sent", { timeout: 20_000 });
+    await expect(bob.locator(".thread-view")).toBeVisible();
+    await bob.fill("#thread-input", "hello from bob");
+    await bob.click("#btn-thread-send");
+    await expect(bob.locator(".bubble-row.mine").last()).toContainText("hello from bob", { timeout: 20_000 });
 
     await expect
       .poll(async () => {

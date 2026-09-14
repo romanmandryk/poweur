@@ -63,6 +63,8 @@ export function threadMessages(messages, selfIdentity, peer, threadId = "") {
   for (const raw of messages) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!message.sender) continue;
+    // The handshake is not chat: the tray leaves it out, so the thread does too.
+    if (isContactHandshake(message.type)) continue;
     if (conversationPeer(message, selfIdentity).toLowerCase() !== wanted) continue;
     if ((message.thread_id || "") !== (threadId || "")) continue;
     out.push(message);
@@ -183,6 +185,41 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     });
   }
   return rows.sort((a, b) => new Date(b.lastMsg.timestamp) - new Date(a.lastMsg.timestamp));
+}
+
+/**
+ * Whether a read mark covers a message. A mark is a *position* (timestamp and
+ * id): timestamps are RFC3339 to the second, so two messages a moment apart
+ * share one, and a timestamp-only mark would swallow the second.
+ */
+export function markCovers(mark, timestamp, id) {
+  if (!mark?.timestamp) return false;
+  if (mark.timestamp !== timestamp) return new Date(mark.timestamp) > new Date(timestamp);
+  return (mark.id ?? "") >= id;
+}
+
+/**
+ * Every unread signed message across all conversations — the number on the
+ * Messages nav badge. Same rule the per-conversation count uses: our own
+ * messages never count, and a conversation's read mark covers what is behind it.
+ *
+ * @param {Array<object|string>} messages
+ * @param {string} selfIdentity
+ * @param {Record<string, {timestamp: string, id?: string}>} conversations  read marks by conversation
+ */
+export function unreadTotal(messages, selfIdentity, conversations = {}) {
+  const self = String(selfIdentity ?? "").toLowerCase();
+  let count = 0;
+  for (const raw of messages) {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!message.sender || message.sender.toLowerCase() === self) continue;
+    // A request is counted once, on Contacts — not again as a message.
+    if (isContactHandshake(message.type)) continue;
+    const conversation = String(message.group_verified ? message.metadata?.group : message.sender).toLowerCase();
+    if (markCovers(conversations?.[conversation], message.timestamp, message.id ?? "")) continue;
+    count += 1;
+  }
+  return count;
 }
 
 /**

@@ -2060,3 +2060,39 @@ input, textarea, select { font-family: inherit; }
   resize: none;
 }
 .thread-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+
+/* Nav badges (E15-T13): unread messages on Messages, pending requests on
+   Contacts. Pinned to the icon, so the rail, the tab bar and the labelled
+   sidebar all show it in the same place. */
+.nav-icon { position: relative; display: inline-flex; }
+.nav-badge {
+  position: absolute;
+  top: -5px;
+  left: calc(100% - 9px);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--bg);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 17px;
+  text-align: center;
+}
+
+.thread-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 20px;
+  cursor: pointer;
+}
+.thread-attach:active { background: var(--surface-2); }
+.new-chat-body { display: flex; flex-direction: column; gap: 12px; }

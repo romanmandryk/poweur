@@ -18,7 +18,7 @@
 | E15-T1 Information architecture & shared components | **done** | five destinations, IdentityInput / AudiencePicker / ProfileCard, relay URL off `location.origin` |
 | Keys, devices & recovery (E11's web surface) | **done** | seed-derived identities, keystore inventory, recovery kit, the E11-T3 ceremony |
 | E15-T2 Contacts & requests | **done** | contacts destination, requests tray merging queue + inbox, key-pin dialog. **Friction fixed since manual testing:** a bare handle is completed with your own domain (a hosted relay puts everyone under one, so typing `alice` failed validation with "that does not look like a Poweur ID"); the add-contact buttons resolve on press instead of staying disabled behind a debounced lookup, which left someone who typed a name and pressed the button they were looking at with nothing at all; a queued request's intro is decrypted and shown |
-| E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send |
+| E15-T3 Inbox policy, anonymous & PoW | **done** | `policy-controls.js`, anonymous tray, in-page PoW send (the send *toggle* left the signed-in UI with E15-T13; the SDK path stays) |
 | E15-T4 Files explorer & sharing | **done** | chunked upload, share dialog, received shares, changes-feed refresh |
 | E15-T5 Profile, first-run onboarding & polish | **done** | profile editor, three skippable steps, a11y pass, walkthrough docs |
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
@@ -808,7 +808,19 @@ filtering a conversation still means opening everything.
   - outbox pending/failed bubbles;
   - read marks per visible message (still marked when the conversation opens);
   - download paging (E20-T8).
-- Contact rows and "Message" actions still open compose.
+
+
+**Chat-style composer and nav badges (web 0.1.13):**
+- **The compose screen is gone.**
+  - "New message" is a To picker that opens the conversation; a group identity is recognised by its roster.
+  - Contact rows, the contact sheet's "Message" button and add-contact "Message" all open the conversation.
+  - Attachments send from the 📎 button beside the reply box, using any typed text as the caption.
+- **"Send anonymously" is no longer offered in the signed-in app.** The SDK path (`sendAnonymous`, PoW solved in-page) is unchanged and `policy.spec.js` drives it directly. A signed-out anonymous send surface belongs with EPIC-012's contact page.
+- **Nav badges:**
+  - Messages counts unread messages (signed, from read marks, plus unread anonymous).
+  - Contacts counts incoming requests waiting for an answer.
+  - History and requests load on every destination so the numbers are right wherever you are. A background load repaints another destination only when a badge number changed.
+- **Unlocking pulls everything immediately.** Passkey or native unlock (including web passkey sign-in), keystore recovery, restore on a new device and registration all call `pullAfterUnlock()`. It fetches history, inbox, requests (forced), contacts, policy and then the anonymous queue, and retries the outbox. It no longer depends on having returned to Messages or on the push stream's `ready` event. `nav-badges.spec.js` blocks the event stream, unlocks from Contacts and checks both badges.
 
 **Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
 in order with ticks; A sends while B sits in the thread and it appears without interaction;

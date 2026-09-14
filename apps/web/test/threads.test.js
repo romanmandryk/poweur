@@ -8,8 +8,8 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  bodyFor, buildConversationRows, conversationPeer, deliveryState, latestWindow, previewFor,
-  threadLabel, threadMessages, threadsOf, THREAD_PAGE_SIZE,
+  bodyFor, buildConversationRows, conversationPeer, deliveryState, latestWindow, markCovers, previewFor,
+  threadLabel, threadMessages, threadsOf, THREAD_PAGE_SIZE, unreadTotal,
 } from "../js/threads.js";
 
 const ME = "alice.poweur.net";
@@ -261,5 +261,65 @@ describe("bodyFor", () => {
     expect(previewFor(expiring)).toMatch(/^soon gone · ⏳ /);
     expect(bodyFor(msg({ type: "chat.attachment", metadata: { attachment_name: "a.pdf" } }))).toBe("📎 a.pdf");
     expect(bodyFor(msg({ plaintext: null }))).toBe("🔒 Could not decrypt");
+  });
+});
+
+describe("markCovers", () => {
+  it("compares positions, breaking a shared second on id", () => {
+    const mark = { timestamp: "2026-01-15T09:00:00Z", id: "m2" };
+    expect(markCovers(mark, "2026-01-15T08:59:59Z", "zzz")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m1")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m2")).toBe(true);
+    expect(markCovers(mark, "2026-01-15T09:00:00Z", "m3")).toBe(false);
+    expect(markCovers(mark, "2026-01-15T09:00:01Z", "a")).toBe(false);
+    expect(markCovers(null, "2026-01-15T09:00:00Z", "m1")).toBe(false);
+  });
+});
+
+describe("unreadTotal", () => {
+  const store = [
+    msg({ id: "b1", timestamp: "2026-01-15T09:00:00Z" }),
+    msg({ id: "b2", timestamp: "2026-01-15T09:01:00Z" }),
+    msg({ id: "mine", sender: ME, recipient: "bob.example.org", timestamp: "2026-01-15T09:02:00Z" }),
+    msg({ id: "c1", sender: "carol.example.org", timestamp: "2026-01-15T09:03:00Z" }),
+    msg({ id: "g1", sender: "dave.example.org", group_verified: true, metadata: { group: "crew.poweur.net" },
+      timestamp: "2026-01-15T09:04:00Z" }),
+    msg({ id: "anon", sender: "", timestamp: "2026-01-15T09:05:00Z" }),
+  ];
+
+  it("counts every signed message from someone else when nothing is read", () => {
+    expect(unreadTotal(store, ME)).toBe(4);
+    expect(unreadTotal(store, ME, undefined)).toBe(4);
+  });
+
+  it("stops counting what each conversation's mark covers, groups by group", () => {
+    expect(unreadTotal(store, ME, {
+      "bob.example.org": { timestamp: "2026-01-15T09:00:00Z", id: "b1" },
+      "crew.poweur.net": { timestamp: "2026-01-15T09:04:00Z", id: "g1" },
+    })).toBe(2);
+  });
+
+  it("reaches zero once everything is read", () => {
+    expect(unreadTotal(store, ME, {
+      "bob.example.org": { timestamp: "2026-01-15T09:01:00Z", id: "b2" },
+      "carol.example.org": { timestamp: "2026-01-15T09:03:00Z", id: "c1" },
+      "crew.poweur.net": { timestamp: "2026-01-15T09:04:00Z", id: "g1" },
+    })).toBe(0);
+  });
+});
+
+describe("contact handshakes stay out of chat counts", () => {
+  const store = [
+    msg({ id: "req", type: "sys.contact.request", plaintext: "hi, it's bob", timestamp: "2026-01-15T09:00:00Z" }),
+    msg({ id: "acc", type: "sys.contact.accept", plaintext: "accepted", timestamp: "2026-01-15T09:01:00Z" }),
+    msg({ id: "chat", plaintext: "actual chat", timestamp: "2026-01-15T09:02:00Z" }),
+  ];
+
+  it("counts a request on Contacts only, never as an unread message", () => {
+    expect(unreadTotal(store, ME)).toBe(1);
+  });
+
+  it("does not render the handshake as a bubble", () => {
+    expect(threadMessages(store, ME, "bob.example.org").map((m) => m.id)).toEqual(["chat"]);
   });
 });
