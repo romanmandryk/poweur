@@ -1,6 +1,6 @@
 # EPIC-004 — File sync protocol & sync clients
 
-- **Status:** core complete (T1–T4 shipped; T5/T6 + daemon mode deferred, see Progress)
+- **Status:** core complete (T1–T4 and T6 shipped; T5 + fsnotify daemon mode deferred, see Progress)
 - **Priority:** P1
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-010 (watch-folder automations), offline-capable apps
@@ -9,12 +9,12 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E04-T1 Sync protocol spec | **done** | [`apps/docs/docs/files/sync-protocol.md`](../apps/docs/docs/files/sync-protocol.md); moves-as-delete+put documented for v1; `sys.sync.changed` payload defined, delivery deferred to EPIC-009 |
+| E04-T1 Sync protocol spec | **done** | [`apps/docs/docs/files/sync-protocol.md`](../apps/docs/docs/files/sync-protocol.md); moves-as-delete+put documented for v1; `sys.sync.changed` payload defined and registered (EPIC-009 typed messages have landed), but **no emitter yet** — open, lands with the event-driven daemon |
 | E04-T2 Journal + changes/manifest | **done** | Journal hooked into the metadata `Index` (single choke point: DAV, uploads, relay writes all journal); compaction is lazy (on load/append: 30 d / 10 000 records) instead of a `runPruner` job; per-principal visibility via the E03-T4 permission engine (EPIC-005 grants slot in) |
 | E04-T3 Chunked resumable upload | **done** | tus-header-style protocol at `/sync/{id}/upload` (choice written up in the spec); quota at start; 24 h spool expiry; kill-and-resume covered in `TestSyncChunkedUploadResume`; web app routes files ≥ 64 MiB through `SyncClient.uploadChunked` (`doUploadFiles` in `apps/web/js/app.js`); **open:** a web-side test for that threshold branch |
 | E04-T4 `poweur sync` client | **done** (one-shot) | `pull`/`push`/`run`/`status` + conflicted-copy matrix + `--path` selective sync + `.poweurignore` (subset, no negation); engine in `apps/cli/internal/sync` with fake-remote conflict-matrix tests + `TestINT_SYNC_01` two-device convergence; **deferred:** fsnotify daemon mode (poll with `run` or cron until then) |
 | E04-T5 Mobile & desktop passes | **deferred** (web half done) | mount-vs-sync doc, launchd/systemd templates, iOS/Android File-Provider notes still open; web changes-feed auto-refresh shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4 |
-| E04-T6 Device registry | **deferred** | design sketch in sync-protocol.md §Device registry; lands with EPIC-007/009 groundwork (`devices.json`, per-device cursors, revocation) |
+| E04-T6 Device registry | **done** | Relay-managed `poweur-sys/relay/devices.json` (schema `conventions/schemas/poweur-sys/devices.schema.json`, `apps/api/internal/relay/devices.go`); `poweur devices` CLI + web device list/revoke; revoking a device kills its app passwords, DAV tokens and sessions; per-device sync cursor + `last_seen` (presence from the E09-T2 event stream, not user-visible in v1). Coverage: `TestINT_DEVICES_01` (revoke stops the device), `_02` (owner sees sync cursor), `_03` (registry is relay-managed) |
 
 ## Goal
 
@@ -144,10 +144,10 @@ test matrix.
 Sync introduces "the user's devices" as first-class actors (they already exist implicitly as
 sessions, `apps/api/internal/relay/sessions.go` keeps a `DeviceFingerprint`).
 
-- [ ] `poweur-sys/relay/devices.json` convention: device id, name, kind (laptop/phone/agent),
+- [x] `poweur-sys/relay/devices.json` convention: device id, name, kind (laptop/phone/agent),
       sync scopes, added_at, last_seen — written by the relay, readable by owner
-- [ ] CLI/web UI to list devices and revoke one (revokes its app passwords/tokens + sessions)
-- [ ] Per-device sync cursors stored server-side so the owner can see staleness ("phone last
+- [x] CLI/web UI to list devices and revoke one (revokes its app passwords/tokens + sessions)
+- [x] Per-device sync cursors stored server-side so the owner can see staleness ("phone last
       synced 3 days ago")
 
 **Acceptance:** revoking a device kills its sync within one poll cycle; device list visible in

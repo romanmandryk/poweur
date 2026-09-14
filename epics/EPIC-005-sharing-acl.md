@@ -1,6 +1,6 @@
 # EPIC-005 — Sharing, ACLs, groups & public-to-any-valid-ID
 
-- **Status:** complete except the offer/accept UX (grant engine, CLI, web dialog, link shares and group identities shipped; `sys.share.offer/accept` messages and recipient mounts deferred to EPIC-009)
+- **Status:** complete except the offer/accept UX (grant engine, CLI, web dialog, link shares and group identities shipped). **E05-T3's remaining half is open and unblocked:** EPIC-009 typed messages have landed and `sys.share.offer/accept/revoked` are registered in the code, but nothing emits them yet and recipient mounts are not built
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps

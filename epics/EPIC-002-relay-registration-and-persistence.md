@@ -1,6 +1,6 @@
 # EPIC-002 — Relay-only registration, wildcard identities & durable relay storage
 
-- **Status:** complete (PoW gate shipped via EPIC-014: `REGISTRATION_GATE=pow`)
+- **Status:** complete (PoW gate shipped via EPIC-014: `REGISTRATION_GATE=pow`); one polish item open — E02-T1's SQLite/bbolt lookup index is not built
 - **Priority:** P0
 - **Depends on:** EPIC-001
 - **Unlocks:** EPIC-003 (file storage), EPIC-009 (message persistence)
