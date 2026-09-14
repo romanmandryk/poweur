@@ -1,6 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { test, expect } from "@playwright/test";
+import { SDK_VERSION } from "@poweur/client";
 import { startRelay } from "../helpers/relay.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
+import { APP_VERSION, APP_BUILD_TIME } from "../../js/build-info.js";
+
+/** The relay's semver, read from the one place it is bumped. */
+const RELAY_VERSION = readFileSync(new URL("../../../api/internal/buildinfo/buildinfo.go", import.meta.url), "utf8")
+  .match(/var Version = "([^"]+)"/)[1];
 
 /**
  * E15-T1 acceptance: the five destinations render and route, and the shell is
@@ -187,10 +195,12 @@ test.describe("five destinations at 375px", () => {
     const identity = await registerIdentity(page, relay, destHandle());
 
     await page.click('.nav-tab[data-page="settings"]');
-    await expect(page.locator("#about-app-version")).toHaveText("0.1.10");
-    await expect(page.locator("#about-sdk-version")).toHaveText("0.1.4");
-    await expect(page.locator("#about-app-build")).toContainText("2026-09-11");
-    await expect(page.locator("#about-relay-version")).toHaveText("0.1.4", { timeout: 15_000 });
+    // From the sources the versions are bumped in, so a patch bump does not
+    // break the screen that reports it.
+    await expect(page.locator("#about-app-version")).toHaveText(APP_VERSION);
+    await expect(page.locator("#about-sdk-version")).toHaveText(SDK_VERSION);
+    await expect(page.locator("#about-app-build")).toContainText(APP_BUILD_TIME.slice(0, 10));
+    await expect(page.locator("#about-relay-version")).toHaveText(RELAY_VERSION, { timeout: 15_000 });
     await expect(page.locator("#about-relay-meta")).toContainText(identity);
     await expect(page.locator("#about-relay-meta")).toContainText(relay.baseUrl);
   });

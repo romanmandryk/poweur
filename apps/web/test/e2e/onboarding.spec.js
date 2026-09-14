@@ -114,6 +114,9 @@ test.describe("first run", () => {
     await bob.fill("#thread-input", "hello from bob");
     await bob.click("#btn-thread-send");
     await expect(bob.locator(".bubble-row.mine").last()).toContainText("hello from bob", { timeout: 20_000 });
+    // A conversation stays open after sending, as in any chat app; on a phone
+    // it covers the tab bar, so leave it to go anywhere else.
+    await bob.click("#btn-back");
 
     await expect
       .poll(async () => {

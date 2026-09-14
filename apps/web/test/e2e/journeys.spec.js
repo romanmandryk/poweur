@@ -217,7 +217,6 @@ test.describe("browser journeys", () => {
 
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
     await composeTo(strangerPage, ownerId, "signed and attributable");
-    await strangerPage.click("#btn-back").catch(() => {});
     await strangerPage.evaluate(async ({ identity, relayUrl }) => {
       const { sendAnonymous } = await import("@poweur/client");
       const { resolveOptionsForRelay } = await import("./js/client.js");

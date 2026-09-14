@@ -3448,6 +3448,8 @@ async function ensureSession(identity) {
  * unlocking, so without this guard those two collide every time.
  */
 let inboxInFlight = null;
+/** A push that landed mid-drain: drain once more when this one finishes. */
+let inboxPending = false;
 
 /**
  * Fold a poll response into the message store.
@@ -3518,7 +3520,7 @@ function startEventStream() {
       // parked while the socket was down stays invisible until a click.
       if (event.type === "ready") {
         retryBrowserOutbox();
-        loadInbox();
+        loadInbox({ force: true });
         loadRequests({ force: true });
         if (S.tray === "anonymous" || S.policy.doc?.anonymous?.allow) loadAnon({ force: true });
         return;
@@ -3529,7 +3531,7 @@ function startEventStream() {
       // open it.
       if (event.type === "request") loadRequests({ force: true });
       else if (event.type === "anon") loadAnon({ force: true });
-      else loadInbox();
+      else loadInbox({ force: true });
     },
     onError: (error) => console.warn("Push stream dropped, retrying:", error.message),
   }).catch(() => {});
@@ -3545,7 +3547,7 @@ function startEventStream() {
 function pullAfterUnlock() {
   if (!S.identity || !getUnlockedKeys()) return;
   loadHistory();
-  loadInbox();
+  loadInbox({ force: true });
   loadRequests({ force: true });
   loadContacts();
   loadPolicy().then(() => {
@@ -3559,10 +3561,23 @@ function stopEventStream() {
   streamAbort = null;
 }
 
-function loadInbox() {
+/**
+ * Drain the inbox into the store.
+ *
+ * `force` is for callers that *know* something new is waiting — a push event,
+ * an unlock. Joining an in-flight drain would miss a message posted after that
+ * drain's GET left, and nothing else would come back for it off Messages (where
+ * every render drains again and hid the gap). Renders call without `force`, so
+ * a render a drain causes cannot schedule the next drain.
+ */
+function loadInbox({ force = false } = {}) {
   const client = clientFor(S.identity);
   if (!client) return Promise.resolve();
-  inboxInFlight ??= challengeSerial(async () => {
+  if (inboxInFlight) {
+    if (force) inboxPending = true;
+    return inboxInFlight;
+  }
+  inboxInFlight = challengeSerial(async () => {
     try {
       // Read, receipt and *keep* in one step. Any gap between the pickup and
       // the archive write is a window where the relay has forgotten a message
@@ -3582,6 +3597,11 @@ function loadInbox() {
       console.warn("Inbox error:", e.message);
     } finally {
       inboxInFlight = null;
+      const again = inboxPending;
+      inboxPending = false;
+      // Outside this serial task: a challenge-signed drain chained from here
+      // would wait on a promise that cannot resolve until this one does.
+      if (again) queueMicrotask(() => loadInbox({ force: true }));
     }
   });
   return inboxInFlight;

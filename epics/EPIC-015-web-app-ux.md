@@ -821,6 +821,7 @@ filtering a conversation still means opening everything.
   - Contacts counts incoming requests waiting for an answer.
   - History and requests load on every destination so the numbers are right wherever you are. A background load repaints another destination only when a badge number changed.
 - **Unlocking pulls everything immediately.** Passkey or native unlock (including web passkey sign-in), keystore recovery, restore on a new device and registration all call `pullAfterUnlock()`. It fetches history, inbox, requests (forced), contacts, policy and then the anonymous queue, and retries the outbox. It no longer depends on having returned to Messages or on the push stream's `ready` event. `nav-badges.spec.js` blocks the event stream, unlocks from Contacts and checks both badges.
+- **Found on the way: a push landing mid-drain was dropped.** `loadInbox` was single-flight, so an event arriving while a drain was in flight joined it and missed any message posted after its GET left. On Messages every render drained again, which hid the gap; anywhere else the message stayed on the relay until something unrelated happened. Push events and unlock now call `loadInbox({ force: true })`, which queues one more drain, the same pattern `loadRequests` already used. Renders never force, so a drain cannot schedule itself in a loop.
 
 **Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
 in order with ticks; A sends while B sits in the thread and it appears without interaction;
