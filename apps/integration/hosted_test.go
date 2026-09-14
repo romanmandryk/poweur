@@ -103,6 +103,45 @@ func TestINT_HOSTED_01_HostedRegisterAndMessage(t *testing.T) {
 	assertDecryptedInbox(t, bobInbox2, "alicehost.poweur.net", msg2)
 }
 
+// A claimed name must not leave a leftover keypair in the failing client's
+// HOME — those files would shadow a later enroll/recover of the real identity.
+func TestINT_HOSTED_CreateTakenNameLeavesNoLocalKeys(t *testing.T) {
+	zone := newZone(t)
+	_, addr := newHostedRelay(t, zone, t.TempDir())
+	relayURL := "http://" + addr
+	name := "takenname.poweur.net"
+	zone.SetHost(name, addr)
+
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	owner := t.TempDir()
+	runCLI(t, owner, "identity", "create", name, "--hosted", "--relay", relayURL, "--json")
+	ownerKey := filepath.Join(owner, ".poweur", "keys", name+".key")
+	original, err := os.ReadFile(ownerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other := t.TempDir()
+	if code := runCLICode(t, other, "identity", "create", name, "--hosted", "--relay", relayURL, "--json"); code == 0 {
+		t.Fatal("second create of a claimed name must fail")
+	}
+	for _, leaf := range []string{name + ".key", name + ".enc"} {
+		path := filepath.Join(other, ".poweur", "keys", leaf)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("loser home must not keep leftover %s: %v", leaf, err)
+		}
+	}
+	after, err := os.ReadFile(ownerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original) != string(after) {
+		t.Fatal("owner keys were mutated by the failed create")
+	}
+}
+
 func rewriteRelayURL(t *testing.T, home, relayURL string) {
 	t.Helper()
 	cfgPath := filepath.Join(home, ".poweur", "config.toml")

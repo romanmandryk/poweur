@@ -29,6 +29,7 @@
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
+| **E15-T13 Conversation view & paged history** | **open** | tapping a row opens compose, not the thread; view can ship now, paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
 
 ## Goal
 
@@ -755,6 +756,53 @@ screenshot diffing across machines is a flake source this suite does not need.
 **Acceptance:** e2e covering a policy-rejected name shown before typing finishes, a
 taken-on-submit recovery that returns to the field, and an offline landing that refuses to
 pretend it checked.
+
+### E15-T13 — Conversation view & paged history
+
+**Background.** The Messages tray renders one row per (contact, thread) with only the latest
+message's preview ([`renderTray`](../apps/web/js/app.js)). Tapping a row marks it read and
+pushes the *compose* sub-page with `to`/`thread` preset — so nothing in the web app or the
+Capacitor shell ever shows an earlier message. The data is all there: `S.messages` holds both
+sides (the archive keeps sent copies, E09-T1), per-message acks including read ticks
+(E09-T6), attachments and `expires_at`.
+
+The archive itself does not scale as it is read today. Layout is
+`poweur-sys/private/messages/<YYYY-MM>/<sortkey>-<id>.json`, one sealed file per message
+([`packages/identity/history.go`](../packages/identity/history.go)). `MessageHistory.load()`
+in `@poweur/client` lists every shard and then issues **one GET + one unseal per message**,
+and the web app calls it on every unlock; the Go CLI's `Load` does the same over the sync
+manifest, and `poweur history [peer]` prints the entire result with no limit. At 10k messages
+that is 10k requests before the tray can draw. Filenames carry time but not the peer, so
+filtering a conversation still means opening everything.
+
+- [ ] **Conversation screen** (`R.push("thread", { peer, thread, group })`): bubbles
+      oldest→newest, own messages right-aligned, day separators, sender name per bubble in
+      groups. Tapping a tray row opens this, not compose; "New message" stays compose
+- [ ] **Per-message state in the bubble:** sent / delivered / read ticks from `S.acks`,
+      outbox pending/failed with retry, expiry countdown, "Open 📎" on attachment bubbles,
+      the generic "app message (&lt;type&gt;)" line for unknown types (reuse `describeMessage`)
+- [ ] **Inline reply composer** pinned to the bottom (safe-area aware in the shell), keeping
+      the thread id; attachment picker behind an icon. Sending appends optimistically
+- [ ] **Live:** push events already trigger `loadInbox()` → `render()`; the open thread must
+      re-render too (today it only repaints when `R.page === "messages" && !R.sub`), stick to
+      the bottom when already there, and show a "new messages ↓" pill when scrolled up
+- [ ] Read marks advance as the thread is viewed (to the newest visible message), not on the
+      row tap
+- [ ] **Paging comes from history v2, not the v1 layout** —
+      [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 (one append-only log per conversation
+      on chunked storage, `tail` / `before` APIs in both SDKs, CLI `--limit/--before`). The
+      conversation screen above can ship first on today's full load; the two items below wait
+      for E20-T8
+- [ ] Web: unlock loads one tail chunk per conversation for the tray; the thread view fetches
+      older chunks on scroll-to-top with the scroll position preserved; chunks cached in
+      IndexedDB (immutable, never revalidated)
+- [ ] Desktop (with E15-T11): the thread renders into the detail pane of the two-pane layout
+
+**Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
+in order with ticks; A sends while B sits in the thread and it appears without interaction;
+after a reload the thread is intact. Once E20-T8 lands: a relay test seeds a 2k-message
+archive and asserts the tray paints having fetched at most one tail chunk per conversation,
+and that scrolling up fetches the previous one.
 
 ## Forward-looking (prepare for, don't build)
 

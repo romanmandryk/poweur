@@ -45,6 +45,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | proposed | E01, E03, E04, E05, E14 |
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
+| [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: chunked, content-addressed sync & capability sharing | Files / Trust | proposed | E03, E04, E05, E11 |
 
 ## Integration epics (`integrations/`)
 
@@ -119,6 +120,12 @@ EPIC-015 + EPIC-017 + EPIC-018 ──► EPIC-019 (Capacitor mobile shell)
                    │  no-`location.origin` constraints
                    └─ `kdf:"native"` key custody frees the store build from
                       associated-domains, so self-hosters need no fork
+
+EPIC-003/004/005/011 ──► EPIC-020 (storage v2: chunks, versions, capability sharing)
+                   ├─ WebDAV becomes a compatibility view, not the storage model
+                   ├─ message history v2 (supersedes E09-T1 layout) → E15-T13 paging
+                   └─ lands E03-T7 relay-blind storage, E05-T3 mounts, append/excerpt/
+                      time-boxed shares and delegation
 ```
 
 ## Architecture deltas at a glance

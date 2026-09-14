@@ -87,7 +87,8 @@ tests show no traversal.
       validates signature against the embedded key before accepting
 - [x] Keep DNS mode fully working; route by request shape + config
 - [x] CLI: `poweur identity create name.poweur.net --hosted` (no token args); web app
-      registration flow updated (`apps/web/js/app.js`)
+      registration flow updated (`apps/web/js/app.js`). Failed registration no longer
+      leaves a leftover local keypair (autoclean + refuse overwrite).
 - [x] Update docs: `apps/docs/docs/relay/api-reference.md`, web-identity protocol page
 - [x] `dns-management.md` wording pass (hosted vs DNS dual-mode; lease = no expiry)
 

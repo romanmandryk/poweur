@@ -72,6 +72,115 @@ func TestIdentityCreateWritesConfig(t *testing.T) {
 	}
 }
 
+func TestIdentityCreateRefusesExistingKeys(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"identity", "create", "alice", "--parent-domain", "poweur.net"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("first create: %d: %s", code, stderr.String())
+	}
+	keysDir, err := config.KeysDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := identity.KeyPath(keysDir, "alice.poweur.net")
+	before, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := Run([]string{"identity", "create", "alice", "--parent-domain", "poweur.net"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("second create must fail rather than overwrite")
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("keys already exist")) {
+		t.Fatalf("want keys-already-exist error, got %q", stderr.String())
+	}
+	after, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("existing key file was overwritten")
+	}
+}
+
+func TestIdentityCreateCleansKeysWhenRelayRefuses(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(HealthResponse{Status: "ok", Version: "test"})
+	})
+	mux.HandleFunc("POST /identities", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "identity_exists", Detail: "identity already registered"})
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"identity", "create", "alice.poweur.net",
+		"--hosted", "--relay", ts.URL,
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("create must fail when the relay refuses, stderr=%s", stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("identity_exists")) {
+		t.Fatalf("want identity_exists in stderr, got %q", stderr.String())
+	}
+	keysDir, err := config.KeysDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.AnyKeyFileExists(
+		identity.KeyPath(keysDir, "alice.poweur.net"),
+		identity.EncryptionKeyPath(keysDir, "alice.poweur.net"),
+	) {
+		t.Fatal("refused create must not leave key files")
+	}
+}
+
+func TestIdentityCreateCleansKeysWhenRelayUnreachable(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Error: "unavailable", Detail: "down"})
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"identity", "create", "alice.poweur.net",
+		"--hosted", "--relay", ts.URL,
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("create must fail when health check fails")
+	}
+	keysDir, err := config.KeysDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.AnyKeyFileExists(
+		identity.KeyPath(keysDir, "alice.poweur.net"),
+		identity.EncryptionKeyPath(keysDir, "alice.poweur.net"),
+	) {
+		t.Fatal("unreachable relay must not leave key files")
+	}
+}
+
 // mockRelay runs an in-process relay that accepts session registrations and
 // messages. It records the most recently received message for assertions.
 type mockRelay struct {

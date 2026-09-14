@@ -5,6 +5,11 @@
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-010 (watch-folder automations), offline-capable apps
 
+> **Continues in [EPIC-020](EPIC-020-storage-protocol-v2.md).** The changes journal, cursor and
+> SSE notification stay; bodies move from whole-file DAV transfer to chunks + version-checked
+> commits (E20-T3), and `poweur sync` moves onto them (E20-T6), so conflicts are detected by the
+> relay's `409` instead of client-side guesswork.
+
 ## Progress
 
 | Task | Status | Notes |

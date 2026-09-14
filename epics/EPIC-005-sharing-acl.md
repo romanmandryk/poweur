@@ -5,6 +5,12 @@
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
 
+> **Extended by [EPIC-020](EPIC-020-storage-protocol-v2.md) Wave 3.** Grants stay path-based
+> signed documents; v2 adds authorization of versions and chunks (E20-T9), the `append` and
+> `create` permissions (E20-T10), snapshot / excerpt / time-boxed shares (E20-T11) and the
+> reserved `share` permission as attenuated delegation (E20-T12). E05-T3's recipient mounts
+> benefit from immutable, cacheable chunks.
+
 ## Progress
 
 | Task | Status | Notes |

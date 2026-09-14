@@ -213,13 +213,26 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	keyPath, err := identity.SavePrivateKey(identityValue, priv)
+	keysDir, err := config.KeysDir()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	encKeyPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	keyPath := identity.KeyPath(keysDir, identityValue)
+	encKeyPath := identity.EncryptionKeyPath(keysDir, identityValue)
+	if identity.AnyKeyFileExists(keyPath, encKeyPath) {
+		fmt.Fprintf(stderr, "keys already exist for %s at %s — use `poweur key enroll` or `poweur key recover` to add this device, not `identity create`\n", identityValue, keyPath)
+		return 1
+	}
+
+	keyPath, err = identity.SavePrivateKey(identityValue, priv)
 	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encKeyPath, err = identity.SaveEncryptionPrivateKey(identityValue, encPriv)
+	if err != nil {
+		identity.RemoveKeyFiles(keyPath)
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -228,6 +241,15 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
 	registered := false
 	if *relayURL != "" {
+		// Keys are written before the relay answers so a successful
+		// registration always has material on disk. If the relay refuses,
+		// drop those files — they are a different keypair, not this identity.
+		keepKeys := false
+		defer func() {
+			if !keepKeys {
+				identity.RemoveKeyFiles(keyPath, encKeyPath)
+			}
+		}()
 		if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -291,6 +313,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		registered = true
+		keepKeys = true
 	}
 
 	cfg.Identity = identityValue

@@ -168,6 +168,37 @@ func TestEncryptionKey_ProtectsToo(t *testing.T) {
 	}
 }
 
+func TestAnyKeyFileExists(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "alice.poweur.net.key")
+	missing := filepath.Join(dir, "alice.poweur.net.enc")
+	if AnyKeyFileExists(present, missing) {
+		t.Fatal("must be false when nothing is on disk")
+	}
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !AnyKeyFileExists(present, missing) {
+		t.Fatal("must be true when either path exists")
+	}
+	if AnyKeyFileExists("", missing) {
+		t.Fatal("empty paths must be ignored")
+	}
+}
+
+func TestRemoveKeyFilesIgnoresMissingAndDeletesPresent(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "alice.poweur.net.key")
+	missing := filepath.Join(dir, "alice.poweur.net.enc")
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	RemoveKeyFiles(present, missing, "")
+	if _, err := os.Stat(present); !os.IsNotExist(err) {
+		t.Fatalf("present file should be gone, stat=%v", err)
+	}
+}
+
 func TestPassphrase_PrefersExplicitOverEnvironment(t *testing.T) {
 	t.Setenv(EnvKeyPassphrase, "from-env")
 	if got := Passphrase("explicit"); got != "explicit" {
