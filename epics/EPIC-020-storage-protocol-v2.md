@@ -3,8 +3,10 @@
 - **Status:** proposed
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage, `StorageProvider`), EPIC-004 (changes journal, uploads),
-  EPIC-005 (grant engine), EPIC-011 (device keys, for the encrypted domains)
-- **Unlocks:** message history v2 (supersedes EPIC-009 E09-T1's layout), E15-T13 paged
+  EPIC-005 (grant engine), EPIC-006 (`capabilities.json`), EPIC-011 (device keys, for the
+  encrypted domains), EPIC-013 (deployment topology)
+- **Unlocks:** files as a separately deployed and scaled service (id/messaging relays without
+  files), message history v2 (supersedes EPIC-009 E09-T1's layout), E15-T13 paged
   conversations, relay-blind storage (E03-T7 phases 1–2), recipient share mounts (E05-T3),
   append-only shared logs for EPIC-010 agents, S3 provider (E03-T8)
 
@@ -12,10 +14,15 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
+| **Wave 0 — the files service boundary** (numbered after Wave 3 to keep IDs stable; build first) | | |
+| E20-T13 Service topology spec & capability declaration | **open** | control plane vs files service ownership; signed `files` capability + endpoint binding |
+| E20-T14 Control-plane ↔ files-service contract | **open** | control-zone documents, tokens + revocation feed, groups, notifications |
+| E20-T15 Extract the files service | **open** | `internal/filesvc`, `RELAY_SERVICES`, combined and split deployments, topology test matrix |
+| E20-T16 Clients follow the declared files endpoint | **open** | Go CLI, TS SDK, web, shell; messaging-only identities degrade explicitly |
 | **Wave 1 — the protocol** | | |
 | E20-T1 Research & decision record | **open** | survey + chunker/hash/encoding/commit decisions, `storage-v2.md` |
 | E20-T2 Object model & conformance vectors | **open** | chunk ids, manifests, log framing — Go + TS vectors |
-| E20-T3 Relay chunk store & commit API | **open** | missing-chunks, upload, version-checked commit, GC, quota |
+| E20-T3 Files-service chunk store & commit API | **open** | missing-chunks, upload, version-checked commit, GC, quota |
 | E20-T4 WebDAV, links & public serving as views | **open** | DAV assembles chunks; existing DAV suite stays green |
 | E20-T5 Chunk encryption & key domains | **open** | per-frame/per-chunk AEAD, keyed chunk ids, no cross-domain dedup |
 | E20-T6 SDK sync engines (Go + TS) | **open** | chunk cache, commit/rebase loop; `poweur sync` and web uploads move over |
@@ -122,14 +129,159 @@ E09-T2 SSE stream. Manifests are JSON in v2.0; CBOR is an E20-T1 decision.
   audience is a commit rule. None of these need a second enforcement engine; they compose
   onto the grant engine as new fields and permissions (Wave 3).
 
+### Files is a service an identity *declares*, not a part of the relay
+
+**Today it is optional in name only.** `davEnabled()` is just `filesProvider != nil`, but the
+messaging half of the relay reads its own configuration *out of the file tree*:
+
+| Messaging / identity feature | Reads from the file tree | Code |
+|------------------------------|--------------------------|------|
+| Inbox policy & stranger gate | `poweur-sys/relay/inbox-policy.json`, `contacts.json` | `relay/policy.go` `readSysJSON` |
+| Group message fan-out | group identity `poweur-sys/relay/groups/self.json` | `relay/groups.go` → `files.GrantStore.GroupIdentity` |
+| Device registry, presence, revocation | `poweur-sys/relay/devices.json`, `app-passwords.json` | `relay/devices.go`, `relay/events.go` |
+| Sign-in connected apps | `ConnectedAppsPath` | `relay/signin_grants.go` |
+| `/.well-known/poweur/profile.json`, `capabilities.json` | `poweur-sys/public/*` | `relay/wellknown.go` `serveSysPublicFile` |
+
+**Without a provider, `readSysJSON` returns nil and the recipient silently falls back to
+the default `open` policy.** So a messaging-only relay today would not just lack files — it
+would drop contact-only and block enforcement without saying so. Splitting the services is
+therefore a data-ownership decision first and a deployment option second.
+
+**Ownership after the split** (id + messaging stay one process — they are too tightly coupled
+to be worth separating now):
+
+| Control plane (id + messaging relay) | Files service |
+|--------------------------------------|---------------|
+| identity documents, keystore, enrollment, sessions, challenges | content roots `/public`, `/shared`, `/private`, `/apps` |
+| spool, acks, requests, anon queue, SSE hub | `poweur-sys/private` (message history, credentials) |
+| **control zone:** `poweur-sys/public/*`, `poweur-sys/relay/{contacts,inbox-policy,blocks,devices,app-passwords,groups,analytics}`, connected apps | `poweur-sys/relay/shares/*` (only the files service enforces grants), link-share stats |
+| issues DAV tokens and session tokens; owns revocation | changes journal, uploads, chunk store, quota, `/dav`, `/sync`, `/v2`, `/s/`, `/pub` |
+
+**Clients still see one tree.** Contacts, policy and groups are written through the file API
+today (E15-T2) and synced like any file. The files service keeps serving the control zone at
+the same paths, and in split mode proxies those paths to a small documents API on the control
+plane. The validators, journal entries and audit trail stay the same. Combined mode does this
+in-process.
+
+**Declaring and discovering it.**
+
+- The signed identity document already carries a `capabilities` string list (default
+  `["messaging"]`). Adding the *value* `"files"` changes no canonical signing field, so every
+  existing verifier accepts it. Identities can then be `["messaging", "files"]`,
+  `["messaging"]`, or — later — `[]` for id-only.
+- Where the service lives goes in `capabilities.json`, whose `endpoints` map exists but no
+  client reads yet (every client builds `relayUrl + "/dav"` / `"/sync"`). It holds a
+  `services.files` entry: endpoint, supported protocols (`dav`, `sync-v1`, `storage-v2`), and
+  an **owner-signed binding** over `(identity, service, endpoint, service_key, issued_at)`.
+  The owner signs it, not the relay: `capabilities.json` itself is unsigned and served by the
+  control plane, so without a signature an operator could point clients at any files server.
+- Absent binding + `"files"` capability + a legacy relay = the compatibility rule
+  `relayUrl + "/dav"`, so every identity that exists today keeps working unchanged.
+- The binding does not assume one operator. A hosted identity on `poweur.net` can bind a
+  self-hosted files service — v1 ships single-operator, but nothing in the contract may
+  preclude this.
+
+**Deployment modes, one binary:** `RELAY_SERVICES=identity,messaging,files` (default, as
+today), `identity,messaging` + `FILES_SERVICE_URL`, and `files` + `CONTROL_PLANE_URL` +
+service credentials. Files is the part that needs different scaling: it has large bodies,
+is mostly stateless over the `StorageProvider`, and suits S3. Wave 1's chunk store is built
+inside this boundary from the start rather than extracted later.
+
 ## Tasks
+
+### E20-T13 — Service topology spec & capability declaration
+
+- [ ] `apps/docs/docs/relay/service-topology.md`: the ownership table above made normative,
+      with every current cross-read (policy, groups, devices, app passwords, connected apps,
+      well-known) assigned an owner and an access path
+- [ ] **Fail closed without files.** A relay whose control zone is unreachable refuses
+      policy-dependent deliveries (`503`) rather than defaulting to `open`; a
+      messaging-only relay stores the control zone itself. Test that removing the files
+      provider can never widen an inbox
+- [ ] Identity document: `"files"` as a `capabilities` value; conformance vector proving an
+      old verifier accepts a document carrying it
+- [ ] `capabilities.json` schema (EPIC-006): `services.files {endpoint, protocols[],
+      binding}`; binding canonical signing string + vectors in `packages/identity`, same
+      pattern as grants
+- [ ] Discovery rule for clients, including the legacy fallback and what a missing or
+      invalid binding means (refuse, never silently fall back to the relay)
+- [ ] Threat notes: operator-substituted endpoint, stale binding after moving services,
+      files service impersonating the control plane, cross-operator bindings
+
+**Acceptance:** spec merged with worked resolution examples for combined, split,
+messaging-only and legacy identities; vectors pass in Go and TS.
+
+### E20-T14 — Control-plane ↔ files-service contract
+
+- [ ] **Control-zone documents API** on the control plane (`GET/PUT /docs/{identity}/{path}`)
+      with the existing `sysfiles.go` validators and journal semantics; the files service
+      proxies control-zone paths to it in split mode
+- [ ] **Tokens:** control plane issues short-lived signed access tokens (audience = files
+      endpoint, identity, device id, scope, ≤ 15 min) that the files service verifies
+      offline. Coordinate the format with E20-T12 rather than inventing a second one
+- [ ] **Revocation feed:** device revoke, app-password delete, session end and grant-relevant
+      group changes are pushed to the files service over an authenticated internal stream,
+      so E04-T6's "revoking a device kills its DAV tokens" stays immediate, not TTL-bounded.
+      On stream loss the files service fails closed for token auth until caught up
+- [ ] App passwords (Basic auth for legacy DAV mounts) verified by the files service against
+      the control plane's document, cached and invalidated by the feed
+- [ ] Group membership for grant evaluation read from the control plane (cross-relay group
+      resolution stays deferred, as in E05-T5)
+- [ ] Signed-challenge (visitor and owner) auth works at the files service with its own
+      challenge store and public identity resolution — no control-plane round trip
+- [ ] **Notifications:** commits publish `sync.changed` to the control plane's SSE hub, so
+      clients keep one event stream per identity
+- [ ] Service-to-service authentication (mTLS or a signed service key from the binding) and
+      the internal endpoints kept off the public mux
+
+**Acceptance:** contract doc + tests for every row of the ownership table in both
+directions; a revoked device's token is refused by a split files service on its next
+request.
+
+### E20-T15 — Extract the files service
+
+- [ ] Move DAV, sync, uploads, link shares, `/pub`, quota and grants out of `internal/relay`
+      into `internal/filesvc`, depending on a `ControlPlane` interface (documents, token
+      verification, revocations, groups, notify) with an in-process implementation and an
+      HTTP one
+- [ ] Import-boundary test: `filesvc` never imports `relay`, and `relay` never touches a
+      `files.StorageProvider` directly
+- [ ] `RELAY_SERVICES` / `FILES_SERVICE_URL` / `CONTROL_PLANE_URL` in `internal/config` with
+      validation (for example, `files` alone without a control plane URL is a startup error)
+- [ ] `/health` and telemetry report which services a process runs; OTLP resource attributes
+      distinguish them (EPIC-013)
+- [ ] Deployment: compose profile and ansible role for a split files host; `deploy/OPS.md`
+      section on moving an existing combined relay to split without downtime
+- [ ] **Topology matrix in `apps/integration`:** files, sharing, history, attachments, device
+      revoke and group suites run against both combined and split (two processes); plus a
+      messaging-only relay suite
+
+**Acceptance:** the whole integration suite is green in combined and split mode; a
+messaging-only relay delivers, enforces contact-only policy, and answers `/dav` with `404`.
+
+### E20-T16 — Clients follow the declared files endpoint
+
+- [ ] Go CLI (`internal/sync/remote.go`, `history.go`, `share.go`) and `@poweur/client`
+      (`files.ts` `davUrl`, `sync.ts`) resolve the files endpoint through the T13 discovery
+      rule instead of concatenating the relay URL
+- [ ] Visitors (shares, links, recipient mounts) resolve the *owner's* files endpoint
+- [ ] Messaging-only identities, shown plainly rather than as errors:
+      - the web/shell Files destination explains that the identity has no file storage;
+      - attachments are disabled with a reason;
+      - message history is local to the device and the UI says so
+- [ ] `poweur identity lookup` prints the files service and binding verdict
+
+**Acceptance:** e2e — the web app against a split deployment uploads, shares, and reads
+history; against a messaging-only relay it messages normally and the Files, attachment and
+history surfaces explain the missing capability.
 
 ### E20-T1 — Research & decision record
 
 - [ ] Survey write-up of the sources in the table above, with one paragraph each on what
       breaks for Poweur's model (relay-mediated, identity-keyed, per-path ACL, encrypted zones)
 - [ ] Decide and justify: chunker (FastCDC params: min/avg/max), hash (SHA-256 stdlib vs
-      BLAKE3 — the relay has no third-party dependencies today), manifest encoding (JSON vs
+      BLAKE3 — the relay's only direct dependencies today are `golang.org/x/crypto` and
+      `golang.org/x/net`), manifest encoding (JSON vs
       dag-CBOR), manifest paging for huge files (casync-style index vs chunked manifest)
 - [ ] Decide commit semantics: CAS on `base_version` vs version vectors; what the changes
       journal records per version; version retention default (e.g. last N or 30 days)
@@ -150,7 +302,9 @@ commit + rebase, large-file resume, a DAV client editing a v2 file, and a revoke
 
 **Acceptance:** Go and TS produce byte-identical chunk ids and manifests for every vector.
 
-### E20-T3 — Relay chunk store & commit API
+### E20-T3 — Files-service chunk store & commit API
+
+Built inside `internal/filesvc` (E20-T15), never in `internal/relay`.
 
 - [ ] Endpoints under `/v2/{identity}/`: `chunks/missing`, `chunks/{id}` (PUT), version
       read (`files/{path}` → manifest), chunk read *through a version* (see E20-T9),
@@ -203,7 +357,8 @@ transfers ≤ two chunks.
 
 ### E20-T7 — Migration & protocol negotiation
 
-- [ ] `capabilities.json` advertises `storage: ["dav", "v2"]`; clients fall back to v1 paths
+- [ ] `services.files.protocols` (E20-T13) advertises `storage-v2`; clients fall back to
+      `dav` + `sync-v1` when it is absent
 - [ ] v1 files ingest lazily (first v2 read or a background pass) into single-version
       manifests; plain DAV writes keep working throughout
 - [ ] Existing grants, links and journal cursors survive the migration untouched

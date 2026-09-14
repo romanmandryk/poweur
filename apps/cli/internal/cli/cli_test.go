@@ -615,3 +615,70 @@ func TestVersionFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestHostForRelayURL(t *testing.T) {
+	const recipient = "bobbob.poweur.net"
+	cases := []struct {
+		name, scheme, recipient, want string
+		dns                           identity.DNSStatus
+		fail                          bool
+	}{
+		{
+			name:      "https skips cloudflare anycast IPs",
+			scheme:    "https",
+			recipient: recipient,
+			dns:       identity.DNSStatus{RelayHosts: []string{"172.67.136.22", "104.21.32.214"}},
+			want:      recipient,
+		},
+		{
+			name:      "http keeps httptest host:port",
+			scheme:    "http",
+			recipient: recipient,
+			dns:       identity.DNSStatus{RelayHosts: []string{"127.0.0.1:54321"}},
+			want:      "127.0.0.1:54321",
+		},
+		{
+			name:      "https prefers the identity name over a hostname A-record",
+			scheme:    "https",
+			recipient: recipient,
+			dns:       identity.DNSStatus{RelayHosts: []string{"relay.example.org"}},
+			want:      recipient,
+		},
+		{
+			name:      "https with only IPs and no identity name fails closed",
+			scheme:    "https",
+			recipient: "",
+			dns:       identity.DNSStatus{RelayHosts: []string{"172.67.136.22"}},
+			fail:      true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := hostForRelayURL(tc.scheme, tc.recipient, tc.dns)
+			if tc.fail {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRelayURLHostIsBareIP(t *testing.T) {
+	if !relayURLHostIsBareIP("https://172.67.136.22") {
+		t.Fatal("cloudflare IP URL must be rewritten")
+	}
+	if relayURLHostIsBareIP("http://127.0.0.1:54321") {
+		t.Fatal("httptest host:port must be kept")
+	}
+	if relayURLHostIsBareIP("https://bobbob.poweur.net") {
+		t.Fatal("hostname URL must be kept")
+	}
+}
