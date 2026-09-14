@@ -170,6 +170,7 @@ test.describe("contacts, requests and key pinning", () => {
       const contacts = await clientFor(getActiveIdentity()).contacts();
       await contacts.set(target, "accepted", {});
     }, bobId);
+    await johnPage.click('.nav-tab[data-page="settings"]');
     await johnPage.click('.nav-tab[data-page="contacts"]');
     await expect(johnPage.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 20_000 });
 

@@ -2246,6 +2246,9 @@ function attachEvents() {
   // Bottom nav
   qAll(".nav-tab[data-page]").forEach(t => t.addEventListener("click", () => {
     S.dropdownOpen = false;
+    // Contacts live on DAV and change on other devices; opening the
+    // destination is the moment to look again, not a later pull-to-refresh.
+    if (t.dataset.page === "contacts") S.contacts.loaded = false;
     R.go(t.dataset.page);
   }));
 
@@ -3697,7 +3700,6 @@ async function doSend() {
 
   const client = clientFor(S.identity);
   if (!client) return toast("Unlock your identity first", "warning");
-  const sess = loadSessionRecord(S.identity);
 
   sendBtn.disabled = true;
   const setStatus = (msg, cls = "") => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `compose-status ${cls}`; } };
@@ -3711,11 +3713,41 @@ async function doSend() {
     return;
   }
 
-  if (q("#c-group")?.checked) {
+  try {
+    const group = Boolean(q("#c-group")?.checked);
+    const outcome = await sendSigned(client, {
+      to, body, attachment, group, thread: R.params.thread || "", setStatus,
+    });
+    if (outcome.status === "sent" || outcome.status === "queued") {
+      if (q("#c-body")) q("#c-body").value = "";
+    }
+    if (outcome.status === "sent") {
+      if (group) {
+        toast(`Group message delivered to ${outcome.delivered} of ${outcome.total}`,
+          outcome.delivered === outcome.total ? "success" : "warning");
+      } else {
+        toast("Message sent!", "success");
+      }
+      setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+    }
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+/**
+ * Send a signed message — direct or to a group — and keep our own copy in the
+ * store. Shared by compose and the conversation view, which differ only in
+ * what they do with the screen afterwards.
+ *
+ * @returns {Promise<{status: "sent"|"queued"|"blocked"|"failed", delivered?: number, total?: number}>}
+ */
+async function sendSigned(client, { to, body, attachment = null, thread = "", group = false, setStatus }) {
+  if (group) {
     try {
       setStatus("Reading the signed group roster…");
       const sent = await client.sendGroupAndArchive(to, body, {
-        ...(R.params.thread ? { thread: R.params.thread } : {}),
+        ...(thread ? { thread } : {}),
       });
       const first = sent.envelopes[0];
       mergeMessages([{
@@ -3733,35 +3765,32 @@ async function doSend() {
       const total = sent.envelopes.length;
       setStatus(`✓ ${delivered} of ${total} delivered`, delivered === total ? "ok" : "err");
       if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
-      if (q("#c-body")) q("#c-body").value = "";
-      toast(`Group message delivered to ${delivered} of ${total}`, delivered === total ? "success" : "warning");
-      setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+      return { status: "sent", delivered, total };
     } catch (err) {
       setStatus(`✕ ${err.message}`, "err");
       toast(err.message, "error");
-    } finally {
-      if (sendBtn) sendBtn.disabled = false;
+      return { status: "failed" };
     }
-    return;
   }
 
   try {
     setStatus("Checking their key…");
     if (!(await checkPinBeforeSend(client, to))) {
       setStatus("✕ Not sent — key not trusted", "err");
-      return;
+      return { status: "blocked" };
     }
     setStatus("Sending…");
+    const sess = loadSessionRecord(S.identity);
     const sent = attachment
       ? await client.sendAttachment(to, new Uint8Array(await attachment.arrayBuffer()), {
           name: attachment.name,
           mime: attachment.type || "application/octet-stream",
           caption: body || attachment.name,
-          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+          ...(thread ? { threadId: thread } : {}),
         })
       : await client.sendAndArchive(to, body, {
           signWith: sessionIsValid(sess) ? "session" : "identity",
-          ...(R.params.thread ? { threadId: R.params.thread } : {}),
+          ...(thread ? { threadId: thread } : {}),
         });
     setStatus("✓ Sent", "ok");
     // Keep our own copy on screen too: the relay never hands a sender their
@@ -3775,28 +3804,24 @@ async function doSend() {
       queue: "sent",
       plaintext: body || attachment?.name,
       ...(attachment ? { type: "chat.attachment", metadata: sent.message.metadata } : {}),
-      ...(R.params.thread ? { thread_id: R.params.thread } : {}),
+      ...(thread ? { thread_id: thread } : {}),
     }]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
-    if (q("#c-body")) q("#c-body").value = "";
-    toast("Message sent!", "success");
-    setTimeout(() => { R.sub = null; R.page = "messages"; render(); }, 1200);
+    return { status: "sent" };
   } catch (err) {
     if (!attachment && client.decryptor && isRetryableSendError(err)) {
       const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, body);
       queueWebMessage(S.identity, to, sealed, {
         signWith: "identity",
-        ...(R.params.thread ? { threadId: R.params.thread } : {}),
+        ...(thread ? { threadId: thread } : {}),
       }, err.message);
       setStatus("· Queued — will retry when online", "ok");
       toast("Message queued until the relay is reachable", "success");
-      if (q("#c-body")) q("#c-body").value = "";
-      return;
+      return { status: "queued" };
     }
     setStatus(`✕ ${err.message}`, "err");
     toast(err.message, "error");
-  } finally {
-    if (sendBtn) sendBtn.disabled = false;
+    return { status: "failed" };
   }
 }
 

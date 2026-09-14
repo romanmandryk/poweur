@@ -29,7 +29,7 @@
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
-| **E15-T13 Conversation view & paged history** | **open** | tapping a row opens compose, not the thread; view can ship now, paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
+| **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
 
 ## Goal
 
@@ -774,13 +774,13 @@ manifest, and `poweur history [peer]` prints the entire result with no limit. At
 that is 10k requests before the tray can draw. Filenames carry time but not the peer, so
 filtering a conversation still means opening everything.
 
-- [ ] **Conversation screen** (`R.push("thread", { peer, thread, group })`): bubbles
+- [x] **Conversation screen** (`R.push("thread", { peer, thread, group })`): bubbles
       oldest→newest, own messages right-aligned, day separators, sender name per bubble in
       groups. Tapping a tray row opens this, not compose; "New message" stays compose
 - [ ] **Per-message state in the bubble:** sent / delivered / read ticks from `S.acks`,
       outbox pending/failed with retry, expiry countdown, "Open 📎" on attachment bubbles,
       the generic "app message (&lt;type&gt;)" line for unknown types (reuse `describeMessage`)
-- [ ] **Inline reply composer** pinned to the bottom (safe-area aware in the shell), keeping
+- [x] **Inline reply composer** pinned to the bottom (safe-area aware in the shell), keeping
       the thread id; attachment picker behind an icon. Sending appends optimistically
 - [ ] **Live:** push events already trigger `loadInbox()` → `render()`; the open thread must
       re-render too (today it only repaints when `R.page === "messages" && !R.sub`), stick to
@@ -796,6 +796,19 @@ filtering a conversation still means opening everything.
       older chunks on scroll-to-top with the scroll position preserved; chunks cached in
       IndexedDB (immutable, never revalidated)
 - [ ] Desktop (with E15-T11): the thread renders into the detail pane of the two-pane layout
+
+**Shipped so far (2026-09-14, web 0.1.12):**
+- The conversation screen shows the newest 10 messages first. "Load more (N earlier)" appears only while older messages exist, and adds 10 at a time.
+- Direct messages you sent show sent / delivered / read ticks, or "!" when the relay's `sys.delivery.failed` notice arrives. Group messages show no ticks.
+- Attachment bubbles have "Open 📎", expiring messages show a countdown, and unknown message types show the generic line.
+- The reply box is text only (Cmd/Ctrl+Enter sends); attachments still go through compose. Its sending code is shared with compose (`sendSigned`).
+- Push events repaint the open conversation. It stays pinned to the bottom while you're there, and stays in place after "Load more".
+- Open work from the list above:
+  - the "new messages ↓" pill;
+  - outbox pending/failed bubbles;
+  - read marks per visible message (still marked when the conversation opens);
+  - download paging (E20-T8).
+- Contact rows and "Message" actions still open compose.
 
 **Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
 in order with ticks; A sends while B sits in the thread and it appears without interaction;

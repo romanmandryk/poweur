@@ -183,7 +183,7 @@ test.describe("messages survive a refresh", () => {
 
     // Opening it is reading it.
     await conversation.click();
-    await expect(alicePage.locator(".compose-body")).toBeVisible();
+    await expect(alicePage.locator(".thread-view")).toBeVisible();
     await alicePage.click("#btn-back");
     await expect(
       (await conversationWith(alicePage, bobId)).locator(".conv-badge"),
