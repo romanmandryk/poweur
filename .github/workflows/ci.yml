@@ -123,6 +123,25 @@ jobs:
       - run: pnpm web:test
       - run: pnpm web:test:e2e
 
+  web-next:
+    name: Web app (EPIC-021 React rewrite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter @poweur/web-next...
+      - run: pnpm client:build
+      - run: pnpm web-next:typecheck
+      - run: pnpm web-next:test
+      - run: pnpm web-next:build
+
   observability:
     name: Observability and deployment
     runs-on: ubuntu-latest

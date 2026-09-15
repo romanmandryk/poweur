@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Dark mode follows `data-theme` on <html> (set from `poweur:theme`, shared
+   with the legacy app), not the media query directly. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Design tokens (E21-T5). Semantic names map onto light values here and are
+   swapped for dark below, so components use `bg-surface`, never `dark:` pairs. */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-bg: #f2f2f7;
+  --color-surface: #ffffff;
+  --color-surface-2: #f2f2f7;
+  --color-border: #e5e5ea;
+  --color-fg: #000000;
+  --color-muted: #8e8e93;
+  --color-accent: #007aff;
+  --color-accent-fg: #ffffff;
+  --color-danger: #ff3b30;
+  --color-success: #34c759;
+  --color-warning: #ff9500;
+
+  --radius-card: 12px;
+}
+
+@layer base {
+  [data-theme="dark"] {
+    --color-bg: #000000;
+    --color-surface: #1c1c1e;
+    --color-surface-2: #2c2c2e;
+    --color-border: #38383a;
+    --color-fg: #ffffff;
+    --color-muted: #8e8e93;
+    --color-accent: #0a84ff;
+    --color-danger: #ff453a;
+    --color-success: #30d158;
+    --color-warning: #ff9f0a;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}

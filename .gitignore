@@ -4,6 +4,7 @@ node_modules/
 dist/
 build/
 .cache/
+*.tsbuildinfo
 
 # Playwright
 **/test-results/

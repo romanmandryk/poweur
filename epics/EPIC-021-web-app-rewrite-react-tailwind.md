@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** proposed
+- **Status:** in progress — T1, T3 done; T2 done pending first production deploy
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -13,9 +13,9 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E21-T1 Scaffold `apps/web-next` (Vite, React 19, TS, Tailwind v4) | open | |
-| E21-T2 Relay serves `/newapp/` beside `/app/` + prod wiring | open | relay patch bump |
-| E21-T3 Non-UI modules carried over verbatim | open | storage format must stay byte-compatible |
+| E21-T1 Scaffold `apps/web-next` (Vite, React 19, TS, Tailwind v4) | **done** | Vite 8, React 19.3 + Compiler (Babel preset), Tailwind 4.3, 69 KB gz placeholder bundle; ESLint replaced by source-guard tests |
+| E21-T2 Relay serves `/newapp/` beside `/app/` + prod wiring | **done** (deploy unverified) | relay 0.1.7; image builds locally with `/web-next` baked in; confirm on prod after merge |
+| E21-T3 Non-UI modules carried over verbatim | **done** | 12 modules + 15 test files (176 tests green); legacy↔next storage compat + byte-identical guard in `test/lib/legacy-compat.test.js` |
 | E21-T4 State store, routing & app shell | open | replaces `S`, `R`, `render()`, `attachEvents()` |
 | E21-T5 Design system: tokens + primitives | open | replaces `css/style.css` |
 | E21-T6 Front doors & gates | open | |
@@ -110,35 +110,44 @@ Dependencies are pinned in the lockfile; nothing is loaded from a CDN at runtime
 
 ### E21-T1 — Scaffold `apps/web-next`
 
-- [ ] `apps/web-next/` as pnpm workspace package `@poweur/web-next`, version `0.1.0`
-- [ ] Vite + React 19 + TypeScript (strict) + React Compiler (babel plugin)
-- [ ] Tailwind v4 via `@tailwindcss/vite`; `src/index.css` with `@theme` tokens and
+- [x] `apps/web-next/` as pnpm workspace package `@poweur/web-next`, version `0.1.0`
+- [x] Vite + React 19 + TypeScript (strict) + React Compiler (`reactCompilerPreset` via
+      `@rolldown/plugin-babel`; `@babel/core` pinned to 7 because `apps/docs` Docusaurus needs it)
+- [x] Tailwind v4 via `@tailwindcss/vite`; `src/index.css` with `@theme` tokens and
       `@custom-variant dark` keyed on `[data-theme="dark"]` (what `poweur:theme` sets today)
-- [ ] `vite.config.ts`: `base: "./"`, output `dist/`, no external runtime URLs
-- [ ] `@poweur/client` as a `workspace:*` dependency (bundled — no vendor copy, no import map)
-- [ ] ESLint: react-hooks, react-compiler, ban `dangerouslySetInnerHTML`
-- [ ] `src/build-info.ts` with `APP_VERSION` / `APP_BUILD_TIME` (shown in Settings → About)
-- [ ] Root scripts: `web-next:dev`, `web-next:build`, `web-next:test`, `web-next:test:e2e`
-- [ ] Viewport meta, `viewport-fit=cover`, safe-area insets as Tailwind utilities
+- [x] `vite.config.ts`: `base: "./"`, output `dist/`, no external runtime URLs
+- [x] `@poweur/client` as a `workspace:*` dependency (bundled — no vendor copy, no import map)
+- [x] ~~ESLint~~ → source-guard tests instead (fewer deps): `test/scaffold.test.tsx` bans
+      `dangerouslySetInnerHTML` / `innerHTML =` / `insertAdjacentHTML` and any `.css` besides
+      `index.css`; `test/lib/origin.test.js` now scans all of `src/` for `location.origin`
+- [x] `src/build-info.ts` with `APP_VERSION` / `APP_BUILD_TIME` (test asserts it matches package.json)
+- [x] Root scripts: `web-next:dev`, `web-next:build`, `web-next:typecheck`, `web-next:test`
+      (`web-next:test:e2e` arrives with T12)
+- [x] Viewport meta, `viewport-fit=cover`, `pt-safe` / `pb-safe` utilities; theme applied before
+      first paint from `poweur:theme`
 
 **Acceptance:** `pnpm web-next:build` emits `dist/index.html` whose asset references are all
 relative; `pnpm web-next:test` runs green on an empty smoke test.
 
 ### E21-T2 — Relay serves `/newapp/` beside `/app/`; prod wiring
 
-- [ ] Generalize `mountWebStatic(mux, dir)` → `mountWebStatic(mux, prefix, dir)`; mount
+- [x] Generalize `mountWebStatic(mux, dir)` → `mountWebStatic(mux, prefix, dir)`; mount
       `/app/` from `WEB_STATIC_DIR` (unchanged) and `/newapp/` from new
       `WEB_NEXT_STATIC_DIR` (unset → not mounted)
-- [ ] Go unit tests: `/newapp` → 301 `/newapp/`, SPA fallback, path traversal rejected,
-      unset dir mounts nothing, `/app/` behavior unchanged
-- [ ] `GET /` capabilities list mentions `web_ui_next` when mounted
-- [ ] Bump relay patch version (`apps/api/internal/buildinfo.Version`)
-- [ ] **Prod build:** CI builds `apps/web-next` and bakes `dist/` into the relay image
-      (new Node stage in `apps/api/Dockerfile`, copied to `/web-next`), set
-      `WEB_NEXT_STATIC_DIR: /web-next` in `docker-compose.prod.yml`. (Baking avoids committing
-      build output; the legacy `./apps/web:/web:ro` mount stays until T14.)
-- [ ] Web test helper `startRelay()` also sets `WEB_NEXT_STATIC_DIR` to `apps/web-next/dist`
-- [ ] `deploy/OPS.md`: note that `/newapp/` is the preview build
+- [x] Go unit tests (`internal/relay/webstatic_test.go`): `/newapp` → 301 `/newapp/`, SPA
+      fallback, path traversal rejected, unset dir mounts nothing, `/app/` behavior unchanged
+- [x] `GET /` document lists `web_ui_next`
+- [x] Bump relay patch version (`apps/api/internal/buildinfo.Version` 0.1.6 → 0.1.7)
+- [x] **Prod build:** `web` Node stage in `apps/api/Dockerfile` (pnpm 10, frozen lockfile)
+      builds `@poweur/client` + web-next and copies `dist/` to `/web-next`; `.dockerignore`
+      admits the workspace manifests, `packages/client-ts`, `apps/web-next`;
+      `WEB_NEXT_STATIC_DIR: /web-next` in `docker-compose.prod.yml`. Legacy
+      `./apps/web:/web:ro` mount stays until T14. CI gains a `web-next` job.
+- [x] Web test helper `startRelay()` also sets `WEB_NEXT_STATIC_DIR` to `apps/web-next/dist`
+- [x] `deploy/OPS.md`: note that `/newapp/` is the preview build
+- [x] `.claude/launch.json` → `relay-web-next`: local relay on :8088 serving both apps
+- [ ] Verify on production after the first deploy: `https://poweur.net/newapp/` and
+      `https://<handle>.poweur.net/newapp/` load
 
 **Acceptance:** after a deploy, `https://poweur.net/newapp/` and
 `https://<handle>.poweur.net/newapp/` serve the new build while `/app/` is untouched; an
@@ -148,16 +157,18 @@ identity unlocked in `/app/` is visible (and unlockable) in `/newapp/` in the sa
 
 These already contain no DOM code and are covered by Vitest. Move, don't rewrite.
 
-- [ ] Copy to `apps/web-next/src/lib/` with minimal changes (types via JSDoc → `.ts` only
-      where free): `storage`, `vault`, `passkey`, `native`, `keystore`, `client`, `mode`,
-      `profiles`, `threads`, `outbox`, `signin`, `enroll-wait`
-- [ ] Copy their unit tests (`storage`, `vault`, `passkey`, `native`, `keystore`,
-      `keystore-relay`, `client-relay`, `mode`, `profiles`, `threads`, `outbox`, `signin`,
-      `enroll-wait`, `fingerprint`, `origin`, `devices`) and keep them green
-- [ ] **Compatibility test:** a record written by legacy `apps/web/js/storage.js` is read by
-      the new module and vice versa (identity, session, config, active, theme)
-- [ ] Hardcoded `/app/` links (`app.js` "Claim a different name", the `#claim=` join URL) are
-      built from the **current mount path**, so links opened from `/newapp/` stay in `/newapp/`
+- [x] Copy to `apps/web-next/src/lib/` **byte-identical** (no `.ts` conversion yet — the guard
+      below would flag it): `storage`, `vault`, `passkey`, `native`, `keystore`, `client`,
+      `mode`, `profiles`, `threads`, `outbox`, `signin`, `enroll-wait`
+- [x] Copy their unit tests to `test/lib/` and keep them green; helpers (`relay`, `identity`,
+      `browser-globals`) copied to `test/helpers/`. `fingerprint` imports the bundled
+      `@poweur/client` instead of `vendor/`. `devices.test.js` is a component test → T5
+- [x] **Compatibility test** (`test/lib/legacy-compat.test.js`): identity / active / config
+      written by either app reads back in the other, same bytes; removal is shared
+- [x] **Freeze guard:** same file asserts each carried module is byte-identical to
+      `apps/web/js/` — a legacy fix not mirrored here fails CI
+- [ ] ~~Hardcoded `/app/` links~~ → moved to **T6** (identity door "Claim a different name")
+      and **T10** (`#claim=` join URL): both live in `app.js` UI code, not in a carried module
 
 **Acceptance:** all copied unit tests pass under `apps/web-next`; cross-app storage
 compatibility test passes.
