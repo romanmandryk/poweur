@@ -1,69 +1,275 @@
 # Poweur
 
-A pnpm monorepo for the Poweur ID DNS-identity protocol, relay, clients, docs, and infrastructure.
+**One name for identity, messages, files, apps, and agents.**
 
-**Agents / contributors:** see [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Roadmap tasks: [epics/](epics/README.md).
+Poweur is an open protocol and self-hostable network built around a simple idea: a stable,
+human-readable internet name should be useful everywhere. A Poweur ID such as
+`alice.example.com` or `alice.poweur.net` is simultaneously a verifiable identity, a messaging
+address, a sign-in credential, and a file-sharing target.
 
-## Structure
+Poweur will provide hosted IDs and services, but the network is not meant to depend on one
+operator. Anyone can run a relay, host identities, build a compatible client, or create an app
+on the same identity, messaging, and storage primitives.
 
+> [!NOTE]
+> Poweur proves control of a name and its cryptographic keys. It does not by itself prove a
+> legal identity, a unique human, or a real-world reputation. Those claims can be added through
+> explicit attestations without changing the underlying ID.
+
+## TL;DR
+
+- **Your ID is an internet name.** Bring a domain you control or claim a hosted name under a
+  relay's wildcard domain.
+- **Your keys stay with you.** Clients sign, messages are encrypted end-to-end, and relays do
+  not hold identity private keys.
+- **The same ID works across services.** Use it for end-to-end encrypted messaging, contacts,
+  file sharing, app sign-in, and scoped access to your data.
+- **Your ID has a home.** Each identity can have a WebDAV-compatible, syncable filesystem with
+  public, shared, private, and application namespaces.
+- **Apps can compose instead of integrating pairwise.** Apps and agents can exchange typed
+  messages and work on shared files using published conventions rather than bespoke APIs.
+- **Hosting is a choice, not a boundary.** Poweur can operate a convenient hosted service while
+  independent relays and self-hosted domains remain first-class participants.
+- **The working substrate exists today.** Identity resolution, hosted registration, encrypted
+  messaging, contacts and anti-spam controls, WebDAV storage, sync, sharing, sign-in, web and
+  CLI clients, and recovery foundations are implemented. Poweur is still pre-1.0; product UX,
+  integrations, active websites, agent workflows, and storage v2 remain roadmap work.
+
+Start with the [documentation](apps/docs/docs/intro.md), browse the
+[roadmap](epics/README.md), or see [Contributing](CONTRIBUTING.md).
+
+## The broader goal: an open, composable “everything app”
+
+Poweur is not trying to put every feature into one closed super-app. It aims to make many apps
+feel like one coherent environment because they share a few open primitives:
+
+```text
+Poweur ID
+   ├── proves control of a stable name
+   ├── receives signed, encrypted messages
+   ├── owns a syncable file home
+   ├── grants apps and people scoped access
+   └── gives agents an address and shared workspace
 ```
-poweur/
-├── apps/
-│   ├── api/      # Go relay / HTTP API
-│   ├── cli/      # Node CLI
-│   ├── docs/     # Docusaurus documentation site
-│   ├── ios/      # Native iOS package scaffolding
-│   ├── android/  # Native Android package scaffolding
-│   └── infra/    # Terraform for Hetzner deployment
-├── requirements.md
-├── test-scenarios.md
-├── package.json
-└── pnpm-workspace.yaml
-```
 
-## Prerequisites
+An app can authenticate a user and, with consent, store its data in that user's home. Another
+authorized app can read the same open convention. A person can share a folder with another
+person, a group, or an agent. Typed messages and file-change events can coordinate work across
+different vendors and independently hosted relays.
 
-- [Node.js](https://nodejs.org/) >= 18
-- [pnpm](https://pnpm.io/) >= 9
-- [Go](https://go.dev/) >= 1.21
+The intended result is an open distributed application layer for communication, publishing,
+collaboration, payments, personal software, and agent workflows—composable like the web, but
+with identity, reachability, trust controls, and user-controlled data built in.
 
-## Getting started
+## What works today
 
-Install JS dependencies from the repo root:
+### Identity and discovery
+
+- DNS names are canonical Poweur IDs.
+- Public keys and relay information resolve web-first from
+  `https://<id>/.well-known/poweur/id.json`, with DNS TXT fallback.
+- Conflicting web and DNS identity material fails closed.
+- Relays can offer hosted wildcard identities without one DNS write per user.
+- Domain owners can self-host, rotate keys, export an identity, and move between relays.
+
+See [Identity model](apps/docs/docs/protocol/identity-model.md),
+[web identity](apps/docs/docs/protocol/web-identity.md), and
+[EPIC-001](epics/EPIC-001-web-identity.md).
+
+### Messaging, contacts, and trust
+
+- Signed, end-to-end encrypted relay-to-relay messaging.
+- Durable inbox spool and encrypted client-side history.
+- Push notifications over SSE, delivery acknowledgements, expiry, threads, typed messages,
+  attachments, and group messaging.
+- Contact requests, pinned keys, blocking, inbox policies, relay-level abuse pressure, and
+  opt-in anonymous messages protected by proof of work.
+
+See [Messaging](apps/docs/docs/protocol/message-format.md),
+[contacts and trust](apps/docs/docs/trust/contacts.md),
+[EPIC-007](epics/EPIC-007-contacts-trust-antispam.md), and
+[EPIC-009](epics/EPIC-009-messaging-upgrades.md).
+
+### Files, sync, and sharing
+
+- A per-identity home exposed through WebDAV and the web client.
+- Public, shared, private, relay-managed, and app-specific namespaces.
+- Change journals, manifests, selective sync, resumable uploads, and device revocation.
+- Signed path grants for people and groups, link shares, quotas, and immediate revocation.
+- A conventions process for portable application data, with a shared tasks app as the first
+  end-to-end example.
+
+The current relay filesystem is server-readable; relay-blind encrypted storage is future work.
+See [Storage model](apps/docs/docs/files/storage-model.md),
+[sharing](apps/docs/docs/files/sharing.md),
+[app-data conventions](apps/docs/docs/conventions/app-data.md), and
+[EPIC-003](epics/EPIC-003-file-storage-webdav.md).
+
+### Sign-in, clients, and recovery
+
+- Stateless “Sign in with Poweur” challenge-response and verifier SDKs.
+- Optional, consented, path-scoped grants to an app's own namespace.
+- A mechanical `did:web` projection and a reference relying-party guestbook.
+- Go CLI, browser app, and `@poweur/client` for browser, Node, Bun, and Deno.
+- Seed-derived keys, multiple device enrollments, recovery kits, device removal, and a
+  device-to-device enrollment ceremony.
+- A Capacitor mobile shell with native key-custody seams and multi-relay support.
+
+See [Sign-in](apps/docs/docs/auth/sign-in.md),
+[client overview](apps/docs/docs/clients/overview.md),
+[EPIC-008](epics/EPIC-008-sign-in.md), and
+[EPIC-011](epics/EPIC-011-key-management-recovery.md).
+
+## Roadmap
+
+The detailed roadmap and task status live in [`epics/`](epics/README.md). Broadly, the work
+moves from a usable substrate toward an interoperable app and agent ecosystem.
+
+### 1. Finish the everyday product
+
+Complete the host-aware web experience, desktop/tablet layout, conversation history UX, mobile
+packaging and background delivery, and the remaining share-offer/mount flow.
+
+- [Web app UX](epics/EPIC-015-web-app-ux.md)
+- [Mobile app](epics/EPIC-019-mobile-app-capacitor.md)
+- [Sharing and recipient mounts](epics/EPIC-005-sharing-acl.md)
+- [Key management and recovery](epics/EPIC-011-key-management-recovery.md)
+
+### 2. Make every identity a place to publish and interact
+
+Let identities publish real websites and content from their homes, receive contact-form
+messages under their inbox policy, advertise capabilities, and later expose payment methods or
+recipient-priced sender challenges.
+
+- [Identity websites](epics/EPIC-012-identity-websites.md)
+- [Capabilities and conventions](epics/EPIC-006-poweur-sys-conventions.md)
+- [Anonymous messaging](epics/EPIC-014-anonymous-messaging-challenges.md)
+- [Pay-to-send and proof-of-work v2](epics/EPIC-016-pow-v2-and-pay-to-send.md)
+- [Payment integrations](epics/integrations/INT-002-payments.md)
+
+### 3. Turn the home into an app platform
+
+Publish stable client packages, make app data portable by convention, and let third-party apps
+use a Poweur ID for both authentication and narrowly scoped access to user-controlled storage.
+
+- [TypeScript client SDK](epics/EPIC-017-typescript-client-sdk.md)
+- [Sign in with Poweur](epics/EPIC-008-sign-in.md)
+- [Integration program and OIDC bridge](epics/integrations/INT-000-overview.md)
+- [Identity and verification integrations](epics/integrations/INT-001-identity-verification.md)
+- [Collaboration-tool integrations](epics/integrations/INT-004-collaboration-tools.md)
+
+### 4. Build shared agent workflows
+
+Give agents their own verifiable IDs and accountable operators, then use messages, scoped
+grants, shared folders, and file-change events as a neutral handoff layer between agents and
+people—even when their tools and hosting providers differ.
+
+- [Agents and automation](epics/EPIC-010-agents-automation.md)
+- [AI and agent-framework integrations](epics/integrations/INT-003-ai-agents.md)
+- [Agent control-plane integrations](epics/integrations/INT-005-agent-control-planes.md)
+
+### 5. Harden the distributed network
+
+Separate identity/messaging control from storage services, add content-addressed chunking and
+relay-blind encryption, improve delegation and share capabilities, and continue production and
+federation hardening.
+
+- [Storage protocol v2](epics/EPIC-020-storage-protocol-v2.md)
+- [Production deployment and observability](epics/EPIC-013-prod-deployment-observability.md)
+- [Relay registration, persistence, export, and migration](epics/EPIC-002-relay-registration-and-persistence.md)
+
+Adoption work is tracked separately in the
+[integration epics](epics/integrations/INT-000-overview.md), because those deliverables often
+belong in upstream projects rather than this repository.
+
+## Architecture
+
+- **Relay (`apps/api`)** — Go HTTP service for identity hosting, message verification/routing,
+  durable delivery, file homes, shares, and well-known endpoints.
+- **Identity package (`packages/identity`)** — canonical Go wire formats, signatures, grants,
+  policies, resolution, and conformance-vector generation.
+- **Go CLI (`apps/cli`)** — complete scriptable client for people, operators, bots, and tests.
+- **TypeScript SDK (`packages/client-ts`)** — the corresponding browser/Node implementation
+  and interoperable `poweur` CLI.
+- **Web app (`apps/web`)** — vanilla-JS client for identity creation, messaging, contacts,
+  settings, files, sharing, sign-in approval, devices, and recovery.
+- **Mobile (`apps/mobile`)** — Capacitor shell over the web client with native iOS and Android
+  key-custody bridges.
+- **Integration suite (`apps/integration`)** — real in-process relays, CLI journeys, fake DNS,
+  restart tests, and cross-relay coverage.
+- **Reference apps (`apps/guestbook`, `apps/tasks`)** — sign-in and portable shared-data examples.
+- **Docs and conventions (`apps/docs`, `conventions`)** — protocol documentation, schemas, and
+  the Poweur Convention Proposal process.
+- **Deployment (`deploy`)** — container, Caddy, Ansible, telemetry, dashboards, and operational
+  material for a production relay.
+
+## Development
+
+### Prerequisites
+
+- Go 1.25 or newer
+- Node.js 18 or newer
+- pnpm 9 or newer
+
+Install JavaScript dependencies:
 
 ```bash
 pnpm install
 ```
 
-### API (`apps/api`)
+Run the Go relay:
 
 ```bash
 cd apps/api
-go run main.go       # starts the HTTP server on :8080
-```
-
-### CLI (`apps/cli`)
-
-```bash
-cd apps/cli
+# Create .env first; see apps/api/README.md for the required relay address and local settings.
 go run .
 ```
 
-The CLI signs outbound messages with a short-lived session key by default. Headless agents or operators who want to bypass session registration can opt into signing with the long-lived identity key on a per-send basis:
+Run the Go CLI:
 
 ```bash
-poweur send --sign-with=identity bob.poweur.net "hi bob"
+cd apps/cli
+go run . --help
 ```
 
-Relays accept both paths; the recipient decrypts the same way regardless of which signing key the sender chose.
+Serve the web app from the relay by setting `WEB_STATIC_DIR` to `apps/web` in the relay's
+environment, then open `/app/`. The browser app has no bundler and imports the vendored
+`@poweur/client` ESM directly.
 
-### Docs (`apps/docs`)
+See [`apps/api/README.md`](apps/api/README.md) for a local relay setup.
 
-The repository contains a Docusaurus documentation site under `apps/docs`, alongside the higher-level product requirements in `requirements.md`.
+Build and test the TypeScript client:
 
-## Current implementation status
+```bash
+pnpm client:build
+pnpm client:test
+pnpm client:typecheck
+```
 
-- `apps/api` currently exposes only minimal root and health endpoints.
-- `apps/cli` is still a placeholder.
-- `apps/ios` and `apps/android` are package-level scaffolding; native app sources are not yet present in the repo.
-- The most complete source of truth today is the documentation set in `apps/docs` together with `requirements.md`.
+Run the Go protocol and integration suites:
+
+```bash
+go test ./packages/identity/... ./apps/api/... ./apps/cli/...
+cd apps/integration && go test ./... -count=1
+```
+
+See [AGENTS.md](AGENTS.md) for testing, protocol-conformance, vendoring, versioning, and epic
+tracking requirements before changing code.
+
+## Project status
+
+Poweur is pre-1.0 and under active development. The protocol and main product paths are backed
+by unit, conformance, live-relay, cross-language, browser, and end-to-end tests, but APIs and
+storage formats may still evolve. Check each epic's progress table before relying on a planned
+capability.
+
+The code is developed in public with the goal of permitting independent clients, relays, apps,
+and hosted services. A repository-wide license must be selected before the project is treated as
+open source for redistribution; package-level metadata alone does not license the entire
+workspace.
+
+## Contributing
+
+Roadmap epics are the issue tracker until corresponding GitHub issues exist. Start with
+[Contributing](CONTRIBUTING.md), choose an unblocked task from the [epic index](epics/README.md),
+and keep protocol changes documented and covered by integration tests.
