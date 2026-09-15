@@ -201,8 +201,11 @@ nor IP. All current action families have coverage; logs contain no content or cr
 - [x] Deploy by digest/sha, not `:latest`: `RELAY_IMAGE` is the GHCR digest from the
       build job; `docker compose up` on the VM checkout. Auto-rollback and baseline
       snapshots were removed after they restored Grafana 11 over a working 12 stack.
-- [x] Post-deploy gate: `wget` `/health` inside the relay container. Failure is red
-      but does not compose an older stack. Authenticated CLI smoke is not part of deploy.
+- [x] Post-deploy gate: `wget` `/health` inside the relay container and require
+      `versionHash` to match `RELEASE_SHA`. Failure is red but does not compose an
+      older stack. Authenticated CLI smoke is not part of deploy. (`bash -s` +
+      `docker compose exec` previously swallowed the remote script after Caddy
+      reload, so GitHub stayed green while prod froze on 66e969ba / relay 0.1.2.)
 - [x] Build the web app + docs artifacts in CI if/when they gain a build step (today
       `apps/web` is static — volume-mounted; keep that, but note it in the ops doc)
 - [x] `deploy/README.md` (or extend `BACKUP.md` into `deploy/OPS.md`): the full runbook —

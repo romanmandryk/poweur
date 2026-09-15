@@ -82,7 +82,12 @@ jobs:
           RELEASE_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          ssh "poweur@$DEPLOY_HOST" env RELEASE_SHA="$RELEASE_SHA" RELEASE_IMAGE="$RELEASE_IMAGE" bash -s <<'EOF'
+          # Write the remote script to a file first. `bash -s` plus
+          # `docker compose exec` (stdin attached by default) used to swallow
+          # the rest of the heredoc after `caddy reload`, so compose never
+          # recreated the relay and GitHub still reported success.
+          ssh "poweur@$DEPLOY_HOST" env RELEASE_SHA="$RELEASE_SHA" RELEASE_IMAGE="$RELEASE_IMAGE" \
+            bash -c 'cat > /tmp/poweur-release.sh && exec bash /tmp/poweur-release.sh' <<'EOF'
           set -euo pipefail
           cd /opt/apps/poweur
           git fetch origin "$RELEASE_SHA"
@@ -91,13 +96,18 @@ jobs:
           export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
-            exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+            exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true
           export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
-          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
+          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d --pull always --force-recreate
           for _ in $(seq 1 30); do
-            if docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health >/dev/null; then
-              echo "Relay /health ok"
-              exit 0
+            health="$(docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health || true)"
+            if [ -n "$health" ]; then
+              echo "Relay /health ok: $health"
+              case "$health" in
+                *"\"versionHash\":\"$RELEASE_SHA\""*) exit 0 ;;
+              esac
+              echo "deployed versionHash does not match $RELEASE_SHA" >&2
+              exit 1
             fi
             sleep 2
           done
