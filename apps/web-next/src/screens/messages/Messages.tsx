@@ -3,7 +3,8 @@
  * contact requests, anonymous — and compose, as a thumb-reach button on a
  * phone and a header action from 768px.
  */
-import { useEffect, type KeyboardEvent } from "react";
+import { useEffect } from "react";
+import { onActivateKeys } from "../../lib/a11y";
 import { Plus, SquarePen } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { loadPolicy } from "../../actions/account";
@@ -116,16 +117,6 @@ export function Messages() {
   );
 }
 
-/** A div that is a button: it must answer Enter and Space, not just clicks. */
-function onActivate(action: () => void) {
-  return (event: KeyboardEvent) => {
-    if (event.target !== event.currentTarget) return;
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    action();
-  };
-}
-
 function InboxTray() {
   const identity = useSession((state) => state.identity) ?? "";
   const messages = useData((state) => state.messages);
@@ -157,7 +148,7 @@ function InboxTray() {
             data-thread={row.threadId}
             data-group={row.group ? "true" : "false"}
             onClick={open}
-            onKeyDown={onActivate(open)}
+            onKeyDown={onActivateKeys(open)}
             className="conv-row flex min-h-13 cursor-pointer items-center gap-3 border-b border-sep px-4 py-3 transition-colors last:border-b-0 focus-visible:-outline-offset-2 active:bg-surface-2 [@media(hover:hover)]:hover:bg-surface-2"
           >
             {row.group ? (

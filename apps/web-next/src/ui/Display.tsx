@@ -94,6 +94,18 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
+/** A label and a value on one line, as panels list facts about a key or a contact. */
+export function KvRow({ label, id, mono = false, children }: { label: ReactNode; id?: string; mono?: boolean; children: ReactNode }) {
+  return (
+    <div className="kv-row flex items-start gap-3 border-b border-sep py-2.5 text-sm last:border-b-0">
+      <span className="kv-label w-[90px] shrink-0 pt-px font-medium text-muted">{label}</span>
+      <span id={id} className={cn("kv-value flex-1 break-all text-fg", mono && "font-mono text-[13px]")}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
 export function Notice({ tone = "info", className, ...props }: ComponentProps<"div"> & { tone?: "info" | "warn" }) {
   return (
     <div

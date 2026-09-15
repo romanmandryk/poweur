@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3–T7 done; T2 done pending first production deploy; T8–T11 (contacts, files, launcher, settings) next
+- **Status:** in progress — T1, T3–T8 done; T2 done pending first production deploy; T9–T11 (files, launcher, settings) next
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -20,7 +20,7 @@
 | E21-T5 Design system: tokens + primitives | **done** | tokens from `style.css` in `index.css`; `src/ui/*`; IdentityInput, ProfileCard, AudiencePicker, PolicyControls in React; 257 tests green. Bundle now 144 KB gz (React + Radix + `@poweur/client` crypto) — above the 70–90 KB estimate, recheck in T13 |
 | E21-T6 Front doors & gates | **done** (unit-verified; e2e in T12) | landing + claim card, identity door, relay prompt, add-id, unlock, claim + DNS claim, onboarding, sign-in approval, join device; `actions/` hold the ported identity lifecycle. 304 tests green. Bundle 195 KB gz (argon2 / bip39 / keystore now reachable) |
 | E21-T7 Messages destination & conversation | **done** (unit-verified; e2e in T12) | trays, conversation rows, new chat, thread view, push stream, archive, read marks, signed / group / attachment send, offline outbox, key-change dialog; `actions/messages.ts` + `actions/contacts.ts`. 327 tests green. Bundle 210 KB gz |
-| E21-T8 Contacts destination | open | |
+| E21-T8 Contacts destination | **done** (unit-verified; e2e in T12) | list + filter, rows with state chip and overflow, contact panel (safety number, petname, message / block / unblock / remove), add-contact panel; requests and key pins came with T7 |
 | E21-T9 Files destination & sharing | open | |
 | E21-T10 Launcher & claim | open | |
 | E21-T11 Settings & every panel | open | |
@@ -306,10 +306,25 @@ drives modules directly and checks the vendored import map, so it stays a legacy
 
 ### E21-T8 — Contacts destination
 
-- [ ] List with filter, contact rows, contact panel, add-contact panel (preset from a message)
-- [ ] Requests handling, key pin
+- [x] List (`screens/contacts/Contacts.tsx`): Add in the header and in the empty state, search
+      filter (a controlled input now — it keeps focus while typing), loading / error, "no match";
+      rows are a compact ProfileCard (petname as the display name), a state chip
+      (Contact / Requested / Blocked) and an overflow `[data-contact-menu]`; tapping a row messages
+      them, tapping a blocked one opens its panel; Enter / Space work (`lib/a11y.ts`)
+- [x] Reload on arrival: the nav marks contacts stale, the destination reads them again and drains
+      requests, so an accepted request of ours is promoted while Contacts is open
+- [x] Contact panel (`ContactPanel.tsx`): identity, state, safety number of the pinned key, the
+      key itself, petname save (`setPetname`), Message / Block or Unblock (silent) / Remove
+- [x] Add-contact panel (`AddContactPanel.tsx`): IdentityInput with our domain as default and an
+      optional preset, lookup forced on submit (never a dead button), intro and petname, "Send
+      request" or "Just message them"
+- [x] Requests handling, key pin, key-changed dialog → shipped with **T7** (`actions/contacts.ts`,
+      `components/KeyMismatchDialog.tsx`); `KvRow` shared by both panels
+- [x] Unit tests: `test/screens/contacts.test.tsx`
 
-**Acceptance:** `contacts` spec passes against `/newapp/`.
+**Acceptance:** unit-level ✅. `contacts.spec` moves to **T12**; it reads the pinned key and
+seeds contacts through `page.evaluate(import("./js/client.js"))`, so it needs the same test seam as
+the T7 specs.
 
 ### E21-T9 — Files destination & sharing
 

@@ -196,6 +196,20 @@ export function removeContact(identity: string) {
   });
 }
 
+/** What you call someone; the state they are in does not change. */
+export async function setPetname(identity: string, petname: string) {
+  const client = activeClient();
+  if (!client) return;
+  const existing = contactFor(useData.getState().contacts.list, identity);
+  try {
+    const contacts = await client.contacts();
+    await contacts.set(identity, existing?.state ?? "accepted", { petname });
+    await refreshContacts();
+  } catch (error) {
+    toast(errorMessage(error), "error");
+  }
+}
+
 /**
  * Gate a send on the recipient's pin. False only when the user saw a mismatch
  * and declined; every other failure fails open — pinning is defence in depth,
