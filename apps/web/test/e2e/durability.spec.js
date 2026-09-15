@@ -112,8 +112,8 @@ test.describe("messages survive a refresh", () => {
     await conversationWith(alicePage, bobId);
     // Both are in the archive: open the thread and count what the store holds.
     const bodies = await alicePage.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const store = await clientFor(getActiveIdentity()).history();
       return (await store.load()).map((r) => r.body);
     });
@@ -156,8 +156,8 @@ test.describe("messages survive a refresh", () => {
 
     await reloadAndUnlock(alicePage);
     const queues = await alicePage.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const store = await clientFor(getActiveIdentity()).history();
       return (await store.load()).map((r) => `${r.queue}:${r.body}`);
     });
@@ -223,8 +223,8 @@ test.describe("messages survive a refresh", () => {
     // Open the anonymous door, free tier — the policy screen owns this
     // setting; here it is a precondition, not the thing under test.
     await rcptPage.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       await clientFor(getActiveIdentity()).setPolicy("open", { allow: true, challenge: "none" });
     });
     // Written behind the app's back, so let it re-read: the anonymous queue is
@@ -234,8 +234,8 @@ test.describe("messages survive a refresh", () => {
 
     // An unsigned sender needs no identity at all, which is the point.
     await rcptPage.evaluate(async ({ identity, relayUrl }) => {
-      const { sendAnonymous } = await import("@poweur/client");
-      const { resolveOptionsForRelay } = await import("./js/client.js");
+      const { sendAnonymous } = await window.__poweurModule("sdk");
+      const { resolveOptionsForRelay } = await window.__poweurModule("client");
       await sendAnonymous(identity, "a tip from nobody", {
         resolve: resolveOptionsForRelay(relayUrl),
         targetRelayUrl: relayUrl,
@@ -285,8 +285,8 @@ test.describe("messages survive a refresh", () => {
       .toBeGreaterThan(0);
 
     const stored = await page.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const dav = await clientFor(getActiveIdentity()).dav();
       const shards = (await dav.list("poweur-sys/private/messages")).filter((e) => e.dir);
       const files = (await dav.list(shards[0].path)).filter((e) => !e.dir);

@@ -300,7 +300,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
-	mountWebStatic(mux, s.cfg.WebStaticDir)
+	mountWebStatic(mux, "/app", s.cfg.WebStaticDir)
+	mountWebStatic(mux, "/newapp", s.cfg.WebNextStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))
 }
 
@@ -334,6 +335,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"launcher_hosts": s.cfg.LauncherHosts,
 		"hosted_domains": s.cfg.HostedDomains,
 		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
+		"web_ui_next":    "GET /newapp/ (when WEB_NEXT_STATIC_DIR is set)",
 		"version":        version,
 		"buildTime":      buildTime,
 		"versionHash":    versionHash,

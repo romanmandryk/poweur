@@ -38,7 +38,7 @@ handed work by an outside party.
 
 ### Open WebUI — `open-webui/open-webui`
 The most popular self-hosted LLM chat UI. Integration in three steps: Poweur sign-in (they
-already support OIDC — works with INT-000-T1 immediately); chat history stored under
+already support OIDC — works with EPIC-022 immediately); chat history stored under
 `/apps/com.openwebui/` in the *user's* home so conversations survive reinstalls and roam
 between instances; and **conversation sharing to a Poweur ID** — share a chat folder with a
 colleague or with an agent that continues the work overnight and writes results back. Open WebUI

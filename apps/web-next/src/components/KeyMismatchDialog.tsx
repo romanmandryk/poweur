@@ -1,0 +1,62 @@
+/**
+ * "Key changed" (EPIC-007): a contact's resolved key no longer matches the one
+ * pinned, and no signed rotation covers it. Resolves true only when the user
+ * explicitly trusts the new key; closing the panel is "don't send".
+ */
+import { fingerprintOrKey } from "@poweur/client";
+import { openPanel } from "../state/ui";
+import { Button } from "../ui/Button";
+import { KvRow } from "../ui/Display";
+
+export function confirmKeyChange({
+  recipient,
+  pinnedKey,
+  resolvedKey,
+}: {
+  recipient: string;
+  pinnedKey?: string | null;
+  resolvedKey?: string | null;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let trusted = false;
+    openPanel(
+      "Key changed",
+      (close) => (
+        <div>
+          <p className="val-warn mb-2 font-semibold text-warning">{recipient}'s key does not match the one you pinned.</p>
+          <p className="mb-3 text-[13px] text-muted">
+            No rotation statement covers this change. It can mean a compromised relay or registrar impersonating your contact. Verify
+            with them out of band before you trust it.
+          </p>
+          <KvRow label="Pinned" id="km-pinned" mono>
+            {pinnedKey ? fingerprintOrKey(pinnedKey) : ""}
+          </KvRow>
+          <KvRow label="Now" id="km-resolved" mono>
+            {resolvedKey ? fingerprintOrKey(resolvedKey) : ""}
+          </KvRow>
+          <p className="mt-2 text-[13px] text-muted">
+            These are safety numbers — read them to {recipient} over a channel you already trust. They match on both sides when nothing
+            has been tampered with.
+          </p>
+          <div className="panel-actions mt-4 flex flex-wrap gap-2">
+            <Button id="km-cancel" className="min-h-11 flex-[1_1_40%] px-4 py-3 text-[15px]" onClick={close}>
+              Don't send
+            </Button>
+            <Button
+              id="km-trust"
+              variant="danger"
+              className="min-h-11 flex-[1_1_40%] px-4 py-3 text-[15px]"
+              onClick={() => {
+                trusted = true;
+                close();
+              }}
+            >
+              Trust new key
+            </Button>
+          </div>
+        </div>
+      ),
+      () => resolve(trusted),
+    );
+  });
+}

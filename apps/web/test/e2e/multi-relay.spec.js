@@ -83,9 +83,9 @@ test.describe("many identities, many relays, one client", () => {
     // The client built for each identity addresses that identity's relay —
     // not whichever one the app happened to be configured with last.
     const targets = await page.evaluate(async (identities) => {
-      const { clientFor } = await import("./js/client.js");
+      const { clientFor } = await window.__poweurModule("client");
       const { setActiveIdentity, setUnlockedKeys, loadIdentityRecord, relayUrlFor } =
-        await import("./js/storage.js");
+        await window.__poweurModule("storage");
       const out = {};
       for (const identity of identities) {
         out[identity] = relayUrlFor(identity);

@@ -55,3 +55,27 @@ test("the Capacitor config points at the staged directory", () => {
   assert.equal(config.webDir, "www");
   assert.ok(config.appId.includes("."), "appId must be a reverse-DNS identifier");
 });
+
+// EPIC-021 E21-T13: the React build stages the same way, behind WEB_SOURCE=next.
+const nextDist = join(mobile, "../web-next/dist/index.html");
+
+test("WEB_SOURCE=next stages the React build, relative and without source maps", { skip: !existsSync(nextDist) && "apps/web-next is not built" }, () => {
+  try {
+    execFileSync("node", [join(mobile, "scripts/stage-web.mjs")], { stdio: "pipe", env: { ...process.env, WEB_SOURCE: "next" } });
+
+    assert.ok(existsSync(join(www, "index.html")), "missing index.html");
+    assert.ok(readFileSync(join(www, ".staged"), "utf8").startsWith("source: next"));
+    const assets = readdirSync(join(www, "assets"));
+    assert.ok(assets.some((name) => name.endsWith(".js")), "no bundle in assets/");
+    assert.ok(!assets.some((name) => name.endsWith(".map")), "source maps were staged");
+    // No legacy tree mixed in.
+    assert.ok(!existsSync(join(www, "vendor")), "legacy vendor/ was staged");
+
+    const html = readFileSync(join(www, "index.html"), "utf8");
+    const absolute = [...html.matchAll(/(?:src|href)\s*=\s*"(\/[^"]*)"/g)].map((m) => m[1]);
+    assert.deepEqual(absolute, [], `absolute paths in index.html: ${absolute.join(", ")}`);
+  } finally {
+    // Leave www/ as the default (legacy) staging, as the other tests expect.
+    execFileSync("node", [join(mobile, "scripts/stage-web.mjs")], { stdio: "pipe", env: { ...process.env, WEB_SOURCE: "" } });
+  }
+});

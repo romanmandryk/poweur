@@ -55,8 +55,8 @@ test.describe("inbox policy, anonymous and PoW", () => {
 
     // …and the document on the relay is what the CLI would have written.
     const stored = await ownerPage.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       return (await clientFor(getActiveIdentity()).policy()).policy;
     });
     expect(stored).toMatchObject({
@@ -139,8 +139,8 @@ test.describe("inbox policy, anonymous and PoW", () => {
     // A fresh identity that has never opted in: the default everywhere is deny.
     const closed = `polc${suffix}.poweur.net`;
     await page.evaluate(async ({ target, relayUrl }) => {
-      const { createIdentity } = await import("@poweur/client");
-      const { identityApiFor } = await import("./js/client.js");
+      const { createIdentity } = await window.__poweurModule("sdk");
+      const { identityApiFor } = await window.__poweurModule("client");
       await createIdentity(identityApiFor(relayUrl), target, { hosted: true });
     }, { target: closed, relayUrl: relay.baseUrl });
 
@@ -156,9 +156,9 @@ test.describe("inbox policy, anonymous and PoW", () => {
  */
 async function sendAnonymouslyFrom(page, to, body) {
   await page.evaluate(async ({ to, body }) => {
-    const { sendAnonymous } = await import("@poweur/client");
-    const { resolveOptionsForRelay } = await import("./js/client.js");
-    const { getActiveIdentity, relayUrlFor } = await import("./js/storage.js");
+    const { sendAnonymous } = await window.__poweurModule("sdk");
+    const { resolveOptionsForRelay } = await window.__poweurModule("client");
+    const { getActiveIdentity, relayUrlFor } = await window.__poweurModule("storage");
     const resolve = resolveOptionsForRelay(relayUrlFor(getActiveIdentity()));
     await sendAnonymous(to, body, { resolve, ...(resolve.scheme ? { scheme: resolve.scheme } : {}) });
   }, { to, body });

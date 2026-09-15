@@ -15,8 +15,8 @@ const MOBILE = { width: 375, height: 812 };
 /** Put a folder and a file under /shared, the way the owner's tree starts. */
 async function seedSharedFolder(page, folder) {
   return page.evaluate(async ({ folder }) => {
-    const { clientFor } = await import("./js/client.js");
-    const { getActiveIdentity } = await import("./js/storage.js");
+    const { clientFor } = await window.__poweurModule("client");
+    const { getActiveIdentity } = await window.__poweurModule("storage");
     const dav = await clientFor(getActiveIdentity()).dav();
     await dav.mkdir(`shared/${folder}`);
     await dav.write(`shared/${folder}/notes.txt`, "owner wrote this");
@@ -85,8 +85,8 @@ test.describe("files sharing", () => {
 
     // …and writes, because the grant said read and write.
     const wrote = await grantee.evaluate(async ({ owner, path }) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const dav = await clientFor(getActiveIdentity()).dav({ audience: owner, scope: "dav:full" });
       await dav.write(path, "grantee was here");
       return dav.readText(path);
@@ -99,8 +99,8 @@ test.describe("files sharing", () => {
     await expect(owner.locator("#shares-list")).toContainText("not shared anything yet", { timeout: 20_000 });
 
     const refused = await grantee.evaluate(async ({ owner }) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const dav = await clientFor(getActiveIdentity()).dav({ audience: owner, scope: "dav:full", force: true });
       try {
         await dav.list("shared/project-x");
@@ -129,8 +129,8 @@ test.describe("files sharing", () => {
 
     // Written behind the UI's back, the way another device would.
     await page.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const dav = await clientFor(getActiveIdentity()).dav();
       await dav.write("shared/watched/from-elsewhere.txt", "another device");
     });
@@ -159,8 +159,8 @@ test.describe("files sharing", () => {
     await seedSharedFolder(owner, "handouts");
 
     const { shareId, token } = await owner.evaluate(async ({ folder }) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const client = clientFor(getActiveIdentity());
       const shares = await client.shares();
       const { grant, token } = await shares.addLink(client.signer, `shared/${folder}`, {});
@@ -194,8 +194,8 @@ test.describe("files sharing", () => {
 
     // ── The owner revokes it; the next load is a dead end ─────────────────
     await owner.evaluate(async ({ shareId }) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const shares = await clientFor(getActiveIdentity()).shares();
       await shares.revoke(shareId);
     }, { shareId });
@@ -221,8 +221,8 @@ test.describe("files sharing", () => {
     await seedSharedFolder(owner, "guarded");
 
     const token = await owner.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const client = clientFor(getActiveIdentity());
       const shares = await client.shares();
       const { token } = await shares.addLink(client.signer, "shared/guarded", {

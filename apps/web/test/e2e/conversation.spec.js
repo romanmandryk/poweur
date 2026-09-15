@@ -15,8 +15,8 @@ const MOBILE = { width: 375, height: 812 };
 /** Send from the page's own unlocked client — a dozen compose round-trips would be the slow part. */
 async function sendFrom(page, to, bodies) {
   await page.evaluate(async ({ to, bodies }) => {
-    const { clientFor } = await import("./js/client.js");
-    const { getActiveIdentity } = await import("./js/storage.js");
+    const { clientFor } = await window.__poweurModule("client");
+    const { getActiveIdentity } = await window.__poweurModule("storage");
     const client = clientFor(getActiveIdentity());
     for (const body of bodies) await client.sendAndArchive(to, body);
   }, { to, bodies });

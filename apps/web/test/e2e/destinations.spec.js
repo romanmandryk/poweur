@@ -4,7 +4,10 @@ import { test, expect } from "@playwright/test";
 import { SDK_VERSION } from "@poweur/client";
 import { startRelay } from "../helpers/relay.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
-import { APP_VERSION, APP_BUILD_TIME } from "../../js/build-info.js";
+import { appBuildInfo } from "../helpers/app-path.mjs";
+
+// The app under test reports its own version (legacy js/build-info.js or web-next's).
+const { APP_VERSION, APP_BUILD_TIME } = appBuildInfo();
 
 /** The relay's semver, read from the one place it is bumped. */
 const RELAY_VERSION = readFileSync(new URL("../../../api/internal/buildinfo/buildinfo.go", import.meta.url), "utf8")

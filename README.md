@@ -154,7 +154,8 @@ use a Poweur ID for both authentication and narrowly scoped access to user-contr
 
 - [TypeScript client SDK](epics/EPIC-017-typescript-client-sdk.md)
 - [Sign in with Poweur](epics/EPIC-008-sign-in.md)
-- [Integration program and OIDC bridge](epics/integrations/INT-000-overview.md)
+- [OAuth/OIDC and IndieAuth bridge](epics/EPIC-021-oauth-oidc-indieauth-bridge.md)
+- [Integration program and bridge adoption](epics/integrations/INT-000-overview.md)
 - [Identity and verification integrations](epics/integrations/INT-001-identity-verification.md)
 - [Collaboration-tool integrations](epics/integrations/INT-004-collaboration-tools.md)
 

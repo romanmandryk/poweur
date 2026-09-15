@@ -53,6 +53,8 @@ Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to th
 
 Push to `master` (or manual dispatch) runs Deploy: CI, GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no smoke step, `.releases` pointer, or rollback. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
 
+**Web app preview (EPIC-021):** the relay serves two web clients on every host until cutover. `/app/` is the legacy app, mounted from the checkout (`./apps/web:/web`). `/newapp/` is the React rewrite, built into the image at `/web-next` (`WEB_NEXT_STATIC_DIR`). Both share one origin, so an identity created in one is usable in the other. Unset `WEB_NEXT_STATIC_DIR` to hide the preview.
+
 ## Fresh VM
 
 Run the Ansible bootstrap, finish its GitHub SSH keys and read-access setup, and initialize `.observability.env` using the helper. For the initial boot only, select a **CI-tested digest** from GHCR and start infra and relay with the shared secrets:

@@ -31,17 +31,21 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// mountWebStatic serves the Vite-built SPA from dir under /app/ (base URL /app/).
-func mountWebStatic(mux *http.ServeMux, dir string) {
+// mountWebStatic serves the web client SPA from dir under prefix ("/app" →
+// GET /app/). The same handler serves the EPIC-021 preview build at /newapp/,
+// on the same origin, so both apps share one identity store while they are
+// compared side by side.
+func mountWebStatic(mux *http.ServeMux, prefix, dir string) {
 	if dir == "" {
 		return
 	}
 	root := filepath.Clean(dir)
-	mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+	base := prefix + "/"
+	mux.HandleFunc("GET "+prefix, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, base, http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(r.URL.Path, "/app/")
+	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, base)
 		rel = strings.TrimPrefix(rel, "/")
 		if rel == "" {
 			http.ServeFile(w, r, filepath.Join(root, "index.html"))

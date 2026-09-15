@@ -10,8 +10,10 @@
  */
 
 import { expect } from "@playwright/test";
+import { appPath, installAppSeam } from "./app-path.mjs";
 
 export async function stubPasskeys(page, { prf = true } = {}) {
+  await installAppSeam(page);
   await page.addInitScript((withPrf) => {
     if (!navigator.credentials) return;
     const rawId = crypto.getRandomValues(new Uint8Array(32));
@@ -78,7 +80,7 @@ export async function stubPasskeysWithoutPrf(page) {
 
 /** Open the SPA pointed at a test relay (the relay URL is config, not origin). */
 export async function openApp(page, relay) {
-  await page.goto(`${relay.baseUrl}/app/`);
+  await page.goto(`${relay.baseUrl}${appPath()}`);
   await page.evaluate((url) => {
     localStorage.setItem("poweur:config", JSON.stringify({ relayUrl: url, parentDomain: "poweur.net" }));
   }, relay.baseUrl);

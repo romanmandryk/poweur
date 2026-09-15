@@ -77,21 +77,23 @@ type Config struct {
 	ListenAddr          string
 	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
 	WebStaticDir string
-	RelayAddress string
-	RelayScheme  string
-	DNSTTL       time.Duration
-	ChallengeTTL time.Duration
+	// WebNextStaticDir, when set, serves the EPIC-021 preview build under GET /newapp/.
+	WebNextStaticDir string
+	RelayAddress     string
+	RelayScheme      string
+	DNSTTL           time.Duration
+	ChallengeTTL     time.Duration
 	// Version is the relay semver (buildinfo.Version unless VERSION is set).
 	Version string
 	// BuildTime and VersionHash are release metadata for GET / and /health.
-	BuildTime           string
-	VersionHash         string
-	RateLimits          RateLimits
-	GlobalRateLimits    GlobalRateLimits
+	BuildTime        string
+	VersionHash      string
+	RateLimits       RateLimits
+	GlobalRateLimits GlobalRateLimits
 	// RequestRelayLimits caps contact-request admissions per *sending relay*
 	// (EPIC-007 E07-T5). Keyed on the relay accountable for the sender, not
 	// on the sender, because identities are cheap and relays are not.
-	RequestRelayLimits RateLimits
+	RequestRelayLimits  RateLimits
 	DNSProxyMode        string
 	MaxInboxPerIdentity int
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
@@ -223,6 +225,7 @@ func FromEnv() Config {
 		Telemetry: tc, TelemetryProxyError: proxyErr,
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
+		WebNextStaticDir:        strings.TrimSpace(os.Getenv("WEB_NEXT_STATIC_DIR")),
 		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
 		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
 		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),

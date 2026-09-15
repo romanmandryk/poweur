@@ -1,7 +1,9 @@
 # INT-004 — Collaboration, productivity & federation tool integrations
 
 - **Status:** proposed
-- **Poweur prerequisites:** INT-000-T1 (OIDC bridge), EPIC-003 (WebDAV — many tools connect with zero upstream code), EPIC-005 (shares), EPIC-007 (contacts/anti-spam), EPIC-009 (messaging)
+- **Poweur prerequisites:** EPIC-022 (generic OAuth/OIDC + IndieAuth bridge), EPIC-003
+  (WebDAV — many tools connect with zero upstream code), EPIC-005 (shares), EPIC-007
+  (contacts/anti-spam), EPIC-009 (messaging)
 - **Goal:** put Poweur ID inside the tools people already collaborate in — as login, as share
   target, as sync backend, as verified federation identity — so that "collaborate with
   alice.poweur.net" works the same whether the surface is a wiki, a chat server, a git forge or
@@ -14,7 +16,7 @@
 ### Nextcloud — `nextcloud/server`
 The flagship integration of the whole program — the existing analysis in
 `apps/docs/docs/future/capabilities.md` already singles it out as the closest fit. Three
-layers: (1) Poweur sign-in via their mature OIDC support (works at INT-000-T1); (2) an
+layers: (1) Poweur sign-in via their mature OIDC support (works through EPIC-022); (2) an
 **external storage** provider mounting the user's Poweur home next to Nextcloud files; (3) the
 deep one — extend **Federated Cloud sharing** to accept `alice.poweur.net` as a share target,
 resolving recipients through the Poweur resolver chain. Nextcloud federation today only reaches

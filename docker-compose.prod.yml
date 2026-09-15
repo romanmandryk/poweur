@@ -19,6 +19,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       NAME_RESERVED: "ingest,metrics,grafana,stats,${NAME_RESERVED:-}"
       WEB_STATIC_DIR: /web
+      # EPIC-021 preview build, baked into the image; served at /newapp/ beside
+      # /app/ until cutover (E21-T14).
+      WEB_NEXT_STATIC_DIR: /web-next
       POWEUR_DATA: /data
       # Which domains this relay hosts names under. Without it `GET /` answers
       # `hosted_domains: null` and every host classifies as `unknown` (E15-T7):
