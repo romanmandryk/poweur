@@ -1,54 +1,50 @@
 /**
  * Stage the web client into the shell's www/ (EPIC-019 E19-T1).
  *
- * The shell wraps the *same* tree the relay serves — there is no mobile build
- * of the UI and no fork of a screen. Copying rather than symlinking is
- * deliberate: `cap sync` follows this directory into the native projects, and a
- * symlink there produces a native bundle that works on the developer's machine
- * and nowhere else.
+ * The shell wraps the *same* build the relay serves at /app/ — there is no
+ * mobile build of the UI and no fork of a screen. Copying rather than
+ * symlinking is deliberate: `cap sync` follows this directory into the native
+ * projects, and a symlink there produces a native bundle that works on the
+ * developer's machine and nowhere else.
  */
-import { cp, rm, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, rm, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mobile = join(here, "..");
-const web = join(mobile, "../web");
 const www = join(mobile, "www");
+const dist = join(mobile, "../web/dist");
 
-// Everything the browser loads from /app/, and nothing else: no tests, no
-// node_modules, no config that only means something to a dev server.
-const INCLUDE = ["index.html", "js", "css", "vendor", "assets", "manifest.webmanifest", "favicon.ico"];
+if (!existsSync(join(dist, "index.html"))) {
+  throw new Error("apps/web/dist/index.html is missing — build the web app first (`pnpm web`)");
+}
 
 await rm(www, { recursive: true, force: true });
 await mkdir(www, { recursive: true });
 
+// The Vite output, minus source maps: a device has no use for them.
 const staged = [];
-for (const entry of INCLUDE) {
-  try {
-    await cp(join(web, entry), join(www, entry), { recursive: true });
-    staged.push(entry);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
+for (const entry of await readdir(dist)) {
+  await cp(join(dist, entry), join(www, entry), {
+    recursive: true,
+    filter: (path) => !path.endsWith(".map"),
+  });
+  staged.push(entry);
 }
 
-if (!staged.includes("index.html")) {
-  throw new Error("apps/web/index.html is missing — nothing to wrap");
-}
-
-// The import map in index.html is relative (`./vendor/…`), which is what makes
-// the same file work at `/app/` on a relay and at `capacitor://localhost/` here.
-// Fail loudly rather than shipping a bundle whose modules 404 on a device.
+// Everything must resolve relative to the document: the same build works at
+// `/app/` on a relay and at `capacitor://localhost/` here. Fail loudly rather
+// than shipping a bundle whose assets 404 on a device.
 const html = await readFile(join(www, "index.html"), "utf8");
-const absolute = [...html.matchAll(/(?:src|href)\s*=\s*"(\/app\/[^"]*)"/g)].map((m) => m[1]);
-const mapped = [...html.matchAll(/"(\/app\/[^"]*)"\s*[,}]/g)].map((m) => m[1]);
-if (absolute.length || mapped.length) {
+const absolute = [...html.matchAll(/(?:src|href)\s*=\s*"(\/[^"]*)"/g)].map((m) => m[1]);
+if (absolute.length) {
   throw new Error(
-    `index.html resolves ${[...absolute, ...mapped].join(", ")} from the server root; ` +
+    `index.html resolves ${absolute.join(", ")} from the server root; ` +
       "the shell serves from the bundle root, so these must be relative",
   );
 }
-await writeFile(join(www, ".staged"), staged.join("\n") + "\n");
+await writeFile(join(www, ".staged"), `${staged.join("\n")}\n`);
 
-console.log(`staged ${staged.length} entries into apps/mobile/www/`);
+console.log(`staged ${staged.length} entries from apps/web/dist into apps/mobile/www/`);

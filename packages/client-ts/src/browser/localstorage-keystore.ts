@@ -4,7 +4,7 @@
  * This stores key material in plain `localStorage`, which any script on the
  * origin can read. It is here for demos, tests and throwaway identities — a
  * production browser app should wrap keys with a passkey PRF
- * (see `apps/web/js/passkey.js`) and implement `KeyStore` over that instead.
+ * (see `apps/web/src/lib/passkey.js`) and implement `KeyStore` over that instead.
  */
 
 import type { KeyStore, StoredIdentityKeys } from "../crypto/keys.js";

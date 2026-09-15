@@ -63,8 +63,8 @@ async function composeTo(page, recipient, body) {
 /** Set the inbox policy through the SDK — Settings owns the UI for it. */
 async function setPolicy(page, mode, anonymous = undefined) {
   await page.evaluate(async ({ mode, anonymous }) => {
-    const { clientFor } = await import("./js/client.js");
-    const { getActiveIdentity } = await import("./js/storage.js");
+    const { clientFor } = await window.__poweurModule("client");
+    const { getActiveIdentity } = await window.__poweurModule("storage");
     await clientFor(getActiveIdentity()).setPolicy(mode, anonymous);
   }, { mode, anonymous });
 }
@@ -216,10 +216,16 @@ test.describe("browser journeys", () => {
     const strangerId = await registerIdentity(strangerPage, relay, `mixs${suffix}`);
 
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
+    // Written behind the app's back, so let it re-read: the app offers an
+    // anonymous tray only for the policy it loaded.
+    await ownerPage.reload();
+    if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");
+    await ownerPage.click("#btn-do-unlock");
+    await expect(ownerPage.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
     await composeTo(strangerPage, ownerId, "signed and attributable");
     await strangerPage.evaluate(async ({ identity, relayUrl }) => {
-      const { sendAnonymous } = await import("@poweur/client");
-      const { resolveOptionsForRelay } = await import("./js/client.js");
+      const { sendAnonymous } = await window.__poweurModule("sdk");
+      const { resolveOptionsForRelay } = await window.__poweurModule("client");
       await sendAnonymous(identity, "unsigned and not", {
         resolve: resolveOptionsForRelay(relayUrl),
         targetRelayUrl: relayUrl,

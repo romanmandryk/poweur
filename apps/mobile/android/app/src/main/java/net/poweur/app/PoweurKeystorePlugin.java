@@ -29,7 +29,7 @@ import javax.crypto.spec.GCMParameterSpec;
  * The Android half of the `PoweurKeystore` contract (EPIC-019 E19-T2).
  *
  * The contract — four methods and what each has to guarantee — is documented at
- * the bottom of `apps/web/js/native.js`, the only caller. Nothing about
+ * the bottom of `apps/web/src/lib/native.js`, the only caller. Nothing about
  * identities, relays or messages is known here: the web layer generates 32
  * random bytes and does the AES wrapping of the keys themselves, and this class
  * only keeps those bytes somewhere the app cannot read without the user.

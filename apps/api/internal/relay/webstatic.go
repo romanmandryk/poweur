@@ -31,17 +31,20 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// mountWebStatic serves the Vite-built SPA from dir under /app/ (base URL /app/).
-func mountWebStatic(mux *http.ServeMux, dir string) {
+// mountWebStatic serves the web client SPA from dir under prefix ("/app" →
+// GET /app/): real files as themselves, every other path as index.html so the
+// app's own routes survive a reload.
+func mountWebStatic(mux *http.ServeMux, prefix, dir string) {
 	if dir == "" {
 		return
 	}
 	root := filepath.Clean(dir)
-	mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+	base := prefix + "/"
+	mux.HandleFunc("GET "+prefix, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, base, http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(r.URL.Path, "/app/")
+	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, base)
 		rel = strings.TrimPrefix(rel, "/")
 		if rel == "" {
 			http.ServeFile(w, r, filepath.Join(root, "index.html"))

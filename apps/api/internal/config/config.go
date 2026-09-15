@@ -84,14 +84,14 @@ type Config struct {
 	// Version is the relay semver (buildinfo.Version unless VERSION is set).
 	Version string
 	// BuildTime and VersionHash are release metadata for GET / and /health.
-	BuildTime           string
-	VersionHash         string
-	RateLimits          RateLimits
-	GlobalRateLimits    GlobalRateLimits
+	BuildTime        string
+	VersionHash      string
+	RateLimits       RateLimits
+	GlobalRateLimits GlobalRateLimits
 	// RequestRelayLimits caps contact-request admissions per *sending relay*
 	// (EPIC-007 E07-T5). Keyed on the relay accountable for the sender, not
 	// on the sender, because identities are cheap and relays are not.
-	RequestRelayLimits RateLimits
+	RequestRelayLimits  RateLimits
 	DNSProxyMode        string
 	MaxInboxPerIdentity int
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.

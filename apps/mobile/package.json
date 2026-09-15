@@ -1,14 +1,14 @@
 {
   "name": "@poweur/mobile",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "Capacitor shell over the web client (EPIC-019)",
   "scripts": {
-    "stage": "node scripts/stage-web.mjs",
+    "stage": "pnpm --filter @poweur/web build && node scripts/stage-web.mjs",
     "sync": "pnpm run stage && cap sync",
     "ios": "pnpm run sync && cap open ios",
     "android": "pnpm run sync && cap open android",
-    "build:ios": "pnpm run sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
+    "build:ios": "pnpm run sync && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
     "build:android": "pnpm run sync && ./android/gradlew -p android :app:assembleDebug",
     "install:android": "pnpm run build:android && node scripts/adb-install.mjs",
     "test": "node --test --test-reporter=spec test/stage.test.mjs"

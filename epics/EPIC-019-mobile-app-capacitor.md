@@ -66,7 +66,7 @@ across relays.
 This was the open question that motivated the epic, and the answer falls out of how keys are
 already stored. The passkey is **not** the identity key: PRF output derives an AES key that
 wraps the Ed25519/X25519 keys (`wrapKeysAES`,
-[`apps/web/js/vault.js`](../apps/web/js/vault.js)), and the stored record already
+[`apps/web/src/lib/vault.js`](../apps/web/src/lib/vault.js)), and the stored record already
 carries a `kdf` discriminator (`"prf" | "native"`). The passkey is a **lock, not the key** —
 so nothing binds an identity to a domain. Two independent consequences:
 
@@ -87,7 +87,7 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
   fallback, never a forked screen.
 - **Relay URL is configuration, not `window.location.origin`.** Today `doCreateIdentity`
   reads `const relayUrl = window.location.origin`
-  ([`apps/web/js/app.js`](../apps/web/js/app.js)) — correct for a relay-served SPA, fatal for
+  (the legacy `apps/web/js/app.js`) — correct for a relay-served SPA, fatal for
   a shell on `capacitor://localhost`. E15-T1 must make the base URL come from the identity
   record / config. **This is the one thing E15 has to get right for this epic to be cheap**,
   and it is cheap to do now.
@@ -105,7 +105,7 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
 ### E19-T1 — Shell scaffolding & single-origin client — **partial**
 
 - [x] Capacitor project in `apps/mobile/` with an `ios/` platform folder (Capacitor 8 uses
-      SwiftPM, so there is no CocoaPods step). `pnpm stage` copies `apps/web` into `www/`
+      SwiftPM, so there is no CocoaPods step). `pnpm run stage` builds `apps/web` and copies `dist/` into `www/`
       — a copy rather than a symlink, because `cap sync` follows it into the native project
       and a symlink there builds an app that works on one developer's machine
 - [x] No `location.origin` assumptions — `test/origin.test.js` has enforced that since
@@ -155,7 +155,7 @@ the inbox path, so a request waited silently until the app was opened.
 ### E19-T2 — Native key custody (`kdf: "native"`) — **done, minus tiered custody**
 
 - [x] **The plugin is written on both platforms**, against the contract at the bottom of
-      `apps/web/js/native.js`: `ios/App/App/PoweurKeystorePlugin.swift` (Keychain +
+      `apps/web/src/lib/native.js`: `ios/App/App/PoweurKeystorePlugin.swift` (Keychain +
       `SecAccessControl(.biometryCurrentSet)` + LocalAuthentication) and
       `android/app/src/main/java/net/poweur/app/PoweurKeystorePlugin.java` (a per-identity
       AES key in the Android Keystore, unlocked by `BiometricPrompt`, opening a ciphertext

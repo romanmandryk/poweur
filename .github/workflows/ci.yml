@@ -112,15 +112,16 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # The SPA loads @poweur/client from a committed copy of the package's ESM
-      # (no bundler). A change to the package that skipped the vendor step ships
-      # a stale protocol to browsers, so rebuild and diff rather than trust it.
+      - run: pnpm --filter @poweur/web exec playwright install chromium
       - run: pnpm client:build
-      - run: pnpm web:vendor:check
+      - run: pnpm web:typecheck
 
-      # Both suites spawn a real Go relay (`go run`).
+      # The live-relay suites spawn a real Go relay (`go run`).
       - run: pnpm web:test
+      - run: pnpm web
+
+      # Playwright drives the built app at /app/ on a real Go relay — the same
+      # tree the image serves and the Capacitor shell stages.
       - run: pnpm web:test:e2e
 
   observability:

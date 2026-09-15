@@ -1,6 +1,6 @@
 /**
  * Cryptographic primitives — the TypeScript twin of
- * `apps/cli/internal/crypto/encryption.go` and `apps/web/js/crypto.js`.
+ * `apps/cli/internal/crypto/encryption.go`.
  *
  * Ed25519, X25519, HKDF-SHA256 and ChaCha20-Poly1305 come from @noble rather
  * than WebCrypto: WebCrypto's Ed25519/X25519 support is absent on Node 18 and

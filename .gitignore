@@ -4,6 +4,7 @@ node_modules/
 dist/
 build/
 .cache/
+*.tsbuildinfo
 
 # Playwright
 **/test-results/
@@ -39,9 +40,6 @@ apps/integration/coverage/
 *.test
 *.out
 vendor/
-# …except the web app's, which is the served static tree: prod mounts apps/web
-# straight from the checkout, so the vendored ESM has to be committed.
-!apps/web/vendor/
 bin/
 apps/cli/poweur
 

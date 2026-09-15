@@ -1,5 +1,5 @@
 /**
- * WebDAV file access — the twin of `poweur dav` and `apps/web/js/files.js`.
+ * WebDAV file access — the twin of `poweur dav`.
  *
  * DAV bearer tokens are minted by signing a canonical string with the
  * identity key, so the relay never needs a password and a token can be scoped

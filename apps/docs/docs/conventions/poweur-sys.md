@@ -56,7 +56,10 @@ Human-facing and machine-facing self-description (E06-T2):
 ```
 
 `avatar` is a tree path under `/public` — never an external URL (no tracking pixels on
-profile views). Capabilities supersede the `_poweur-caps` TXT sketch for web-resolved
+profile views). A client that uploads one also has to make it servable: `/pub/` serves a
+`/public` folder only once it carries a `.poweur-web-public` marker, so the web app keeps
+avatars in `public/avatars/` (content-named, e.g. `avatar-3f9a1c2e.jpg`) with that marker and
+exposes nothing else. Capabilities supersede the `_poweur-caps` TXT sketch for web-resolved
 identities:
 
 ```json

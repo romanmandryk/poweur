@@ -11,15 +11,15 @@ terminal: identity, messages, contacts, files, sharing and inbox policy. This pa
 follows a new user through it and says which document or endpoint each screen writes,
 so a behaviour you see here can be traced to the spec that defines it.
 
-It is vanilla JS with no build step. The protocol lives in
-[`@poweur/client`](../clients/js-sdk.md), vendored into the served tree; the app owns
+It is a React + Tailwind app built with Vite. The protocol lives in
+[`@poweur/client`](../clients/js-sdk.md), bundled into that build; the app owns
 key custody (passkey PRF, or the mobile shell's native keystore) and the screens.
 
 ## Five destinations
 
 | Destination | What it is |
 |-------------|------------|
-| **Messages** | conversations, plus **Requests** and **Anonymous** as separate trays |
+| **Messages** | conversations, plus **Requests** and — while the inbox policy accepts them — **Anonymous** as separate trays |
 | **Contacts** | your `contacts.json`, with states, petnames and search |
 | **Files** | your tree, sharing, and other people's shares |
 | **Apps** | the launcher (forward-looking) |

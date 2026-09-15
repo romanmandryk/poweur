@@ -82,7 +82,14 @@ jobs:
           RELEASE_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          ssh "poweur@$DEPLOY_HOST" env RELEASE_SHA="$RELEASE_SHA" RELEASE_IMAGE="$RELEASE_IMAGE" bash -s <<'EOF'
+          # Bake SHA/image into the remote file. `ssh env VAR= bash -c '...'` loses
+          # both the quotes and the env (remote shell sees `bash -c cat > file &&
+          # exec bash file`, so the script runs with an empty environment).
+          # Writing a file also keeps `docker compose exec` from swallowing stdin.
+          {
+            printf 'export RELEASE_SHA=%q\n' "$RELEASE_SHA"
+            printf 'export RELEASE_IMAGE=%q\n' "$RELEASE_IMAGE"
+            cat <<'EOF'
           set -euo pipefail
           cd /opt/apps/poweur
           git fetch origin "$RELEASE_SHA"
@@ -91,13 +98,18 @@ jobs:
           export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
-            exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+            exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true
           export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
-          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d
+          docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d --pull always --force-recreate
           for _ in $(seq 1 30); do
-            if docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health >/dev/null; then
-              echo "Relay /health ok"
-              exit 0
+            health="$(docker exec poweur-relay wget -qO- http://127.0.0.1:8080/health || true)"
+            if [ -n "$health" ]; then
+              echo "Relay /health ok: $health"
+              case "$health" in
+                *"\"versionHash\":\"$RELEASE_SHA\""*) exit 0 ;;
+              esac
+              echo "deployed versionHash does not match $RELEASE_SHA" >&2
+              exit 1
             fi
             sleep 2
           done
@@ -105,3 +117,4 @@ jobs:
           docker logs --tail 40 poweur-relay >&2 || true
           exit 1
           EOF
+          } | ssh "poweur@$DEPLOY_HOST" "cat > /tmp/poweur-release.sh && exec bash /tmp/poweur-release.sh"

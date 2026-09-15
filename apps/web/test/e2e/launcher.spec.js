@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { appPath } from "../helpers/app-path.mjs";
 import { startRelay } from "../helpers/relay.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
 
@@ -47,7 +48,7 @@ test.describe("claiming a name", () => {
     await secondPage.addInitScript((url) => {
       localStorage.setItem("poweur:config", JSON.stringify({ relayUrl: url, parentDomain: "poweur.net" }));
     }, relay.baseUrl);
-    await secondPage.goto(`${relay.baseUrl}/app/#claim=${payload}`);
+    await secondPage.goto(`${relay.baseUrl}${appPath()}#claim=${payload}`);
 
     // Adopted: the identity is active and the app asks to unlock it, rather
     // than offering to create another one.

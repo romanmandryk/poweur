@@ -4,11 +4,10 @@
   "scripts": {
     "web": "pnpm --filter @poweur/web build",
     "web:dev": "pnpm --filter @poweur/web dev",
+    "web:typecheck": "pnpm --filter @poweur/web typecheck",
     "web:test": "pnpm --filter @poweur/web test",
     "web:test:e2e": "pnpm --filter @poweur/web test:e2e",
     "web:test:all": "pnpm --filter @poweur/web test:all",
-    "web:vendor": "pnpm --filter @poweur/web vendor",
-    "web:vendor:check": "pnpm --filter @poweur/web vendor:check",
     "mobile:stage": "pnpm --filter @poweur/mobile run stage",
     "mobile:sync": "pnpm --filter @poweur/mobile run sync",
     "mobile:android": "pnpm --filter @poweur/mobile run build:android",

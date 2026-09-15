@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/telemetry"
+	idpkg "github.com/poweur/identity"
 )
 
 const analyticsPath = "poweur-sys/relay/analytics.json"
@@ -81,10 +83,12 @@ func (s *Server) Close(ctx context.Context) error {
 }
 
 type requestTelemetry struct {
-	ip     string
-	actor  string
-	direct bool
-	action string
+	ip      string
+	actor   string
+	direct  bool
+	action  string
+	detail  string
+	changes []string
 }
 type telemetryKey struct{}
 
@@ -99,7 +103,26 @@ func requestAction(r *http.Request, action string) {
 		st.action = action
 	}
 }
+
+// requestDetail sets the bounded detail label of the request's business action.
+func requestDetail(r *http.Request, detail string) {
+	if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
+		st.detail = detail
+	}
+}
+
+// settingsChanged queues one settings.change action per field, emitted only
+// when the write itself succeeds.
+func settingsChanged(r *http.Request, fields []string) {
+	if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
+		st.changes = fields
+	}
+}
+
 func (s *Server) event(ctx context.Context, action, outcome string) {
+	s.eventDetail(ctx, action, "", outcome)
+}
+func (s *Server) eventDetail(ctx context.Context, action, detail, outcome string) {
 	actor, ip := "", ""
 	if st, ok := ctx.Value(telemetryKey{}).(*requestTelemetry); ok {
 		actor = st.actor
@@ -107,7 +130,7 @@ func (s *Server) event(ctx context.Context, action, outcome string) {
 			ip = st.ip
 		}
 	}
-	s.telemetry.Record(ctx, telemetry.Event{Kind: "action", Action: action, Outcome: outcome}, actor, ip)
+	s.telemetry.Record(ctx, telemetry.Event{Kind: "action", Action: action, Detail: detail, Outcome: outcome}, actor, ip)
 	if outcome == "failure" {
 		s.telemetry.Record(ctx, telemetry.Event{Kind: "diagnostic", Action: action, Outcome: outcome, ErrorCode: "operation_failed", Level: slog.LevelWarn}, actor, ip)
 	}
@@ -198,7 +221,12 @@ func (s *Server) instrument(mux *http.ServeMux, next http.Handler) http.Handler 
 			}
 			s.telemetry.Record(context.Background(), telemetry.Event{Kind: "request", Action: "http.request", Outcome: outcome, Route: route, Method: method, Status: rw.status, ErrorCode: rw.code, DurationMS: float64(time.Since(start).Microseconds()) / 1000}, st.actor, ip)
 			if st.action != "" {
-				s.event(r.Context(), st.action, outcome)
+				s.eventDetail(r.Context(), st.action, st.detail, outcome)
+			}
+			if outcome == "success" {
+				for _, field := range st.changes {
+					s.eventDetail(r.Context(), "settings.change", field, outcome)
+				}
 			}
 			if rw.status >= 500 || stack != "" {
 				code := rw.code
@@ -220,6 +248,9 @@ func (s *Server) sampleTelemetry() {
 	s.telemetry.Gauge(context.Background(), "hosted_identities", int64(len(ids)))
 	s.telemetry.Gauge(context.Background(), "inbox_depth", s.inbox.Depth())
 	if s.filesProvider != nil {
+		for state, n := range adoptionCounts(ids, s.readSysDoc) {
+			s.telemetry.Gauge(context.Background(), state, n)
+		}
 		var used int64
 		for _, id := range ids {
 			n, err := s.filesProvider.UsedBytes(context.Background(), id)
@@ -231,6 +262,151 @@ func (s *Server) sampleTelemetry() {
 		}
 		s.telemetry.Gauge(context.Background(), "storage_bytes", used)
 	}
+}
+
+// readSysDoc reads a relay-readable system document, or nil when it is absent,
+// unreadable or oversized. Never used for poweur-sys/private.
+func (s *Server) readSysDoc(identity, path string) []byte {
+	if s.filesProvider == nil {
+		return nil
+	}
+	f, err := s.filesProvider.OpenFile(context.Background(), identity, path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxSysDocBytes+1))
+	if err != nil || len(b) > maxSysDocBytes {
+		return nil
+	}
+	return b
+}
+
+// messageKind buckets an envelope type into a bounded metric value: plain
+// chat, a registered sys.* type verbatim, or "app" for application types.
+// The type is plaintext routing metadata; payloads are never inspected.
+func messageKind(t string) string {
+	t = idpkg.NormalizeMessageType(t)
+	switch {
+	case t == idpkg.MsgTypeChatText:
+		return "chat"
+	case idpkg.IsKnownSystemType(t):
+		return t
+	case idpkg.IsSystemType(t):
+		return "sys.other"
+	default:
+		return "app"
+	}
+}
+
+// settingsDocs lists the top-level fields counted per validated settings
+// document. Unknown fields are preserved on disk but never become labels.
+var settingsDocs = map[string]struct {
+	prefix string
+	fields []string
+}{
+	files.SysPublic + "/profile.json":     {"profile", []string{"display_name", "avatar", "bio", "links", "locale"}},
+	files.SysRelay + "/inbox-policy.json": {"inbox", []string{"mode", "anonymous", "read_receipts"}},
+	analyticsPath:                         {"analytics", []string{"granted"}},
+}
+
+// settingsChanges names the known fields that differ between two versions of
+// a settings document. A missing old document counts every field now set;
+// absent, null and empty values are all "unset".
+func settingsChanges(clean string, old, next []byte) []string {
+	doc, ok := settingsDocs[clean]
+	if !ok {
+		return nil
+	}
+	var before, after map[string]json.RawMessage
+	_ = json.Unmarshal(old, &before)
+	if json.Unmarshal(next, &after) != nil {
+		return nil
+	}
+	var out []string
+	for _, f := range doc.fields {
+		if !reflect.DeepEqual(jsonValue(before[f]), jsonValue(after[f])) {
+			out = append(out, doc.prefix+"."+f)
+		}
+	}
+	return out
+}
+
+func jsonValue(raw json.RawMessage) any {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	switch x := v.(type) {
+	case string:
+		if x == "" {
+			return nil
+		}
+	case []any:
+		if len(x) == 0 {
+			return nil
+		}
+	case map[string]any:
+		if len(x) == 0 {
+			return nil
+		}
+	}
+	return v
+}
+
+// adoptionStates are always reported, so each series exists even at zero.
+var adoptionStates = []string{
+	"adopt_profile_display_name", "adopt_profile_bio", "adopt_profile_avatar", "adopt_profile_links", "adopt_profile_locale",
+	"adopt_inbox_default", "adopt_inbox_open", "adopt_inbox_contacts_only", "adopt_inbox_contacts_and_requests",
+	"adopt_inbox_anonymous", "adopt_read_receipts_off", "adopt_analytics_granted", "adopt_contacts",
+}
+
+var inboxModeStates = map[string]string{
+	idpkg.InboxOpen:                "adopt_inbox_open",
+	idpkg.InboxContactsOnly:        "adopt_inbox_contacts_only",
+	idpkg.InboxContactsAndRequests: "adopt_inbox_contacts_and_requests",
+}
+
+// adoptionCounts counts identities per profile/settings choice. Only relay-
+// readable documents (public profile, relay settings) are consulted, and only
+// aggregate counts leave this function.
+func adoptionCounts(ids []string, read func(identity, path string) []byte) map[string]int64 {
+	out := make(map[string]int64, len(adoptionStates))
+	for _, state := range adoptionStates {
+		out[state] = 0
+	}
+	inc := func(state string, ok bool) {
+		if ok {
+			out[state]++
+		}
+	}
+	for _, id := range ids {
+		if p, err := idpkg.ParseProfile(read(id, files.SysPublic+"/profile.json")); err == nil {
+			inc("adopt_profile_display_name", strings.TrimSpace(p.DisplayName) != "")
+			inc("adopt_profile_bio", strings.TrimSpace(p.Bio) != "")
+			inc("adopt_profile_avatar", p.Avatar != "")
+			inc("adopt_profile_links", len(p.Links) > 0)
+			inc("adopt_profile_locale", p.Locale != "")
+		}
+		if p, err := idpkg.ParseInboxPolicy(read(id, files.SysRelay+"/inbox-policy.json")); err == nil {
+			out[inboxModeStates[p.Mode]]++
+			inc("adopt_inbox_anonymous", p.Anonymous != nil)
+			inc("adopt_read_receipts_off", p.ReadReceipts != nil && !p.ReadReceipts.Enabled)
+		} else {
+			out["adopt_inbox_default"]++
+		}
+		if p, err := parseAnalytics(read(id, analyticsPath)); err == nil {
+			inc("adopt_analytics_granted", p.Granted)
+		}
+		if c, err := idpkg.ParseContactsFile(read(id, files.SysRelay+"/contacts.json")); err == nil {
+			accepted := false
+			for _, contact := range c.Contacts {
+				accepted = accepted || contact.State == idpkg.ContactAccepted
+			}
+			inc("adopt_contacts", accepted)
+		}
+	}
+	return out
 }
 
 // systemAction recognizes only validated system documents, never filenames.

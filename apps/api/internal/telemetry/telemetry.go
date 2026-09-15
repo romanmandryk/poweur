@@ -30,9 +30,12 @@ import (
 
 // Event contains only deliberately selected fields; no arbitrary attributes.
 type Event struct {
-	Timestamp    time.Time  `json:"timestamp"`
-	Kind         string     `json:"kind"`
-	Action       string     `json:"action"`
+	Timestamp time.Time `json:"timestamp"`
+	Kind      string    `json:"kind"`
+	Action    string    `json:"action"`
+	// Detail refines an action with a value from a fixed, relay-defined set
+	// (message kind, settings field). Never derived from free-form input.
+	Detail       string     `json:"detail,omitempty"`
 	Outcome      string     `json:"outcome"`
 	ErrorCode    string     `json:"error_code,omitempty"`
 	Route        string     `json:"route,omitempty"`
@@ -192,7 +195,7 @@ func (t *Runtime) Record(ctx context.Context, e Event, actor, ip string) {
 		t.local.Log(context.Background(), e.Level, "relay diagnostic", "event", json.RawMessage(b))
 	}
 	if t.actions != nil && e.Kind == "action" {
-		t.actions.Add(ctx, 1, metricapi.WithAttributes(attribute.String("action", e.Action), attribute.String("outcome", e.Outcome)))
+		t.actions.Add(ctx, 1, metricapi.WithAttributes(attribute.String("action", e.Action), attribute.String("detail", e.Detail), attribute.String("outcome", e.Outcome)))
 	}
 	if t.requests != nil && e.Kind == "request" {
 		attrs := metricapi.WithAttributes(attribute.String("route", e.Route), attribute.String("method", e.Method), attribute.Int("status", e.Status))

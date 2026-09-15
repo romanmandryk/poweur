@@ -9,7 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // helpers → test → web → apps → repo root
 const REPO_ROOT = join(__dirname, "../../../..");
 const API_DIR = join(REPO_ROOT, "apps/api");
-const WEB_DIR = join(REPO_ROOT, "apps/web");
+// The built app, served at /app/ (`pnpm web` first).
+const WEB_DIR = join(REPO_ROOT, "apps/web/dist");
 
 export async function freePort() {
   return new Promise((resolve, reject) => {

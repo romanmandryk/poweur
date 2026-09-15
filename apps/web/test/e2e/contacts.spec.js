@@ -81,8 +81,8 @@ test.describe("contacts, requests and key pinning", () => {
     await expect(bobPage.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 20_000 });
 
     const pinned = await bobPage.evaluate(async (identity) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const contacts = await clientFor(getActiveIdentity()).contacts();
       return (await contacts.load()).contacts.find((c) => c.identity === identity)?.pinned_key ?? null;
     }, aliceId);
@@ -125,8 +125,8 @@ test.describe("contacts, requests and key pinning", () => {
     await registerIdentity(sender, relay, `pqs${suffix}`);
 
     await reader.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       await clientFor(getActiveIdentity()).setPolicy("contacts_and_requests");
     });
 
@@ -166,8 +166,8 @@ test.describe("contacts, requests and key pinning", () => {
 
     // John already lists Bob as a contact — the green tick — before Bob asks.
     await johnPage.evaluate(async (target) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const contacts = await clientFor(getActiveIdentity()).contacts();
       await contacts.set(target, "accepted", {});
     }, bobId);
@@ -208,16 +208,16 @@ test.describe("contacts, requests and key pinning", () => {
     // A second identity to pin, created head-lessly against the same relay.
     const peer = `ctp${suffix}.poweur.net`;
     await page.evaluate(async ({ target, relayUrl }) => {
-      const { createIdentity } = await import("@poweur/client");
-      const { identityApiFor } = await import("./js/client.js");
+      const { createIdentity } = await window.__poweurModule("sdk");
+      const { identityApiFor } = await window.__poweurModule("client");
       await createIdentity(identityApiFor(relayUrl), target, { hosted: true });
     }, { target: peer, relayUrl: relay.baseUrl });
 
     // Pin them, then swap the pinned key for one they never had — what a
     // registrar or relay impersonating a contact looks like from here.
     await page.evaluate(async (target) => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const contacts = await clientFor(getActiveIdentity()).contacts();
       await contacts.set(target, "accepted", {});
       const file = await contacts.load();

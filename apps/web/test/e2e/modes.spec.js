@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { appPath } from "../helpers/app-path.mjs";
 import { startRelay } from "../helpers/relay.mjs";
 import { stubPasskeys, registerIdentity } from "../helpers/app-ui.mjs";
 
@@ -37,7 +38,7 @@ test.use({
   },
 });
 
-const at = (host, path = "/app/") => `http://${host}:${port}${path}`;
+const at = (host, path = appPath()) => `http://${host}:${port}${path}`;
 
 test.describe("front doors", () => {
   test("the launcher host lands on the claim field, not a welcome card", async ({ page }) => {

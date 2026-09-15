@@ -1,0 +1,107 @@
+/**
+ * Boot: decide the first screen before the first paint, then correct the front
+ * door when the relay says which host this is (from app.js `boot()`).
+ */
+import { isSessionValid } from "@poweur/client";
+import {
+  getActiveIdentity,
+  getUnlockedKeys,
+  loadSessionRecord,
+  saveIdentityRecord,
+  setActiveIdentity,
+} from "../lib/storage.js";
+import { fromBase64url } from "../lib/vault.js";
+import { resolveMode } from "../lib/mode.js";
+import { beginSignInApproval } from "../actions/signin";
+import { useData } from "../state/data";
+import { useRoute } from "../state/route";
+import { refreshSession, useSession, type ModeInfo } from "../state/session";
+
+/**
+ * A hand-off from the launcher arrives as `#claim=<base64url JSON>` and is
+ * adopted before anything else looks at storage (EPIC-018 E18-T3). The
+ * fragment is always stripped, adopted or not: it carries a wrapped key record.
+ */
+export function adoptHandOff(): boolean {
+  const hash = globalThis.location?.hash ?? "";
+  if (!hash.startsWith("#claim=")) return false;
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(fromBase64url(hash.slice("#claim=".length))));
+    if (!decoded?.identity || !decoded?.record) return false;
+    saveIdentityRecord(decoded.identity, decoded.record);
+    setActiveIdentity(decoded.identity);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+  }
+}
+
+/** Title and description per door (E15-T12). */
+export function setDocumentIdentity(info: ModeInfo) {
+  const title =
+    ({
+      launcher: "Poweur ID — claim your name",
+      identity: info.subject ? `${info.subject} — Poweur ID` : "Poweur ID",
+      shell: "Poweur ID",
+    } as Record<string, string>)[info.mode] ?? "Poweur ID";
+  const description =
+    ({
+      launcher: "Claim an identity you own: encrypted messages, a synced drive, and sign-in — under your own name.",
+      identity: `Sign in to ${info.subject || "this identity"} with a passkey.`,
+    } as Record<string, string>)[info.mode] ?? "Encrypted, identity-first messaging.";
+
+  document.title = title;
+  let meta = document.querySelector('meta[name="description"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "description");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", description);
+}
+
+let booted = false;
+
+/** Runs once, before the first render. Returns the mode lookup for tests. */
+export function boot(): Promise<void> {
+  if (booted) return Promise.resolve();
+  booted = true;
+
+  const authInput = new URL(globalThis.location?.href ?? "http://localhost/").searchParams.get("auth") || "";
+  const handedOver = adoptHandOff();
+  refreshSession();
+  const identity = getActiveIdentity();
+  const route = useRoute.getState();
+
+  if (authInput) {
+    useRoute.setState({ page: "settings", sub: "auth", params: {} });
+    useData.setState((state) => ({ auth: { ...state.auth, input: authInput } }));
+    void beginSignInApproval(authInput);
+  } else if (handedOver) {
+    // Locked on arrival: the passkey that opens the keys is scoped to the
+    // domain both hosts share (E18-T4).
+    useRoute.setState({ page: "messages" });
+    route.push("unlock");
+  } else if (!identity) {
+    useRoute.setState({ page: "messages" });
+  } else if (!getUnlockedKeys() && !isSessionValid(loadSessionRecord(identity))) {
+    // A valid session in sessionStorage lets a reload skip re-auth.
+    route.push("unlock");
+  } else {
+    useRoute.setState({ page: "messages" });
+  }
+
+  // The first paint came from the cached mode (or `unknown`, the generic
+  // welcome); correct the door when the relay answers.
+  return resolveMode().then((info: ModeInfo) => {
+    setDocumentIdentity(info);
+    useSession.setState({ mode: info });
+  });
+}
+
+/** Test seam. */
+export function resetBootForTests() {
+  booted = false;
+}

@@ -45,6 +45,18 @@ Business actions cover registration, session create/revoke, identity export/rota
 
 OTLP log bodies contain JSON `timestamp`, `kind`, `action`, `outcome`, optional `error_code`, `route`, `method`, `status`, `duration_ms`, `actor_id`, `identity_mode`, `client_ip` and `stack`. Resource attributes identify service, release version and environment. Loki indexes service/environment only; private Explore can parse `| json` to filter actor fields. HTTP and business events are distinct; count only successful `message.submit`/`message.anonymous` for origin submissions, not receive, forward, polls or pickup.
 
-Metrics: `poweur_http_requests_total`, HTTP duration histogram, `poweur_actions_total`, `poweur_state` (identities/inbox/storage), `poweur_telemetry_dropped`, and heartbeat timestamp. Counters/histograms have bounded labels only, with no identities/IPs/paths. Public recording rules compute increases per source series before summing, so process resets do not become growth. Public counts are estimates with possible export gaps.
+Business actions may carry a bounded `detail`, never derived from free-form input:
+
+| Action | `detail` values |
+|---|---|
+| `message.submit`, `message.receive` | `chat` (absent type or `chat.text`), a registered `sys.*` type, `sys.other`, or `app` for every application type |
+| `message.anonymous` | `anonymous` |
+| `settings.change` | `profile.display_name`, `profile.avatar`, `profile.bio`, `profile.links`, `profile.locale`, `inbox.mode`, `inbox.anonymous`, `inbox.read_receipts`, `analytics.granted` |
+
+`settings.change` is emitted once per field whose value differs from the stored document, and only when the validated DAV PUT succeeds; saving an unchanged value and unknown fields are not counted. Values themselves are never recorded. Message types come from the plaintext envelope; payloads stay encrypted and are never read.
+
+Every five minutes the relay also samples adoption across hosted identities into `poweur_state{state="adopt_*"}`: profile fields set (display name, bio, avatar, links, locale), inbox policy mode (or `adopt_inbox_default` when never set), anonymous inbox enabled, read receipts off, detailed analytics granted and non-empty contacts. Only the public profile and relay-readable settings are consulted, never `poweur-sys/private`, and only totals are exported.
+
+Metrics: `poweur_http_requests_total`, HTTP duration histogram, `poweur_actions_total` (labels `action`, `detail`, `outcome`), `poweur_state` (identities/inbox/storage/adoption), `poweur_telemetry_dropped`, and heartbeat timestamp. Counters/histograms have bounded labels only, with no identities/IPs/paths. Public recording rules compute increases per source series before summing, so process resets do not become growth. Public counts are estimates with possible export gaps.
 
 For deployment, DNS, private/public sharing, retention and recovery, see the repository's `deploy/OPS.md` runbook.

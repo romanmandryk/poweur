@@ -300,7 +300,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
-	mountWebStatic(mux, s.cfg.WebStaticDir)
+	mountWebStatic(mux, "/app", s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))
 }
 
@@ -820,6 +820,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifiedActor(r, msg.Sender)
+	requestDetail(r, messageKind(msg.Type))
 	if senderLocal {
 		requestAction(r, "message.submit")
 	} else {

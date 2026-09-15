@@ -9,9 +9,9 @@
  */
 import { createIdentity, rfc3339 } from "@poweur/client";
 
-import { generateIdentityJwks, keyBytesFromJwks, wrapKeysAES } from "../../js/vault.js";
-import { identityApiFor } from "../../js/client.js";
-import { saveIdentityRecord, setActiveIdentity, setUnlockedKeys } from "../../js/storage.js";
+import { generateIdentityJwks, keyBytesFromJwks, wrapKeysAES } from "../../src/lib/vault.js";
+import { identityApiFor } from "../../src/lib/client.js";
+import { saveIdentityRecord, setActiveIdentity, setUnlockedKeys } from "../../src/lib/storage.js";
 
 export async function createWebIdentity(relayUrl, identity) {
   const { signingJWK, encJWK, publicKey, encPublicKey } = await generateIdentityJwks();

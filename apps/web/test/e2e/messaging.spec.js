@@ -3,7 +3,8 @@ import { startRelay } from "../helpers/relay.mjs";
 
 import "../helpers/browser-globals.mjs";
 import { createWebIdentity, unlock } from "../helpers/identity.mjs";
-import { clientFor } from "../../js/client.js";
+import { clientFor } from "../../src/lib/client.js";
+import { installAppSeam } from "../helpers/app-path.mjs";
 
 /**
  * Playwright smoke for relay messaging (same protocol as CLI send/inbox),
@@ -47,18 +48,19 @@ test.describe("web ↔ relay messaging E2E", () => {
     expect(res.ok).toBeTruthy();
   });
 
-  test("the SPA loads its vendored client, with no CDN fetch", async ({ page }) => {
+  test("the SPA loads its bundled client, with no CDN fetch", async ({ page }) => {
     const external = [];
     page.on("request", (req) => {
       if (!req.url().startsWith(relay.baseUrl)) external.push(req.url());
     });
 
+    await installAppSeam(page);
     await page.goto(`${relay.baseUrl}/app/`);
-    await expect(page.locator("#app")).not.toBeEmpty();
+    await expect(page.locator("body > div").first()).not.toBeEmpty();
 
-    // The import map resolves @poweur/client out of the served tree.
+    // Vite bundles @poweur/client into the app; the test seam hands out that copy.
     const version = await page.evaluate(async () => {
-      const mod = await import("@poweur/client");
+      const mod = await window.__poweurModule("sdk");
       return mod.PROTOCOL_VERSION;
     });
     expect(version).toBeTruthy();
