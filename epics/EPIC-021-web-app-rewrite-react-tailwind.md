@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — every screen ported (T1, T3–T11 done); T2 done pending first production deploy; T12 parity, T13 shell, T14 cutover remain
+- **Status:** in progress — T1–T13 done (T2 pending first production deploy); T14 cutover remains, after a side-by-side pass on production
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -24,8 +24,8 @@
 | E21-T9 Files destination & sharing | **done** (unit-verified; e2e in T12) | explorer, owner trees, upload (chunked above threshold), download, new folder / rename / delete via dialogs, share + shares panels, changes-feed refresh |
 | E21-T10 Launcher & claim | **done** | Apps empty state; the claim flow shipped in T6 |
 | E21-T11 Settings & every panel | **done** (unit-verified; e2e in T12) | Settings page + all 12 legacy panels, remove / rotate / session actions; no `NotPorted` screen is left |
-| E21-T12 E2E parity: one Playwright suite, both apps | open | the cutover gate |
-| E21-T13 Capacitor shell on the new build | open | |
+| E21-T12 E2E parity: one Playwright suite, both apps | **done** | 62 passed / 1 skipped on each app |
+| E21-T13 Capacitor shell on the new build | **done** | iOS simulator walkthrough passed (native keystore create → note to self ✓✓ → relaunch → Face ID unlock); production bundle 254 KB gz / 3 files vs legacy 325 KB gz / 90 files |
 | E21-T14 Cutover: `/app/` serves the new app, legacy deleted | open | |
 
 **Resuming after an interruption:** check the table above and the checkboxes below; the first
@@ -432,11 +432,17 @@ skipped (`no-flicker`, rewrite only).
       SUCCEEDED, `App.app/public` carries the React bundle; `WEB_SOURCE=next pnpm build:android` →
       `app-debug.apk`, same bundle in `assets/public`. Fixed on the way: `build:ios` pointed at a
       non-existent `App.xcworkspace` (the project is SPM-based) — now `-project App.xcodeproj`
-- [ ] Walk it on the iOS simulator: relay prompt → create (native keystore) → unlock →
-      send/receive — blocked on granting Claude access to the simulator
+- [x] Walk it on the iOS simulator (iPhone 16 Pro, 2026-09-15): relay prompt → Other…
+      `http://localhost:8088` → claim `simnext` with native keystore custody (Face ID enrolled in
+      the simulator; without it the claim is correctly blocked, as in legacy) → onboarding shows
+      the recommended policy → note to self delivered ✓✓ → relaunch → Unlock gate → Face ID
+      match → inbox shows the note
 - [x] Safe areas (`pt-safe` / `pb-safe` / `h-header` / `h-nav`, composer and sheet insets) and
       hardware back (Capacitor `backButton`: closes the panel, then pops) → in the shell since T4 / T7
-- [ ] Keyboard overlap in the thread view — check on a device
+- [ ] Keyboard overlap in the thread view — check on a device. Simulator had a hardware keyboard
+      (accessory bar only): composer stayed visible. Seen: after the keyboard closes the header can
+      sit ~20–50 pt lower until the next interaction (WKWebView scroll offset with
+      `contentInset: "always"`) — confirm on a device before cutover
 
 **Acceptance:** the E19-T1 simulator walkthrough passes on the new build.
 
