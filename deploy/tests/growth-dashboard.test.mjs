@@ -16,6 +16,17 @@ test('public growth dashboard is read-only, unique and fits the grid', () => {
   for (const p of board.panels) assert.ok(p.gridPos.x + p.gridPos.w <= 24, `${p.title} overflows the grid`);
 });
 
+test('query panels pin prometheus; text panels have no datasource', () => {
+  assert.ok(board.panels.some(p => p.type === 'text'));
+  for (const p of board.panels) {
+    if (p.type === 'text' || p.type === 'row') {
+      assert.equal(p.datasource, undefined, `${p.title || p.type} must not bind a datasource`);
+      continue;
+    }
+    assert.equal(p.datasource?.uid, 'prometheus', `${p.title} must query prometheus`);
+  }
+});
+
 test('public growth dashboard only queries production aggregates', () => {
   assert.ok(queries.length > 0);
   for (const { panel, expr, ds } of queries) {

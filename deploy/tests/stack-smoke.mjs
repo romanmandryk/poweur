@@ -89,7 +89,14 @@ try {
   const admin = `Basic ${Buffer.from(`admin:${config.services.grafana.environment.GF_SECURITY_ADMIN_PASSWORD}`).toString('base64')}`;
   const board = request(`${urls.grafana}/api/dashboards/uid/poweur-growth`, undefined, admin);
   assert.equal(board.status, 200);
-  assert.ok(JSON.parse(board.body).dashboard.panels.every(p => p.datasource.uid === 'prometheus'));
+  const growthPanels = JSON.parse(board.body).dashboard.panels;
+  assert.ok(growthPanels.length > 0);
+  for (const p of growthPanels) {
+    // Markdown/row panels have no query. Grafana omits datasource there; do not
+    // treat that as Loki. Everything that queries must stay on prometheus.
+    if (p.type === 'text' || p.type === 'row') continue;
+    assert.equal(p.datasource?.uid, 'prometheus', `${p.title || p.id} must query prometheus`);
+  }
   const share = request(`${urls.grafana}/api/dashboards/uid/poweur-growth/public-dashboards`, { isEnabled: true, timeSelectionEnabled: false, annotationsEnabled: false, share: 'public' }, admin);
   assert.ok([200, 201].includes(share.status));
   const publicBoard = request(`${urls.grafana}/api/public/dashboards/${JSON.parse(share.body).accessToken}`);
