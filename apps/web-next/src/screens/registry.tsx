@@ -1,40 +1,35 @@
-/**
- * Which component draws each destination, sub-page and front door. T7–T11
- * replace the remaining NotPorted entries one by one; the shell never changes.
- */
+/** Which component draws each destination, sub-page and front door. */
 import type { Destination, SubPageId } from "../state/route";
 import { useSession } from "../state/session";
 import { AddId } from "./AddId";
 import { Claim } from "./Claim";
+import { Contacts } from "./contacts/Contacts";
 import { IdentityDoor } from "./doors/IdentityDoor";
 import { Landing } from "./doors/Landing";
-import { Welcome } from "./gates";
-import { Contacts } from "./contacts/Contacts";
 import { Files } from "./files/Files";
+import { Welcome } from "./gates";
 import { Launcher } from "./Launcher";
 import { Messages } from "./messages/Messages";
 import { NewChat } from "./messages/NewChat";
 import { ThreadScreen } from "./messages/Thread";
-import { NotPortedDestination } from "./NotPorted";
 import { Onboarding } from "./Onboarding";
+import { Settings } from "./settings/Settings";
 import { SignInApproval } from "./SignInApproval";
 import { Unlock } from "./Unlock";
 
-const DESTINATION_TITLES: Record<Destination, { title: string; task: string }> = {
-  messages: { title: "Messages", task: "T7" },
-  contacts: { title: "Contacts", task: "T8" },
-  files: { title: "Files", task: "T9" },
-  launcher: { title: "Apps", task: "T10" },
-  settings: { title: "Settings", task: "T11" },
-};
-
 export function DestinationScreen({ page }: { page: Destination }) {
-  if (page === "messages") return <Messages />;
-  if (page === "contacts") return <Contacts />;
-  if (page === "files") return <Files />;
-  if (page === "launcher") return <Launcher />;
-  const { title, task } = DESTINATION_TITLES[page];
-  return <NotPortedDestination title={title} task={task} />;
+  switch (page) {
+    case "contacts":
+      return <Contacts />;
+    case "files":
+      return <Files />;
+    case "launcher":
+      return <Launcher />;
+    case "settings":
+      return <Settings />;
+    default:
+      return <Messages />;
+  }
 }
 
 export function SubScreen({ sub }: { sub: SubPageId }) {

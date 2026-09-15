@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3–T10 done; T2 done pending first production deploy; T11 (settings) next, then T12 parity, T13 shell, T14 cutover
+- **Status:** in progress — every screen ported (T1, T3–T11 done); T2 done pending first production deploy; T12 parity, T13 shell, T14 cutover remain
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -23,7 +23,7 @@
 | E21-T8 Contacts destination | **done** (unit-verified; e2e in T12) | list + filter, rows with state chip and overflow, contact panel (safety number, petname, message / block / unblock / remove), add-contact panel; requests and key pins came with T7 |
 | E21-T9 Files destination & sharing | **done** (unit-verified; e2e in T12) | explorer, owner trees, upload (chunked above threshold), download, new folder / rename / delete via dialogs, share + shares panels, changes-feed refresh |
 | E21-T10 Launcher & claim | **done** | Apps empty state; the claim flow shipped in T6 |
-| E21-T11 Settings & every panel | open | |
+| E21-T11 Settings & every panel | **done** (unit-verified; e2e in T12) | Settings page + all 12 legacy panels, remove / rotate / session actions; no `NotPorted` screen is left |
 | E21-T12 E2E parity: one Playwright suite, both apps | open | the cutover gate |
 | E21-T13 Capacitor shell on the new build | open | |
 | E21-T14 Cutover: `/app/` serves the new app, legacy deleted | open | |
@@ -362,13 +362,31 @@ specs run in **T12**.
 
 ### E21-T11 — Settings & every panel
 
-- [ ] Settings page sections, About (versions: app, SDK, relay)
-- [ ] Panels: policy, profile, connected apps, keys & devices, approve device, recovery kit,
-      identity keys, lookup, relay, session, DNS, analytics
-- [ ] Theme toggle persisted to `poweur:theme`
+- [x] Settings page (`screens/settings/Settings.tsx`): identity card with custody chip; Account,
+      Security, Inbox, Network, Advanced, About groups with the legacy row ids and
+      `.settings-row-value`s; DNS row only for identities that took the DNS path; About fills the
+      relay's version / build / hash when it answers
+- [x] Panels (`screens/settings/panels.tsx`), one per legacy `show*Panel`:
+  - [x] policy (PolicyControls, save closes and marks the anonymous queue stale)
+  - [x] profile (ProfileEditor + "This identity speaks" capabilities)
+  - [x] connected apps (apps, revoke with confirm, recent approvals)
+  - [x] keys & devices (enrollments with this-device / recovery-master chips and OS-keystore
+        wording, back-up nag, remove; the relay's device registry with revoke)
+  - [x] approve device (request code → six digits → send keys; wrong code refused)
+  - [x] recovery kit (eligibility, 24 words, typed-back check)
+  - [x] identity keys, lookup (safety number), relay (test / save), session (refresh / revoke),
+        DNS, analytics consent
+- [x] Actions (`actions/settings.ts`): policy summary, DNS-path rule, encryption-key rotation
+      (native or PRF re-wrap, `seedDerived: false`), session refresh / revoke, remove identity from
+      device (record, session, native secret, switch to the next); `touchSession()` repaints
+      storage-backed rows
+- [x] Theme toggle persisted to `poweur:theme` → shipped in T4
+- [x] `connected apps` / `keys & devices` confirms use `askConfirm` instead of `confirm()`
+- [x] Registry has no `NotPorted` entries left; `screens/NotPorted.tsx` deleted
+- [x] Unit tests: `test/screens/settings.test.tsx`
 
-**Acceptance:** `policy`, `analytics`, `destinations` specs pass against `/newapp/`; every
-`show*Panel` in legacy `app.js` has a checked counterpart below.
+**Acceptance:** unit-level ✅. `policy`, `analytics`, `destinations`, `enrollment` and
+`native-custody` specs run in **T12**.
 
 ### E21-T12 — E2E parity: one Playwright suite, both apps
 

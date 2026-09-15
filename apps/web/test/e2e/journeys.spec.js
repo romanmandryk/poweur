@@ -63,8 +63,8 @@ async function composeTo(page, recipient, body) {
 /** Set the inbox policy through the SDK — Settings owns the UI for it. */
 async function setPolicy(page, mode, anonymous = undefined) {
   await page.evaluate(async ({ mode, anonymous }) => {
-    const { clientFor } = await import("./js/client.js");
-    const { getActiveIdentity } = await import("./js/storage.js");
+    const { clientFor } = await window.__poweurModule("client");
+    const { getActiveIdentity } = await window.__poweurModule("storage");
     await clientFor(getActiveIdentity()).setPolicy(mode, anonymous);
   }, { mode, anonymous });
 }
@@ -218,8 +218,8 @@ test.describe("browser journeys", () => {
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
     await composeTo(strangerPage, ownerId, "signed and attributable");
     await strangerPage.evaluate(async ({ identity, relayUrl }) => {
-      const { sendAnonymous } = await import("@poweur/client");
-      const { resolveOptionsForRelay } = await import("./js/client.js");
+      const { sendAnonymous } = await window.__poweurModule("sdk");
+      const { resolveOptionsForRelay } = await window.__poweurModule("client");
       await sendAnonymous(identity, "unsigned and not", {
         resolve: resolveOptionsForRelay(relayUrl),
         targetRelayUrl: relayUrl,

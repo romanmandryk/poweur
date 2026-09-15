@@ -69,19 +69,21 @@ function AddContact({ preset, close }: { preset: string; close: () => void }) {
         Type a Poweur ID. We resolve it first, so a typo fails here rather than silently later — and the key we resolve now is the one we
         pin.
       </p>
-      <IdentityInput
-        ref={input}
-        resolve={resolveForActive}
-        contacts={contacts}
-        value={preset}
-        // On a hosted relay everyone shares a domain: "alice" is what people type.
-        defaultDomain={domainOf(identity)}
-        label="Identity"
-        onChange={(result) => {
-          picked.current = result;
-        }}
-        onSubmit={() => void sendRequest()}
-      />
+      <div id="add-contact-input">
+        <IdentityInput
+          ref={input}
+          resolve={resolveForActive}
+          contacts={contacts}
+          value={preset}
+          // On a hosted relay everyone shares a domain: "alice" is what people type.
+          defaultDomain={domainOf(identity)}
+          label="Identity"
+          onChange={(result) => {
+            picked.current = result;
+          }}
+          onSubmit={() => void sendRequest()}
+        />
+      </div>
       <FormGroup className="mt-4">
         <Label htmlFor="ac-intro">Say hello (optional)</Label>
         <Input ref={intro} id="ac-intro" type="text" placeholder="contact request" autoComplete="off" />

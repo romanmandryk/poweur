@@ -38,6 +38,11 @@ export interface SessionState {
   unlocked: boolean;
   /** Which front door this host is (E15-T7); corrected when the relay answers. */
   mode: ModeInfo;
+  /**
+   * Bumped when something outside the store changed what screens read from
+   * storage — a rotated key, a revoked session — so they repaint.
+   */
+  revision: number;
 }
 
 export const useSession = create<SessionState>()(() => ({
@@ -45,7 +50,13 @@ export const useSession = create<SessionState>()(() => ({
   config: getConfig(),
   unlocked: Boolean(getUnlockedKeys()),
   mode: modeNow() as ModeInfo,
+  revision: 0,
 }));
+
+/** Storage changed under the screens (identity record, session record): repaint them. */
+export function touchSession() {
+  useSession.setState((state) => ({ revision: state.revision + 1, config: getConfig() }));
+}
 
 /** Re-read identity, config and key state from storage. */
 export function refreshSession() {
@@ -92,7 +103,7 @@ export function onIdentityTeardown(fn: () => void): () => void {
  * Make `identity` active and drop everything scoped to the previous one.
  * State is keyed by identity (E15-T1), so this is a reset rather than a merge.
  */
-export function switchIdentity(identity: string) {
+export function switchIdentity(identity: string | null) {
   for (const teardown of teardowns) teardown();
   clearUnlockedKeys();
   clearProfileCache();

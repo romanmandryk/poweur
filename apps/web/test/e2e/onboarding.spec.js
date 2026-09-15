@@ -202,8 +202,8 @@ test.describe("first run", () => {
     // Skipping writes nothing: the relay default stands, and the panel says so
     // rather than pretending a policy was chosen.
     const policy = await page.evaluate(async () => {
-      const { clientFor } = await import("./js/client.js");
-      const { getActiveIdentity } = await import("./js/storage.js");
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
       const client = clientFor(getActiveIdentity());
       const [inbox, profile] = await Promise.all([client.policy(), client.profile()]);
       return { explicit: inbox.explicit, mode: inbox.policy.mode, profileWritten: profile.explicit };

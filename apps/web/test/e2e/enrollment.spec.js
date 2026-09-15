@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { appPath } from "../helpers/app-path.mjs";
 import { startRelay } from "../helpers/relay.mjs";
 import { openApp, registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
 
@@ -126,7 +127,7 @@ test.describe("new-device enrollment", () => {
     const identity = await registerIdentity(laptopPage, relay, `host${Date.now().toString(36)}`);
     const port = new URL(relay.baseUrl).port;
 
-    await phonePage.goto(`http://${identity}:${port}/app/`);
+    await phonePage.goto(`http://${identity}:${port}${appPath()}`);
     await expect(phonePage.locator("#opt-join-device")).toBeVisible({ timeout: 30_000 });
     await phonePage.click("#opt-join-device");
     // The host already named the identity — no field, no extra tap.
