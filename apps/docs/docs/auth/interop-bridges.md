@@ -57,7 +57,7 @@ it never receives an identity private key or becomes the canonical directory.
 ### Recommendation
 
 Implementation is now planned in
-[EPIC-021](https://github.com/poweur/poweur/blob/main/epics/EPIC-021-oauth-oidc-indieauth-bridge.md):
+[EPIC-022](https://github.com/poweur/poweur/blob/main/epics/EPIC-022-oauth-oidc-indieauth-bridge.md):
 a generic, independently
 self-hostable bridge, with OIDC/OAuth 2.0 as the primary standards surface and IndieAuth over
 the same authentication core. It remains a separate service because it adds issuer signing

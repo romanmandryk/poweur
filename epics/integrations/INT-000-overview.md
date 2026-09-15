@@ -2,7 +2,7 @@
 
 - **Status:** proposed
 - **Theme:** adoption & ecosystem growth
-- **Depends on (Poweur side):** EPIC-021 (generic OAuth/OIDC + IndieAuth bridge), EPIC-003/004
+- **Depends on (Poweur side):** EPIC-022 (generic OAuth/OIDC + IndieAuth bridge), EPIC-003/004
   (WebDAV + sync), EPIC-005 (sharing), EPIC-009 (typed messages), EPIC-010 (agent SDK, MCP)
 
 ## Why integrations are the growth engine
@@ -72,14 +72,14 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 ### INT-000-T1 — Bridge adoption track
 
 Bridge implementation, security and packaging are owned by
-[EPIC-021](../EPIC-021-oauth-oidc-indieauth-bridge.md). This integration task begins once its
+[EPIC-022](../EPIC-022-oauth-oidc-indieauth-bridge.md). This integration task begins once its
 OIDC surface is usable and turns that generic service into upstream adoption:
 
 - [ ] Maintain tested Keycloak, Authentik, Dex and oauth2-proxy configurations against the
       hosted issuer and an independently self-hosted bridge
 - [ ] Reduce each integration to normal issuer/client/redirect configuration wherever possible;
       open an upstream change only when a documented product limitation requires it
-- [ ] Feed failures in standards compatibility, claims or self-hosting back to EPIC-021 rather
+- [ ] Feed failures in standards compatibility, claims or self-hosting back to EPIC-022 rather
       than adding project-specific behavior to the bridge
 
 ### INT-000-T2 — Integration starter kit

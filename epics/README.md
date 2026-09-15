@@ -46,8 +46,8 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
 | [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
-| [EPIC-021](EPIC-021-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | proposed | E01, E08, E13 |
-| [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | Web app rewrite: React + Tailwind, side by side at `/newapp/` | Web / UX | proposed | E15, E17, E19 |
+| [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | Web app rewrite: React + Tailwind, side by side at `/newapp/` | Web / UX | in progress (all screens ported, e2e parity; cutover T14 pending) | E15, E17, E19 |
+| [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | proposed | E01, E08, E13 |
 
 ## Integration epics (`integrations/`)
 
@@ -58,7 +58,7 @@ playbook.
 
 | ID | Title | Depends on |
 |----|-------|------------|
-| [INT-000](integrations/INT-000-overview.md) | Integrations program overview, tiers & bridge adoption | E21 |
+| [INT-000](integrations/INT-000-overview.md) | Integrations program overview, tiers & bridge adoption | E22 |
 | [INT-001](integrations/INT-001-identity-verification.md) | Identity & verification providers (Keycloak, Authentik, Dex, EUDI/eIDAS, walt.id, …) | INT-000 |
 | [INT-002](integrations/INT-002-payments.md) | Payments — crypto & conventional (Lightning, BTCPay, Open Payments, Revolut/Wise handles, …) | E01, E06 |
 | [INT-003](integrations/INT-003-ai-agents.md) | AI tools & agent frameworks (MCP, Open WebUI, LangChain, n8n, OpenHands, …) | E04, E05, E09, E10 |
@@ -131,7 +131,7 @@ EPIC-003/004/005/006/011/013 ──► EPIC-020 (storage v2: chunks, versions, c
                    └─ lands E03-T7 relay-blind storage, E05-T3 mounts, append/excerpt/
                       time-boxed shares and delegation
 
-EPIC-001 + EPIC-008 + EPIC-013 ──► EPIC-021 (generic OAuth/OIDC + IndieAuth bridge)
+EPIC-001 + EPIC-008 + EPIC-013 ──► EPIC-022 (generic OAuth/OIDC + IndieAuth bridge)
                    ├─ one issuer can authenticate IDs hosted on any public Poweur relay
                    ├─ same-browser signer first, cross-device QR second
                    ├─ optional message push is a separate delivery channel, not a contact

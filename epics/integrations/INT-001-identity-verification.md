@@ -2,7 +2,7 @@
 
 - **Status:** proposed
 - **Poweur prerequisites:** EPIC-001 (resolver chain, did:web), EPIC-008 (native Sign-In),
-  EPIC-021 (generic OAuth/OIDC + IndieAuth bridge)
+  EPIC-022 (generic OAuth/OIDC + IndieAuth bridge)
 - **Goal:** make Poweur ID a first-party login and verification option in the identity
   infrastructure the self-hosted world already runs — and bind government-grade verification
   (eIDAS/EUDI) to Poweur IDs so an identity can be *both* self-sovereign and legally attested.
@@ -61,7 +61,7 @@ provider #101 by their architecture — cheap to land, and it carries Poweur int
 the other IdPs don't reach.
 
 ### oauth2-proxy — `oauth2-proxy/oauth2-proxy`
-The de-facto auth sidecar for anything HTTP. With the generic bridge (EPIC-021) it works
+The de-facto auth sidecar for anything HTTP. With the generic bridge (EPIC-022) it works
 *today* with zero upstream changes — the task is a documented provider preset + tutorial, the
 lowest-friction win on this list.
 

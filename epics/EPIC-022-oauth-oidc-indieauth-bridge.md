@@ -1,4 +1,4 @@
-# EPIC-021 — Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility
+# EPIC-022 — Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility
 
 - **Status:** proposed
 - **Priority:** P1 (ecosystem adoption: one bridge unlocks existing auth-capable applications)
@@ -13,14 +13,14 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E21-T1 Architecture, protocol profile & threat model | **open** | Fix service boundary, trust model, canonical identifiers and OAuth/OIDC profile before code |
-| E21-T2 Bridge core + native Poweur authentication | **open** | Generic for any publicly resolvable Poweur ID; browser approval is the primary path |
-| E21-T3 OIDC Authorization Code + PKCE provider | **open** | Primary standards surface; discovery, JWKS, code/token/UserInfo, pairwise subjects |
-| E21-T4 Browser signer and consent journey | **open** | Same-browser redirect/return first; no QR or messaging required for the normal desktop path |
-| E21-T5 Cross-device QR journey | **open** | Phone scans the same short-lived request; desktop polls and resumes |
-| E21-T6 IndieAuth compatibility | **open** | Profile discovery, metadata, authorization code flow and canonical `me` URL |
-| E21-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
-| E21-T8 Packaging, conformance, integrations & operations | **open** | Standalone image, colocated Compose profile, key rotation, security tests and integration recipes |
+| E22-T1 Architecture, protocol profile & threat model | **open** | Fix service boundary, trust model, canonical identifiers and OAuth/OIDC profile before code |
+| E22-T2 Bridge core + native Poweur authentication | **open** | Generic for any publicly resolvable Poweur ID; browser approval is the primary path |
+| E22-T3 OIDC Authorization Code + PKCE provider | **open** | Primary standards surface; discovery, JWKS, code/token/UserInfo, pairwise subjects |
+| E22-T4 Browser signer and consent journey | **open** | Same-browser redirect/return first; no QR or messaging required for the normal desktop path |
+| E22-T5 Cross-device QR journey | **open** | Phone scans the same short-lived request; desktop polls and resumes |
+| E22-T6 IndieAuth compatibility | **open** | Profile discovery, metadata, authorization code flow and canonical `me` URL |
+| E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
+| E22-T8 Packaging, conformance, integrations & operations | **open** | Standalone image, colocated Compose profile, key rotation, security tests and integration recipes |
 
 ## Goal
 
@@ -36,7 +36,7 @@ core for personal-web software where the user's profile URL chooses the authoriz
 
 The default user journey is **same-browser approval in the Poweur web signer**. A QR handoff to
 the mobile app is the second path when the identity's keys are not available in that browser.
-Delivery through Poweur messaging is an optional later channel, isolated in E21-T7; it must not
+Delivery through Poweur messaging is an optional later channel, isolated in E22-T7; it must not
 be required for login and must not turn the bridge into one of the user's contacts.
 
 ## Product and architecture decisions
@@ -95,7 +95,7 @@ audit use case requires it.
 ### Messaging is not the protocol transport
 
 The required response travels to a short-lived HTTPS callback at the bridge. Poweur contacts,
-inbox policy and durable messages are not prerequisites. E21-T7 may additionally deliver the
+inbox policy and durable messages are not prerequisites. E22-T7 may additionally deliver the
 same public request as an encrypted typed message so an already enrolled phone receives a push,
 but that message is only a notification/handoff. Approval still posts the signed response to the
 bridge callback and the initiating browser resumes its existing transaction.
@@ -152,7 +152,7 @@ requested with a documented scope such as `poweur_id`:
 }
 ```
 
-The exact claim names and release rules land in E21-T1. A Poweur-aware RP may receive an
+The exact claim names and release rules land in E22-T1. A Poweur-aware RP may receive an
 optional proof claim containing the verified native response or its digest and independently
 verify it; ordinary OIDC clients trust the issuer in the conventional way.
 
@@ -185,7 +185,7 @@ accessibility and CLI fallback, not a promoted primary path.
 
 ## Tasks
 
-### E21-T1 — Architecture, protocol profile & threat model
+### E22-T1 — Architecture, protocol profile & threat model
 
 - [ ] Write `apps/docs/docs/auth/oauth-oidc-bridge.md` covering the trust boundary, generic-ID
       resolution, issuer semantics, hosted/self-hosted deployment and native-proof translation
@@ -201,7 +201,7 @@ accessibility and CLI fallback, not a promoted primary path.
 **Acceptance:** the document is sufficient to implement an independent bridge and says plainly
 that generic OIDC RPs trust the bridge, while native Poweur RPs verify the user directly.
 
-### E21-T2 — Bridge core + native Poweur authentication
+### E22-T2 — Bridge core + native Poweur authentication
 
 - [ ] New bridge service with configurable issuer, persistent transaction store and health/build
       metadata; reuse `packages/identity/signin` rather than copying verification logic
@@ -218,7 +218,7 @@ that generic OIDC RPs trust the bridge, while native Poweur RPs verify the user 
 **Acceptance:** identities on a Poweur-hosted wildcard, a different public relay and an owned
 domain all authenticate to one bridge with zero relay registration or shared secret.
 
-### E21-T3 — OIDC Authorization Code + PKCE provider
+### E22-T3 — OIDC Authorization Code + PKCE provider
 
 - [ ] `/.well-known/openid-configuration`, `/authorize`, `/token`, `/jwks.json` and `/userinfo`
 - [ ] Authorization Code only; require PKCE `S256` for public clients and support it for every
@@ -236,7 +236,7 @@ domain all authenticate to one bridge with zero relay registration or shared sec
 OIDC configuration and sees a stable `(iss, sub)`; the public ID appears only when requested and
 approved.
 
-### E21-T4 — Browser signer and consent journey
+### E22-T4 — Browser signer and consent journey
 
 - [ ] Bridge page to enter or select a Poweur ID, with `login_hint` support and strict
       normalization
@@ -254,7 +254,7 @@ approved.
 **Acceptance:** on a desktop with keys enrolled in the browser signer, “Sign in with Poweur” is a
 redirect/unlock/approve/return journey with no QR, mobile app, message or copy/paste step.
 
-### E21-T5 — Cross-device QR journey
+### E22-T5 — Cross-device QR journey
 
 - [ ] Bridge renders the same Poweur auth request as a QR and exposes a browser-session-bound
       polling transaction
@@ -268,7 +268,7 @@ redirect/unlock/approve/return journey with no QR, mobile app, message or copy/p
 **Acceptance:** a desktop browser with no Poweur keys completes OIDC login using a phone, and no
 private or recovery key appears in the QR, callback, browser history or bridge storage.
 
-### E21-T6 — IndieAuth compatibility
+### E22-T6 — IndieAuth compatibility
 
 - [ ] IndieAuth metadata plus authorization, token and revocation behavior over the same bridge
       core and browser/QR journeys
@@ -285,7 +285,7 @@ private or recovery key appears in the QR, callback, browser history or bridge s
 **Acceptance:** an unmodified IndieAuth client starts from `https://alice.example.com/`, discovers
 Alice's selected bridge, completes PKCE login and receives that exact canonical `me` URL.
 
-### E21-T7 — Optional push-to-approve delivery channel
+### E22-T7 — Optional push-to-approve delivery channel
 
 This task is additive and does not block T2–T6.
 
@@ -306,7 +306,7 @@ This task is additive and does not block T2–T6.
 browser waits, but disabling the trusted auth service stops delivery without changing contacts or
 breaking browser/QR login.
 
-### E21-T8 — Packaging, conformance, integrations & operations
+### E22-T8 — Packaging, conformance, integrations & operations
 
 - [ ] Standalone container and documented configuration for issuer URL, database, client registry,
       signer discovery, signing keys, pairwise secret, retention and rate limits
@@ -337,7 +337,7 @@ work without Poweur-specific patches.
 - OpenID Federation, SIOPv2/OpenID4VP credential presentation or social-login aggregation in v1
 - Building Micropub or an identity website publishing system as part of the bridge
 
-## Open questions to close in E21-T1
+## Open questions to close in E22-T1
 
 - Exact OIDC claim/scope names and whether the optional native proof carries the full response or
   only a digest plus retrieval endpoint
