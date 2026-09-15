@@ -10,6 +10,13 @@
   on show waits for data it does not have (after 250 ms, so a fast read never blinks it; background
   drains stay silent). Messages and Contacts refresh on pull-down (`ui/PullToRefresh`): the content
   follows the finger and a spinner sits in the gap until the reads settle
+- **Profile photos everywhere (web 0.1.16):** the profile editor (onboarding and Settings) crops a
+  picked photo to a 256 px square and previews it in the avatar circle; saving uploads it to
+  `public/avatars/avatar-<hash>.<ext>` behind a `.poweur-web-public` marker (without one `/pub/`
+  never served the old `public/avatar.png` to anyone) and deletes the replaced file. `ui/Avatar`
+  reads `state/avatars`: our own photo is kept on the device (shown on unlock and in the switcher
+  before keys open, read back over DAV on a new device), other people's come from their public
+  profiles, resolved by Messages, Thread, Contacts, the Files owner picker and the identity door
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6; the second wave consumes [EPIC-018](EPIC-018-identity-onboarding-naming.md)'s name policy, `GET /hosted/availability` and credential scope
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),

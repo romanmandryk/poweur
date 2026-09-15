@@ -16,7 +16,7 @@ import { useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
 import { toast } from "../state/ui";
-import { loadPolicy } from "./account";
+import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
 import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
 
@@ -248,6 +248,7 @@ export function pullAfterUnlock() {
   void loadInbox({ force: true });
   void loadRequests({ force: true });
   void loadContacts();
+  void loadProfile();
   void loadPolicy().then(() => {
     if (useData.getState().policy.doc?.anonymous?.allow) void loadAnon({ force: true });
   });

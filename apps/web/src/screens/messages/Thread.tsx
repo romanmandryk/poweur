@@ -11,6 +11,7 @@ import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, 
 import { downloadAttachment, markConversationRead, sendSigned, unreadFor } from "../../actions/messages";
 import { activeClient } from "../../actions/relay";
 import { MessageText } from "../../components/MessageText";
+import { usePeerAvatars } from "../../actions/avatars";
 import { cn } from "../../lib/cn";
 import { dayLabel, fmtClock } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
@@ -71,6 +72,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
   const unread = unreadFor({ messages, history }, identity, peer);
   const title = group ? handleOf(peer) : contactFor(contacts, peer)?.petname || handleOf(peer);
   const self = identity.toLowerCase();
+  usePeerAvatars(group ? [] : [peer]);
 
   // Pinned to the newest message while the reader is there, held in place
   // when they scrolled up, anchored after "Load more" prepends.

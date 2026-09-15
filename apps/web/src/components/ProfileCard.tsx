@@ -89,7 +89,7 @@ export function ProfileCard({
         className,
       )}
     >
-      <Avatar identity={identity} size={compact ? "md" : "lg"} src={entry?.avatar ?? null} />
+      <Avatar identity={identity} size={compact ? "md" : "lg"} src={entry?.avatar || undefined} />
       <div className="profile-card-body flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="profile-card-name text-base font-semibold">{name}</div>
         <div className="profile-card-id truncate text-xs text-muted" title={identity}>

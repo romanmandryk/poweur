@@ -34,6 +34,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     requests: vi.fn(async () => [] as any[]),
     anonAndArchive: vi.fn(async () => ({ messages: [] as any[], lost: 0 })),
     policy: vi.fn(async () => ({ policy: { version: 1, mode: "open" } as any, explicit: false })),
+    profile: vi.fn(async () => ({ profile: { version: 1 } as any, explicit: false })),
     groups: { roster: vi.fn(async (): Promise<any> => Promise.reject(new Error("not a group"))) },
     messages: { ack: vi.fn(async () => {}) },
     sendAndArchive: vi.fn(async (to: string) => ({

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { cn } from "../lib/cn";
 import { avatarColor, initialOf } from "../lib/identity";
+import { useAvatarSrc } from "../state/avatars";
 
 const SIZES = {
   sm: "size-7 text-[13px]",
@@ -11,7 +12,12 @@ const SIZES = {
 
 export type AvatarSize = keyof typeof SIZES;
 
-/** Initials on the identity's colour; the resolved image covers them once it loads. */
+/**
+ * Initials on the identity's colour; the photo covers them once it loads.
+ * Without `src` the circle shows whatever the avatar store knows — our own
+ * photo, or a resolved profile's — so every place that draws someone gets it.
+ * `src={null}` forces initials (a removed photo in the editor).
+ */
 export function Avatar({
   identity,
   size = "sm",
@@ -23,6 +29,8 @@ export function Avatar({
   src?: string | null;
   className?: string;
 }) {
+  const stored = useAvatarSrc(identity);
+  const image = src === undefined ? stored : src;
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   return (
     <div
@@ -35,14 +43,15 @@ export function Avatar({
       style={{ background: avatarColor(identity) }}
     >
       {initialOf(identity)}
-      {src && (
-        // A broken or slow avatar leaves the initials showing.
+      {image && (
+        // A broken or slow photo leaves the initials showing.
         <img
-          src={src}
+          src={image}
           alt=""
           loading="lazy"
-          onLoad={() => setLoadedSrc(src)}
-          className={cn("id-avatar-img absolute inset-0 size-full object-cover", loadedSrc !== src && "invisible")}
+          decoding="async"
+          onLoad={() => setLoadedSrc(image)}
+          className={cn("id-avatar-img absolute inset-0 size-full object-cover", loadedSrc !== image && "invisible")}
         />
       )}
     </div>

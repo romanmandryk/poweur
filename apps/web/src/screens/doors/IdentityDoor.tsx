@@ -16,6 +16,7 @@ import { Button } from "../../ui/Button";
 import { Skeleton } from "../../ui/Display";
 import { Note } from "../../ui/Field";
 import { openJoinDevicePanel } from "../JoinDevice";
+import { usePeerAvatars } from "../../actions/avatars";
 import { DoorPage } from "./DoorPage";
 
 function DoorCard({ children }: { children: ReactNode }) {
@@ -49,6 +50,7 @@ export function IdentityDoor() {
   const identity = useSession((state) => state.identity);
   const door = useData((state) => state.door);
   const subject = info.subject ?? "";
+  usePeerAvatars(subject ? [subject] : []);
 
   useEffect(() => {
     probeDoor(info, identity);

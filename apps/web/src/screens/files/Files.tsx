@@ -32,6 +32,7 @@ import { Button } from "../../ui/Button";
 import { Chip, EmptyState, SectionLabel } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
 import { Tab, TabBar } from "../../ui/Tabs";
+import { usePeerAvatars } from "../../actions/avatars";
 import { openSharePanel, openSharesPanel } from "./SharePanel";
 
 export function Files() {
@@ -260,6 +261,7 @@ function Listing() {
 function OwnerPicker() {
   const contacts = useData((state) => state.contacts.list);
   const accepted = contacts.filter((contact) => contact.state === "accepted");
+  usePeerAvatars(accepted.map((contact) => contact.identity));
   return (
     <div className="owner-picker px-4 pb-4">
       <p className="mb-2 text-[13px] text-muted">Open someone's tree to see what they have shared with you.</p>

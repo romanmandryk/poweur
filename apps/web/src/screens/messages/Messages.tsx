@@ -34,6 +34,7 @@ import { Button } from "../../ui/Button";
 import { Chip, CountBadge, EmptyState } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
+import { usePeerAvatars } from "../../actions/avatars";
 import { Tab, TabBar } from "../../ui/Tabs";
 
 const TRAYS: { id: Tray; label: string }[] = [
@@ -131,6 +132,8 @@ function InboxTray() {
       return { ...row, petname: known?.petname ?? null, stranger: !known };
     },
   );
+
+  usePeerAvatars(rows.filter((row: any) => !row.group).map((row: any) => row.contact));
 
   if (!rows.length) {
     return <EmptyState icon={MessageCircle} title="No messages yet" body="Start a conversation with New message." />;

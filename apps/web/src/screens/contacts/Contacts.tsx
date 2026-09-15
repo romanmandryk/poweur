@@ -16,6 +16,7 @@ import { Chip, EmptyState, type ChipTone } from "../../ui/Display";
 import { Input } from "../../ui/Field";
 import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
+import { usePeerAvatars } from "../../actions/avatars";
 import { openAddContactPanel } from "./AddContactPanel";
 import { openContactPanel } from "./ContactPanel";
 
@@ -37,6 +38,8 @@ export function Contacts() {
     void loadHistory();
   }, [contacts.loaded]);
 
+  // Their photos, for this list and every picker that shows the same people.
+  usePeerAvatars(contacts.list.map((contact) => contact.identity));
   const needle = contacts.filter.trim().toLowerCase();
   const filtered = contacts.list.filter((contact) => !needle || `${contact.identity} ${contact.petname ?? ""}`.toLowerCase().includes(needle));
 
