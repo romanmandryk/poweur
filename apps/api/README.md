@@ -26,7 +26,7 @@ go run .
 
 ### Web client (static SPA)
 
-Build the web UI once (outputs to `apps/api/web/dist`):
+Build the web UI once (outputs to `apps/web/dist`):
 
 ```bash
 pnpm --filter @poweur/web build
@@ -35,12 +35,12 @@ pnpm --filter @poweur/web build
 Point the relay at that directory so it serves the app under **`/app/`**:
 
 ```bash
-WEB_STATIC_DIR=/absolute/path/to/poweur/apps/api/web/dist go run .
+WEB_STATIC_DIR=/absolute/path/to/poweur/apps/web/dist go run .
 ```
 
 The relay sends permissive **CORS** headers on all routes so browsers can talk to any Poweur ID relay (direct POST to recipient hosts, not only the home relay).
 
-For local development without copying files, run Vite (`pnpm --filter @poweur/web dev`) — it proxies `/messages`, `/sessions`, etc. to `http://127.0.0.1:8080` by default.
+For UI work, `pnpm web:dev` runs Vite with hot reload; the app talks to whichever relay it is pointed at, so pick the local one (`http://127.0.0.1:8080`) in its relay prompt.
 
 ## Test coverage
 

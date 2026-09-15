@@ -1,11 +1,11 @@
 # `@poweur/mobile` — the Capacitor shell (EPIC-019)
 
 The iOS and Android apps are the **web client in a native container**. There is no mobile
-build of the UI and no forked screen: `pnpm stage` copies `apps/web` into `www/`, and
+build of the UI and no forked screen: `pnpm run stage` builds `apps/web` and copies its `dist/` into `www/`, and
 `cap sync` carries it into the platform projects.
 
 ```bash
-pnpm --filter @poweur/mobile run sync     # stage apps/web, then cap sync
+pnpm --filter @poweur/mobile run sync     # build + stage apps/web, then cap sync
 pnpm --filter @poweur/mobile run ios      # …and open Xcode
 pnpm --filter @poweur/mobile test         # staging invariants (no native toolchain needed)
 ```
@@ -24,7 +24,7 @@ anything at all, and it falls out of the shell's origin rather than being built.
 ## What the shell adds, and what it must not
 
 It adds capabilities a browser lacks — hardware-backed key custody, push, background sync,
-the share sheet — through the seam in [`apps/web/js/native.js`](../web/js/native.js), which
+the share sheet — through the seam in [`apps/web/src/lib/native.js`](../web/src/lib/native.js), which
 answers "is this available?" and otherwise leaves the app unchanged. Everything there has a
 web fallback and runs untouched in a plain browser.
 

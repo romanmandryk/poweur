@@ -216,7 +216,7 @@ test.describe("browser journeys", () => {
     const strangerId = await registerIdentity(strangerPage, relay, `mixs${suffix}`);
 
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
-    // Written behind the app's back, so let it re-read: the rewrite offers an
+    // Written behind the app's back, so let it re-read: the app offers an
     // anonymous tray only for the policy it loaded.
     await ownerPage.reload();
     if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");

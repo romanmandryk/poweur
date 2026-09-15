@@ -2,6 +2,9 @@
 
 - **Status:** in progress — T1–T6 done (the app for someone who *has* an ID);
   **T7–T12 open** (the front door for someone who does not, and the big screen)
+- **Code:** since [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) E21-T14 the app is the React +
+  Tailwind client in `apps/web/src/`; `js/…` paths below name the legacy files a screen was
+  ported from, and T7–T12 continue on the React code
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6; the second wave consumes [EPIC-018](EPIC-018-identity-onboarding-naming.md)'s name policy, `GET /hosted/availability` and credential scope
 - **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),

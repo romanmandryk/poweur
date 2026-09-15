@@ -3,7 +3,7 @@ import { startRelay } from "../helpers/relay.mjs";
 
 import "../helpers/browser-globals.mjs";
 import { createWebIdentity, unlock } from "../helpers/identity.mjs";
-import { clientFor } from "../../js/client.js";
+import { clientFor } from "../../src/lib/client.js";
 
 /**
  * Playwright smoke for WebDAV files (EPIC-003) — same protocol the SPA file

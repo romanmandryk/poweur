@@ -32,9 +32,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 // mountWebStatic serves the web client SPA from dir under prefix ("/app" →
-// GET /app/). The same handler serves the EPIC-021 preview build at /newapp/,
-// on the same origin, so both apps share one identity store while they are
-// compared side by side.
+// GET /app/): real files as themselves, every other path as index.html so the
+// app's own routes survive a reload.
 func mountWebStatic(mux *http.ServeMux, prefix, dir string) {
 	if dir == "" {
 		return

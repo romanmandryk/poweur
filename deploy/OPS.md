@@ -53,7 +53,7 @@ Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to th
 
 Push to `master` (or manual dispatch) runs Deploy: CI, GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no smoke step, `.releases` pointer, or rollback. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
 
-**Web app preview (EPIC-021):** the relay serves two web clients on every host until cutover. `/app/` is the legacy app, mounted from the checkout (`./apps/web:/web`). `/newapp/` is the React rewrite, built into the image at `/web-next` (`WEB_NEXT_STATIC_DIR`). Both share one origin, so an identity created in one is usable in the other. Unset `WEB_NEXT_STATIC_DIR` to hide the preview.
+**Web app:** the relay image carries the built client at `/web` (`WEB_STATIC_DIR`) and serves it at `/app/` on every host; nothing is mounted from the checkout.
 
 ## Fresh VM
 

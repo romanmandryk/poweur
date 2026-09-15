@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { appPath, isNextApp } from "../helpers/app-path.mjs";
+import { appPath } from "../helpers/app-path.mjs";
 import { startRelay } from "../helpers/relay.mjs";
 import { stubPasskeys, registerIdentity } from "../helpers/app-ui.mjs";
 
@@ -71,8 +71,6 @@ test.describe("front doors", () => {
   });
 
   test("the apex is a launcher too, and is not a service banner", async ({ page }) => {
-    // The relay redirects the apex to /app/ — the legacy app — until cutover (E21-T14).
-    test.skip(isNextApp(), "apex redirect targets /app/ until cutover");
     // Before E15-T7 `GET /` here answered {"service":"poweur-relay"} to a human.
     // Navigate in the page so Chromium's host-resolver-rules apply; Playwright's
     // `page.request` does not use them and would hit the real apex over DNS.

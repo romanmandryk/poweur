@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
 import { startRelay } from "../helpers/relay.mjs";
-import { isNextApp } from "../helpers/app-path.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
 
 /**
@@ -8,14 +7,10 @@ import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
  * HTML string on every change, so buttons flickered, focus jumped and a half-
  * typed reply was re-created under the cursor. The rewrite must keep the same
  * DOM nodes across navigation and live updates.
- *
- * Runs against the rewrite only — the legacy app is the thing being fixed.
  */
 const MOBILE = { width: 375, height: 812 };
 
 test.describe("no full-page re-render", () => {
-  test.skip(!isNextApp(), "the legacy shell re-renders from strings by design");
-
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
   let relay;
   test.beforeAll(async () => { relay = await startRelay(); });

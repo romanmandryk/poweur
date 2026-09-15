@@ -78,31 +78,24 @@ match Go, or reconsider the protocol change.
 
 ### Web client tests (Vitest + Playwright)
 
-`apps/web` tests spawn a **real Go relay** (`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR`), same spirit as CLI integration tests.
+`apps/web` is the React + Tailwind client (Vite, TypeScript), served by the relay at `/app/`
+and staged into the Capacitor shell. Its live-relay and e2e suites spawn a **real Go relay**
+(`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR=apps/web/dist`), same spirit
+as CLI integration tests.
 
 ```bash
-cd apps/web && pnpm install   # postinstall downloads Chromium for Playwright
-pnpm test          # Vitest: vault/storage/components unit + live-relay
-pnpm test:e2e      # Playwright: destinations at 375px, hosted create UI, protocol smoke
-pnpm test:all
-# If e2e says browser executable missing: pnpm exec playwright install chromium
+pnpm install
+pnpm --filter @poweur/web exec playwright install chromium   # once, for e2e
+pnpm web:typecheck
+pnpm web:test      # Vitest: screens, components, stores, lib + live-relay
+pnpm web           # vite build → apps/web/dist (what the relay and the shell serve)
+pnpm web:test:e2e  # builds, then Playwright against /app/ on a real relay
 ```
 
-**The web app has no bundler**: it imports `@poweur/client` through an import map that
-points at `apps/web/vendor/`, a committed copy of the package's ESM (prod mounts `apps/web`
-straight from the checkout, so it has to be in git). **Any change to `packages/client-ts`
-must be re-vendored in the same change set:**
-
-```bash
-pnpm client:build && pnpm web:vendor    # refresh apps/web/vendor/
-pnpm web:vendor:check                   # fails when it is stale (also asserted in Vitest)
-```
-
-Web Vitest mirrors CLI unit tests (`encrypt/decrypt`, identity persistence, session send,
-identity-signed send, invalid `--sign-with`) plus CLI↔relay messaging (register → session
-→ encrypt/send → inbox decrypt) driven through the app's own modules (`js/client.js`,
-`js/vault.js`) against a real `go run` relay. The protocol itself lives in
-`@poweur/client` and is tested there; `apps/web` tests the browser key-custody seam.
+The app bundles `@poweur/client` from the workspace, so there is no vendored copy to refresh:
+a change to `packages/client-ts` reaches the browser on the next web build. The protocol itself
+lives in `@poweur/client` and is tested there; `apps/web` tests the screens and the browser
+key-custody seam (`src/lib/`).
 
 If a feature cannot be asserted in unit tests alone (Host routing, restart/`POWEUR_DATA`, E2E encrypt/send/inbox), write an integration test.
 
@@ -148,8 +141,8 @@ bump the `Version` constant instead.
 |---------|---------------|------------|
 | Relay (`apps/api`) | `apps/api/internal/buildinfo.Version` | `BUILD_TIME` / `VERSION_HASH` env or VCS info at build; `GET /` exposes them |
 | Go CLI (`apps/cli`) | `apps/cli/internal/buildinfo.Version` | same; printed by `poweur version` / `--version` / `-v` |
-| `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM`; re-vendor the web copy |
-| Web app | `apps/web/package.json` **and** `apps/web/js/build-info.js` | `APP_VERSION` / `APP_BUILD_TIME` |
+| `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM` |
+| Web app | `apps/web/package.json` **and** `apps/web/src/build-info.ts` | `APP_VERSION` / `APP_BUILD_TIME` |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
 
 Default bump is **patch**. Minor/major is for breaking protocol or public API
@@ -167,7 +160,7 @@ git sha as `VERSION` (that belongs in `VERSION_HASH`).
 ```
 apps/api          Go relay
 apps/cli          Go CLI
-apps/web          Vanilla JS client (served at /app/)
+apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
 apps/integration  In-process E2E tests
 packages/identity Shared identity document + resolver (Go, canonical)
 packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)

@@ -34,7 +34,7 @@ import (
 //	sha256(token + "." + nonce)
 //
 // has at least `bits` leading zero bits. The same contract is implemented
-// by the browser solver (apps/web/js/pow.js).
+// by the TypeScript solver (solvePow in packages/client-ts).
 
 // PoW difficulty window. Issuers clamp requested difficulties into
 // [PowMinBits, PowMaxBits]; 0 anywhere means "use the default".

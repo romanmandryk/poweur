@@ -16,7 +16,7 @@
 - PoW scheme `sha256-lead0`: solution nonce s.t. `sha256(token + "." + nonce)` has ≥
   `bits` leading zero bits; tokens are HMAC-sealed `{purpose, bits, expires_at,
   nonce}`, purpose-bound, single-use, 10-min TTL. Reference: `packages/identity/pow.go`
-  + `apps/web/js/pow.js`.
+  + `solvePow` in `packages/client-ts`.
 - Anonymous messages: envelope without `sender`/`signature`, E2E-encrypted with an
   ephemeral key, delivered to a dedicated queue (`GET /anon/{identity}`), never the
   signed inbox.

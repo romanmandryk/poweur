@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1–T13 done (T2 pending first production deploy); T14 cutover remains, after a side-by-side pass on production
+- **Status:** **complete** — T1–T14 done. The React app is `apps/web`: the relay serves it at `/app/` and the Capacitor shell stages its build
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -14,7 +14,7 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | E21-T1 Scaffold `apps/web-next` (Vite, React 19, TS, Tailwind v4) | **done** | Vite 8, React 19.3 + Compiler (Babel preset), Tailwind 4.3, 69 KB gz placeholder bundle; ESLint replaced by source-guard tests |
-| E21-T2 Relay serves `/newapp/` beside `/app/` + prod wiring | **done** (deploy unverified) | relay 0.1.7; image builds locally with `/web-next` baked in; confirm on prod after merge |
+| E21-T2 Relay serves `/newapp/` beside `/app/` + prod wiring | **done** | relay 0.1.7; verified on production 2026-09-15 (`/newapp/` 200 at `33e1cda`) |
 | E21-T3 Non-UI modules carried over verbatim | **done** | 12 modules + 15 test files (176 tests green); legacy↔next storage compat + byte-identical guard in `test/lib/legacy-compat.test.js` |
 | E21-T4 State store, routing & app shell | **done** | Zustand `route` / `session` / `data` / `ui` stores; shell, boot, overlays, back nav; every unported screen is a labelled `NotPorted` stand-in linking to `/app/` |
 | E21-T5 Design system: tokens + primitives | **done** | tokens from `style.css` in `index.css`; `src/ui/*`; IdentityInput, ProfileCard, AudiencePicker, PolicyControls in React; 257 tests green. Bundle now 144 KB gz (React + Radix + `@poweur/client` crypto) — above the 70–90 KB estimate, recheck in T13 |
@@ -26,7 +26,7 @@
 | E21-T11 Settings & every panel | **done** (unit-verified; e2e in T12) | Settings page + all 12 legacy panels, remove / rotate / session actions; no `NotPorted` screen is left |
 | E21-T12 E2E parity: one Playwright suite, both apps | **done** | 62 passed / 1 skipped on each app |
 | E21-T13 Capacitor shell on the new build | **done** | iOS simulator walkthrough passed (native keystore create → note to self ✓✓ → relaunch → Face ID unlock); production bundle 254 KB gz / 3 files vs legacy 325 KB gz / 90 files |
-| E21-T14 Cutover: `/app/` serves the new app, legacy deleted | open | |
+| E21-T14 Cutover: `/app/` serves the new app, legacy deleted | **done** | `apps/web` is the React app (0.1.14); relay 0.1.8 serves only `/app/`; image serves `/web`; shell stages `apps/web/dist` (mobile 0.1.2); legacy JS/CSS/vendor deleted |
 
 **Resuming after an interruption:** check the table above and the checkboxes below; the first
 unchecked box in the lowest-numbered open task is the next thing to do. T6–T11 are independent
@@ -146,7 +146,7 @@ relative; `pnpm web-next:test` runs green on an empty smoke test.
 - [x] Web test helper `startRelay()` also sets `WEB_NEXT_STATIC_DIR` to `apps/web-next/dist`
 - [x] `deploy/OPS.md`: note that `/newapp/` is the preview build
 - [x] `.claude/launch.json` → `relay-web-next`: local relay on :8088 serving both apps
-- [ ] Verify on production after the first deploy: `https://poweur.net/newapp/` and
+- [x] Verify on production after the first deploy: `https://poweur.net/newapp/` and
       `https://<handle>.poweur.net/newapp/` load
 
 **Acceptance:** after a deploy, `https://poweur.net/newapp/` and
@@ -457,17 +457,25 @@ skipped (`no-flicker`, rewrite only).
 
 Only after T12 is fully green and a manual side-by-side pass on production.
 
-- [ ] Delete legacy `apps/web` contents; move `apps/web-next` → `apps/web`
-      (package name back to `@poweur/web`, version above the last legacy version)
-- [ ] Relay: `/app/` serves the new build; `/newapp/` → 301 `/app/` (keep for one release,
-      then remove `WEB_NEXT_STATIC_DIR`); bump relay patch
-- [ ] Prod: drop the `./apps/web:/web:ro` mount; image carries the built app at `/web`
-- [ ] Mobile: stage from the built app by default, remove `WEB_SOURCE` flag; bump mobile patch
-- [ ] Remove `web:vendor` scripts and `apps/web/vendor/` (the bundler consumes
-      `@poweur/client` directly); update AGENTS.md ("no bundler" section, vendor rule), README,
-      CLAUDE.md, EPIC-019's staging notes
-- [ ] E2E: drop `APP_PATH` dual run
-- [ ] Mark this epic complete; re-point EPIC-015 T7–T12 at the new code
+- [x] Delete legacy `apps/web` contents; move `apps/web-next` → `apps/web` (`@poweur/web`
+      0.1.14 — above legacy 0.1.13 and web-next 0.1.7). The Playwright suite and its two
+      app-driving helpers moved into `apps/web/test/`; the legacy unit tests went with the code
+      they tested (their carried-module twins already lived in `test/lib/`), and so did the
+      legacy↔next storage compatibility test
+- [x] Relay: `/app/` serves the built app from `WEB_STATIC_DIR`; `/newapp/` and
+      `WEB_NEXT_STATIC_DIR` removed outright — no redirect, since the preview never had real users;
+      relay 0.1.8
+- [x] Prod: the `./apps/web:/web:ro` mount is gone; the image builds the app into `/web` and
+      defaults `WEB_STATIC_DIR=/web`
+- [x] Mobile: `pnpm run stage` builds `apps/web` and stages `dist/` (no source maps, no
+      `WEB_SOURCE`); mobile 0.1.2
+- [x] `web:vendor` scripts, `scripts/vendor.mjs` and `apps/web/vendor/` removed; AGENTS.md (web
+      tests, vendor rule, version table, map), README, `apps/api/README.md`, OPS.md, EPIC-019 and
+      the comments that named `apps/web/js/*` updated. CLAUDE.md had nothing web-specific
+- [x] E2E: `POWEUR_APP_PATH` and the `/newapp/` CI run are gone; one Web CI job typechecks,
+      unit-tests, builds and runs Playwright against `/app/`. The apex-redirect test runs again
+      and `no-flicker.spec` is unconditional
+- [x] Marked complete; EPIC-015 notes that T7–T12 continue on `apps/web/src/`
 
 **Acceptance:** production `/app/` runs the React app; `apps/web` contains no legacy JS/CSS;
 `pnpm web:test:all`, `apps/integration` and `pnpm client:test` are green.

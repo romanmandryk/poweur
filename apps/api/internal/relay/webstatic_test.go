@@ -39,32 +39,15 @@ func staticGet(t *testing.T, ts *httptest.Server, path string) (int, string, str
 	return resp.StatusCode, resp.Header.Get("Location"), string(body)
 }
 
-// EPIC-021 E21-T2: the preview build is served at /newapp/ beside the legacy
-// app at /app/, from its own directory, with the same SPA fallback.
-func TestWebStaticServesLegacyAndNextSideBySide(t *testing.T) {
-	legacy := writeStaticApp(t, "legacy")
-	next := writeStaticApp(t, "next")
-	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", legacy)
-	mountWebStatic(mux, "/newapp", next)
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
+type staticCase struct {
+	path     string
+	status   int
+	location string
+	contains string
+}
 
-	cases := []struct {
-		path     string
-		status   int
-		location string
-		contains string
-	}{
-		{"/app", http.StatusMovedPermanently, "/app/", ""},
-		{"/newapp", http.StatusMovedPermanently, "/newapp/", ""},
-		{"/app/", http.StatusOK, "", "legacy"},
-		{"/newapp/", http.StatusOK, "", "next"},
-		{"/newapp/assets/main.js", http.StatusOK, "", "// next"},
-		{"/app/assets/main.js", http.StatusOK, "", "// legacy"},
-		{"/newapp/some/deep/route", http.StatusOK, "", "next"},
-		{"/newapp/assets", http.StatusOK, "", "next"},
-	}
+func checkStatic(t *testing.T, ts *httptest.Server, cases []staticCase) {
+	t.Helper()
 	for _, tc := range cases {
 		status, loc, body := staticGet(t, ts, tc.path)
 		if status != tc.status {
@@ -79,12 +62,29 @@ func TestWebStaticServesLegacyAndNextSideBySide(t *testing.T) {
 	}
 }
 
-func TestWebStaticUnsetDirMountsNothing(t *testing.T) {
+// The built app is served at /app/, with every unknown path answered by
+// index.html so the SPA's own routes survive a reload.
+func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/newapp", "")
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
-	if status, _, _ := staticGet(t, ts, "/newapp/"); status != http.StatusNotFound {
+
+	checkStatic(t, ts, []staticCase{
+		{"/app", http.StatusMovedPermanently, "/app/", ""},
+		{"/app/", http.StatusOK, "", "app"},
+		{"/app/assets/main.js", http.StatusOK, "", "// app"},
+		{"/app/some/deep/route", http.StatusOK, "", "<html>app"},
+		{"/app/assets", http.StatusOK, "", "<html>app"},
+	})
+}
+
+func TestWebStaticUnsetDirMountsNothing(t *testing.T) {
+	mux := http.NewServeMux()
+	mountWebStatic(mux, "/app", "")
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	if status, _, _ := staticGet(t, ts, "/app/"); status != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", status)
 	}
 }
@@ -103,12 +103,12 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/newapp", app)
+	mountWebStatic(mux, "/app", app)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	// ServeMux answers a dot-segment path with a redirect to the cleaned one,
 	// so the check is on the file's content, not on the path appearing anywhere.
-	for _, path := range []string{"/newapp/../secret.txt", "/newapp/%2e%2e/secret.txt", "/newapp/..%2fsecret.txt"} {
+	for _, path := range []string{"/app/../secret.txt", "/app/%2e%2e/secret.txt", "/app/..%2fsecret.txt"} {
 		_, _, body := staticGet(t, ts, path)
 		if strings.Contains(body, secret) {
 			t.Errorf("%s leaked a file outside the app dir", path)

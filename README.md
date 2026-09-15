@@ -192,7 +192,7 @@ belong in upstream projects rather than this repository.
 - **Go CLI (`apps/cli`)** — complete scriptable client for people, operators, bots, and tests.
 - **TypeScript SDK (`packages/client-ts`)** — the corresponding browser/Node implementation
   and interoperable `poweur` CLI.
-- **Web app (`apps/web`)** — vanilla-JS client for identity creation, messaging, contacts,
+- **Web app (`apps/web`)** — React + Tailwind client for identity creation, messaging, contacts,
   settings, files, sharing, sign-in approval, devices, and recovery.
 - **Mobile (`apps/mobile`)** — Capacitor shell over the web client with native iOS and Android
   key-custody bridges.
@@ -233,9 +233,9 @@ cd apps/cli
 go run . --help
 ```
 
-Serve the web app from the relay by setting `WEB_STATIC_DIR` to `apps/web` in the relay's
-environment, then open `/app/`. The browser app has no bundler and imports the vendored
-`@poweur/client` ESM directly.
+Build the web app with `pnpm web`, then serve it from the relay by setting `WEB_STATIC_DIR` to
+`apps/web/dist` in the relay's environment and open `/app/`. `pnpm web:dev` runs Vite with hot
+reload while working on the UI.
 
 See [`apps/api/README.md`](apps/api/README.md) for a local relay setup.
 

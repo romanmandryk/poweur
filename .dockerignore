@@ -1,5 +1,5 @@
 # Relay image only needs the Go modules the Dockerfile copies, plus the
-# workspace pieces that build the EPIC-021 web app (`@poweur/client` + web-next).
+# workspace pieces that build the web client (`@poweur/client` + apps/web).
 *
 !packages/identity/**
 !apps/api/**
@@ -8,9 +8,10 @@
 !pnpm-workspace.yaml
 !pnpm-lock.yaml
 !packages/client-ts/**
-!apps/web-next/**
+!apps/web/**
 **/node_modules
 **/dist
+**/test-results
 
 # Never send local environment secrets to the image builder.
 **/.env

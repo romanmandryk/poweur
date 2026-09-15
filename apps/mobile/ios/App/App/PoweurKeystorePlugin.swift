@@ -7,7 +7,7 @@ import Security
  * The iOS half of the `PoweurKeystore` contract (EPIC-019 E19-T2).
  *
  * The contract itself — four methods, and what each has to guarantee — is
- * documented at the bottom of `apps/web/js/native.js`, which is the only
+ * documented at the bottom of `apps/web/src/lib/native.js`, which is the only
  * caller. Nothing cryptographic happens here: the web layer generates the 32
  * random bytes and does the AES wrapping, and this plugin's whole job is to
  * hold those bytes somewhere the app cannot read them without the user.

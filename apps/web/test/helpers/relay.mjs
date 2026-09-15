@@ -9,9 +9,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // helpers → test → web → apps → repo root
 const REPO_ROOT = join(__dirname, "../../../..");
 const API_DIR = join(REPO_ROOT, "apps/api");
-const WEB_DIR = join(REPO_ROOT, "apps/web");
-// EPIC-021: the React build, served at /newapp/ (`pnpm web-next:build` first).
-const WEB_NEXT_DIR = join(REPO_ROOT, "apps/web-next/dist");
+// The built app, served at /app/ (`pnpm web` first).
+const WEB_DIR = join(REPO_ROOT, "apps/web/dist");
 
 export async function freePort() {
   return new Promise((resolve, reject) => {
@@ -60,7 +59,6 @@ export async function startRelay({ hostedDomains = "poweur.net" } = {}) {
       POWEUR_DATA: dataDir,
       HOSTED_DOMAINS: hostedDomains,
       WEB_STATIC_DIR: WEB_DIR,
-      WEB_NEXT_STATIC_DIR: WEB_NEXT_DIR,
       RESOLVER_ALLOW_PRIVATE: "1",
       RATE_LIMIT_MINUTE: "10000",
       RATE_LIMIT_HOUR: "100000",

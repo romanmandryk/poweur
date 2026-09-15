@@ -18,10 +18,8 @@ services:
       TELEMETRY_TRUSTED_PROXIES: ${TELEMETRY_TRUSTED_PROXIES:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       NAME_RESERVED: "ingest,metrics,grafana,stats,${NAME_RESERVED:-}"
+      # The web client is built into the image at /web and served at /app/.
       WEB_STATIC_DIR: /web
-      # EPIC-021 preview build, baked into the image; served at /newapp/ beside
-      # /app/ until cutover (E21-T14).
-      WEB_NEXT_STATIC_DIR: /web-next
       POWEUR_DATA: /data
       # Which domains this relay hosts names under. Without it `GET /` answers
       # `hosted_domains: null` and every host classifies as `unknown` (E15-T7):
@@ -38,7 +36,6 @@ services:
       # NAME_BLOCKED_FILE: /data/blocked-terms.txt (one term per line)
       # NAME_BLOCK_MODE: substring | exact
     volumes:
-      - ./apps/web:/web:ro
       - poweur_data:/data
     networks:
       - poweur_net
