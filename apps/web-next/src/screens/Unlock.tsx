@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { LockOpen } from "lucide-react";
 import { unlock } from "../actions/identity";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { domainOf, handleOf } from "../lib/identity";
@@ -32,7 +33,7 @@ export function Unlock() {
         <div className="unlock-sub text-[15px] text-muted">{domainOf(identity)}</div>
       </div>
       <Button id="btn-do-unlock" variant="passkey" className="max-w-70" onClick={() => void unlock()}>
-        🔓 {copy.action}
+        <LockOpen className="size-5" aria-hidden="true" /> {copy.action}
       </Button>
       <Note className="mt-0 max-w-[220px]">{copy.note}</Note>
     </SubPage>

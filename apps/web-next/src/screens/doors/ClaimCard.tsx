@@ -6,6 +6,7 @@
  * is what a claim reads, and the relay-refused path writes the attempt back.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { KeyRound } from "lucide-react";
 import { chooseCustody, createIdentity, type ClaimIntent } from "../../actions/identity";
 import { cn } from "../../lib/cn";
 import { normalizeHandleInput, policyHint, webCustodyBlocked } from "../../lib/claim";
@@ -372,7 +373,7 @@ export function DnsClaimCard({ info }: { info: ModeInfo }) {
       </FormGroup>
       <StatusLine status={availability.status} fallback="" />
       <Button id="btn-claim" variant="passkey" disabled={availability.disabled} onClick={claim}>
-        🔑 Create with passkey
+        <KeyRound className="size-5" aria-hidden="true" /> Create with passkey
       </Button>
       <Note className="mt-2.5 text-[13px]">Keys are generated locally and never leave your device in plain form.</Note>
     </div>

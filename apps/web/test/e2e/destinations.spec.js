@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test";
 import { SDK_VERSION } from "@poweur/client";
 import { startRelay } from "../helpers/relay.mjs";
 import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
-import { appBuildInfo } from "../helpers/app-path.mjs";
+import { appBuildInfo, isNextApp } from "../helpers/app-path.mjs";
 
 // The app under test reports its own version (legacy js/build-info.js or web-next's).
 const { APP_VERSION, APP_BUILD_TIME } = appBuildInfo();
@@ -106,19 +106,22 @@ test.describe("five destinations at 375px", () => {
       .toBe(true);
   });
 
-  test("Messages shows three trays and switches between them", async ({ page }) => {
+  test("Messages shows its trays and switches between them", async ({ page }) => {
     await stubPasskeys(page);
     await registerIdentity(page, relay, destHandle());
 
-    await expect(page.locator(".tray-tab")).toHaveCount(3);
+    // The rewrite offers the anonymous tray only to an inbox that accepts anonymous messages.
+    await expect(page.locator(".tray-tab")).toHaveCount(isNextApp() ? 2 : 3);
     await expect(page.locator(".tray-tab.active")).toHaveText("Inbox");
     await expect(page.locator(".empty-state-title")).toHaveText("No messages yet");
 
     await page.click('.tray-tab[data-tray="requests"]');
     await expect(page.locator(".empty-state-title")).toHaveText("No contact requests");
 
-    await page.click('.tray-tab[data-tray="anonymous"]');
-    await expect(page.locator(".empty-state-title")).toHaveText("No anonymous messages");
+    if (!isNextApp()) {
+      await page.click('.tray-tab[data-tray="anonymous"]');
+      await expect(page.locator(".empty-state-title")).toHaveText("No anonymous messages");
+    }
 
     // No badges when nothing is waiting: a badge that never clears teaches
     // people to ignore badges (E07-T3).

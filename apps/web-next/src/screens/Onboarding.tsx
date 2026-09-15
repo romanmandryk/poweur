@@ -5,6 +5,7 @@
  * save fails stays put with the error beside the field.
  */
 import { useRef, useState } from "react";
+import { PartyPopper } from "lucide-react";
 import { savePolicy } from "../actions/account";
 import { PolicyControls, type PolicyControlsHandle } from "../components/PolicyControls";
 import { ProfileEditor, type ProfileEditorHandle } from "../components/ProfileEditor";
@@ -121,7 +122,9 @@ export function Onboarding() {
 
       {step === 3 && (
         <div className="onboard-done py-6 text-center">
-          <div className="empty-state-icon text-[40px]">🎉</div>
+          <div className="empty-state-icon mx-auto mb-3 flex size-16 items-center justify-center rounded-full bg-accent-soft text-accent">
+            <PartyPopper className="size-8" strokeWidth={1.75} aria-hidden="true" />
+          </div>
           <h2 className="onboard-title mb-1.5 text-[22px] font-bold">You're set</h2>
           <p className="text-muted">
             {identity} can send and receive encrypted messages, keep files, and share them. Add someone from Contacts to get started.

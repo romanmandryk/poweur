@@ -122,7 +122,8 @@ describe("Unlock", () => {
     saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "native" } });
     at("unlock");
     render(<App />);
-    expect($("#btn-do-unlock")!.textContent).toBe("🔓 Unlock");
+    expect($("#btn-do-unlock")!.textContent).toBe(" Unlock");
+    expect($("#btn-do-unlock svg")).toBeTruthy();
     expect(screen.getByText("Your device will ask for Face ID, Touch ID or your passcode")).toBeTruthy();
   });
 

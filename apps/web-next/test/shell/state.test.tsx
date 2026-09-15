@@ -78,9 +78,12 @@ describe("badges", () => {
     expect(requests[0]).toMatchObject({ intro: "again", queued: true });
   });
 
-  it("count unread anonymous messages on Messages", () => {
-    const data = { ...base(), anon: { ...base().anon, messages: [{ id: "a", timestamp: "2026-09-01T00:00:00Z" }] } };
-    expect(navBadges(data, "alice.poweur.net", true).messages).toBe(1);
+  it("count unread anonymous messages on Messages, while the inbox accepts them", () => {
+    const anon = { ...base().anon, messages: [{ id: "a", timestamp: "2026-09-01T00:00:00Z" }] };
+    const accepting = { ...base().policy, loaded: true, doc: { version: 1, mode: "open", anonymous: { allow: true } } as any };
+    expect(navBadges({ ...base(), anon, policy: accepting }, "alice.poweur.net", true).messages).toBe(1);
+    // Turned off, there is no tray to clear them from, so they are no count either.
+    expect(navBadges({ ...base(), anon }, "alice.poweur.net", true).messages).toBe(0);
   });
 });
 

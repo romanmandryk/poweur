@@ -30,6 +30,7 @@ export function BottomNav({ className }: { className?: string }) {
       history: state.history,
       requests: state.requests,
       contacts: state.contacts,
+      policy: state.policy,
     })),
   );
   const badges = navBadges(badgeData, identity, unlocked);

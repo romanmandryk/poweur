@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
 /** The in-page title of a destination, distinct from the app header. */
@@ -70,7 +70,8 @@ export function SettingsGroup({ label, children, className }: { label?: ReactNod
 }
 
 export function SettingsRow({
-  icon,
+  icon: Icon,
+  iconClassName,
   label,
   value,
   valueTone,
@@ -79,7 +80,8 @@ export function SettingsRow({
   onClick,
   ...props
 }: Omit<ComponentProps<"button">, "value"> & {
-  icon?: ReactNode;
+  icon?: LucideIcon;
+  iconClassName?: string;
   label: ReactNode;
   value?: ReactNode;
   valueTone?: "ok" | "warn";
@@ -101,7 +103,11 @@ export function SettingsRow({
       )}
       {...props}
     >
-      {icon && <span className="settings-row-icon w-7 shrink-0 text-center text-xl">{icon}</span>}
+      {Icon && (
+        <span className="settings-row-icon flex w-7 shrink-0 justify-center text-accent">
+          <Icon className={cn("size-5", iconClassName)} strokeWidth={1.9} aria-hidden="true" />
+        </span>
+      )}
       <span className="settings-row-label flex-1 text-base">{label}</span>
       {value !== undefined && (
         <span

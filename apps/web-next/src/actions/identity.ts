@@ -450,7 +450,7 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
     afterUnlock();
 
     setLoading(false);
-    toast(`${identity} created! 🎉`, "success");
+    toast(`${identity} created`, "success");
 
     // Claimed on a launcher host? The identity's own origin is where it lives.
     if (await handOffToIdentityOrigin(identity)) return;

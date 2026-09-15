@@ -3,6 +3,7 @@
  * itself, like every chat app.
  */
 import { useRef, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { openNewChat } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
 import { IdentityInput, type IdentityInputHandle } from "../../components/IdentityInput";
@@ -48,7 +49,7 @@ export function NewChat() {
       bodyClassName="new-chat-body flex flex-col gap-3"
       footer={
         <Button id="btn-open-chat" disabled={opening} onClick={() => void open()}>
-          Open chat →
+          Open chat <ArrowRight className="size-5" aria-hidden="true" />
         </Button>
       }
     >

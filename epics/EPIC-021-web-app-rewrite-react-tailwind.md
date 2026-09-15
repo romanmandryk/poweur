@@ -444,6 +444,13 @@ skipped (`no-flicker`, rewrite only).
       sit ~20–50 pt lower until the next interaction (WKWebView scroll offset with
       `contentInset: "always"`) — confirm on a device before cutover
 
+- [x] Polish after the walkthrough (web-next 0.1.7): every emoji is a lucide icon (the one icon
+      set, tree-shaken: +4.8 KB gz for ~40 icons); carried `lib/threads.js` still writes 📎/🔒/⏳ and
+      `MessageText` draws them as icons. Message trays and the Files source switch are underline
+      tabs (`ui/Tabs`). The Anonymous tray, and its share of the Messages badge, exist only while
+      the loaded inbox policy accepts anonymous messages; `destinations.spec` expects two trays on
+      the rewrite, `journeys.spec` reloads after writing the policy behind the app's back
+
 **Acceptance:** the E19-T1 simulator walkthrough passes on the new build.
 
 ### E21-T14 — Cutover: `/app/` serves the new app, legacy deleted

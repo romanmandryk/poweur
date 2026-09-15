@@ -1,5 +1,29 @@
 /** The Settings destination (E15-T1…T5), from app.js `renderSettings()`. */
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  ArrowLeftRight,
+  BadgeCheck,
+  ChartColumn,
+  FileText,
+  Globe,
+  IdCard,
+  KeyRound,
+  Laptop,
+  Link,
+  MonitorSmartphone,
+  Package,
+  Puzzle,
+  RefreshCw,
+  ScrollText,
+  Search,
+  Server,
+  Shield,
+  Smartphone,
+  Trash2,
+  UserRound,
+  VenetianMask,
+  type LucideIcon,
+} from "lucide-react";
 import { isSessionValid, SDK_BUILD_TIME, SDK_VERSION } from "@poweur/client";
 import { loadPolicy, loadProfile } from "../../actions/account";
 import { policySummary, removeIdentityFromDevice, rotateEncryptionKey, usesDnsPath } from "../../actions/settings";
@@ -45,6 +69,7 @@ export function Settings() {
   const session: any = identity ? loadSessionRecord(identity) : null;
   const sessionOk = isSessionValid(session);
   const summary = policySummary(policy);
+  const custody = CUSTODY_COPY[custodyOf(record)];
 
   useEffect(() => {
     if (!unlocked) return;
@@ -80,12 +105,13 @@ export function Settings() {
           <div className="settings-id-name text-xl font-bold">{handleOf(identity)}</div>
           <div className="settings-id-domain text-sm text-muted">{domainOf(identity)}</div>
           <Chip tone="success" className="mt-1">
-            {CUSTODY_COPY[custodyOf(record)].chip}
+            <custody.icon className="size-3.5" aria-hidden="true" />
+            {custody.chip}
           </Chip>
         </div>
       ) : (
         <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
-          <div className="text-5xl opacity-30">👤</div>
+          <UserRound className="size-12 text-faint" strokeWidth={1.5} aria-hidden="true" />
           <p className="text-muted">No identity selected</p>
           <Button id="settings-add-id" size="sm" className="mt-4" onClick={() => push("add-id")}>
             Add identity
@@ -94,28 +120,28 @@ export function Settings() {
       )}
 
       <SettingsGroup label="Account">
-        <SettingsRow id="row-switch-id" icon="🔄" label="Switch / Add identity" onClick={() => push("add-id")} />
+        <SettingsRow id="row-switch-id" icon={ArrowLeftRight} label="Switch / Add identity" onClick={() => push("add-id")} />
         {record && (
           <>
             <SettingsRow
               id="row-profile"
-              icon="🪞"
+              icon={UserRound}
               label="Your profile"
               value={profile.doc?.display_name ?? (profile.loaded ? "Not set" : "…")}
               onClick={openProfilePanel}
             />
-            <SettingsRow id="row-identity-keys" icon="🪪" label="Identity keys" onClick={openIdentityKeysPanel} />
+            <SettingsRow id="row-identity-keys" icon={IdCard} label="Identity keys" onClick={openIdentityKeysPanel} />
           </>
         )}
       </SettingsGroup>
 
       {record && (
         <SettingsGroup label="Security">
-          <SettingsRow id="row-keys-devices" icon="📱" label="Keys & devices" onClick={() => void openKeysAndDevicesPanel()} />
-          <SettingsRow id="row-connected-apps" icon="🔐" label="Connected apps" onClick={openConnectedAppsPanel} />
+          <SettingsRow id="row-keys-devices" icon={MonitorSmartphone} label="Keys & devices" onClick={() => void openKeysAndDevicesPanel()} />
+          <SettingsRow id="row-connected-apps" icon={Puzzle} label="Connected apps" onClick={openConnectedAppsPanel} />
           <SettingsRow
             id="row-auth-request"
-            icon="✅"
+            icon={BadgeCheck}
             label="Approve sign-in request"
             onClick={() => {
               resetSignInRequest();
@@ -124,7 +150,7 @@ export function Settings() {
           />
           <SettingsRow
             id="row-recovery-kit"
-            icon="🧾"
+            icon={ScrollText}
             label="Recovery kit"
             value={record.seedDerived ? "Available" : "Not available"}
             valueTone={record.seedDerived ? "ok" : "warn"}
@@ -134,11 +160,11 @@ export function Settings() {
       )}
 
       <SettingsGroup label="Inbox">
-        <SettingsRow id="row-analytics" icon="📊" label="Relay analytics" onClick={openAnalyticsPanel} />
-        <SettingsRow id="row-policy" icon="🛡️" label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
+        <SettingsRow id="row-analytics" icon={ChartColumn} label="Relay analytics" onClick={openAnalyticsPanel} />
+        <SettingsRow id="row-policy" icon={Shield} label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
         <SettingsRow
           id="row-policy-anon"
-          icon="🎭"
+          icon={VenetianMask}
           label="Anonymous & proof-of-work"
           value={summary.anon}
           valueTone={summary.anonOn ? "ok" : undefined}
@@ -147,41 +173,47 @@ export function Settings() {
       </SettingsGroup>
 
       <SettingsGroup label="Network">
-        <SettingsRow id="row-relay" icon="🔗" label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
-        <SettingsRow id="row-lookup" icon="🔎" label="Lookup identity" onClick={openLookupPanel} />
+        <SettingsRow id="row-relay" icon={Link} label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
+        <SettingsRow id="row-lookup" icon={Search} label="Lookup identity" onClick={openLookupPanel} />
       </SettingsGroup>
 
       <SettingsGroup label="Advanced">
         <SettingsRow
           id="row-session"
-          icon="🔑"
+          icon={KeyRound}
           label="Session"
           value={sessionOk ? "Active" : "None"}
           valueTone={sessionOk ? "ok" : "warn"}
           onClick={session ? openSessionPanel : undefined}
         />
         {usesDnsPath(record, identity, mode.hostedDomains) && (
-          <SettingsRow id="row-dns" icon="🌐" label="DNS provider" value={config.dnsProvider || "Cloudflare"} onClick={openDnsPanel} />
+          <SettingsRow id="row-dns" icon={Globe} label="DNS provider" value={config.dnsProvider || "Cloudflare"} onClick={openDnsPanel} />
         )}
         {record && (
           <>
-            <SettingsRow id="row-rotate-enc" icon="🔄" label="Rotate encryption key" onClick={() => void rotateEncryptionKey()} />
-            <SettingsRow id="row-remove-id" icon="🗑️" label={<span className="text-danger">Remove this identity</span>} onClick={() => void confirmRemove()} />
+            <SettingsRow id="row-rotate-enc" icon={RefreshCw} label="Rotate encryption key" onClick={() => void rotateEncryptionKey()} />
+            <SettingsRow
+              id="row-remove-id"
+              icon={Trash2}
+              iconClassName="text-danger"
+              label={<span className="text-danger">Remove this identity</span>}
+              onClick={() => void confirmRemove()}
+            />
           </>
         )}
       </SettingsGroup>
 
       <SettingsGroup label="About">
-        <AboutRow icon="📋" label="Protocol" value="Poweur ID v1" />
+        <AboutRow icon={FileText} label="Protocol" value="Poweur ID v1" />
         <AboutRow
-          icon="💻"
+          icon={isShellRuntime() ? Smartphone : Laptop}
           label="App"
           value={APP_VERSION}
           valueId="about-app-version"
           meta={[APP_BUILD_TIME, isShellRuntime() ? "Mobile" : "Web"].join(" · ")}
           metaId="about-app-build"
         />
-        <AboutRow icon="📦" label="SDK" value={SDK_VERSION} valueId="about-sdk-version" meta={SDK_BUILD_TIME} metaId="about-sdk-build" />
+        <AboutRow icon={Package} label="SDK" value={SDK_VERSION} valueId="about-sdk-version" meta={SDK_BUILD_TIME} metaId="about-sdk-build" />
         <AboutRelay identity={identity || mode.subject || ""} />
       </SettingsGroup>
       <div className="h-8" />
@@ -190,14 +222,14 @@ export function Settings() {
 }
 
 function AboutRow({
-  icon,
+  icon: Icon,
   label,
   value,
   meta,
   valueId,
   metaId,
 }: {
-  icon: string;
+  icon: LucideIcon;
   label: string;
   value: ReactNode;
   meta?: ReactNode;
@@ -206,7 +238,9 @@ function AboutRow({
 }) {
   return (
     <div className="settings-row settings-row-about no-action flex min-h-13 items-start gap-3 border-b border-sep px-4 py-3.5 last:border-b-0">
-      <span className="settings-row-icon w-7 shrink-0 text-center text-xl">{icon}</span>
+      <span className="settings-row-icon flex w-7 shrink-0 justify-center pt-0.5 text-accent">
+        <Icon className="size-5" strokeWidth={1.9} aria-hidden="true" />
+      </span>
       <div className="settings-row-stack flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="settings-row-stack-top flex items-baseline justify-between gap-3">
           <span className="settings-row-label text-base">{label}</span>
@@ -250,7 +284,7 @@ function AboutRelay({ identity }: { identity: string }) {
   const fallback = relayUrl ? [identity, relayUrl].filter(Boolean).join(" · ") : "Not connected";
   return (
     <AboutRow
-      icon="🔗"
+      icon={Server}
       label="Relay"
       value={relayUrl ? (answer?.version ?? "…") : "—"}
       valueId="about-relay-version"

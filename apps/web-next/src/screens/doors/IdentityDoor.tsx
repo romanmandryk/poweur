@@ -4,6 +4,7 @@
  * is free and can be claimed, as `bob` and nothing else.
  */
 import { useEffect, type ReactNode } from "react";
+import { KeyRound, Smartphone } from "lucide-react";
 import { probeDoor, retryDoor } from "../../actions/door";
 import { createIdentity, signInWithPasskey } from "../../actions/identity";
 import { launcherAppUrl } from "../../lib/claim";
@@ -84,7 +85,7 @@ export function IdentityDoor() {
           {name}
           {domain}
           <Button id="btn-door-signin" variant="passkey" className={primary} onClick={() => void signInWithPasskey(subject)}>
-            🔑 Sign in with passkey
+            <KeyRound className="size-5" aria-hidden="true" /> Sign in with passkey
           </Button>
           <Button
             id="opt-join-device"
@@ -93,7 +94,7 @@ export function IdentityDoor() {
             data-join-identity={subject}
             onClick={() => openJoinDevicePanel(subject)}
           >
-            📱 Add this device
+            <Smartphone className="size-5" aria-hidden="true" /> Add this device
           </Button>
           <Note className="mt-3 text-[13px]">
             This name is taken. If it is yours, your passkey opens it — on this device or a device you already use.
@@ -136,7 +137,7 @@ export function IdentityDoor() {
             Try again
           </Button>
           <Button id="btn-door-signin" variant="passkey" className={secondary} onClick={() => void signInWithPasskey(subject)}>
-            🔑 Sign in with passkey
+            <KeyRound className="size-5" aria-hidden="true" /> Sign in with passkey
           </Button>
         </DoorCard>
       </DoorPage>

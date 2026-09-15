@@ -1,11 +1,11 @@
 /**
- * The Messages destination (E15-T2/T3/T13): three trays — conversations,
- * contact requests, anonymous — and compose, as a thumb-reach button on a
- * phone and a header action from 768px.
+ * The Messages destination (E15-T2/T3/T13): trays — conversations, contact
+ * requests, and anonymous messages for an inbox that accepts them — and
+ * compose, as a thumb-reach button on a phone and a header action from 768px.
  */
 import { useEffect } from "react";
 import { onActivateKeys } from "../../lib/a11y";
-import { Plus, SquarePen } from "lucide-react";
+import { Handshake, Lock, MessageCircle, Paperclip, Plus, SquarePen, Users, VenetianMask } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { loadPolicy } from "../../actions/account";
 import { acceptContact, blockContact, loadContacts, loadRequests, removeContact, requestContact } from "../../actions/contacts";
@@ -19,12 +19,12 @@ import {
   unreadFor,
 } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
+import { MessageText } from "../../components/MessageText";
 import { ProfileCard } from "../../components/ProfileCard";
-import { cn } from "../../lib/cn";
 import { fmtRelative } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
 import { buildConversationRows, threadLabel } from "../../lib/threads.js";
-import { contactFor, incomingRequests, unreadAnonymous } from "../../state/badges";
+import { anonymousAllowed, contactFor, incomingRequests, unreadAnonymous } from "../../state/badges";
 import { useData, type Tray } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
@@ -32,6 +32,7 @@ import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
 import { Chip, CountBadge, EmptyState } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
+import { Tab, TabBar } from "../../ui/Tabs";
 
 const TRAYS: { id: Tray; label: string }[] = [
   { id: "inbox", label: "Inbox" },
@@ -41,6 +42,7 @@ const TRAYS: { id: Tray; label: string }[] = [
 
 export function Messages() {
   const tray = useData((state) => state.tray);
+  const policy = useData((state) => state.policy);
   const push = useRoute((state) => state.push);
   const identity = useSession((state) => state.identity) ?? "";
   const counts = useData(
@@ -49,6 +51,10 @@ export function Messages() {
       anonymous: unreadAnonymous(state),
     })),
   );
+  // An inbox that refuses anonymous messages has nothing to show in their tray.
+  const anonOn = anonymousAllowed(policy);
+  const trays = TRAYS.filter(({ id }) => id !== "anonymous" || anonOn);
+  const shown: Tray = tray === "anonymous" && !anonOn ? "inbox" : tray;
 
   // Arriving here is a moment to look: the stream covers the rest.
   useEffect(() => {
@@ -57,10 +63,13 @@ export function Messages() {
     void loadRequests();
     void loadContacts();
     void loadPolicy().then(() => {
-      const { tray: current, policy } = useData.getState();
-      if (current === "anonymous" || policy.doc?.anonymous?.allow) void loadAnon();
+      if (anonymousAllowed(useData.getState().policy)) void loadAnon();
     });
   }, [tray]);
+
+  useEffect(() => {
+    if (policy.loaded && tray === "anonymous" && !anonOn) useData.setState({ tray: "inbox" });
+  }, [policy.loaded, tray, anonOn]);
 
   return (
     <>
@@ -69,40 +78,28 @@ export function Messages() {
           <Plus className="size-4" aria-hidden="true" /> New message
         </Button>
       </DestHeader>
-      <div className="tray-bar flex gap-1.5 overflow-x-auto px-4 pb-3 [scrollbar-width:none]" role="tablist" aria-label="Message trays">
-        {TRAYS.map(({ id, label }) => {
+      <TabBar className="tray-bar" aria-label="Message trays">
+        {trays.map(({ id, label }) => {
           const waiting = id === "inbox" ? 0 : counts[id];
-          const active = tray === id;
           return (
-            <button
+            <Tab
               key={id}
-              type="button"
-              role="tab"
               data-tray={id}
-              aria-selected={active}
+              active={shown === id}
               aria-label={waiting ? `${label}, ${waiting} waiting` : undefined}
               onClick={() => useData.setState({ tray: id })}
-              className={cn(
-                "tray-tab min-h-9 shrink-0 rounded-full bg-surface-3 px-3.5 py-[7px] text-sm font-semibold text-muted",
-                active && "active bg-accent text-white",
-              )}
             >
               {label}
               {waiting > 0 && (
-                <span
-                  className={cn(
-                    "tray-badge ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-[5px] text-[11px] leading-none font-bold text-white",
-                    active && "bg-white/28",
-                  )}
-                >
+                <span className="tray-badge inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-[5px] text-[11px] leading-none font-bold text-white">
                   {waiting > 99 ? "99+" : waiting}
                 </span>
               )}
-            </button>
+            </Tab>
           );
         })}
-      </div>
-      {tray === "requests" ? <RequestsTray /> : tray === "anonymous" ? <AnonTray /> : <InboxTray />}
+      </TabBar>
+      {shown === "requests" ? <RequestsTray /> : shown === "anonymous" ? <AnonTray /> : <InboxTray />}
       <button
         id="btn-compose"
         type="button"
@@ -132,7 +129,7 @@ function InboxTray() {
   );
 
   if (!rows.length) {
-    return <EmptyState icon="💬" title="No messages yet" body="Tap ✏️ to send your first." />;
+    return <EmptyState icon={MessageCircle} title="No messages yet" body="Start a conversation with New message." />;
   }
 
   return (
@@ -152,7 +149,9 @@ function InboxTray() {
             className="conv-row flex min-h-13 cursor-pointer items-center gap-3 border-b border-sep px-4 py-3 transition-colors last:border-b-0 focus-visible:-outline-offset-2 active:bg-surface-2 [@media(hover:hover)]:hover:bg-surface-2"
           >
             {row.group ? (
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-lg">👥</div>
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+                <Users className="size-[18px]" aria-hidden="true" />
+              </div>
             ) : (
               <Avatar identity={row.contact} size="md" />
             )}
@@ -166,7 +165,9 @@ function InboxTray() {
                 )}
                 {row.threaded && <span className="conv-thread ml-1.5 text-[13px] font-medium text-faint">#{threadLabel(row.threadId)}</span>}
               </div>
-              <div className="conv-preview mt-px truncate text-sm text-muted">{row.preview}</div>
+              <div className="conv-preview mt-px truncate text-sm text-muted">
+                <MessageText text={row.preview} />
+              </div>
             </div>
             <div className="conv-meta flex shrink-0 flex-col items-end gap-[5px]">
               <span className="conv-time text-xs text-faint">{fmtRelative(row.lastMsg.timestamp)}</span>
@@ -181,7 +182,7 @@ function InboxTray() {
                     void downloadAttachment(row.lastMsg.metadata);
                   }}
                 >
-                  Open 📎
+                  <Paperclip className="size-4" aria-hidden="true" /> Open
                 </Button>
               )}
               {row.stranger && (
@@ -232,7 +233,7 @@ function RequestsTray() {
     return (
       <>
         <TrayError error={data.requests.error} />
-        <EmptyState icon="🤝" title="No contact requests" body="Requests to connect land here. Accepting one lets you message each other." />
+        <EmptyState icon={Handshake} title="No contact requests" body="Requests to connect land here. Accepting one lets you message each other." />
       </>
     );
   }
@@ -301,10 +302,7 @@ function RequestsTray() {
  */
 function AnonTray() {
   const anon = useData((state) => state.anon);
-  const policy = useData((state) => state.policy);
   const unread = useData((state) => unreadAnonymous(state));
-  const go = useRoute((state) => state.go);
-  const off = policy.loaded && !policy.doc?.anonymous?.allow;
 
   // Looking at this tray is reading it: there is nothing to open.
   useEffect(() => {
@@ -316,20 +314,9 @@ function AnonTray() {
       <>
         <TrayError error={anon.error} />
         <EmptyState
-          icon="🎭"
+          icon={VenetianMask}
           title="No anonymous messages"
-          body={
-            off
-              ? "Anonymous messages are turned off. Strangers with no identity cannot reach you until you allow it in Settings."
-              : "Messages from strangers with no identity land here. Nobody is identified, so there is nothing to reply to."
-          }
-          action={
-            off && (
-              <Button id="btn-anon-settings" className="w-auto px-6" onClick={() => go("settings")}>
-                Open inbox settings
-              </Button>
-            )
-          }
+          body="Messages from strangers with no identity land here. Nobody is identified, so there is nothing to reply to."
         />
       </>
     );
@@ -348,7 +335,11 @@ function AnonTray() {
               <span className="conv-time text-xs text-faint">{fmtRelative(message.timestamp)}</span>
             </div>
             <div className="anon-body text-[15px] whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">
-              {message.plaintext ?? "🔒 Could not decrypt"}
+              {message.plaintext ?? (
+                <span className="inline-flex items-center gap-1.5 text-muted">
+                  <Lock className="size-4" aria-hidden="true" /> Could not decrypt
+                </span>
+              )}
             </div>
           </div>
         ))}

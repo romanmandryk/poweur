@@ -43,15 +43,14 @@ describe("Messages destination (E21-T7)", () => {
     expect(holder.client.history).toHaveBeenCalled();
   });
 
-  it("shows three trays, an empty inbox, and a compose button", async () => {
+  it("shows the inbox and requests trays, an empty inbox, and a compose button", async () => {
     render(<App />);
-    expect($$(".tray-tab")).toHaveLength(3);
+    expect($$(".tray-tab")).toHaveLength(2);
+    expect($('.tray-tab[data-tray="anonymous"]')).toBeNull();
     expect($(".tray-tab.active")!.textContent).toBe("Inbox");
     expect($(".empty-state-title")!.textContent).toBe("No messages yet");
     fireEvent.click($('.tray-tab[data-tray="requests"]')!);
     expect($(".empty-state-title")!.textContent).toBe("No contact requests");
-    fireEvent.click($('.tray-tab[data-tray="anonymous"]')!);
-    expect($(".empty-state-title")!.textContent).toBe("No anonymous messages");
 
     fireEvent.click($("#btn-compose")!);
     expect(useRoute.getState().sub).toBe("new-chat");
@@ -114,12 +113,16 @@ describe("Messages destination (E21-T7)", () => {
     await waitFor(() => expect(holder.client.store.markConversationRead).toHaveBeenCalledWith("anonymous", expect.any(Array)));
   });
 
-  it("anonymous turned off says so and links to settings", async () => {
+  it("offers the anonymous tray only while the inbox policy accepts anonymous messages", async () => {
     useData.setState({ tray: "anonymous" });
+    holder.client.policy.mockResolvedValue({ policy: { version: 1, mode: "open" }, explicit: true });
     render(<App />);
-    await waitFor(() => expect($("#btn-anon-settings")).toBeTruthy());
-    fireEvent.click($("#btn-anon-settings")!);
-    expect(useRoute.getState().page).toBe("settings");
+    await waitFor(() => expect(useData.getState().tray).toBe("inbox"));
+    expect($('.tray-tab[data-tray="anonymous"]')).toBeNull();
+    expect($(".tray-tab.active")!.textContent).toBe("Inbox");
+
+    act(() => useData.setState((state) => ({ policy: { ...state.policy, doc: { version: 1, mode: "open", anonymous: { allow: true } } as any } })));
+    expect($$(".tray-tab")).toHaveLength(3);
   });
 });
 
@@ -198,7 +201,8 @@ describe("Conversation view (E15-T13)", () => {
   it("an attachment bubble offers to open it", async () => {
     openWith([inbound(BOB, "report", 1, { type: "chat.attachment", metadata: { attachment_name: "evidence.txt" } })]);
     render(<App />);
-    expect($(".bubble-text")!.textContent).toBe("📎 evidence.txt");
+    expect($(".bubble-text")!.textContent).toBe("evidence.txt");
+    expect($(".bubble-text svg")).toBeTruthy();
     fireEvent.click($(".bubble-attachment")!);
     await waitFor(() => expect(holder.client.downloadAttachment).toHaveBeenCalledWith({ attachment_name: "evidence.txt" }));
   });

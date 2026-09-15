@@ -1,12 +1,13 @@
 /**
- * What the nav badges count (E15-T13): unread messages — signed and anonymous
- * — on Messages, and contact requests waiting for an answer on Contacts. Both
- * come from read marks and the requests queue, so they reach zero.
+ * What the nav badges count (E15-T13): unread messages — signed, and anonymous
+ * where the inbox accepts them — on Messages, and contact requests waiting for
+ * an answer on Contacts. Both come from read marks and the requests queue, so
+ * they reach zero.
  */
 import { markCovers, unreadTotal } from "../lib/threads.js";
 import type { Contact, DataFields } from "./data";
 
-type BadgeData = Pick<DataFields, "messages" | "anon" | "history" | "requests" | "contacts">;
+type BadgeData = Pick<DataFields, "messages" | "anon" | "history" | "requests" | "contacts"> & Partial<Pick<DataFields, "policy">>;
 
 export interface IncomingRequest {
   sender: string;
@@ -44,6 +45,11 @@ export function incomingRequests(data: BadgeData, identity: string | null): Inco
   return [...byRequester.values()].sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp));
 }
 
+/** Whether the loaded inbox policy takes anonymous messages — the only case with a tray for them. */
+export function anonymousAllowed(policy: DataFields["policy"] | undefined): boolean {
+  return Boolean(policy?.doc?.anonymous?.allow);
+}
+
 export function unreadAnonymous(data: BadgeData): number {
   const mark = (data.history.readState?.conversations as Record<string, any>)?.["anonymous"] ?? null;
   return data.anon.messages.filter((message: any) => !(mark && markCovers(mark, message.timestamp, message.id ?? ""))).length;
@@ -51,8 +57,10 @@ export function unreadAnonymous(data: BadgeData): number {
 
 export function navBadges(data: BadgeData, identity: string | null, unlocked: boolean): Partial<Record<string, number>> {
   if (!identity || !unlocked) return {};
+  // With anonymous messages turned off there is no tray to clear them from.
+  const anonymous = anonymousAllowed(data.policy) ? unreadAnonymous(data) : 0;
   return {
-    messages: unreadTotal(data.messages, identity, data.history.readState?.conversations) + unreadAnonymous(data),
+    messages: unreadTotal(data.messages, identity, data.history.readState?.conversations) + anonymous,
     contacts: incomingRequests(data, identity).length,
   };
 }

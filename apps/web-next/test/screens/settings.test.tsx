@@ -102,7 +102,7 @@ describe("Settings destination (E21-T11)", () => {
   it("shows the identity, its custody, and every group", async () => {
     render(<App />);
     expect($(".settings-id-name")!.textContent).toBe("alice");
-    expect($(".settings-id-card .chip")!.textContent).toBe("🛡️ Device keystore");
+    expect($(".settings-id-card .chip")!.textContent).toBe("Device keystore");
     for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-rotate-enc", "row-remove-id"]) {
       expect($(`#${id}`), id).toBeTruthy();
     }

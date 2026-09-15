@@ -4,7 +4,7 @@
  * shared nothing simply looks empty.
  */
 import { useEffect } from "react";
-import { FolderPlus, Link2, Pencil, Share2, Trash2, Upload } from "lucide-react";
+import { FileText, Folder, FolderOpen, FolderPlus, Link2, Lock, Pencil, Share2, Trash2, Upload } from "lucide-react";
 import { formatBytes, ROOT_INFO } from "@poweur/client";
 import { loadContacts } from "../../actions/contacts";
 import {
@@ -31,10 +31,8 @@ import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
 import { Chip, EmptyState, SectionLabel } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
+import { Tab, TabBar } from "../../ui/Tabs";
 import { openSharePanel, openSharesPanel } from "./SharePanel";
-
-const tab = "tray-tab min-h-9 flex-1 rounded-full bg-surface-3 px-3.5 py-[7px] text-sm font-semibold text-muted";
-const tabActive = "active bg-accent text-white";
 
 export function Files() {
   const files = useData((state) => state.files);
@@ -93,34 +91,28 @@ export function Files() {
         )}
       </DestHeader>
 
-      <div className="dest-toolbar file-sources flex gap-2 px-4 pb-3" role="tablist" aria-label="Which files">
-        <button
+      <TabBar className="dest-toolbar file-sources mb-3" aria-label="Which files">
+        <Tab
           id="btn-files-mine"
-          type="button"
-          role="tab"
-          aria-selected={!visiting && !picking}
-          className={cn(tab, !visiting && !picking && tabActive)}
+          active={!visiting && !picking}
           onClick={() => {
             if (!files.owner && !files.picking) return;
             setFilesOwner(null);
           }}
         >
           My files
-        </button>
-        <button
+        </Tab>
+        <Tab
           id="btn-files-shared"
-          type="button"
-          role="tab"
-          aria-selected={visiting || picking}
-          className={cn(tab, (visiting || picking) && tabActive)}
+          active={visiting || picking}
           onClick={() => {
             if (files.owner) return;
             useData.setState((state) => ({ files: { ...state.files, picking: true } }));
           }}
         >
           Shared with me
-        </button>
-      </div>
+        </Tab>
+      </TabBar>
 
       {picking ? (
         <OwnerPicker />
@@ -198,16 +190,16 @@ function Listing() {
     if (visiting) {
       return (
         <EmptyState
-          icon="🔒"
+          icon={Lock}
           title="Nothing shared here"
           body={`${files.owner} has not granted you anything under this folder, or the grant was revoked.`}
         />
       );
     }
     return atRoot ? (
-      <EmptyState icon="📂" title="No roots yet" body="Your storage roots appear once the relay provisions them." />
+      <EmptyState icon={FolderOpen} title="No roots yet" body="Your storage roots appear once the relay provisions them." />
     ) : (
-      <EmptyState icon="📂" title="Empty folder" body="Upload a file or create a folder to get started." />
+      <EmptyState icon={FolderOpen} title="Empty folder" body="Upload a file or create a folder to get started." />
     );
   }
 
@@ -219,7 +211,13 @@ function Listing() {
         const open = () => (entry.dir ? void loadFiles(entry.path) : void downloadEntry(entry.path));
         return (
           <div key={entry.path} className="conv-row file-row flex min-h-13 items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0 [@media(hover:hover)]:hover:bg-surface-2">
-            <div className="file-icon w-9 shrink-0 text-center text-[22px]">{entry.dir ? "📁" : "📄"}</div>
+            <div className="file-icon flex w-9 shrink-0 justify-center">
+              {entry.dir ? (
+                <Folder className="size-[22px] text-accent" strokeWidth={1.8} aria-hidden="true" />
+              ) : (
+                <FileText className="size-[22px] text-muted" strokeWidth={1.8} aria-hidden="true" />
+              )}
+            </div>
             <div
               role="button"
               tabIndex={0}

@@ -6,6 +6,7 @@
  * group is a shortcut for its members, never a member itself.
  */
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { Check, Users, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { handleOf } from "../lib/identity";
 import { Avatar } from "../ui/Avatar";
@@ -100,10 +101,10 @@ export function AudiencePicker({
               <button
                 type="button"
                 aria-label={`Remove ${identity}`}
-                className="audience-chip-x min-h-7 min-w-7 px-1 text-lg leading-none text-muted"
+                className="audience-chip-x flex min-h-7 min-w-7 items-center justify-center px-1 text-muted"
                 onClick={() => remove(identity)}
               >
-                ×
+                <X className="size-4" aria-hidden="true" />
               </button>
             </span>
           ))
@@ -121,7 +122,11 @@ export function AudiencePicker({
                 <AudienceRow
                   key={group.id}
                   picked={all}
-                  icon={<span className="audience-group-icon w-9 text-center text-xl">👥</span>}
+                  icon={
+                    <span className="audience-group-icon flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-muted">
+                      <Users className="size-[18px]" aria-hidden="true" />
+                    </span>
+                  }
                   name={group.name || group.id}
                   detail={`${members.length} member${members.length === 1 ? "" : "s"}`}
                   onClick={() => {
@@ -203,7 +208,9 @@ function AudienceRow({
         <span className="audience-row-name text-[15px] font-semibold">{name}</span>
         <span className="audience-row-id truncate text-[13px] text-muted">{detail}</span>
       </span>
-      <span className="audience-row-tick w-5 text-center font-bold text-accent">{picked ? "✓" : ""}</span>
+      <span className="audience-row-tick flex w-5 justify-center text-accent">
+        {picked && <Check className="size-[18px]" strokeWidth={2.6} aria-hidden="true" />}
+      </span>
     </button>
   );
 }

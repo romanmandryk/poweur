@@ -1,6 +1,6 @@
 {
   "name": "@poweur/web-next",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "description": "EPIC-021: React + Tailwind rewrite of the web client, served at /newapp/ until cutover",

@@ -2,6 +2,7 @@
  * The parent-domain landing (E15-T8), also the shell's front door. One
  * dominant control: a name, with the domain as a fixed suffix inside the field.
  */
+import { KeyRound, Lock, Tag, type LucideIcon } from "lucide-react";
 import { hasRelayUrl } from "../../lib/storage.js";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
@@ -10,10 +11,10 @@ import { cardClass, DoorPage, LinkButton } from "./DoorPage";
 import { RelayPrompt, relayPromptVisible } from "./RelayPrompt";
 
 /** The three sentences. Any longer and nobody reads them. */
-const HOW_IT_WORKS = [
-  ["🏷️", "A name you own", "Your ID is an address on the internet — like a domain, but for a person."],
-  ["🔒", "Messages and files under it", "End-to-end encrypted mail and a synced drive, addressed to the name."],
-  ["🔑", "Sign in with it", "No passwords to reuse: your device holds the key, and apps ask it."],
+const HOW_IT_WORKS: [LucideIcon, string, string][] = [
+  [Tag, "A name you own", "Your ID is an address on the internet — like a domain, but for a person."],
+  [Lock, "Messages and files under it", "End-to-end encrypted mail and a synced drive, addressed to the name."],
+  [KeyRound, "Sign in with it", "No passwords to reuse: your device holds the key, and apps ask it."],
 ];
 
 export function Landing() {
@@ -42,10 +43,10 @@ export function Landing() {
       )}
       {showClaim && <ClaimCard info={info} />}
       <ol className="landing-steps flex animate-fade-in-up list-none flex-col gap-4 landscape:max-h-[500px]:hidden">
-        {HOW_IT_WORKS.map(([icon, title, body]) => (
+        {HOW_IT_WORKS.map(([Icon, title, body]) => (
           <li key={title} className="landing-step flex items-start gap-3.5">
-            <span aria-hidden="true" className="landing-step-icon w-7 shrink-0 text-center text-[22px] leading-[1.3]">
-              {icon}
+            <span aria-hidden="true" className="landing-step-icon flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-accent">
+              <Icon className="size-5" strokeWidth={1.9} />
             </span>
             <div>
               <div className="landing-step-title text-[15px] font-[650]">{title}</div>

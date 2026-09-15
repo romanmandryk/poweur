@@ -216,6 +216,12 @@ test.describe("browser journeys", () => {
     const strangerId = await registerIdentity(strangerPage, relay, `mixs${suffix}`);
 
     await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
+    // Written behind the app's back, so let it re-read: the rewrite offers an
+    // anonymous tray only for the policy it loaded.
+    await ownerPage.reload();
+    if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");
+    await ownerPage.click("#btn-do-unlock");
+    await expect(ownerPage.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
     await composeTo(strangerPage, ownerId, "signed and attributable");
     await strangerPage.evaluate(async ({ identity, relayUrl }) => {
       const { sendAnonymous } = await window.__poweurModule("sdk");

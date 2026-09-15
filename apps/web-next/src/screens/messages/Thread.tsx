@@ -7,9 +7,10 @@
  * put back by hand.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, Paperclip, Users, type LucideIcon } from "lucide-react";
 import { downloadAttachment, markConversationRead, sendSigned, unreadFor } from "../../actions/messages";
 import { activeClient } from "../../actions/relay";
+import { MessageText } from "../../components/MessageText";
 import { cn } from "../../lib/cn";
 import { dayLabel, fmtClock } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
@@ -23,12 +24,22 @@ import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
 import { EmptyState } from "../../ui/Display";
 
-const TICKS: Record<string, [string, string]> = {
-  sent: ["✓", "Sent"],
-  delivered: ["✓✓", "Delivered"],
-  read: ["✓✓", "Read"],
-  failed: ["!", "Not delivered"],
+const TICKS: Record<string, [LucideIcon, string]> = {
+  sent: [Check, "Sent"],
+  delivered: [CheckCheck, "Delivered"],
+  read: [CheckCheck, "Read"],
+  failed: [CircleAlert, "Not delivered"],
 };
+
+/** Sent is one tick, delivered two; read and failed are drawn heavier. */
+function DeliveryTick({ state }: { state: string }) {
+  const [Icon, label] = TICKS[state];
+  return (
+    <span className={cn("bubble-tick ml-1 inline-flex align-[-2px]", `tick-${state}`)} title={label} aria-label={label}>
+      <Icon className="size-3.5" strokeWidth={state === "read" || state === "failed" ? 3 : 2} aria-hidden="true" />
+    </span>
+  );
+}
 
 /** A fresh view per conversation: page size, draft and scroll do not leak between them. */
 export function ThreadScreen() {
@@ -131,7 +142,9 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
           <ChevronLeft className="size-6" strokeWidth={2.4} aria-hidden="true" />
         </button>
         {group ? (
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2">👥</div>
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted">
+            <Users className="size-4" aria-hidden="true" />
+          </div>
         ) : (
           <Avatar identity={peer} />
         )}
@@ -169,7 +182,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
           </div>
         )}
         {visible.length === 0 ? (
-          <EmptyState icon="💬" title="No messages yet" body="Say hello below." />
+          <EmptyState icon={MessageCircle} title="No messages yet" body="Say hello below." />
         ) : (
           visible.map((message: any, index: number) => {
             const mine = String(message.sender).toLowerCase() === self;
@@ -195,7 +208,9 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
                         {contactFor(contacts, message.sender)?.petname || handleOf(message.sender)}
                       </div>
                     )}
-                    <div className="bubble-text text-base leading-[1.35] whitespace-pre-wrap">{bodyFor(message)}</div>
+                    <div className="bubble-text text-base leading-[1.35] whitespace-pre-wrap">
+                      <MessageText text={bodyFor(message)} />
+                    </div>
                     {message.type === "chat.attachment" && message.metadata && (
                       <Button
                         size="sm"
@@ -204,22 +219,19 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
                         data-download-attachment={JSON.stringify(message.metadata)}
                         onClick={() => void downloadAttachment(message.metadata)}
                       >
-                        Open 📎
+                        <Paperclip className="size-4" aria-hidden="true" /> Open
                       </Button>
                     )}
                     <div className="bubble-meta mt-0.5 text-right text-[11px] opacity-75">
-                      {countdown ? `⏳ ${countdown} · ` : ""}
-                      {fmtClock(message.timestamp)}
-                      {state && (
-                        // Per-member ticks for a group are their own design (E09-T5).
-                        <span
-                          className={cn("bubble-tick ml-1 tracking-[-2px]", `tick-${state}`, (state === "read" || state === "failed") && "font-extrabold")}
-                          title={TICKS[state][1]}
-                          aria-label={TICKS[state][1]}
-                        >
-                          {TICKS[state][0]}
-                        </span>
+                      {countdown && (
+                        <>
+                          <Hourglass className="mr-0.5 inline size-3 align-[-2px]" aria-hidden="true" />
+                          {countdown} ·{" "}
+                        </>
                       )}
+                      {fmtClock(message.timestamp)}
+                      {/* Per-member ticks for a group are their own design (E09-T5). */}
+                      {state && <DeliveryTick state={state} />}
                     </div>
                   </div>
                 </div>
@@ -248,9 +260,9 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
               htmlFor="thread-file"
               title="Attach a file (up to 20 MB)"
               aria-label="Attach a file"
-              className="thread-attach flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-xl active:bg-surface-2"
+              className="thread-attach flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted active:bg-surface-2"
             >
-              📎
+              <Paperclip className="size-5" aria-hidden="true" />
             </label>
             <input
               ref={fileInput}

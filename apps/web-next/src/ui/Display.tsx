@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
 const CHIP_TONES = {
@@ -50,13 +51,13 @@ export function SectionLabel({ className, ...props }: ComponentProps<"div">) {
 
 /** Every destination has one, with the obvious next action. */
 export function EmptyState({
-  icon,
+  icon: Icon,
   title,
   body,
   action,
   className,
 }: {
-  icon?: ReactNode;
+  icon?: LucideIcon;
   title: ReactNode;
   body?: ReactNode;
   action?: ReactNode;
@@ -64,7 +65,11 @@ export function EmptyState({
 }) {
   return (
     <div className={cn("empty-state flex flex-col items-center gap-2.5 px-7 py-11 text-center text-muted", className)}>
-      {icon && <div className="empty-state-icon text-[40px]">{icon}</div>}
+      {Icon && (
+        <div className="empty-state-icon mb-1 flex size-16 items-center justify-center rounded-full bg-accent-soft text-accent">
+          <Icon className="size-8" strokeWidth={1.75} aria-hidden="true" />
+        </div>
+      )}
       <div className="empty-state-title text-[17px] font-bold text-fg">{title}</div>
       {body && <div className="empty-state-body max-w-[30ch] text-sm">{body}</div>}
       {action && <div className="mt-1.5">{action}</div>}

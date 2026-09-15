@@ -4,7 +4,7 @@
  * no typed identity; in the shell, no passkey (a browser authenticator).
  */
 import { useRef, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, KeyRound, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 import { signInWithPasskey } from "../actions/identity";
 import { cn } from "../lib/cn";
 import { addIdOptions } from "../lib/mode.js";
@@ -20,10 +20,10 @@ import { openJoinDevicePanel } from "./JoinDevice";
 
 const CARD = "option-card relative flex min-h-13 w-full items-center gap-4 rounded-card bg-surface px-4 py-[18px] text-left";
 
-function OptionIcon({ children }: { children: ReactNode }) {
+function OptionIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <div className="option-icon-wrap flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-[22px]">
-      {children}
+    <div className="option-icon-wrap flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+      <Icon className="size-6" strokeWidth={1.9} aria-hidden="true" />
     </div>
   );
 }
@@ -39,7 +39,7 @@ function OptionBody({ title, description }: { title: ReactNode; description: Rea
 
 function OptionButton({ id, icon, title, description, onClick, ...rest }: {
   id: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   title: ReactNode;
   description: ReactNode;
   onClick: () => void;
@@ -53,7 +53,7 @@ function OptionButton({ id, icon, title, description, onClick, ...rest }: {
       className={cn(CARD, "transition-[background-color,transform] active:scale-[.99] active:bg-surface-2 [@media(hover:hover)]:hover:bg-surface-2")}
       {...rest}
     >
-      <OptionIcon>{icon}</OptionIcon>
+      <OptionIcon icon={icon} />
       <OptionBody title={title} description={description} />
       <ChevronRight className="option-arrow size-5 shrink-0 text-faint" aria-hidden="true" />
     </button>
@@ -90,7 +90,7 @@ export function AddId() {
         {options.passkey && !subject && (
           <div className={cn(CARD, "option-card-form-wrap flex-col items-stretch")}>
             <div className="option-card-top flex w-full items-center gap-4">
-              <OptionIcon>🔑</OptionIcon>
+              <OptionIcon icon={KeyRound} />
               <OptionBody title="Sign in with existing passkey" description="Enter your identity to authenticate in this browser" />
             </div>
             <div className="option-inline-form mt-3.5 flex items-center gap-2.5">
@@ -119,7 +119,7 @@ export function AddId() {
         {options.passkey && subject && (
           <OptionButton
             id="btn-door-signin"
-            icon="🔑"
+            icon={KeyRound}
             title="Sign in with passkey"
             description={`Unlock ${subject} in this browser`}
             onClick={() => void signInWithPasskey(subject)}
@@ -129,7 +129,7 @@ export function AddId() {
         {options.join && (
           <OptionButton
             id="opt-join-device"
-            icon="📱"
+            icon={Smartphone}
             title={`Add this ${here} to an existing ID`}
             description={
               subject ? "Show a code, approve it on a device you already use" : "Enter your ID, show a code, approve it on a device you already use"
@@ -142,7 +142,7 @@ export function AddId() {
         {options.create && (
           <OptionButton
             id="opt-create-new"
-            icon="✨"
+            icon={Sparkles}
             title="Add new ID"
             description={isShellRuntime() ? "Create a fresh identity on this device" : "Create a fresh identity with a passkey"}
             onClick={() => push("claim")}

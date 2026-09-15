@@ -1,5 +1,6 @@
 /** Approve a "Sign in with Poweur ID" request (EPIC-008), from app.js. */
 import { useRef } from "react";
+import { CircleCheck } from "lucide-react";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
@@ -37,7 +38,9 @@ export function SignInApproval() {
       : "";
     return (
       <SubPage title="Approved">
-        <div className="empty-icon text-center text-[40px]">✓</div>
+        <div className="empty-icon flex justify-center text-success">
+          <CircleCheck className="size-12" strokeWidth={1.6} aria-hidden="true" />
+        </div>
         <h2 className="mb-2 text-center text-xl font-bold">{auth.metadata?.name || auth.request?.domain || "App"}</h2>
         <p className="mb-3 text-muted">
           {auth.result.delivered ? "The signed approval was delivered." : "Copy this one-time response back to the app."}

@@ -1,3 +1,4 @@
+import { LockOpen, MessageCircle } from "lucide-react";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { domainOf, handleOf } from "../lib/identity";
 import { loadIdentityRecord } from "../lib/storage.js";
@@ -12,8 +13,8 @@ export function Welcome() {
   const push = useRoute((state) => state.push);
   return (
     <div className="welcome-wrap flex min-h-[70vh] flex-col items-center justify-center gap-4 p-8 text-center landscape:max-h-[500px]:min-h-0">
-      <div className="welcome-icon flex size-24 animate-pop-in items-center justify-center rounded-[28px] bg-linear-135 from-accent to-accent-2 text-[44px] shadow-[0_12px_40px_rgb(88_86_214/.35)]">
-        💬
+      <div className="welcome-icon flex size-24 animate-pop-in items-center justify-center rounded-[28px] bg-linear-135 from-accent to-accent-2 text-white shadow-[0_12px_40px_rgb(88_86_214/.35)]">
+        <MessageCircle className="size-11" strokeWidth={1.8} aria-hidden="true" />
       </div>
       <h1 className="welcome-title animate-fade-in-up text-[28px] font-extrabold tracking-[-.5px]">Welcome to Poweur ID</h1>
       <p className="welcome-sub max-w-[260px] animate-fade-in-up text-base leading-normal text-muted">
@@ -41,7 +42,7 @@ export function Locked() {
         <div className="unlock-sub text-[15px] text-muted">{domainOf(identity)}</div>
       </div>
       <Button id="btn-unlock-main" variant="passkey" className="mt-4 max-w-80" onClick={() => push("unlock")}>
-        🔓 {copy.action}
+        <LockOpen className="size-5" aria-hidden="true" /> {copy.action}
       </Button>
       <Note className="mt-0 max-w-[220px]">{copy.note}</Note>
     </div>

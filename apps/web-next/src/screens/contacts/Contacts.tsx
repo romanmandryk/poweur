@@ -4,7 +4,7 @@
  * the row's overflow so a row fits a 375px viewport.
  */
 import { useEffect } from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { MoreHorizontal, Plus, Users } from "lucide-react";
 import { loadContacts, loadRequests } from "../../actions/contacts";
 import { loadHistory, openThread } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
@@ -69,7 +69,7 @@ export function Contacts() {
 
       {!contacts.loading && contacts.list.length === 0 && (
         <EmptyState
-          icon="👥"
+          icon={Users}
           title="No contacts yet"
           body="Add someone by their Poweur ID and you can message them without either of you sharing a phone number."
           action={

@@ -4,6 +4,7 @@
  * its own data.
  */
 import { useEffect, useRef, useState } from "react";
+import { Bot, Check, Globe, Hexagon, Laptop, Monitor, Puzzle, ScrollText, Smartphone, Tablet, Usb, type LucideIcon } from "lucide-react";
 import { fingerprintOrKey, isSessionValid, normalizeRendezvousId } from "@poweur/client";
 import { loadPolicy, loadProfile, savePolicy } from "../../actions/account";
 import { enrollApiForJoin } from "../../actions/identity";
@@ -14,7 +15,7 @@ import { PolicyControls } from "../../components/PolicyControls";
 import { ProfileEditor } from "../../components/ProfileEditor";
 import { cn } from "../../lib/cn";
 import { identityApiFor, lookup } from "../../lib/client.js";
-import { describeDevice, deviceIcon } from "../../lib/devices.js";
+import { describeDevice } from "../../lib/devices.js";
 import {
   buildRecoveryKit,
   enrollThisBrowser,
@@ -177,7 +178,9 @@ function ConnectedApps() {
         <div className="settings-rows overflow-hidden rounded-card bg-surface-2">
           {state.apps.map((app) => (
             <div key={app.app_id} className="settings-row flex items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0">
-              <span className="settings-row-icon w-7 text-center text-xl">🧩</span>
+              <span className="settings-row-icon flex w-7 shrink-0 justify-center text-accent">
+                <Puzzle className="size-5" strokeWidth={1.9} aria-hidden="true" />
+              </span>
               <span className="settings-row-label flex-1">
                 <strong>{app.name || app.app_id}</strong>
                 <br />
@@ -205,7 +208,9 @@ function ConnectedApps() {
         <div className="settings-rows overflow-hidden rounded-card bg-surface-2">
           {state.recent.map((record, index) => (
             <div key={`${record.at}-${index}`} className="settings-row flex items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0">
-              <span className="settings-row-icon w-7 text-center">✓</span>
+              <span className="settings-row-icon flex w-7 shrink-0 justify-center text-success">
+                <Check className="size-5" aria-hidden="true" />
+              </span>
               <span className="settings-row-label flex-1">
                 <strong>{record.app_name || record.app_id || record.audience}</strong>
                 <br />
@@ -232,6 +237,25 @@ const ENROLLMENT_KIND_LABEL: Record<string, string> = {
   "recovery-kit": "Recovery kit",
   native: "Native keystore",
 };
+
+const ENROLLMENT_ICON: Record<string, LucideIcon> = { "hardware-key": Usb, "recovery-kit": ScrollText };
+
+const DEVICE_ICON: Record<string, LucideIcon> = {
+  laptop: Laptop,
+  desktop: Monitor,
+  phone: Smartphone,
+  tablet: Tablet,
+  browser: Globe,
+  agent: Bot,
+};
+
+function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="enrollment-icon flex w-8 shrink-0 justify-center text-accent">
+      <Icon className="size-[22px]" strokeWidth={1.8} aria-hidden="true" />
+    </span>
+  );
+}
 
 const ENROLLMENT_WRAP_LABEL: Record<string, string> = {
   prf: "passkey (PRF)",
@@ -345,9 +369,7 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         <div className="enrollment-list flex flex-col">
           {enrollments.map((enrollment) => (
             <div key={enrollment.enrollment_id} className="enrollment-row flex min-h-15 items-center gap-3 border-b border-sep py-3 last:border-b-0">
-              <span className="enrollment-icon w-8 text-center text-[22px]">
-                {enrollment.kind === "hardware-key" ? "🔐" : enrollment.kind === "recovery-kit" ? "🧾" : "📱"}
-              </span>
+              <RowIcon icon={ENROLLMENT_ICON[enrollment.kind] ?? Smartphone} />
               <div className="enrollment-body min-w-0 flex-1">
                 <div className="enrollment-label flex flex-wrap items-center gap-1.5 text-[15px] font-semibold">
                   {enrollment.label || ENROLLMENT_KIND_LABEL[enrollment.kind] || enrollment.kind}
@@ -405,7 +427,7 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         <div className="enrollment-list flex flex-col">
           {registry.map((device) => (
             <div key={device.id} className={cn("enrollment-row flex min-h-15 items-center gap-3 border-b border-sep py-3 last:border-b-0", device.revoked && "is-revoked opacity-55")}>
-              <span className="enrollment-icon w-8 text-center text-[22px]">{deviceIcon(device.kind)}</span>
+              <RowIcon icon={DEVICE_ICON[device.kind] ?? Hexagon} />
               <div className="enrollment-body min-w-0 flex-1">
                 <div className="enrollment-label flex flex-wrap items-center gap-1.5 text-[15px] font-semibold">
                   {device.name || "Unnamed device"}
