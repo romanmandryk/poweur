@@ -17,10 +17,19 @@ import { clearProfileCache } from "../lib/profiles.js";
 import { modeNow } from "../lib/mode.js";
 import { useData } from "./data";
 
+/** `lib/mode.js`'s ModeInfo: which front door this host is. */
 export interface ModeInfo {
   mode: string;
+  host?: string;
   subject?: string;
-  [key: string]: unknown;
+  handle?: string;
+  domain?: string;
+  hostedDomains?: string[];
+  launcherHosts?: string[];
+  launcherHost?: string;
+  resolved?: boolean;
+  probed?: boolean;
+  reachable?: boolean;
 }
 
 export interface SessionState {
@@ -49,6 +58,23 @@ export function refreshSession() {
 
 export function markUnlocked(unlocked = true) {
   useSession.setState({ unlocked });
+}
+
+const unlockHooks = new Set<() => void>();
+
+/**
+ * Register work to start once keys are open — the inbox, requests and
+ * contacts loads messaging owns (E21-T7). Returns the unregister function.
+ */
+export function onUnlocked(fn: () => void): () => void {
+  unlockHooks.add(fn);
+  return () => unlockHooks.delete(fn);
+}
+
+/** Legacy `pullAfterUnlock()`: flip the mirror, then run every hook. */
+export function afterUnlock() {
+  useSession.setState({ unlocked: true });
+  for (const hook of unlockHooks) hook();
 }
 
 const teardowns = new Set<() => void>();

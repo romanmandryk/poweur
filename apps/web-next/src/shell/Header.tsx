@@ -1,16 +1,15 @@
 import { DropdownMenu } from "radix-ui";
-import { Check, ChevronDown, Moon, Plus, Sun } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { cn } from "../lib/cn";
 import { domainOf, handleOf } from "../lib/identity";
 import { listIdentities } from "../lib/storage.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
-import { toggleTheme, useUi } from "../state/ui";
 import { Avatar } from "../ui/Avatar";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Header({ className }: { className?: string }) {
   const identity = useSession((state) => state.identity);
-  const theme = useUi((state) => state.theme);
   const push = useRoute((state) => state.push);
 
   return (
@@ -23,15 +22,7 @@ export function Header({ className }: { className?: string }) {
     >
       <span className="app-wordmark text-[17px] font-bold tracking-[-.3px]">Poweur ID</span>
       <div className="header-actions flex items-center gap-2">
-        <button
-          id="btn-theme"
-          type="button"
-          aria-label="Toggle theme"
-          onClick={toggleTheme}
-          className="btn-theme flex size-9 items-center justify-center rounded-full text-muted hover:bg-surface-2"
-        >
-          {theme === "dark" ? <Sun className="size-[18px]" /> : <Moon className="size-[18px]" />}
-        </button>
+        <ThemeToggle />
         {identity ? (
           <IdentitySwitcher identity={identity} onAdd={() => push("add-id")} />
         ) : (

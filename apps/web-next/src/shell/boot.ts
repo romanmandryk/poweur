@@ -12,6 +12,7 @@ import {
 } from "../lib/storage.js";
 import { fromBase64url } from "../lib/vault.js";
 import { resolveMode } from "../lib/mode.js";
+import { beginSignInApproval } from "../actions/signin";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
@@ -77,6 +78,7 @@ export function boot(): Promise<void> {
   if (authInput) {
     useRoute.setState({ page: "settings", sub: "auth", params: {} });
     useData.setState((state) => ({ auth: { ...state.auth, input: authInput } }));
+    void beginSignInApproval(authInput);
   } else if (handedOver) {
     // Locked on arrival: the passkey that opens the keys is scoped to the
     // domain both hosts share (E18-T4).

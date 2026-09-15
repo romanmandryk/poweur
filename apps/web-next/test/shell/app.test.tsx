@@ -4,6 +4,7 @@ import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
 import { useSession } from "../../src/state/session";
+import { saveIdentityRecord } from "../../src/lib/storage.js";
 import { resetStores } from "../helpers/stores";
 
 const IDENTITY = "alice.poweur.net";
@@ -48,6 +49,7 @@ describe("shell decision tree (E21-T4)", () => {
   });
 
   it("the unlock prompt opens the unlock gate", () => {
+    saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     signedIn(false);
     const { container } = render(<App />);
     fireEvent.click(container.querySelector("#btn-unlock-main")!);
@@ -131,10 +133,10 @@ describe("shell decision tree (E21-T4)", () => {
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
-  it("a launcher host with no identity gets its door, not the generic welcome", () => {
+  it("a launcher host with no identity gets its landing, not the generic welcome", () => {
     useSession.setState({ mode: { mode: "launcher" } });
     const { container } = render(<App />);
     expect(container.querySelector("#btn-welcome-start")).toBeNull();
-    expect(container.textContent).toContain("Front door: launcher");
+    expect(container.querySelector(".landing-title")).toBeTruthy();
   });
 });

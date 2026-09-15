@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3, T4, T5 done; T2 done pending first production deploy; T6–T11 (screens) next
+- **Status:** in progress — T1, T3, T4, T5, T6 done; T2 done pending first production deploy; T7–T11 (destinations) next
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -18,7 +18,7 @@
 | E21-T3 Non-UI modules carried over verbatim | **done** | 12 modules + 15 test files (176 tests green); legacy↔next storage compat + byte-identical guard in `test/lib/legacy-compat.test.js` |
 | E21-T4 State store, routing & app shell | **done** | Zustand `route` / `session` / `data` / `ui` stores; shell, boot, overlays, back nav; every unported screen is a labelled `NotPorted` stand-in linking to `/app/` |
 | E21-T5 Design system: tokens + primitives | **done** | tokens from `style.css` in `index.css`; `src/ui/*`; IdentityInput, ProfileCard, AudiencePicker, PolicyControls in React; 257 tests green. Bundle now 144 KB gz (React + Radix + `@poweur/client` crypto) — above the 70–90 KB estimate, recheck in T13 |
-| E21-T6 Front doors & gates | open | |
+| E21-T6 Front doors & gates | **done** (unit-verified; e2e in T12) | landing + claim card, identity door, relay prompt, add-id, unlock, claim + DNS claim, onboarding, sign-in approval, join device; `actions/` hold the ported identity lifecycle. 304 tests green. Bundle 195 KB gz (argon2 / bip39 / keystore now reachable) |
 | E21-T7 Messages destination & conversation | open | |
 | E21-T8 Contacts destination | open | |
 | E21-T9 Files destination & sharing | open | |
@@ -167,8 +167,8 @@ These already contain no DOM code and are covered by Vitest. Move, don't rewrite
       written by either app reads back in the other, same bytes; removal is shared
 - [x] **Freeze guard:** same file asserts each carried module is byte-identical to
       `apps/web/js/` — a legacy fix not mirrored here fails CI
-- [ ] ~~Hardcoded `/app/` links~~ → moved to **T6** (identity door "Claim a different name")
-      and **T10** (`#claim=` join URL): both live in `app.js` UI code, not in a carried module
+- [x] ~~Hardcoded `/app/` links~~ → done in **T6** (`lib/claim.ts`): the identity door's "Claim a
+      different name" and the `#claim=` hand-off URL both use the current mount path
 
 **Acceptance:** all copied unit tests pass under `apps/web-next`; cross-app storage
 compatibility test passes.
@@ -237,15 +237,34 @@ per-identity avatar colour (a runtime value), so that part of the grep criterion
 
 ### E21-T6 — Front doors & gates
 
-- [ ] Front door by mode: landing (`renderLanding`, claim card + note), identity door
-      (`renderIdentityDoor` + footer), generic welcome, locked
-- [ ] Relay prompt (three-way: production / local emulator / typed URL — shell mode)
-- [ ] Sub-pages: `add-id`, `unlock` (passkey, native keystore, seed), `onboarding` (three
-      skippable steps), `claim` incl. DNS claim, `auth` (sign-in approval)
-- [ ] Join-device panel, enroll-wait flow
+- [x] Front door by mode (`screens/registry.tsx`): `launcher` / `shell` → `doors/Landing.tsx`
+      (hero, claim card, how-it-works, `#opt-have-id`, `#opt-own-domain`); `identity` →
+      `doors/IdentityDoor.tsx` (checking / claimed / claimable / unavailable / offline, probe in
+      `actions/door.ts`); `unknown` → Welcome; Locked from T4
+- [x] Claim card (`doors/ClaimCard.tsx`): skeleton until probed, suffix as fixed text / picker /
+      typed input by hosted-domain count, pasted-FQDN normalization, debounced availability with
+      the relay's own wording, PRF / native-custody note (`#claim-prf-required`); `DnsClaimCard`
+      for the self-hosted path. Fields stay uncontrolled so a relay refusal can put the attempt back
+- [x] Relay prompt (`doors/RelayPrompt.tsx`): production / local / typed URL, `/health` probe
+      before saving, re-resolves the mode; shown in the shell or when no relay is known
+- [x] Sub-pages: `AddId` (options from `addIdOptions`), `Unlock` (PRF passkey or native
+      keystore, `returnTo`), `Claim` (moved here from T10 — the landing is where it starts),
+      `Onboarding` (policy → profile → done; Continue saves, a failed save stays put; Skip
+      writes nothing) with a React `ProfileEditor`, `SignInApproval` (paste → verify → unlock
+      or approve → copy / continue); boot starts approval for `?auth=`
+- [x] Join-device panel (`screens/JoinDevice.tsx`): known subject skips the form, rendezvous
+      code + SAS, poller from `enroll-wait.js`, closing the panel cancels the rendezvous,
+      approval adopts the seed
+- [x] Actions ported from `app.js` into `src/actions/` (`identity`, `door`, `signin`,
+      `account`); `afterUnlock()` / `onUnlocked()` is the hook T7 hangs inbox loading on
+- [x] Links built from the mount path (`lib/claim.ts`: `identityAppUrl`, `launcherAppUrl`) — the
+      hand-off and "Claim a different name" stay in `/newapp/` when started there
+- [x] Unit tests: `test/screens/{doors,gates,join-device}.test.tsx`, `test/lib/claim.test.ts`
 
-**Acceptance:** `modes`, `launcher`, `hosted`, `onboarding`, `enrollment`, `native-custody`
-specs pass against `/newapp/`.
+**Acceptance:** unit-level ✅. The Playwright specs move to **T12** with `APP_PATH`; known
+dependencies there: `onboarding.spec` goes on to contacts / messages / files (T7–T9) and its
+skip test imports `./js/client.js` (needs a web-next equivalent); `enrollment.spec`'s approving
+side is the Keys & devices panel (T11); `native-custody.spec`'s last two cases need Settings (T11).
 
 ### E21-T7 — Messages destination & conversation
 
@@ -277,7 +296,7 @@ pass against `/newapp/`; live message arrival does not reset scroll or the draft
 ### E21-T10 — Launcher & claim
 
 - [ ] Launcher destination (`renderLauncher`)
-- [ ] Claim flow and DNS claim screens reached from the launcher
+- [x] ~~Claim flow and DNS claim screens reached from the launcher~~ → built in **T6**
 
 **Acceptance:** `launcher`, `journeys` specs pass against `/newapp/`.
 

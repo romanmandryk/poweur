@@ -1,11 +1,18 @@
 /**
- * Which component draws each destination, sub-page and front door. T6–T11
- * replace the NotPorted entries one by one; the shell never changes.
+ * Which component draws each destination, sub-page and front door. T7–T11
+ * replace the remaining NotPorted entries one by one; the shell never changes.
  */
 import type { Destination, SubPageId } from "../state/route";
 import { useSession } from "../state/session";
+import { AddId } from "./AddId";
+import { Claim } from "./Claim";
+import { IdentityDoor } from "./doors/IdentityDoor";
+import { Landing } from "./doors/Landing";
 import { Welcome } from "./gates";
-import { NotPortedDestination, NotPortedDoor, NotPortedSubPage } from "./NotPorted";
+import { NotPortedDestination, NotPortedSubPage } from "./NotPorted";
+import { Onboarding } from "./Onboarding";
+import { SignInApproval } from "./SignInApproval";
+import { Unlock } from "./Unlock";
 
 const DESTINATION_TITLES: Record<Destination, { title: string; task: string }> = {
   messages: { title: "Messages", task: "T7" },
@@ -20,19 +27,23 @@ export function DestinationScreen({ page }: { page: Destination }) {
   return <NotPortedDestination title={title} task={task} />;
 }
 
-const SUB_TITLES: Record<SubPageId, { title: string; task: string }> = {
-  "add-id": { title: "Add identity", task: "T6" },
-  unlock: { title: "Unlock", task: "T6" },
-  onboarding: { title: "Get started", task: "T6" },
-  claim: { title: "Claim your name", task: "T10" },
-  auth: { title: "Sign in", task: "T6" },
-  "new-chat": { title: "New chat", task: "T7" },
-  thread: { title: "Conversation", task: "T7" },
-};
-
 export function SubScreen({ sub }: { sub: SubPageId }) {
-  const { title, task } = SUB_TITLES[sub] ?? SUB_TITLES["add-id"];
-  return <NotPortedSubPage title={title} task={task} />;
+  switch (sub) {
+    case "unlock":
+      return <Unlock />;
+    case "onboarding":
+      return <Onboarding />;
+    case "claim":
+      return <Claim />;
+    case "auth":
+      return <SignInApproval />;
+    case "new-chat":
+      return <NotPortedSubPage title="New chat" task="T7" />;
+    case "thread":
+      return <NotPortedSubPage title="Conversation" task="T7" />;
+    default:
+      return <AddId />;
+  }
 }
 
 /** Which door, decided by the host; `unknown` keeps the generic welcome. */
@@ -41,8 +52,9 @@ export function FrontDoorScreen() {
   switch (mode) {
     case "launcher":
     case "shell":
+      return <Landing />;
     case "identity":
-      return <NotPortedDoor mode={mode} task="T6" />;
+      return <IdentityDoor />;
     default:
       return <Welcome />;
   }
