@@ -66,9 +66,12 @@ test('setup refuses missing imports and invalid arguments without creating secre
   assert.notEqual(run('setup-observability.sh', ['--unknown']).status, 0);
 });
 
-test('deploy workflow does not pipe the remote script through docker compose exec', () => {
+test('deploy workflow bakes release identity into the remote script', () => {
   const yml = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  assert.match(yml, /printf 'export RELEASE_SHA=%q\\n'/);
+  assert.match(yml, /printf 'export RELEASE_IMAGE=%q\\n'/);
   assert.match(yml, /cat > \/tmp\/poweur-release\.sh/);
   assert.match(yml, /versionHash/);
   assert.doesNotMatch(yml, /bash -s <</);
+  assert.doesNotMatch(yml, /ssh "[^"]+" env RELEASE_SHA=/);
 });
