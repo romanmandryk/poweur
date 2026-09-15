@@ -3,7 +3,8 @@
 - **Status:** proposed
 - **Poweur prerequisites:** [EPIC-017](../EPIC-017-typescript-client-sdk.md) (`@poweur/client` — hard
   blocker for the plugin), EPIC-009 (typed messages + attachments), EPIC-010-T1 (agent identity +
-  `operated_by`), EPIC-008 / INT-000-T1 (Sign-In, OIDC bridge); EPIC-005 shares are shipped
+  `operated_by`), EPIC-008 / EPIC-021 (native Sign-In + generic OIDC bridge); EPIC-005 shares
+  are shipped
 - **Goal:** become the **identity, messaging and file layer for personal agent gateways** — the
   fast-growing class of self-hosted control planes (OpenClaw, Hermes, and the wave following them)
   that run an agent behind Telegram/Discord/Slack/WhatsApp/Signal. They have solved orchestration
@@ -135,7 +136,7 @@ without any per-user config in the gateway.
 
 ### INT-005-T5 — Gateway profile sign-in with Poweur ID
 
-- [ ] Zero-upstream-code path first: our OIDC bridge (INT-000-T1) behind their trusted-proxy /
+- [ ] Zero-upstream-code path first: our OIDC bridge (EPIC-021) behind their trusted-proxy /
       identity-header mode — a self-hosted alternative to requiring Cloudflare Access or Tailscale
 - [ ] Document the deployment (proxy config, `trustedProxies` hardening, header mapping)
 - [ ] Native provider PR only after the plugin has landed and the relationship exists

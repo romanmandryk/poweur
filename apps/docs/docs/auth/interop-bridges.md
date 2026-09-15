@@ -27,7 +27,7 @@ projected from the current stored document. This follows the
 [did:web resolution path](https://w3c-ccg.github.io/did-method-web/) and the
 [DID Core data model](https://www.w3.org/TR/did-core/).
 
-## OIDC bridge: design
+## OIDC bridge: planned
 
 An optional bridge can make a Poweur identity acceptable to an ordinary OpenID Connect relying
 party:
@@ -56,10 +56,14 @@ it never receives an identity private key or becomes the canonical directory.
 
 ### Recommendation
 
-**No-go for implementation now; go on demonstrated OIDC demand.** The bridge adds operational
-security and account-correlation surface but no new Poweur capability. Build it when a named
-integration cannot use the small native verifier SDK, and ship it as an independently
-self-hostable service with its own threat review.
+Implementation is now planned in
+[EPIC-021](https://github.com/poweur/poweur/blob/main/epics/EPIC-021-oauth-oidc-indieauth-bridge.md):
+a generic, independently
+self-hostable bridge, with OIDC/OAuth 2.0 as the primary standards surface and IndieAuth over
+the same authentication core. It remains a separate service because it adds issuer signing
+keys, browser sessions, client registration, redirects and account-correlation concerns that
+do not belong in the relay. Same-browser Poweur approval is the primary journey, cross-device
+QR is second, and typed-message push is an optional delivery channel rather than a prerequisite.
 
 ## SIOPv2 and OpenID4VP survey
 

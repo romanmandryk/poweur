@@ -2,7 +2,8 @@
 
 - **Status:** proposed
 - **Theme:** adoption & ecosystem growth
-- **Depends on (Poweur side):** EPIC-001 (resolver chain), EPIC-008 (Sign-In + SDKs + OIDC/did:web bridges), EPIC-003/004 (WebDAV + sync), EPIC-005 (sharing), EPIC-009 (typed messages), EPIC-010 (agent SDK, MCP)
+- **Depends on (Poweur side):** EPIC-021 (generic OAuth/OIDC + IndieAuth bridge), EPIC-003/004
+  (WebDAV + sync), EPIC-005 (sharing), EPIC-009 (typed messages), EPIC-010 (agent SDK, MCP)
 
 ## Why integrations are the growth engine
 
@@ -68,15 +69,18 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 
 ## Cross-cutting prerequisite tasks (Poweur side)
 
-### INT-000-T1 — Generic OIDC bridge, production-grade
-The single highest-leverage artifact: 80% of the projects below accept any OIDC provider.
-Promote the EPIC-008 E08-T5 design to a shippable, self-hostable bridge (container image,
-ten-line config), so "integrate Poweur" reduces to "point your OIDC config at this".
+### INT-000-T1 — Bridge adoption track
 
-- [ ] Stateless OIDC OP fronting Sign-In with Poweur; id_token claims carry the Poweur ID and
-      key fingerprint; discovery document, dynamic client registration optional
-- [ ] Hosted instance for evaluation (`oidc.poweur.net`) + docker image for self-hosters
-- [ ] Conformance: test against Keycloak, Dex, oauth2-proxy as relying parties
+Bridge implementation, security and packaging are owned by
+[EPIC-021](../EPIC-021-oauth-oidc-indieauth-bridge.md). This integration task begins once its
+OIDC surface is usable and turns that generic service into upstream adoption:
+
+- [ ] Maintain tested Keycloak, Authentik, Dex and oauth2-proxy configurations against the
+      hosted issuer and an independently self-hosted bridge
+- [ ] Reduce each integration to normal issuer/client/redirect configuration wherever possible;
+      open an upstream change only when a documented product limitation requires it
+- [ ] Feed failures in standards compatibility, claims or self-hosting back to EPIC-021 rather
+      than adding project-specific behavior to the bridge
 
 ### INT-000-T2 — Integration starter kit
 - [ ] "Integrate Poweur" landing page on the docs site: tiers, SDK links, demo relay
