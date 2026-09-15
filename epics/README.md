@@ -46,6 +46,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
 | [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
+| [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | Web app rewrite: React + Tailwind, side by side at `/newapp/` | Web / UX | proposed | E15, E17, E19 |
 
 ## Integration epics (`integrations/`)
 
