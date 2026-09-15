@@ -428,8 +428,12 @@ skipped (`no-flicker`, rewrite only).
       (source maps left out), keeping the relative-path check — stricter for the new build: any
       root-absolute `src` / `href` fails staging. `.staged` records which source was staged.
       `pnpm mobile:stage:next` builds and stages; `test/stage.test.mjs` covers both sources
-- [ ] Verify on iOS simulator: relay prompt → create (native keystore) → unlock → send/receive;
-      Android `:app:assembleDebug` green
+- [x] Native builds on the new web app (2026-09-15): `WEB_SOURCE=next pnpm build:ios` → BUILD
+      SUCCEEDED, `App.app/public` carries the React bundle; `WEB_SOURCE=next pnpm build:android` →
+      `app-debug.apk`, same bundle in `assets/public`. Fixed on the way: `build:ios` pointed at a
+      non-existent `App.xcworkspace` (the project is SPM-based) — now `-project App.xcodeproj`
+- [ ] Walk it on the iOS simulator: relay prompt → create (native keystore) → unlock →
+      send/receive — blocked on granting Claude access to the simulator
 - [x] Safe areas (`pt-safe` / `pb-safe` / `h-header` / `h-nav`, composer and sheet insets) and
       hardware back (Capacitor `backButton`: closes the panel, then pops) → in the shell since T4 / T7
 - [ ] Keyboard overlap in the thread view — check on a device
