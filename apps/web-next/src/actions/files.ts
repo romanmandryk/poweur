@@ -74,18 +74,36 @@ export function openOwnerTree(identity: string) {
   void loadFiles("");
 }
 
+/** Only the newest listing may land: a slow read of the root must not overwrite the folder opened after it. */
+let loadToken = 0;
+/**
+ * The folder the user asked for, which `files.path` only becomes once its
+ * listing lands. The changes feed reloads *this* — reloading the old path
+ * mid-navigation would win the race and snap the view back.
+ */
+let requestedPath = "";
+
 export async function loadFiles(path: string) {
+  const token = ++loadToken;
+  requestedPath = path;
+  // Loading from the first moment, not after the token is minted, so a
+  // changes poll in between sees a navigation in flight and stands back.
+  // Moving to another folder clears the old rows: they would stay clickable
+  // for the moment the new listing takes, and a tap on one opens the wrong
+  // thing. Reloading the same folder keeps them, so a refresh does not blink.
+  const navigating = path !== useData.getState().files.path;
+  setFiles(navigating ? { loading: true, entries: [] } : { loading: true });
   try {
     const client = await dav();
-    if (!client) return;
-    setFiles({ loading: true });
+    if (!client || token !== loadToken) return;
     const [entries, quota] = await Promise.all([client.list(path), client.quota().catch(() => useData.getState().files.quota)]);
+    if (token !== loadToken) return;
     setFiles({ path, entries, quota, loaded: true });
     if (!useData.getState().files.owner) void loadGrants();
   } catch (error) {
-    toast(errorMessage(error), "error");
+    if (token === loadToken) toast(errorMessage(error), "error");
   } finally {
-    setFiles({ loading: false });
+    if (token === loadToken) setFiles({ loading: false });
   }
 }
 
@@ -272,14 +290,15 @@ export function watchChanges(): () => void {
         if (!active) break;
         setFiles({ cursor: fullResync ? "" : cursor });
         const current = useData.getState().files;
-        const prefix = current.path ? `${current.path}/` : "";
+        const folder = requestedPath;
+        const prefix = folder ? `${folder}/` : "";
         const touched = (changes ?? []).some((change: any) => {
           const path = change.path ?? "";
           // This folder's own entries only; a change deep inside a subfolder
           // does not change what this listing shows.
           return path.startsWith(prefix) && !path.slice(prefix.length).includes("/");
         });
-        if (touched && !current.loading) await loadFiles(current.path);
+        if (touched && !current.loading) await loadFiles(folder);
         await sleep(CHANGES_POLL_MS);
       }
     } catch (error) {
@@ -297,4 +316,6 @@ export function watchChanges(): () => void {
 /** Test seam. */
 export function resetFilesForTests() {
   davCache = null;
+  loadToken = 0;
+  requestedPath = "";
 }

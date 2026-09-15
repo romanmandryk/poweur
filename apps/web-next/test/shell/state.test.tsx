@@ -137,6 +137,26 @@ describe("panel", () => {
     expect(useUi.getState().panel).toBeNull();
   });
 
+  it("puts focus back on the control that opened it", async () => {
+    render(
+      <>
+        <button type="button" id="opener" onClick={() => openPanel("Inbox", () => <input aria-label="Mode" />)}>
+          Who can message you
+        </button>
+        <PanelHost />
+      </>,
+    );
+    const opener = document.getElementById("opener")!;
+    opener.focus();
+    fireEvent.click(opener);
+    await screen.findByRole("dialog", { name: "Inbox" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Mode")));
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
   it("a stale close cannot shut a newer panel", () => {
     const closeFirst = openPanel("First", () => null);
     openPanel("Second", () => null);

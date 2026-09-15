@@ -180,7 +180,8 @@ test.describe("first run", () => {
     // Escape closes it, and focus returns to the row that opened it.
     await page.keyboard.press("Escape");
     await expect(page.locator("#panel-root")).toBeHidden();
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("row-policy");
+    // Polled: a dialog library may restore focus a tick after it unmounts.
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("row-policy");
 
     // A row with role="button" is operable from the keyboard.
     await page.click('.nav-tab[data-page="files"]');

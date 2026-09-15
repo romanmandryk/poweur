@@ -100,7 +100,9 @@ export function Onboarding() {
             // Recommended, not imposed: Skip leaves the relay's default in place.
             <PolicyControls
               ref={policyControls}
-              policy={policy.doc ?? { version: 1, mode: "contacts_and_requests" }}
+              // The relay's implicit default ("open") is not a choice anyone made,
+              // so an identity with no saved policy starts on the recommendation.
+              policy={policy.explicit && policy.doc ? policy.doc : { version: 1, mode: "contacts_and_requests" }}
               explicit={policy.explicit}
               showSave={false}
               onSave={savePolicy}

@@ -13,14 +13,20 @@ export function Sheet({
   open,
   onOpenChange,
   title,
+  returnFocus,
   children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: ReactNode;
+  /** The control to focus again when the sheet closes (it opened from code, not a trigger). */
+  returnFocus?: HTMLElement | null;
   children?: ReactNode;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
+  // By the time Radix asks where to put focus, the panel prop is already gone.
+  const returnRef = useRef<HTMLElement | null>(null);
+  if (open) returnRef.current = returnFocus ?? null;
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -42,6 +48,16 @@ export function Sheet({
               root?.querySelector<HTMLElement>("input:not([type=file]), textarea, .btn-primary") ??
               root?.querySelector<HTMLElement>("#panel-close-btn");
             target?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            // Back where it came from — or nowhere in particular, rather than
+            // parked on a control inside a panel that is gone.
+            const target = returnRef.current;
+            returnRef.current = null;
+            if (target?.isConnected) {
+              event.preventDefault();
+              target.focus();
+            }
           }}
           className={
             "panel-root fixed inset-x-0 bottom-0 z-400 mx-auto max-h-[85dvh] max-w-[480px] animate-slide-up overflow-y-auto " +

@@ -21,6 +21,8 @@ export interface PanelItem {
   title: string;
   render: (close: () => void) => ReactNode;
   onClose?: () => void;
+  /** Where focus was when the panel opened, so closing it can put focus back. */
+  returnFocus?: HTMLElement | null;
 }
 
 export interface UiState {
@@ -64,7 +66,11 @@ export function setLoading(active: boolean, text = "Working…") {
 /** Open the panel; returns the function that closes it. One panel at a time. */
 export function openPanel(title: string, render: PanelItem["render"], onClose?: () => void): () => void {
   const id = nextId++;
-  useUi.setState({ panel: { id, title, render, onClose } });
+  // Panels open from code, not from a Radix trigger, so Radix has nowhere to
+  // return focus to: remember the control that opened this one.
+  const active = globalThis.document?.activeElement;
+  const returnFocus = active instanceof HTMLElement && active !== document.body ? active : null;
+  useUi.setState({ panel: { id, title, render, onClose, returnFocus } });
   return () => closePanel(id);
 }
 

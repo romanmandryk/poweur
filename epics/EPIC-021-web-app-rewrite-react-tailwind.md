@@ -390,30 +390,49 @@ specs run in **T12**.
 
 ### E21-T12 — E2E parity: one Playwright suite, both apps
 
-- [ ] `APP_PATH` env (default `/app/`) used by `test/helpers/app-ui.mjs` and every spec that
-      builds a URL (`messaging`, `modes`, `launcher`, `enrollment`, …)
-- [ ] Selectors: prefer role/label; where specs use ids / `data-*`, the new app keeps them
-- [ ] `pnpm web:test:e2e:next` runs the suite with `APP_PATH=/newapp/`
-- [ ] CI runs both until T14
-- [ ] New specs only for things legacy could not do: DOM-identity (no flicker) check, focus
-      retention during live updates
+- [x] `POWEUR_APP_PATH` (default `/app/`, `test/helpers/app-path.mjs`) used by `app-ui.mjs`,
+      `modes`, `launcher`, `enrollment`; `messaging.spec` stays pinned to `/app/` (it checks the
+      legacy import map)
+- [x] Test seam: specs reach the app's own modules through `window.__poweurModule(name)` —
+      installed by `stubPasskeys`; the legacy app imports `./js/<name>.js`, the rewrite hands over
+      its bundled `client` / `storage` / `sdk` when `__POWEUR_TEST_SEAM__` is set
+      (`src/shell/testSeam.ts`, inert otherwise). `destinations` reads the tested app's build-info
+- [x] Selectors: the rewrite keeps every id / `data-*` / class hook the specs use
+- [x] `pnpm web-next:test:e2e` builds web-next and runs the suite against `/newapp/`
+- [x] CI: the `web-next` job runs the full suite against `/newapp/`; the `web` job keeps `/app/`
+- [x] New spec `no-flicker.spec.js` (rewrite only): header / nav nodes survive navigation, and a
+      live message keeps the thread input node, its draft and focus
+- [x] Spec changes for honest parity, not to hide failures: the apex-redirect case skips on the
+      rewrite (the relay redirects to `/app/` until T14); the focus-return check polls (Radix
+      restores focus one tick after unmount)
 
-**Parity checklist** (a spec passing against `/newapp/` checks its box):
+Bugs the suite found in the rewrite, fixed: onboarding opened on the relay's implicit "open"
+policy instead of the recommendation; panels opened from code returned focus nowhere (no Radix
+trigger) — `openPanel` now records the opener; a files listing could be overwritten by an
+earlier or polled load, and stale rows stayed clickable mid-navigation — newest-load-wins token,
+requested-path tracking, rows cleared when changing folder.
 
-- [ ] analytics · [ ] attachments · [ ] contacts · [ ] conversation · [ ] destinations
-- [ ] durability · [ ] enrollment · [ ] files · [ ] hosted · [ ] journeys · [ ] launcher
-- [ ] messaging · [ ] modes · [ ] multi-relay · [ ] native-custody · [ ] nav-badges
-- [ ] onboarding · [ ] policy · [ ] sharing
+**Parity checklist** (every spec green against `/newapp/`, 2026-09-15):
 
-**Acceptance:** the full Playwright suite is green against both `/app/` and `/newapp/`.
+- [x] analytics · [x] attachments · [x] contacts · [x] conversation · [x] destinations
+- [x] durability · [x] enrollment · [x] files · [x] hosted · [x] journeys · [x] launcher
+- [x] messaging · [x] modes (apex case skipped until T14) · [x] multi-relay · [x] native-custody
+- [x] nav-badges · [x] onboarding · [x] policy · [x] sharing
+
+**Acceptance:** ✅ `/newapp/`: 62 passed, 1 skipped (apex redirect). `/app/`: 62 passed, 1
+skipped (`no-flicker`, rewrite only).
 
 ### E21-T13 — Capacitor shell on the new build
 
-- [ ] `apps/mobile/scripts/stage-web.mjs` stages `apps/web-next/dist` behind a flag
-      (`WEB_SOURCE=next`), keeping the relative-path check
+- [x] `apps/mobile/scripts/stage-web.mjs` stages `apps/web-next/dist` behind `WEB_SOURCE=next`
+      (source maps left out), keeping the relative-path check — stricter for the new build: any
+      root-absolute `src` / `href` fails staging. `.staged` records which source was staged.
+      `pnpm mobile:stage:next` builds and stages; `test/stage.test.mjs` covers both sources
 - [ ] Verify on iOS simulator: relay prompt → create (native keystore) → unlock → send/receive;
       Android `:app:assembleDebug` green
-- [ ] Safe areas, keyboard overlap in thread view, hardware back (Android) closes sheet → pops
+- [x] Safe areas (`pt-safe` / `pb-safe` / `h-header` / `h-nav`, composer and sheet insets) and
+      hardware back (Capacitor `backButton`: closes the panel, then pops) → in the shell since T4 / T7
+- [ ] Keyboard overlap in the thread view — check on a device
 
 **Acceptance:** the E19-T1 simulator walkthrough passes on the new build.
 

@@ -15,6 +15,7 @@
     "web-next:test": "pnpm --filter @poweur/web-next test",
     "web-next:test:e2e": "pnpm web-next:build && pnpm --filter @poweur/web exec env POWEUR_APP_PATH=/newapp/ playwright test",
     "mobile:stage": "pnpm --filter @poweur/mobile run stage",
+    "mobile:stage:next": "pnpm web-next:build && WEB_SOURCE=next pnpm --filter @poweur/mobile run stage",
     "mobile:sync": "pnpm --filter @poweur/mobile run sync",
     "mobile:android": "pnpm --filter @poweur/mobile run build:android",
     "android": "pnpm --filter @poweur/mobile run install:android",

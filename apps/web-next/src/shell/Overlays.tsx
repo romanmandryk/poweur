@@ -65,6 +65,7 @@ export function PanelHost() {
         if (!open && panel) closePanel(panel.id);
       }}
       title={panel?.title ?? ""}
+      returnFocus={panel?.returnFocus}
     >
       {panel?.render(() => closePanel(panel.id))}
     </Sheet>

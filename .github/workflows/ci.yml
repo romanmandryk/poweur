@@ -136,11 +136,24 @@ jobs:
           node-version: "22"
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile --filter @poweur/web-next...
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/api/go.sum
+            packages/identity/go.sum
+
+      # The full workspace: the e2e suite lives in apps/web and drives both apps.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm client:build
       - run: pnpm web-next:typecheck
       - run: pnpm web-next:test
       - run: pnpm web-next:build
+
+      # EPIC-021 T12: the legacy Playwright suite, pointed at /newapp/. Both apps
+      # must stay green until the cutover (E21-T14).
+      - name: E2E against /newapp/
+        run: pnpm --filter @poweur/web exec env POWEUR_APP_PATH=/newapp/ playwright test
 
   observability:
     name: Observability and deployment
