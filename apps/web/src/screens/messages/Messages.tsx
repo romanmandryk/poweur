@@ -16,6 +16,7 @@ import {
   loadInbox,
   markConversationRead,
   openThread,
+  refreshMessages,
   unreadFor,
 } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
@@ -32,6 +33,7 @@ import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
 import { Chip, CountBadge, EmptyState } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
+import { PullToRefresh } from "../../ui/PullToRefresh";
 import { Tab, TabBar } from "../../ui/Tabs";
 
 const TRAYS: { id: Tray; label: string }[] = [
@@ -73,33 +75,35 @@ export function Messages() {
 
   return (
     <>
-      <DestHeader title="Messages">
-        <Button id="btn-compose-top" size="sm" className="dest-action hidden md:inline-flex" onClick={() => push("new-chat")}>
-          <Plus className="size-4" aria-hidden="true" /> New message
-        </Button>
-      </DestHeader>
-      <TabBar className="tray-bar" aria-label="Message trays">
-        {trays.map(({ id, label }) => {
-          const waiting = id === "inbox" ? 0 : counts[id];
-          return (
-            <Tab
-              key={id}
-              data-tray={id}
-              active={shown === id}
-              aria-label={waiting ? `${label}, ${waiting} waiting` : undefined}
-              onClick={() => useData.setState({ tray: id })}
-            >
-              {label}
-              {waiting > 0 && (
-                <span className="tray-badge inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-[5px] text-[11px] leading-none font-bold text-white">
-                  {waiting > 99 ? "99+" : waiting}
-                </span>
-              )}
-            </Tab>
-          );
-        })}
-      </TabBar>
-      {shown === "requests" ? <RequestsTray /> : shown === "anonymous" ? <AnonTray /> : <InboxTray />}
+      <PullToRefresh onRefresh={refreshMessages}>
+        <DestHeader title="Messages">
+          <Button id="btn-compose-top" size="sm" className="dest-action hidden md:inline-flex" onClick={() => push("new-chat")}>
+            <Plus className="size-4" aria-hidden="true" /> New message
+          </Button>
+        </DestHeader>
+        <TabBar className="tray-bar" aria-label="Message trays">
+          {trays.map(({ id, label }) => {
+            const waiting = id === "inbox" ? 0 : counts[id];
+            return (
+              <Tab
+                key={id}
+                data-tray={id}
+                active={shown === id}
+                aria-label={waiting ? `${label}, ${waiting} waiting` : undefined}
+                onClick={() => useData.setState({ tray: id })}
+              >
+                {label}
+                {waiting > 0 && (
+                  <span className="tray-badge inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-[5px] text-[11px] leading-none font-bold text-white">
+                    {waiting > 99 ? "99+" : waiting}
+                  </span>
+                )}
+              </Tab>
+            );
+          })}
+        </TabBar>
+        {shown === "requests" ? <RequestsTray /> : shown === "anonymous" ? <AnonTray /> : <InboxTray />}
+      </PullToRefresh>
       <button
         id="btn-compose"
         type="button"

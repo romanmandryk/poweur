@@ -128,11 +128,7 @@ export function Files() {
           )}
           {files.quota && !visiting && <QuotaBar quota={files.quota} />}
           <Breadcrumbs path={files.path} />
-          {files.loading && files.entries.length === 0 ? (
-            <p className="p-4 text-[13px] text-muted">Loading…</p>
-          ) : (
-            <Listing />
-          )}
+          {!(files.loading && files.entries.length === 0) && <Listing />}
         </>
       )}
     </>

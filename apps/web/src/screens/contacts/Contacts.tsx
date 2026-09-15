@@ -5,7 +5,7 @@
  */
 import { useEffect } from "react";
 import { MoreHorizontal, Plus, Users } from "lucide-react";
-import { loadContacts, loadRequests } from "../../actions/contacts";
+import { loadContacts, loadRequests, refreshContactsScreen } from "../../actions/contacts";
 import { loadHistory, openThread } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
 import { ProfileCard } from "../../components/ProfileCard";
@@ -15,6 +15,7 @@ import { Button, IconButton } from "../../ui/Button";
 import { Chip, EmptyState, type ChipTone } from "../../ui/Display";
 import { Input } from "../../ui/Field";
 import { DestHeader } from "../../ui/Layout";
+import { PullToRefresh } from "../../ui/PullToRefresh";
 import { openAddContactPanel } from "./AddContactPanel";
 import { openContactPanel } from "./ContactPanel";
 
@@ -40,7 +41,7 @@ export function Contacts() {
   const filtered = contacts.list.filter((contact) => !needle || `${contact.identity} ${contact.petname ?? ""}`.toLowerCase().includes(needle));
 
   return (
-    <>
+    <PullToRefresh onRefresh={refreshContactsScreen}>
       <DestHeader title="Contacts">
         <Button id="btn-add-contact" size="sm" onClick={() => openAddContactPanel()}>
           <Plus className="size-4" aria-hidden="true" /> Add
@@ -64,10 +65,9 @@ export function Contacts() {
         </div>
       )}
 
-      {contacts.loading && <p className="p-4 text-[13px] text-muted">Loading contacts…</p>}
       {contacts.error && <p className="val-warn p-4 text-[13px] text-warning">{contacts.error}</p>}
 
-      {!contacts.loading && contacts.list.length === 0 && (
+      {contacts.list.length === 0 && !contacts.loading && Boolean(contacts.loaded || contacts.error) && (
         <EmptyState
           icon={Users}
           title="No contacts yet"
@@ -91,7 +91,7 @@ export function Contacts() {
       {contacts.list.length > 0 && filtered.length === 0 && (
         <p className="p-4 text-[13px] text-muted">No contact matches “{contacts.filter}”.</p>
       )}
-    </>
+    </PullToRefresh>
   );
 }
 

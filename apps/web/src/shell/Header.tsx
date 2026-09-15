@@ -6,6 +6,7 @@ import { listIdentities } from "../lib/storage.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
 import { Avatar } from "../ui/Avatar";
+import { ActivityIndicator } from "./ActivityIndicator";
 import { ThemeToggle } from "./ThemeToggle";
 
 export function Header({ className }: { className?: string }) {
@@ -16,7 +17,7 @@ export function Header({ className }: { className?: string }) {
     <header
       className={cn(
         "app-header sticky top-0 z-100 flex h-header shrink-0 items-center justify-between border-b border-sep bg-chrome px-4 pt-safe",
-        "backdrop-blur-xl backdrop-saturate-180 md:static",
+        "backdrop-blur-xl backdrop-saturate-180 md:relative",
         className,
       )}
     >
@@ -36,6 +37,7 @@ export function Header({ className }: { className?: string }) {
           </button>
         )}
       </div>
+      <ActivityIndicator />
     </header>
   );
 }

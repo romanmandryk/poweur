@@ -255,6 +255,13 @@ export function pullAfterUnlock() {
   startEventStream();
 }
 
+/** Pull-to-refresh on Messages: every queue the screen shows, read again now. */
+export function refreshMessages(): Promise<void> {
+  const reads = [loadInbox({ force: true }), loadHistory({ force: true }), loadRequests({ force: true }), loadContacts({ force: true })];
+  if (wantsAnon()) reads.push(loadAnon({ force: true }));
+  return Promise.allSettled(reads).then(() => {});
+}
+
 /** Unread in one conversation, from its read mark — a count that can reach zero. */
 export function unreadFor(data: Pick<DataFields, "messages" | "history">, identity: string, peer: string): number {
   const wanted = String(peer ?? "").toLowerCase();

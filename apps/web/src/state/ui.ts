@@ -30,6 +30,8 @@ export interface UiState {
   toasts: ToastItem[];
   loading: { active: boolean; text: string };
   panel: PanelItem | null;
+  /** A pull-to-refresh spinner is on screen, so the shell's own indicator stays out of its way. */
+  refreshing: boolean;
 }
 
 const THEME_KEY = "poweur:theme";
@@ -43,6 +45,7 @@ export const useUi = create<UiState>()(() => ({
   toasts: [],
   loading: { active: false, text: "Working…" },
   panel: null,
+  refreshing: false,
 }));
 
 let nextId = 1;
@@ -61,6 +64,10 @@ export function toast(message: string, type: ToastType = "info", duration = 3500
 
 export function setLoading(active: boolean, text = "Working…") {
   useUi.setState({ loading: { active, text } });
+}
+
+export function setRefreshing(active: boolean) {
+  useUi.setState({ refreshing: active });
 }
 
 /** Open the panel; returns the function that closes it. One panel at a time. */

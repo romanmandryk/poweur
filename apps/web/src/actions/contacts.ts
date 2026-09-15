@@ -78,6 +78,11 @@ export function loadRequests({ force = false } = {}): Promise<void> {
   return requestsInFlight;
 }
 
+/** Pull-to-refresh on Contacts: the list and the request queue, read again now. */
+export function refreshContactsScreen(): Promise<void> {
+  return Promise.allSettled([loadContacts({ force: true }), loadRequests({ force: true })]).then(() => {});
+}
+
 /** Refresh everything a contact write invalidates. */
 export async function refreshContacts() {
   setContacts({ loaded: false });
