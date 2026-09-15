@@ -820,6 +820,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifiedActor(r, msg.Sender)
+	requestDetail(r, messageKind(msg.Type))
 	if senderLocal {
 		requestAction(r, "message.submit")
 	} else {

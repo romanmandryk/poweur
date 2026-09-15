@@ -7,6 +7,18 @@ groups:
         expr: sum(increase(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"}[1d]))
       - record: poweur_growth_uploads_24h
         expr: sum(increase(poweur_actions_total{action="upload.complete",outcome="success",deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_registrations_7d
+        expr: sum(increase(poweur_actions_total{action="registration.create",outcome="success",deployment_environment_name="production"}[7d]))
+      # detail is the bounded message kind (chat, app, anonymous, registered sys.*).
+      # Series recorded before relay 0.1.6 carry no detail and show as "untyped".
+      - record: poweur_growth_messages_1h
+        expr: label_replace(sum by (detail) (increase(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"}[1h])), "detail", "untyped", "detail", "")
+      - record: poweur_growth_messages_7d
+        expr: label_replace(sum by (detail) (increase(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"}[7d])), "detail", "untyped", "detail", "")
+      - record: poweur_growth_settings_changes_7d
+        expr: sum by (detail) (increase(poweur_actions_total{action="settings.change",outcome="success",deployment_environment_name="production"}[7d]))
+      - record: poweur_growth_adoption
+        expr: max by (state) (poweur_state{state=~"adopt_.+",deployment_environment_name="production"})
       - record: poweur_growth_hosted_identities
         expr: max(poweur_state{state="hosted_identities",deployment_environment_name="production"})
       - record: poweur_growth_storage_bytes

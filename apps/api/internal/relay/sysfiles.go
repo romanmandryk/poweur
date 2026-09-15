@@ -95,7 +95,7 @@ func sysWriteValidator(clean string) func([]byte) error {
 // checkSysWrite validates a PUT to a schema-governed document, replacing
 // r.Body so the DAV handler still sees the full stream. Returns false when
 // the request was rejected (response already written).
-func (s *Server) checkSysWrite(w http.ResponseWriter, r *http.Request, clean string) bool {
+func (s *Server) checkSysWrite(w http.ResponseWriter, r *http.Request, owner, clean string) bool {
 	if r.Method != http.MethodPut {
 		return true
 	}
@@ -121,6 +121,9 @@ func (s *Server) checkSysWrite(w http.ResponseWriter, r *http.Request, clean str
 	if err := validate(body); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_document", err.Error())
 		return false
+	}
+	if fields := settingsChanges(clean, s.readSysDoc(owner, clean), body); len(fields) > 0 {
+		settingsChanged(r, fields)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	return true

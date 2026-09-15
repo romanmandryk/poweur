@@ -1,9 +1,13 @@
 {
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "1h",
   "timezone": "utc",
   "editable": false,
+  "graphTooltip": 1,
+  "tags": [
+    "public"
+  ],
   "annotations": {
     "list": []
   },
@@ -11,7 +15,7 @@
     "list": []
   },
   "time": {
-    "from": "now-7d",
+    "from": "now-30d",
     "to": "now"
   },
   "uid": "poweur-growth",
@@ -19,17 +23,34 @@
   "panels": [
     {
       "id": 1,
-      "title": "Hosted identities (not people)",
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "## ⚡ Poweur, built in public\nLive aggregates from the poweur.net relay, refreshed hourly. We count **identities** (one person may own several), **accepted messages** (end-to-end encrypted, so we only see the envelope type), and **settings choices** as totals. No names, no content, no per-person data."
+      }
+    },
+    {
+      "id": 2,
       "type": "stat",
+      "title": "Identities",
+      "description": "Hosted identities on this relay. Identities, not people.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
-        "w": 12,
-        "h": 8
+        "y": 3,
+        "w": 6,
+        "h": 5
       },
       "targets": [
         {
@@ -42,122 +63,1000 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
         "overrides": []
       },
-      "options": {}
-    },
-    {
-      "id": 2,
-      "title": "Accepted submissions / 24h",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "poweur_growth_submissions_24h",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "interval": "1d"
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {}
+      }
     },
     {
       "id": 3,
-      "title": "Registrations / 24h",
-      "type": "timeseries",
+      "type": "stat",
+      "title": "New this week",
+      "description": "Successful registrations in the last 7 days.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "poweur_growth_registrations_24h",
+          "expr": "round(poweur_growth_registrations_7d)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          },
-          "interval": "1d"
+          }
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "prefix:+",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
     },
     {
       "id": 4,
-      "title": "Completed resumable uploads / 24h",
-      "type": "timeseries",
+      "type": "stat",
+      "title": "Messages · last 24h",
+      "description": "Accepted origin submissions (signed and anonymous). Not reads, not unique conversations.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 8,
-        "w": 12,
-        "h": 8
+        "y": 3,
+        "w": 6,
+        "h": 5
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "poweur_growth_uploads_24h",
+          "expr": "round(poweur_growth_submissions_24h)",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
-          },
-          "interval": "1d"
+          }
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
     },
     {
       "id": 5,
-      "title": "Stored bytes",
-      "type": "stat",
+      "type": "gauge",
+      "title": "Identities with a display name",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * poweur_growth_adoption{state=\"adopt_profile_display_name\"} / scalar(poweur_growth_hosted_identities)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "green",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": false,
+        "showThresholdLabels": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Identities over time",
+      "description": "Line: hosted identities. Bars: registrations in the trailing 24 hours.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 8,
+        "w": 16,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "poweur_growth_hosted_identities",
+          "legendFormat": "identities",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "round(poweur_growth_registrations_24h)",
+          "legendFormat": "new in 24h",
+          "interval": "1d",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 3,
+            "fillOpacity": 35,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "new in 24h"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 70
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.gradientMode",
+                "value": "hue"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "piechart",
+      "title": "What travels through the relay · 7d",
+      "description": "Accepted messages by envelope type. chat = ordinary conversation, app = third-party app types, sys.* = platform events such as contact requests and share offers.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "round(poweur_growth_messages_7d) > 0",
+          "legendFormat": "{{detail}}",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Message pulse · hourly, by type",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 9
+      },
+      "timeFrom": "7d",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "poweur_growth_messages_1h",
+          "legendFormat": "{{detail}}",
+          "interval": "1h",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "gradientMode": "hue",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "status-history",
+      "title": "Heartbeat strip · last 48h",
+      "description": "Each cell is one hour. Brightness is relative to that type's own busiest hour in the window, so quiet types still show their rhythm.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 7
+      },
+      "timeFrom": "48h",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "poweur_growth_messages_1h / on (detail) group_left () (max_over_time(poweur_growth_messages_1h[48h]) > 0)",
+          "legendFormat": "{{detail}}",
+          "interval": "1h",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0
+          },
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "rowHeight": 0.85,
+        "colWidth": 0.92,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "bargauge",
+      "title": "Who fills out their profile",
+      "description": "Share of identities whose public profile sets each field.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
         "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sort_desc(100 * poweur_growth_adoption{state=~\"adopt_profile_.+\"} / scalar(poweur_growth_hosted_identities))",
+          "legendFormat": "{{state}}",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_profile_display_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Display name"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_profile_avatar"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Avatar image"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_profile_bio"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Bio"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_profile_links"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Links"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_profile_locale"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Language"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "displayMode": "lcd",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Most-touched settings · 7d",
+      "description": "How often each setting actually changed. Saving without changing a value is not counted.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 33,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sort_desc(round(poweur_growth_settings_changes_7d) > 0)",
+          "legendFormat": "{{detail}}",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "color": {
+            "mode": "continuous-YlRd"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "profile.display_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Display name"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "profile.avatar"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Avatar image"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "profile.bio"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Bio"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "profile.links"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Profile links"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "profile.locale"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Language"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inbox.mode"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Who can message me"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inbox.anonymous"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Anonymous inbox"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "inbox.read_receipts"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Read receipts"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "analytics.granted"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Detailed analytics"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "piechart",
+      "title": "Who can message you?",
+      "description": "Inbox policy chosen per identity. Default = never changed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "poweur_growth_adoption{state=~\"adopt_inbox_(default|open|contacts_only|contacts_and_requests)\"} > 0",
+          "legendFormat": "{{state}}",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_inbox_default"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Default"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_inbox_open"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Anyone"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_inbox_contacts_only"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Contacts only"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_inbox_contacts_and_requests"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Contacts + requests"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "bargauge",
+      "title": "Opt-ins",
+      "description": "Share of identities that turned on each choice.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 41,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sort_desc(100 * poweur_growth_adoption{state=~\"adopt_(contacts|inbox_anonymous|read_receipts_off|analytics_granted)\"} / scalar(poweur_growth_hosted_identities))",
+          "legendFormat": "{{state}}",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_contacts"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Has contacts"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_inbox_anonymous"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Accepts anonymous"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_read_receipts_off"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Read receipts off"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "adopt_analytics_granted"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Shares analytics"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "top",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Files",
+      "description": "Area: bytes stored. Bars: completed resumable uploads in the trailing 24 hours.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 41,
+        "w": 8,
         "h": 8
       },
       "targets": [
         {
           "refId": "A",
           "expr": "poweur_growth_storage_bytes",
+          "legendFormat": "stored",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "round(poweur_growth_uploads_24h)",
+          "legendFormat": "uploads / 24h",
+          "interval": "1d",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -165,29 +1064,95 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "uploads / 24h"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 70
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
       },
-      "options": {}
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
     },
     {
-      "id": 6,
-      "title": "Telemetry last received (Unix seconds)",
+      "id": 15,
       "type": "stat",
+      "title": "Data freshness",
+      "description": "When the relay last reported. Gaps mean missing data, not zero activity.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 16,
-        "w": 12,
-        "h": 8
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 3
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(poweur_heartbeat_timestamp_seconds{deployment_environment_name=\"production\"})",
+          "expr": "1000 * max(poweur_heartbeat_timestamp_seconds{deployment_environment_name=\"production\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -195,10 +1160,28 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "unit": "dateTimeFromNow",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
     }
   ]
 }

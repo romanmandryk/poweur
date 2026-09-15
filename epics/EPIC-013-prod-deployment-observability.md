@@ -15,6 +15,7 @@
 | E13-T4 External stack, dashboards & alerts | done | Alloy/Loki, private + aggregate dashboards, alerts, external GitHub probe; operator enables public link/SMTP |
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
+| E13-T7 Lively public Growth dashboard | done | Message kind `detail`, `settings.change` field events, `adopt_*` adoption gauges, redesigned Growth board (relay 0.1.6) |
 
 ## Goal
 
@@ -238,6 +239,26 @@ failed `/health` leaves the compose that just started (no restore of an older st
 **Acceptance:** a clean deployment displays real relay metrics and searchable errors; private
 views require login, public access exposes aggregates only. An intake outage does not affect
 relay requests and a simulated VM/relay outage is detected. No extra public dashboard service.
+
+### E13-T7 — Lively public Growth dashboard
+
+The first Growth board was six flat panels. For building in public it should show momentum and
+what people actually do, still only as aggregates.
+
+- [x] Bounded `detail` label on `poweur_actions`: message kind from the plaintext envelope type
+      (`chat`, registered `sys.*`, `sys.other`, `app`, `anonymous`). Payloads untouched.
+- [x] `settings.change` per changed field of profile, inbox policy and analytics preference,
+      only on successful validated writes; unchanged saves, unknown fields and values not recorded.
+- [x] Five-minute `adopt_*` gauges: profile fields set, inbox mode, anonymous inbox, read receipts
+      off, analytics granted, has contacts. Public profile and relay settings only, never private.
+- [x] Recording rules + redesigned board: identity curve with registrations, KPI row, type donut,
+      hourly stacked pulse, 48h heartbeat strip, profile completion, most-touched settings,
+      inbox-policy donut, opt-ins, files. Node test pins public queries to production rules.
+
+Theme and other browser-local preferences stay in `localStorage` and are invisible to the relay.
+
+**Acceptance:** unit tests for kind bucketing, settings diff and adoption counting; a real DAV PUT
+emits exactly one `settings.change` per changed field and none for rewrites or rejected writes.
 
 ### E13-T5 — Federated ecosystem metrics — deferred
 

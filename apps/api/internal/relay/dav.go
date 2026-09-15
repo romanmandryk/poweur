@@ -257,7 +257,7 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 
 	// Schema validation for known system documents (E06-T1): a malformed
 	// contacts.json / inbox-policy.json / grant / manifest never lands.
-	if !s.checkSysWrite(w, r, clean) {
+	if !s.checkSysWrite(w, r, owner, clean) {
 		return
 	}
 
