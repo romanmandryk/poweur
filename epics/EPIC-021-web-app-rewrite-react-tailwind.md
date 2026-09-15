@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3, T4, T5, T6 done; T2 done pending first production deploy; T7–T11 (destinations) next
+- **Status:** in progress — T1, T3–T7 done; T2 done pending first production deploy; T8–T11 (contacts, files, launcher, settings) next
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -19,7 +19,7 @@
 | E21-T4 State store, routing & app shell | **done** | Zustand `route` / `session` / `data` / `ui` stores; shell, boot, overlays, back nav; every unported screen is a labelled `NotPorted` stand-in linking to `/app/` |
 | E21-T5 Design system: tokens + primitives | **done** | tokens from `style.css` in `index.css`; `src/ui/*`; IdentityInput, ProfileCard, AudiencePicker, PolicyControls in React; 257 tests green. Bundle now 144 KB gz (React + Radix + `@poweur/client` crypto) — above the 70–90 KB estimate, recheck in T13 |
 | E21-T6 Front doors & gates | **done** (unit-verified; e2e in T12) | landing + claim card, identity door, relay prompt, add-id, unlock, claim + DNS claim, onboarding, sign-in approval, join device; `actions/` hold the ported identity lifecycle. 304 tests green. Bundle 195 KB gz (argon2 / bip39 / keystore now reachable) |
-| E21-T7 Messages destination & conversation | open | |
+| E21-T7 Messages destination & conversation | **done** (unit-verified; e2e in T12) | trays, conversation rows, new chat, thread view, push stream, archive, read marks, signed / group / attachment send, offline outbox, key-change dialog; `actions/messages.ts` + `actions/contacts.ts`. 327 tests green. Bundle 210 KB gz |
 | E21-T8 Contacts destination | open | |
 | E21-T9 Files destination & sharing | open | |
 | E21-T10 Launcher & claim | open | |
@@ -193,8 +193,7 @@ compatibility test passes.
 - [x] Boot parity (`shell/boot.ts`, runs before first render): `?auth=` → settings/auth,
       `#claim=` hand-off adopted and stripped → unlock, no keys and no valid session → unlock,
       `resolveMode()` corrects the door, title and meta description
-- [ ] ~~SSE/poll loops started once, outbox retry~~ → **T7** (they belong to messaging); the hook
-      they will use exists: `onIdentityTeardown()` runs on `switchIdentity`
+- [x] ~~SSE/poll loops started once, outbox retry~~ → done in **T7** (`shell/useMessaging.ts`)
 - [x] Back: Escape pops a *detail* sub-page (gates have nowhere to go back to), Radix handles
       Escape in panels; Capacitor `backButton` closes the panel, then pops
 - [x] Unported destinations / sub-pages / doors render `screens/NotPorted.tsx` — keeps
@@ -268,15 +267,42 @@ side is the Keys & devices panel (T11); `native-custody.spec`'s last two cases n
 
 ### E21-T7 — Messages destination & conversation
 
-- [ ] Trays: inbox / requests / anonymous with counts
-- [ ] Conversation list rows (`buildConversationRows`, `threadLabel`, delivery state, expiry)
-- [ ] New chat (IdentityInput, key-mismatch dialog)
-- [ ] Thread view: newest page + "Load more", ticks, read receipts, attachments
-      (upload/download), expiry countdown, inline reply, draft preserved across live updates
-- [ ] Outbox: queued/retry states
+- [x] Trays (`screens/messages/Messages.tsx`): inbox / requests / anonymous with `.tray-badge`
+      counts (requests waiting, anonymous unread); FAB `#btn-compose` on a phone, `#btn-compose-top`
+      from 768px; each tray keeps its empty state
+- [x] Conversation rows from `buildConversationRows`: petname, group chip, `#thread` label,
+      preview (expiry countdown included), unread badge from read marks, attachment "Open",
+      one-tap Add for strangers; rows are `role=button` and answer Enter / Space
+- [x] Requests tray: incoming (ProfileCard, intro, Accept / Block) and outgoing (Requested,
+      Cancel); answering drops the request immediately. Anonymous tray: no sender, no avatar,
+      no reply; looking at it marks it read; "turned off" links to Settings
+- [x] New chat (`NewChat.tsx`): IdentityInput with the identity's domain as default; a group is
+      detected by its roster answering
+- [x] Thread view (`Thread.tsx`): newest 10 + "Load more (n earlier)", day separators, ticks
+      from acks (sent / delivered / read / failed, none for groups), group sender names, expiry
+      countdown, attachment send (file picker, typed text as caption) and open, Cmd/Ctrl+Enter
+      sends. Draft, page size and scroll are component state, so a live message changes nothing
+      the reader is doing; keyed per conversation so they do not leak between threads
+- [x] Actions (`actions/messages.ts`, `actions/contacts.ts`, `actions/relay.ts`): inbox drain +
+      archive with single-flight and forced re-drain, group-label verification against the
+      signed roster, history restore (anonymous split out), anonymous drain, push stream
+      (`ready` / `request` / `anon` / message), read marks + read receipts per policy, signed /
+      group / attachment send keeping our own copy, pin check with the key-changed dialog
+      (`components/KeyMismatchDialog.tsx`), contact accept / block / request / remove,
+      auto-promotion when our request is accepted, all challenge reads serialized
+- [x] Outbox: a retryable failure queues the sealed message (`outbox.js`); retried on unlock and
+      on the stream's `ready`
+- [x] Lifecycle (`shell/useMessaging.ts`): unlocking pulls everything and holds the stream on any
+      destination; locking / switching stops it; returning to the tab re-drains. Replaces the
+      legacy per-render loads
+- [x] Unit tests: `test/actions/messaging.test.tsx`, `test/screens/messages.test.tsx`
+      (`test/helpers/fake-client.ts` is a PoweurClient-shaped fake)
 
-**Acceptance:** `messaging`, `conversation`, `attachments`, `durability`, `nav-badges` specs
-pass against `/newapp/`; live message arrival does not reset scroll or the draft.
+**Acceptance:** unit-level ✅, including "a message arriving while open keeps the draft, the
+input node and focus". Playwright moves to **T12**. Needs there: `conversation`, `nav-badges`
+and `durability` send and read through `page.evaluate(import("./js/client.js"))`, which a bundled
+app does not serve — T12 needs a test-only seam (e.g. `window.__poweurTest`); `messaging.spec`
+drives modules directly and checks the vendored import map, so it stays a legacy-only spec.
 
 ### E21-T8 — Contacts destination
 

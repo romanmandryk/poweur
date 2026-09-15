@@ -14,12 +14,14 @@ import { BottomNav } from "./BottomNav";
 import { Header } from "./Header";
 import { LoadingOverlay, PanelHost, Toaster } from "./Overlays";
 import { useBackNavigation } from "./useBackNavigation";
+import { useMessaging } from "./useMessaging";
 
 export function App() {
   const identity = useSession((state) => state.identity);
   const page = useRoute((state) => state.page);
   const sub = useRoute((state) => state.sub);
   useBackNavigation();
+  useMessaging();
 
   useLayoutEffect(() => {
     document.getElementById("page-content")?.scrollTo?.({ top: 0 });

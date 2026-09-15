@@ -9,7 +9,10 @@ import { Claim } from "./Claim";
 import { IdentityDoor } from "./doors/IdentityDoor";
 import { Landing } from "./doors/Landing";
 import { Welcome } from "./gates";
-import { NotPortedDestination, NotPortedSubPage } from "./NotPorted";
+import { Messages } from "./messages/Messages";
+import { NewChat } from "./messages/NewChat";
+import { ThreadScreen } from "./messages/Thread";
+import { NotPortedDestination } from "./NotPorted";
 import { Onboarding } from "./Onboarding";
 import { SignInApproval } from "./SignInApproval";
 import { Unlock } from "./Unlock";
@@ -23,6 +26,7 @@ const DESTINATION_TITLES: Record<Destination, { title: string; task: string }> =
 };
 
 export function DestinationScreen({ page }: { page: Destination }) {
+  if (page === "messages") return <Messages />;
   const { title, task } = DESTINATION_TITLES[page];
   return <NotPortedDestination title={title} task={task} />;
 }
@@ -38,9 +42,9 @@ export function SubScreen({ sub }: { sub: SubPageId }) {
     case "auth":
       return <SignInApproval />;
     case "new-chat":
-      return <NotPortedSubPage title="New chat" task="T7" />;
+      return <NewChat />;
     case "thread":
-      return <NotPortedSubPage title="Conversation" task="T7" />;
+      return <ThreadScreen />;
     default:
       return <AddId />;
   }

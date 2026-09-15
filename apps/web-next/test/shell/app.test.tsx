@@ -89,7 +89,7 @@ describe("shell decision tree (E21-T4)", () => {
     signedIn(true);
     const { container } = render(<App />);
     act(() => useRoute.getState().push("new-chat"));
-    expect(container.querySelector("#detail-pane .sub-title")!.textContent).toBe("New chat");
+    expect(container.querySelector("#detail-pane .sub-title")!.textContent).toBe("New message");
     expect(container.querySelector("#page-content .dest-title")!.textContent).toBe("Messages");
     expect(container.querySelector(".bottom-nav")).toBeTruthy();
   });
