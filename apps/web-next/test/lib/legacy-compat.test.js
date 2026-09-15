@@ -79,4 +79,11 @@ describe("carried-over modules match the frozen legacy app", () => {
     const b = readFileSync(join(NEXT_LIB, `${name}.js`), "utf8");
     expect(b === a, `${name}.js differs from apps/web/js/${name}.js`).toBe(true);
   });
+
+  // The one DOM-free component helper (E21-T5); the rest were rewritten in React.
+  it("devices.js is identical to components/devices.js", () => {
+    const a = readFileSync(join(LEGACY_JS, "components/devices.js"), "utf8");
+    const b = readFileSync(join(NEXT_LIB, "devices.js"), "utf8");
+    expect(b === a, "devices.js differs from apps/web/js/components/devices.js").toBe(true);
+  });
 });

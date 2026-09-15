@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { App } from "../src/App";
 import { APP_VERSION } from "../src/build-info";
 import pkg from "../package.json";
 
@@ -16,11 +14,6 @@ function walk(dir: string): string[] {
 }
 
 describe("scaffold (E21-T1)", () => {
-  it("renders the app", () => {
-    render(<App />);
-    expect(screen.getByRole("heading", { name: "Poweur ID" })).toBeInTheDocument();
-  });
-
   it("build-info matches package.json", () => {
     expect(APP_VERSION).toBe(pkg.version);
   });

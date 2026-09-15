@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3 done; T2 done pending first production deploy
+- **Status:** in progress — T1, T3, T4, T5 done; T2 done pending first production deploy; T6–T11 (screens) next
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -16,8 +16,8 @@
 | E21-T1 Scaffold `apps/web-next` (Vite, React 19, TS, Tailwind v4) | **done** | Vite 8, React 19.3 + Compiler (Babel preset), Tailwind 4.3, 69 KB gz placeholder bundle; ESLint replaced by source-guard tests |
 | E21-T2 Relay serves `/newapp/` beside `/app/` + prod wiring | **done** (deploy unverified) | relay 0.1.7; image builds locally with `/web-next` baked in; confirm on prod after merge |
 | E21-T3 Non-UI modules carried over verbatim | **done** | 12 modules + 15 test files (176 tests green); legacy↔next storage compat + byte-identical guard in `test/lib/legacy-compat.test.js` |
-| E21-T4 State store, routing & app shell | open | replaces `S`, `R`, `render()`, `attachEvents()` |
-| E21-T5 Design system: tokens + primitives | open | replaces `css/style.css` |
+| E21-T4 State store, routing & app shell | **done** | Zustand `route` / `session` / `data` / `ui` stores; shell, boot, overlays, back nav; every unported screen is a labelled `NotPorted` stand-in linking to `/app/` |
+| E21-T5 Design system: tokens + primitives | **done** | tokens from `style.css` in `index.css`; `src/ui/*`; IdentityInput, ProfileCard, AudiencePicker, PolicyControls in React; 257 tests green. Bundle now 144 KB gz (React + Radix + `@poweur/client` crypto) — above the 70–90 KB estimate, recheck in T13 |
 | E21-T6 Front doors & gates | open | |
 | E21-T7 Messages destination & conversation | open | |
 | E21-T8 Contacts destination | open | |
@@ -175,39 +175,65 @@ compatibility test passes.
 
 ### E21-T4 — State store, routing & app shell
 
-- [ ] Zustand stores replacing `S` field-for-field (`config`, `identity`, `messages`, `acks`,
-      `tray`, `contacts`, `history`, `thread`, files state, `dropdownOpen` → local UI state)
-- [ ] Route store replacing `R`: `go(page)`, `push(sub, params)`, `pop()`; `DETAIL_SUBS`
-      (`new-chat`, `thread`) render beside the list at ≥768px, full-screen below
-- [ ] `<App>` picks: sub-page gate → front door (`isFrontDoor`) → header + page + detail pane +
-      bottom nav — the same decision tree as `render()`
-- [ ] Header (wordmark, theme toggle, identity pill + switcher dropdown), bottom nav with
-      badges (`unreadTotal`, requests)
-- [ ] Global overlays as React: toasts (`#toast-root`), loading overlay (`#loading-root`),
-      sheet/dialog host replacing `showPanel()`
-- [ ] Boot sequence parity: mode resolution, `#claim=` / `?auth=` handling, session restore,
-      SSE/poll loops started once (not per render), outbox retry
-- [ ] Back button / Escape closes the top sheet, then pops the sub-page (Capacitor back too)
+- [x] Zustand stores replacing `S` field-for-field: `state/data.ts` (per-identity slices +
+      `resetForIdentity`), `state/session.ts` (`identity`, `config`, `unlocked` mirror of the
+      key store, `mode`), `state/ui.ts` (theme, toasts, loading, panel). `dropdownOpen` is gone —
+      Radix owns the menu's open state
+- [x] Route store replacing `R` (`state/route.ts`): `go`, `push`, `pop` (pop of `thread` clears
+      the open conversation); `DETAIL_SUBS` render in `#detail-pane` beside the list at ≥1024px,
+      full-screen below — same breakpoints as the legacy CSS
+- [x] `shell/App.tsx` picks: gate sub-page → front door → header + page + detail pane + nav, and
+      the Welcome / Locked gating per destination
+- [x] Header (wordmark, theme toggle, `#id-pill` + Radix dropdown with `[data-switch]` /
+      `#dd-add-id`, `#btn-add-id-header`); bottom nav → rail (768px) → sidebar (1024px) with
+      badges from `state/badges.ts` (`incomingRequests`, `unreadAnonymous`, `navBadges`)
+- [x] Overlays (`shell/Overlays.tsx`): `toast()` with same-message dedupe, `setLoading()`,
+      `openPanel(title, render, onClose)` on a Radix dialog keeping `#panel-root` /
+      `#panel-title` / `#panel-close-btn`; bottom sheet on a phone, centred dialog from 768px
+- [x] Boot parity (`shell/boot.ts`, runs before first render): `?auth=` → settings/auth,
+      `#claim=` hand-off adopted and stripped → unlock, no keys and no valid session → unlock,
+      `resolveMode()` corrects the door, title and meta description
+- [ ] ~~SSE/poll loops started once, outbox retry~~ → **T7** (they belong to messaging); the hook
+      they will use exists: `onIdentityTeardown()` runs on `switchIdentity`
+- [x] Back: Escape pops a *detail* sub-page (gates have nowhere to go back to), Radix handles
+      Escape in panels; Capacitor `backButton` closes the panel, then pops
+- [x] Unported destinations / sub-pages / doors render `screens/NotPorted.tsx` — keeps
+      `.dest-title` and `#btn-back`, links to the same screen in `/app/`
 
-**Acceptance:** navigating all five destinations never recreates the header or nav DOM nodes
-(Playwright asserts element handle identity across a state change); no focus loss while
-typing in any input during live message arrival.
+**Acceptance:** ✅ unit-level (`test/shell/app.test.tsx`): switching all five destinations keeps
+the same `.app-header`, `.bottom-nav` and tab nodes; a focused control survives a data update.
+The Playwright version (element handles across a live message) moves to **T12**, since it needs
+T6's registration screens to reach a signed-in shell.
 
 ### E21-T5 — Design system: tokens + primitives
 
-- [ ] Extract colors, radii, spacing, font sizes, shadows from `css/style.css` into `@theme`
-      tokens, light + dark
-- [ ] `src/ui/`: `Button` (variants: primary / secondary / ghost / danger; sizes; loading),
-      `Input`, `Textarea`, `Select`, `Switch`, `Tabs`, `Sheet` (bottom sheet on phone, side
-      dialog on wide), `Dialog`, `DropdownMenu`, `Toast`, `Badge`, `Avatar` (palette from
-      `components/dom.js`), `ListRow`, `EmptyState`, `Spinner`, `PageHeader` with back button
-- [ ] Port shared components: `IdentityInput`, `AudiencePicker`, `ProfileCard`,
-      `PolicyControls`, `Devices` (from `js/components/`)
-- [ ] Component tests (RTL) mirroring `test/components.test.js`
-- [ ] No `.css` files except `src/index.css`
+- [x] Tokens from `css/style.css` into `@theme` (`src/index.css`): surfaces, text (`fg` /
+      `muted` / `faint`), `sep`, `accent` (#5856D6) + soft, status colours, radii (`card` 16,
+      `button` 14, `control` 10), shadows, animations; dark set swapped under `[data-theme=dark]`;
+      `h-header` / `h-nav` / `pt-safe` / `pb-safe` utilities. `cn()` teaches tailwind-merge the
+      token names
+- [x] `src/ui/`: `Button` (primary / passkey / ghost / secondary / danger / link; `sm`) +
+      `IconButton`; `Field` (`Input`, `Textarea`, `Label`, `FormGroup`, `Note`, `CheckRow`);
+      `Avatar`; `Display` (`Chip`, `CountBadge`, `SectionLabel`, `EmptyState`, `Spinner`,
+      `Skeleton`, `Notice`); `Layout` (`DestHeader`, `SubPage`, `SettingsGroup`, `SettingsRow`);
+      `Sheet`. Legacy class names stay on elements as test hooks only (`btn-primary`,
+      `.idin-status`, `.nav-tab`…) — no CSS targets them
+- [ ] ~~`Select`, `Switch`, `Tabs`, `Toast` primitives~~ → built when a screen needs one (T7 trays,
+      T11 settings); toasts are a store + `Toaster`, not Radix Toast (same-message dedupe)
+- [x] Port shared components to React: `IdentityInput` (uncontrolled input so `lookup()` stays
+      synchronous; debounce/token races preserved), `ProfileCard`, `AudiencePicker`,
+      `PolicyControls`; imperative handles via `ref` match the legacy return objects. Pure
+      helpers split out: `lib/identity.ts`, `lib/policy.ts`, `lib/custody.ts`; `devices.js`
+      carried byte-identical (added to the freeze guard)
+- [x] Component tests (RTL) mirroring `test/components.test.js` — every case ported, plus
+      default-domain completion, Enter-submits, disabled action on error, cached paint,
+      anonymous toggle; `credentialRpId` cases moved to `test/lib/passkey-rpid.test.js`
+- [x] No `.css` files except `src/index.css` (guard test)
+- [x] Found and fixed on the way: the panel's `aria-labelledby` pointed at Radix's generated
+      id while the title kept `#panel-title` — the dialog had no accessible name
 
-**Acceptance:** every screen in T6–T11 is composed from `src/ui/` + Tailwind utilities; a
-grep for `style=` and new `.css` files in `src/` finds nothing.
+**Acceptance:** screens in T6–T11 compose `src/ui/` + Tailwind. `style=` appears only for the
+per-identity avatar colour (a runtime value), so that part of the grep criterion is relaxed.
 
 ### E21-T6 — Front doors & gates
 

@@ -4,24 +4,69 @@
    with the legacy app), not the media query directly. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* Design tokens (E21-T5). Semantic names map onto light values here and are
-   swapped for dark below, so components use `bg-surface`, never `dark:` pairs. */
+/* Design tokens (E21-T5), carried over from apps/web/css/style.css. Semantic
+   names map onto light values here and are swapped for dark below, so
+   components write `bg-surface`, never `dark:` pairs. */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
   --color-bg: #f2f2f7;
   --color-surface: #ffffff;
   --color-surface-2: #f2f2f7;
-  --color-border: #e5e5ea;
+  --color-surface-3: #e5e5ea;
   --color-fg: #000000;
-  --color-muted: #8e8e93;
-  --color-accent: #007aff;
-  --color-accent-fg: #ffffff;
-  --color-danger: #ff3b30;
+  --color-muted: #636366;
+  --color-faint: #aeaeb2;
+  --color-sep: rgb(60 60 67 / 0.18);
+  --color-accent: #5856d6;
+  --color-accent-soft: rgb(88 86 214 / 0.12);
+  --color-accent-2: #8b5cf6;
   --color-success: #34c759;
+  --color-danger: #ff3b30;
   --color-warning: #ff9500;
+  /* Translucent header / nav behind a backdrop blur. */
+  --color-chrome: rgb(255 255 255 / 0.8);
 
-  --radius-card: 12px;
+  --radius-card: 16px;
+  --radius-control: 10px;
+  --radius-button: 14px;
+
+  --shadow-card: 0 2px 12px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
+  --shadow-pop: 0 8px 40px rgb(0 0 0 / 0.14), 0 2px 8px rgb(0 0 0 / 0.08);
+  --shadow-accent: 0 6px 20px rgb(88 86 214 / 0.4);
+
+  --animate-fade-in: fade-in 0.2s ease both;
+  --animate-fade-in-up: fade-in-up 0.35s ease both;
+  --animate-slide-up: slide-up 0.3s cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-pop-in: pop-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-toast-in: toast-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes fade-in-up {
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  @keyframes pop-in {
+    from { transform: scale(0.94); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  @keyframes toast-in {
+    from { transform: translateY(16px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
 }
 
 @layer base {
@@ -29,13 +74,19 @@
     --color-bg: #000000;
     --color-surface: #1c1c1e;
     --color-surface-2: #2c2c2e;
-    --color-border: #38383a;
+    --color-surface-3: #3a3a3c;
     --color-fg: #ffffff;
-    --color-muted: #8e8e93;
-    --color-accent: #0a84ff;
-    --color-danger: #ff453a;
+    --color-muted: rgb(235 235 245 / 0.6);
+    --color-faint: rgb(235 235 245 / 0.3);
+    --color-sep: rgb(84 84 88 / 0.65);
+    --color-accent: #6e6cf8;
+    --color-accent-soft: rgb(110 108 248 / 0.15);
     --color-success: #30d158;
+    --color-danger: #ff453a;
     --color-warning: #ff9f0a;
+    --color-chrome: rgb(28 28 30 / 0.85);
+    --shadow-card: 0 2px 12px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 8px 40px rgb(0 0 0 / 0.6);
   }
 
   html,
@@ -45,14 +96,54 @@
   }
 
   body {
-    @apply bg-bg text-fg font-sans antialiased;
+    @apply bg-bg font-sans text-fg antialiased;
+    line-height: 1.5;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  a {
+    color: var(--color-accent);
+  }
+
+  /* Keyboard focus is not hover: always visible, on every device. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
   }
 }
 
+/* Safe areas: added to a height rather than padded into it, or content slides
+   up under the notch once the app is wrapped in the Capacitor shell. */
 @utility pt-safe {
-  padding-top: env(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top, 0px);
 }
 @utility pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@utility h-header {
+  height: calc(56px + env(safe-area-inset-top, 0px));
+}
+@utility h-nav {
+  height: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+@utility bottom-above-nav {
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
 }
