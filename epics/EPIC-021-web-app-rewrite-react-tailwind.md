@@ -1,6 +1,6 @@
 # EPIC-021 — Web app rewrite: React + Tailwind, side by side at `/newapp/`
 
-- **Status:** in progress — T1, T3–T8 done; T2 done pending first production deploy; T9–T11 (files, launcher, settings) next
+- **Status:** in progress — T1, T3–T10 done; T2 done pending first production deploy; T11 (settings) next, then T12 parity, T13 shell, T14 cutover
 - **Priority:** P1 (the string-templated shell is the source of the flicker, focus and
   event-rebinding bugs, and every EPIC-015 screen added makes it worse)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the screens being rewritten),
@@ -21,8 +21,8 @@
 | E21-T6 Front doors & gates | **done** (unit-verified; e2e in T12) | landing + claim card, identity door, relay prompt, add-id, unlock, claim + DNS claim, onboarding, sign-in approval, join device; `actions/` hold the ported identity lifecycle. 304 tests green. Bundle 195 KB gz (argon2 / bip39 / keystore now reachable) |
 | E21-T7 Messages destination & conversation | **done** (unit-verified; e2e in T12) | trays, conversation rows, new chat, thread view, push stream, archive, read marks, signed / group / attachment send, offline outbox, key-change dialog; `actions/messages.ts` + `actions/contacts.ts`. 327 tests green. Bundle 210 KB gz |
 | E21-T8 Contacts destination | **done** (unit-verified; e2e in T12) | list + filter, rows with state chip and overflow, contact panel (safety number, petname, message / block / unblock / remove), add-contact panel; requests and key pins came with T7 |
-| E21-T9 Files destination & sharing | open | |
-| E21-T10 Launcher & claim | open | |
+| E21-T9 Files destination & sharing | **done** (unit-verified; e2e in T12) | explorer, owner trees, upload (chunked above threshold), download, new folder / rename / delete via dialogs, share + shares panels, changes-feed refresh |
+| E21-T10 Launcher & claim | **done** | Apps empty state; the claim flow shipped in T6 |
 | E21-T11 Settings & every panel | open | |
 | E21-T12 E2E parity: one Playwright suite, both apps | open | the cutover gate |
 | E21-T13 Capacitor shell on the new build | open | |
@@ -328,18 +328,37 @@ the T7 specs.
 
 ### E21-T9 — Files destination & sharing
 
-- [ ] Explorer (owner picker, folders, chunked upload with progress, download, delete)
-- [ ] Share panel (AudiencePicker, grants, expiry), shares panel, received shares
-- [ ] Changes-feed refresh without resetting the view
+- [x] Explorer (`screens/files/Files.tsx`): My files / Shared with me, quota bar, breadcrumbs
+      (`[data-nav-path]`), root badges from `ROOT_INFO`, "Shared" chip from live grants, rows open a
+      folder or download a file (Enter / Space too); upload (`#ff-upload`, multiple) and new folder
+      only inside a folder, never at the root; share / rename / delete per row, none for a visitor
+- [x] Owner picker (IdentityInput + accepted contacts) → visitor banner with Leave; a visitor's DAV
+      token asks `dav:full` and lets the owner's grant decide
+- [x] Actions (`actions/files.ts`): DAV client cached per tree and per identity, chunked upload
+      above `DEFAULT_CHUNK_THRESHOLD` through `SyncClient`, 507 / read-only 403 worded, download,
+      mkdir / move / remove
+- [x] `prompt()` / `confirm()` replaced by panel dialogs (`components/Dialogs.tsx`: `askText`,
+      `askConfirm`) — the native ones block the page and misbehave in the Capacitor webview
+- [x] Share panel (`SharePanel.tsx`): AudiencePicker over contacts, Read / Read and write,
+      optional expiry (end of the chosen day), "already shared with"; grant signed in the browser.
+      Shares panel: path, audience, read / read + write, expiry or expired, Revoke
+- [x] Changes feed (`watchChanges`): 5 s poll only while Files is on screen, reloads only when a
+      change touches the open folder's own entries; stops on leave / lock
+- [ ] ~~"received shares" list~~ — there is no "granted to me" endpoint; the owner picker is the
+      legacy behaviour and stays until EPIC-005 T3 offer/accept
+- [x] Unit tests: `test/screens/files.test.tsx`
 
-**Acceptance:** `files`, `sharing` specs pass against `/newapp/`.
+**Acceptance:** unit-level ✅. `sharing.spec` moves to **T12** (seeds folders and grants through
+`page.evaluate(import("./js/client.js"))`); `files.spec` drives modules directly, legacy-only.
 
 ### E21-T10 — Launcher & claim
 
-- [ ] Launcher destination (`renderLauncher`)
+- [x] Launcher destination (`screens/Launcher.tsx`): "No apps yet" — the EPIC-010 seam, and no
+      second create-identity form
 - [x] ~~Claim flow and DNS claim screens reached from the launcher~~ → built in **T6**
 
-**Acceptance:** `launcher`, `journeys` specs pass against `/newapp/`.
+**Acceptance:** unit-level ✅ (`test/screens/files.test.tsx` → Apps). `launcher` / `journeys`
+specs run in **T12**.
 
 ### E21-T11 — Settings & every panel
 

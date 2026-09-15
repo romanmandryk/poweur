@@ -10,6 +10,8 @@ import { IdentityDoor } from "./doors/IdentityDoor";
 import { Landing } from "./doors/Landing";
 import { Welcome } from "./gates";
 import { Contacts } from "./contacts/Contacts";
+import { Files } from "./files/Files";
+import { Launcher } from "./Launcher";
 import { Messages } from "./messages/Messages";
 import { NewChat } from "./messages/NewChat";
 import { ThreadScreen } from "./messages/Thread";
@@ -29,6 +31,8 @@ const DESTINATION_TITLES: Record<Destination, { title: string; task: string }> =
 export function DestinationScreen({ page }: { page: Destination }) {
   if (page === "messages") return <Messages />;
   if (page === "contacts") return <Contacts />;
+  if (page === "files") return <Files />;
+  if (page === "launcher") return <Launcher />;
   const { title, task } = DESTINATION_TITLES[page];
   return <NotPortedDestination title={title} task={task} />;
 }
