@@ -40,7 +40,6 @@ import {
   rpIdFor,
   saveConfig,
   saveIdentityRecord,
-  setActiveIdentity,
   setUnlockedKeys as setUnlockedKeysJs,
 } from "../lib/storage.js";
 
@@ -61,7 +60,7 @@ import { generateSeedIdentityJwks, keyBytesFromJwks, publicKeyFromJwk, toBase64u
 import { identityAppUrl, type CustodyChoice } from "../lib/claim";
 import { useData } from "../state/data";
 import { useRoute, type SubPageId } from "../state/route";
-import { afterUnlock, refreshSession, switchIdentity, useSession } from "../state/session";
+import { afterUnlock, lockIdentity, refreshSession, switchIdentity, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
 
 const message = (error: unknown) => (error as Error)?.message ?? String(error);
@@ -380,6 +379,10 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
 
   setLoading(true, "Generating keys…");
   try {
+    // Leave whoever is signed in: their profile, inbox and keys must not
+    // follow this new identity into onboarding.
+    lockIdentity();
+
     // Seed-derived from the start (EPIC-011): one secret behind both keys.
     const { signingJWK: sigPriv, encJWK: encPriv, seed, publicKey, encPublicKey } = await generateSeedIdentityJwks();
 
@@ -434,8 +437,8 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
     });
     saveConfig({ ...getConfig(), relayUrl, parentDomain: domain, dnsProvider: provider });
 
+    switchIdentity(identity);
     setUnlockedKeys(identity, sigPriv, encPriv, seed);
-    setActiveIdentity(identity);
     refreshSession();
 
     setLoading(true, "Creating session…");

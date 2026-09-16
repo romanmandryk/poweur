@@ -99,15 +99,30 @@ export function onIdentityTeardown(fn: () => void): () => void {
   return () => teardowns.delete(fn);
 }
 
+/** Stop streams, drop keys, and empty identity-scoped app data. */
+function tearDownIdentityState() {
+  for (const teardown of teardowns) teardown();
+  clearUnlockedKeys();
+  clearProfileCache();
+  useData.getState().resetForIdentity();
+}
+
+/**
+ * Sign out of the current unlocked session without changing who is selected.
+ * Used when creating a new identity so the previous inbox, profile and keys
+ * cannot leak into onboarding.
+ */
+export function lockIdentity() {
+  tearDownIdentityState();
+  useSession.setState({ unlocked: false });
+}
+
 /**
  * Make `identity` active and drop everything scoped to the previous one.
  * State is keyed by identity (E15-T1), so this is a reset rather than a merge.
  */
 export function switchIdentity(identity: string | null) {
-  for (const teardown of teardowns) teardown();
-  clearUnlockedKeys();
-  clearProfileCache();
+  tearDownIdentityState();
   setActiveIdentity(identity);
-  useData.getState().resetForIdentity();
   useSession.setState({ identity, unlocked: false });
 }

@@ -10,6 +10,7 @@ import {
   KeyRound,
   Laptop,
   Link,
+  LockOpen,
   MonitorSmartphone,
   Package,
   Puzzle,
@@ -99,123 +100,139 @@ export function Settings() {
     <>
       <DestHeader title="Settings" />
 
-      {record && identity ? (
-        <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
-          <Avatar identity={identity} size="lg" />
-          <div className="settings-id-name text-xl font-bold">{handleOf(identity)}</div>
-          <div className="settings-id-domain text-sm text-muted">{domainOf(identity)}</div>
-          <Chip tone="success" className="mt-1">
-            <custody.icon className="size-3.5" aria-hidden="true" />
-            {custody.chip}
-          </Chip>
-        </div>
-      ) : (
-        <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
-          <UserRound className="size-12 text-faint" strokeWidth={1.5} aria-hidden="true" />
-          <p className="text-muted">No identity selected</p>
-          <Button id="settings-add-id" size="sm" className="mt-4" onClick={() => push("add-id")}>
-            Add identity
-          </Button>
-        </div>
-      )}
+      <section id="settings-identity" aria-label="This identity">
+        {record && identity ? (
+          <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
+            <Avatar identity={identity} size="lg" />
+            <div className="settings-id-name text-xl font-bold">{handleOf(identity)}</div>
+            <div className="settings-id-domain text-sm text-muted">{domainOf(identity)}</div>
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <Chip tone="success" className="mt-1">
+                <custody.icon className="size-3.5" aria-hidden="true" />
+                {custody.chip}
+              </Chip>
+              {!unlocked && (
+                <Chip tone="warning" className="mt-1">
+                  Locked
+                </Chip>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
+            <UserRound className="size-12 text-faint" strokeWidth={1.5} aria-hidden="true" />
+            <p className="text-muted">No identity selected</p>
+          </div>
+        )}
 
-      <SettingsGroup label="Account">
-        <SettingsRow id="row-switch-id" icon={ArrowLeftRight} label="Switch / Add identity" onClick={() => push("add-id")} />
-        {record && (
+        {record && identity && unlocked && (
           <>
-            <SettingsRow
-              id="row-profile"
-              icon={UserRound}
-              label="Your profile"
-              value={profile.doc?.display_name ?? (profile.loaded ? "Not set" : "…")}
-              onClick={openProfilePanel}
-            />
-            <SettingsRow id="row-identity-keys" icon={IdCard} label="Identity keys" onClick={openIdentityKeysPanel} />
+            <SettingsGroup label="Account">
+              <SettingsRow
+                id="row-profile"
+                icon={UserRound}
+                label="Your profile"
+                value={profile.doc?.display_name ?? (profile.loaded ? "Not set" : "…")}
+                onClick={openProfilePanel}
+              />
+              <SettingsRow id="row-identity-keys" icon={IdCard} label="Identity keys" onClick={openIdentityKeysPanel} />
+            </SettingsGroup>
+
+            <SettingsGroup label="Security">
+              <SettingsRow id="row-keys-devices" icon={MonitorSmartphone} label="Keys & devices" onClick={() => void openKeysAndDevicesPanel()} />
+              <SettingsRow id="row-connected-apps" icon={Puzzle} label="Connected apps" onClick={openConnectedAppsPanel} />
+              <SettingsRow
+                id="row-auth-request"
+                icon={BadgeCheck}
+                label="Approve sign-in request"
+                onClick={() => {
+                  resetSignInRequest();
+                  push("auth");
+                }}
+              />
+              <SettingsRow
+                id="row-recovery-kit"
+                icon={ScrollText}
+                label="Recovery kit"
+                value={record.seedDerived ? "Available" : "Not available"}
+                valueTone={record.seedDerived ? "ok" : "warn"}
+                onClick={openRecoveryKitPanel}
+              />
+            </SettingsGroup>
+
+            <SettingsGroup label="Inbox">
+              <SettingsRow id="row-analytics" icon={ChartColumn} label="Relay analytics" onClick={openAnalyticsPanel} />
+              <SettingsRow id="row-policy" icon={Shield} label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
+              <SettingsRow
+                id="row-policy-anon"
+                icon={VenetianMask}
+                label="Anonymous & proof-of-work"
+                value={summary.anon}
+                valueTone={summary.anonOn ? "ok" : undefined}
+                onClick={openPolicyPanel}
+              />
+            </SettingsGroup>
+
+            <SettingsGroup label="Advanced">
+              <SettingsRow
+                id="row-session"
+                icon={KeyRound}
+                label="Session"
+                value={sessionOk ? "Active" : "None"}
+                valueTone={sessionOk ? "ok" : "warn"}
+                onClick={session ? openSessionPanel : undefined}
+              />
+              {usesDnsPath(record, identity, mode.hostedDomains) && (
+                <SettingsRow id="row-dns" icon={Globe} label="DNS provider" value={config.dnsProvider || "Cloudflare"} onClick={openDnsPanel} />
+              )}
+              <SettingsRow id="row-rotate-enc" icon={RefreshCw} label="Rotate encryption key" onClick={() => void rotateEncryptionKey()} />
+              <SettingsRow
+                id="row-remove-id"
+                icon={Trash2}
+                iconClassName="text-danger"
+                label={<span className="text-danger">Remove this identity</span>}
+                onClick={() => void confirmRemove()}
+              />
+            </SettingsGroup>
           </>
         )}
-      </SettingsGroup>
 
-      {record && (
-        <SettingsGroup label="Security">
-          <SettingsRow id="row-keys-devices" icon={MonitorSmartphone} label="Keys & devices" onClick={() => void openKeysAndDevicesPanel()} />
-          <SettingsRow id="row-connected-apps" icon={Puzzle} label="Connected apps" onClick={openConnectedAppsPanel} />
+        {record && identity && !unlocked && (
+          <div id="settings-unlock" className="mx-4 mb-2 rounded-card bg-surface px-4 py-6 text-center">
+            <p className="mb-3 text-sm text-muted">Unlock to manage this identity</p>
+            <Button id="btn-settings-unlock" variant="passkey" size="sm" onClick={() => push("unlock")}>
+              <LockOpen className="size-4" aria-hidden="true" /> {custody.action}
+            </Button>
+          </div>
+        )}
+      </section>
+
+      <section id="settings-device" aria-label="This device">
+        <SettingsGroup label="This device">
           <SettingsRow
-            id="row-auth-request"
-            icon={BadgeCheck}
-            label="Approve sign-in request"
-            onClick={() => {
-              resetSignInRequest();
-              push("auth");
-            }}
+            id="row-switch-id"
+            icon={ArrowLeftRight}
+            label={record ? "Switch / Add identity" : "Add identity"}
+            onClick={() => push("add-id")}
           />
-          <SettingsRow
-            id="row-recovery-kit"
-            icon={ScrollText}
-            label="Recovery kit"
-            value={record.seedDerived ? "Available" : "Not available"}
-            valueTone={record.seedDerived ? "ok" : "warn"}
-            onClick={openRecoveryKitPanel}
-          />
+          <SettingsRow id="row-relay" icon={Link} label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
+          <SettingsRow id="row-lookup" icon={Search} label="Lookup identity" onClick={openLookupPanel} />
         </SettingsGroup>
-      )}
 
-      <SettingsGroup label="Inbox">
-        <SettingsRow id="row-analytics" icon={ChartColumn} label="Relay analytics" onClick={openAnalyticsPanel} />
-        <SettingsRow id="row-policy" icon={Shield} label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
-        <SettingsRow
-          id="row-policy-anon"
-          icon={VenetianMask}
-          label="Anonymous & proof-of-work"
-          value={summary.anon}
-          valueTone={summary.anonOn ? "ok" : undefined}
-          onClick={openPolicyPanel}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup label="Network">
-        <SettingsRow id="row-relay" icon={Link} label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
-        <SettingsRow id="row-lookup" icon={Search} label="Lookup identity" onClick={openLookupPanel} />
-      </SettingsGroup>
-
-      <SettingsGroup label="Advanced">
-        <SettingsRow
-          id="row-session"
-          icon={KeyRound}
-          label="Session"
-          value={sessionOk ? "Active" : "None"}
-          valueTone={sessionOk ? "ok" : "warn"}
-          onClick={session ? openSessionPanel : undefined}
-        />
-        {usesDnsPath(record, identity, mode.hostedDomains) && (
-          <SettingsRow id="row-dns" icon={Globe} label="DNS provider" value={config.dnsProvider || "Cloudflare"} onClick={openDnsPanel} />
-        )}
-        {record && (
-          <>
-            <SettingsRow id="row-rotate-enc" icon={RefreshCw} label="Rotate encryption key" onClick={() => void rotateEncryptionKey()} />
-            <SettingsRow
-              id="row-remove-id"
-              icon={Trash2}
-              iconClassName="text-danger"
-              label={<span className="text-danger">Remove this identity</span>}
-              onClick={() => void confirmRemove()}
-            />
-          </>
-        )}
-      </SettingsGroup>
-
-      <SettingsGroup label="About">
-        <AboutRow icon={FileText} label="Protocol" value="Poweur ID v1" />
-        <AboutRow
-          icon={isShellRuntime() ? Smartphone : Laptop}
-          label="App"
-          value={APP_VERSION}
-          valueId="about-app-version"
-          meta={[APP_BUILD_TIME, isShellRuntime() ? "Mobile" : "Web"].join(" · ")}
-          metaId="about-app-build"
-        />
-        <AboutRow icon={Package} label="SDK" value={SDK_VERSION} valueId="about-sdk-version" meta={SDK_BUILD_TIME} metaId="about-sdk-build" />
-        <AboutRelay identity={identity || mode.subject || ""} />
-      </SettingsGroup>
+        <SettingsGroup label="About">
+          <AboutRow icon={FileText} label="Protocol" value="Poweur ID v1" />
+          <AboutRow
+            icon={isShellRuntime() ? Smartphone : Laptop}
+            label="App"
+            value={APP_VERSION}
+            valueId="about-app-version"
+            meta={[APP_BUILD_TIME, isShellRuntime() ? "Mobile" : "Web"].join(" · ")}
+            metaId="about-app-build"
+          />
+          <AboutRow icon={Package} label="SDK" value={SDK_VERSION} valueId="about-sdk-version" meta={SDK_BUILD_TIME} metaId="about-sdk-build" />
+          <AboutRelay identity={identity || mode.subject || ""} />
+        </SettingsGroup>
+      </section>
       <div className="h-8" />
     </>
   );

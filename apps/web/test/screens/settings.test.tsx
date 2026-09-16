@@ -113,6 +113,32 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect($("#row-profile .settings-row-value")!.textContent).toBe("Not set"));
     await waitFor(() => expect($("#about-relay-version")!.textContent).toBe("0.1.7"));
     expect($("#about-app-version")!.textContent).toMatch(/^\d+\.\d+\.\d+$/);
+    expect($("#settings-identity")).toBeTruthy();
+    expect($("#settings-device")).toBeTruthy();
+    expect($("#btn-settings-unlock")).toBeNull();
+  });
+
+  it("while locked, identity settings wait behind unlock and device settings stay usable", async () => {
+    useSession.setState({ unlocked: false });
+    render(<App />);
+    expect($(".settings-id-name")!.textContent).toBe("alice");
+    expect($("#btn-settings-unlock")).toBeTruthy();
+    expect($("#row-profile")).toBeNull();
+    expect($("#row-policy")).toBeNull();
+    expect($("#row-keys-devices")).toBeNull();
+    expect($("#row-session")).toBeNull();
+    expect($("#row-switch-id")).toBeTruthy();
+    expect($("#row-relay")).toBeTruthy();
+    expect($("#row-lookup")).toBeTruthy();
+    expect($("#about-app-version")).toBeTruthy();
+
+    fireEvent.click($("#row-lookup")!);
+    await waitFor(() => expect($("#lookup-id")).toBeTruthy());
+    fireEvent.click($("#panel-close-btn")!);
+    await waitFor(() => expect($("#panel-root")).toBeNull());
+
+    fireEvent.click($("#btn-settings-unlock")!);
+    expect(useRoute.getState().sub).toBe("unlock");
   });
 
   it("saves an inbox policy and the rows report what was saved", async () => {

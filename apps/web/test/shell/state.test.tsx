@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { incomingRequests, navBadges } from "../../src/state/badges";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
-import { onIdentityTeardown, switchIdentity, useSession } from "../../src/state/session";
+import { onIdentityTeardown, lockIdentity, switchIdentity, useSession } from "../../src/state/session";
 import { closePanel, openPanel, setLoading, toast, useUi } from "../../src/state/ui";
 import { LoadingOverlay, PanelHost, Toaster } from "../../src/shell/Overlays";
 import { resetStores } from "../helpers/stores";
@@ -33,7 +33,7 @@ describe("switchIdentity", () => {
     const stopStream = vi.fn();
     const unregister = onIdentityTeardown(stopStream);
     useSession.setState({ identity: "alice.poweur.net", unlocked: true });
-    useData.setState({ messages: [{ id: 1 }], contacts: { ...useData.getState().contacts, list: [{ identity: "x.y" }], loaded: true }, tray: "requests" });
+    useData.setState({ messages: [{ id: 1 }], contacts: { ...useData.getState().contacts, list: [{ identity: "x.y" }], loaded: true }, tray: "requests", thread: { peer: "carol.poweur.net" } });
 
     switchIdentity("bob.poweur.net");
 
@@ -42,7 +42,32 @@ describe("switchIdentity", () => {
     expect(localStorage.getItem("poweur:active")).toBe("bob.poweur.net");
     expect(useData.getState().messages).toEqual([]);
     expect(useData.getState().contacts).toMatchObject({ list: [], loaded: false });
+    expect(useData.getState().thread).toBeNull();
     // Not identity data: the tray choice survives, as it did in the legacy app.
+    expect(useData.getState().tray).toBe("requests");
+    unregister();
+  });
+});
+
+describe("lockIdentity", () => {
+  it("drops keys and identity data but keeps who is selected", () => {
+    const stopStream = vi.fn();
+    const unregister = onIdentityTeardown(stopStream);
+    useSession.setState({ identity: "alice.poweur.net", unlocked: true });
+    useData.setState({
+      messages: [{ id: 1 }],
+      profile: { doc: { display_name: "Alice", bio: "hi" }, explicit: true, loaded: true, loading: false },
+      thread: { peer: "bob.poweur.net" },
+      tray: "requests",
+    });
+
+    lockIdentity();
+
+    expect(stopStream).toHaveBeenCalledOnce();
+    expect(useSession.getState()).toMatchObject({ identity: "alice.poweur.net", unlocked: false });
+    expect(useData.getState().messages).toEqual([]);
+    expect(useData.getState().profile.doc).toBeNull();
+    expect(useData.getState().thread).toBeNull();
     expect(useData.getState().tray).toBe("requests");
     unregister();
   });
