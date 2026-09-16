@@ -31,7 +31,7 @@ import { getActiveIdentity, saveIdentityRecord } from "../../src/lib/storage.js"
 import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
-import { useSession, type ModeInfo } from "../../src/state/session";
+import { lockIdentity, useSession, type ModeInfo } from "../../src/state/session";
 import { resetStores } from "../helpers/stores";
 
 const IDENTITY = "alice.poweur.net";
@@ -178,6 +178,23 @@ describe("Onboarding (E15-T5)", () => {
     fireEvent.click($("#btn-onboard-skip")!);
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
     expect(fake.client.setPolicy).not.toHaveBeenCalled();
+  });
+
+  it("does not inherit another identity's name, bio or inbox", () => {
+    useData.setState({
+      profile: { doc: { display_name: "John Example", bio: "john's bio" }, explicit: true, loaded: true, loading: false },
+      messages: [{ id: "m1", plaintext: "john's secret" }],
+      onboard: { step: 2 },
+    });
+    lockIdentity();
+    useSession.setState({ identity: "dddddd.poweur.net", unlocked: true });
+    useData.setState({ onboard: { step: 2 } });
+    at("onboarding");
+    render(<App />);
+    expect($<HTMLInputElement>("#pe-name")!.value).toBe("");
+    expect($<HTMLTextAreaElement>("#pe-bio")!.value).toBe("");
+    expect($("#pe-name")!.getAttribute("placeholder")).toBe("dddddd");
+    expect(useData.getState().messages).toEqual([]);
   });
 });
 

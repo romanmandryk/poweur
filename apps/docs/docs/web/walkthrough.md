@@ -23,7 +23,7 @@ key custody (passkey PRF, or the mobile shell's native keystore) and the screens
 | **Contacts** | your `contacts.json`, with states, petnames and search |
 | **Files** | your tree, sharing, and other people's shares |
 | **Apps** | the launcher (forward-looking) |
-| **Settings** | identity, profile, inbox policy, keys and devices, relay |
+| **Settings** | **This identity** (profile, keys, inbox policy — unlock required) and **This device** (add/switch identity, relay, lookup, About) |
 
 Everything is laid out for a 375px screen first, because the Capacitor shell wraps this
 same UI.

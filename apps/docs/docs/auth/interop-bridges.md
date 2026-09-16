@@ -64,6 +64,8 @@ the same authentication core. It remains a separate service because it adds issu
 keys, browser sessions, client registration, redirects and account-correlation concerns that
 do not belong in the relay. Same-browser Poweur approval is the primary journey, cross-device
 QR is second, and typed-message push is an optional delivery channel rather than a prerequisite.
+The design draft — trust boundary, OIDC profile, client registration and threat model — is
+[OAuth 2.0 / OIDC bridge](./oauth-oidc-bridge.md).
 
 ## SIOPv2 and OpenID4VP survey
 

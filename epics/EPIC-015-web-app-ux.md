@@ -10,6 +10,7 @@
   on show waits for data it does not have (after 250 ms, so a fast read never blinks it; background
   drains stay silent). Messages and Contacts refresh on pull-down (`ui/PullToRefresh`): the content
   follows the finger and a spinner sits in the gap until the reads settle
+- **Settings split (web 0.1.17):** identity-scoped rows (profile, keys, inbox policy, session) require unlock; device-scoped rows (add/switch identity, relay URL, lookup, About) stay usable while locked. Creating a new identity locks the previous one first, so onboarding cannot inherit its name, bio or inbox.
 - **Profile photos everywhere (web 0.1.16):** the profile editor (onboarding and Settings) crops a
   picked photo to a 256 px square and previews it in the avatar circle; saving uploads it to
   `public/avatars/avatar-<hash>.<ext>` behind a `.poweur-web-public` marker (without one `/pub/`

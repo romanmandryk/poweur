@@ -33,6 +33,7 @@ describe("shell decision tree (E21-T4)", () => {
   });
 
   it("a locked identity sees the unlock prompt on destinations that need keys", () => {
+    saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     signedIn(false);
     const { container } = render(<App />);
     expect(container.querySelectorAll(".nav-tab")).toHaveLength(5);
@@ -43,6 +44,10 @@ describe("shell decision tree (E21-T4)", () => {
     fireEvent.click(tab(container, "settings"));
     expect(container.querySelector(".dest-title")!.textContent).toBe("Settings");
     expect(container.querySelector("#btn-unlock-main")).toBeNull();
+    expect(container.querySelector("#btn-settings-unlock")).toBeTruthy();
+    expect(container.querySelector("#row-profile")).toBeNull();
+    expect(container.querySelector("#row-switch-id")).toBeTruthy();
+    expect(container.querySelector("#row-lookup")).toBeTruthy();
 
     fireEvent.click(tab(container, "contacts"));
     expect(container.querySelector("#btn-unlock-main")).toBeTruthy();

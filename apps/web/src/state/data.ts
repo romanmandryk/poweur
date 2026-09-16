@@ -63,6 +63,8 @@ function freshIdentityData() {
     policy: freshPolicy(),
     profile: freshProfile(),
     files: freshFiles(),
+    /** The open conversation (E15-T13), or null. */
+    thread: null as any,
   };
 }
 
@@ -70,8 +72,6 @@ export function freshData() {
   return {
     ...freshIdentityData(),
     tray: "inbox" as Tray,
-    /** The open conversation (E15-T13), or null. */
-    thread: null as any,
     /** null unless the first-run flow is on screen. */
     onboard: null as any,
     /** The identity host's own name (E15-T9). */

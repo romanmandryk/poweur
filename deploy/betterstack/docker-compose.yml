@@ -1,0 +1,46 @@
+# Optional Better Stack collector. Host metrics and logs only — no eBPF sidecar.
+# Not part of the relay/infra deploy. Start or stop this file on its own.
+#
+#   cd deploy/betterstack
+#   cp .env.example .env   # set COLLECTOR_SECRET
+#   docker compose --env-file .env up -d
+#   docker compose --env-file .env down
+
+name: better-stack
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  collector:
+    image: ghcr.io/betterstackhq/collector:latest
+    container_name: better-stack-collector
+    restart: unless-stopped
+    logging: *logging
+    uts: host
+    cpus: 1.2
+    mem_reservation: 256m
+    mem_limit: 1024m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ -x /var/lib/better-stack/collector/healthcheck.sh ]; then /var/lib/better-stack/collector/healthcheck.sh; else exit 0; fi",
+        ]
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    environment:
+      COLLECTOR_SECRET: ${COLLECTOR_SECRET:?set COLLECTOR_SECRET in .env}
+      BASE_URL: ${BASE_URL:-https://telemetry.betterstack.com}
+      CLUSTER_COLLECTOR: "false"
+      VECTOR_LOG_FORMAT: json
+      HOSTNAME: ${COLLECTOR_HOSTNAME:-poweur}
+      INSTALLED_AS: docker
+    volumes:
+      - /:/host:ro
+      - /var/lib/better-stack:/var/lib/better-stack

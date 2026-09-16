@@ -313,6 +313,81 @@ a forged identity document are out of scope. The last is mitigated by the resolv
 chain's fail-closed key-mismatch rule (EPIC-001) and by contact key pinning (EPIC-007);
 the first two are the same trust assumptions every login protocol makes.
 
+## Who may complete a sign-in
+
+> **Planned, not implemented (EPIC-022 E22-T4).** This section records a rule the protocol is
+> gaining. Reviewing the shipped flows while designing the OAuth bridge found the reference RP
+> handing its session to whoever *started* a login rather than to whoever *approved* it.
+
+**Anyone may create a request, and that is fine.** A request is a challenge: it carries no
+authority, it names no user, and holding one grants nothing. The protocol also cannot demand a
+signature on this first leg — until the challenge exists there is nothing to sign, and it is the
+relying party that must mint it. Asking "how do we stop a stranger starting a login?" therefore
+has no answer. The right question is who may *finish* one:
+
+> A sign-in completes only for a browser that presents **both** proof that it started the
+> transaction **and** a completion secret that was handed exclusively to the signer.
+
+Two halves, deliberately held in two places. In the ordinary same-browser journey both live in
+the one browser, and nothing changes for the user. When the two halves are in different places,
+the login simply does not complete — which is exactly the outcome wanted.
+
+### The attack this closes
+
+An attacker starts a login at an RP, keeps the pending transaction, and sends the victim the
+signer link (`https://poweur.net/app/?auth=…`). The signer honestly displays the *real* RP's
+name, because the request really is for that RP, so a victim expecting to sign in there may well
+approve.
+
+| Holds | Attacker | Victim |
+|-------|----------|--------|
+| Transaction / initiator binding | ✅ started it | ❌ |
+| Completion secret (minted on approval, returned to the signer) | ❌ | ✅ |
+
+Note what does *not* help: binding the pending login to the browser that started it. The
+attacker **is** the initiator, so any initiator-only binding authenticates the attacker. The
+binding that matters is to the approver's device — which is why the completion secret must be
+returned to the signer, and never be derivable from the request.
+
+### Mechanism
+
+1. The signer POSTs the encoded approval to `response_uri`, as today.
+2. The RP verifies it and answers `200 {"resume_uri": "<same-origin URL with a one-time code>"}`.
+   The code is ≥128 bits, single-use, and expires with the request.
+3. The signer navigates the same browser to `resume_uri` (checking it is same-origin with the
+   audience it just verified). It must **not** put the approval itself in a URL.
+4. The RP completes the login only if the resume code and the transaction's own cookie both
+   match, and then issues its session.
+
+This is additive: the request object, canonical signing string, signature and test vectors are
+unchanged. It governs only how an already-signed approval is redeemed, so no conformance vector
+moves. An RP that publishes no `resume_uri` keeps today's behaviour, and a signer that receives
+one MUST prefer it over building a `?response=` URL.
+
+### Cross-device approval is weaker, and must say so
+
+When the approving device is not the browser being signed in — QR and poll transports — no
+completion secret can reach the initiating browser without also being available to whoever
+forwarded the request. This is the residual risk in every QR login, and it is handled with
+disclosure rather than cryptography:
+
+- The poll handle is a high-entropy secret bound to the initiating browser, **never**
+  `request_id` (which the initiator hands out by construction). This stops a bystander who saw
+  the QR from claiming the session; it does not stop a forwarded request.
+- The signer shows **number matching** against the initiating screen, plus the initiator context
+  the RP recorded: coarse location, browser and how long ago the login started.
+- The signer states plainly that the user is approving a sign-in *started somewhere else*, and
+  says to cancel unless the code is on a screen in front of them.
+- Short TTL, single use, and no silent re-issue of a request inside one transaction.
+
+### Current status of the shipped code
+
+- The web signer's "Continue" button builds a `?response=` URL
+  (`apps/web/src/screens/SignInApproval.tsx`) — to be replaced by `resume_uri`.
+- `apps/guestbook`'s `/auth/poll` authenticates with `request_id` alone and sets the login
+  cookie for any caller that knows it (`handleAuthPoll`), so it is vulnerable to both the
+  bystander and the forwarded-link cases above.
+
 ## Scoped resource grants
 
 The second step, specified in full in [Connected apps](./connected-apps.md): the RP
