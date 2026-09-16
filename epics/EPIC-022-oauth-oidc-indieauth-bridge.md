@@ -1,6 +1,7 @@
 # EPIC-022 — Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility
 
-- **Status:** proposed
+- **Status:** in progress — E22-T1 design draft at
+  [`apps/docs/docs/auth/oauth-oidc-bridge.md`](../apps/docs/docs/auth/oauth-oidc-bridge.md)
 - **Priority:** P1 (ecosystem adoption: one bridge unlocks existing auth-capable applications)
 - **Depends on:** EPIC-001 (public resolver chain), EPIC-008 (native Poweur Sign-In and verifier),
   EPIC-013 (deployment/observability foundations)
@@ -13,7 +14,7 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E22-T1 Architecture, protocol profile & threat model | **open** | Fix service boundary, trust model, canonical identifiers and OAuth/OIDC profile before code |
+| E22-T1 Architecture, protocol profile & threat model | **partial** | Draft written (`auth/oauth-oidc-bridge.md`): boundary, identifier vectors, transaction state machine, OIDC profile, pairwise `sub`, client model, threat model. Needs review; vectors file lands with T2 |
 | E22-T2 Bridge core + native Poweur authentication | **open** | Generic for any publicly resolvable Poweur ID; browser approval is the primary path |
 | E22-T3 OIDC Authorization Code + PKCE provider | **open** | Primary standards surface; discovery, JWKS, code/token/UserInfo, pairwise subjects |
 | E22-T4 Browser signer and consent journey | **open** | Same-browser redirect/return first; no QR or messaging required for the normal desktop path |
@@ -21,6 +22,7 @@
 | E22-T6 IndieAuth compatibility | **open** | Profile discovery, metadata, authorization code flow and canonical `me` URL |
 | E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
 | E22-T8 Packaging, conformance, integrations & operations | **open** | Standalone image, colocated Compose profile, key rotation, security tests and integration recipes |
+| E22-T9 Client registry, developer console & user authorizations | **open** | URL client IDs (no registration), self-service `/developers` for secret-based RPs, static clients, `/account` revoke |
 
 ## Goal
 
@@ -118,10 +120,13 @@ V1 follows:
 - [OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0.html)
 - [OpenID Connect Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html)
 - [IndieAuth](https://indieauth.spec.indieweb.org/)
+- [OAuth 2.0 Authorization Server Issuer Identification](https://www.rfc-editor.org/rfc/rfc9207)
+- [OAuth Client ID Metadata Document](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/) (draft; URL client IDs, E22-T9)
 
 The mandatory external flow is Authorization Code with PKCE `S256`. The implicit grant is not
-implemented. Dynamic OIDC client registration, refresh tokens, OpenID Federation and general
-OAuth resource delegation are deferred until a named integration requires them.
+implemented. RFC 7591 dynamic client registration, refresh tokens, OpenID Federation and general
+OAuth resource delegation are deferred until a named integration requires them. URL client IDs
+(E22-T9) are not dynamic registration: nothing is written to the registry.
 
 ## Identifier and claim model
 
@@ -223,11 +228,12 @@ domain all authenticate to one bridge with zero relay registration or shared sec
 - [ ] `/.well-known/openid-configuration`, `/authorize`, `/token`, `/jwks.json` and `/userinfo`
 - [ ] Authorization Code only; require PKCE `S256` for public clients and support it for every
       client; exact registered redirect URI matching, `state`, OIDC `nonce` and issuer binding
-- [ ] Static/configured client registry first; hash or encrypt confidential client credentials;
-      no dynamic registration in v1
+- [ ] Client lookup through the E22-T9 registry interface; static clients are enough to land
+      this task, URL and console clients follow in T9
 - [ ] Short-lived, single-use codes; short-lived access/ID tokens; no refresh tokens in v1
 - [ ] Persistent, independently rotated issuer signing keys with overlapping JWKS publication
-- [ ] Pairwise subject derivation and consented `poweur_id`/fingerprint claims
+- [ ] Pairwise subject derivation and consented `poweur_id`/fingerprint claims;
+      `OAUTH_SUBJECT_TYPE=pairwise|public` for deployments that want the Poweur ID as `sub`
 - [ ] Optional native-proof claim for Poweur-aware verifiers, without changing standard OIDC
       behavior for ordinary clients
 - [ ] Integration coverage against Keycloak, Authentik and oauth2-proxy configurations
@@ -244,6 +250,11 @@ approved.
       advertised, with a clear chooser/failure state for self-hosted identities
 - [ ] Redirect to the web signer, unlock locally, approve, submit to the bridge and resume the
       original browser transaction without exposing the signed response in URLs
+- [ ] Native callback extension: `POST response_uri` may answer `{"resume_uri": …}` (same-origin,
+      single-use resume code); land it in `auth/sign-in.md`, make the web signer navigate there
+      instead of building `?response=` (`apps/web/src/screens/SignInApproval.tsx` does today), and
+      keep the guestbook's GET callback working when no `response` parameter arrives
+- [ ] Hosted relays publish `endpoints.web_signer` in `capabilities.json` for signer discovery
 - [ ] Separate downstream consent page showing verified client name, origin, requested claims,
       whether the public Poweur ID will be released, and deny/report controls
 - [ ] Host-only `__Host-` cookies (`Secure`, `HttpOnly`, `SameSite`); never a parent-domain cookie;
@@ -261,7 +272,12 @@ redirect/unlock/approve/return journey with no QR, mobile app, message or copy/p
 - [ ] Mobile signer scans, verifies bridge metadata, displays the bridge and action, unlocks and
       submits the signed response directly to the bridge callback
 - [ ] Original browser resumes exactly once; polling handles and responses cannot be swapped
-      between sessions or users
+      between sessions or users. The poll handle is a high-entropy secret bound to the initiating
+      browser — never the `request_id`, which the initiator hands out by construction
+- [ ] Number matching against the initiating screen, plus initiator context (coarse location,
+      browser, elapsed time) and copy stating that the sign-in started somewhere else — the
+      disclosure half of [Who may complete a sign-in](../apps/docs/docs/auth/sign-in.md), since
+      no completion secret can be bound to a browser the approving device cannot reach
 - [ ] Expiry, cancellation, denial, already-used and camera-unavailable flows
 - [ ] Copy/paste request/response remains a documented CLI/accessibility fallback
 
@@ -326,6 +342,36 @@ breaking browser/QR login.
 operator need not run it; an auth-only operator need not host identities; documented integrations
 work without Poweur-specific patches.
 
+### E22-T9 — Client registry, developer console & user authorizations
+
+Three ways a client reaches the bridge, one registry interface, specified in the
+[design draft](../apps/docs/docs/auth/oauth-oidc-bridge.md#clients):
+
+- [ ] **Developer console** at `/developers` — *the main path*: owner signs in with native Poweur
+      Sign-In; create client (name, redirect URIs, sector host); secret shown once and stored
+      hashed; rotate with 7-day overlap; edit; delete; co-owner IDs; audit events per change
+- [ ] Registry interface + static clients from `OAUTH_STATIC_CLIENTS` (JSON), with
+      `first_party` consent skip for `openid` only
+- [ ] **URL client IDs** only because IndieAuth's client identifier *is* a URL (shared fetcher
+      with E22-T6; same as the Client ID Metadata Document draft). `OAUTH_URL_CLIENTS=indieauth`
+      by default, so OIDC clients use the console. Fetch with resolver-grade SSRF rules,
+      `client_id` self-match, same-origin redirect URIs, `none` or `private_key_jwt`, bounded
+      caching
+- [ ] Operator posture: `OAUTH_CLIENT_REGISTRATION=open|allowlist|closed`, `OAUTH_URL_CLIENTS`;
+      per-owner client limit, creation rate limit, `poweur-oauth clients suspend`
+- [ ] Consent labels: verified host for URL clients; "registered by `<owner id>`" + redirect host
+      for console clients; report link on every consent page
+- [ ] **User `/account`**: authorized apps with released claims and last use, revoke (deletes
+      consent, revokes access tokens), recent sign-ins, sign out
+- [ ] Sector host fixed at client creation; editing redirect URIs never changes `sub` (unit test)
+- [ ] Server-rendered pages (Go `html/template`), strict CSP, no third-party content; browser
+      tests for create → configure oauth2-proxy with the secret → sign in → revoke
+
+**Acceptance:** a developer with only a Poweur ID creates a client in the console, configures
+oauth2-proxy with the issued secret and signs in a user from another relay; a web app with no
+registration signs in using a URL `client_id`; the user revokes either from `/account` and is
+asked to consent again next time.
+
 ## Non-goals
 
 - Replacing native Poweur Sign-In inside Poweur-aware clients or relay APIs
@@ -333,17 +379,24 @@ work without Poweur-specific patches.
 - Automatically trusting arbitrary OIDC issuers in mainstream relying parties
 - Sending login requests through contacts or treating the bridge as a user contact
 - Giving OAuth access tokens ambient access to messages, files, shares or identity operations
-- Dynamic OIDC client registration, refresh tokens, implicit flow or password grants in v1
+- RFC 7591 dynamic client registration, refresh tokens, implicit flow or password grants in v1
+- A web admin UI for issuer keys and operator actions (CLI/config in v1)
 - OpenID Federation, SIOPv2/OpenID4VP credential presentation or social-login aggregation in v1
 - Building Micropub or an identity website publishing system as part of the bridge
 
 ## Open questions to close in E22-T1
 
-- Exact OIDC claim/scope names and whether the optional native proof carries the full response or
-  only a digest plus retrieval endpoint
+Proposed answers are in the design draft; confirm them in review before closing T1.
+
+- ~~Exact OIDC claim/scope names~~ → `openid`, `poweur_id`, `profile`; native proof claim
+  `poweur_proof` reserved, not in v1
 - Signer discovery when an owned-domain identity is resolvable but does not serve a web client
-- Pairwise-subject sector rules for clients with multiple redirect hosts
+  → `endpoints.web_signer`, else app / QR / default-signer chooser; in-browser paste flow decided in T4
+- ~~Pairwise-subject sector rules for clients with multiple redirect hosts~~ → sector host fixed
+  at client creation
 - Whether an IndieAuth login-only response needs any bridge access token beyond the protocol's
-  minimum interoperable response
-- Account-linking UX when an RP changes issuers while the user retains the same Poweur ID
-- Whether the hosted bridge is open registration for OIDC clients or approval-only at launch
+  minimum interoperable response (T6)
+- ~~Account-linking UX when an RP changes issuers~~ → only via a released `poweur_id`; documented,
+  not automated
+- ~~Open registration or approval-only at launch~~ → operator setting; hosted bridge launches
+  `open` with URL clients on (E22-T9)
