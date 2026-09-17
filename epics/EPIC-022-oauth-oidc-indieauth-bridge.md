@@ -16,12 +16,12 @@
 |------|--------|-------|
 | E22-T1 Architecture, protocol profile & threat model | **done** | `auth/oauth-oidc-bridge.md`; ID vectors `id-input.json` |
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
-| E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy and Keycloak verified live; Authentik → T8; `poweur_proof` deferred |
+| E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy, Keycloak and Authentik verified live; `poweur_proof` deferred |
 | E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer; create-an-ID funnel on the sign-in page |
 | E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, recipes, CI; conformance suite, live Authentik/IndieAuth, prod rollout open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI; conformance suite, live IndieAuth clients, prod rollout open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
 ## Goal
@@ -257,10 +257,13 @@ registration or shared secret.
 - [x] Live runs against **oauth2-proxy 7.12** and **Keycloak 26.3** containers through the real
       web signer (`apps/web/test/e2e/oauth-live-*.spec.js`, `POWEUR_LIVE_DOCKER=1`). The oauth2-proxy
       run showed `nonce` must be optional (it sends none); the bridge now echoes it when sent
-- [ ] Authentik — **moved to E22-T8**
+- [x] Live run against **Authentik 2026.8.2** (server, worker, Postgres, Redis) as an OpenID
+      Connect OAuth source: enrolls and signs in, linking by pairwise `sub`
+      (`oauth-live-authentik.spec.js`). It asks for `openid profile email` plus the configured
+      extra scopes — the bridge ignores the ones it does not know, as OIDC Core says it should
 
-**Acceptance:** met for go-oidc, oauth2-proxy and Keycloak with only standard configuration;
-Authentik remains.
+**Acceptance:** met for go-oidc, oauth2-proxy, Keycloak and Authentik with only standard
+configuration.
 
 ### E22-T4 — Browser signer and consent journey — **done**
 
@@ -394,9 +397,12 @@ browser/QR login is unchanged.
       a device, so running it needs a scripted signer harness (test identity + web signer),
       written up in the design doc under *Conformance and external review*
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
-- [x] Live oauth2-proxy and Keycloak runs (opt-in Playwright specs, Docker)
-- [ ] Authentik and two independent IndieAuth clients live; production deployment at
-      `oauth.poweur.org` (ansible/Caddy) — open
+- [x] Live oauth2-proxy, Keycloak and **Authentik** runs (opt-in Playwright specs, Docker)
+- [ ] Two independent IndieAuth clients live — open. The well-known third-party checks
+      (indieauth.rocks, indielogin.com, hosted Micropub clients) fetch the client and the
+      authorization server over the public internet, so this waits on the staging deployment
+      rather than on bridge work
+- [ ] Production deployment at `oauth.poweur.org` (ansible/Caddy) — open
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
 **Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live

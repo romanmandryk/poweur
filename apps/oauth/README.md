@@ -113,7 +113,13 @@ Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
   secret sent as basic auth*, *PKCE: S256*, default scopes `openid poweur_id`, and a *Username
   Template Importer* mapper with `${CLAIM.poweur_id}`. A Poweur ID carries no e-mail or name, so
   make those optional in the realm's user profile (or let the review-profile step ask).
-- **Authentik** (OAuth source): *OpenID Connect* type, *OIDC Well-known URL* above, consumer key/secret from the console, scopes `openid poweur_id`.
+- **Authentik** (OAuth source; verified live, 2026.8.2 — `apps/web/test/e2e/oauth-live-authentik.spec.js`):
+  *Directory → Federation and Social login → Create → OpenID Connect OAuth Source*, OIDC well-known
+  URL above, consumer key/secret from the console, *Additional scopes* `poweur_id`. Two settings
+  people miss: add the source to the **identification stage** (`default-authentication-identification`)
+  or no button appears on the login page, and keep an **enrollment flow** that asks for a username —
+  a Poweur ID carries no `preferred_username` or e-mail, so the enrolling user types one (the spec
+  uses the Poweur ID itself). Accounts link by the pairwise `sub`, not by the Poweur ID.
 - **Grafana**: `[auth.generic_oauth]` with `use_pkce = true`, `scopes = openid poweur_id`, `login_attribute_path = poweur_id`.
 
 ## Tests
