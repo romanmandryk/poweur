@@ -1,7 +1,7 @@
 # EPIC-022 — Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility
 
-- **Status:** in progress — bridge implemented in `apps/oauth` (T1–T4, T6, T9 done; T5, T8
-  partial; T7 open). Design: [`apps/docs/docs/auth/oauth-oidc-bridge.md`](../apps/docs/docs/auth/oauth-oidc-bridge.md)
+- **Status:** in progress — bridge implemented in `apps/oauth` (T1–T4, T6, T7, T9 done; T5, T8
+  partial). Design: [`apps/docs/docs/auth/oauth-oidc-bridge.md`](../apps/docs/docs/auth/oauth-oidc-bridge.md)
 - **Priority:** P1 (ecosystem adoption: one bridge unlocks existing auth-capable applications)
 - **Depends on:** EPIC-001 (public resolver chain), EPIC-008 (native Poweur Sign-In and verifier),
   EPIC-013 (deployment/observability foundations)
@@ -16,11 +16,11 @@
 |------|--------|-------|
 | E22-T1 Architecture, protocol profile & threat model | **done** | `auth/oauth-oidc-bridge.md`; ID vectors `id-input.json` |
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
-| E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc/x/oauth2 verified; live Keycloak/Authentik runs moved to T8; `poweur_proof` deferred |
+| E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy and Keycloak verified live; Authentik → T8; `poweur_proof` deferred |
 | E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer |
 | E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
-| E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
+| E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
 | E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI, rate limits, recipes, CI; conformance suite, live products, prod rollout open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
@@ -237,7 +237,8 @@ registration or shared secret.
 - [x] `/.well-known/openid-configuration` (+ RFC 8414 alias), `/authorize`, `/token`,
       `/jwks.json`, `/userinfo`, `/revoke`, `/introspect`
 - [x] Authorization Code only; PKCE `S256` required for every client; exact redirect matching
-      (loopback any-port for public clients only); `state`, `nonce`, `iss` (RFC 9207);
+      (loopback any-port for public clients only); `state`, `iss` (RFC 9207), `nonce` echoed when
+      sent (optional for the code flow — oauth2-proxy sends none by default);
       duplicate parameters refused; errors before the redirect is trusted render a page
 - [x] Client lookup through one registry (static, console, URL)
 - [x] Codes: 256-bit, hashed, single-use, 60 s; reuse revokes the first redemption's tokens.
@@ -253,10 +254,13 @@ registration or shared secret.
       design's open questions)
 - [x] Integration coverage with `coreos/go-oidc` + `x/oauth2` — the libraries oauth2-proxy is
       built on — against real relays (`TestINT_OAUTH_01/02`)
-- [ ] Runs against live Keycloak, Authentik and oauth2-proxy containers — **moved to E22-T8**
-      (recipes are in `apps/oauth/README.md`)
+- [x] Live runs against **oauth2-proxy 7.12** and **Keycloak 26.3** containers through the real
+      web signer (`apps/web/test/e2e/oauth-live-*.spec.js`, `POWEUR_LIVE_DOCKER=1`). The oauth2-proxy
+      run showed `nonce` must be optional (it sends none); the bridge now echoes it when sent
+- [ ] Authentik — **moved to E22-T8**
 
-**Acceptance:** met for the go-oidc stack; the named products are verified in T8.
+**Acceptance:** met for go-oidc, oauth2-proxy and Keycloak with only standard configuration;
+Authentik remains.
 
 ### E22-T4 — Browser signer and consent journey — **done**
 
@@ -324,26 +328,33 @@ waits on EPIC-019.
 
 **Acceptance:** met at protocol level by `bridge/indieauth_test.go`; live clients in T8.
 
-### E22-T7 — Optional push-to-approve delivery channel — **open**
+### E22-T7 — Optional push-to-approve delivery channel — **done** (native background notification → EPIC-019)
 
 This task is additive and does not block T2–T6.
 
-- [ ] Define and register an encrypted, short-lived `sys.auth.request` typed message carrying the
-      same request, verified client summary and a transaction-bound number match
-- [ ] Bridge operates its own Poweur ID only for delivery; compromise cannot produce a user
-      signature, though an OIDC RP already trusts that bridge's issuer key
-- [ ] Add `trusted_auth_services` (or equivalent) as a narrow policy distinct from contacts;
-      accepting auth requests grants no chat, sharing or other `sys.*` permission
-- [ ] Dedicated Sign-in Requests queue/tray; do not archive requests into conversations; states
-      are new/viewed/approved/denied/expired
-- [ ] Number matching between initiating browser and approving device; never approve from the OS
-      notification itself; require unlock/user verification
-- [ ] Rate limit, deduplicate, expire and provide deny/block controls to resist push fatigue
-- [ ] Foreground SSE/web delivery first; native background notification depends on EPIC-019
+- [x] `sys.auth.request` registered (Go, TS, `conventions/registry.json`); body
+      `{version, request, client, client_host, expires_at}` (`identity.AuthRequestPayload`,
+      TS `parseAuthRequestPayload`) — the same public request as the QR, never the match code
+- [x] The bridge sends as its own Poweur ID through the `poweur` CLI (`OAUTH_PUSH_*`,
+      `--via-home-relay`); a queued or redirected send counts as not delivered
+- [x] `trusted_auth_services` in `inbox-policy.json` (Go + TS + vectors): the relay admits prompts
+      only from listed services, in every mode, only that type, short-lived and small; contacts
+      gain nothing; blocked services are refused. `poweur policy set --trusted-auth`, kept across
+      mode changes; the web policy editor keeps and edits it (Settings → Sign-in services)
+- [x] Sign-in requests list on Messages: not a conversation, not archived (SDK and CLI skip
+      history), expiry shown, Review / Dismiss; CLI `inbox` prints the approve command
+- [x] Number matching: a reviewed prompt requires the code from the starting screen; the page
+      opens its code section after a send
+- [x] Rate limits: three sends per sign-in, 15 s apart, plus the per-IP limits; relay-side caps
+- [x] Foreground delivery through the app's existing push stream; background OS notifications
+      wait on EPIC-019 E19-T4
+- [x] Tests: relay admission (`auth_prompt_test.go`), bridge (`push_test.go`), CLI, SDK, web;
+      `TestINT_OAUTH_03` (untrusted refused, trusted delivered, approve with code, no chat);
+      Playwright "pushed to the app" (Settings → trust → push → Review → code → consent)
 
-**Acceptance:** an enrolled device can approve a request delivered by message while the initiating
-browser waits, but disabling the trusted auth service stops delivery without changing contacts or
-breaking browser/QR login.
+**Acceptance:** met — an enrolled app approves a pushed request while the browser waits;
+removing the service from Sign-in services stops delivery without touching contacts, and
+browser/QR login is unchanged.
 
 ### E22-T8 — Packaging, conformance, integrations & operations — **partial**
 
@@ -360,7 +371,8 @@ breaking browser/QR login.
       `Retry-After`
 - [ ] OIDC conformance suite, OAuth security failure matrix, external review — open (human)
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
-- [ ] Live runs of those products and of two IndieAuth clients; privacy policy; production
+- [x] Live oauth2-proxy and Keycloak runs (opt-in Playwright specs, Docker)
+- [ ] Authentik and two independent IndieAuth clients live; privacy policy; production
       deployment at `oauth.poweur.org` (ansible/Caddy) — open
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 

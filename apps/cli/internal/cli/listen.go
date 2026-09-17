@@ -442,6 +442,10 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		// line, because the CLI cannot present an application's payload and
 		// showing the raw plaintext would be showing someone else's JSON.
 		rendered := describeTypedMessage(msg.Sender, msg.Type, display, decrypted)
+		isPrompt := idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeAuthRequest
+		if isPrompt && decrypted {
+			rendered = describeAuthPrompt(msg.Sender, display)
+		}
 		if decrypted && idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeChatAttachment {
 			if ref, err := idpkg.ParseAttachmentMetadata(msg.Metadata); err == nil {
 				rendered = fmt.Sprintf("attachment %s (%s, %d bytes) — poweur attachment get %s %s --sha256 %s",
@@ -451,7 +455,9 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
 			rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
 
-		if decrypted {
+		// A sign-in prompt is a notification, not conversation: it is never
+		// archived into history (EPIC-022 E22-T7).
+		if decrypted && !isPrompt {
 			record := historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
 				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display)
 			record.ExpiresAt, record.Metadata = msg.ExpiresAt, msg.Metadata
@@ -503,4 +509,23 @@ func loadInboxPolicyForReceipts(ctx context.Context, cfg config.Config, identity
 		return policy, false
 	}
 	return parsed, true
+}
+
+// describeAuthPrompt renders a sign-in prompt as the command that answers it.
+// The code is never in the prompt: it is on the screen that started the
+// sign-in, and asking for it is the point.
+func describeAuthPrompt(sender, body string) string {
+	p, req, err := idpkg.ParseAuthRequestPayload([]byte(body), time.Now())
+	if err != nil {
+		return fmt.Sprintf("sign-in request from %s could not be read (%v)", sender, err)
+	}
+	app := p.Client
+	if app == "" {
+		app = req.Domain
+	}
+	if p.ClientHost != "" && !strings.EqualFold(p.ClientHost, app) {
+		app += " (" + p.ClientHost + ")"
+	}
+	return fmt.Sprintf("sign-in request for %s via %s — if you started it, run: poweur auth approve %s --code <the code on that screen>",
+		app, sender, p.Request)
 }

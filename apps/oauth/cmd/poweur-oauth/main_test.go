@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/poweur/identity/signin"
 )
@@ -104,5 +107,54 @@ func TestKeysAndClientsCommands(t *testing.T) {
 	t.Setenv("OAUTH_SESSION_TTL", "soon")
 	if code, _, errOut := runCmd(t, "", "keys", "list"); code == 0 || !strings.Contains(errOut, "OAUTH_SESSION_TTL") {
 		t.Fatalf("bad session ttl = %d %q", code, errOut)
+	}
+}
+
+func TestCLIPusher(t *testing.T) {
+	home := t.TempDir()
+	if _, err := newCLIPusher("poweur", "", "bridge.poweur.org"); err == nil {
+		t.Fatal("missing home accepted")
+	}
+	if _, err := newCLIPusher("poweur", home, "not a name"); err == nil {
+		t.Fatal("bad identity accepted")
+	}
+	if _, err := newCLIPusher("poweur", filepath.Join(home, "missing"), "bridge.poweur.org"); err == nil {
+		t.Fatal("missing directory accepted")
+	}
+	p, err := newCLIPusher("poweur", home, "Bridge.Poweur.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotArgs, gotEnv []string
+	p.run = func(_ context.Context, name string, args, env []string) ([]byte, error) {
+		gotArgs, gotEnv = append([]string{name}, args...), env
+		return []byte(`{"id":"m1","status":202}`), nil
+	}
+	t.Setenv("POWEUR_RESOLVER_SCHEME", "http")
+	t.Setenv("OAUTH_KEY_ENCRYPTION_KEY", "must-not-leak")
+	exp := time.Date(2026, 9, 17, 12, 3, 0, 0, time.UTC)
+	if err := p.Push(context.Background(), "alice.poweur.net", []byte(`{"version":1}`), exp); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(gotArgs, " ")
+	for _, want := range []string{"poweur send alice.poweur.net", "--type sys.auth.request", "--expires 2026-09-17T12:03:00Z", "--use-identity bridge.poweur.org", "--via-home-relay"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args %q lack %q", joined, want)
+		}
+	}
+	env := strings.Join(gotEnv, "\n")
+	if !strings.Contains(env, "HOME="+home) || !strings.Contains(env, "POWEUR_RESOLVER_SCHEME=http") || strings.Contains(env, "must-not-leak") {
+		t.Fatalf("env = %q", env)
+	}
+	p.run = func(context.Context, string, []string, []string) ([]byte, error) { return nil, errors.New("boom") }
+	if err := p.Push(context.Background(), "alice.poweur.net", nil, exp); err == nil {
+		t.Fatal("a failed send was reported as sent")
+	}
+	for _, out := range []string{`{"id":"m1","status":"queued"}`, `{"status":403}`, `not json`} {
+		out := out
+		p.run = func(context.Context, string, []string, []string) ([]byte, error) { return []byte(out), nil }
+		if err := p.Push(context.Background(), "alice.poweur.net", nil, exp); err == nil {
+			t.Fatalf("output %s was reported as delivered", out)
+		}
 	}
 }

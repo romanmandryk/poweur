@@ -40,6 +40,7 @@ button, .button {
   background: var(--card); color: var(--text); text-decoration: none;
 }
 button.primary, .button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.wide { width: 100%; }
 button.link { background: none; border: none; padding: .25rem 0; color: var(--accent); font-weight: 400; }
 button.danger { color: var(--danger); }
 .error { color: var(--danger); margin: 0; }

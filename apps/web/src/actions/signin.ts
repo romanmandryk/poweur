@@ -24,13 +24,13 @@ export function setContinueTo(fn: (url: string) => void) {
 
 export function resetSignInRequest() {
   useData.setState({
-    auth: { input: "", request: null, metadata: null, headline: "", context: "", scopes: [], loading: false, error: "", result: null },
+    auth: { input: "", request: null, metadata: null, headline: "", context: "", requireCode: false, scopes: [], loading: false, error: "", result: null },
   });
 }
 
 /** Verify a pasted request or `?auth=` link against the app's origin. */
-export async function beginSignInApproval(input: string) {
-  patchAuth({ input: String(input ?? "").trim(), loading: true, error: "", result: null });
+export async function beginSignInApproval(input: string, { requireCode = false } = {}) {
+  patchAuth({ input: String(input ?? "").trim(), loading: true, error: "", result: null, requireCode });
   useRoute.setState({ sub: "auth" });
   try {
     const consent: any = await loadSignInConsent(useData.getState().auth.input);
@@ -65,4 +65,14 @@ export async function approveSignIn(match = "") {
   } catch (error) {
     patchAuth({ loading: false, error: (error as Error).message });
   }
+}
+
+/** Open a sign-in prompt for review: always a cross-device approval. */
+export function openAuthPrompt(prompt: { request: string }) {
+  void beginSignInApproval(prompt.request, { requireCode: true });
+}
+
+/** Hide a prompt for the rest of this session. */
+export function dismissAuthPrompt(id: string) {
+  useData.setState((state) => ({ dismissedPrompts: [...state.dismissedPrompts, id] }));
 }

@@ -429,6 +429,8 @@ func TestVectors_SysDocs(t *testing.T) {
 		{"anon-pow", `{"version":1,"mode":"contacts_and_requests","anonymous":{"allow":true,"challenge":"pow","pow_bits":18}}`},
 		{"bad-mode", `{"version":1,"mode":"everyone"}`},
 		{"bad-challenge", `{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"captcha"}}`},
+		{"trusted-auth", `{"version":1,"mode":"contacts_only","trusted_auth_services":["bridge.poweur.org"]}`},
+		{"bad-trusted-auth", `{"version":1,"mode":"open","trusted_auth_services":["not a name"]}`},
 	} {
 		_, err := ParseInboxPolicy([]byte(entry.raw))
 		policies = append(policies, sysDocVector{entry.name, json.RawMessage(entry.raw), err == nil})

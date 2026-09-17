@@ -35,6 +35,12 @@ States: `requested` (an open request exists), `accepted`, `blocked`.
 | `contacts_only` | accepted contacts only; everyone else `policy_rejected` — including contact requests |
 | `contacts_and_requests` | contacts message normally; a stranger's first `sys.contact.request` lands in the **requests queue**; everything else is rejected until accepted |
 
+`trusted_auth_services` (optional) lists the OAuth bridges (EPIC-022) whose
+`sys.auth.request` sign-in prompts the relay admits — in every mode, and only that type. A
+listed service is not a contact: it cannot chat, share or send any other `sys.*` message, and
+being a contact does not let anyone send prompts. A blocked service is refused like any other
+blocked sender. Prompts must be small and expire within ten minutes.
+
 Clients SHOULD write `contacts_and_requests` for human identities (`poweur policy set
 contacts_and_requests`). Blocked senders are rejected in **every** mode — and receive the
 same generic `policy_rejected` as strangers, so a block is indistinguishable from a

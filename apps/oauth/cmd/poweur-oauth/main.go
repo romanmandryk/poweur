@@ -269,6 +269,15 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 			AllowPrivate: os.Getenv("RESOLVER_ALLOW_PRIVATE") == "1",
 		},
 	}
+	if cli := env("OAUTH_PUSH_CLI", ""); cli != "" {
+		p, err := newCLIPusher(cli, env("OAUTH_PUSH_HOME", ""), env("OAUTH_PUSH_IDENTITY", ""))
+		if err != nil {
+			store.Close()
+			return bridge.Config{}, err
+		}
+		cfg.Pusher = p
+		cfg.PushIdentity = p.identity
+	}
 	if dial := env("OAUTH_RESOLVER_DIAL", ""); dial != "" {
 		// Local development: every identity host is served by one relay
 		// (mirrors the CLI's POWEUR_RESOLVER_DIAL).

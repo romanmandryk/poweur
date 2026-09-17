@@ -32,6 +32,7 @@ interface PolicyState {
   maxPerDay: number;
   readReceipts: boolean;
   disabledFor: string;
+  trustedAuth: string;
 }
 
 function initialState(policy: InboxPolicy): PolicyState {
@@ -44,6 +45,7 @@ function initialState(policy: InboxPolicy): PolicyState {
     maxPerDay: policy.anonymous?.max_per_day || 20,
     readReceipts: policy.read_receipts?.enabled !== false,
     disabledFor: (policy.read_receipts?.disabled_for ?? []).join(", "),
+    trustedAuth: (policy.trusted_auth_services ?? []).join(", "),
   };
 }
 
@@ -63,6 +65,8 @@ export function toPolicyDocument(state: PolicyState): InboxPolicy {
     enabled: state.readReceipts,
     disabled_for: state.disabledFor.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean),
   };
+  const trusted = [...new Set(state.trustedAuth.split(/[\s,]+/).map((value) => value.trim().toLowerCase()).filter(Boolean))];
+  if (trusted.length) document.trusted_auth_services = trusted;
   return document;
 }
 
@@ -255,6 +259,22 @@ export function PolicyControls({
           placeholder="private-contact.example (optional)"
           onChange={(event) => update({ disabledFor: event.currentTarget.value })}
         />
+      </FormGroup>
+
+      <SectionLabel className="px-0">Sign-in services</SectionLabel>
+      <FormGroup>
+        <Label htmlFor="policy-trusted-auth">May send you sign-in requests (comma-separated)</Label>
+        <Input
+          id="policy-trusted-auth"
+          type="text"
+          value={state.trustedAuth}
+          placeholder="bridge.poweur.org (optional)"
+          onChange={(event) => update({ trustedAuth: event.currentTarget.value })}
+        />
+        <p className="mt-1 text-[13px] text-muted">
+          A sign-in page shows the service's name. Listing it lets its requests reach your Sign-in requests — nothing
+          else: it cannot message you or share files.
+        </p>
       </FormGroup>
 
       {showSave && (

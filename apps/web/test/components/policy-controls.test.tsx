@@ -90,4 +90,14 @@ describe("PolicyControls", () => {
     fireEvent.click($("#policy-read-receipts"));
     expect(controls().value().read_receipts).toEqual({ enabled: false, disabled_for: ["alice.example", "bob.example"] });
   });
+
+  it("round-trips trusted sign-in services and writes nothing when empty", () => {
+    const { controls, $ } = setup({ mode: "open", trusted_auth_services: ["bridge.poweur.org"] });
+    expect($<HTMLInputElement>("#policy-trusted-auth").value).toBe("bridge.poweur.org");
+    expect(controls().value().trusted_auth_services).toEqual(["bridge.poweur.org"]);
+    fireEvent.change($("#policy-trusted-auth"), { target: { value: " Bridge.Poweur.org, other.example.org  bridge.poweur.org" } });
+    expect(controls().value().trusted_auth_services).toEqual(["bridge.poweur.org", "other.example.org"]);
+    fireEvent.change($("#policy-trusted-auth"), { target: { value: "" } });
+    expect(controls().value()).not.toHaveProperty("trusted_auth_services");
+  });
 });

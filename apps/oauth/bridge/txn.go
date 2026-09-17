@@ -50,6 +50,8 @@ type Txn struct {
 	RequestExpires time.Time `json:"request_expires,omitempty"`
 	Match          string    `json:"match,omitempty"`
 	Signers        []Signer  `json:"signers,omitempty"`
+	Pushes         int       `json:"pushes,omitempty"`
+	LastPush       time.Time `json:"last_push,omitempty"`
 
 	// Approval.
 	Claimed          bool      `json:"claimed,omitempty"`

@@ -181,6 +181,7 @@ Shape: two or more dot-separated segments of lowercase letters, digits and inner
 | `sys.share.offer` / `sys.share.accept` / `sys.share.revoked` | Share grant lifecycle |
 | `sys.sync.changed` | Sync journal notification |
 | `sys.abuse.report` | Abuse report |
+| `sys.auth.request` | Sign-in prompt from an OAuth bridge the recipient trusts (EPIC-022); admitted only from `trusted_auth_services`, must carry `expires_at` ≤ 10 minutes ahead, never archived |
 
 Everything **outside** `sys.*` is opaque to the relay: it stores and forwards a `chat.text`, a `chat.attachment` and an application's own `net.example.thing` identically and has no opinion about their contents. An application ships a new message type without a relay release.
 

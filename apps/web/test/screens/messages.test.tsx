@@ -18,7 +18,9 @@ import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
 import { useSession } from "../../src/state/session";
+import { decodeSignInRequest, encodeSignInRequest } from "@poweur/client";
 import { fakeClient, inbound } from "../helpers/fake-client";
+import { promptMessage } from "../helpers/prompts";
 import { resetStores } from "../helpers/stores";
 
 const ME = "alice.poweur.net";
@@ -214,5 +216,28 @@ describe("Conversation view (E15-T13)", () => {
     fireEvent.click($("#btn-back")!);
     expect(useRoute.getState().sub).toBeNull();
     expect(useData.getState().thread).toBeNull();
+  });
+
+  it("shows sign-in requests apart from conversations, and review requires the code", async () => {
+    const soon = new Date(Date.now() + 120_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const prompt = { ...promptMessage("p1"), recipient: ME };
+    const payload = JSON.parse(prompt.plaintext);
+    // Re-issue with a live window.
+    const req = { ...decodeSignInRequest(payload.request), issued_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), expires_at: soon };
+    prompt.plaintext = JSON.stringify({ ...payload, request: encodeSignInRequest(req as never), expires_at: soon });
+    holder.client.inboxAndArchive.mockResolvedValueOnce({ messages: [prompt], acks: [], acked: [], archived: 0, lost: 0 });
+    render(<App />);
+    await waitFor(() => expect($("#auth-prompts")).not.toBeNull());
+    expect($("#auth-prompts")!.textContent).toContain("Team dashboard (grafana.example.org)");
+    expect($("#auth-prompts")!.textContent).toContain("via bridge.poweur.org");
+    expect($(".empty-state-title")!.textContent).toBe("No messages yet");
+
+    fireEvent.click($(".btn-prompt-review")!);
+    expect(useData.getState().auth.requireCode).toBe(true);
+    expect(useRoute.getState().sub).toBe("auth");
+
+    act(() => useRoute.setState({ sub: null } as never));
+    fireEvent.click($(".btn-prompt-dismiss")!);
+    await waitFor(() => expect($("#auth-prompts")).toBeNull());
   });
 });

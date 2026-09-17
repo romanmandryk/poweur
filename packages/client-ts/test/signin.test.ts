@@ -24,6 +24,7 @@ import {
   describeSignInContext,
   fetchSignInContext,
   normalizeMatchCode,
+  parseAuthRequestPayload,
   canonicalSignInResponse,
   checkRequestAgainstMetadata,
   checkSignInScopeNamespace,
@@ -817,5 +818,29 @@ describe("canonical string", () => {
     for (const [secs, want] of [[1, "just now"], [30, "30 seconds ago"], [90, "a minute ago"], [300, "5 minutes ago"], [7200, "over an hour ago"]] as const) {
       expect(describeSignInContext({ request_id: "r", started_at: "2026-09-17T12:00:00Z" }, at + secs * 1000)).toBe(`Started ${want}.`);
     }
+  });
+
+  it("parses sign-in prompts like Go", () => {
+    const now = Date.parse("2026-09-17T12:00:00Z");
+    const req = {
+      poweur_auth: "1", request_id: "req_1", audience: "https://oauth.poweur.org", nonce: "nonce-nonce-nonce",
+      action: "signin", issued_at: "2026-09-17T12:00:00Z", expires_at: "2026-09-17T12:03:00Z",
+      response_uri: "https://oauth.poweur.org/poweur/callback",
+    };
+    const encoded = encodeSignInRequest(req as never);
+    const good = { version: 1, request: encoded, client: "Team dashboard", client_host: "grafana.example.org", expires_at: req.expires_at };
+    const { payload, request } = parseAuthRequestPayload(JSON.stringify(good), now);
+    expect(request.request_id).toBe("req_1");
+    expect(payload.client).toBe("Team dashboard");
+    for (const bad of [
+      { ...good, version: 2 },
+      { ...good, request: "%%%" },
+      { ...good, expires_at: "2026-09-17T12:00:00Z" },
+      { ...good, client: "a\nb" },
+    ]) {
+      expect(() => parseAuthRequestPayload(JSON.stringify(bad), now)).toThrow();
+    }
+    expect(() => parseAuthRequestPayload(JSON.stringify(good), now + 3600_000)).toThrow();
+    expect(() => parseAuthRequestPayload("{", now)).toThrow();
   });
 });

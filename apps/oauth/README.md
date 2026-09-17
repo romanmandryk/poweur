@@ -44,6 +44,7 @@ repo root. [`compose.example.yml`](compose.example.yml) runs it beside a relay.
 | `OAUTH_URL_CLIENTS` | `indieauth` | URL `client_id`s: `indieauth` (IndieAuth only), `on` (OIDC too), `off`. |
 | `OAUTH_SESSION_TTL` | `12h` | How long a browser stays signed in to the bridge. |
 | `OAUTH_CONTACT_URI`, `OAUTH_ABUSE_CONTACT` | `/abuse` | Where consent pages send abuse reports. |
+| `OAUTH_PUSH_CLI`, `OAUTH_PUSH_HOME`, `OAUTH_PUSH_IDENTITY` | — | Enable **Send to my Poweur app**: the `poweur` binary, a home holding only the bridge's identity (`HOME=… poweur identity create …`), and that identity. Users list it under Sign-in services. |
 | `OAUTH_RATE_AUTHORIZE` / `_IDENTIFY` / `_CALLBACK` / `_TOKEN` / `_CONSOLE` | 60 / 20 / 60 / 120 / 30 | Requests per minute per client IP; `-1` disables. |
 | `OAUTH_TRUST_PROXY` | off | `1` to rate-limit by the last `X-Forwarded-For` hop (only behind a proxy that sets it). |
 | `RESOLVER_ALLOW_PRIVATE`, `POWEUR_RESOLVER_SCHEME` | off, `https` | Local development only. |
@@ -73,8 +74,16 @@ Discovery: `https://<issuer>/.well-known/openid-configuration`. Authorization
 Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
 `profile` (released only if the user leaves them ticked).
 
-- **oauth2-proxy**: `--provider=oidc --oidc-issuer-url=<issuer> --client-id=… --client-secret=… --code-challenge-method=S256 --scope="openid poweur_id"`
-- **Keycloak** (identity brokering): *OpenID Connect v1.0* provider, discovery URL above, *Client authentication: Client secret sent as basic auth*, *PKCE: S256*, default scopes `openid poweur_id`.
+- **oauth2-proxy** (verified live, v7.12 — `apps/web/test/e2e/oauth-live-oauth2-proxy.spec.js`):
+  `--provider=oidc --oidc-issuer-url=<issuer> --client-id=… --client-secret=… --code-challenge-method=S256
+  --scope="openid poweur_id" --oidc-email-claim=poweur_id --email-domain=* --insecure-oidc-allow-unverified-email`.
+  The bridge releases no e-mail, so the Poweur ID stands in for it; restrict who gets in with
+  `--authenticated-emails-file` listing Poweur IDs.
+- **Keycloak** (identity brokering; verified live, 26.3 — `apps/web/test/e2e/oauth-live-keycloak.spec.js`):
+  *OpenID Connect v1.0* provider with the discovery URL above, *Client authentication: Client
+  secret sent as basic auth*, *PKCE: S256*, default scopes `openid poweur_id`, and a *Username
+  Template Importer* mapper with `${CLAIM.poweur_id}`. A Poweur ID carries no e-mail or name, so
+  make those optional in the realm's user profile (or let the review-profile step ask).
 - **Authentik** (OAuth source): *OpenID Connect* type, *OIDC Well-known URL* above, consumer key/secret from the console, scopes `openid poweur_id`.
 - **Grafana**: `[auth.generic_oauth]` with `use_pkce = true`, `scopes = openid poweur_id`, `login_attribute_path = poweur_id`.
 

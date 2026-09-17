@@ -202,6 +202,42 @@ export interface SignInDeliveryReceipt {
   resume_uri?: string;
 }
 
+/**
+ * The decrypted body of a `sys.auth.request` sign-in prompt. Mirrors Go
+ * `identity.AuthRequestPayload`. It never carries the match code: that is on
+ * the screen that started the sign-in.
+ */
+export interface AuthRequestPayload {
+  version: number;
+  request: string;
+  client?: string;
+  client_host?: string;
+  expires_at: string;
+}
+
+export const MAX_AUTH_REQUEST_BYTES = 8 * 1024;
+
+/** Parse and validate a prompt body; returns the payload and its decoded request. */
+export function parseAuthRequestPayload(
+  text: string,
+  nowMs = Date.now(),
+): { payload: AuthRequestPayload; request: SignInRequest } {
+  if ((text ?? "").length > MAX_AUTH_REQUEST_BYTES) fail("sign-in prompt too large");
+  let payload: AuthRequestPayload;
+  try {
+    payload = JSON.parse(text) as AuthRequestPayload;
+  } catch {
+    return fail("sign-in prompt is not JSON");
+  }
+  if (payload?.version !== 1) fail(`unsupported sign-in prompt version ${payload?.version}`);
+  const request = validateSignInRequest(decodeSignInRequest(payload.request), nowMs);
+  if (request.expires_at !== payload.expires_at) fail("sign-in prompt expiry does not match its request");
+  if ((payload.client ?? "").length > 80 || (payload.client_host ?? "").length > 253 || /[\r\n]/.test(`${payload.client ?? ""}${payload.client_host ?? ""}`)) {
+    fail("sign-in prompt labels are malformed");
+  }
+  return { payload, request };
+}
+
 /** Digits of a cross-device match code; see Go `signin.MatchCodeDigits`. */
 export const SIGNIN_MATCH_CODE_DIGITS = 2;
 

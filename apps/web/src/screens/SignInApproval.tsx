@@ -29,7 +29,7 @@ export function SignInApproval() {
   const [localError, setLocalError] = useState("");
   // In the shell the app being signed in to is never in this browser, so a
   // same-device finish is impossible and the code is required.
-  const shell = isShellRuntime();
+  const shell = isShellRuntime() || auth.requireCode;
 
   if (auth.loading) {
     return (

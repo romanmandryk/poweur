@@ -89,6 +89,11 @@ type awaitView struct {
 	Match    string
 	Client   *AuthorizeRequest
 	QR       template.HTML
+	// Push is set when the bridge can send the request to the user's app.
+	Push       bool
+	PushFrom   string
+	Pushed     bool
+	PushNotice string
 }
 
 func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
@@ -110,6 +115,10 @@ func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
 		v.DeepLink = template.URL(deep)
 	}
 	v.QR = qrSVG(deep)
+	v.Push = s.cfg.Pusher != nil && t.Pushes < maxPushesPerTxn
+	v.PushFrom = s.cfg.PushIdentity
+	v.Pushed = t.Pushes > 0
+	v.PushNotice = r.URL.Query().Get("push")
 	s.render(w, r, http.StatusOK, "await.html", "Approve with your Poweur ID", v)
 }
 

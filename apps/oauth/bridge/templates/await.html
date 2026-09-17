@@ -10,9 +10,24 @@
     {{with $s.Note}}<p class="hint">{{.}}</p>{{end}}
     {{end}}
     <a class="button" href="{{.Data.DeepLink}}">Open the Poweur app on this device</a>
+    {{if .Data.Push}}
+    <form method="post" action="/t/{{.Data.Txn.ID}}/push">
+      <button type="submit" class="wide">Send to my Poweur app</button>
+    </form>
+    <p class="hint">Your app shows it only if you listed <strong>{{.Data.PushFrom}}</strong> under Sign-in services.</p>
+    {{end}}
+    {{with .Data.PushNotice}}
+    <p class="status" role="status">
+      {{if eq . "sent"}}Sent. Open it in your Poweur app and enter the code below.
+      {{else if eq . "too-soon"}}Already sent — give it a few seconds.
+      {{else if eq . "too-many"}}Sent as many times as allowed for this sign-in.
+      {{else if eq . "failed"}}It could not be sent. Use one of the other ways.
+      {{else}}This sign-in is no longer waiting for approval.{{end}}
+    </p>
+    {{end}}
   </div>
 
-  <details class="other-device">
+  <details class="other-device"{{if .Data.Pushed}} open{{end}}>
     <summary>Approving on another device?</summary>
     <p>Scan this with your Poweur app, or paste the request code into it. When it asks, enter:</p>
     <p class="match" aria-label="Code to enter on the other device">{{.Data.Match}}</p>

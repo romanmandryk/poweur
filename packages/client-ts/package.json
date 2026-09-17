@@ -1,6 +1,6 @@
 {
   "name": "@poweur/client",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Poweur protocol client — identity, messaging, files, sync, shares and proof-of-work for browser, Node, Bun and Deno.",
   "license": "MIT",
   "type": "module",

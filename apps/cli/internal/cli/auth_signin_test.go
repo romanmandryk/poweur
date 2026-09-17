@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,5 +108,43 @@ func TestDeliverSignInApprovalToleratesLegacyAndRefusesRedirects(t *testing.T) {
 	defer refused.Close()
 	if _, err := deliverSignInApproval(context.Background(), refused.URL, signinpkg.Delivery{Response: "enc", Match: "11"}); err == nil {
 		t.Fatal("a refused delivery must be an error")
+	}
+}
+
+func TestDescribeAuthPrompt(t *testing.T) {
+	req := signInRequestForCLI(t)
+	enc, _ := idpkg.EncodeSignInRequest(req)
+	body, _ := json.Marshal(idpkg.AuthRequestPayload{
+		Version: 1, Request: enc, Client: "Team dashboard", ClientHost: "grafana.example.org", ExpiresAt: req.ExpiresAt,
+	})
+	got := describeAuthPrompt("bridge.poweur.org", string(body))
+	for _, want := range []string{"Team dashboard (grafana.example.org)", "via bridge.poweur.org", "poweur auth approve " + enc, "--code"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("describeAuthPrompt = %q, lacks %q", got, want)
+		}
+	}
+	if got := describeAuthPrompt("x.example", "{not json"); !strings.Contains(got, "could not be read") {
+		t.Fatalf("garbage = %q", got)
+	}
+}
+
+func TestSendMessageDoesNotFollowRedirects(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		followed = true
+		_, _ = w.Write([]byte("<html>a landing page</html>"))
+	}))
+	defer target.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusMovedPermanently)
+	}))
+	defer redirecting.Close()
+	resp, err := SendMessage(context.Background(), redirecting.URL, Message{ID: "m1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if followed || resp.StatusCode != http.StatusMovedPermanently {
+		t.Fatalf("redirect followed=%v status=%d — a redirect must never read as delivery", followed, resp.StatusCode)
 	}
 }

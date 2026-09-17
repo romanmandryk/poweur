@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -10,12 +11,17 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"fmt"
+
 	"github.com/coreos/go-oidc/v3/oidc"
+	clipkg "github.com/poweur/cli/pkg/cli"
 	"github.com/poweur/integration/fakedns"
 	"github.com/poweur/oauth/bridge"
 	"golang.org/x/oauth2"
@@ -46,11 +52,17 @@ func routingClient(routes map[string]string) *http.Client {
 }
 
 type oauthFixture struct {
-	issuer string
-	store  *bridge.Store
+	issuer  string
+	store   *bridge.Store
+	advance func(time.Duration)
 }
 
 func newOAuthBridge(t *testing.T, zone *fakedns.Zone, routes map[string]string, clients []bridge.Client) oauthFixture {
+	t.Helper()
+	return newOAuthBridgeWith(t, zone, routes, clients, nil)
+}
+
+func newOAuthBridgeWith(t *testing.T, zone *fakedns.Zone, routes map[string]string, clients []bridge.Client, tweak func(*bridge.Config)) oauthFixture {
 	t.Helper()
 	ctx := context.Background()
 	store, err := bridge.OpenStore(ctx, ":memory:")
@@ -64,7 +76,11 @@ func newOAuthBridge(t *testing.T, zone *fakedns.Zone, routes map[string]string, 
 	}
 	ts := httptest.NewUnstartedServer(nil)
 	issuer := "http://" + ts.Listener.Addr().String()
-	srv, err := bridge.New(ctx, bridge.Config{
+	var mu sync.Mutex
+	now := time.Now()
+	fx := oauthFixture{advance: func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }}
+	cfg := bridge.Config{
+		Now:           func() time.Time { mu.Lock(); defer mu.Unlock(); return now },
 		Issuer:        issuer,
 		Store:         store,
 		Keys:          keys,
@@ -76,14 +92,19 @@ func newOAuthBridge(t *testing.T, zone *fakedns.Zone, routes map[string]string, 
 			TXT:          zone,
 			HTTPClient:   routingClient(routes),
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	srv, err := bridge.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts.Config.Handler = srv
 	ts.Start()
 	t.Cleanup(ts.Close)
-	return oauthFixture{issuer: issuer, store: store}
+	fx.issuer, fx.store = issuer, store
+	return fx
 }
 
 type oauthBrowser struct {
@@ -337,5 +358,116 @@ func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 	resp, _ = attacker.do(http.MethodGet, fx.issuer+"/t/"+txn+"/continue", nil)
 	if loc := resp.Header.Get("Location"); strings.Contains(loc, "code=") {
 		t.Fatalf("the attacker got a code: %s", loc)
+	}
+}
+
+// cliPusher sends prompts as the bridge's identity through the real CLI,
+// in-process, from the bridge's own HOME.
+type cliPusherForTest struct {
+	t        *testing.T
+	home     string
+	identity string
+	mu       sync.Mutex
+	outputs  []string
+}
+
+func (p *cliPusherForTest) Push(_ context.Context, to string, body []byte, exp time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	prev := os.Getenv("HOME")
+	os.Setenv("HOME", p.home)
+	defer os.Setenv("HOME", prev)
+	var stdout, stderr bytes.Buffer
+	code := clipkg.Run([]string{"send", to, string(body), "--type", idpkg.MsgTypeAuthRequest,
+		"--expires", exp.UTC().Format(time.RFC3339), "--use-identity", p.identity, "--via-home-relay", "--json"}, &stdout, &stderr)
+	p.outputs = append(p.outputs, stdout.String()+stderr.String())
+	if code != 0 {
+		return fmt.Errorf("send exited %d: %s", code, stderr.String())
+	}
+	var out struct {
+		Status json.RawMessage `json:"status"`
+	}
+	_ = json.Unmarshal(stdout.Bytes(), &out)
+	if string(out.Status) != "202" && string(out.Status) != "200" {
+		return fmt.Errorf("not delivered: %s", stdout.String())
+	}
+	return nil
+}
+
+// TestINT_OAUTH_03: push-to-approve. The bridge sends a sign-in prompt as its
+// own Poweur ID; the relay admits it only because the user listed the
+// bridge; the user approves with the code the starting browser shows.
+func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
+	zone := newZone(t)
+	relay, addr := newHostedRelay(t, zone, t.TempDir())
+	defer relay.Close()
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+	// Every name here lives on the test relay; nothing may reach real DNS.
+	zone.SetHost("pushuser.poweur.net", addr)
+	zone.SetHost("pushbridge.poweur.net", addr)
+	userHome := t.TempDir()
+	user := "pushuser.poweur.net"
+	runCLI(t, userHome, "identity", "create", user, "--hosted", "--relay", "http://"+addr, "--json")
+	bridgeHome := t.TempDir()
+	bridgeID := "pushbridge.poweur.net"
+	runCLI(t, bridgeHome, "identity", "create", bridgeID, "--hosted", "--relay", "http://"+addr, "--json")
+
+	pusher := &cliPusherForTest{t: t, home: bridgeHome, identity: bridgeID}
+	const redirect = "https://rp.example/cb"
+	fx := newOAuthBridgeWith(t, zone, map[string]string{"poweur.net": addr}, []bridge.Client{{
+		ID: "rp", Name: "Push RP", RedirectURIs: []string{redirect}, Secret: "rp-secret-0123456789",
+	}}, func(c *bridge.Config) { c.Pusher = pusher; c.PushIdentity = bridgeID })
+
+	b := newOAuthBrowser(t, fx.issuer)
+	txn, _ := b.startAndIdentify(fx.issuer+"/authorize?"+url.Values{
+		"response_type": {"code"}, "client_id": {"rp"}, "redirect_uri": {redirect}, "scope": {"openid"},
+		"state": {"s"}, "nonce": {"n"}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"},
+	}.Encode(), user)
+	_, page := b.do(http.MethodGet, fx.issuer+"/t/"+txn, nil)
+	match := regexp.MustCompile(`class="match"[^>]*>(\d+)<`).FindStringSubmatch(page)[1]
+
+	push := func() string {
+		resp, _ := b.do(http.MethodPost, fx.issuer+"/t/"+txn+"/push", url.Values{})
+		return resp.Header.Get("Location")
+	}
+	// Not trusted yet: the relay refuses, the page says so.
+	if loc := push(); !strings.HasSuffix(loc, "push=failed") {
+		t.Fatalf("push before trust = %s (%v)", loc, pusher.outputs)
+	}
+	out, _ := runCLI(t, userHome, "policy", "set", "contacts_only", "--trusted-auth", bridgeID)
+	if !strings.Contains(out, "sign-in prompts from "+bridgeID) {
+		t.Fatalf("policy set: %s", out)
+	}
+	// A later mode change keeps the trusted service.
+	runCLI(t, userHome, "policy", "set", "contacts_and_requests")
+	shown, _ := runCLI(t, userHome, "policy", "show")
+	if !strings.Contains(shown, "sign-in prompts from: "+bridgeID) {
+		t.Fatalf("policy show: %s", shown)
+	}
+
+	fx.advance(20 * time.Second)
+	if loc := push(); !strings.HasSuffix(loc, "push=sent") {
+		t.Fatalf("push after trust = %s (%v)", loc, pusher.outputs)
+	}
+	inbox, _ := runCLI(t, userHome, "inbox")
+	re := regexp.MustCompile(`poweur auth approve (\S+) --code`)
+	m := re.FindStringSubmatch(inbox)
+	if m == nil {
+		t.Fatalf("inbox did not show the prompt: %s", inbox)
+	}
+	// The prompt is not archived as conversation.
+	hist, _ := runCLI(t, userHome, "history", "--json")
+	if strings.Contains(hist, idpkg.MsgTypeAuthRequest) {
+		t.Fatalf("prompt archived into history: %s", hist)
+	}
+	runCLI(t, userHome, "auth", "approve", m[1], "--sign-with", "identity", "--code", match)
+	resp, body := b.do(http.MethodGet, fx.issuer+"/t/"+txn+"/status", nil)
+	if resp.StatusCode != 200 || !strings.Contains(body, `"complete"`) {
+		t.Fatalf("status after pushed approval = %s", body)
+	}
+	// Trust admits prompts only: the bridge cannot chat.
+	if code, _, _ := runCLIFull(t, bridgeHome, "send", user, "hello", "--use-identity", bridgeID); code == 0 {
+		t.Fatal("a trusted sign-in service could send chat into a contacts-only inbox")
 	}
 }

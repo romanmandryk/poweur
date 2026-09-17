@@ -57,6 +57,12 @@
       "owner": "poweur core",
       "pcp": null,
       "status": "experimental"
+    },
+    {
+      "type": "sys.auth.request",
+      "owner": "poweur core",
+      "pcp": null,
+      "status": "experimental"
     }
   ],
   "schema_namespaces": [

@@ -436,7 +436,12 @@ func SendAck(ctx context.Context, relayURL string, ack Ack) (*http.Response, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	dumpRequest(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	// A relay that redirects is not accepting the message: following it would
+	// turn the POST into a GET and read the redirect target's 200 as delivery.
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	resp, err := client.Do(req)
 	if err == nil {
 		dumpResponse(resp)
@@ -455,7 +460,12 @@ func SendMessage(ctx context.Context, relayURL string, msg Message) (*http.Respo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	dumpRequest(req)
-	client := &http.Client{Timeout: 10 * time.Second}
+	// A relay that redirects is not accepting the message: following it would
+	// turn the POST into a GET and read the redirect target's 200 as delivery.
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	resp, err := client.Do(req)
 	if err == nil {
 		dumpResponse(resp)

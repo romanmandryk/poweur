@@ -171,6 +171,13 @@ export function Settings() {
                 valueTone={summary.anonOn ? "ok" : undefined}
                 onClick={openPolicyPanel}
               />
+              <SettingsRow
+                id="row-policy-signin"
+                icon={KeyRound}
+                label="Sign-in services"
+                value={summary.signin}
+                onClick={openPolicyPanel}
+              />
             </SettingsGroup>
 
             <SettingsGroup label="Advanced">

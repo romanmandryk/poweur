@@ -344,6 +344,11 @@ export interface InboxPolicy {
   anonymous?: AnonymousPolicy;
   /** Third-tick receipts; absent means enabled. */
   read_receipts?: { enabled: boolean; disabled_for?: string[] };
+  /**
+   * OAuth bridges allowed to send `sys.auth.request` sign-in prompts. Admits
+   * that one type only — a listed service is not a contact.
+   */
+  trusted_auth_services?: string[];
 }
 
 /** System message types the relay routes on (EPIC-007). */

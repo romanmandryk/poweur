@@ -648,6 +648,7 @@ poweur policy set contacts_and_requests --anon-allow=true --anon-challenge=pow -
 | Flag | Description |
 |------|-------------|
 | `--anon-allow <bool>` | Accept anonymous (unsigned) messages |
+| `--trusted-auth <id>` | OAuth bridge allowed to send sign-in prompts (repeatable; `none` clears). Kept across `policy set` when omitted |
 | `--anon-challenge <kind>` | `none` \| `pow` \| `verified` \| `payment` |
 | `--anon-bits <n>` | Proof-of-work difficulty; each +1 doubles sender work (0 = relay default) |
 | `--anon-max-bytes <n>` | Max anonymous payload bytes (0 = default 4096) |

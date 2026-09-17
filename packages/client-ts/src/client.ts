@@ -27,6 +27,7 @@ import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./g
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
+import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
 import type { ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
@@ -191,7 +192,8 @@ export class PoweurClient {
     const { messages, acks, acked } = await this.inboxAndAck();
     const { archived, lost } = await this.archive(
       messages
-        .filter((m) => m.plaintext !== null)
+        // A sign-in prompt is a notification, not conversation: never archived.
+        .filter((m) => m.plaintext !== null && m.type !== MSG_TYPE_AUTH_REQUEST)
         .map((m) => ({
           id: m.id,
           sender: m.sender ?? "",
@@ -372,8 +374,13 @@ export class PoweurClient {
     return readInboxPolicy(await this.dav());
   }
 
-  async setPolicy(mode: InboxMode, anonymous?: AnonymousPolicy, readReceipts?: InboxPolicy["read_receipts"]): Promise<InboxPolicy> {
-    return writeInboxPolicy(await this.dav(), mode, anonymous, readReceipts);
+  async setPolicy(
+    mode: InboxMode,
+    anonymous?: AnonymousPolicy,
+    readReceipts?: InboxPolicy["read_receipts"],
+    trustedAuthServices?: string[],
+  ): Promise<InboxPolicy> {
+    return writeInboxPolicy(await this.dav(), mode, anonymous, readReceipts, trustedAuthServices);
   }
 
   /** Our own public profile document, and whether one has been written. */

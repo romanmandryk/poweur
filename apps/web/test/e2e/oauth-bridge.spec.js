@@ -18,7 +18,7 @@ test.describe("OAuth bridge through the web signer", () => {
   test.beforeAll(async () => {
     relay = await startRelay();
     rp = await startRP();
-    bridge = await startBridge({ relay, redirectUri: rp.redirectUri });
+    bridge = await startBridge({ relay, redirectUri: rp.redirectUri, pushHandle: "oauthpusher" });
   });
 
   test.afterAll(() => {
@@ -101,6 +101,59 @@ test.describe("OAuth bridge through the web signer", () => {
       await expect(screen.locator("h1")).toHaveText("Back at the application");
       const back = rp.hits.at(-1);
       expect(back.searchParams.get("state")).toBe("desk");
+      const claims = await redeem(bridge, rp, back.searchParams.get("code"), verifier);
+      expect(claims.poweur_id).toBe(identity);
+    } finally {
+      await phone.close();
+      await desktop.close();
+    }
+  });
+
+  test("pushed to the app: a trusted bridge's request, approved with the desktop's code", async ({ browser }) => {
+    const phone = await browser.newContext();
+    const desktop = await browser.newContext();
+    try {
+      const app = await phone.newPage();
+      await stubPasskeys(app);
+      const identity = await registerIdentity(app, relay, "oauthpush");
+
+      // The user lets this bridge send sign-in requests — and nothing else.
+      await app.click('.nav-tab[data-page="settings"]');
+      await app.click("#row-policy-signin");
+      await app.fill("#policy-trusted-auth", bridge.pushIdentity);
+      await app.click("#policy-save");
+      await expect(app.locator("#row-policy-signin .settings-row-value")).toHaveText(bridge.pushIdentity, { timeout: 15_000 });
+      await app.click('.nav-tab[data-page="messages"]');
+
+      const screen = await desktop.newPage();
+      const { verifier, challenge } = pkce();
+      await identifyAt(screen, authorizeURL(bridge, rp, { challenge, state: "push" }), identity);
+      await expect(screen.locator("text=" + bridge.pushIdentity)).toBeVisible();
+      await screen.click('button:has-text("Send to my Poweur app")');
+      await expect(screen.locator(".status").first()).toContainText("Sent", { timeout: 30_000 });
+      const match = (await screen.locator(".match").textContent()).trim();
+      // The prompt arrives in its own list, not as a conversation.
+      await expect(app.locator("#auth-prompts")).toContainText("E2E application", { timeout: 45_000 });
+      await expect(app.locator("#auth-prompts")).toContainText(`via ${bridge.pushIdentity}`);
+      await app.click(".btn-prompt-review");
+      await expect(app.locator("#auth-context")).toContainText("to sign in to E2E application", { timeout: 45_000 });
+      // From a push, the code is required.
+      if (await app.locator("#btn-auth-unlock").count()) {
+        await app.click("#btn-auth-unlock");
+        await app.click("#btn-do-unlock");
+      }
+      await expect(app.locator("#btn-auth-approve")).toBeVisible({ timeout: 45_000 });
+      await app.click("#btn-auth-approve");
+      await expect(app.locator("text=Enter the 2-digit code")).toBeVisible();
+      await app.fill("#auth-match", match);
+      await app.click("#btn-auth-approve");
+      await expect(app.locator("#auth-result-note")).toContainText("Go back to the screen");
+
+      await expect(screen.locator("h1")).toHaveText("Allow E2E application?", { timeout: 30_000 });
+      await screen.click('button[value="allow"]');
+      await expect(screen.locator("h1")).toHaveText("Back at the application");
+      const back = rp.hits.at(-1);
+      expect(back.searchParams.get("state")).toBe("push");
       const claims = await redeem(bridge, rp, back.searchParams.get("code"), verifier);
       expect(claims.poweur_id).toBe(identity);
     } finally {

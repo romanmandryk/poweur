@@ -9,8 +9,8 @@ title: OAuth 2.0 / OIDC bridge
 > **Status: implemented in `apps/oauth` (EPIC-022).** Native authentication, the OIDC provider,
 > the developer console, `/account`, IndieAuth and the QR/code journey are built and tested
 > against real relays with `go-oidc` as the relying party (`apps/integration`, `TestINT_OAUTH_*`).
-> Still open: push-to-approve (E22-T7), production rollout and recipes verified against live
-> Keycloak/Authentik (E22-T8). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
+> Still open: production rollout and recipes verified against live Keycloak/Authentik (E22-T8),
+> and a phone camera for the QR code (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
 
 Native [Sign in with Poweur ID](./sign-in.md) needs no issuer: a relying party verifies the
 user's signature itself. Most existing software cannot do that — Keycloak, Authentik,
@@ -233,7 +233,9 @@ the native proof, not of the session cookie.
 **Requirements**
 
 - PKCE `S256` required for **every** client, confidential or public. `plain` is refused.
-- `state` required. `nonce` required when `openid` is requested.
+- `state` required. `nonce` is echoed in the ID token when sent; it is not required, because OIDC
+  Core makes it optional for the code flow and PKCE already binds the code to the client's
+  session (oauth2-proxy, for example, sends none by default).
 - `iss` returned on the authorization response (RFC 9207) so a client talking to several
   issuers can detect mix-up.
 - Exact string match on `redirect_uri`, except loopback redirects (`http://127.0.0.1:<any port>/…`,
@@ -411,6 +413,26 @@ Where accepted, the rules are strict:
 Redirect URIs travel with the client rather than living in the registry, but they are
 authenticated by the client's own TLS-served document: dynamic and authenticated, not dynamic
 and trusted.
+
+## Push to the app (optional)
+
+A bridge with its own Poweur ID can also *send* the pending request to the user's app, for a
+user whose phone is not in front of the browser's QR code:
+
+1. The waiting page offers **Send to my Poweur app** (at most three times, 15 s apart).
+2. The bridge sends an encrypted `sys.auth.request` from its identity through its own relay.
+   The body is the same public request the QR code shows, the application's name and host,
+   and the expiry — **never the match code**.
+3. The user's relay drops it unless the user listed the bridge in `trusted_auth_services`
+   (Settings → Sign-in services). Listing it admits prompts and nothing else.
+4. The app shows it under **Sign-in requests**, never in conversations or history. Review opens
+   the ordinary approval screen with the code field required: approving from a prompt is by
+   definition approving on another device.
+
+The prompt is only a notification. A compromised bridge could send prompts, but could not
+produce a user's signature, and each prompt still needs the code from the screen that started
+the sign-in. Operators enable it with `OAUTH_PUSH_CLI` (the `poweur` binary),
+`OAUTH_PUSH_HOME` (a home holding only the bridge's identity) and `OAUTH_PUSH_IDENTITY`.
 
 ## What the user manages
 

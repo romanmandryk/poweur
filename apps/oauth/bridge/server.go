@@ -68,6 +68,13 @@ type Config struct {
 	// FetchClientMetadata overrides URL-client document fetches. Tests.
 	FetchClientMetadata func(ctx context.Context, clientID string) ([]byte, error)
 
+	// Pusher delivers sign-in prompts to the user's app as `sys.auth.request`
+	// messages (E22-T7). Nil disables the "Send to my Poweur app" button.
+	Pusher Pusher
+	// PushIdentity is the bridge's own Poweur ID, which users must list under
+	// trusted sign-in services before prompts reach them.
+	PushIdentity string
+
 	// ContactURI is shown on consent pages for abuse reports.
 	ContactURI string
 	// AbuseContact is what /abuse tells people to write to (an email address
@@ -268,6 +275,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /t/{id}/status", s.handleTxnStatus)
 	mux.HandleFunc("GET /t/{id}/continue", s.handleTxnContinue)
 	mux.HandleFunc("POST /t/{id}/cancel", s.handleTxnCancel)
+	mux.HandleFunc("POST /t/{id}/push", s.handlePush)
 
 	// OIDC provider (E22-T3).
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)

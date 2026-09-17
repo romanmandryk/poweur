@@ -194,10 +194,10 @@ func (s *Server) parseAuthorize(ctx context.Context, q url.Values, surface strin
 		if !a.wants(ScopeOpenID) {
 			return fail("invalid_scope", "the openid scope is required")
 		}
+		// OIDC Core makes nonce optional for the code flow, and PKCE — which is
+		// mandatory here — already binds the code to the client's session.
+		// Echoed when sent (oauth2-proxy, for one, does not send it by default).
 		a.Nonce = q.Get("nonce")
-		if a.Nonce == "" {
-			return fail("invalid_request", "nonce is required")
-		}
 		if len(a.Nonce) > 512 {
 			return fail("invalid_request", "nonce is too long")
 		}

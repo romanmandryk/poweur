@@ -236,7 +236,6 @@ func TestAuthorizeErrorsGoToTheClient(t *testing.T) {
 		{"no openid", authorizeQuery("rp", rpRedirect, "profile"), "invalid_scope"},
 		{"no pkce", authorizeQuery("rp", rpRedirect, "openid", "code_challenge", ""), "invalid_request"},
 		{"plain pkce", authorizeQuery("rp", rpRedirect, "openid", "code_challenge_method", "plain"), "invalid_request"},
-		{"no nonce", authorizeQuery("rp", rpRedirect, "openid", "nonce", ""), "invalid_request"},
 		{"request object", authorizeQuery("rp", rpRedirect, "openid", "request", "eyJ"), "request_not_supported"},
 		{"fragment mode", authorizeQuery("rp", rpRedirect, "openid", "response_mode", "fragment"), "invalid_request"},
 		{"bad prompt", authorizeQuery("rp", rpRedirect, "openid", "prompt", "nonsense"), "invalid_request"},
@@ -506,5 +505,24 @@ func TestCrossSiteFormPostsAreRefused(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("same-site sibling identify = %d", resp.StatusCode)
+	}
+}
+
+func TestNonceIsOptionalAndEchoed(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	id, p := b.signIn(authorizeQuery("rp", rpRedirect, "openid", "nonce", ""), h.users[alice])
+	if strings.Contains(p.body, "/consent") {
+		p = b.consent(id)
+	}
+	res := h.token(codeForm(h.codeFrom(p, rpRedirect), rpRedirect), "rp", rpSecret)
+	if res.status != 200 {
+		t.Fatalf("token = %d %v", res.status, res.body)
+	}
+	if _, ok := h.idClaims(res.body["id_token"].(string))["nonce"]; ok {
+		t.Fatal("a nonce appeared that the client never sent")
+	}
+	if got := h.errorFrom(b.get(authorizeQuery("rp", rpRedirect, "openid", "nonce", strings.Repeat("n", 513))), rpRedirect); got != "invalid_request" {
+		t.Fatalf("oversized nonce = %s", got)
 	}
 }
