@@ -34,7 +34,34 @@ func (s *Server) nativeMetadata() signin.Metadata {
 		ResponseURIs: []string{s.cfg.Issuer + "/poweur/callback"},
 		Transports:   []string{"redirect", "qr", "deeplink"},
 		ContactURI:   s.cfg.ContactURI,
+		ContextURI:   s.cfg.Issuer + "/poweur/context",
 	}
+}
+
+// handleNativeContext tells a signer where a pending sign-in was started.
+// It answers only while the request can still be approved, and says nothing
+// the holder of the request id could not already see.
+func (s *Server) handleNativeContext(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	requestID := r.URL.Query().Get("request_id")
+	id, err := s.store.TxnIDByRequest(r.Context(), requestID)
+	if err != nil {
+		writeOAuthError(w, http.StatusNotFound, "invalid_request", "no sign-in is waiting for this request")
+		return
+	}
+	t, err := s.store.GetTxn(r.Context(), id)
+	if err != nil || t.usable() != nil || t.Claimed || s.now().After(t.RequestExpires) {
+		writeOAuthError(w, http.StatusNotFound, "invalid_request", "no sign-in is waiting for this request")
+		return
+	}
+	c := signin.SignInContext{RequestID: requestID, StartedAt: t.CreatedAt, Browser: t.Browser}
+	if t.Authorize != nil {
+		c.Client = t.Authorize.ClientName
+		if u, err := url.Parse(t.Authorize.RedirectURI); err == nil {
+			c.ClientHost = u.Hostname()
+		}
+	}
+	writeJSON(w, http.StatusOK, c)
 }
 
 func (s *Server) handleNativeMetadata(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +87,7 @@ func (s *Server) newTxn(w http.ResponseWriter, r *http.Request, kind string) (*T
 		CreatedAt:   now,
 		ExpiresAt:   now.Add(s.cfg.TxnTTL),
 		BindingHash: signin.HashSecret(binding),
+		Browser:     summarizeUserAgent(r.UserAgent()),
 	}, nil
 }
 

@@ -1,5 +1,6 @@
 import {
-  checkRequestAgainstMetadata, checkResumeUri, decodeSignInRequest, normalizeMatchCode,
+  checkRequestAgainstMetadata, checkResumeUri, decodeSignInRequest, describeSignInContext,
+  fetchSignInContext, normalizeMatchCode,
   describeScopes, encodeSignInResponse, fetchRelyingPartyMetadata,
   normalizeSignInRequest, signInResponseCanonical, summarizeSignInRequest,
   validateSignInRequest,
@@ -26,9 +27,16 @@ export async function loadSignInConsent(input, options = {}) {
   const request = decodeAuthInput(input);
   const metadata = await fetchRelyingPartyMetadata(request.audience, options);
   checkRequestAgainstMetadata(request, metadata);
+  // Where the sign-in was started, for someone approving from another device.
+  // Best effort: a missing or failing context never blocks an approval.
+  let context = "";
+  try {
+    context = describeSignInContext(await fetchSignInContext(metadata, request.request_id, options));
+  } catch { /* the RP may not publish one */ }
   return {
     request,
     metadata,
+    context,
     headline: summarizeSignInRequest(request, metadata.name),
     scopes: describeScopes(request.scopes ?? [], metadata.name),
   };

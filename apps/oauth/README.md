@@ -44,6 +44,8 @@ repo root. [`compose.example.yml`](compose.example.yml) runs it beside a relay.
 | `OAUTH_URL_CLIENTS` | `indieauth` | URL `client_id`s: `indieauth` (IndieAuth only), `on` (OIDC too), `off`. |
 | `OAUTH_SESSION_TTL` | `12h` | How long a browser stays signed in to the bridge. |
 | `OAUTH_CONTACT_URI`, `OAUTH_ABUSE_CONTACT` | `/abuse` | Where consent pages send abuse reports. |
+| `OAUTH_RATE_AUTHORIZE` / `_IDENTIFY` / `_CALLBACK` / `_TOKEN` / `_CONSOLE` | 60 / 20 / 60 / 120 / 30 | Requests per minute per client IP; `-1` disables. |
+| `OAUTH_TRUST_PROXY` | off | `1` to rate-limit by the last `X-Forwarded-For` hop (only behind a proxy that sets it). |
 | `RESOLVER_ALLOW_PRIVATE`, `POWEUR_RESOLVER_SCHEME` | off, `https` | Local development only. |
 
 Relays advertise the bridge with `OAUTH_BRIDGE_URL` (IndieAuth discovery and

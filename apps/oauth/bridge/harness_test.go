@@ -163,6 +163,8 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		},
 		ClientRegistration: RegistrationOpen,
 		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		// The harness drives many journeys from one address in one minute.
+		RateLimits: RateLimits{Authorize: -1, Identify: -1, Callback: -1, Token: -1, Console: -1},
 	}
 	for _, o := range opts {
 		o(&cfg)

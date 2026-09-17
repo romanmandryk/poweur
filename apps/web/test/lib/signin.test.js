@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { encodeSignInRequest, signInDeepLink } from "@poweur/client";
 import {
-  appendBrowserConsent, decodeAuthInput, deliverBrowserApproval,
+  appendBrowserConsent, decodeAuthInput, deliverBrowserApproval, loadSignInConsent,
   readConnectedApps, readConsentLog, revokeConnectedApp, signBrowserApproval,
 } from "../../src/lib/signin.js";
 
@@ -94,6 +94,25 @@ describe("web Sign in with Poweur ID", () => {
     expect(await deliverBrowserApproval(request(), "encoded", legacy)).toEqual({ delivered: true, resumeUri: "" });
     const refused = async () => ({ ok: false, status: 403, json: async () => ({ error: "the code does not match" }) });
     await expect(deliverBrowserApproval(request(), "encoded", refused, "11")).rejects.toThrow("the code does not match");
+  });
+
+  it("adds where the sign-in started when the app publishes it, and never fails on it", async () => {
+    const { encodeSignInRequest: enc } = await import("@poweur/client");
+    const req = request();
+    const meta = { poweur_auth: "1", origin: "https://tasks.example", name: "Tasks", context_uri: "https://tasks.example/ctx",
+      response_uris: ["https://tasks.example/callback"] };
+    const fetchWith = (ctx) => async (url) => {
+      if (url.endsWith("/.well-known/poweur.json")) return new Response(JSON.stringify(meta));
+      if (ctx === "boom") throw new Error("offline");
+      return new Response(JSON.stringify(ctx));
+    };
+    const withCtx = await loadSignInConsent(enc(req), {
+      fetch: fetchWith({ request_id: "req_web", started_at: new Date().toISOString(), browser: "Firefox on Linux" }),
+    });
+    expect(withCtx.context).toMatch(/^Started just now in Firefox on Linux\.$/);
+    const without = await loadSignInConsent(enc(req), { fetch: fetchWith("boom") });
+    expect(without.context).toBe("");
+    expect(without.metadata.name).toBe("Tasks");
   });
 
   it("lists and revokes connected apps by editing the relay policy file", async () => {

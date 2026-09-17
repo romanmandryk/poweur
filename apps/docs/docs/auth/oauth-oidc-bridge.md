@@ -128,6 +128,7 @@ It publishes ordinary RP metadata:
   "name": "Poweur OAuth bridge",
   "response_uris": ["https://oauth.poweur.org/poweur/callback"],
   "transports": ["redirect", "qr", "deeplink"],
+  "context_uri": "https://oauth.poweur.org/poweur/context",
   "contact_uri": "https://oauth.poweur.org/abuse"
 }
 ```
@@ -225,7 +226,7 @@ the native proof, not of the session cookie.
 | `/userinfo` | claims for an access token |
 | `/revoke` | RFC 7009 access-token revocation |
 | `/introspect` | RFC 7662, for the client that owns the token |
-| `/.well-known/poweur.json`, `/poweur/callback`, `/poweur/resume` | the native RP side |
+| `/.well-known/poweur.json`, `/poweur/callback`, `/poweur/resume`, `/poweur/context` | the native RP side |
 | `/t/{id}`, `/t/{id}/status`, `/t/{id}/continue` | a transaction's pages and its browser-bound status poll |
 | `/login`, `/account`, `/developers` | bridge sign-in, the user's authorizations, the developer console |
 

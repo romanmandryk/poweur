@@ -85,6 +85,7 @@ export function freshData() {
       request: null as any,
       metadata: null as any,
       headline: "",
+      context: "",
       scopes: [] as any[],
       loading: false,
       error: "",

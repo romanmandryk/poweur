@@ -126,6 +126,11 @@ export function SignInApproval() {
       </Note>
       {auth.request.response_uri && (
         <div className="mt-4">
+          {auth.context && (
+            <p id="auth-context" className="mb-2 text-sm">
+              {auth.context}
+            </p>
+          )}
           <label htmlFor="auth-match" className="mb-1 block text-sm font-semibold">
             {shell ? "Code shown by the app you are signing in to" : "Started on another screen? Enter the code it shows"}
           </label>

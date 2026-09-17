@@ -118,6 +118,20 @@ export interface RelyingPartyMetadata {
   transports?: string[];
   poll_uri?: string;
   contact_uri?: string;
+  /** Answers `?request_id=` with a {@link SignInContext}. Same-origin. */
+  context_uri?: string;
+}
+
+/**
+ * Where a pending sign-in was started, as its relying party reports it — for
+ * a signer approving on another device. Mirrors Go `signin.SignInContext`.
+ */
+export interface SignInContext {
+  request_id: string;
+  started_at: string;
+  browser?: string;
+  client?: string;
+  client_host?: string;
 }
 
 function fail(message: string): never {
@@ -652,6 +666,7 @@ export function validateRelyingPartyMetadata(
   }
   // A third-party logo would leak the pending approval to whoever serves it.
   if (meta.poll_uri && !sameOrigin(origin, meta.poll_uri)) fail("poll_uri is not same-origin");
+  if (meta.context_uri && !sameOrigin(origin, meta.context_uri)) fail("context_uri is not same-origin");
   if (meta.logo_uri && !sameOrigin(origin, meta.logo_uri)) fail("logo_uri is not same-origin");
   const appId = signInAppId(origin);
   if (meta.app_id && meta.app_id !== appId) {
@@ -716,6 +731,77 @@ export async function fetchRelyingPartyMetadata(
   } finally {
     clearTimeout(timer);
   }
+}
+
+const MAX_SIGNIN_CONTEXT_BYTES = 4 * 1024;
+
+function displayLine(value: unknown, max: number): string {
+  // eslint-disable-next-line no-control-regex
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max);
+}
+
+/**
+ * Fetch where a pending request was started, from the RP's `context_uri`.
+ * Resolves to `null` when the RP publishes none. Mirrors Go `FetchContext`.
+ */
+export async function fetchSignInContext(
+  meta: RelyingPartyMetadata,
+  requestId: string,
+  options: { fetch?: typeof globalThis.fetch; timeoutMs?: number } = {},
+): Promise<SignInContext | null> {
+  if (!meta.context_uri) return null;
+  if (!sameOrigin(meta.origin, meta.context_uri)) fail("context_uri is not same-origin");
+  const u = new URL(meta.context_uri);
+  u.searchParams.set("request_id", requestId);
+  const doFetch = options.fetch ?? globalThis.fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
+  try {
+    const res = await doFetch(u.toString(), {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!res.ok) fail(`sign-in context returned ${res.status}`);
+    const text = await res.text();
+    if (text.length > MAX_SIGNIN_CONTEXT_BYTES) fail("sign-in context too large");
+    let raw: SignInContext;
+    try {
+      raw = JSON.parse(text) as SignInContext;
+    } catch {
+      return fail("sign-in context is not JSON");
+    }
+    if (raw?.request_id !== requestId) fail("sign-in context is for another request");
+    return {
+      request_id: raw.request_id,
+      started_at: String(raw.started_at ?? ""),
+      browser: displayLine(raw.browser, 60),
+      client: displayLine(raw.client, 80),
+      client_host: displayLine(raw.client_host, 253),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The sentence a signer shows for a context. Mirrors Go `DescribeContext`. */
+export function describeSignInContext(ctx: SignInContext | null | undefined, nowMs = Date.now()): string {
+  const started = Date.parse(ctx?.started_at ?? "");
+  if (!ctx || Number.isNaN(started) || started <= 0) return "";
+  const secs = Math.floor((nowMs - started) / 1000);
+  const ago =
+    secs < 5 ? "just now"
+      : secs < 60 ? `${secs} seconds ago`
+        : secs < 120 ? "a minute ago"
+          : secs < 3600 ? `${Math.floor(secs / 60)} minutes ago`
+            : "over an hour ago";
+  let out = `Started ${ago}`;
+  if (ctx.browser) out += ` in ${ctx.browser}`;
+  if (ctx.client) {
+    out += `, to sign in to ${ctx.client}`;
+    if (ctx.client_host && ctx.client_host.toLowerCase() !== ctx.client.toLowerCase()) out += ` (${ctx.client_host})`;
+  }
+  return out + ".";
 }
 
 /**

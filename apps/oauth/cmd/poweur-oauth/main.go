@@ -262,6 +262,7 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 		URLClients:            env("OAUTH_URL_CLIENTS", ""),
 		ContactURI:            env("OAUTH_CONTACT_URI", ""),
 		AbuseContact:          env("OAUTH_ABUSE_CONTACT", ""),
+		TrustProxyHeaders:     os.Getenv("OAUTH_TRUST_PROXY") == "1",
 		Logger:                log,
 		ResolveOptions: identity.ResolveOptions{
 			Scheme:       env("POWEUR_RESOLVER_SCHEME", "https"),
@@ -291,6 +292,22 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 			return bridge.Config{}, errors.New("OAUTH_MAX_CLIENTS_PER_OWNER must be a positive integer")
 		}
 		cfg.MaxClientsPerOwner = n
+	}
+	for name, dst := range map[string]*int{
+		"OAUTH_RATE_AUTHORIZE": &cfg.RateLimits.Authorize,
+		"OAUTH_RATE_IDENTIFY":  &cfg.RateLimits.Identify,
+		"OAUTH_RATE_CALLBACK":  &cfg.RateLimits.Callback,
+		"OAUTH_RATE_TOKEN":     &cfg.RateLimits.Token,
+		"OAUTH_RATE_CONSOLE":   &cfg.RateLimits.Console,
+	} {
+		if v := env(name, ""); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				store.Close()
+				return bridge.Config{}, fmt.Errorf("%s must be an integer per minute (-1 disables)", name)
+			}
+			*dst = n
+		}
 	}
 	if v := env("OAUTH_SESSION_TTL", ""); v != "" {
 		d, err := time.ParseDuration(v)

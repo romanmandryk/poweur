@@ -74,6 +74,12 @@ type Config struct {
 	// or URL).
 	AbuseContact string
 
+	// RateLimits per client IP; zero values use the defaults.
+	RateLimits RateLimits
+	// TrustProxyHeaders believes the last X-Forwarded-For hop for rate
+	// limiting. Set it only behind a proxy that appends that header.
+	TrustProxyHeaders bool
+
 	Retention Retention
 	Logger    *slog.Logger
 	Now       func() time.Time
@@ -89,6 +95,7 @@ type Server struct {
 	mux      *http.ServeMux
 	log      *slog.Logger
 	secure   bool
+	limits   limiters
 }
 
 // New validates cfg and builds a Server.
@@ -192,6 +199,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		verifier: v,
 		log:      cfg.Logger,
 		secure:   strings.HasPrefix(issuer, "https://"),
+		limits:   newLimiters(cfg.RateLimits, cfg.Now),
 	}
 	s.keys = cfg.Keys
 	if s.keys == nil {
@@ -252,6 +260,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /poweur/callback", s.handleNativeCallback)
 	mux.HandleFunc("GET /poweur/callback", s.handleNativeCallbackGet)
 	mux.HandleFunc("GET /poweur/resume", s.handleNativeResume)
+	mux.HandleFunc("GET /poweur/context", s.handleNativeContext)
 	mux.HandleFunc("GET /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.HandleFunc("GET /t/{id}", s.handleTxnPage)
@@ -297,6 +306,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
 	if s.secure {
 		h.Set("Strict-Transport-Security", "max-age=31536000")
+	}
+	if s.rateLimited(w, r) {
+		return
 	}
 	s.mux.ServeHTTP(w, r)
 }

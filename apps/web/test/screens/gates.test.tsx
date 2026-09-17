@@ -242,6 +242,7 @@ describe("Sign-in approval (EPIC-008)", () => {
     request: { audience: "https://app.example", response_uri: "https://app.example/cb" },
     metadata: { name: "Example App" },
     headline: "Sign in to Example App",
+    context: "Started 12 seconds ago in Chrome on macOS.",
     scopes: [],
   };
 
@@ -272,6 +273,7 @@ describe("Sign-in approval (EPIC-008)", () => {
     setContinueTo((url) => went.push(url));
     fake.deliver.mockResolvedValueOnce({ delivered: true, resumeUri: "" });
     await openUnlocked();
+    expect($("#auth-context")!.textContent).toBe("Started 12 seconds ago in Chrome on macOS.");
     fireEvent.change($("#auth-match")!, { target: { value: "4 2" } });
     fireEvent.click($("#btn-auth-approve")!);
     await waitFor(() => expect($("#auth-result-note")!.textContent).toMatch(/Go back to the screen/));

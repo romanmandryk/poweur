@@ -107,6 +107,8 @@ type pendingLogin struct {
 	requestID   string
 	expiresAt   time.Time
 	bindingHash string // the starting browser's binding cookie
+	startedAt   time.Time
+	browser     string // coarse label for the signer's context line
 	pollHash    string // the starting page's poll secret
 	match       string // shown on the starting screen
 	claimed     bool   // an approval has been received; no second one is processed
@@ -187,6 +189,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallbackGet)
 	mux.HandleFunc("GET /auth/resume", s.handleAuthResume)
 	mux.HandleFunc("GET /auth/poll", s.handleAuthPoll)
+	mux.HandleFunc("GET /auth/context", s.handleAuthContext)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/entries", s.handleEntriesGet)
@@ -212,6 +215,7 @@ func (s *Server) Metadata() signin.Metadata {
 		// redirect elsewhere on this site from becoming an approval leak.
 		ResponseURIs: []string{s.cfg.Origin + "/auth/callback"},
 		PollURI:      s.cfg.Origin + "/auth/poll",
+		ContextURI:   s.cfg.Origin + "/auth/context",
 		Scopes:       s.cfg.Scopes,
 		Transports:   []string{"redirect", "qr", "deeplink", "poll"},
 		ContactURI:   s.cfg.Origin + "/",
@@ -297,6 +301,8 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		requestID:   req.RequestID,
 		expiresAt:   expires,
 		bindingHash: signin.HashSecret(binding),
+		startedAt:   s.now(),
+		browser:     coarseBrowser(r.UserAgent()),
 		pollHash:    signin.HashSecret(pollSecret),
 		match:       match,
 	}
@@ -587,6 +593,47 @@ func (s *Server) handleAuthPoll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAuthContext tells a signer on another device where this sign-in was
+// started, while it can still be approved.
+func (s *Server) handleAuthContext(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
+	s.mu.Lock()
+	p := s.pending[requestID]
+	var out *signin.SignInContext
+	if p != nil && !p.claimed && p.err == "" && !s.now().After(p.expiresAt) {
+		out = &signin.SignInContext{RequestID: requestID, StartedAt: p.startedAt, Browser: p.browser}
+	}
+	s.mu.Unlock()
+	if out == nil {
+		writeError(w, http.StatusNotFound, "no sign-in is waiting for this request")
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// coarseBrowser keeps a browser and OS name, never the full user agent.
+func coarseBrowser(ua string) string {
+	lower := strings.ToLower(ua)
+	browser := "a browser"
+	for _, b := range []struct{ token, name string }{
+		{"edg/", "Edge"}, {"firefox/", "Firefox"}, {"chrome/", "Chrome"}, {"safari/", "Safari"},
+	} {
+		if strings.Contains(lower, b.token) {
+			browser = b.name
+			break
+		}
+	}
+	for _, o := range []struct{ token, name string }{
+		{"iphone", "iOS"}, {"ipad", "iOS"}, {"android", "Android"}, {"mac os", "macOS"}, {"windows", "Windows"}, {"linux", "Linux"},
+	} {
+		if strings.Contains(lower, o.token) {
+			return browser + " on " + o.name
+		}
+	}
+	return browser
 }
 
 // dropPendingLocked forgets a transaction and any session prepared for it but

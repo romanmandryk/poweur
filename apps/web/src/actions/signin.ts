@@ -24,7 +24,7 @@ export function setContinueTo(fn: (url: string) => void) {
 
 export function resetSignInRequest() {
   useData.setState({
-    auth: { input: "", request: null, metadata: null, headline: "", scopes: [], loading: false, error: "", result: null },
+    auth: { input: "", request: null, metadata: null, headline: "", context: "", scopes: [], loading: false, error: "", result: null },
   });
 }
 

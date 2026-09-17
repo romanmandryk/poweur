@@ -67,6 +67,14 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stderr, signinpkg.SummarizeRequest(req, metadata.Name))
+	if sc, err := signinpkg.FetchContext(ctx, metadata, req.RequestID, signinpkg.FetchOptions{}); err == nil {
+		if line := signinpkg.DescribeContext(sc, time.Now()); line != "" {
+			fmt.Fprintln(stderr, line)
+			if *matchCode != "" {
+				fmt.Fprintln(stderr, "Approve only if that is the screen in front of you.")
+			}
+		}
+	}
 	for _, line := range signinpkg.DescribeScopes(req.Scopes, metadata.Name) {
 		fmt.Fprintln(stderr, "- "+line)
 	}

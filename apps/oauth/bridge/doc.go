@@ -12,4 +12,4 @@ package bridge
 
 // Version is the bridge's semver. Bump the patch when shipping behaviour
 // changes (AGENTS.md → Version bumps).
-const Version = "0.1.0"
+const Version = "0.1.1"

@@ -469,3 +469,40 @@ func TestSummarizeUserAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestSignInContextForTheOtherDevice(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	b.client.Transport = uaTransport{"Mozilla/5.0 (Macintosh; Mac OS X 14) AppleWebKit Chrome/120 Safari/537"}
+	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	txn := h.txn(id)
+	meta := h.srv.nativeMetadata()
+	h.advance(20 * time.Second)
+
+	c, err := signin.FetchContext(context.Background(), meta, txn.RequestID, signin.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Browser != "Chrome on macOS" || c.Client != "Relying Party" || c.ClientHost != "rp.example" {
+		t.Fatalf("context = %+v", c)
+	}
+	if line := signin.DescribeContext(c, h.clock()); !strings.Contains(line, "20 seconds ago in Chrome on macOS") {
+		t.Fatalf("describe = %q", line)
+	}
+	// Unknown ids, and requests already answered, reveal nothing.
+	if _, err := signin.FetchContext(context.Background(), meta, "req_unknown", signin.FetchOptions{}); err == nil {
+		t.Fatal("context for an unknown request")
+	}
+	h.deliver(h.approve(id, h.users[alice]), "")
+	if _, err := signin.FetchContext(context.Background(), meta, txn.RequestID, signin.FetchOptions{}); err == nil {
+		t.Fatal("context for an answered request")
+	}
+}
+
+type uaTransport struct{ ua string }
+
+func (u uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("User-Agent", u.ua)
+	return http.DefaultTransport.RoundTrip(r)
+}

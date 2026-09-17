@@ -243,7 +243,8 @@ whose session has since been revoked.
   "poll_uri": "https://guestbook.poweur.net/auth/poll",
   "scopes": ["profile:read", "dav:rw:apps/net.poweur.guestbook"],
   "transports": ["redirect", "qr", "poll"],
-  "contact_uri": "https://guestbook.poweur.net/abuse"
+  "contact_uri": "https://guestbook.poweur.net/abuse",
+  "context_uri": "https://guestbook.poweur.net/auth/context"
 }
 ```
 
@@ -257,6 +258,12 @@ and **nobody registers it anywhere**. Rules a signer enforces:
   that loads a third-party logo leaks the pending approval to that third party.
 - `app_id`, when present, must equal the reverse-DNS of the origin host.
 - Every advertised scope must sit in the RP's own namespace.
+- `context_uri`, when present, must be same-origin. `GET <context_uri>?request_id=…` answers,
+  while the request can still be approved, with where it was started:
+  `{"request_id", "started_at", "browser", "client", "client_host"}` — a coarse browser label,
+  never a precise location. A signer approving from another device shows it
+  (`signin.FetchContext`/`DescribeContext`, TS `fetchSignInContext`/`describeSignInContext`)
+  and ignores it if it cannot be fetched.
 - Body capped at 16 KiB.
 
 An RP that publishes no `response_uris` accepts any same-origin one — a permissive
@@ -411,8 +418,9 @@ disclosure rather than cryptography:
 | Web signer (`apps/web`) | optional code field (required in the mobile shell); follows `resume_uri`; no approval in any URL |
 | Go CLI | `poweur auth approve --code <digits>`; prints the resume link for a same-device approval |
 
-Initiator context on the signer (location, browser, elapsed time) is not implemented in the
-guestbook; the OAuth bridge's QR journey adds it (EPIC-022 E22-T5).
+Initiator context is served by the guestbook and the OAuth bridge (`context_uri`) and shown by
+the web signer and `poweur auth approve`: which browser started the sign-in, how long ago, and —
+for the bridge — which application it is for. Coarse location is not offered.
 
 ## Scoped resource grants
 

@@ -21,6 +21,8 @@ import {
   SIGNIN_MATCH_CODE_DIGITS,
   SignInVerifier,
   checkResumeUri,
+  describeSignInContext,
+  fetchSignInContext,
   normalizeMatchCode,
   canonicalSignInResponse,
   checkRequestAgainstMetadata,
@@ -788,5 +790,32 @@ describe("canonical string", () => {
     expect(normalizeMatchCode(" 0-7 ")).toBe("07");
     expect(normalizeMatchCode("")).toBe("");
     expect(SIGNIN_MATCH_CODE_DIGITS).toBe(2);
+  });
+
+  it("fetches and describes sign-in context like the Go signer", async () => {
+    const meta = { poweur_auth: "1", origin: "https://rp.example", name: "RP", context_uri: "https://rp.example/ctx" };
+    let asked = "";
+    const ok = async (url: string) => {
+      asked = url;
+      return new Response(JSON.stringify({
+        request_id: "req_1", started_at: "2026-09-17T12:00:00Z",
+        browser: "Chrome on macOS\u0000", client: "Team dashboard", client_host: "grafana.example.org",
+      }));
+    };
+    const ctx = await fetchSignInContext(meta, "req_1", { fetch: ok as unknown as typeof fetch });
+    expect(asked).toBe("https://rp.example/ctx?request_id=req_1");
+    expect(ctx?.browser).toBe("Chrome on macOS");
+    expect(describeSignInContext(ctx, Date.parse("2026-09-17T12:00:12Z")))
+      .toBe("Started 12 seconds ago in Chrome on macOS, to sign in to Team dashboard (grafana.example.org).");
+    expect(await fetchSignInContext({ ...meta, context_uri: undefined }, "req_1")).toBeNull();
+    const other = async () => new Response(JSON.stringify({ request_id: "req_2", started_at: "2026-09-17T12:00:00Z" }));
+    await expect(fetchSignInContext(meta, "req_1", { fetch: other as unknown as typeof fetch })).rejects.toThrow(/another request/);
+    await expect(fetchSignInContext({ ...meta, context_uri: "https://evil.example/ctx" }, "req_1")).rejects.toThrow(/same-origin/);
+    expect(() => validateRelyingPartyMetadata({ ...meta, context_uri: "https://evil.example/ctx" }, "https://rp.example")).toThrow();
+    expect(describeSignInContext(null)).toBe("");
+    const at = Date.parse("2026-09-17T12:00:00Z");
+    for (const [secs, want] of [[1, "just now"], [30, "30 seconds ago"], [90, "a minute ago"], [300, "5 minutes ago"], [7200, "over an hour ago"]] as const) {
+      expect(describeSignInContext({ request_id: "r", started_at: "2026-09-17T12:00:00Z" }, at + secs * 1000)).toBe(`Started ${want}.`);
+    }
   });
 });

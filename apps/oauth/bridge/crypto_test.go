@@ -418,3 +418,54 @@ func TestClientValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestRateLimits(t *testing.T) {
+	h := newHarness(t, func(c *Config) {
+		c.RateLimits = RateLimits{Authorize: 2, Identify: 1, Callback: 1, Token: 1, Console: 1}
+	})
+	b := h.browser()
+	for i := 0; i < 2; i++ {
+		if p := b.get(authorizeQuery("rp", rpRedirect, "openid")); p.status != http.StatusSeeOther {
+			t.Fatalf("authorize %d = %d", i, p.status)
+		}
+	}
+	p := b.get(authorizeQuery("rp", rpRedirect, "openid"))
+	if p.status != http.StatusTooManyRequests || p.header.Get("Retry-After") == "" || !strings.Contains(p.body, "Too many attempts") {
+		t.Fatalf("third authorize = %d %v", p.status, p.header)
+	}
+	// Other surfaces have their own budgets, and the window resets.
+	if res := h.token(url.Values{"grant_type": {"authorization_code"}}, "rp", rpSecret); res.status != 400 {
+		t.Fatalf("first token = %d", res.status)
+	}
+	if res := h.token(url.Values{}, "rp", rpSecret); res.status != http.StatusTooManyRequests || res.body["error"] != "slow_down" {
+		t.Fatalf("second token = %d %v", res.status, res.body)
+	}
+	h.advance(time.Minute)
+	if p := b.get(authorizeQuery("rp", rpRedirect, "openid")); p.status != http.StatusSeeOther {
+		t.Fatalf("after the window = %d", p.status)
+	}
+	// Static pages are never limited.
+	for i := 0; i < 5; i++ {
+		if p := b.get("/.well-known/openid-configuration"); p.status != 200 {
+			t.Fatalf("discovery = %d", p.status)
+		}
+	}
+}
+
+func TestClientIPTrustsProxiesOnlyWhenTold(t *testing.T) {
+	h := newHarness(t)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.5:1234"
+	r.Header.Set("X-Forwarded-For", "1.1.1.1, 203.0.113.7")
+	if got := h.srv.clientIP(r); got != "10.0.0.5" {
+		t.Fatalf("untrusted = %s", got)
+	}
+	h.srv.cfg.TrustProxyHeaders = true
+	if got := h.srv.clientIP(r); got != "203.0.113.7" {
+		t.Fatalf("trusted = %s (must be the proxy-appended hop, not the client-supplied one)", got)
+	}
+	r.Header.Set("X-Forwarded-For", "garbage")
+	if got := h.srv.clientIP(r); got != "10.0.0.5" {
+		t.Fatalf("garbage header = %s", got)
+	}
+}

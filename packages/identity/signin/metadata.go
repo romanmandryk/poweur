@@ -57,6 +57,11 @@ type Metadata struct {
 	PollURI string `json:"poll_uri,omitempty"`
 	// ContactURI is where a user reports abuse by this RP.
 	ContactURI string `json:"contact_uri,omitempty"`
+	// ContextURI, when published, answers `?request_id=` with where a pending
+	// sign-in was started (SignInContext). A signer approving from another
+	// device shows it, so a user sent someone else's request can notice that
+	// it did not start in front of them. Must be same-origin.
+	ContextURI string `json:"context_uri,omitempty"`
 }
 
 // Validate checks a metadata document against the origin it was served from.
@@ -87,6 +92,9 @@ func (m Metadata) Validate(servedFrom string) error {
 	}
 	if m.PollURI != "" && !identity.SameOrigin(origin, m.PollURI) {
 		return fmt.Errorf("%w: poll_uri is not same-origin with %s", identity.ErrSignInAudience, origin)
+	}
+	if m.ContextURI != "" && !identity.SameOrigin(origin, m.ContextURI) {
+		return fmt.Errorf("%w: context_uri is not same-origin with %s", identity.ErrSignInAudience, origin)
 	}
 	if m.LogoURI != "" && !identity.SameOrigin(origin, m.LogoURI) {
 		return fmt.Errorf("%w: logo_uri is not same-origin with %s", identity.ErrSignInAudience, origin)

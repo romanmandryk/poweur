@@ -18,10 +18,10 @@
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
 | E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc/x/oauth2 verified; live Keycloak/Authentik runs moved to T8; `poweur_proof` deferred |
 | E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright run through a passkey signer open |
-| E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll; phone camera (EPIC-019) and initiator context open |
+| E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI, recipes, CI; rate limits, conformance suite, live products, prod rollout open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI, rate limits, recipes, CI; conformance suite, live products, prod rollout open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
 ## Goal
@@ -296,8 +296,10 @@ registration or shared secret.
 - [x] Original browser resumes exactly once; handles cannot be swapped between browsers
 - [x] Number matching: the approving device must send the code the starting screen shows; one
       attempt, then the transaction fails
-- [ ] Initiator context (coarse location, browser, elapsed time) shown on the signer — open;
-      needs a signer-readable context endpoint
+- [x] Initiator context shown on the signer: `context_uri` in RP metadata (Go + TS), served by
+      the bridge and the guestbook, shown by the web signer and `poweur auth approve` —
+      browser, elapsed time and the application. Coarse location is **not** offered (it would
+      need a GeoIP database the bridge does not want to hold)
 - [x] Expiry, cancellation, denial and already-used flows
 - [x] Copy/paste request code remains the CLI/accessibility path (`poweur auth approve --code`)
 
@@ -351,8 +353,9 @@ breaking browser/QR login.
 - [x] Operator CLI: `keys list|rotate`, `clients list|suspend|unsuspend`, `prune`, `gen-key`,
       `hash-secret`; hourly pruning with retention; backup guidance and loss consequences;
       structured audit events without payloads
-- [ ] Rate limiting on `/authorize`, `/t/*/identify` and `/token` (identify triggers outbound
-      fetches) — open
+- [x] Per-IP rate limits on authorize/login, identify, callback, token-family and console
+      posts (`OAUTH_RATE_*`, `OAUTH_TRUST_PROXY` for the proxy-appended hop), 429 with
+      `Retry-After`
 - [ ] OIDC conformance suite, OAuth security failure matrix, external review — open (human)
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
 - [ ] Live runs of those products and of two IndieAuth clients; privacy policy; production

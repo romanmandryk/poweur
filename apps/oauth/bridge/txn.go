@@ -31,6 +31,9 @@ type Txn struct {
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	BindingHash string    `json:"binding_hash"`
+	// Browser is the starting browser's coarse label, shown to a signer on
+	// another device (SignInContext).
+	Browser string `json:"browser,omitempty"`
 
 	// KindLogin: the local path to return to.
 	ReturnTo string `json:"return_to,omitempty"`

@@ -839,3 +839,30 @@ func signIn(t *testing.T, srv *Server, u user) *http.Cookie {
 	}
 	return sessionCookie(t, res)
 }
+
+func TestSignInContext(t *testing.T) {
+	alice := newUser(t, who)
+	srv, _ := newServer(t, alice)
+	r := httptest.NewRequest(http.MethodPost, "/auth/start", nil)
+	r.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Version/17 Mobile Safari/604")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, r)
+	var started StartResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &started)
+
+	if err := srv.Metadata().Validate(rpOrigin); err != nil {
+		t.Fatal(err)
+	}
+	ctxRec := get(t, srv, "/auth/context?request_id="+url.QueryEscape(started.RequestID))
+	var c signin.SignInContext
+	if err := json.Unmarshal(ctxRec.Body.Bytes(), &c); err != nil || c.Browser != "Safari on iOS" || !c.StartedAt.Equal(testNow) {
+		t.Fatalf("context = %d %s", ctxRec.Code, ctxRec.Body.String())
+	}
+	if rec := get(t, srv, "/auth/context?request_id=req_nope"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown = %d", rec.Code)
+	}
+	deliver(t, srv, approve(t, alice, started.Request), started.MatchCode)
+	if rec := get(t, srv, "/auth/context?request_id="+url.QueryEscape(started.RequestID)); rec.Code != http.StatusNotFound {
+		t.Fatalf("answered request still has context: %d", rec.Code)
+	}
+}

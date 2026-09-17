@@ -28,7 +28,9 @@ navigation away sign nothing.
 The app you are signing in to is never in this app's browser, so every mobile approval is a
 **cross-device** approval: ask for the code shown on the screen that started the sign-in and
 send it with the delivery (`{"response": …, "match": …}`). Say plainly that the code must be
-on a screen in front of the user, and that a code someone *sent* them means cancel.
+on a screen in front of the user, and that a code someone *sent* them means cancel. When the RP
+publishes `context_uri`, show its line ("Started 12 seconds ago in Chrome on macOS, to sign in
+to …") beside the code field.
 
 After approval, append the consent record first, then deliver to the allow-listed
 `response_uri`. If the receipt carries a `resume_uri` — possible only when a request reached
