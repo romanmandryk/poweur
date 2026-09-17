@@ -85,8 +85,10 @@ try {
   await waitFor(() => JSON.parse(query('poweur_actions_total')).data.result.length > 0);
   assert.ok(!query('poweur_actions_total').includes('PRIVATE_CANARY'));
   await waitFor(() => request(`${urls.loki}/loki/api/v1/query_range?${new URLSearchParams({ query: '{service_name="poweur-relay"}', limit: '10' })}`).body.includes('PRIVATE_CANARY'));
-  for (const path of ['/api/dashboards/uid/poweur-ops', '/api/datasources/proxy/uid/loki/loki/api/v1/labels']) assert.ok([401, 403].includes(request(urls.grafana + path).status));
+  for (const path of ['/api/dashboards/uid/poweur-ops', '/api/dashboards/uid/poweur-host', '/api/datasources/proxy/uid/loki/loki/api/v1/labels']) assert.ok([401, 403].includes(request(urls.grafana + path).status));
   const admin = `Basic ${Buffer.from(`admin:${config.services.grafana.environment.GF_SECURITY_ADMIN_PASSWORD}`).toString('base64')}`;
+  const host = request(`${urls.grafana}/api/dashboards/uid/poweur-host`, undefined, admin);
+  assert.equal(host.status, 200);
   const board = request(`${urls.grafana}/api/dashboards/uid/poweur-growth`, undefined, admin);
   assert.equal(board.status, 200);
   const growthPanels = JSON.parse(board.body).dashboard.panels;
