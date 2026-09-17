@@ -17,11 +17,11 @@
 | E22-T1 Architecture, protocol profile & threat model | **done** | `auth/oauth-oidc-bridge.md`; ID vectors `id-input.json` |
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
 | E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy and Keycloak verified live; Authentik → T8; `poweur_proof` deferred |
-| E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer |
+| E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer; create-an-ID funnel on the sign-in page |
 | E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI, rate limits, recipes, CI; conformance suite, live products, prod rollout open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, recipes, CI; conformance suite, live Authentik/IndieAuth, prod rollout open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
 ## Goal
@@ -291,6 +291,15 @@ Authentik remains.
       navigation) and another device (the phone shows the context line, types the code, the
       desktop page continues by itself)
 
+- [x] **Create an ID from the sign-in page** (the first-time visitor's way in): why a Poweur ID,
+      a name field checked at the launcher from the browser (`OAUTH_LAUNCHER_URL`, default
+      `poweur.net`, `none` hides it; the only other origin in `connect-src`), creation in a new
+      tab (`/app/?handle=…&from=signin`), `POST /t/{id}/creating` holding the sign-in open for
+      30 min (capped at an hour), and the tab noticing on focus that the name is now taken and
+      filling it in. The claim card takes only a plausible `?handle=` and shows a fixed
+      "waiting in your other tab" note. Go tests + Playwright
+      (`oauth-bridge-create-id.spec.js`), bridge 0.1.3, web 0.1.22
+
 **Acceptance:** met by the harness and by hand in the browser (`scripts/dev.sh`).
 
 ### E22-T5 — Cross-device QR journey — **partial**
@@ -363,17 +372,31 @@ browser/QR login is unchanged.
 - [x] Compose example with a relay beside it (`apps/oauth/compose.example.yml`), separate
       processes, origins, keys and storage; `scripts/dev.sh` for local work
 - [ ] Document remote deployment across operators — partly in the design doc; no runbook yet
-- [x] Operator CLI: `keys list|rotate`, `clients list|suspend|unsuspend`, `prune`, `gen-key`,
-      `hash-secret`; hourly pruning with retention; backup guidance and loss consequences;
-      structured audit events without payloads
+- [x] Operator CLI: `keys list|rotate`, `clients list|suspend|unsuspend`, `prune`, `backup`,
+      `gen-key`, `hash-secret`; hourly pruning with retention; structured audit events without
+      payloads
+- [x] `poweur-oauth backup` (`VACUUM INTO`, refuses to overwrite) and a restore test: same
+      key-encryption key → same pairwise subjects, same kids, old ID tokens still verify
+      (`TestBackupRestoreKeepsSubjectsAndKeys`)
+- [x] `/health` fails (503) when SQLite is unreadable or no signing key is loaded
+- [x] `/metrics` on a private listener (`OAUTH_METRICS_ADDR`): requests and latency by route
+      pattern, rate-limit refusals, one counter per audit event; no identities or addresses in
+      labels; sample alerting rules in `apps/oauth/deploy/alerts.yml`
+- [x] Registration defaults to `closed` (`open` is an explicit operator choice); the hosted
+      bridge launches `allowlist`
+- [x] `/privacy` (what is kept and for how long, from the running config), `/security`
+      (disclosure contact, incident steps) and an expanded `/abuse`, linked in the footer
 - [x] Per-IP rate limits on authorize/login, identify, callback, token-family and console
       posts (`OAUTH_RATE_*`, `OAUTH_TRUST_PROXY` for the proxy-appended hop), 429 with
       `Retry-After`
-- [ ] OIDC conformance suite, OAuth security failure matrix, external review — open (human)
+- [ ] OIDC conformance suite, OAuth security failure matrix, external review — open (human).
+      The suite authenticates with a scripted password form; this bridge needs a signature from
+      a device, so running it needs a scripted signer harness (test identity + web signer),
+      written up in the design doc under *Conformance and external review*
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
 - [x] Live oauth2-proxy and Keycloak runs (opt-in Playwright specs, Docker)
-- [ ] Authentik and two independent IndieAuth clients live; privacy policy; production
-      deployment at `oauth.poweur.org` (ansible/Caddy) — open
+- [ ] Authentik and two independent IndieAuth clients live; production deployment at
+      `oauth.poweur.org` (ansible/Caddy) — open
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
 **Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live

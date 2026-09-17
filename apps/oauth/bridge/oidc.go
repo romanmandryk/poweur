@@ -483,19 +483,11 @@ func (s *Server) issueCode(w http.ResponseWriter, r *http.Request, t *Txn, c *Cl
 		IssuedAt:      now,
 		Surface:       a.Surface,
 	}
-	// Mark the transaction done first: it produces exactly one code.
-	if _, err := s.store.UpdateTxn(ctx, t.ID, func(t *Txn) error {
-		if err := t.usable(); err != nil {
-			return err
-		}
-		t.Done = true
-		return nil
-	}); err != nil {
+	// The transaction produces exactly one code: finishing it and storing
+	// the code are one write.
+	if _, err := s.store.FinishTxnWithCode(ctx, t.ID, (*Txn).usable,
+		signin.HashSecret(code), grant, now.Add(codeTTL)); err != nil {
 		s.txnError(w, r, err)
-		return
-	}
-	if err := s.store.PutCode(ctx, signin.HashSecret(code), grant, now.Add(codeTTL)); err != nil {
-		s.renderError(w, r, http.StatusInternalServerError, "Could not finish signing in.")
 		return
 	}
 	s.recordSignIn(r, t, c)
@@ -621,26 +613,20 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := r.PostForm.Get("code")
-	grant, err := s.store.RedeemCode(ctx, signin.HashSecret(code))
+	grant, err := s.store.RedeemCode(ctx, signin.HashSecret(code), func(g *CodeGrant) error {
+		return checkCodeBinding(r, c, g)
+	})
+	var refused *grantRefusal
 	switch {
 	case errors.Is(err, errCodeReused):
 		s.audit(ctx, "token.code_reused", map[string]any{"client_id": c.ID})
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "the authorization code was already used; its tokens are revoked")
 		return
+	case errors.As(err, &refused):
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", refused.reason)
+		return
 	case err != nil:
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "unknown or expired authorization code")
-		return
-	}
-	if grant.ClientID != c.ID {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "the code was issued to another client")
-		return
-	}
-	if r.PostForm.Get("redirect_uri") != grant.RedirectURI {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "redirect_uri does not match the authorization request")
-		return
-	}
-	if !verifyPKCE(r.PostForm.Get("code_verifier"), grant.CodeChallenge) {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "code_verifier does not match code_challenge")
 		return
 	}
 
@@ -815,4 +801,23 @@ func clientHost(c *Client) string {
 		}
 	}
 	return ""
+}
+
+// grantRefusal is a code presented with the wrong client, redirect_uri or
+// verifier. The code stays unspent.
+type grantRefusal struct{ reason string }
+
+func (e *grantRefusal) Error() string { return e.reason }
+
+// checkCodeBinding holds a code to what its authorization request bound it to.
+func checkCodeBinding(r *http.Request, c *Client, g *CodeGrant) error {
+	switch {
+	case g.ClientID != c.ID:
+		return &grantRefusal{"the code was issued to another client"}
+	case r.PostForm.Get("redirect_uri") != g.RedirectURI:
+		return &grantRefusal{"redirect_uri does not match the authorization request"}
+	case !verifyPKCE(r.PostForm.Get("code_verifier"), g.CodeChallenge):
+		return &grantRefusal{"code_verifier does not match code_challenge"}
+	}
+	return nil
 }

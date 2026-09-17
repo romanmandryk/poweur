@@ -1,9 +1,18 @@
 {{template "head" .}}
-<section class="card">
+<section class="card prose">
   <h1>Report an application</h1>
-  <p>If an application misled you on a sign-in page, tell the operator of this service. Include the application's name and,
-     if you can, its client ID (it appears in the address bar as <code>client_id</code>).</p>
+  <p>If an application misled you on a sign-in page — pretended to be someone else, asked for more than it needed, or
+     sent you somewhere you did not expect — tell the operator of this service.</p>
   {{with .Data}}<p>Contact: <strong>{{.}}</strong></p>{{else}}<p class="muted">The operator has not published a contact address.</p>{{end}}
-  <p class="hint">Suspending an application stops every sign-in to it at once.</p>
+  <h2>What to include</h2>
+  <ul>
+    <li>The application's name as the consent page showed it.</li>
+    <li>Its client ID — it appears in the address bar as <code>client_id</code>.</li>
+    <li>Where you were sent afterwards, and when.</li>
+  </ul>
+  <h2>What happens next</h2>
+  <p>The operator reviews the report and may suspend the application, which stops every sign-in to it at once, and
+     contact its developer. If you approved a sign-in you now regret, revoke the application at
+     <a href="/account">your account</a>. Security problems in this service itself: see <a href="/security">security</a>.</p>
 </section>
 {{template "foot" .}}

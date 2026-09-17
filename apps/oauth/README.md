@@ -36,14 +36,18 @@ repo root. [`compose.example.yml`](compose.example.yml) runs it beside a relay.
 | `OAUTH_ADDR` | `:8090` | Listen address. |
 | `OAUTH_NAME` | `Poweur OAuth bridge` | Shown to signers and on pages. |
 | `OAUTH_DEFAULT_SIGNER` | — | Web signer offered when an identity advertises none. |
+| `OAUTH_LAUNCHER_URL` | `https://poweur.net` | Where the sign-in page sends visitors without a Poweur ID to create one (a relay serving the web app). The page checks name availability there from the browser. `none` hides the offer. |
+| `OAUTH_LAUNCHER_DOMAIN` | launcher host without `id.` | Hosted domain new names are created under (`alice.<domain>`). |
 | `OAUTH_SUBJECT_TYPE` | `pairwise` | `public` makes `sub` the Poweur ID itself. |
-| `OAUTH_CLIENT_REGISTRATION` | `open` | Who may use `/developers`: `open`, `allowlist`, `closed`. |
+| `OAUTH_CLIENT_REGISTRATION` | `closed` | Who may use `/developers`: `closed`, `allowlist`, `open`. Start closed or allowlisted: `open` lets any Poweur ID publish a consent page under your name. |
 | `OAUTH_REGISTRATION_ALLOWLIST` | — | CSV of IDs or `*.domain` suffixes for `allowlist`. |
 | `OAUTH_MAX_CLIENTS_PER_OWNER` | `10` | Console limit per Poweur ID. |
 | `OAUTH_STATIC_CLIENTS` | — | JSON file of operator clients; see [`clients.example.json`](clients.example.json). |
 | `OAUTH_URL_CLIENTS` | `indieauth` | URL `client_id`s: `indieauth` (IndieAuth only), `on` (OIDC too), `off`. |
 | `OAUTH_SESSION_TTL` | `12h` | How long a browser stays signed in to the bridge. |
 | `OAUTH_CONTACT_URI`, `OAUTH_ABUSE_CONTACT` | `/abuse` | Where consent pages send abuse reports. |
+| `OAUTH_SECURITY_CONTACT` | abuse contact | Where `/security` asks vulnerability reports to go. |
+| `OAUTH_METRICS_ADDR` | off | A second listener for `GET /metrics` (Prometheus text). Bind it to a private address: `127.0.0.1:9464`. |
 | `OAUTH_PUSH_CLI`, `OAUTH_PUSH_HOME`, `OAUTH_PUSH_IDENTITY` | — | Enable **Send to my Poweur app**: the `poweur` binary, a home holding only the bridge's identity (`HOME=… poweur identity create …`), and that identity. Users list it under Sign-in services. |
 | `OAUTH_RATE_AUTHORIZE` / `_IDENTIFY` / `_CALLBACK` / `_TOKEN` / `_CONSOLE` | 60 / 20 / 60 / 120 / 30 | Requests per minute per client IP; `-1` disables. |
 | `OAUTH_TRUST_PROXY` | off | `1` to rate-limit by the last `X-Forwarded-For` hop (only behind a proxy that sets it). |
@@ -62,11 +66,36 @@ poweur-oauth clients suspend <client_id> impersonation
 poweur-oauth clients unsuspend <client_id>
 poweur-oauth hash-secret < secret.txt      # client_secret_sha256 for the static file
 poweur-oauth prune                         # also runs hourly inside `serve`
+poweur-oauth backup /backups/oauth-$(date +%F).db   # consistent copy, server running
 ```
 
-Back up the database **and** the key-encryption key together. Restoring the
-database without the key leaves the bridge unable to sign; losing the database
-changes every user's pairwise `sub` at every application.
+### Health
+
+`GET /health` answers `200 {"status":"ok"}` only when the database reads and a
+signing key is loaded; otherwise `503` with `"error":"database"` or
+`"signing key"`. Point your load balancer and uptime check at it.
+
+### Metrics and alerts
+
+With `OAUTH_METRICS_ADDR` set, `GET /metrics` serves request counts and
+latency by route, rate-limit refusals, and counters for the audit events
+(`token.code_reused`, `native.match_failed`, `push.failed`, …). Labels are
+route patterns and event names only — no identities, client ids or addresses.
+Sample rules: [`deploy/alerts.yml`](deploy/alerts.yml).
+
+### Backup and restore
+
+`poweur-oauth backup <new-file>` writes a consistent copy while the server
+runs (`VACUUM INTO`; it refuses to overwrite). Back it up **with** the
+key-encryption key, and keep them apart: the file holds the sealed signing
+keys and the pairwise-subject secret.
+
+Restore = copy the file into place and start with the *same*
+`OAUTH_KEY_ENCRYPTION_KEY`. Then every user keeps the same `sub` at every
+application and old ID tokens still verify — tested in
+`TestBackupRestoreKeepsSubjectsAndKeys`. Restoring without the key leaves the
+bridge unable to sign; losing the database changes every user's pairwise `sub`
+everywhere.
 
 ## Connecting applications
 

@@ -98,6 +98,22 @@ func TestKeysAndClientsCommands(t *testing.T) {
 	if code, _, _ := runCmd(t, "", "prune"); code != 0 {
 		t.Fatal("prune failed")
 	}
+	backup := filepath.Join(dir, "backup.db")
+	if code, out, errOut := runCmd(t, "", "backup", backup); code != 0 || !strings.Contains(out, "OAUTH_KEY_ENCRYPTION_KEY") {
+		t.Fatalf("backup = %d %q %q", code, out, errOut)
+	}
+	if code, _, _ := runCmd(t, "", "backup", backup); code == 0 {
+		t.Fatal("backup overwrote a file")
+	}
+	if code, _, _ := runCmd(t, "", "backup"); code != 2 {
+		t.Fatal("backup without a path")
+	}
+	// The restored copy serves the same keys.
+	t.Setenv("OAUTH_DATABASE", backup)
+	if code, restored, _ := runCmd(t, "", "keys", "list"); code != 0 || restored != strings.TrimPrefix(rotated, rotated[:strings.Index(rotated, "KID")]) {
+		t.Fatalf("restored keys = %q, want %q", restored, rotated)
+	}
+	t.Setenv("OAUTH_DATABASE", filepath.Join(dir, "oauth.db"))
 
 	t.Setenv("OAUTH_STATIC_CLIENTS", filepath.Join(dir, "nope.json"))
 	if code, _, errOut := runCmd(t, "", "keys", "list"); code == 0 || !strings.Contains(errOut, "OAUTH_STATIC_CLIENTS") {
@@ -107,6 +123,14 @@ func TestKeysAndClientsCommands(t *testing.T) {
 	t.Setenv("OAUTH_SESSION_TTL", "soon")
 	if code, _, errOut := runCmd(t, "", "keys", "list"); code == 0 || !strings.Contains(errOut, "OAUTH_SESSION_TTL") {
 		t.Fatalf("bad session ttl = %d %q", code, errOut)
+	}
+}
+
+func TestLauncherURL(t *testing.T) {
+	for in, want := range map[string]string{"none": "", "OFF": "", " ": "", "https://poweur.net": "https://poweur.net"} {
+		if got := launcherURL(in); got != want {
+			t.Errorf("launcherURL(%q) = %q", in, got)
+		}
 	}
 }
 

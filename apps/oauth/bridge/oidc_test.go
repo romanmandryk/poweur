@@ -309,13 +309,20 @@ func TestTokenEndpointRefusals(t *testing.T) {
 		if res := h.token(f, "rp", rpSecret); res.status != 400 || res.body["error"] != "invalid_grant" {
 			t.Errorf("%s: %d %v", name, res.status, res.body)
 		}
+		// …and the refusal did not spend it: the rightful request still works.
+		if res := h.token(codeForm(c, rpRedirect), "rp", rpSecret); res.status != 200 {
+			t.Errorf("%s spent the code: %d %v", name, res.status, res.body)
+		}
 	}
 
-	// Another client cannot redeem rp's code.
+	// Another client cannot redeem rp's code, nor spend it.
 	c := newCode()
 	f := codeForm(c, rpRedirect)
 	if res := h.token(f, "internal", rpSecret); res.status != 400 || res.body["error"] != "invalid_grant" {
 		t.Errorf("cross-client redemption: %d %v", res.status, res.body)
+	}
+	if res := h.token(f, "rp", rpSecret); res.status != 200 {
+		t.Errorf("cross-client attempt spent the code: %d %v", res.status, res.body)
 	}
 
 	// Reuse revokes what the first redemption issued.

@@ -52,6 +52,28 @@ func OpenStore(ctx context.Context, path string) (*Store, error) {
 // Close releases the database.
 func (s *Store) Close() error { return s.db.Close() }
 
+// Check reads from the database: schema, transactions and the pairwise
+// secret's table, so a missing or unreadable file fails.
+func (s *Store) Check(ctx context.Context) error {
+	var version, n int
+	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM secrets`).Scan(&n); err != nil {
+		return err
+	}
+	return s.db.QueryRowContext(ctx, `SELECT count(*) FROM transactions WHERE expires_at > ?`, unix(s.now())).Scan(&n)
+}
+
+// Backup writes a consistent copy of the database to path (VACUUM INTO),
+// which must not exist. The copy holds sealed signing keys and the pairwise
+// subject secret: restore it with the same key-encryption key and every
+// client keeps seeing the same subjects and verifying the same kids.
+func (s *Store) Backup(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
+}
+
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS transactions (
 		id          TEXT PRIMARY KEY,
@@ -227,6 +249,12 @@ func (s *Store) txnWhere(ctx context.Context, where string, arg any) (*Txn, erro
 // UpdateTxn applies fn to a live transaction atomically. fn must not call the
 // store. Returning an error from fn aborts the update; the error is returned.
 func (s *Store) UpdateTxn(ctx context.Context, id string, fn func(*Txn) error) (*Txn, error) {
+	return s.updateTxn(ctx, id, fn, nil)
+}
+
+// updateTxn is UpdateTxn with also, a further write committed with the
+// transaction's own — and only when fn accepted the change.
+func (s *Store) updateTxn(ctx context.Context, id string, fn func(*Txn) error, also func(*sql.Tx) error) (*Txn, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -262,6 +290,11 @@ func (s *Store) UpdateTxn(ctx context.Context, id string, fn func(*Txn) error) (
 	}
 	if err := saveTxn(ctx, tx, &t); err != nil {
 		return nil, err
+	}
+	if also != nil {
+		if err := also(tx); err != nil {
+			return nil, err
+		}
 	}
 	return &t, tx.Commit()
 }

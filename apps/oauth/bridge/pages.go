@@ -61,15 +61,19 @@ func (s *Server) renderFailed(w http.ResponseWriter, r *http.Request, t *Txn) {
 }
 
 type identifyView struct {
-	Txn    *Txn
-	Hint   string
-	Error  string
-	Client *AuthorizeRequest
+	Txn      *Txn
+	Hint     string
+	Error    string
+	Client   *AuthorizeRequest
+	Launcher *launcherView
+	Why      string
 }
 
 func (s *Server) renderIdentify(w http.ResponseWriter, r *http.Request, t *Txn, message string, status int) {
 	s.render(w, r, status, "identify.html", "Sign in with your Poweur ID", identifyView{
 		Txn: t, Hint: t.LoginHint, Error: message, Client: t.Authorize,
+		Launcher: s.launcherView(),
+		Why:      whyPoweur(t),
 	})
 }
 
@@ -174,4 +178,14 @@ func (s *Server) serveAsset(w http.ResponseWriter, name, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = w.Write(raw)
+}
+
+// whyPoweur is the one-line answer to "why do I need this?".
+func whyPoweur(t *Txn) string {
+	app := "This site"
+	if t.Authorize != nil && t.Authorize.ClientName != "" {
+		app = t.Authorize.ClientName
+	}
+	return app + " signs you in with a Poweur ID instead of a password: a name you own, " +
+		"confirmed with a key that never leaves your device. The same ID works anywhere Poweur ID is accepted."
 }

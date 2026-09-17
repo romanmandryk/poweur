@@ -35,6 +35,8 @@ func (s *Server) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /developers/clients/{id}/secrets/{sid}/retire", s.handleClientRetireSecret)
 	mux.HandleFunc("POST /developers/clients/{id}/delete", s.handleClientDelete)
 	mux.HandleFunc("GET /abuse", s.handleAbuse)
+	mux.HandleFunc("GET /privacy", s.handlePrivacy)
+	mux.HandleFunc("GET /security", s.handleSecurity)
 }
 
 // requireSession returns the signed-in browser session, or sends the browser
@@ -560,4 +562,64 @@ func (s *Server) handleClientDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAbuse(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "abuse.html", "Report an application", s.cfg.AbuseContact)
+}
+
+// policyView is what /privacy and /security state, from the running config,
+// so the page cannot drift from what the bridge does.
+type policyView struct {
+	Contact         string
+	SecurityContact string
+	Pairwise        bool
+	Audit           string
+	SignIns         string
+	Consents        string
+	Session         string
+	Txn             string
+	Code            string
+	AccessToken     string
+	Registration    string
+}
+
+func (s *Server) policyView() policyView {
+	r := s.cfg.Retention
+	return policyView{
+		Contact:         s.cfg.AbuseContact,
+		SecurityContact: s.cfg.SecurityContact,
+		Pairwise:        s.cfg.SubjectType == SubjectPairwise,
+		Audit:           humanDuration(r.Audit),
+		SignIns:         humanDuration(r.SignIns),
+		Consents:        humanDuration(r.Consents),
+		Session:         humanDuration(s.cfg.SessionTTL),
+		Txn:             humanDuration(s.cfg.TxnTTL),
+		Code:            humanDuration(codeTTL),
+		AccessToken:     humanDuration(accessTokenTTL),
+		Registration:    s.cfg.ClientRegistration,
+	}
+}
+
+func (s *Server) handlePrivacy(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, http.StatusOK, "privacy.html", "Privacy and retention", s.policyView())
+}
+
+func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, http.StatusOK, "security.html", "Security and incidents", s.policyView())
+}
+
+func humanDuration(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour && d%(24*time.Hour) == 0:
+		return plural(int(d/(24*time.Hour)), "day")
+	case d >= time.Hour && d%time.Hour == 0:
+		return plural(int(d/time.Hour), "hour")
+	case d >= time.Minute && d%time.Minute == 0:
+		return plural(int(d/time.Minute), "minute")
+	}
+	return d.String()
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }

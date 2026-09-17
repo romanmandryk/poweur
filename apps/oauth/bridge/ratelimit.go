@@ -134,6 +134,7 @@ func (s *Server) rateLimited(w http.ResponseWriter, r *http.Request) bool {
 	if ok {
 		return false
 	}
+	s.metrics.limited(rateRoute(r))
 	w.Header().Set("Retry-After", strconv.Itoa(retry))
 	if strings.HasPrefix(r.URL.Path, "/t/") || r.URL.Path == "/authorize" && r.Method == http.MethodGet ||
 		r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/developers") || strings.HasPrefix(r.URL.Path, "/account") {

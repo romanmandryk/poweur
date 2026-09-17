@@ -109,6 +109,25 @@ describe("the launcher landing (E15-T8)", () => {
     await waitFor(() => expect(claim.disabled).toBe(false));
   });
 
+  it("a link from a sign-in page fills the name, checks it and says where to go back", async () => {
+    history.replaceState(null, "", "/app/?handle=Newbie&from=signin");
+    useSession.setState({ mode: launcher });
+    relay.availability.mockResolvedValue({ available: true, identity: "newbie.poweur.net", policy: null });
+    render(<App />);
+    expect($<HTMLInputElement>("#ni-handle").value).toBe("newbie");
+    expect($("#claim-from-signin").textContent).toContain("go back to that tab");
+    await waitFor(() => expect($("#ni-availability").textContent).toBe("newbie.poweur.net is available"), { timeout: 2000 });
+    expect(relay.availability).toHaveBeenCalledWith("newbie", "poweur.net");
+  });
+
+  it("an ordinary visit has no sign-in note and an empty name", () => {
+    history.replaceState(null, "", "/app/?handle=<b>x</b>");
+    useSession.setState({ mode: launcher });
+    render(<App />);
+    expect($<HTMLInputElement>("#ni-handle").value).toBe("");
+    expect(document.querySelector("#claim-from-signin")).toBeNull();
+  });
+
   it("refuses up front when this browser has no PRF passkey", async () => {
     useSession.setState({ mode: launcher });
     useData.setState({

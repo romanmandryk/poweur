@@ -154,6 +154,31 @@ and picks where to send the browser:
 
 The bridge never embeds or frames a signer and never receives key material.
 
+### Visitors who have no Poweur ID yet
+
+The sign-in page is where most people meet Poweur for the first time, and a page that only
+accepts an ID they do not have is a dead end. Under the ID field it offers to create one:
+
+- **A reason, in one sentence.** "*Grafana* signs you in with a Poweur ID instead of a password:
+  a name you own, confirmed with a key that never leaves your device. The same ID works anywhere
+  Poweur ID is accepted."
+- **A name field with the hosted suffix**, checked as it is typed against the launcher's
+  `GET /hosted/availability` — the same endpoint the web app's claim card uses, called from the
+  visitor's browser (CORS `*`), so the bridge neither proxies it nor learns what was typed
+  before it is submitted. The launcher is `OAUTH_LAUNCHER_URL` (default `https://poweur.net`,
+  `none` to hide the offer); it is the only other origin in the page's `connect-src`.
+- **Creation in a new tab**, at `<launcher>/app/?handle=<name>&from=signin`. The sign-in tab
+  stays where it is: it tells the bridge it is waiting (`POST /t/{id}/creating`, which extends
+  the transaction to 30 minutes, capped at an hour from its start), and watches the name —
+  every 20 seconds and whenever the tab regains focus, which is the moment that matters. When
+  the name becomes taken, it is *the visitor who just took it*: the ID field is filled in and
+  the page says "ready — continue to sign in with it".
+- The link works without JavaScript, and the flow degrades to "create it, come back, type it in".
+
+Nothing from the launcher tab is trusted: the sign-in tab reads only its own availability check
+(a boolean and a name it composed itself), and the claim page takes only a plausible handle from
+`?handle=` — never free text — as `from=signin` merely shows a fixed note about the waiting tab.
+
 ### Same-browser return without the response in a URL
 
 Today's web signer POSTs the approval to `response_uri`, then offers a "Continue" link that
@@ -253,6 +278,11 @@ the native proof, not of the session cookie.
 | `openid` | `iss`, `sub`, `aud`, `exp`, `iat`, `auth_time`, `nonce`, `amr` | always |
 | `poweur_id` | `poweur_id`, `poweur_key_fingerprint`, `poweur_id_url` | shown ticked on consent; released only if left ticked |
 | `profile` | `name`, `picture`, `profile` from the identity's public profile | shown ticked on consent; released only if left ticked |
+
+Unknown scope values are **ignored**, not refused: OIDC Core §3.1.2.1 says an authorization
+server SHOULD ignore scope values it does not understand, and real deployments ask for `email`
+or `offline_access` from templates the operator cannot edit. The token response reports the
+scopes actually granted, and the consent screen only ever shows what the bridge really releases.
 
 `amr` is `["poweur"]`, with `"session"` appended when a delegated session key signed. `email`
 is not offered: a Poweur ID is not an email address, and inventing one would be a lie some RP
@@ -358,11 +388,11 @@ every consent page, and operator suspension (`poweur-oauth clients suspend`). Op
 the posture:
 
 ```
-OAUTH_CLIENT_REGISTRATION = open | allowlist | closed
+OAUTH_CLIENT_REGISTRATION = closed (default) | allowlist | open
 ```
 
-The hosted `oauth.poweur.org` launches `open`; a company bridge usually runs `closed` with
-static clients only.
+The hosted `oauth.poweur.org` launches `allowlist` and opens up once abuse handling has been
+exercised; a company bridge usually runs `closed` with static clients only.
 
 ### 2. Static clients — operator configuration
 
@@ -458,6 +488,30 @@ configuration**, not web UI — `poweur-oauth keys rotate`, `poweur-oauth client
 A web admin surface is one more authenticated attack surface on the most sensitive service an
 operator runs; v1 does without it (E22-T8 packages the commands).
 
+Client registration defaults to **closed**: `open` lets any Poweur ID publish a consent page
+under the operator's issuer, which is a phishing surface an operator should choose knowingly.
+The hosted bridge starts `allowlist`.
+
+Production also gets: `/health`, which answers 503 unless the database reads and a signing key
+is loaded; `GET /metrics` on a private listener (`OAUTH_METRICS_ADDR`) with per-route request,
+latency and rate-limit counters plus one counter per audit event, and sample alert rules in
+`apps/oauth/deploy/alerts.yml`; and `poweur-oauth backup <file>`, a consistent copy that — kept
+with, but stored apart from, the key-encryption key — restores to the same subjects and the
+same key ids.
+
+### Conformance and external review
+
+The OpenID Foundation's [certification suite](https://openid.net/certification/connect_op_testing/)
+drives a browser through the authorization endpoint and expects to authenticate with a password
+form it can script. This bridge authenticates only with a signature from the user's device, so
+the basic OP profile cannot run unattended against it: the suite's browser has no keys. Running
+it needs a scripted signer — a test identity whose key the harness holds, driving the web signer
+— which is planned work, not a configuration switch. The protocol surface the suite checks
+(discovery, JWKS, PKCE, `nonce`, `iss`, error codes, pairwise subjects) is covered by
+`apps/oauth/bridge` unit tests, `apps/integration` with `go-oidc` as the RP, and live runs of
+oauth2-proxy and Keycloak. An external security review is commissioned work and stays open in
+E22-T8.
+
 ## Storage
 
 SQLite by default (Postgres behind the same interface for multi-instance). Tables: `clients`,
@@ -466,7 +520,14 @@ SQLite by default (Postgres behind the same interface for multi-instance). Table
 `audit_events`, `signing_keys` (encrypted at rest with an operator-supplied key).
 
 Retention: transactions, codes and nonces are deleted after expiry; audit events 90 days by
-default; consents until revoked or 1 year unused.
+default; consents until revoked or 1 year unused. The running values are published at
+`/privacy`, beside what applications learn; `/security` states the disclosure contact and the
+incident steps, and `/abuse` how to report an application.
+
+A code is issued in the same database transaction that marks its sign-in finished, and redeemed
+only by a request that already matches its client, `redirect_uri` and PKCE verifier — a wrong
+verifier leaves the code unspent for the client that holds the right one, while a genuine reuse
+revokes every token the first redemption issued.
 
 ## Threat model
 

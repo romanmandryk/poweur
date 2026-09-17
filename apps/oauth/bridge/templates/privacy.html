@@ -1,0 +1,42 @@
+{{template "head" .}}
+{{$v := .Data}}
+<section class="card prose">
+  <h1>Privacy and retention</h1>
+  <p>{{.Name}} lets applications sign you in with a Poweur ID. It never holds your keys: you approve each sign-in on
+     your own device, and this service checks the signature.</p>
+
+  <h2>What it keeps, and for how long</h2>
+  <ul>
+    <li><strong>A sign-in in progress</strong> — the application, the Poweur ID you typed and a coarse browser label
+        (such as “Firefox on macOS”), for {{$v.Txn}}, or up to an hour while you create an ID.</li>
+    <li><strong>Authorization codes</strong> — {{$v.Code}}; <strong>access tokens</strong> — {{$v.AccessToken}}.
+        Only hashes are stored.</li>
+    <li><strong>Your session on this service</strong> — {{$v.Session}}, in a first-party cookie. Signing out ends it.</li>
+    <li><strong>What you allowed each application to see</strong> — until you revoke it at
+        <a href="/account">your account</a>, or {{$v.Consents}} after it was last used.</li>
+    <li><strong>Recent sign-ins</strong> (application, time, browser label) — {{$v.SignIns}}, so you can review them
+        at <a href="/account">your account</a>.</li>
+    <li><strong>Security log</strong> (events such as a reused code or a suspended application; no message content) —
+        {{$v.Audit}}.</li>
+    <li><strong>Applications registered by developers</strong> — until the developer or the operator deletes them.</li>
+  </ul>
+
+  <h2>What applications learn</h2>
+  <p>Only what you allow on the consent page. {{if $v.Pairwise}}The account identifier (<code>sub</code>) is different
+     for every application, so applications cannot match you up by it. Your Poweur ID itself is shared only when you
+     allow it.{{else}}The account identifier (<code>sub</code>) is the same for every application.{{end}}
+     Your name and picture come from your public profile and are sent only when you allow them.</p>
+
+  <h2>What it does not do</h2>
+  <ul>
+    <li>No advertising, analytics or third-party scripts; pages load nothing from other sites. The one exception: when
+        you choose a name for a new Poweur ID, your browser asks the ID provider whether it is free.</li>
+    <li>No passwords and no private keys, ever.</li>
+    <li>This service does not store IP addresses: it uses them briefly, in memory, to limit request rates. The
+        operator's web server may keep ordinary access logs.</li>
+  </ul>
+
+  <h2>Contact</h2>
+  {{with $v.Contact}}<p>Questions or requests about your data: <strong>{{.}}</strong>.</p>{{else}}<p class="muted">The operator has not published a contact address.</p>{{end}}
+</section>
+{{template "foot" .}}

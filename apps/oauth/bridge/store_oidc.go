@@ -38,22 +38,50 @@ type Claims struct {
 
 // PutCode stores a new code.
 func (s *Store) PutCode(ctx context.Context, codeHash string, g CodeGrant, expiresAt time.Time) error {
+	return putCode(ctx, s.db, codeHash, g, expiresAt)
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func putCode(ctx context.Context, db execer, codeHash string, g CodeGrant, expiresAt time.Time) error {
 	raw, err := json.Marshal(g)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx,
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO codes(code_hash, expires_at, used, data) VALUES(?, ?, 0, ?)`,
 		codeHash, unix(expiresAt), string(raw))
 	return err
 }
 
+// FinishTxnWithCode marks a transaction done and stores its one code in the
+// same database transaction: a crash between the two can neither leave a
+// finished sign-in with no code nor a code for an unfinished one. check runs
+// on the transaction first and may refuse.
+func (s *Store) FinishTxnWithCode(ctx context.Context, id string, check func(*Txn) error,
+	codeHash string, g CodeGrant, expiresAt time.Time) (*Txn, error) {
+	return s.updateTxn(ctx, id, func(t *Txn) error {
+		if err := check(t); err != nil {
+			return err
+		}
+		t.Done = true
+		return nil
+	}, func(tx *sql.Tx) error {
+		return putCode(ctx, tx, codeHash, g, expiresAt)
+	})
+}
+
 var errCodeReused = errors.New("authorization code already used")
 
-// RedeemCode marks a code used and returns its grant. A second redemption
-// returns errCodeReused and revokes every token the first one produced
+// RedeemCode validates a code with check and, only if check accepts it,
+// marks it used — in one database transaction, so a request that presents the
+// wrong client, redirect_uri or verifier cannot spend the code for the client
+// that holds the right ones. A second redemption of a spent code returns
+// errCodeReused and revokes every token the first one produced
 // (RFC 6749 §4.1.2).
-func (s *Store) RedeemCode(ctx context.Context, codeHash string) (*CodeGrant, error) {
+func (s *Store) RedeemCode(ctx context.Context, codeHash string, check func(*CodeGrant) error) (*CodeGrant, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -83,12 +111,19 @@ func (s *Store) RedeemCode(ctx context.Context, codeHash string) (*CodeGrant, er
 	if expires <= unix(s.now()) {
 		return nil, ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE codes SET used = 1 WHERE code_hash = ?`, codeHash); err != nil {
-		return nil, err
-	}
 	var g CodeGrant
 	if err := json.Unmarshal([]byte(raw), &g); err != nil {
 		return nil, err
+	}
+	if err := check(&g); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE codes SET used = 1 WHERE code_hash = ? AND used = 0`, codeHash)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return nil, errCodeReused
 	}
 	return &g, tx.Commit()
 }

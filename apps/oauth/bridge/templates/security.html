@@ -1,0 +1,36 @@
+{{template "head" .}}
+{{$v := .Data}}
+<section class="card prose">
+  <h1>Security and incidents</h1>
+
+  <h2>Reporting a vulnerability</h2>
+  {{with $v.SecurityContact}}<p>Write to <strong>{{.}}</strong>. Include what you found and how to reproduce it.
+     We acknowledge within three working days and tell you what we will do.</p>
+  {{else}}<p class="muted">The operator has not published a security contact.</p>{{end}}
+  <p>Please test only against your own identities and applications, do not access other people's data, and give us a
+     reasonable time to fix a problem before publishing it.</p>
+
+  <h2>How this service is built to fail safely</h2>
+  <ul>
+    <li>It holds no user keys: a compromise cannot sign as you at another Poweur service.</li>
+    <li>Signing keys are stored encrypted and can be rotated; old keys stay published only as long as tokens signed
+        with them are valid.</li>
+    <li>A sign-in can be finished only by the browser that started it, or by one you confirmed with the code it shows.</li>
+    <li>A reused authorization code revokes every token issued from it.</li>
+  </ul>
+
+  <h2>If something goes wrong</h2>
+  <ol>
+    <li><strong>Contain.</strong> Suspend affected applications (every sign-in to them stops at once), rotate the
+        signing key, or take the service offline. Existing application sessions are the applications' own and are not
+        ended by this service; ID tokens expire within minutes.</li>
+    <li><strong>Assess</strong> from the security log what was affected and since when.</li>
+    <li><strong>Tell people.</strong> Affected users and application developers are told what happened, what it means
+        for them and what to do — within 72 hours of confirming an incident that exposed personal data.</li>
+    <li><strong>Fix and review</strong>, and publish what changed.</li>
+  </ol>
+
+  <p>Abusive or misleading applications: <a href="/abuse">report an application</a>.
+     Client registration on this service is <strong>{{$v.Registration}}</strong>.</p>
+</section>
+{{template "foot" .}}

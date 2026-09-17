@@ -27,6 +27,7 @@ trap 'kill $relay 2>/dev/null || true' EXIT
 cd "$root/apps/oauth"
 OAUTH_ISSUER=http://oauth.localhost:8090 OAUTH_ADDR=:8090 OAUTH_DATABASE="$data/oauth.db" \
   OAUTH_KEY_ENCRYPTION_KEY_FILE="$data/kek" OAUTH_DEFAULT_SIGNER=http://localhost:8089/app/ \
+  OAUTH_LAUNCHER_URL=http://localhost:8089 OAUTH_LAUNCHER_DOMAIN=localhost \
   OAUTH_STATIC_CLIENTS="$data/clients.json" OAUTH_ABUSE_CONTACT=abuse@localhost \
   RESOLVER_ALLOW_PRIVATE=1 POWEUR_RESOLVER_SCHEME=http OAUTH_RESOLVER_DIAL=127.0.0.1:8089 \
   go run ./cmd/poweur-oauth

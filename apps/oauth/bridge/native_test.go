@@ -440,6 +440,9 @@ func TestNewRejectsBadConfig(t *testing.T) {
 		"request ttl":       func(c *Config) { c.RequestTTL = time.Hour },
 		"bad signer":        func(c *Config) { c.DefaultSigner = "javascript:alert(1)" },
 		"bad static client": func(c *Config) { c.StaticClients = []Client{{ID: "x", Name: "X"}} },
+		"bad launcher":      func(c *Config) { c.LauncherURL = "ftp://poweur.net" },
+		"launcher path":     func(c *Config) { c.LauncherURL = "https://poweur.net/app/" },
+		"bad launcher zone": func(c *Config) { c.LauncherURL = "https://poweur.net"; c.LauncherDomain = "a/b" },
 		"url static client": func(c *Config) {
 			c.StaticClients = []Client{{ID: "c", Name: "C", RedirectURIs: []string{"http://example.com/cb"}}}
 		},

@@ -53,7 +53,7 @@ export async function startRP() {
  * a dotted host, and Chromium resolves *.localhost to loopback); identity
  * lookups all go to the test relay.
  */
-export async function startBridge({ relay, redirectUri, pushHandle = "", clients = null, listen = "127.0.0.1" }) {
+export async function startBridge({ relay, redirectUri, pushHandle = "", clients = null, listen = "127.0.0.1", launcher = false }) {
   const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), "poweur-oauth-e2e-"));
   const push = pushHandle ? preparePusher(dir, relay, pushHandle) : null;
@@ -75,6 +75,9 @@ export async function startBridge({ relay, redirectUri, pushHandle = "", clients
       OAUTH_KEY_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
       OAUTH_DEFAULT_SIGNER: `${relay.baseUrl}/app/`,
       OAUTH_STATIC_CLIENTS: clientsFile,
+      // The create-an-ID offer points at the test relay, or nowhere.
+      OAUTH_LAUNCHER_URL: launcher ? relay.baseUrl : "none",
+      OAUTH_LAUNCHER_DOMAIN: "poweur.net",
       RESOLVER_ALLOW_PRIVATE: "1",
       POWEUR_RESOLVER_SCHEME: "http",
       OAUTH_RESOLVER_DIAL: relay.addr,

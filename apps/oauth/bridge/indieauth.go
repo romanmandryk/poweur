@@ -181,15 +181,19 @@ func (s *Server) handleIndieAuthRedeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := r.PostForm.Get("code")
-	grant, err := s.store.RedeemCode(r.Context(), signin.HashSecret(code))
-	if err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "unknown, expired or already used authorization code")
-		return
-	}
-	if grant.Surface != surfaceIndieAuth || grant.ClientID != c.ID ||
-		r.PostForm.Get("redirect_uri") != grant.RedirectURI ||
-		!verifyPKCE(r.PostForm.Get("code_verifier"), grant.CodeChallenge) {
+	grant, err := s.store.RedeemCode(r.Context(), signin.HashSecret(code), func(g *CodeGrant) error {
+		if g.Surface != surfaceIndieAuth {
+			return &grantRefusal{"not an IndieAuth code"}
+		}
+		return checkCodeBinding(r, c, g)
+	})
+	var refused *grantRefusal
+	switch {
+	case errors.As(err, &refused):
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "the code does not match this client, redirect_uri or code_verifier")
+		return
+	case err != nil:
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "unknown, expired or already used authorization code")
 		return
 	}
 	s.writeIndieAuthProfile(w, grant, nil)

@@ -614,6 +614,7 @@ func (s *Server) recordSignIn(r *http.Request, t *Txn, c *Client) {
 }
 
 func (s *Server) audit(ctx context.Context, event string, fields map[string]any) {
+	s.metrics.event(event)
 	if err := s.store.Audit(ctx, event, fields); err != nil {
 		s.log.Warn("audit", "event", event, "err", err)
 	}

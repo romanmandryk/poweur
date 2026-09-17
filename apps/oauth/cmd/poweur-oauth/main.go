@@ -72,9 +72,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, signin.HashSecret(secret))
 		return 0
-	case "serve", "keys", "clients", "prune":
+	case "serve", "keys", "clients", "prune", "backup":
 	default:
-		fmt.Fprintf(stderr, "unknown command %q (want serve, keys, clients, prune, gen-key, hash-secret, version)\n", cmd)
+		fmt.Fprintf(stderr, "unknown command %q (want serve, keys, clients, prune, backup, gen-key, hash-secret, version)\n", cmd)
 		return 2
 	}
 
@@ -100,6 +100,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return keysCmd(ctx, srv, args, stdout, stderr)
 	case "clients":
 		return clientsCmd(ctx, cfg.Store, args, stdout, stderr)
+	case "backup":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: poweur-oauth backup <new-file>")
+			return 2
+		}
+		if err := cfg.Store.Backup(ctx, args[0]); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %s; restoring it needs the same OAUTH_KEY_ENCRYPTION_KEY\n", args[0])
+		return 0
 	case "prune":
 		if err := cfg.Store.Prune(ctx, cfg.Retention); err != nil {
 			fmt.Fprintln(stderr, err)
@@ -122,7 +133,17 @@ func serve(ctx context.Context, srv *bridge.Server, log *slog.Logger) int {
 		MaxHeaderBytes:    64 * 1024,
 	}
 	go srv.Run(ctx)
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
+	if maddr := env("OAUTH_METRICS_ADDR", ""); maddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", srv.MetricsHandler())
+		ms := &http.Server{Addr: maddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			log.Info("metrics listening", "addr", maddr)
+			errc <- ms.ListenAndServe()
+		}()
+		defer ms.Close()
+	}
 	go func() {
 		log.Info("poweur-oauth listening", "addr", addr, "issuer", srv.Issuer(), "version", bridge.Version)
 		errc <- hs.ListenAndServe()
@@ -255,6 +276,8 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 		Name:                  env("OAUTH_NAME", ""),
 		Store:                 store,
 		DefaultSigner:         env("OAUTH_DEFAULT_SIGNER", ""),
+		LauncherURL:           launcherURL(env("OAUTH_LAUNCHER_URL", "https://poweur.net")),
+		LauncherDomain:        env("OAUTH_LAUNCHER_DOMAIN", ""),
 		KeyEncryptionKey:      kek,
 		SubjectType:           env("OAUTH_SUBJECT_TYPE", ""),
 		ClientRegistration:    env("OAUTH_CLIENT_REGISTRATION", ""),
@@ -262,6 +285,7 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 		URLClients:            env("OAUTH_URL_CLIENTS", ""),
 		ContactURI:            env("OAUTH_CONTACT_URI", ""),
 		AbuseContact:          env("OAUTH_ABUSE_CONTACT", ""),
+		SecurityContact:       env("OAUTH_SECURITY_CONTACT", ""),
 		TrustProxyHeaders:     os.Getenv("OAUTH_TRUST_PROXY") == "1",
 		Logger:                log,
 		ResolveOptions: identity.ResolveOptions{
@@ -366,4 +390,13 @@ func loadKEK() ([]byte, error) {
 		return nil, errors.New("OAUTH_KEY_ENCRYPTION_KEY must be 32 bytes, base64")
 	}
 	return key, nil
+}
+
+// launcherURL maps "none"/"off" to no create-an-ID offer.
+func launcherURL(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "none", "off":
+		return ""
+	}
+	return v
 }

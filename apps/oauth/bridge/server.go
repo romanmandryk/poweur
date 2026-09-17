@@ -28,6 +28,13 @@ type Config struct {
 	// DefaultSigner is the web signer offered when an identity advertises
 	// none, e.g. "https://poweur.net/app/". Optional.
 	DefaultSigner string
+	// LauncherURL is where someone without a Poweur ID creates one — a relay
+	// origin serving the web app's claim flow, e.g. "https://poweur.net".
+	// Empty hides the offer.
+	LauncherURL string
+	// LauncherDomain is the hosted domain new names are created under.
+	// Defaults to the launcher's host without a leading "id.".
+	LauncherDomain string
 	// ResolveOptions configures identity resolution (and the fetches of
 	// capabilities and profiles, which use the same SSRF rules).
 	ResolveOptions identity.ResolveOptions
@@ -56,7 +63,9 @@ type Config struct {
 	SubjectType string
 	// StaticClients are operator-configured clients (OAUTH_STATIC_CLIENTS).
 	StaticClients []Client
-	// ClientRegistration is "open" (default), "allowlist" or "closed".
+	// ClientRegistration is "closed" (default), "allowlist" or "open".
+	// Open lets any Poweur ID create clients — a phishing surface an operator
+	// should choose knowingly.
 	ClientRegistration string
 	// RegistrationAllowlist lists identities (or "*.domain" suffixes) that
 	// may register clients when ClientRegistration is "allowlist".
@@ -80,6 +89,9 @@ type Config struct {
 	// AbuseContact is what /abuse tells people to write to (an email address
 	// or URL).
 	AbuseContact string
+	// SecurityContact is where /security asks vulnerability reports to go.
+	// Defaults to AbuseContact.
+	SecurityContact string
 
 	// RateLimits per client IP; zero values use the defaults.
 	RateLimits RateLimits
@@ -103,6 +115,8 @@ type Server struct {
 	log      *slog.Logger
 	secure   bool
 	limits   limiters
+	csp      string
+	metrics  *metrics
 }
 
 // New validates cfg and builds a Server.
@@ -144,7 +158,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	}
 	switch cfg.ClientRegistration {
 	case "":
-		cfg.ClientRegistration = RegistrationOpen
+		cfg.ClientRegistration = RegistrationClosed
 	case RegistrationOpen, RegistrationAllowlist, RegistrationClosed:
 	default:
 		return nil, fmt.Errorf("bridge: ClientRegistration must be open, allowlist or closed")
@@ -164,6 +178,21 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("bridge: DefaultSigner must be an absolute http(s) URL")
 		}
 	}
+	if cfg.LauncherURL != "" {
+		launcher, err := identity.NormalizeOrigin(cfg.LauncherURL)
+		if err != nil {
+			return nil, fmt.Errorf("bridge: LauncherURL: %w", err)
+		}
+		cfg.LauncherURL = launcher
+		if cfg.LauncherDomain == "" {
+			u, _ := url.Parse(launcher)
+			cfg.LauncherDomain = strings.TrimPrefix(u.Hostname(), "id.")
+		}
+		cfg.LauncherDomain = strings.ToLower(strings.Trim(cfg.LauncherDomain, ". "))
+		if cfg.LauncherDomain == "" || strings.ContainsAny(cfg.LauncherDomain, "/:@ ") {
+			return nil, fmt.Errorf("bridge: LauncherDomain %q is not a domain", cfg.LauncherDomain)
+		}
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -171,6 +200,10 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		cfg.Now = time.Now
 	}
 	cfg.Store.now = cfg.Now
+	if cfg.SecurityContact == "" {
+		cfg.SecurityContact = cfg.AbuseContact
+	}
+	cfg.Retention = cfg.Retention.withDefaults()
 	if cfg.ContactURI == "" {
 		cfg.ContactURI = issuer + "/abuse"
 	}
@@ -207,7 +240,19 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		log:      cfg.Logger,
 		secure:   strings.HasPrefix(issuer, "https://"),
 		limits:   newLimiters(cfg.RateLimits, cfg.Now),
+		metrics:  newMetrics(cfg.Now()),
 	}
+	// No third-party content, no framing (consent is a clickjacking target),
+	// no inline script. form-action is deliberately absent: Chrome applies it
+	// to the redirect that follows a consent POST, which must reach the client.
+	// The launcher is the one other origin pages talk to: the create-an-ID
+	// offer checks name availability there, from the visitor's browser.
+	connect := "'self'"
+	if cfg.LauncherURL != "" {
+		connect += " " + cfg.LauncherURL
+	}
+	s.csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+		"connect-src " + connect + "; frame-ancestors 'none'; base-uri 'none'"
 	s.keys = cfg.Keys
 	if s.keys == nil {
 		if len(cfg.KeyEncryptionKey) != 32 {
@@ -276,6 +321,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /t/{id}/continue", s.handleTxnContinue)
 	mux.HandleFunc("POST /t/{id}/cancel", s.handleTxnCancel)
 	mux.HandleFunc("POST /t/{id}/push", s.handlePush)
+	mux.HandleFunc("POST /t/{id}/creating", s.handleCreating)
 
 	// OIDC provider (E22-T3).
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)
@@ -306,28 +352,42 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
-	// No third-party content, no framing (consent is a clickjacking target),
-	// no inline script. form-action is deliberately absent: Chrome applies it
-	// to the redirect that follows a consent POST, which must reach the client.
-	h.Set("Content-Security-Policy",
-		"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "+
-			"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", s.csp)
 	if s.secure {
 		h.Set("Strict-Transport-Security", "max-age=31536000")
 	}
 	if s.rateLimited(w, r) {
 		return
 	}
-	s.mux.ServeHTTP(w, r)
+	start := time.Now()
+	rec := &statusRecorder{ResponseWriter: w}
+	s.mux.ServeHTTP(rec, r)
+	if rec.status == 0 {
+		rec.status = http.StatusOK
+	}
+	s.metrics.observe(routeOf(r), rec.status, time.Since(start))
 }
 
+// handleHealth answers ok only when the bridge could sign someone in: the
+// database reads and a signing key is loaded.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"status":  "ok",
 		"service": "poweur-oauth",
 		"version": Version,
 		"issuer":  s.cfg.Issuer,
-	})
+	}
+	status := http.StatusOK
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.store.Check(ctx); err != nil {
+		s.log.Error("health: database", "err", err)
+		out["status"], out["error"], status = "unavailable", "database", http.StatusServiceUnavailable
+	} else if _, err := s.keys.signer(); err != nil {
+		out["status"], out["error"], status = "unavailable", "signing key", http.StatusServiceUnavailable
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, status, out)
 }
 
 // --- Cookies -------------------------------------------------------------------
