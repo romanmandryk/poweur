@@ -168,6 +168,54 @@ export function sameOrigin(origin: string, rawUrl: string): boolean {
 }
 
 /**
+ * What a signer POSTs to `response_uri`. `match` is present only when the
+ * approval was made on another device: the number the starting screen showed.
+ * It is not part of the signed bytes. Mirrors Go `signin.Delivery`.
+ */
+export interface SignInDelivery {
+  response: string;
+  match?: string;
+}
+
+/** The relying party's answer to a delivery. Mirrors Go `signin.DeliveryReceipt`. */
+export interface SignInDeliveryReceipt {
+  status?: string;
+  identity?: string;
+  /**
+   * Set for a same-device approval: the signer sends the browser here, and
+   * the RP finishes only if that browser also started the sign-in.
+   */
+  resume_uri?: string;
+}
+
+/** Digits of a cross-device match code; see Go `signin.MatchCodeDigits`. */
+export const SIGNIN_MATCH_CODE_DIGITS = 2;
+
+/** Strip what a person types around the digits of a match code. */
+export function normalizeMatchCode(value: string): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+/**
+ * The signer-side check on a receipt's `resume_uri`: same origin as the
+ * audience the user just approved, no credentials, no fragment. A signer
+ * that followed anything else would let a compromised callback send the user
+ * anywhere. Mirrors Go `signin.CheckResumeURI`; an empty value passes.
+ */
+export function checkResumeUri(audience: string, resumeUri: string): void {
+  const value = String(resumeUri ?? "").trim();
+  if (!value) return;
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    fail("resume_uri is not a URL");
+  }
+  if (u.username || u.password || u.hash) fail("resume_uri must not carry credentials or a fragment");
+  if (!sameOrigin(audience, value)) fail(`resume_uri ${JSON.stringify(value)} is not same-origin with ${audience}`);
+}
+
+/**
  * App namespace derived from a verified origin by reversing the host labels:
  * `https://guestbook.poweur.net` → `net.poweur.guestbook`.
  *

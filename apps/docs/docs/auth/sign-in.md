@@ -88,7 +88,8 @@ One encoded form serves every transport: compact JSON, `base64url` without paddi
 | Web signer handoff | `https://poweur.net/app/?auth=<b64url>` (URL-escaped) |
 | Redirect | RP navigates the browser to the signer with the same parameter |
 | Cross-device paste | the user copies the encoded **response** back into the RP |
-| Cross-device poll | the signer POSTs to `response_uri`; the RP's own front end polls the RP's `poll_uri` |
+| Cross-device poll | the signer POSTs to `response_uri` with the match code; the starting page polls the RP's `poll_uri` with its poll secret |
+| Same-device return | the signer POSTs to `response_uri`, then opens the `resume_uri` from the receipt |
 
 Decoders also accept raw JSON and padded base64url: a user pasting a code should not have
 to know which they copied.
@@ -315,9 +316,10 @@ the first two are the same trust assumptions every login protocol makes.
 
 ## Who may complete a sign-in
 
-> **Planned, not implemented (EPIC-022 E22-T4).** This section records a rule the protocol is
-> gaining. Reviewing the shipped flows while designing the OAuth bridge found the reference RP
-> handing its session to whoever *started* a login rather than to whoever *approved* it.
+> Added while designing the OAuth bridge (EPIC-022), after a review found the reference RP
+> handing its session to whoever *started* a login rather than to whoever *approved* it. The
+> Go helpers are in `packages/identity/signin/delivery.go`; the TypeScript twins are
+> `checkResumeUri` and `normalizeMatchCode` in `@poweur/client`.
 
 **Anyone may create a request, and that is fine.** A request is a challenge: it carries no
 authority, it names no user, and holding one grants nothing. The protocol also cannot demand a
@@ -351,18 +353,39 @@ returned to the signer, and never be derivable from the request.
 
 ### Mechanism
 
-1. The signer POSTs the encoded approval to `response_uri`, as today.
-2. The RP verifies it and answers `200 {"resume_uri": "<same-origin URL with a one-time code>"}`.
-   The code is ≥128 bits, single-use, and expires with the request.
-3. The signer navigates the same browser to `resume_uri` (checking it is same-origin with the
-   audience it just verified). It must **not** put the approval itself in a URL.
-4. The RP completes the login only if the resume code and the transaction's own cookie both
-   match, and then issues its session.
+The **approval** — not the page that started the sign-in — decides how it finishes, because
+only the approval can say whether the approver was looking at the starting screen.
 
-This is additive: the request object, canonical signing string, signature and test vectors are
-unchanged. It governs only how an already-signed approval is redeemed, so no conformance vector
-moves. An RP that publishes no `resume_uri` keeps today's behaviour, and a signer that receives
-one MUST prefer it over building a `?response=` URL.
+When the RP creates a request it keeps a transaction holding: the hash of a binding cookie it
+sets on the starting browser, the hash of a poll secret it gives the starting page, and a
+two-digit match code that page displays.
+
+The signer POSTs a delivery to `response_uri`:
+
+```json
+{ "response": "<encoded approval>", "match": "42" }
+```
+
+`match` is present only when the user says they started on another screen. A delivery without
+it may also be the bare encoded approval as the whole body (the original wire form). The RP
+processes **one** approval per transaction and then:
+
+| Delivery | RP checks | Receipt | Finishes at |
+|----------|-----------|---------|-------------|
+| without `match` | signature | `{"status":"ok","resume_uri":"…?code=…"}` | `resume_uri`, only with the binding cookie |
+| with `match` | match code (one attempt), then signature | `{"status":"ok"}` | the starting page's poll, only with the poll secret |
+
+- The resume code is ≥128 bits, single-use, and short-lived (the guestbook allows one minute).
+- The signer checks `resume_uri` is same-origin with the audience it verified, then navigates
+  the same browser there. It **never** puts the approval itself in a URL, and an RP never
+  accepts one there.
+- A wrong match code ends the transaction; the right code afterwards does not revive it.
+- A poll before a same-device approval is resumed reports `approved` and hands out nothing.
+
+This is additive to the signed protocol: the request object, canonical signing string,
+signature and test vectors are unchanged. It governs only how an already-signed approval is
+redeemed, so no conformance vector moves. `match` is deliberately outside the signed bytes —
+it proves where the approver was looking, not who they are.
 
 ### Cross-device approval is weaker, and must say so
 
@@ -380,13 +403,16 @@ disclosure rather than cryptography:
   says to cancel unless the code is on a screen in front of them.
 - Short TTL, single use, and no silent re-issue of a request inside one transaction.
 
-### Current status of the shipped code
+### Where it is implemented
 
-- The web signer's "Continue" button builds a `?response=` URL
-  (`apps/web/src/screens/SignInApproval.tsx`) — to be replaced by `resume_uri`.
-- `apps/guestbook`'s `/auth/poll` authenticates with `request_id` alone and sets the login
-  cookie for any caller that knows it (`handleAuthPoll`), so it is vulnerable to both the
-  bystander and the forwarded-link cases above.
+| Component | Behaviour |
+|-----------|-----------|
+| `apps/guestbook` | binding cookie, poll secret, match code, `/auth/resume`; refuses approvals in URLs |
+| Web signer (`apps/web`) | optional code field (required in the mobile shell); follows `resume_uri`; no approval in any URL |
+| Go CLI | `poweur auth approve --code <digits>`; prints the resume link for a same-device approval |
+
+Initiator context on the signer (location, browser, elapsed time) is not implemented in the
+guestbook; the OAuth bridge's QR journey adds it (EPIC-022 E22-T5).
 
 ## Scoped resource grants
 

@@ -1,5 +1,6 @@
 /** Approve a "Sign in with Poweur ID" request (EPIC-008), from app.js. */
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { normalizeMatchCode, SIGNIN_MATCH_CODE_DIGITS } from "@poweur/client";
 import { CircleCheck } from "lucide-react";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
 import { useData } from "../state/data";
@@ -8,7 +9,8 @@ import { useSession } from "../state/session";
 import { toast } from "../state/ui";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Display";
-import { Note, Textarea } from "../ui/Field";
+import { Input, Note, Textarea } from "../ui/Field";
+import { isShellRuntime } from "../lib/storage.js";
 import { SubPage } from "../ui/Layout";
 
 function ErrorLine({ error }: { error: string }) {
@@ -22,6 +24,12 @@ export function SignInApproval() {
   const pop = useRoute((state) => state.pop);
   const push = useRoute((state) => state.push);
   const pasted = useRef<HTMLTextAreaElement>(null);
+  const matchRef = useRef<HTMLInputElement>(null);
+  const [match, setMatch] = useState("");
+  const [localError, setLocalError] = useState("");
+  // In the shell the app being signed in to is never in this browser, so a
+  // same-device finish is impossible and the code is required.
+  const shell = isShellRuntime();
 
   if (auth.loading) {
     return (
@@ -32,37 +40,46 @@ export function SignInApproval() {
   }
 
   if (auth.result) {
-    const responseUri: string | undefined = auth.request?.response_uri;
-    const redirect = responseUri
-      ? `${responseUri}${responseUri.includes("?") ? "&" : "?"}response=${encodeURIComponent(auth.result.encoded)}`
-      : "";
+    const { delivered, resumeUri } = auth.result;
     return (
       <SubPage title="Approved">
         <div className="empty-icon flex justify-center text-success">
           <CircleCheck className="size-12" strokeWidth={1.6} aria-hidden="true" />
         </div>
         <h2 className="mb-2 text-center text-xl font-bold">{auth.metadata?.name || auth.request?.domain || "App"}</h2>
-        <p className="mb-3 text-muted">
-          {auth.result.delivered ? "The signed approval was delivered." : "Copy this one-time response back to the app."}
-        </p>
-        <Textarea id="auth-response" readOnly rows={5} className="min-h-0" value={auth.result.encoded} />
-        <div className="stack mt-4 flex flex-col gap-3">
-          <Button
-            id="btn-auth-copy"
-            variant="ghost"
-            onClick={async () => {
-              await navigator.clipboard?.writeText(auth.result.encoded);
-              toast("Response copied", "success");
-            }}
-          >
-            Copy response
-          </Button>
-          {redirect && (
-            <a className="btn btn-primary block rounded-button bg-accent p-4 text-center text-[17px] font-semibold text-white no-underline" href={redirect}>
+        {resumeUri ? (
+          <>
+            <p id="auth-result-note" className="mb-3 text-muted">Approved. Taking you back to the app…</p>
+            <a
+              id="btn-auth-continue"
+              className="btn btn-primary block rounded-button bg-accent p-4 text-center text-[17px] font-semibold text-white no-underline"
+              href={resumeUri}
+              rel="noreferrer"
+            >
               Continue to app
             </a>
-          )}
-        </div>
+          </>
+        ) : delivered ? (
+          <p id="auth-result-note" className="mb-3 text-muted">
+            Approved. Go back to the screen where you started signing in — it will continue by itself.
+          </p>
+        ) : (
+          <>
+            <p id="auth-result-note" className="mb-3 text-muted">Copy this one-time response back to the app.</p>
+            <Textarea id="auth-response" readOnly rows={5} className="min-h-0" value={auth.result.encoded} />
+            <Button
+              id="btn-auth-copy"
+              variant="ghost"
+              className="mt-4"
+              onClick={async () => {
+                await navigator.clipboard?.writeText(auth.result.encoded);
+                toast("Response copied", "success");
+              }}
+            >
+              Copy response
+            </Button>
+          </>
+        )}
       </SubPage>
     );
   }
@@ -107,9 +124,41 @@ export function SignInApproval() {
       <Note className="text-[13px]">
         Signing as <strong>{identity || "no identity selected"}</strong>.
       </Note>
-      <ErrorLine error={auth.error} />
+      {auth.request.response_uri && (
+        <div className="mt-4">
+          <label htmlFor="auth-match" className="mb-1 block text-sm font-semibold">
+            {shell ? "Code shown by the app you are signing in to" : "Started on another screen? Enter the code it shows"}
+          </label>
+          <Input
+            ref={matchRef}
+            id="auth-match"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={8}
+            placeholder={shell ? "Required" : "Leave empty if you started in this browser"}
+            onChange={(e) => setMatch(e.currentTarget.value)}
+          />
+          <p className="mt-1 text-[13px] text-muted">
+            Only enter a code that is on a screen in front of you. If someone sent you this link or a code, cancel.
+          </p>
+        </div>
+      )}
+      <ErrorLine error={auth.error || localError} />
       {unlocked ? (
-        <Button id="btn-auth-approve" className="mt-4" onClick={() => void approveSignIn()}>
+        <Button
+          id="btn-auth-approve"
+          className="mt-4"
+          onClick={() => {
+            const code = normalizeMatchCode(match);
+            if (auth.request.response_uri && (shell || code) && code.length !== SIGNIN_MATCH_CODE_DIGITS) {
+              setLocalError(`Enter the ${SIGNIN_MATCH_CODE_DIGITS}-digit code from the screen where you started.`);
+              matchRef.current?.focus();
+              return;
+            }
+            setLocalError("");
+            void approveSignIn(code);
+          }}
+        >
           Approve
         </Button>
       ) : (

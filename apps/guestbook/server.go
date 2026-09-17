@@ -20,7 +20,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -102,12 +101,23 @@ type Session struct {
 	grantErr string
 }
 
+// pendingLogin is one sign-in in progress. Every value whose possession is
+// the proof is stored hashed.
 type pendingLogin struct {
-	requestID string
-	expiresAt time.Time
-	token     string // set once an approval lands
-	identity  string
-	err       string
+	requestID   string
+	expiresAt   time.Time
+	bindingHash string // the starting browser's binding cookie
+	pollHash    string // the starting page's poll secret
+	match       string // shown on the starting screen
+	claimed     bool   // an approval has been received; no second one is processed
+
+	finish        string // finishSameDevice or finishCrossDevice, once approved
+	token         string // the prepared session, not yet handed to anyone
+	identity      string
+	resumeHash    string
+	resumeExpires time.Time
+	resumed       bool
+	err           string
 }
 
 // New builds a Server. It fails rather than starting with an origin the
@@ -174,7 +184,8 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /.well-known/poweur.json", s.handleMetadata)
 	mux.HandleFunc("POST /auth/start", s.handleAuthStart)
 	mux.HandleFunc("POST /auth/callback", s.handleAuthCallback)
-	mux.HandleFunc("GET /auth/callback", s.handleAuthCallbackRedirect)
+	mux.HandleFunc("GET /auth/callback", s.handleAuthCallbackGet)
+	mux.HandleFunc("GET /auth/resume", s.handleAuthResume)
 	mux.HandleFunc("GET /auth/poll", s.handleAuthPoll)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
@@ -215,7 +226,8 @@ func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
 // --- Sign-in -----------------------------------------------------------------
 
 // StartResponse is what the browser gets when it presses "Sign in with
-// Poweur ID": one request rendered into every transport it might use.
+// Poweur ID": one request rendered into every transport it might use, plus
+// the two values only this page may know.
 type StartResponse struct {
 	RequestID string   `json:"request_id"`
 	Request   string   `json:"request"`
@@ -224,9 +236,34 @@ type StartResponse struct {
 	ExpiresAt string   `json:"expires_at"`
 	Scopes    []string `json:"scopes,omitempty"`
 	Consent   []string `json:"consent,omitempty"`
+	// PollSecret authenticates this page's polling. It is deliberately not
+	// the request_id, which travels inside the request to whoever approves.
+	PollSecret string `json:"poll_secret"`
+	// MatchCode is shown on this screen. A signer on another device sends it
+	// back, which is the proof that the approver was looking at this screen.
+	MatchCode string `json:"match_code"`
 }
 
+// How a sign-in may finish. The approval decides, never the page that started
+// it: see "Who may complete a sign-in" in apps/docs/docs/auth/sign-in.md.
+const (
+	// finishSameDevice: through /auth/resume, in the browser that holds the
+	// binding cookie set by /auth/start.
+	finishSameDevice = "same-device"
+	// finishCrossDevice: through /auth/poll, because the signer sent back the
+	// match code the starting screen showed.
+	finishCrossDevice = "cross-device"
+)
+
+// resumeWindow is how long a same-device approval waits for its browser.
+const resumeWindow = time.Minute
+
 func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
+	binding, err := s.browserBinding(w, r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	req, err := s.verifier.NewRequest(signin.RequestOptions{
 		Statement:   "Sign the Poweur Guestbook",
 		ResponseURI: s.cfg.Origin + "/auth/callback",
@@ -241,24 +278,66 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	pollSecret, err := signin.NewSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	match, err := signin.NewMatchCode()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	deep, _ := identity.SignInDeepLink(req)
 	web, _ := identity.SignInWebLink(signerBase(r), req)
 
 	expires, _ := time.Parse(time.RFC3339, req.ExpiresAt)
 	s.mu.Lock()
-	s.pending[req.RequestID] = &pendingLogin{requestID: req.RequestID, expiresAt: expires}
+	s.pending[req.RequestID] = &pendingLogin{
+		requestID:   req.RequestID,
+		expiresAt:   expires,
+		bindingHash: signin.HashSecret(binding),
+		pollHash:    signin.HashSecret(pollSecret),
+		match:       match,
+	}
 	s.prunePendingLocked()
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, StartResponse{
-		RequestID: req.RequestID,
-		Request:   encoded,
-		DeepLink:  deep,
-		WebLink:   web,
-		ExpiresAt: req.ExpiresAt,
-		Scopes:    req.Scopes,
-		Consent:   signin.DescribeScopes(req.Scopes, s.cfg.Name),
+		RequestID:  req.RequestID,
+		Request:    encoded,
+		DeepLink:   deep,
+		WebLink:    web,
+		ExpiresAt:  req.ExpiresAt,
+		Scopes:     req.Scopes,
+		Consent:    signin.DescribeScopes(req.Scopes, s.cfg.Name),
+		PollSecret: pollSecret,
+		MatchCode:  match,
 	})
+}
+
+// browserBinding returns this browser's login-binding value, setting the
+// cookie on first use. One value per browser rather than per attempt, so two
+// tabs signing in at once do not orphan each other.
+func (s *Server) browserBinding(w http.ResponseWriter, r *http.Request) (string, error) {
+	if c, err := r.Cookie(bindingCookieName); err == nil && len(c.Value) >= 43 {
+		return c.Value, nil
+	}
+	v, err := signin.NewSecret()
+	if err != nil {
+		return "", err
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     bindingCookieName,
+		Value:    v,
+		Path:     "/auth/",
+		HttpOnly: true,
+		// Lax, not Strict: the resume is a top-level navigation arriving from
+		// the signer's origin, and must carry this cookie.
+		SameSite: http.SameSiteLaxMode,
+		Secure:   strings.HasPrefix(s.cfg.Origin, "https://"),
+	})
+	return v, nil
 }
 
 // signerBase is where a browser without a native handler is sent to approve.
@@ -270,52 +349,152 @@ func signerBase(r *http.Request) string {
 	return "https://poweur.net/app/"
 }
 
-// handleAuthCallback is the response_uri: the signer POSTs the approval here.
-// It accepts a JSON body, a form field, or the raw encoded string, because a
-// signer, a CLI and a paste box all end up here.
+// handleAuthCallback is the response_uri: a signer POSTs the approval here.
+//
+// It also decides how the sign-in may finish, and only it can: a delivery
+// carrying the match code came from someone looking at the starting screen,
+// and one without it must finish in the browser that started it.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	encoded, err := readApproval(r)
+	d, err := signin.ParseDelivery(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	session, requestID, err := s.completeSignIn(r.Context(), encoded)
+	requestID := ""
+	if resp, err := identity.DecodeSignInResponse(d.Response); err == nil {
+		requestID = resp.RequestID
+	}
+	crossDevice := d.Match != ""
+
+	// Claim the transaction before verifying: one approval per sign-in is
+	// ever processed, so a second approver — or a second guess at the match
+	// code — has nothing to race for.
+	s.mu.Lock()
+	p := s.pending[requestID]
+	switch {
+	case p == nil || s.now().After(p.expiresAt):
+		s.mu.Unlock()
+		writeError(w, http.StatusNotFound, "no sign-in is waiting for this approval")
+		return
+	case p.claimed:
+		s.mu.Unlock()
+		writeError(w, http.StatusConflict, "this sign-in has already been answered")
+		return
+	}
+	p.claimed = true
+	if crossDevice && !signin.MatchCodesEqual(p.match, d.Match) {
+		p.err = signin.ErrMatchCode.Error()
+		s.mu.Unlock()
+		writeError(w, http.StatusForbidden, p.err)
+		return
+	}
+	s.mu.Unlock()
+
+	session, err := s.completeSignIn(r.Context(), d.Response)
 	if err != nil {
-		// Record the failure against the pending login so the waiting tab is
-		// told what happened instead of spinning until the request expires.
-		if requestID != "" {
-			s.mu.Lock()
-			if p := s.pending[requestID]; p != nil {
-				p.err = err.Error()
-			}
-			s.mu.Unlock()
-		}
+		s.failPending(requestID, err.Error())
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "ok",
-		"identity": session.Identity,
-	})
+
+	receipt := signin.DeliveryReceipt{Status: "ok", Identity: session.Identity}
+	var resumeCode string
+	if !crossDevice {
+		if resumeCode, err = signin.NewSecret(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		receipt.ResumeURI = s.cfg.Origin + "/auth/resume?code=" + url.QueryEscape(resumeCode)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p = s.pending[requestID]; p == nil {
+		delete(s.sessions, session.token)
+		writeError(w, http.StatusGone, "the sign-in expired while it was being verified")
+		return
+	}
+	p.token = session.token
+	p.identity = session.Identity
+	if crossDevice {
+		p.finish = finishCrossDevice
+	} else {
+		p.finish = finishSameDevice
+		p.resumeHash = signin.HashSecret(resumeCode)
+		p.resumeExpires = s.now().Add(resumeWindow)
+	}
+	writeJSON(w, http.StatusOK, receipt)
 }
 
-// handleAuthCallbackRedirect is the same delivery over a browser navigation
-// (`GET /auth/callback?response=…`), which is how a same-device redirect flow
-// lands. It sets the login cookie and sends the user back to the page.
-func (s *Server) handleAuthCallbackRedirect(w http.ResponseWriter, r *http.Request) {
-	encoded := strings.TrimSpace(r.URL.Query().Get("response"))
-	if encoded == "" {
-		writeError(w, http.StatusBadRequest, "missing response parameter")
+// handleAuthCallbackGet refuses approvals carried in a URL. History, server
+// logs and Referer headers all keep URLs, and an approval belongs in none of
+// them. Signers POST, then send the browser to the resume_uri they get back.
+func (s *Server) handleAuthCallbackGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	writeError(w, http.StatusBadRequest,
+		"approvals are accepted only by POST to this URL; the browser continues at the resume_uri the POST returns")
+}
+
+// handleAuthResume finishes a same-device sign-in. Two halves must meet in one
+// browser: the resume code, which only the approving signer received, and the
+// binding cookie, which only the browser that pressed "Sign in" holds. A
+// forwarded sign-in link splits them between attacker and victim, and then
+// nobody is signed in.
+func (s *Server) handleAuthResume(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	binding := ""
+	if c, err := r.Cookie(bindingCookieName); err == nil {
+		binding = c.Value
+	}
+
+	s.mu.Lock()
+	var p *pendingLogin
+	if code != "" {
+		for _, candidate := range s.pending {
+			if candidate.finish == finishSameDevice && signin.SecretMatches(candidate.resumeHash, code) {
+				p = candidate
+				break
+			}
+		}
+	}
+	if p == nil || s.now().After(p.resumeExpires) {
+		s.mu.Unlock()
+		resumeFailed(w, http.StatusGone, "This sign-in link has expired or was already used.")
 		return
 	}
-	session, _, err := s.completeSignIn(r.Context(), encoded)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, err.Error())
+	// Single use, whatever happens next.
+	p.resumeHash = ""
+	if !signin.SecretMatches(p.bindingHash, binding) {
+		delete(s.sessions, p.token)
+		p.token = ""
+		p.err = "the sign-in was approved for a different browser from the one that started it"
+		s.mu.Unlock()
+		resumeFailed(w, http.StatusForbidden,
+			"This sign-in was started in a different browser. If you did not start it yourself, someone may have sent you their sign-in link — nothing was signed in.")
 		return
 	}
-	s.setCookie(w, session.token)
+	token := p.token
+	p.resumed = true
+	s.mu.Unlock()
+
+	s.setCookie(w, token)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func resumeFailed(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = resumeFailedTemplate.Execute(w, message)
+}
+
+func (s *Server) failPending(requestID, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.pending[requestID]; p != nil {
+		p.err = message
+	}
 }
 
 // sessionWithToken carries the cookie value alongside the session.
@@ -324,18 +503,13 @@ type sessionWithToken struct {
 	token string
 }
 
-// completeSignIn is the whole protocol obligation of a relying party.
-func (s *Server) completeSignIn(ctx context.Context, encoded string) (sessionWithToken, string, error) {
-	// Decoded first only so a failure can be reported against the right
-	// pending login; Verify re-decodes and trusts nothing from this.
-	requestID := ""
-	if resp, err := identity.DecodeSignInResponse(encoded); err == nil {
-		requestID = resp.RequestID
-	}
-
+// completeSignIn is the whole protocol obligation of a relying party. The
+// session it creates is not handed to anyone: the caller decides which
+// browser may have it.
+func (s *Server) completeSignIn(ctx context.Context, encoded string) (sessionWithToken, error) {
 	result, err := s.verifier.Verify(ctx, encoded)
 	if err != nil {
-		return sessionWithToken{}, requestID, err
+		return sessionWithToken{}, err
 	}
 
 	session := &Session{
@@ -358,45 +532,56 @@ func (s *Server) completeSignIn(ctx context.Context, encoded string) (sessionWit
 
 	token, err := randomToken(24)
 	if err != nil {
-		return sessionWithToken{}, requestID, err
+		return sessionWithToken{}, err
 	}
-
 	s.mu.Lock()
 	s.sessions[token] = session
-	if p := s.pending[result.RequestID]; p != nil {
-		p.token = token
-		p.identity = result.Identity
-	}
 	s.mu.Unlock()
-
-	return sessionWithToken{Session: session, token: token}, result.RequestID, nil
+	return sessionWithToken{Session: session, token: token}, nil
 }
 
-// handleAuthPoll is what the tab that started the login watches while the
-// user approves on their phone.
+// handleAuthPoll is what the tab that started the login watches. It needs
+// the poll secret only that tab was given; a request_id alone — which anyone
+// who saw the QR code knows — gets the same answer as a request that never
+// existed.
 func (s *Server) handleAuthPoll(w http.ResponseWriter, r *http.Request) {
 	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
-	if requestID == "" {
-		writeError(w, http.StatusBadRequest, "missing request_id")
+	secret := strings.TrimSpace(r.URL.Query().Get("poll_secret"))
+	if requestID == "" || secret == "" {
+		writeError(w, http.StatusBadRequest, "missing request_id or poll_secret")
 		return
 	}
 	s.mu.Lock()
 	p := s.pending[requestID]
+	if p != nil && !signin.SecretMatches(p.pollHash, secret) {
+		p = nil
+	}
+	now := s.now()
 	var out map[string]any
 	switch {
 	case p == nil:
 		out = map[string]any{"status": "unknown"}
 	case p.err != "":
 		out = map[string]any{"status": "failed", "error": p.err}
-		delete(s.pending, requestID)
-	case p.token != "":
+		s.dropPendingLocked(p)
+	case p.finish == finishCrossDevice:
 		out = map[string]any{"status": "complete", "identity": p.identity}
 		// One-shot: the poll hands the cookie over exactly once.
 		s.setCookie(w, p.token)
 		delete(s.pending, requestID)
-	case s.now().After(p.expiresAt):
-		out = map[string]any{"status": "expired"}
+	case p.finish == finishSameDevice && p.resumed:
+		// The resume already set the cookie in this browser.
+		out = map[string]any{"status": "complete", "identity": p.identity}
 		delete(s.pending, requestID)
+	case p.finish == finishSameDevice && now.After(p.resumeExpires):
+		out = map[string]any{"status": "expired"}
+		s.dropPendingLocked(p)
+	case p.finish == finishSameDevice:
+		// Approved; the signer is sending this browser to /auth/resume.
+		out = map[string]any{"status": "approved"}
+	case now.After(p.expiresAt):
+		out = map[string]any{"status": "expired"}
+		s.dropPendingLocked(p)
 	default:
 		out = map[string]any{"status": "pending"}
 	}
@@ -404,18 +589,35 @@ func (s *Server) handleAuthPoll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// dropPendingLocked forgets a transaction and any session prepared for it but
+// never handed out.
+func (s *Server) dropPendingLocked(p *pendingLogin) {
+	if p.token != "" && !p.resumed {
+		delete(s.sessions, p.token)
+	}
+	delete(s.pending, p.requestID)
+}
+
 func (s *Server) prunePendingLocked() {
 	now := s.now()
-	for k, p := range s.pending {
-		if now.After(p.expiresAt.Add(time.Minute)) {
-			delete(s.pending, k)
+	for _, p := range s.pending {
+		deadline := p.expiresAt
+		if p.resumeExpires.After(deadline) {
+			deadline = p.resumeExpires
+		}
+		if now.After(deadline.Add(time.Minute)) {
+			s.dropPendingLocked(p)
 		}
 	}
 }
 
 // --- The RP's own session ----------------------------------------------------
 
-const cookieName = "guestbook_session"
+const (
+	cookieName = "guestbook_session"
+	// bindingCookieName ties a sign-in to the browser that started it.
+	bindingCookieName = "guestbook_login"
+)
 
 func (s *Server) setCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
@@ -543,51 +745,6 @@ func hasDAVScope(scopes []string) bool {
 		}
 	}
 	return false
-}
-
-// readApproval accepts the three shapes an approval arrives in: a JSON body
-// {"response": "..."} or the response object itself, a form field, or the raw
-// encoded string as the whole body.
-func readApproval(r *http.Request) (string, error) {
-	ct := r.Header.Get("Content-Type")
-	if strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
-		if err := r.ParseForm(); err != nil {
-			return "", errors.New("malformed form body")
-		}
-		if v := strings.TrimSpace(r.PostForm.Get("response")); v != "" {
-			return v, nil
-		}
-		return "", errors.New("missing response field")
-	}
-	buf := make([]byte, 0, 4096)
-	tmp := make([]byte, 4096)
-	body := http.MaxBytesReader(nil, r.Body, 64*1024)
-	for {
-		n, err := body.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			break
-		}
-	}
-	raw := strings.TrimSpace(string(buf))
-	if raw == "" {
-		return "", errors.New("empty body")
-	}
-	if strings.HasPrefix(raw, "{") {
-		var envelope struct {
-			Response json.RawMessage `json:"response"`
-		}
-		if err := json.Unmarshal([]byte(raw), &envelope); err == nil && len(envelope.Response) > 0 {
-			var asString string
-			if err := json.Unmarshal(envelope.Response, &asString); err == nil {
-				return asString, nil
-			}
-			return string(envelope.Response), nil
-		}
-		// A bare response object.
-		return raw, nil
-	}
-	return raw, nil
 }
 
 func randomToken(n int) (string, error) {

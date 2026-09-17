@@ -55,11 +55,45 @@ describe("web Sign in with Poweur ID", () => {
 
   it("delivers to the request callback and reports copy-only flows", async () => {
     const calls = [];
-    const fakeFetch = async (url, init) => { calls.push({ url, init }); return { ok: true }; };
-    expect(await deliverBrowserApproval(request(), "encoded", fakeFetch)).toBe(true);
+    const fakeFetch = async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ status: "ok" }) }; };
+    expect(await deliverBrowserApproval(request(), "encoded", fakeFetch)).toEqual({ delivered: true, resumeUri: "" });
     expect(calls[0].url).toBe("https://tasks.example/callback");
+    // Without a code the wire is unchanged: the bare code, CORS-simple.
     expect(calls[0].init.body).toBe("encoded");
-    expect(await deliverBrowserApproval({ ...request(), response_uri: "" }, "encoded", fakeFetch)).toBe(false);
+    expect(calls[0].init.headers["content-type"]).toMatch(/^text\/plain/);
+    expect(await deliverBrowserApproval({ ...request(), response_uri: "" }, "encoded", fakeFetch))
+      .toEqual({ delivered: false, resumeUri: "" });
+  });
+
+  it("sends a cross-device code in an envelope", async () => {
+    let body = "";
+    const fakeFetch = async (_url, init) => { body = init.body; return { ok: true, json: async () => ({}) }; };
+    await deliverBrowserApproval(request(), "encoded", fakeFetch, " 4-2 ");
+    expect(JSON.parse(body)).toEqual({ response: "encoded", match: "42" });
+  });
+
+  it("returns a same-origin resume link and refuses any other", async () => {
+    const answer = (resume_uri) => async () => ({ ok: true, json: async () => ({ status: "ok", resume_uri }) });
+    const ok = await deliverBrowserApproval(request(), "encoded", answer("https://tasks.example/auth/resume?code=abc"));
+    expect(ok).toEqual({ delivered: true, resumeUri: "https://tasks.example/auth/resume?code=abc" });
+    for (const bad of ["https://evil.example/r", "http://tasks.example/r", "javascript:alert(1)"]) {
+      await expect(deliverBrowserApproval(request(), "encoded", answer(bad))).rejects.toThrow(/resume_uri/);
+    }
+  });
+
+  it("never puts the approval in a URL", async () => {
+    const urls = [];
+    const fakeFetch = async (url) => { urls.push(url); return { ok: true, json: async () => ({ resume_uri: "https://tasks.example/r?code=c" }) }; };
+    const out = await deliverBrowserApproval(request(), "SECRET-APPROVAL", fakeFetch);
+    expect(urls.join(" ")).not.toContain("SECRET-APPROVAL");
+    expect(out.resumeUri).not.toContain("SECRET-APPROVAL");
+  });
+
+  it("tolerates an RP that answers without JSON, and surfaces refusals", async () => {
+    const legacy = async () => ({ ok: true, json: async () => { throw new Error("not json"); } });
+    expect(await deliverBrowserApproval(request(), "encoded", legacy)).toEqual({ delivered: true, resumeUri: "" });
+    const refused = async () => ({ ok: false, status: 403, json: async () => ({ error: "the code does not match" }) });
+    await expect(deliverBrowserApproval(request(), "encoded", refused, "11")).rejects.toThrow("the code does not match");
   });
 
   it("lists and revokes connected apps by editing the relay policy file", async () => {

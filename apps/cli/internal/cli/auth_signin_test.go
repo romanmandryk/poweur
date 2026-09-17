@@ -1,12 +1,17 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	idpkg "github.com/poweur/identity"
+	signinpkg "github.com/poweur/identity/signin"
 )
 
 func signInRequestForCLI(t *testing.T) idpkg.SignInRequest {
@@ -50,5 +55,57 @@ func TestReadSignInRequestForms(t *testing.T) {
 func TestReadSignInRequestRejectsGarbage(t *testing.T) {
 	if _, err := readSignInRequest("not-a-request-and-not-a-file"); err == nil {
 		t.Fatal("expected malformed request to fail")
+	}
+}
+
+func TestDeliverSignInApprovalSendsCodeAndReadsReceipt(t *testing.T) {
+	var got signinpkg.Delivery
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d, err := signinpkg.ParseDelivery(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		got = d
+		_ = json.NewEncoder(w).Encode(signinpkg.DeliveryReceipt{Status: "ok", ResumeURI: "https://rp.example/auth/resume?code=x"})
+	}))
+	defer srv.Close()
+
+	receipt, err := deliverSignInApproval(context.Background(), srv.URL+"/cb", signinpkg.Delivery{Response: "enc", Match: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Response != "enc" || got.Match != "42" {
+		t.Fatalf("server received %+v", got)
+	}
+	if receipt.ResumeURI != "https://rp.example/auth/resume?code=x" {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+}
+
+func TestDeliverSignInApprovalToleratesLegacyAndRefusesRedirects(t *testing.T) {
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer legacy.Close()
+	receipt, err := deliverSignInApproval(context.Background(), legacy.URL, signinpkg.Delivery{Response: "enc"})
+	if err != nil || receipt.ResumeURI != "" {
+		t.Fatalf("legacy RP: receipt %+v err %v", receipt, err)
+	}
+
+	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://elsewhere.example/cb", http.StatusTemporaryRedirect)
+	}))
+	defer moved.Close()
+	if _, err := deliverSignInApproval(context.Background(), moved.URL, signinpkg.Delivery{Response: "enc"}); err == nil {
+		t.Fatal("a redirecting callback must not be treated as a delivery")
+	}
+
+	refused := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"code mismatch"}`, http.StatusForbidden)
+	}))
+	defer refused.Close()
+	if _, err := deliverSignInApproval(context.Background(), refused.URL, signinpkg.Delivery{Response: "enc", Match: "11"}); err == nil {
+		t.Fatal("a refused delivery must be an error")
 	}
 }

@@ -7,9 +7,12 @@ const fake = vi.hoisted(() => ({
     policy: vi.fn(() => Promise.resolve({ policy: { version: 1, mode: "contacts_and_requests" }, explicit: true })),
     setProfile: vi.fn(),
     sessions: { ensure: vi.fn(() => Promise.resolve({})) },
+    dav: vi.fn(() => Promise.resolve({})),
     signer: {},
   },
   consent: vi.fn(),
+  sign: vi.fn(() => Promise.resolve({ response: { request_id: "r" }, encoded: "ENCODED" })),
+  deliver: vi.fn(),
 }));
 vi.mock("../../src/lib/client.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -24,12 +27,16 @@ vi.mock("../../src/lib/passkey.js", async (importOriginal) => ({
 vi.mock("../../src/lib/signin.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   loadSignInConsent: fake.consent,
+  signBrowserApproval: fake.sign,
+  appendBrowserConsent: vi.fn(() => Promise.resolve({})),
+  deliverBrowserApproval: fake.deliver,
 }));
 
 import { authenticatePasskey } from "../../src/lib/passkey.js";
 import { getActiveIdentity, saveIdentityRecord } from "../../src/lib/storage.js";
 import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
+import { setContinueTo } from "../../src/actions/signin";
 import { useRoute } from "../../src/state/route";
 import { lockIdentity, useSession, type ModeInfo } from "../../src/state/session";
 import { resetStores } from "../helpers/stores";
@@ -229,5 +236,55 @@ describe("Sign-in approval (EPIC-008)", () => {
     render(<App />);
     fireEvent.click($("#btn-auth-load")!);
     await waitFor(() => expect(screen.getByText("origin does not match")).toBeTruthy());
+  });
+
+  const consent = {
+    request: { audience: "https://app.example", response_uri: "https://app.example/cb" },
+    metadata: { name: "Example App" },
+    headline: "Sign in to Example App",
+    scopes: [],
+  };
+
+  async function openUnlocked() {
+    useSession.setState({ identity: IDENTITY, unlocked: true });
+    fake.consent.mockResolvedValueOnce(consent);
+    at("auth");
+    render(<App />);
+    fireEvent.click($("#btn-auth-load")!);
+    await waitFor(() => expect($("#btn-auth-approve")).toBeTruthy());
+  }
+
+  it("finishes a same-device approval in this browser, with nothing in a URL", async () => {
+    const went: string[] = [];
+    setContinueTo((url) => went.push(url));
+    fake.deliver.mockResolvedValueOnce({ delivered: true, resumeUri: "https://app.example/auth/resume?code=c" });
+    await openUnlocked();
+    fireEvent.click($("#btn-auth-approve")!);
+    await waitFor(() => expect($("#btn-auth-continue")).toBeTruthy());
+    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, "");
+    expect(went).toEqual(["https://app.example/auth/resume?code=c"]);
+    expect($<HTMLAnchorElement>("#btn-auth-continue")!.href).not.toContain("ENCODED");
+    expect($("#auth-response")).toBeNull();
+  });
+
+  it("sends the code for a cross-device approval and sends nobody anywhere", async () => {
+    const went: string[] = [];
+    setContinueTo((url) => went.push(url));
+    fake.deliver.mockResolvedValueOnce({ delivered: true, resumeUri: "" });
+    await openUnlocked();
+    fireEvent.change($("#auth-match")!, { target: { value: "4 2" } });
+    fireEvent.click($("#btn-auth-approve")!);
+    await waitFor(() => expect($("#auth-result-note")!.textContent).toMatch(/Go back to the screen/));
+    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, "42");
+    expect(went).toEqual([]);
+    expect($("#btn-auth-continue")).toBeNull();
+  });
+
+  it("refuses a malformed code before signing anything", async () => {
+    await openUnlocked();
+    fireEvent.change($("#auth-match")!, { target: { value: "7" } });
+    fireEvent.click($("#btn-auth-approve")!);
+    await waitFor(() => expect(screen.getByText(/Enter the 2-digit code/)).toBeTruthy());
+    expect(fake.sign).not.toHaveBeenCalled();
   });
 });

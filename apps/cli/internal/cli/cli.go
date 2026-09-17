@@ -2106,6 +2106,8 @@ func printHelp(w io.Writer) {
   poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
+  poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver] [--json]
+      (--code: the number shown by the screen that started the sign-in, when approving from another device)
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
   poweur version

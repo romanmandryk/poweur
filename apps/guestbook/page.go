@@ -8,13 +8,15 @@ import (
 // The whole front end. One file, no build step, no framework: a reference RP
 // that needed a toolchain would be teaching the wrong lesson.
 //
-// Two transports are wired here, because they are the two a real site needs:
+// Two ways a sign-in finishes, and the approval — not this page — picks one:
 //
-//   - same device — hand the request to the local signer via `poweur://auth`,
-//     which comes back through GET /auth/callback?response=…
-//   - other device — show the request as a link (and, in a real deployment, a
-//     QR code of the same string), then poll /auth/poll until the phone has
-//     approved.
+//   - same device — the signer (the `poweur://auth` handler, or the web signer
+//     the link opens) POSTs the approval and sends this browser to
+//     /auth/resume, which works only here because only this browser holds the
+//     binding cookie /auth/start set.
+//   - other device — the phone's user types the two-digit code shown on this
+//     page into their signer; this page polls /auth/poll with its own poll
+//     secret and is handed the session.
 var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -28,6 +30,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
   .entry { border-top: 1px solid #ddd; padding: .75rem 0; }
   .who { font-weight: 600; }
   .at, .where { color: #777; font-size: .8rem; }
+  .match { font-size: 1.6rem; letter-spacing: .2em; }
   .consent { background: #f6f6f6; border-radius: .4rem; padding: .75rem 1rem; }
   textarea { width: 100%; font: inherit; }
   [hidden] { display: none !important; }
@@ -43,8 +46,10 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <section id="auth">
   <button id="signin">Sign in with Poweur ID</button>
   <div id="pending" hidden>
-    <p>Approve on your device, or open this on your phone:</p>
+    <p>Approve on this device, or open this on your phone:</p>
     <p id="approve"></p>
+    <p>Approving on another device? It will ask for this code:
+       <strong id="match" class="match"></strong></p>
     <p id="status">Waiting…</p>
   </div>
 </section>
@@ -95,6 +100,7 @@ $("signin").addEventListener("click", async () => {
   a.href = start.web_link;
   a.textContent = start.web_link;
   $("approve").replaceChildren(a);
+  $("match").textContent = start.match_code;
   if (start.consent?.length) {
     const box = document.createElement("div");
     box.className = "consent";
@@ -107,8 +113,10 @@ $("signin").addEventListener("click", async () => {
   const deadline = Date.parse(start.expires_at);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000));
-    const poll = await j("/auth/poll?request_id=" + encodeURIComponent(start.request_id));
+    const poll = await j("/auth/poll?request_id=" + encodeURIComponent(start.request_id) +
+      "&poll_secret=" + encodeURIComponent(start.poll_secret));
     if (poll.status === "complete") { $("pending").hidden = true; return refresh(); }
+    if (poll.status === "approved") { $("status").textContent = "Approved — finishing in this browser…"; continue; }
     if (poll.status === "failed") { $("status").textContent = "Rejected: " + poll.error; return; }
     if (poll.status === "expired") { $("status").textContent = "Request expired."; return; }
   }
@@ -136,6 +144,16 @@ $("post").addEventListener("submit", async (ev) => {
 
 refresh();
 </script>
+`))
+
+var resumeFailedTemplate = template.Must(template.New("resume-failed").Parse(`<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign-in not completed</title>
+<style>body { font: 16px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }</style>
+<h1>Sign-in not completed</h1>
+<p>{{.}}</p>
+<p><a href="/">Back to the guestbook</a></p>
 `))
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

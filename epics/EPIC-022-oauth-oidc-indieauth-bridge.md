@@ -17,12 +17,12 @@
 | E22-T1 Architecture, protocol profile & threat model | **partial** | Draft written (`auth/oauth-oidc-bridge.md`): boundary, identifier vectors, transaction state machine, OIDC profile, pairwise `sub`, client model, threat model. Needs review; vectors file lands with T2 |
 | E22-T2 Bridge core + native Poweur authentication | **open** | Generic for any publicly resolvable Poweur ID; browser approval is the primary path |
 | E22-T3 OIDC Authorization Code + PKCE provider | **open** | Primary standards surface; discovery, JWKS, code/token/UserInfo, pairwise subjects |
-| E22-T4 Browser signer and consent journey | **open** | Same-browser redirect/return first; no QR or messaging required for the normal desktop path |
+| E22-T4 Browser signer and consent journey | **partial** | Native completion binding shipped (resume code + binding cookie, match code for cross-device); bridge pages open |
 | E22-T5 Cross-device QR journey | **open** | Phone scans the same short-lived request; desktop polls and resumes |
 | E22-T6 IndieAuth compatibility | **open** | Profile discovery, metadata, authorization code flow and canonical `me` URL |
 | E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
 | E22-T8 Packaging, conformance, integrations & operations | **open** | Standalone image, colocated Compose profile, key rotation, security tests and integration recipes |
-| E22-T9 Client registry, developer console & user authorizations | **open** | URL client IDs (no registration), self-service `/developers` for secret-based RPs, static clients, `/account` revoke |
+| E22-T9 Client registry, developer console & user authorizations | **open** | Self-service `/developers` console (main path), static clients, URL client IDs only for IndieAuth, `/account` revoke |
 
 ## Goal
 
@@ -250,10 +250,14 @@ approved.
       advertised, with a clear chooser/failure state for self-hosted identities
 - [ ] Redirect to the web signer, unlock locally, approve, submit to the bridge and resume the
       original browser transaction without exposing the signed response in URLs
-- [ ] Native callback extension: `POST response_uri` may answer `{"resume_uri": …}` (same-origin,
-      single-use resume code); land it in `auth/sign-in.md`, make the web signer navigate there
-      instead of building `?response=` (`apps/web/src/screens/SignInApproval.tsx` does today), and
-      keep the guestbook's GET callback working when no `response` parameter arrives
+- [x] Native completion binding ("Who may complete a sign-in", `auth/sign-in.md`): a delivery
+      without a match code finishes only at a single-use `resume_uri` in the browser holding the
+      RP's binding cookie; one with the code finishes only through the starting page's poll
+      secret. Shared Go helpers `signin.ParseDelivery`/`NewMatchCode`/`NewSecret`/`CheckResumeURI`,
+      TS `checkResumeUri`/`normalizeMatchCode`. The guestbook implements it and refuses approvals
+      in URLs; the web signer has a code field (required in the shell) and follows `resume_uri`;
+      `poweur auth approve --code`. Unit + `TestINT_SIGNIN_02` (forwarded link signs nobody in).
+      Web 0.1.18, SDK 0.1.5, CLI 0.1.8
 - [ ] Hosted relays publish `endpoints.web_signer` in `capabilities.json` for signer discovery
 - [ ] Separate downstream consent page showing verified client name, origin, requested claims,
       whether the public Poweur ID will be released, and deny/report controls

@@ -18,7 +18,10 @@ import { generateSigningKeypair, signCanonical } from "../src/crypto/index.js";
 import { toBase64url } from "../src/encoding.js";
 import {
   MemoryNonceCache,
+  SIGNIN_MATCH_CODE_DIGITS,
   SignInVerifier,
+  checkResumeUri,
+  normalizeMatchCode,
   canonicalSignInResponse,
   checkRequestAgainstMetadata,
   checkSignInScopeNamespace,
@@ -761,5 +764,29 @@ describe("canonical string", () => {
       "dav:rw:apps/net.poweur.guestbook,profile:read",
       "identity",
     ]);
+  });
+
+  it("checks resume links like the Go signer does", () => {
+    const aud = "https://guestbook.poweur.net";
+    for (const ok of ["", "https://guestbook.poweur.net/auth/resume?code=x", "https://GUESTBOOK.poweur.net:443/r"]) {
+      expect(() => checkResumeUri(aud, ok)).not.toThrow();
+    }
+    for (const bad of [
+      "https://evil.example/auth/resume",
+      "http://guestbook.poweur.net/auth/resume",
+      "https://guestbook.poweur.net.evil.example/r",
+      "https://user@guestbook.poweur.net/r",
+      "https://guestbook.poweur.net/r#frag",
+      "javascript:alert(1)",
+      "/relative/only",
+    ]) {
+      expect(() => checkResumeUri(aud, bad), bad).toThrow();
+    }
+  });
+
+  it("normalizes typed match codes", () => {
+    expect(normalizeMatchCode(" 0-7 ")).toBe("07");
+    expect(normalizeMatchCode("")).toBe("");
+    expect(SIGNIN_MATCH_CODE_DIGITS).toBe(2);
   });
 });

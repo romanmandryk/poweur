@@ -86,28 +86,52 @@ const deepLink = signInDeepLink(req);
 Hand `deepLink` to a same-device signer, render it as a QR code for a phone, or navigate
 the browser to `webLink`. All three carry the identical encoded request.
 
-You store nothing. Everything the verify step needs travels inside the signed approval.
-The one exception is cross-device UX: if a tab is waiting for a phone to approve, keep
-`request_id` in a short-lived map so the tab can poll — see `handleAuthPoll` in the
-guestbook.
+Verification itself needs no state — everything it checks travels inside the signed
+approval. *Finishing* a login does: you must hand the session to the browser that started
+it, and to nobody else. Keep a short-lived transaction per request (see
+[Who may complete a sign-in](./sign-in.md#who-may-complete-a-sign-in)):
+
+- set a binding cookie on the browser that pressed "Sign in";
+- give that page a **poll secret** (never the `request_id`, which travels to whoever
+  approves) and a two-digit **match code** to display;
+- let `signin.NewSecret`, `signin.NewMatchCode` and `signin.HashSecret` make and store them.
+
+The guestbook (`apps/guestbook/server.go`) is a complete, tested implementation.
 
 ## 3. Verify the approval (5 minutes)
 
-The signer delivers the approval to your `response_uri` (POST) or as a `?response=`
-parameter on a redirect. Either way:
+The signer POSTs the approval to your `response_uri`. Never accept one in a URL — history,
+logs and `Referer` headers all keep URLs.
 
 ### Go
 
 ```go
 func (a *App) callback(w http.ResponseWriter, r *http.Request) {
-    encoded := readApproval(r)                        // body, form field, or ?response=
-    result, err := a.verifier.Verify(r.Context(), encoded)
+    d, err := signin.ParseDelivery(r)                 // any shape a signer sends
+    tx := a.claim(d.Response)                         // your pending transaction; one approval each
+    if d.Match != "" && !signin.MatchCodesEqual(tx.Match, d.Match) {
+        a.fail(tx)                                    // one attempt, then the sign-in is over
+        http.Error(w, signin.ErrMatchCode.Error(), http.StatusForbidden)
+        return
+    }
+    result, err := a.verifier.Verify(r.Context(), d.Response)
     if err != nil {
         http.Error(w, "sign-in failed", http.StatusUnauthorized)
         return
     }
-    a.login(w, result.Identity)                       // result.Identity is the user
+    if d.Match != "" {
+        tx.ReadyForPoll(result.Identity)              // approved on another device
+        json.NewEncoder(w).Encode(signin.DeliveryReceipt{Status: "ok"})
+        return
+    }
+    code, _ := signin.NewSecret()                     // same device: finish in *that* browser
+    tx.ReadyForResume(result.Identity, signin.HashSecret(code))
+    json.NewEncoder(w).Encode(signin.DeliveryReceipt{
+        Status: "ok", ResumeURI: "https://you.example/auth/resume?code=" + code,
+    })
 }
+
+// GET /auth/resume: sign the browser in only if it also holds tx's binding cookie.
 ```
 
 ### TypeScript
@@ -126,7 +150,13 @@ canonical scopes, and single-use nonces.
 [Connected apps](./connected-apps.md)), `Scopes`, `AppID`, `ExpiresAt` and the resolved
 `Document`.
 
-## 4. Three things to get right
+## 4. Four things to get right
+
+**Hand the session only to the browser that started the login.** Anyone can create a
+sign-in request; a login link forwarded to a victim is approved by the victim. A same-device
+approval finishes only where the resume code *and* your binding cookie meet, and a
+cross-device one only with the match code the starting screen showed. Skip this and a
+forwarded link is an account takeover.
 
 **Use a shared nonce cache if you run more than one process.** The default cache is
 in-memory and correct for exactly one process; with several, an approval can be replayed
