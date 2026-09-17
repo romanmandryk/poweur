@@ -321,6 +321,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.advertiseIndieAuth(w, r)
 	version, buildTime, versionHash := s.releaseInfo()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":       "poweur-relay",
@@ -338,6 +339,26 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"buildTime":      buildTime,
 		"versionHash":    versionHash,
 	})
+}
+
+// advertiseIndieAuth points IndieAuth clients at the operator's bridge when
+// the root of a hosted identity is fetched: `https://alice.poweur.net/` is
+// Alice's IndieAuth profile URL, and a Link header is how a client discovers
+// who authenticates her (EPIC-022 E22-T6). The relay shares nothing with the
+// bridge; an identity can point elsewhere from its own site.
+func (s *Server) advertiseIndieAuth(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.OAuthBridgeURL == "" || r.URL.Path != "/" {
+		return
+	}
+	host := r.Host
+	if h, _, err := splitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if !s.identities.Exists(host) {
+		return
+	}
+	w.Header().Add("Link", "<"+s.cfg.OAuthBridgeURL+"/.well-known/oauth-authorization-server>; rel=\"indieauth-metadata\"")
 }
 
 // releaseInfo is the semver + build stamp advertised on GET / and /health.

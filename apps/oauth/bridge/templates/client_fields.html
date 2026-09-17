@@ -1,0 +1,11 @@
+{{define "client_fields"}}
+<label for="name">Application name</label>
+<input id="name" name="name" type="text" maxlength="80" required value="{{.Name}}">
+<p class="hint">Shown to people when they sign in, next to your Poweur ID.</p>
+<label for="redirect_uris">Redirect URIs</label>
+<textarea id="redirect_uris" name="redirect_uris" rows="3" required placeholder="https://app.example.com/oauth2/callback">{{.RedirectURIs}}</textarea>
+<p class="hint">One per line. Exact match, https only (http is allowed for 127.0.0.1 and [::1]).</p>
+<label for="co_owners">Co-owners</label>
+<textarea id="co_owners" name="co_owners" rows="2" placeholder="colleague.example.com">{{.CoOwners}}</textarea>
+<p class="hint">Other Poweur IDs that may manage this application, one per line.</p>
+{{end}}

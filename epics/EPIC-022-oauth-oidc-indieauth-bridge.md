@@ -1,7 +1,7 @@
 # EPIC-022 — Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility
 
-- **Status:** in progress — E22-T1 design draft at
-  [`apps/docs/docs/auth/oauth-oidc-bridge.md`](../apps/docs/docs/auth/oauth-oidc-bridge.md)
+- **Status:** in progress — bridge implemented in `apps/oauth` (T1–T4, T6, T9 done; T5, T8
+  partial; T7 open). Design: [`apps/docs/docs/auth/oauth-oidc-bridge.md`](../apps/docs/docs/auth/oauth-oidc-bridge.md)
 - **Priority:** P1 (ecosystem adoption: one bridge unlocks existing auth-capable applications)
 - **Depends on:** EPIC-001 (public resolver chain), EPIC-008 (native Poweur Sign-In and verifier),
   EPIC-013 (deployment/observability foundations)
@@ -14,15 +14,15 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E22-T1 Architecture, protocol profile & threat model | **partial** | Draft written (`auth/oauth-oidc-bridge.md`): boundary, identifier vectors, transaction state machine, OIDC profile, pairwise `sub`, client model, threat model. Needs review; vectors file lands with T2 |
-| E22-T2 Bridge core + native Poweur authentication | **open** | Generic for any publicly resolvable Poweur ID; browser approval is the primary path |
-| E22-T3 OIDC Authorization Code + PKCE provider | **open** | Primary standards surface; discovery, JWKS, code/token/UserInfo, pairwise subjects |
-| E22-T4 Browser signer and consent journey | **partial** | Native completion binding shipped (resume code + binding cookie, match code for cross-device); bridge pages open |
-| E22-T5 Cross-device QR journey | **open** | Phone scans the same short-lived request; desktop polls and resumes |
-| E22-T6 IndieAuth compatibility | **open** | Profile discovery, metadata, authorization code flow and canonical `me` URL |
+| E22-T1 Architecture, protocol profile & threat model | **done** | `auth/oauth-oidc-bridge.md`; ID vectors `id-input.json` |
+| E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
+| E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc/x/oauth2 verified; live Keycloak/Authentik runs moved to T8; `poweur_proof` deferred |
+| E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright run through a passkey signer open |
+| E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll; phone camera (EPIC-019) and initiator context open |
+| E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
-| E22-T8 Packaging, conformance, integrations & operations | **open** | Standalone image, colocated Compose profile, key rotation, security tests and integration recipes |
-| E22-T9 Client registry, developer console & user authorizations | **open** | Self-service `/developers` console (main path), static clients, URL client IDs only for IndieAuth, `/account` revoke |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI, recipes, CI; rate limits, conformance suite, live products, prod rollout open |
+| E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
 ## Goal
 
@@ -190,66 +190,81 @@ accessibility and CLI fallback, not a promoted primary path.
 
 ## Tasks
 
-### E22-T1 — Architecture, protocol profile & threat model
+### E22-T1 — Architecture, protocol profile & threat model — **done**
 
-- [ ] Write `apps/docs/docs/auth/oauth-oidc-bridge.md` covering the trust boundary, generic-ID
+- [x] Write `apps/docs/docs/auth/oauth-oidc-bridge.md` covering the trust boundary, generic-ID
       resolution, issuer semantics, hosted/self-hosted deployment and native-proof translation
-- [ ] Specify the canonical FQDN ↔ IndieAuth profile URL ↔ `did:web` mapping and test vectors
-- [ ] Specify OIDC scopes and claims, pairwise `sub`, explicit release of `poweur_id`, account
+- [x] Specify the canonical FQDN ↔ IndieAuth profile URL ↔ `did:web` mapping and test vectors
+      (`identity.NormalizeIDInput`, `IndieAuthProfileURL`, `DIDWebID`; `vectors/id-input.json`)
+- [x] Specify OIDC scopes and claims, pairwise `sub`, explicit release of `poweur_id`, account
       linking and what changes when an RP moves to another issuer
-- [ ] Define browser transaction, consent, denial, expiry and audit-record state machines
-- [ ] Threat model: bridge compromise, forged OIDC assertions, login CSRF, mix-up, open redirect,
+- [x] Define browser transaction, consent, denial, expiry and audit-record state machines
+- [x] Threat model: bridge compromise, forged OIDC assertions, login CSRF, mix-up, open redirect,
       SSRF through arbitrary IDs/client URLs, cookie tossing from hosted subdomains, replay,
       key rotation and malicious/compromised signers
-- [ ] Record the deployment boundary: standalone service is normative; colocation is packaging
+- [x] Record the deployment boundary: standalone service is normative; colocation is packaging
 
 **Acceptance:** the document is sufficient to implement an independent bridge and says plainly
 that generic OIDC RPs trust the bridge, while native Poweur RPs verify the user directly.
 
-### E22-T2 — Bridge core + native Poweur authentication
+### E22-T2 — Bridge core + native Poweur authentication — **done**
 
-- [ ] New bridge service with configurable issuer, persistent transaction store and health/build
-      metadata; reuse `packages/identity/signin` rather than copying verification logic
-- [ ] Accept any valid, publicly resolvable Poweur ID; reuse resolver SSRF, redirect, size,
-      timeout, cache and web/DNS mismatch protections
-- [ ] Create EPIC-008 auth requests, publish bridge verifier metadata, accept signed callbacks,
-      enforce nonce/expiry/single-use rules and support delegated session proofs
-- [ ] Browser session begins only after successful native proof; no account/password database
-- [ ] Store only transaction, replay, client, pairwise-subject and audit state; never identity
-      private keys, DNS tokens, relay admin credentials or DAV credentials
-- [ ] Unit tests for invalid IDs, private targets, mismatch, replay, expiry, wrong audience,
-      rotation, session revocation and concurrent transactions
+- [x] New bridge service (`apps/oauth`, `poweur-oauth`) with configurable issuer, SQLite store
+      and `/health`; reuses `packages/identity/signin` for every verification step
+- [x] Accept any valid, publicly resolvable Poweur ID through `identity.Resolve`; its HTTP client
+      checks the *dialled* address (no DNS-rebinding window), follows no redirects, caps size
+      and time; web/DNS mismatch protection comes with the resolver
+- [x] Create EPIC-008 requests, publish bridge metadata, accept signed callbacks, enforce
+      nonce/expiry/single-use (the store is the atomic nonce cache), one approval per
+      transaction, and the completion binding (resume code + binding cookie / match code)
+- [x] Browser session begins only after a verified native proof; no account/password database
+- [x] Store only transaction, replay, session, client, consent, code/token hashes, sealed issuer
+      keys, pairwise secret and audit state
+- [x] Unit tests for invalid IDs, mismatch (another identity's approval), replay, expiry,
+      forwarded links, wrong match codes, private addresses, two tabs, identity change
+      (`bridge/native_test.go`, `crypto_test.go`). Delegated session proofs are verified by the
+      shared verifier (`packages/identity/signin`) and surface as `amr: ["poweur","session"]`;
+      *revoked* sessions are only knowable to the relay, which is where scoped grants check them
+- [x] Hosted-handle reserved list gains `oauth`, `sso`, `idp`, `openid`, `indieauth` (Go + TS)
+- [x] Issuer must be a dotted host (the native audience derives an app namespace) — checked at start
 
-**Acceptance:** identities on a Poweur-hosted wildcard, a different public relay and an owned
-domain all authenticate to one bridge with zero relay registration or shared secret.
+**Acceptance:** met by `TestINT_OAUTH_01`: identities on a hosted wildcard, on a second relay with
+another hosted domain, and a DNS-published identity all sign in to one bridge with no relay
+registration or shared secret.
 
-### E22-T3 — OIDC Authorization Code + PKCE provider
+### E22-T3 — OIDC Authorization Code + PKCE provider — **done** (live Keycloak/Authentik runs → T8)
 
-- [ ] `/.well-known/openid-configuration`, `/authorize`, `/token`, `/jwks.json` and `/userinfo`
-- [ ] Authorization Code only; require PKCE `S256` for public clients and support it for every
-      client; exact registered redirect URI matching, `state`, OIDC `nonce` and issuer binding
-- [ ] Client lookup through the E22-T9 registry interface; static clients are enough to land
-      this task, URL and console clients follow in T9
-- [ ] Short-lived, single-use codes; short-lived access/ID tokens; no refresh tokens in v1
-- [ ] Persistent, independently rotated issuer signing keys with overlapping JWKS publication
-- [ ] Pairwise subject derivation and consented `poweur_id`/fingerprint claims;
-      `OAUTH_SUBJECT_TYPE=pairwise|public` for deployments that want the Poweur ID as `sub`
-- [ ] Optional native-proof claim for Poweur-aware verifiers, without changing standard OIDC
-      behavior for ordinary clients
-- [ ] Integration coverage against Keycloak, Authentik and oauth2-proxy configurations
+- [x] `/.well-known/openid-configuration` (+ RFC 8414 alias), `/authorize`, `/token`,
+      `/jwks.json`, `/userinfo`, `/revoke`, `/introspect`
+- [x] Authorization Code only; PKCE `S256` required for every client; exact redirect matching
+      (loopback any-port for public clients only); `state`, `nonce`, `iss` (RFC 9207);
+      duplicate parameters refused; errors before the redirect is trusted render a page
+- [x] Client lookup through one registry (static, console, URL)
+- [x] Codes: 256-bit, hashed, single-use, 60 s; reuse revokes the first redemption's tokens.
+      ID tokens 5 min, access tokens 10 min, no refresh tokens
+- [x] RS256 keys sealed with AES-GCM under `OAUTH_KEY_ENCRYPTION_KEY`, kid-bound; rotation keeps
+      retired keys published for 24 h (`poweur-oauth keys rotate`); a running server reloads
+- [x] Pairwise subject (`HMAC(secret, sector, id)`, sector fixed at creation) and consented
+      `poweur_id`/fingerprint/profile claims; `OAUTH_SUBJECT_TYPE=public`
+- [x] SSO: session reuse, `prompt=none|login|consent`, `max_age`, `login_hint`, `auth_time`
+- [x] Client authentication: `client_secret_basic`/`_post`, `private_key_jwt` (RS256/ES256/EdDSA,
+      `jti` replay guard, audience and lifetime checks), `none`
+- [ ] Optional native-proof claim — **deferred** (claim name `poweur_proof` reserved; see the
+      design's open questions)
+- [x] Integration coverage with `coreos/go-oidc` + `x/oauth2` — the libraries oauth2-proxy is
+      built on — against real relays (`TestINT_OAUTH_01/02`)
+- [ ] Runs against live Keycloak, Authentik and oauth2-proxy containers — **moved to E22-T8**
+      (recipes are in `apps/oauth/README.md`)
 
-**Acceptance:** each named consumer signs in an identity hosted on another relay using only normal
-OIDC configuration and sees a stable `(iss, sub)`; the public ID appears only when requested and
-approved.
+**Acceptance:** met for the go-oidc stack; the named products are verified in T8.
 
-### E22-T4 — Browser signer and consent journey
+### E22-T4 — Browser signer and consent journey — **done** (Playwright journey through the web signer open)
 
-- [ ] Bridge page to enter or select a Poweur ID, with `login_hint` support and strict
-      normalization
-- [ ] Discover a compatible web signer; hosted identity-origin `/app/` is the default when
-      advertised, with a clear chooser/failure state for self-hosted identities
-- [ ] Redirect to the web signer, unlock locally, approve, submit to the bridge and resume the
-      original browser transaction without exposing the signed response in URLs
+- [x] Identify page with `login_hint` and strict normalization (profile URLs accepted)
+- [x] Signer discovery: `endpoints.web_signer`, else the identity-origin `/app/` for web-resolved
+      IDs, plus the operator default (labelled) and the `poweur://` deep link; nothing is probed
+- [x] Redirect to the web signer, approve, POST to the bridge, resume the original browser with
+      nothing signed in any URL
 - [x] Native completion binding ("Who may complete a sign-in", `auth/sign-in.md`): a delivery
       without a match code finishes only at a single-use `resume_uri` in the browser holding the
       RP's binding cookie; one with the code finishes only through the starting page's poll
@@ -258,54 +273,54 @@ approved.
       in URLs; the web signer has a code field (required in the shell) and follows `resume_uri`;
       `poweur auth approve --code`. Unit + `TestINT_SIGNIN_02` (forwarded link signs nobody in).
       Web 0.1.18, SDK 0.1.5, CLI 0.1.8
-- [ ] Hosted relays publish `endpoints.web_signer` in `capabilities.json` for signer discovery
-- [ ] Separate downstream consent page showing verified client name, origin, requested claims,
-      whether the public Poweur ID will be released, and deny/report controls
-- [ ] Host-only `__Host-` cookies (`Secure`, `HttpOnly`, `SameSite`); never a parent-domain cookie;
-      no third-party content and `Referrer-Policy: no-referrer` on auth pages
-- [ ] Browser tests for success, denial, back/refresh, multiple tabs, expired session, malicious
-      redirect and a browser that does not hold the requested identity
+- [x] Relays serve `endpoints.web_signer` (and `endpoints.oauth_bridge`) in `capabilities.json`
+      without writing into the user's tree (relay 0.1.9)
+- [x] Consent page: client name, return host, "registered by" + "not reviewed" for console
+      clients, verified host for URL clients, tick-boxes for `poweur_id`/`profile`, deny, report
+- [x] `__Host-` cookies (`Secure`, `HttpOnly`, `SameSite=Lax`) on https; strict CSP with
+      `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, same-origin form-post checks
+- [x] Journey tests (Go HTTP harness): success, denial, cancel, refresh/continue, two tabs,
+      expiry at each stage, forwarded link, wrong browser, session change before consent,
+      cross-site posts
+- [ ] Playwright journey through the real web signer with a passkey — open (the same flow is
+      covered by the Go harness and the web signer's own unit tests)
 
-**Acceptance:** on a desktop with keys enrolled in the browser signer, “Sign in with Poweur” is a
-redirect/unlock/approve/return journey with no QR, mobile app, message or copy/paste step.
+**Acceptance:** met by the harness and by hand in the browser (`scripts/dev.sh`).
 
-### E22-T5 — Cross-device QR journey
+### E22-T5 — Cross-device QR journey — **partial**
 
-- [ ] Bridge renders the same Poweur auth request as a QR and exposes a browser-session-bound
-      polling transaction
-- [ ] Mobile signer scans, verifies bridge metadata, displays the bridge and action, unlocks and
-      submits the signed response directly to the bridge callback
-- [ ] Original browser resumes exactly once; polling handles and responses cannot be swapped
-      between sessions or users. The poll handle is a high-entropy secret bound to the initiating
-      browser — never the `request_id`, which the initiator hands out by construction
-- [ ] Number matching against the initiating screen, plus initiator context (coarse location,
-      browser, elapsed time) and copy stating that the sign-in started somewhere else — the
-      disclosure half of [Who may complete a sign-in](../apps/docs/docs/auth/sign-in.md), since
-      no completion secret can be bound to a browser the approving device cannot reach
-- [ ] Expiry, cancellation, denial, already-used and camera-unavailable flows
-- [ ] Copy/paste request/response remains a documented CLI/accessibility fallback
+- [x] QR (inline SVG), request code with copy button, and a browser-bound status poll (the
+      binding cookie is the poll secret)
+- [ ] Mobile signer scans a QR — the shell has no camera flow yet (EPIC-019); it can paste the
+      request code and type the match code today
+- [x] Original browser resumes exactly once; handles cannot be swapped between browsers
+- [x] Number matching: the approving device must send the code the starting screen shows; one
+      attempt, then the transaction fails
+- [ ] Initiator context (coarse location, browser, elapsed time) shown on the signer — open;
+      needs a signer-readable context endpoint
+- [x] Expiry, cancellation, denial and already-used flows
+- [x] Copy/paste request code remains the CLI/accessibility path (`poweur auth approve --code`)
 
-**Acceptance:** a desktop browser with no Poweur keys completes OIDC login using a phone, and no
-private or recovery key appears in the QR, callback, browser history or bridge storage.
+**Acceptance:** met with the CLI as the other device (`TestINT_OAUTH_02`); a phone scanning the QR
+waits on EPIC-019.
 
-### E22-T6 — IndieAuth compatibility
+### E22-T6 — IndieAuth compatibility — **done** (interop runs against third-party clients → T8)
 
-- [ ] IndieAuth metadata plus authorization, token and revocation behavior over the same bridge
-      core and browser/QR journeys
-- [ ] Canonical `me=https://<poweur-id>/` returned by the code exchange
-- [ ] Validate public client-ID URLs and redirect URIs per IndieAuth; apply the resolver-grade
-      SSRF and redirect policy to fetched profile/client documents
-- [ ] Hosted identity pages advertise the operator's configured default using the standard
-      `rel=indieauth-metadata`; self-hosters can publish their chosen bridge without changing ID
-- [ ] Login/profile scopes first; no implicit mapping from IndieAuth/Micropub scopes to DAV or
-      messaging grants
-- [ ] Test with at least two independent IndieAuth clients and one identity delegating to an
-      independently hosted bridge
+- [x] Metadata at `/.well-known/oauth-authorization-server`; authorization, code redemption at
+      the authorization endpoint *and* the token endpoint, introspection, revocation
+- [x] Canonical `me=https://<poweur-id>/` (+ `profile` when released); no access token for
+      login/profile-only grants
+- [x] Client-ID URL rules (https, path, no dot segments, no credentials/fragment, no IP but
+      loopback); client metadata fetched with the safe client; redirect URIs same-origin with the
+      client or listed in its metadata (and then only same-origin or loopback)
+- [x] Relays with `OAUTH_BRIDGE_URL` send `Link: …; rel="indieauth-metadata"` on hosted identity
+      roots; self-hosters publish their own
+- [x] Login/profile scopes only; nothing maps to DAV or messaging
+- [ ] Run two independent IndieAuth clients against it — **moved to E22-T8**
 
-**Acceptance:** an unmodified IndieAuth client starts from `https://alice.example.com/`, discovers
-Alice's selected bridge, completes PKCE login and receives that exact canonical `me` URL.
+**Acceptance:** met at protocol level by `bridge/indieauth_test.go`; live clients in T8.
 
-### E22-T7 — Optional push-to-approve delivery channel
+### E22-T7 — Optional push-to-approve delivery channel — **open**
 
 This task is additive and does not block T2–T6.
 
@@ -326,55 +341,52 @@ This task is additive and does not block T2–T6.
 browser waits, but disabling the trusted auth service stops delivery without changing contacts or
 breaking browser/QR login.
 
-### E22-T8 — Packaging, conformance, integrations & operations
+### E22-T8 — Packaging, conformance, integrations & operations — **partial**
 
-- [ ] Standalone container and documented configuration for issuer URL, database, client registry,
-      signer discovery, signing keys, pairwise secret, retention and rate limits
-- [ ] One-command Compose profile colocated with a relay, while preserving separate processes,
-      origins, keys, storage and health checks
-- [ ] Document remote deployment: bridge and relay on different operators/networks with no shared
-      secret; private-only identities use a private bridge
-- [ ] Back up and rotate issuer keys/pairwise secret safely; define consequences of loss and
-      migration; structured audit events without auth payloads or unnecessary IDs
-- [ ] Run available OIDC conformance tests and the OAuth security failure matrix; commission an
-      external review before presenting the hosted bridge as production authentication
-- [ ] Publish Keycloak, Authentik and oauth2-proxy recipes, IndieAuth setup, privacy policy,
-      availability expectations and self-host guide
-- [ ] Add a live cross-relay journey: external RP → hosted bridge → ID on independent relay → RP
+- [x] Standalone container (`apps/oauth/Dockerfile`, non-root, healthcheck) and documented
+      configuration (`apps/oauth/README.md`)
+- [x] Compose example with a relay beside it (`apps/oauth/compose.example.yml`), separate
+      processes, origins, keys and storage; `scripts/dev.sh` for local work
+- [ ] Document remote deployment across operators — partly in the design doc; no runbook yet
+- [x] Operator CLI: `keys list|rotate`, `clients list|suspend|unsuspend`, `prune`, `gen-key`,
+      `hash-secret`; hourly pruning with retention; backup guidance and loss consequences;
+      structured audit events without payloads
+- [ ] Rate limiting on `/authorize`, `/t/*/identify` and `/token` (identify triggers outbound
+      fetches) — open
+- [ ] OIDC conformance suite, OAuth security failure matrix, external review — open (human)
+- [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
+- [ ] Live runs of those products and of two IndieAuth clients; privacy policy; production
+      deployment at `oauth.poweur.org` (ansible/Caddy) — open
+- [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
-**Acceptance:** the same image runs at `oauth.poweur.org` and an independent issuer; a relay-only
-operator need not run it; an auth-only operator need not host identities; documented integrations
-work without Poweur-specific patches.
+**Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live
+product verification and the hosted rollout remain.
 
-### E22-T9 — Client registry, developer console & user authorizations
+### E22-T9 — Client registry, developer console & user authorizations — **done**
 
 Three ways a client reaches the bridge, one registry interface, specified in the
-[design draft](../apps/docs/docs/auth/oauth-oidc-bridge.md#clients):
+[design](../apps/docs/docs/auth/oauth-oidc-bridge.md#clients):
 
-- [ ] **Developer console** at `/developers` — *the main path*: owner signs in with native Poweur
-      Sign-In; create client (name, redirect URIs, sector host); secret shown once and stored
-      hashed; rotate with 7-day overlap; edit; delete; co-owner IDs; audit events per change
-- [ ] Registry interface + static clients from `OAUTH_STATIC_CLIENTS` (JSON), with
+- [x] **Developer console** at `/developers` — *the main path*: owner signs in with native Poweur
+      Sign-In; create client (name, redirect URIs, sector host, auth method); secret shown once,
+      stored as SHA-256; rotate with 7-day overlap; retire; edit; delete (typed confirmation);
+      co-owner IDs; audit events per change
+- [x] Static clients from `OAUTH_STATIC_CLIENTS` (plaintext or `client_secret_sha256`), with
       `first_party` consent skip for `openid` only
-- [ ] **URL client IDs** only because IndieAuth's client identifier *is* a URL (shared fetcher
-      with E22-T6; same as the Client ID Metadata Document draft). `OAUTH_URL_CLIENTS=indieauth`
-      by default, so OIDC clients use the console. Fetch with resolver-grade SSRF rules,
-      `client_id` self-match, same-origin redirect URIs, `none` or `private_key_jwt`, bounded
-      caching
-- [ ] Operator posture: `OAUTH_CLIENT_REGISTRATION=open|allowlist|closed`, `OAUTH_URL_CLIENTS`;
-      per-owner client limit, creation rate limit, `poweur-oauth clients suspend`
-- [ ] Consent labels: verified host for URL clients; "registered by `<owner id>`" + redirect host
-      for console clients; report link on every consent page
-- [ ] **User `/account`**: authorized apps with released claims and last use, revoke (deletes
+- [x] **URL client IDs** for IndieAuth (`OAUTH_URL_CLIENTS=indieauth` by default; `on` admits
+      Client ID Metadata Document clients on the OIDC surface; `off`)
+- [x] Operator posture: `OAUTH_CLIENT_REGISTRATION=open|allowlist|closed`, allowlist with
+      `*.domain` suffixes, per-owner limit, 5 creations/hour, `poweur-oauth clients suspend`
+- [x] Consent labels as specified; report link on every consent page; `/abuse`
+- [x] **User `/account`**: authorized apps with released claims and last use, revoke (deletes
       consent, revokes access tokens), recent sign-ins, sign out
-- [ ] Sector host fixed at client creation; editing redirect URIs never changes `sub` (unit test)
-- [ ] Server-rendered pages (Go `html/template`), strict CSP, no third-party content; browser
-      tests for create → configure oauth2-proxy with the secret → sign in → revoke
+- [x] Sector fixed at creation; editing redirect URIs keeps `sub` (`TestConsoleClientLifecycle`)
+- [x] Server-rendered pages, strict CSP, no third-party content; lifecycle tests from create to
+      token to revoke
 
-**Acceptance:** a developer with only a Poweur ID creates a client in the console, configures
-oauth2-proxy with the issued secret and signs in a user from another relay; a web app with no
-registration signs in using a URL `client_id`; the user revokes either from `/account` and is
-asked to consent again next time.
+**Acceptance:** met: a console client signs in a user from another identity and redeems with its
+secret; URL clients sign in without registration; revoking from `/account` kills tokens and
+brings consent back.
 
 ## Non-goals
 

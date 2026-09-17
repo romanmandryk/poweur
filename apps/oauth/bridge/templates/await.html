@@ -1,0 +1,30 @@
+{{template "head" .}}
+<section class="card" data-status-url="/t/{{.Data.Txn.ID}}/status">
+  {{with .Data.Client}}<p class="eyebrow">Signing in to {{.ClientName}}</p>{{end}}
+  <h1>Approve as {{.Data.Txn.Identity}}</h1>
+  <p class="muted"><a href="/t/{{.Data.Txn.ID}}?change=1">Not you? Use a different ID</a></p>
+
+  <div class="stack">
+    {{range $i, $s := .Data.Signers}}
+    <a class="button{{if eq $i 0}} primary{{end}}" href="{{$s.Href}}">{{$s.Label}}</a>
+    {{with $s.Note}}<p class="hint">{{.}}</p>{{end}}
+    {{end}}
+    <a class="button" href="{{.Data.DeepLink}}">Open the Poweur app on this device</a>
+  </div>
+
+  <details class="other-device">
+    <summary>Approving on another device?</summary>
+    <p>Scan this with your Poweur app, or paste the request code into it. When it asks, enter:</p>
+    <p class="match" aria-label="Code to enter on the other device">{{.Data.Match}}</p>
+    <div class="qr">{{.Data.QR}}</div>
+    <label for="request-code">Request code</label>
+    <textarea id="request-code" readonly rows="3">{{.Data.Request}}</textarea>
+    <button type="button" data-copy="request-code">Copy request code</button>
+    <p class="hint">Only approve a sign-in you started yourself, on a screen in front of you. If someone sent you a code or link, cancel.</p>
+  </details>
+
+  <p id="status" class="status" role="status">Waiting for your approval…</p>
+  <noscript><p><a class="button" href="/t/{{.Data.Txn.ID}}/continue">I have approved — continue</a></p></noscript>
+  <form method="post" action="/t/{{.Data.Txn.ID}}/cancel"><button class="link" type="submit">Cancel</button></form>
+</section>
+{{template "foot" .}}

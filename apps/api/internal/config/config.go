@@ -147,6 +147,11 @@ type Config struct {
 	MaxFileBytes int64
 	// StorageProvider selects the file-body backend (E03-T8). v1: "relay-fs".
 	StorageProvider string
+	// OAuthBridgeURL is the issuer of the OAuth/OIDC bridge this operator
+	// runs or recommends (EPIC-022), e.g. https://oauth.poweur.org. Optional
+	// and secret-free: hosted identities advertise it for IndieAuth discovery
+	// and in their capabilities; the relay never talks to it.
+	OAuthBridgeURL string
 }
 
 func (c Config) Validate() error {
@@ -194,6 +199,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("NAME_BLOCKED_FILE %s: %w", c.NameBlockedFile, err)
 		}
 	}
+	if c.OAuthBridgeURL != "" {
+		if _, err := idpkg.NormalizeOrigin(c.OAuthBridgeURL); err != nil {
+			return fmt.Errorf("invalid OAUTH_BRIDGE_URL: %w", err)
+		}
+	}
 	if len(missing) == 0 {
 		return nil
 	}
@@ -223,6 +233,7 @@ func FromEnv() Config {
 		Telemetry: tc, TelemetryProxyError: proxyErr,
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
+		OAuthBridgeURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
 		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
 		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
 		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),

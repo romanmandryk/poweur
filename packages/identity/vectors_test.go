@@ -380,6 +380,7 @@ func TestVectors_Names(t *testing.T) {
 		"аdmin.poweur.net", "аlice.poweur.net", "xn--80ak6aa92e.example.org",
 		// Newly reserved labels, so a TS list that drifts from Go's is caught.
 		"support.poweur.net", "verify.poweur.net", "id.poweur.net",
+		"oauth.poweur.net", "indieauth.poweur.net",
 	} {
 		vector := nameVector{
 			Identity: name,

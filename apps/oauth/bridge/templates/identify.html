@@ -1,0 +1,20 @@
+{{template "head" .}}
+<section class="card">
+  {{with .Data.Client}}
+  <p class="eyebrow">Signing in to</p>
+  <h1>{{.ClientName}}</h1>
+  {{else}}
+  <h1>Sign in</h1>
+  {{end}}
+  <p>Enter your Poweur ID. You approve with the keys on your own device — {{$.Name}} never sees them.</p>
+  <form method="post" action="/t/{{.Data.Txn.ID}}/identify" class="stack">
+    <label for="identity">Poweur ID</label>
+    <input id="identity" name="identity" type="text" inputmode="url" autocomplete="username"
+           autocapitalize="none" spellcheck="false" required autofocus
+           placeholder="alice.poweur.net" value="{{.Data.Hint}}">
+    {{with .Data.Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+    <button type="submit" class="primary">Continue</button>
+  </form>
+  <form method="post" action="/t/{{.Data.Txn.ID}}/cancel"><button class="link" type="submit">Cancel</button></form>
+</section>
+{{template "foot" .}}

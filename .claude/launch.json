@@ -22,6 +22,15 @@
       ],
       "port": 8088,
       "url": "http://localhost:8088"
+    },
+    {
+      "name": "oauth-bridge",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "apps/oauth/scripts/dev.sh"
+      ],
+      "port": 8090,
+      "url": "http://oauth.localhost:8090"
     }
   ]
 }

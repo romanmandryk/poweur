@@ -94,5 +94,15 @@
     "identity": "id.poweur.net",
     "valid": false,
     "hosted_valid": false
+  },
+  {
+    "identity": "oauth.poweur.net",
+    "valid": false,
+    "hosted_valid": false
+  },
+  {
+    "identity": "indieauth.poweur.net",
+    "valid": false,
+    "hosted_valid": false
   }
 ]

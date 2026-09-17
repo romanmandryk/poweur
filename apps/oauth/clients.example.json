@@ -1,0 +1,17 @@
+{
+  "clients": [
+    {
+      "client_id": "grafana",
+      "client_name": "Grafana",
+      "redirect_uris": ["https://grafana.example.org/login/generic_oauth"],
+      "client_secret_sha256": "replace with the output of: poweur-oauth hash-secret < grafana-secret.txt",
+      "first_party": true
+    },
+    {
+      "client_id": "cli-tool",
+      "client_name": "Command-line tool",
+      "redirect_uris": ["http://127.0.0.1/callback"],
+      "token_endpoint_auth_method": "none"
+    }
+  ]
+}

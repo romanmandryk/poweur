@@ -38,6 +38,12 @@ Point the relay at that directory so it serves the app under **`/app/`**:
 WEB_STATIC_DIR=/absolute/path/to/poweur/apps/web/dist go run .
 ```
 
+### OAuth/OIDC bridge (optional)
+
+`OAUTH_BRIDGE_URL=https://oauth.example.org` advertises the operator's bridge
+([`apps/oauth`](../oauth/README.md)) in hosted identities' capabilities and as their IndieAuth
+metadata `Link`. It is a public URL, not a credential: the relay never calls the bridge.
+
 The relay sends permissive **CORS** headers on all routes so browsers can talk to any Poweur ID relay (direct POST to recipient hosts, not only the home relay).
 
 For UI work, `pnpm web:dev` runs Vite with hot reload; the app talks to whichever relay it is pointed at, so pick the local one (`http://127.0.0.1:8080`) in its relay prompt.

@@ -1,0 +1,32 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>{{.Title}} · {{.Name}}</title>
+<link rel="stylesheet" href="/static/bridge.css">
+<script src="/static/bridge.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">{{.Name}}</a>
+  {{if .Session}}
+  <nav>
+    <a href="/account">{{.Session.Identity}}</a>
+    <form method="post" action="/logout"><button class="link" type="submit">Sign out</button></form>
+  </nav>
+  {{end}}
+</header>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+<footer class="foot">
+  <a href="/">About this service</a> · <a href="{{.Contact}}">Report abuse</a>
+</footer>
+</body>
+</html>
+{{end}}

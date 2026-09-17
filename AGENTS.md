@@ -27,6 +27,9 @@ go test ./apps/api/...
 
 # CLI
 go test ./apps/cli/...
+
+# OAuth/OIDC bridge (EPIC-022)
+go test ./apps/oauth/...
 ```
 
 ### Integration tests (CLI / Go)
@@ -143,6 +146,7 @@ bump the `Version` constant instead.
 | Go CLI (`apps/cli`) | `apps/cli/internal/buildinfo.Version` | same; printed by `poweur version` / `--version` / `-v` |
 | `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM` |
 | Web app | `apps/web/package.json` **and** `apps/web/src/build-info.ts` | `APP_VERSION` / `APP_BUILD_TIME` |
+| OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | printed by `poweur-oauth version`, `GET /health` |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
 
 Default bump is **patch**. Minor/major is for breaking protocol or public API
@@ -161,6 +165,7 @@ git sha as `VERSION` (that belongs in `VERSION_HASH`).
 apps/api          Go relay
 apps/cli          Go CLI
 apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
+apps/oauth        OAuth 2.0 / OIDC / IndieAuth bridge (EPIC-022), a separate service
 apps/integration  In-process E2E tests
 packages/identity Shared identity document + resolver (Go, canonical)
 packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)

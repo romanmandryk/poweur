@@ -1,0 +1,9 @@
+{{template "head" .}}
+<section class="card">
+  <h1>Report an application</h1>
+  <p>If an application misled you on a sign-in page, tell the operator of this service. Include the application's name and,
+     if you can, its client ID (it appears in the address bar as <code>client_id</code>).</p>
+  {{with .Data}}<p>Contact: <strong>{{.}}</strong></p>{{else}}<p class="muted">The operator has not published a contact address.</p>{{end}}
+  <p class="hint">Suspending an application stops every sign-in to it at once.</p>
+</section>
+{{template "foot" .}}
