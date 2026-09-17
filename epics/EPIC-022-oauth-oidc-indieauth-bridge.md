@@ -17,7 +17,7 @@
 | E22-T1 Architecture, protocol profile & threat model | **done** | `auth/oauth-oidc-bridge.md`; ID vectors `id-input.json` |
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
 | E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc/x/oauth2 verified; live Keycloak/Authentik runs moved to T8; `poweur_proof` deferred |
-| E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright run through a passkey signer open |
+| E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer |
 | E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **open** | Separate `sys.auth.request` channel; not a contact and not required for OIDC/IndieAuth |
@@ -258,7 +258,7 @@ registration or shared secret.
 
 **Acceptance:** met for the go-oidc stack; the named products are verified in T8.
 
-### E22-T4 — Browser signer and consent journey — **done** (Playwright journey through the web signer open)
+### E22-T4 — Browser signer and consent journey — **done**
 
 - [x] Identify page with `login_hint` and strict normalization (profile URLs accepted)
 - [x] Signer discovery: `endpoints.web_signer`, else the identity-origin `/app/` for web-resolved
@@ -282,8 +282,10 @@ registration or shared secret.
 - [x] Journey tests (Go HTTP harness): success, denial, cancel, refresh/continue, two tabs,
       expiry at each stage, forwarded link, wrong browser, session change before consent,
       cross-site posts
-- [ ] Playwright journey through the real web signer with a passkey — open (the same flow is
-      covered by the Go harness and the web signer's own unit tests)
+- [x] Playwright journeys through the real web signer (`apps/web/test/e2e/oauth-bridge.spec.js`):
+      same device (signer follows `resume_uri`, consent, code redeemed, no `response=` in any
+      navigation) and another device (the phone shows the context line, types the code, the
+      desktop page continues by itself)
 
 **Acceptance:** met by the harness and by hand in the browser (`scripts/dev.sh`).
 

@@ -106,6 +106,7 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: |
             apps/api/go.sum
+            apps/oauth/go.sum
             packages/identity/go.sum
       - uses: pnpm/action-setup@v4
         with:
@@ -125,7 +126,8 @@ jobs:
       - run: pnpm web
 
       # Playwright drives the built app at /app/ on a real Go relay — the same
-      # tree the image serves and the Capacitor shell stages.
+      # tree the image serves and the Capacitor shell stages. oauth-bridge.spec
+      # also starts the OAuth bridge (`go run ./apps/oauth/cmd/poweur-oauth`).
       - run: pnpm web:test:e2e
 
   observability:
