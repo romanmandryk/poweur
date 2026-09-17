@@ -190,6 +190,9 @@ func TestSysNamespaceIsReserved(t *testing.T) {
 			}
 		case idpkg.MsgTypeContactAccept:
 			mustStatus(t, resp, http.StatusForbidden, "unsolicited "+known)
+		case idpkg.MsgTypeAuthRequest:
+			// Only from a service the recipient trusts (auth_prompt_test.go).
+			mustStatus(t, resp, http.StatusForbidden, "untrusted "+known)
 		default:
 			mustStatus(t, resp, http.StatusAccepted, "registered type "+known)
 		}

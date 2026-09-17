@@ -65,6 +65,8 @@ export function threadMessages(messages, selfIdentity, peer, threadId = "") {
     if (!message.sender) continue;
     // The handshake is not chat: the tray leaves it out, so the thread does too.
     if (isContactHandshake(message.type)) continue;
+    // A sign-in prompt is a notification with its own tray (EPIC-022).
+    if (normalizeMessageType(message.type) === "sys.auth.request") continue;
     if (conversationPeer(message, selfIdentity).toLowerCase() !== wanted) continue;
     if ((message.thread_id || "") !== (threadId || "")) continue;
     out.push(message);
@@ -153,6 +155,7 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     // anonymous tray, which renders it as a different kind of object.
     if (!message.sender) continue;
     if (isContactHandshake(message.type)) continue;
+    if (normalizeMessageType(message.type) === "sys.auth.request") continue;
     // A verified fan-out carries the group in signed metadata. File it under
     // that address rather than under whichever member happened to speak.
     const contact = conversationPeer(message, selfIdentity);

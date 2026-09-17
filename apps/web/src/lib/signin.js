@@ -1,5 +1,6 @@
 import {
-  checkRequestAgainstMetadata, decodeSignInRequest,
+  checkRequestAgainstMetadata, checkResumeUri, decodeSignInRequest, describeSignInContext,
+  fetchSignInContext, normalizeMatchCode,
   describeScopes, encodeSignInResponse, fetchRelyingPartyMetadata,
   normalizeSignInRequest, signInResponseCanonical, summarizeSignInRequest,
   validateSignInRequest,
@@ -26,9 +27,16 @@ export async function loadSignInConsent(input, options = {}) {
   const request = decodeAuthInput(input);
   const metadata = await fetchRelyingPartyMetadata(request.audience, options);
   checkRequestAgainstMetadata(request, metadata);
+  // Where the sign-in was started, for someone approving from another device.
+  // Best effort: a missing or failing context never blocks an approval.
+  let context = "";
+  try {
+    context = describeSignInContext(await fetchSignInContext(metadata, request.request_id, options));
+  } catch { /* the RP may not publish one */ }
   return {
     request,
     metadata,
+    context,
     headline: summarizeSignInRequest(request, metadata.name),
     scopes: describeScopes(request.scopes ?? [], metadata.name),
   };
@@ -83,18 +91,42 @@ export async function appendBrowserConsent(dav, response, metadata) {
   return record;
 }
 
-export async function deliverBrowserApproval(request, encoded, fetchImpl = globalThis.fetch) {
-  if (!request.response_uri) return false;
+/**
+ * POST the approval to the request's callback and read the relying party's
+ * receipt. Returns `{ delivered, resumeUri }`.
+ *
+ * `match` is the number the user copied from the screen that started the
+ * sign-in; present only when approving from another device. Without it the
+ * wire stays what it always was — the bare code as text/plain, a CORS-simple
+ * request every existing RP accepts.
+ *
+ * The approval never goes into a URL. A same-device RP answers with a
+ * `resume_uri` instead, which finishes only in the browser that started.
+ */
+export async function deliverBrowserApproval(request, encoded, fetchImpl = globalThis.fetch, match = "") {
+  if (!request.response_uri) return { delivered: false, resumeUri: "" };
+  const code = normalizeMatchCode(match);
   const response = await fetchImpl(request.response_uri, {
     method: "POST",
     // text/plain is a CORS-simple request; the RP accepts the portable code
     // directly, so QR/cross-device approval needs no preflight ceremony.
     headers: { "content-type": "text/plain;charset=UTF-8" },
-    body: encoded,
+    body: code ? JSON.stringify({ response: encoded, match: code }) : encoded,
     redirect: "error",
   });
-  if (!response.ok) throw new Error(`The relying party refused the approval (HTTP ${response.status}).`);
-  return true;
+  if (!response.ok) {
+    let reason = "";
+    try { reason = (await response.json())?.error ?? ""; } catch { /* not JSON */ }
+    throw new Error(reason
+      ? `The app refused the approval: ${reason}`
+      : `The relying party refused the approval (HTTP ${response.status}).`);
+  }
+  let receipt = {};
+  try { receipt = (await response.json()) ?? {}; } catch { /* an RP that predates receipts */ }
+  const resumeUri = typeof receipt.resume_uri === "string" ? receipt.resume_uri.trim() : "";
+  // Never follow a resume link off the origin the user just approved.
+  checkResumeUri(request.audience, resumeUri);
+  return { delivered: true, resumeUri };
 }
 
 export async function readConnectedApps(dav) {

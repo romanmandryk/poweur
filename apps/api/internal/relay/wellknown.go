@@ -90,6 +90,10 @@ func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, iden
 		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
 		return
 	}
+	if clean == "capabilities.json" {
+		s.serveCapabilities(w, r, identity)
+		return
+	}
 	f, err := s.filesProvider.OpenFile(r.Context(), identity, files.SysPublic+"/"+clean, os.O_RDONLY, 0)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
@@ -185,4 +189,60 @@ func marshalDocRaw(doc idpkg.IdentityDocument) (json.RawMessage, error) {
 
 func encodePubB64(pub []byte) string {
 	return base64.RawURLEncoding.EncodeToString(pub)
+}
+
+// serveCapabilities serves the identity's capabilities.json with the
+// endpoints this relay provides filled in where the file is silent: the web
+// signer the relay serves beside the identity, and the operator's OAuth
+// bridge (EPIC-022). The user's own values always win, and a missing file
+// still answers with those defaults.
+func (s *Server) serveCapabilities(w http.ResponseWriter, r *http.Request, identity string) {
+	var caps map[string]any
+	if f, err := s.filesProvider.OpenFile(r.Context(), identity, files.SysPublic+"/capabilities.json", os.O_RDONLY, 0); err == nil {
+		raw, rerr := io.ReadAll(io.LimitReader(f, idpkg.MaxDocumentBytes+1))
+		f.Close()
+		if rerr != nil || len(raw) > idpkg.MaxDocumentBytes || json.Unmarshal(raw, &caps) != nil {
+			writeError(w, http.StatusInternalServerError, "invalid_capabilities", "stored capabilities.json is unreadable")
+			return
+		}
+	}
+	defaults := s.capabilityEndpoints(identity)
+	if caps == nil && len(defaults) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+		return
+	}
+	if caps == nil {
+		caps = map[string]any{"version": 1}
+	}
+	endpoints, _ := caps["endpoints"].(map[string]any)
+	if endpoints == nil {
+		endpoints = map[string]any{}
+	}
+	for k, v := range defaults {
+		if _, set := endpoints[k]; !set {
+			endpoints[k] = v
+		}
+	}
+	if len(endpoints) > 0 {
+		caps["endpoints"] = endpoints
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	writeJSON(w, http.StatusOK, caps)
+}
+
+// capabilityEndpoints are the endpoints this relay provides for identity.
+func (s *Server) capabilityEndpoints(identity string) map[string]string {
+	out := map[string]string{}
+	if s.cfg.WebStaticDir != "" {
+		scheme := s.cfg.RelayScheme
+		if scheme == "" {
+			scheme = "https"
+		}
+		out["web_signer"] = scheme + "://" + identity + "/app/"
+	}
+	if s.cfg.OAuthBridgeURL != "" {
+		out["oauth_bridge"] = s.cfg.OAuthBridgeURL
+	}
+	return out
 }

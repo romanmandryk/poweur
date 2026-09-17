@@ -36,12 +36,13 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity approving the request")
 	signWith := fs.String("sign-with", "session", "sign with session (default) or identity key")
 	noDeliver := fs.Bool("no-deliver", false, "print the response code instead of POSTing it to response_uri")
+	matchCode := fs.String("code", "", "the code shown by the screen that started the sign-in, when approving from another device")
 	jsonOut := fs.Bool("json", false, "output JSON")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--no-deliver": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: poweur auth approve <request|link|file> [--sign-with=session|identity] [--no-deliver]")
+		fmt.Fprintln(stderr, "usage: poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver]")
 		return 1
 	}
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
@@ -66,6 +67,14 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stderr, signinpkg.SummarizeRequest(req, metadata.Name))
+	if sc, err := signinpkg.FetchContext(ctx, metadata, req.RequestID, signinpkg.FetchOptions{}); err == nil {
+		if line := signinpkg.DescribeContext(sc, time.Now()); line != "" {
+			fmt.Fprintln(stderr, line)
+			if *matchCode != "" {
+				fmt.Fprintln(stderr, "Approve only if that is the screen in front of you.")
+			}
+		}
+	}
 	for _, line := range signinpkg.DescribeScopes(req.Scopes, metadata.Name) {
 		fmt.Fprintln(stderr, "- "+line)
 	}
@@ -117,9 +126,17 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	}
 
 	delivered := false
+	var receipt signinpkg.DeliveryReceipt
 	if req.ResponseURI != "" && !*noDeliver {
-		if err := deliverSignInApproval(ctx, req.ResponseURI, encoded); err != nil {
-			fmt.Fprintf(stderr, "approval was signed but delivery failed: %v\nresponse: %s\n", err, encoded)
+		receipt, err = deliverSignInApproval(ctx, req.ResponseURI, signinpkg.Delivery{
+			Response: encoded, Match: signinpkg.NormalizeMatchCode(*matchCode),
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "approval was signed but delivery failed: %v\n", err)
+			return 1
+		}
+		if err := signinpkg.CheckResumeURI(req.Audience, receipt.ResumeURI); err != nil {
+			fmt.Fprintf(stderr, "the relying party answered with an unsafe resume link: %v\n", err)
 			return 1
 		}
 		delivered = true
@@ -131,6 +148,12 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	message := encoded + "\n"
 	if delivered {
 		message = fmt.Sprintf("approved sign-in for %s and delivered it to %s\n", metadata.Name, req.ResponseURI)
+		if receipt.ResumeURI != "" {
+			// A same-device approval finishes only in the browser that started
+			// it; the link is useless anywhere else, so it is safe to print.
+			payload["resume_uri"] = receipt.ResumeURI
+			message += "open this in the browser where you started signing in:\n" + receipt.ResumeURI + "\n"
+		}
 	}
 	return writeOutput(stdout, *jsonOut, payload, message)
 }
@@ -185,25 +208,39 @@ func readSignInRequest(source string) (idpkg.SignInRequest, error) {
 	return idpkg.DecodeSignInRequest(string(raw))
 }
 
-func deliverSignInApproval(ctx context.Context, responseURI, encoded string) error {
-	body, err := json.Marshal(map[string]string{"response": encoded})
+// deliverSignInApproval POSTs a delivery to response_uri and returns the
+// relying party's receipt. An RP that predates receipts answers with an empty
+// or non-JSON body, which reads as a receipt with no resume link.
+func deliverSignInApproval(ctx context.Context, responseURI string, delivery signinpkg.Delivery) (signinpkg.DeliveryReceipt, error) {
+	body, err := json.Marshal(delivery)
 	if err != nil {
-		return err
+		return signinpkg.DeliveryReceipt{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responseURI, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return signinpkg.DeliveryReceipt{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		// The approval goes to the published response_uri and nowhere else.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return signinpkg.DeliveryReceipt{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return parseErrorResponse("sign-in callback failed", resp)
+		return signinpkg.DeliveryReceipt{}, parseErrorResponse("sign-in callback failed", resp)
 	}
-	return nil
+	var receipt signinpkg.DeliveryReceipt
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if err != nil {
+		return signinpkg.DeliveryReceipt{}, err
+	}
+	_ = json.Unmarshal(raw, &receipt)
+	return receipt, nil
 }
 
 func appendConsentRecord(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey, record idpkg.AuthLogRecord) error {

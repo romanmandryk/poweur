@@ -156,6 +156,26 @@ type InboxPolicy struct {
 	Anonymous *AnonymousPolicy `json:"anonymous,omitempty"`
 	// ReadReceipts controls third-tick acknowledgements; nil = enabled.
 	ReadReceipts *ReadReceiptPolicy `json:"read_receipts,omitempty"`
+	// TrustedAuthServices lists the Poweur IDs (OAuth bridges, EPIC-022) that
+	// may deliver `sys.auth.request` sign-in prompts. It admits that one type
+	// and nothing else: a listed service is not a contact and cannot chat,
+	// share or send any other `sys.*` message. Empty = no service may.
+	TrustedAuthServices []string `json:"trusted_auth_services,omitempty"`
+}
+
+// MaxTrustedAuthServices caps the list; a sign-in prompt source is a
+// deliberate, rare choice.
+const MaxTrustedAuthServices = 16
+
+// TrustsAuthService reports whether sender may deliver sign-in prompts.
+func (p InboxPolicy) TrustsAuthService(sender string) bool {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	for _, s := range p.TrustedAuthServices {
+		if strings.ToLower(strings.TrimSpace(s)) == sender && sender != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks the policy document.
@@ -178,6 +198,20 @@ func (p InboxPolicy) Validate() error {
 		if err := p.ReadReceipts.Validate(); err != nil {
 			return err
 		}
+	}
+	if len(p.TrustedAuthServices) > MaxTrustedAuthServices {
+		return fmt.Errorf("trusted_auth_services has too many entries (max %d)", MaxTrustedAuthServices)
+	}
+	seen := map[string]bool{}
+	for _, s := range p.TrustedAuthServices {
+		n := strings.ToLower(strings.TrimSpace(s))
+		if err := ValidateIdentityName(n); err != nil {
+			return fmt.Errorf("invalid trusted auth service %q: %w", s, err)
+		}
+		if seen[n] {
+			return fmt.Errorf("duplicate trusted auth service %q", n)
+		}
+		seen[n] = true
 	}
 	return nil
 }

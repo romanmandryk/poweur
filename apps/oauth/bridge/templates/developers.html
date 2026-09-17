@@ -1,0 +1,30 @@
+{{template "head" .}}
+{{$v := .Data}}
+<section class="card">
+  <h1>Your applications</h1>
+  <p>Register an application to get a client ID and secret for Keycloak, Authentik, oauth2-proxy or any OpenID Connect library.
+     Issuer: <code>{{$.Issuer}}</code></p>
+  {{if $v.Clients}}
+  <table>
+    <thead><tr><th>Name</th><th>Client ID</th><th>Returns to</th></tr></thead>
+    <tbody>
+    {{range $v.Clients}}
+    <tr>
+      <td><a href="/developers/clients/{{.ID}}">{{.Name}}</a>{{if .Suspended}} <span class="badge warn">suspended</span>{{end}}</td>
+      <td><code>{{.ID}}</code></td>
+      <td>{{range .RedirectURIs}}{{.}}<br>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">You have not registered any applications.</p>
+  {{end}}
+  {{if $v.CanWrite}}
+  <p><a class="button primary" href="/developers/new">Register an application</a></p>
+  <p class="hint">Up to {{$v.Max}} applications per Poweur ID.</p>
+  {{else}}
+  <p class="hint">{{$v.Why}}</p>
+  {{end}}
+</section>
+{{template "foot" .}}

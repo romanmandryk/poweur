@@ -1,0 +1,48 @@
+{{template "head" .}}
+{{$v := .Data}}
+<section class="card">
+  <h1>Authorized apps</h1>
+  {{if eq $v.Notice "revoked"}}<p class="status" role="status">Revoked. That app will ask again next time you sign in.</p>{{end}}
+  {{if $v.Consents}}
+  <table>
+    <thead><tr><th>App</th><th>Shared</th><th>Last used</th><th></th></tr></thead>
+    <tbody>
+    {{range $v.Consents}}
+    <tr>
+      <td><strong>{{.ClientName}}</strong>{{with .ClientHost}}<br><span class="hint">{{.}}</span>{{end}}</td>
+      <td>{{if .Granted}}{{range $i, $g := .Granted}}{{if $i}}, {{end}}{{if eq $g "poweur_id"}}Poweur ID{{else if eq $g "profile"}}Profile{{else}}{{$g}}{{end}}{{end}}{{else}}Sign-in only{{end}}</td>
+      <td>{{.LastUsed.Format "2 Jan 2006"}}</td>
+      <td><form method="post" action="/account/revoke">
+        <input type="hidden" name="client_id" value="{{.ClientID}}">
+        <button class="link danger" type="submit">Revoke</button>
+      </form></td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p class="hint">Revoking stops the app's current tokens and makes it ask again. It does not delete the account the app keeps for you.</p>
+  {{else}}
+  <p>You have not signed in to any app through {{$.Name}} yet.</p>
+  {{end}}
+</section>
+<section class="card">
+  <h2>Recent sign-ins</h2>
+  {{if $v.SignIns}}
+  <table>
+    <thead><tr><th>When</th><th>Where</th><th>How</th></tr></thead>
+    <tbody>
+    {{range $v.SignIns}}
+    <tr>
+      <td>{{.At.Format "2 Jan 2006 15:04 MST"}}</td>
+      <td>{{if .ClientName}}{{.ClientName}}{{else}}{{$.Name}}{{end}}</td>
+      <td>{{.UserAgent}}{{if eq .Finish "cross-device"}}, approved on another device{{end}}{{if .SessionDelegated}}, session key{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No sign-ins recorded.</p>
+  {{end}}
+  <p class="hint"><a href="/developers">Register your own application</a></p>
+</section>
+{{template "foot" .}}

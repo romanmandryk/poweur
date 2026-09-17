@@ -46,6 +46,7 @@ const (
 	MsgTypeShareRevoked = "sys.share.revoked" // EPIC-005 pcp-0003
 	MsgTypeSyncChanged  = "sys.sync.changed"  // EPIC-004 pcp-0005
 	MsgTypeAbuseReport  = "sys.abuse.report"  // EPIC-007
+	MsgTypeAuthRequest  = "sys.auth.request"  // EPIC-022 E22-T7
 )
 
 // SysPrefix is the reserved platform namespace.
@@ -65,6 +66,7 @@ var systemMessageTypes = []string{
 	MsgTypeShareRevoked,
 	MsgTypeSyncChanged,
 	MsgTypeAbuseReport,
+	MsgTypeAuthRequest,
 }
 
 // SystemMessageTypes returns the reserved `sys.*` types, sorted.

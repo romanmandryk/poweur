@@ -42,6 +42,21 @@ export function normalizeHandleInput(raw: string, info: Pick<ModeInfo, "domain" 
   return value;
 }
 
+/**
+ * What a link into the claim page asks for: `?handle=alice` pre-fills the name
+ * (a sign-in page that already checked it sends this), `from=signin` means a
+ * sign-in is waiting in another tab. Only a plausible handle is taken — the
+ * link comes from anywhere, so nothing else from it reaches the page.
+ */
+export function claimInvite(search: string): { handle: string; fromSignIn: boolean } {
+  const params = new URLSearchParams(search);
+  const handle = (params.get("handle") ?? "").trim().toLowerCase();
+  return {
+    handle: /^[a-z0-9][a-z0-9-]{0,62}$/.test(handle) ? handle : "",
+    fromSignIn: params.get("from") === "signin",
+  };
+}
+
 /** The relay a preset names; a typed URL gains https:// and loses trailing slashes. */
 export function relayUrlForPreset(
   preset: string,

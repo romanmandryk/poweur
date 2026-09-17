@@ -1,0 +1,58 @@
+# A relay and the OAuth bridge side by side. They are separate processes with
+# separate origins, keys, storage and health checks; the relay only knows the
+# bridge's public URL (OAUTH_BRIDGE_URL), and the bridge knows the relay only
+# through public identity resolution.
+#
+#   poweur-oauth gen-key > oauth-kek.txt   # back this file up
+#   docker compose -f apps/oauth/compose.example.yml up
+#
+# Put a TLS proxy in front: the relay on *.poweur.example, the bridge on a
+# domain that issues no identities (auth.example.org), never under the relay's
+# hosted domain.
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      RELAY_ADDRESS: relay.poweur.example
+      HOSTED_DOMAINS: poweur.example
+      POWEUR_DATA: /data
+      OAUTH_BRIDGE_URL: https://auth.example.org
+    volumes:
+      - relay_data:/data
+    ports:
+      - "8080:8080"
+
+  oauth:
+    build:
+      context: ../..
+      dockerfile: apps/oauth/Dockerfile
+    environment:
+      OAUTH_ISSUER: https://auth.example.org
+      OAUTH_DEFAULT_SIGNER: https://id.poweur.example/app/
+      OAUTH_KEY_ENCRYPTION_KEY_FILE: /run/secrets/oauth_kek
+      # Start closed or allowlisted; open lets any Poweur ID publish a
+      # consent page under your issuer.
+      OAUTH_CLIENT_REGISTRATION: allowlist
+      OAUTH_REGISTRATION_ALLOWLIST: "*.example.org"
+      OAUTH_LAUNCHER_URL: https://poweur.net
+      OAUTH_ABUSE_CONTACT: abuse@example.org
+      OAUTH_SECURITY_CONTACT: security@example.org
+      OAUTH_METRICS_ADDR: 127.0.0.1:9464
+      # OAUTH_STATIC_CLIENTS: /config/clients.json
+    secrets:
+      - oauth_kek
+    volumes:
+      - oauth_data:/data
+      # - ./clients.example.json:/config/clients.json:ro
+    ports:
+      - "8090:8090"
+
+secrets:
+  oauth_kek:
+    file: ./oauth-kek.txt
+
+volumes:
+  relay_data:
+  oauth_data:

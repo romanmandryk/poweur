@@ -35,7 +35,8 @@ export async function loadPolicy({ force = false } = {}) {
 export async function savePolicy(document: InboxPolicy) {
   const client = activeClient();
   if (!client) throw new Error("Unlock your identity first");
-  await client.setPolicy(document.mode, document.anonymous, document.read_receipts);
+  const trusted = document.trusted_auth_services?.length ? [document.trusted_auth_services] : [];
+  await client.setPolicy(document.mode, document.anonymous, document.read_receipts, ...trusted);
   await loadPolicy({ force: true });
 }
 

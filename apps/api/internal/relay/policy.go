@@ -89,6 +89,18 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 		return policyReject, rejectedDetail
 	}
 
+	// A sign-in prompt (EPIC-022 E22-T7) is admitted only from a service the
+	// recipient named, in every inbox mode, and never because the sender is a
+	// contact: being a contact is permission to talk, not to ask for sign-ins.
+	// It must also be small and short-lived, so a trusted but compromised
+	// service cannot turn prompts into a message stream.
+	if idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeAuthRequest {
+		if policy.TrustsAuthService(msg.Sender) && authPromptShapeOK(msg, time.Now()) {
+			return policyAllow, ""
+		}
+		return policyReject, rejectedDetail
+	}
+
 	hookCtx := closedInboxCtx{
 		msg:          msg,
 		mode:         policy.Mode,
@@ -120,6 +132,22 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	default:
 		return policyAllow, ""
 	}
+}
+
+// maxAuthPromptPayload caps an encrypted sign-in prompt; the plaintext is at
+// most identity.MaxAuthRequestBytes before encryption and base64.
+const maxAuthPromptPayload = 16 * 1024
+
+// maxAuthPromptLifetime bounds how far ahead a prompt may expire: it mirrors
+// a native sign-in request, which lives at most five minutes.
+const maxAuthPromptLifetime = 10 * time.Minute
+
+func authPromptShapeOK(msg Message, now time.Time) bool {
+	if len(msg.Payload) > maxAuthPromptPayload || msg.ExpiresAt == "" {
+		return false
+	}
+	exp, err := time.Parse(time.RFC3339, msg.ExpiresAt)
+	return err == nil && exp.After(now) && exp.Sub(now) <= maxAuthPromptLifetime
 }
 
 // senderRelayKey names the relay accountable for a sender, for metering

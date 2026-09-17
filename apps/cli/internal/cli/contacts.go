@@ -475,6 +475,8 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 	readReceipts := fs.Bool("read-receipts", true, "send read receipts")
 	var noReadFor stringList
 	fs.Var(&noReadFor, "no-read-receipt-for", "identity that must not receive read receipts (repeatable)")
+	var trustedAuth stringList
+	fs.Var(&trustedAuth, "trusted-auth", "sign-in service (OAuth bridge) allowed to send you sign-in prompts (repeatable; \"none\" clears)")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--anon-allow": true})); err != nil {
 		return 1
@@ -515,6 +517,11 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		} else {
 			fmt.Fprintln(stdout, "anonymous: denied (default)")
 		}
+		if len(policy.TrustedAuthServices) > 0 {
+			fmt.Fprintf(stdout, "sign-in prompts from: %s\n", strings.Join(policy.TrustedAuthServices, ", "))
+		} else {
+			fmt.Fprintln(stdout, "sign-in prompts: from nobody (default)")
+		}
 		if policy.ReadReceipts == nil {
 			fmt.Fprintln(stdout, "read receipts: enabled (default)")
 		} else {
@@ -532,6 +539,18 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		}
 		policy := idpkg.InboxPolicy{Version: 1, Mode: fs.Arg(0)}
 		policy.ReadReceipts = &idpkg.ReadReceiptPolicy{Enabled: *readReceipts, DisabledFor: noReadFor}
+		// Trusted sign-in services survive a mode change unless named here.
+		if len(trustedAuth) > 0 {
+			if !(len(trustedAuth) == 1 && strings.EqualFold(trustedAuth[0], "none")) {
+				for _, s := range trustedAuth {
+					policy.TrustedAuthServices = append(policy.TrustedAuthServices, strings.ToLower(strings.TrimSpace(s)))
+				}
+			}
+		} else if raw, status, err := davGetBytes(ctx, relayURL, identityValue, token, inboxPolicyTreePath); err == nil && status == http.StatusOK {
+			if prev, err := idpkg.ParseInboxPolicy(raw); err == nil {
+				policy.TrustedAuthServices = prev.TrustedAuthServices
+			}
+		}
 		if *anonAllow || *anonChallenge != "" || *anonBits > 0 {
 			policy.Anonymous = &idpkg.AnonymousPolicy{
 				Allow:     *anonAllow,
@@ -553,6 +572,9 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		anonNote := ""
 		if policy.Anonymous != nil && policy.Anonymous.Allow {
 			anonNote = fmt.Sprintf(" (anonymous allowed, challenge=%s)", policy.Anonymous.EffectiveChallenge())
+		}
+		if len(policy.TrustedAuthServices) > 0 {
+			anonNote += fmt.Sprintf(" (sign-in prompts from %s)", strings.Join(policy.TrustedAuthServices, ", "))
 		}
 		fmt.Fprintf(stdout, "inbox policy set to %s%s\n", policy.Mode, anonNote)
 		return 0

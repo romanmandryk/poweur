@@ -14,15 +14,23 @@ import { toast } from "../state/ui";
 const patchAuth = (patch: Partial<ReturnType<typeof useData.getState>["auth"]>) =>
   useData.setState((state) => ({ auth: { ...state.auth, ...patch } }));
 
+/** Navigation seam, replaced in tests. */
+export let continueTo = (url: string) => {
+  window.location.assign(url);
+};
+export function setContinueTo(fn: (url: string) => void) {
+  continueTo = fn;
+}
+
 export function resetSignInRequest() {
   useData.setState({
-    auth: { input: "", request: null, metadata: null, headline: "", scopes: [], loading: false, error: "", result: null },
+    auth: { input: "", request: null, metadata: null, headline: "", context: "", requireCode: false, scopes: [], loading: false, error: "", result: null },
   });
 }
 
 /** Verify a pasted request or `?auth=` link against the app's origin. */
-export async function beginSignInApproval(input: string) {
-  patchAuth({ input: String(input ?? "").trim(), loading: true, error: "", result: null });
+export async function beginSignInApproval(input: string, { requireCode = false } = {}) {
+  patchAuth({ input: String(input ?? "").trim(), loading: true, error: "", result: null, requireCode });
   useRoute.setState({ sub: "auth" });
   try {
     const consent: any = await loadSignInConsent(useData.getState().auth.input);
@@ -32,7 +40,11 @@ export async function beginSignInApproval(input: string) {
   }
 }
 
-export async function approveSignIn() {
+/**
+ * Sign and deliver. `match` is the code from the screen that started the
+ * sign-in, when that screen is on another device; empty otherwise.
+ */
+export async function approveSignIn(match = "") {
   const identity = useSession.getState().identity;
   const client: any = identity ? clientFor(identity) : null;
   const { request, metadata } = useData.getState().auth;
@@ -45,9 +57,22 @@ export async function approveSignIn() {
     const signed: any = await signBrowserApproval(request, identity, client.signer);
     const dav = await client.dav();
     await appendBrowserConsent(dav, signed.response, metadata);
-    const delivered = await deliverBrowserApproval(request, signed.encoded);
-    patchAuth({ loading: false, result: { ...signed, delivered } });
+    const { delivered, resumeUri } = await deliverBrowserApproval(request, signed.encoded, undefined, match);
+    patchAuth({ loading: false, result: { ...signed, delivered, resumeUri, crossDevice: !!match } });
+    // Same device: finish in this browser straight away. The resume link works
+    // only here, because only this browser holds the RP's sign-in cookie.
+    if (resumeUri) continueTo(resumeUri);
   } catch (error) {
     patchAuth({ loading: false, error: (error as Error).message });
   }
+}
+
+/** Open a sign-in prompt for review: always a cross-device approval. */
+export function openAuthPrompt(prompt: { request: string }) {
+  void beginSignInApproval(prompt.request, { requireCode: true });
+}
+
+/** Hide a prompt for the rest of this session. */
+export function dismissAuthPrompt(id: string) {
+  useData.setState((state) => ({ dismissedPrompts: [...state.dismissedPrompts, id] }));
 }

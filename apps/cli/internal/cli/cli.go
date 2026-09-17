@@ -863,7 +863,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 				plaintext, *useIdentity, *jsonOut, err, stdout, stderr)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
+		// Anything but 2xx — including a redirect — is not a delivery.
+		if resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(resp.Body)
 			if retryableStatus(resp.StatusCode) {
 				return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
@@ -972,7 +973,8 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	// Anything but 2xx — including a redirect — is not a delivery.
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		if retryableStatus(resp.StatusCode) {
 			return queueOfflineSend(identityValue, targetURL, msg, useViaHomeRelay, identityPriv,
@@ -1254,7 +1256,7 @@ func emitMessageAck(ctx context.Context, cfg config.Config, localIdentity string
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("ack rejected (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -2103,9 +2105,11 @@ func printHelp(w io.Writer) {
   poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
   poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
   poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
-  poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--use-identity=...]
+  poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--trusted-auth=<bridge id>|none] [--use-identity=...]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
+  poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver] [--json]
+      (--code: the number shown by the screen that started the sign-in, when approving from another device)
   poweur auth inspect <request-file-or-url> [--json]
   poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
   poweur version

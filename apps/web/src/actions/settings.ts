@@ -30,14 +30,16 @@ const wrapKeysWithPRF = wrapKeysWithPRFJs as (prf: unknown, s: unknown, e: unkno
 /** One-line summaries for the Inbox rows. */
 export function policySummary(policy: { doc: InboxPolicy | null; loading: boolean }) {
   const doc = policy.doc;
-  if (!doc) return { mode: policy.loading ? "…" : "—", anon: "—", anonOn: false };
+  if (!doc) return { mode: policy.loading ? "…" : "—", anon: "—", anonOn: false, signin: "—" };
   const mode = INBOX_MODES.find((option) => option.id === doc.mode)?.label ?? String(doc.mode ?? "");
   const anon = doc.anonymous?.allow
     ? doc.anonymous.challenge === "pow"
       ? `On · ${clampPowBits(doc.anonymous.pow_bits ?? 0)} bits`
       : "On"
     : "Off";
-  return { mode, anon, anonOn: Boolean(doc.anonymous?.allow) };
+  const services = doc.trusted_auth_services ?? [];
+  const signin = services.length === 0 ? "None" : services.length === 1 ? services[0] : `${services.length} services`;
+  return { mode, anon, anonOn: Boolean(doc.anonymous?.allow), signin };
 }
 
 /**

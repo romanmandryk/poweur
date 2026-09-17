@@ -1,0 +1,13 @@
+{{template "head" .}}
+<section class="card">
+  <h1>{{.Name}}</h1>
+  <p>This service lets applications that speak OpenID Connect or IndieAuth sign you in with any Poweur ID, on any relay.
+     You approve every sign-in with your own keys; this service never holds them and cannot read your messages or files.</p>
+  <ul class="links">
+    <li><a href="/account">Your authorized apps and recent sign-ins</a></li>
+    <li><a href="/developers">Register an application</a></li>
+    <li><a href="/.well-known/openid-configuration">OpenID Connect discovery</a></li>
+  </ul>
+  <p class="hint">Applications see an identifier unique to them, and learn your Poweur ID only if you allow it.</p>
+</section>
+{{template "foot" .}}

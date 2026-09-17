@@ -118,6 +118,20 @@ export interface RelyingPartyMetadata {
   transports?: string[];
   poll_uri?: string;
   contact_uri?: string;
+  /** Answers `?request_id=` with a {@link SignInContext}. Same-origin. */
+  context_uri?: string;
+}
+
+/**
+ * Where a pending sign-in was started, as its relying party reports it — for
+ * a signer approving on another device. Mirrors Go `signin.SignInContext`.
+ */
+export interface SignInContext {
+  request_id: string;
+  started_at: string;
+  browser?: string;
+  client?: string;
+  client_host?: string;
 }
 
 function fail(message: string): never {
@@ -165,6 +179,90 @@ export function sameOrigin(origin: string, rawUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * What a signer POSTs to `response_uri`. `match` is present only when the
+ * approval was made on another device: the number the starting screen showed.
+ * It is not part of the signed bytes. Mirrors Go `signin.Delivery`.
+ */
+export interface SignInDelivery {
+  response: string;
+  match?: string;
+}
+
+/** The relying party's answer to a delivery. Mirrors Go `signin.DeliveryReceipt`. */
+export interface SignInDeliveryReceipt {
+  status?: string;
+  identity?: string;
+  /**
+   * Set for a same-device approval: the signer sends the browser here, and
+   * the RP finishes only if that browser also started the sign-in.
+   */
+  resume_uri?: string;
+}
+
+/**
+ * The decrypted body of a `sys.auth.request` sign-in prompt. Mirrors Go
+ * `identity.AuthRequestPayload`. It never carries the match code: that is on
+ * the screen that started the sign-in.
+ */
+export interface AuthRequestPayload {
+  version: number;
+  request: string;
+  client?: string;
+  client_host?: string;
+  expires_at: string;
+}
+
+export const MAX_AUTH_REQUEST_BYTES = 8 * 1024;
+
+/** Parse and validate a prompt body; returns the payload and its decoded request. */
+export function parseAuthRequestPayload(
+  text: string,
+  nowMs = Date.now(),
+): { payload: AuthRequestPayload; request: SignInRequest } {
+  if ((text ?? "").length > MAX_AUTH_REQUEST_BYTES) fail("sign-in prompt too large");
+  let payload: AuthRequestPayload;
+  try {
+    payload = JSON.parse(text) as AuthRequestPayload;
+  } catch {
+    return fail("sign-in prompt is not JSON");
+  }
+  if (payload?.version !== 1) fail(`unsupported sign-in prompt version ${payload?.version}`);
+  const request = validateSignInRequest(decodeSignInRequest(payload.request), nowMs);
+  if (request.expires_at !== payload.expires_at) fail("sign-in prompt expiry does not match its request");
+  if ((payload.client ?? "").length > 80 || (payload.client_host ?? "").length > 253 || /[\r\n]/.test(`${payload.client ?? ""}${payload.client_host ?? ""}`)) {
+    fail("sign-in prompt labels are malformed");
+  }
+  return { payload, request };
+}
+
+/** Digits of a cross-device match code; see Go `signin.MatchCodeDigits`. */
+export const SIGNIN_MATCH_CODE_DIGITS = 2;
+
+/** Strip what a person types around the digits of a match code. */
+export function normalizeMatchCode(value: string): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+/**
+ * The signer-side check on a receipt's `resume_uri`: same origin as the
+ * audience the user just approved, no credentials, no fragment. A signer
+ * that followed anything else would let a compromised callback send the user
+ * anywhere. Mirrors Go `signin.CheckResumeURI`; an empty value passes.
+ */
+export function checkResumeUri(audience: string, resumeUri: string): void {
+  const value = String(resumeUri ?? "").trim();
+  if (!value) return;
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    fail("resume_uri is not a URL");
+  }
+  if (u.username || u.password || u.hash) fail("resume_uri must not carry credentials or a fragment");
+  if (!sameOrigin(audience, value)) fail(`resume_uri ${JSON.stringify(value)} is not same-origin with ${audience}`);
 }
 
 /**
@@ -604,6 +702,7 @@ export function validateRelyingPartyMetadata(
   }
   // A third-party logo would leak the pending approval to whoever serves it.
   if (meta.poll_uri && !sameOrigin(origin, meta.poll_uri)) fail("poll_uri is not same-origin");
+  if (meta.context_uri && !sameOrigin(origin, meta.context_uri)) fail("context_uri is not same-origin");
   if (meta.logo_uri && !sameOrigin(origin, meta.logo_uri)) fail("logo_uri is not same-origin");
   const appId = signInAppId(origin);
   if (meta.app_id && meta.app_id !== appId) {
@@ -668,6 +767,77 @@ export async function fetchRelyingPartyMetadata(
   } finally {
     clearTimeout(timer);
   }
+}
+
+const MAX_SIGNIN_CONTEXT_BYTES = 4 * 1024;
+
+function displayLine(value: unknown, max: number): string {
+  // eslint-disable-next-line no-control-regex
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max);
+}
+
+/**
+ * Fetch where a pending request was started, from the RP's `context_uri`.
+ * Resolves to `null` when the RP publishes none. Mirrors Go `FetchContext`.
+ */
+export async function fetchSignInContext(
+  meta: RelyingPartyMetadata,
+  requestId: string,
+  options: { fetch?: typeof globalThis.fetch; timeoutMs?: number } = {},
+): Promise<SignInContext | null> {
+  if (!meta.context_uri) return null;
+  if (!sameOrigin(meta.origin, meta.context_uri)) fail("context_uri is not same-origin");
+  const u = new URL(meta.context_uri);
+  u.searchParams.set("request_id", requestId);
+  const doFetch = options.fetch ?? globalThis.fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
+  try {
+    const res = await doFetch(u.toString(), {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!res.ok) fail(`sign-in context returned ${res.status}`);
+    const text = await res.text();
+    if (text.length > MAX_SIGNIN_CONTEXT_BYTES) fail("sign-in context too large");
+    let raw: SignInContext;
+    try {
+      raw = JSON.parse(text) as SignInContext;
+    } catch {
+      return fail("sign-in context is not JSON");
+    }
+    if (raw?.request_id !== requestId) fail("sign-in context is for another request");
+    return {
+      request_id: raw.request_id,
+      started_at: String(raw.started_at ?? ""),
+      browser: displayLine(raw.browser, 60),
+      client: displayLine(raw.client, 80),
+      client_host: displayLine(raw.client_host, 253),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The sentence a signer shows for a context. Mirrors Go `DescribeContext`. */
+export function describeSignInContext(ctx: SignInContext | null | undefined, nowMs = Date.now()): string {
+  const started = Date.parse(ctx?.started_at ?? "");
+  if (!ctx || Number.isNaN(started) || started <= 0) return "";
+  const secs = Math.floor((nowMs - started) / 1000);
+  const ago =
+    secs < 5 ? "just now"
+      : secs < 60 ? `${secs} seconds ago`
+        : secs < 120 ? "a minute ago"
+          : secs < 3600 ? `${Math.floor(secs / 60)} minutes ago`
+            : "over an hour ago";
+  let out = `Started ${ago}`;
+  if (ctx.browser) out += ` in ${ctx.browser}`;
+  if (ctx.client) {
+    out += `, to sign in to ${ctx.client}`;
+    if (ctx.client_host && ctx.client_host.toLowerCase() !== ctx.client.toLowerCase()) out += ` (${ctx.client_host})`;
+  }
+  return out + ".";
 }
 
 /**

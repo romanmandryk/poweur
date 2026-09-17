@@ -80,6 +80,7 @@ export function validateInboxPolicy(policy: InboxPolicy): void {
     );
   }
   if (policy.anonymous) validateAnonymousPolicy(policy.anonymous);
+  validateTrustedAuthServices(policy.trusted_auth_services);
   if (policy.read_receipts) {
     if (typeof policy.read_receipts.enabled !== "boolean") {
       throw new PoweurError("invalid_document", "read_receipts.enabled must be a boolean");
@@ -104,6 +105,33 @@ export function validateInboxPolicy(policy: InboxPolicy): void {
       seen.add(normalized);
     }
   }
+}
+
+export const MAX_TRUSTED_AUTH_SERVICES = 16;
+
+function validateTrustedAuthServices(list: unknown): void {
+  if (list === undefined) return;
+  if (!Array.isArray(list)) throw new PoweurError("invalid_document", "trusted_auth_services must be an array");
+  if (list.length > MAX_TRUSTED_AUTH_SERVICES) {
+    throw new PoweurError("invalid_document", `trusted_auth_services has too many entries (max ${MAX_TRUSTED_AUTH_SERVICES})`);
+  }
+  const seen = new Set<string>();
+  for (const entry of list) {
+    const normalized = String(entry ?? "").trim().toLowerCase();
+    try {
+      validateIdentityName(normalized);
+    } catch {
+      throw new PoweurError("invalid_document", `invalid trusted auth service "${entry}"`);
+    }
+    if (seen.has(normalized)) throw new PoweurError("invalid_document", `duplicate trusted auth service "${normalized}"`);
+    seen.add(normalized);
+  }
+}
+
+/** Whether `sender` may deliver sign-in prompts. Mirrors Go `TrustsAuthService`. */
+export function trustsAuthService(policy: InboxPolicy, sender: string): boolean {
+  const wanted = String(sender ?? "").trim().toLowerCase();
+  return !!wanted && (policy.trusted_auth_services ?? []).some((s) => s.trim().toLowerCase() === wanted);
 }
 
 export function sendsReadReceiptsTo(policy: InboxPolicy, peer: string): boolean {
@@ -131,10 +159,14 @@ export async function writeInboxPolicy(
   mode: InboxMode,
   anonymous?: AnonymousPolicy,
   readReceipts?: InboxPolicy["read_receipts"],
+  trustedAuthServices?: string[],
 ): Promise<InboxPolicy> {
   const policy: InboxPolicy = { version: 1, mode };
   if (anonymous) policy.anonymous = anonymous;
   if (readReceipts) policy.read_receipts = readReceipts;
+  if (trustedAuthServices?.length) {
+    policy.trusted_auth_services = trustedAuthServices.map((s) => s.trim().toLowerCase());
+  }
   validateInboxPolicy(policy);
   await dav.writeJson(INBOX_POLICY_PATH, policy);
   return policy;

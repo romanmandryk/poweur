@@ -1,0 +1,135 @@
+[
+  {
+    "input": "Alice.Example.com",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "alice.example.com.",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "@alice.example.com",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "  alice.example.com  ",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "https://alice.example.com",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "https://alice.example.com/",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "HTTPS://Alice.Example.com/",
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "https://alice.example.com/blog",
+    "valid": false
+  },
+  {
+    "input": "https://alice.example.com:8443/",
+    "valid": false
+  },
+  {
+    "input": "https://alice.example.com/?x=1",
+    "valid": false
+  },
+  {
+    "input": "https://alice.example.com/?",
+    "valid": false
+  },
+  {
+    "input": "https://alice.example.com/#me",
+    "valid": false
+  },
+  {
+    "input": "https://bob@alice.example.com/",
+    "valid": false
+  },
+  {
+    "input": "http://alice.example.com/",
+    "valid": false
+  },
+  {
+    "input": "http://alice.example.com/",
+    "allow_http": true,
+    "id": "alice.example.com",
+    "profile_url": "https://alice.example.com/",
+    "did": "did:web:alice.example.com",
+    "valid": true
+  },
+  {
+    "input": "ftp://alice.example.com/",
+    "allow_http": true,
+    "valid": false
+  },
+  {
+    "input": "alice",
+    "valid": false
+  },
+  {
+    "input": "",
+    "valid": false
+  },
+  {
+    "input": "@",
+    "valid": false
+  },
+  {
+    "input": "alice.example.com/blog",
+    "valid": false
+  },
+  {
+    "input": "alice@example.com",
+    "valid": false
+  },
+  {
+    "input": "аlice.example.com",
+    "valid": false
+  },
+  {
+    "input": "xn--80ak6aa92e.example",
+    "id": "xn--80ak6aa92e.example",
+    "profile_url": "https://xn--80ak6aa92e.example/",
+    "did": "did:web:xn--80ak6aa92e.example",
+    "valid": true
+  },
+  {
+    "input": "192.168.0.1",
+    "valid": false
+  },
+  {
+    "input": "https://192.168.0.1/",
+    "valid": false
+  },
+  {
+    "input": "www.example.com",
+    "valid": false
+  }
+]

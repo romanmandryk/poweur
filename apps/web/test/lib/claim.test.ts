@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appBasePath,
+  claimInvite,
   identityAppUrl,
   joinIdentityFor,
   launcherAppUrl,
@@ -95,5 +96,16 @@ describe("joinIdentityFor", () => {
     expect(joinIdentityFor("alice", { mode: "unknown", domain: "" }, "example.org")).toBe("alice.example.org");
     expect(joinIdentityFor("alice.other.net", { mode: "unknown", domain: "poweur.net" })).toBe("alice.other.net");
     expect(joinIdentityFor("", { mode: "unknown", domain: "poweur.net" })).toBe("");
+  });
+});
+
+describe("claimInvite", () => {
+  it("takes a plausible handle and the sign-in marker, nothing else", () => {
+    expect(claimInvite("?handle=Alice&from=signin")).toEqual({ handle: "alice", fromSignIn: true });
+    expect(claimInvite("?handle=a-b-1")).toEqual({ handle: "a-b-1", fromSignIn: false });
+    for (const bad of ["-x", "a.b", "<script>", "a b", "x".repeat(64), ""]) {
+      expect(claimInvite(`?handle=${encodeURIComponent(bad)}`).handle).toBe("");
+    }
+    expect(claimInvite("?from=elsewhere").fromSignIn).toBe(false);
   });
 });

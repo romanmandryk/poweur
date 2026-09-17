@@ -26,6 +26,9 @@ var ReservedLabels = map[string]struct{}{
 	// here because E18-T3 serves the claim flow on one of them.
 	"id": {}, "ids": {}, "launcher": {}, "get": {}, "join": {}, "signup": {},
 	"signin": {}, "login": {}, "auth": {}, "account": {}, "accounts": {},
+	// Auth services an operator runs beside hosted identities (EPIC-022): a
+	// user must not be able to claim the name of the OAuth bridge.
+	"oauth": {}, "sso": {}, "idp": {}, "openid": {}, "indieauth": {},
 	"console": {}, "dashboard": {}, "portal": {}, "home": {},
 	// Data / ops.
 	"data": {}, "files": {}, "file": {}, "storage": {}, "analytics": {},

@@ -1,0 +1,43 @@
+{{template "head" .}}
+{{$v := .Data}}
+<section class="card">
+  {{with $v.Client}}
+  <p class="eyebrow">Signing in to</p>
+  <h1>{{.ClientName}}</h1>
+  {{else}}
+  <h1>Sign in</h1>
+  {{end}}
+  <p>Enter your Poweur ID. You approve with the keys on your own device — {{$.Name}} never sees them.</p>
+  <form method="post" action="/t/{{$v.Txn.ID}}/identify" class="stack">
+    <label for="identity">Poweur ID</label>
+    <input id="identity" name="identity" type="text" inputmode="url" autocomplete="username"
+           autocapitalize="none" spellcheck="false" required autofocus
+           placeholder="alice.{{with $v.Launcher}}{{.Domain}}{{else}}poweur.net{{end}}" value="{{$v.Hint}}">
+    {{with $v.Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+    <p id="created-ready" class="ready" role="status" hidden></p>
+    <button type="submit" class="primary">Continue</button>
+  </form>
+  <form method="post" action="/t/{{$v.Txn.ID}}/cancel"><button class="link" type="submit">Cancel</button></form>
+</section>
+
+{{with $v.Launcher}}
+<section class="card create" id="create-id-section"
+         data-create data-launcher="{{.URL}}" data-domain="{{.Domain}}"
+         data-creating-url="/t/{{$v.Txn.ID}}/creating">
+  <h2>Don't have a Poweur ID?</h2>
+  <p class="muted">{{$v.Why}}</p>
+  <label for="new-handle">Choose a name</label>
+  <div class="handle-field">
+    <input id="new-handle" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+           placeholder="yourname" aria-describedby="new-handle-status">
+    <span class="suffix">.{{.Domain}}</span>
+  </div>
+  <p id="new-handle-status" class="hint" role="status"></p>
+  <a id="create-id" class="button primary" href="{{.URL}}/app/?from=signin" target="_blank" rel="noopener">
+    Create a Poweur ID at {{.Host}}
+  </a>
+  <p class="hint">It opens in a new tab and takes about a minute. Come back to this tab when you're done —
+    it picks up your new ID and this sign-in keeps waiting.</p>
+</section>
+{{end}}
+{{template "foot" .}}

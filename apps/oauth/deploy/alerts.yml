@@ -1,0 +1,58 @@
+# Prometheus alert rules for poweur-oauth (see OAUTH_METRICS_ADDR).
+# Scrape the metrics listener from inside your network; it is not
+# authenticated and must not be public.
+groups:
+  - name: poweur-oauth
+    rules:
+      - alert: PoweurOAuthDown
+        expr: up{job="poweur-oauth"} == 0
+        for: 2m
+        annotations:
+          summary: "The bridge is not answering; nobody can sign in with a Poweur ID."
+
+      - alert: PoweurOAuthServerErrors
+        expr: |
+          sum(rate(poweur_oauth_http_requests_total{code="5xx"}[5m]))
+            / sum(rate(poweur_oauth_http_requests_total[5m])) > 0.02
+        for: 10m
+        annotations:
+          summary: "Over 2% of requests are failing."
+
+      - alert: PoweurOAuthTokenEndpointSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(poweur_oauth_http_request_duration_seconds_bucket{route="POST /token"}[5m]))) > 1
+        for: 10m
+        annotations:
+          summary: "p95 token exchange over 1s; applications will time out."
+
+      - alert: PoweurOAuthRateLimiting
+        expr: sum(rate(poweur_oauth_rate_limited_total[5m])) > 1
+        for: 15m
+        annotations:
+          summary: "Sustained rate-limit refusals: an attack, or limits set too low for real traffic."
+
+      # Security signals. A code is redeemed once; a reuse means it leaked.
+      - alert: PoweurOAuthCodeReuse
+        expr: increase(poweur_oauth_events_total{event="token.code_reused"}[15m]) > 0
+        annotations:
+          summary: "An authorization code was presented twice; its tokens were revoked. Investigate."
+
+      - alert: PoweurOAuthMatchCodeFailures
+        expr: increase(poweur_oauth_events_total{event="native.match_failed"}[15m]) > 5
+        annotations:
+          summary: "Many wrong match codes: someone may be pushing sign-ins at people."
+
+      - alert: PoweurOAuthPushFailures
+        expr: |
+          increase(poweur_oauth_events_total{event="push.failed"}[30m])
+            > increase(poweur_oauth_events_total{event="push.sent"}[30m])
+        for: 15m
+        annotations:
+          summary: "Most push-to-approve prompts are failing to send; check the relay and the bridge identity."
+
+      - alert: PoweurOAuthNoSignIns
+        expr: increase(poweur_oauth_events_total{event="authorize.code_issued"}[1h]) == 0
+        for: 1h
+        annotations:
+          summary: "No sign-in has completed in an hour — unusual outside quiet periods."

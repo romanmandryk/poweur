@@ -1,0 +1,45 @@
+{{template "head" .}}
+<section class="card" data-status-url="/t/{{.Data.Txn.ID}}/status">
+  {{with .Data.Client}}<p class="eyebrow">Signing in to {{.ClientName}}</p>{{end}}
+  <h1>Approve as {{.Data.Txn.Identity}}</h1>
+  <p class="muted"><a href="/t/{{.Data.Txn.ID}}?change=1">Not you? Use a different ID</a></p>
+
+  <div class="stack">
+    {{range $i, $s := .Data.Signers}}
+    <a class="button{{if eq $i 0}} primary{{end}}" href="{{$s.Href}}">{{$s.Label}}</a>
+    {{with $s.Note}}<p class="hint">{{.}}</p>{{end}}
+    {{end}}
+    <a class="button" href="{{.Data.DeepLink}}">Open the Poweur app on this device</a>
+    {{if .Data.Push}}
+    <form method="post" action="/t/{{.Data.Txn.ID}}/push">
+      <button type="submit" class="wide">Send to my Poweur app</button>
+    </form>
+    <p class="hint">Your app shows it only if you listed <strong>{{.Data.PushFrom}}</strong> under Sign-in services.</p>
+    {{end}}
+    {{with .Data.PushNotice}}
+    <p class="status" role="status">
+      {{if eq . "sent"}}Sent. Open it in your Poweur app and enter the code below.
+      {{else if eq . "too-soon"}}Already sent — give it a few seconds.
+      {{else if eq . "too-many"}}Sent as many times as allowed for this sign-in.
+      {{else if eq . "failed"}}It could not be sent. Use one of the other ways.
+      {{else}}This sign-in is no longer waiting for approval.{{end}}
+    </p>
+    {{end}}
+  </div>
+
+  <details class="other-device"{{if .Data.Pushed}} open{{end}}>
+    <summary>Approving on another device?</summary>
+    <p>Scan this with your Poweur app, or paste the request code into it. When it asks, enter:</p>
+    <p class="match" aria-label="Code to enter on the other device">{{.Data.Match}}</p>
+    <div class="qr">{{.Data.QR}}</div>
+    <label for="request-code">Request code</label>
+    <textarea id="request-code" readonly rows="3">{{.Data.Request}}</textarea>
+    <button type="button" data-copy="request-code">Copy request code</button>
+    <p class="hint">Only approve a sign-in you started yourself, on a screen in front of you. If someone sent you a code or link, cancel.</p>
+  </details>
+
+  <p id="status" class="status" role="status">Waiting for your approval…</p>
+  <noscript><p><a class="button" href="/t/{{.Data.Txn.ID}}/continue">I have approved — continue</a></p></noscript>
+  <form method="post" action="/t/{{.Data.Txn.ID}}/cancel"><button class="link" type="submit">Cancel</button></form>
+</section>
+{{template "foot" .}}

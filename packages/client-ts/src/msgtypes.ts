@@ -46,6 +46,8 @@ export const MSG_TYPE_SHARE_ACCEPT = "sys.share.accept";
 export const MSG_TYPE_SHARE_REVOKED = "sys.share.revoked";
 export const MSG_TYPE_SYNC_CHANGED = "sys.sync.changed";
 export const MSG_TYPE_ABUSE_REPORT = "sys.abuse.report";
+/** A sign-in prompt from a trusted OAuth bridge (EPIC-022 E22-T7). */
+export const MSG_TYPE_AUTH_REQUEST = "sys.auth.request";
 
 /**
  * The closed set of `sys.*` types this protocol revision knows, sorted. A
@@ -54,6 +56,7 @@ export const MSG_TYPE_ABUSE_REPORT = "sys.abuse.report";
  */
 export const SYSTEM_MESSAGE_TYPES: readonly string[] = [
   MSG_TYPE_ABUSE_REPORT,
+  MSG_TYPE_AUTH_REQUEST,
   MSG_TYPE_CONTACT_ACCEPT,
   MSG_TYPE_CONTACT_BLOCK,
   MSG_TYPE_CONTACT_REQUEST,

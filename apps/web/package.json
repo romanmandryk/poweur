@@ -1,6 +1,6 @@
 {
   "name": "@poweur/web",
-  "version": "0.1.17",
+  "version": "0.1.22",
   "private": true,
   "type": "module",
   "description": "The Poweur web client: React + Tailwind, served by the relay at /app/ and wrapped by the Capacitor shell",

@@ -68,6 +68,13 @@ describe("threadsOf", () => {
 });
 
 describe("buildConversationRows", () => {
+  it("keeps sign-in prompts out of conversations", () => {
+    const rows = buildConversationRows([
+      { id: "p1", sender: "bridge.poweur.org", recipient: "me.poweur.net", type: "sys.auth.request", timestamp: "2026-01-01T00:00:00Z", plaintext: "{}" },
+    ], "me.poweur.net");
+    expect(rows).toEqual([]);
+  });
+
   it("renders an unthreaded contact as exactly one row", () => {
     const rows = buildConversationRows(
       [msg({ id: "m1" }), msg({ id: "m2", plaintext: "second" })],

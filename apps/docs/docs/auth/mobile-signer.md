@@ -25,9 +25,19 @@ no redirects. Display the verified app name and origin, action, statement, and e
 scope in plain language. Approval is one explicit biometric/passcode-gated action; denial and
 navigation away sign nothing.
 
+The app you are signing in to is never in this app's browser, so every mobile approval is a
+**cross-device** approval: ask for the code shown on the screen that started the sign-in and
+send it with the delivery (`{"response": …, "match": …}`). Say plainly that the code must be
+on a screen in front of the user, and that a code someone *sent* them means cancel. When the RP
+publishes `context_uri`, show its line ("Started 12 seconds ago in Chrome on macOS, to sign in
+to …") beside the code field.
+
 After approval, append the consent record first, then deliver to the allow-listed
-`response_uri`. If delivery fails, show a copyable response code. A cross-device flow must
-remain usable without the two devices sharing an account or push channel.
+`response_uri`. If the receipt carries a `resume_uri` — possible only when a request reached
+the app without a code — check it is same-origin with the audience before opening it. Never
+build a URL containing the approval. If delivery fails, show a copyable response code. A
+cross-device flow must remain usable without the two devices sharing an account or push
+channel.
 
 ## Platform lifecycle
 

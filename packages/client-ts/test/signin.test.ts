@@ -18,7 +18,13 @@ import { generateSigningKeypair, signCanonical } from "../src/crypto/index.js";
 import { toBase64url } from "../src/encoding.js";
 import {
   MemoryNonceCache,
+  SIGNIN_MATCH_CODE_DIGITS,
   SignInVerifier,
+  checkResumeUri,
+  describeSignInContext,
+  fetchSignInContext,
+  normalizeMatchCode,
+  parseAuthRequestPayload,
   canonicalSignInResponse,
   checkRequestAgainstMetadata,
   checkSignInScopeNamespace,
@@ -761,5 +767,80 @@ describe("canonical string", () => {
       "dav:rw:apps/net.poweur.guestbook,profile:read",
       "identity",
     ]);
+  });
+
+  it("checks resume links like the Go signer does", () => {
+    const aud = "https://guestbook.poweur.net";
+    for (const ok of ["", "https://guestbook.poweur.net/auth/resume?code=x", "https://GUESTBOOK.poweur.net:443/r"]) {
+      expect(() => checkResumeUri(aud, ok)).not.toThrow();
+    }
+    for (const bad of [
+      "https://evil.example/auth/resume",
+      "http://guestbook.poweur.net/auth/resume",
+      "https://guestbook.poweur.net.evil.example/r",
+      "https://user@guestbook.poweur.net/r",
+      "https://guestbook.poweur.net/r#frag",
+      "javascript:alert(1)",
+      "/relative/only",
+    ]) {
+      expect(() => checkResumeUri(aud, bad), bad).toThrow();
+    }
+  });
+
+  it("normalizes typed match codes", () => {
+    expect(normalizeMatchCode(" 0-7 ")).toBe("07");
+    expect(normalizeMatchCode("")).toBe("");
+    expect(SIGNIN_MATCH_CODE_DIGITS).toBe(2);
+  });
+
+  it("fetches and describes sign-in context like the Go signer", async () => {
+    const meta = { poweur_auth: "1", origin: "https://rp.example", name: "RP", context_uri: "https://rp.example/ctx" };
+    let asked = "";
+    const ok = async (url: string) => {
+      asked = url;
+      return new Response(JSON.stringify({
+        request_id: "req_1", started_at: "2026-09-17T12:00:00Z",
+        browser: "Chrome on macOS\u0000", client: "Team dashboard", client_host: "grafana.example.org",
+      }));
+    };
+    const ctx = await fetchSignInContext(meta, "req_1", { fetch: ok as unknown as typeof fetch });
+    expect(asked).toBe("https://rp.example/ctx?request_id=req_1");
+    expect(ctx?.browser).toBe("Chrome on macOS");
+    expect(describeSignInContext(ctx, Date.parse("2026-09-17T12:00:12Z")))
+      .toBe("Started 12 seconds ago in Chrome on macOS, to sign in to Team dashboard (grafana.example.org).");
+    expect(await fetchSignInContext({ ...meta, context_uri: undefined }, "req_1")).toBeNull();
+    const other = async () => new Response(JSON.stringify({ request_id: "req_2", started_at: "2026-09-17T12:00:00Z" }));
+    await expect(fetchSignInContext(meta, "req_1", { fetch: other as unknown as typeof fetch })).rejects.toThrow(/another request/);
+    await expect(fetchSignInContext({ ...meta, context_uri: "https://evil.example/ctx" }, "req_1")).rejects.toThrow(/same-origin/);
+    expect(() => validateRelyingPartyMetadata({ ...meta, context_uri: "https://evil.example/ctx" }, "https://rp.example")).toThrow();
+    expect(describeSignInContext(null)).toBe("");
+    const at = Date.parse("2026-09-17T12:00:00Z");
+    for (const [secs, want] of [[1, "just now"], [30, "30 seconds ago"], [90, "a minute ago"], [300, "5 minutes ago"], [7200, "over an hour ago"]] as const) {
+      expect(describeSignInContext({ request_id: "r", started_at: "2026-09-17T12:00:00Z" }, at + secs * 1000)).toBe(`Started ${want}.`);
+    }
+  });
+
+  it("parses sign-in prompts like Go", () => {
+    const now = Date.parse("2026-09-17T12:00:00Z");
+    const req = {
+      poweur_auth: "1", request_id: "req_1", audience: "https://oauth.poweur.org", nonce: "nonce-nonce-nonce",
+      action: "signin", issued_at: "2026-09-17T12:00:00Z", expires_at: "2026-09-17T12:03:00Z",
+      response_uri: "https://oauth.poweur.org/poweur/callback",
+    };
+    const encoded = encodeSignInRequest(req as never);
+    const good = { version: 1, request: encoded, client: "Team dashboard", client_host: "grafana.example.org", expires_at: req.expires_at };
+    const { payload, request } = parseAuthRequestPayload(JSON.stringify(good), now);
+    expect(request.request_id).toBe("req_1");
+    expect(payload.client).toBe("Team dashboard");
+    for (const bad of [
+      { ...good, version: 2 },
+      { ...good, request: "%%%" },
+      { ...good, expires_at: "2026-09-17T12:00:00Z" },
+      { ...good, client: "a\nb" },
+    ]) {
+      expect(() => parseAuthRequestPayload(JSON.stringify(bad), now)).toThrow();
+    }
+    expect(() => parseAuthRequestPayload(JSON.stringify(good), now + 3600_000)).toThrow();
+    expect(() => parseAuthRequestPayload("{", now)).toThrow();
   });
 });

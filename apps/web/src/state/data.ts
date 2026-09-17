@@ -80,11 +80,16 @@ export function freshData() {
     passkey: null as any,
     /** `chooseCustody()`, likewise. */
     custody: null as any,
+    /** Sign-in prompts the user dismissed this session. */
+    dismissedPrompts: [] as string[],
     auth: {
       input: "",
       request: null as any,
       metadata: null as any,
       headline: "",
+      context: "",
+      /** Opened from a sign-in prompt: the page that started it is elsewhere. */
+      requireCode: false,
       scopes: [] as any[],
       loading: false,
       error: "",

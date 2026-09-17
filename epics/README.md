@@ -47,7 +47,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (shell scaffolded, custody seam + multi-relay done; native builds unverified, Android not generated) | E15, E17, E18 |
 | [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
 | [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | Web app rewrite: React + Tailwind, side by side at `/newapp/` | Web / UX | **complete** (T1–T14; the React app is `apps/web`, served at `/app/`) | E15, E17, E19 |
-| [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | in progress (T1 design draft; T9 client registry & console added) | E01, E08, E13 |
+| [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | in progress (bridge built in `apps/oauth`: T1–T4, T6, T7, T9 done; T5/T8 partial — live products, prod rollout, phone camera) | E01, E08, E13 |
 
 ## Integration epics (`integrations/`)
 

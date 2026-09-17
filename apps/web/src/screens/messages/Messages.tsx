@@ -5,7 +5,7 @@
  */
 import { useEffect } from "react";
 import { onActivateKeys } from "../../lib/a11y";
-import { Handshake, Lock, MessageCircle, Paperclip, Plus, SquarePen, Users, VenetianMask } from "lucide-react";
+import { Handshake, KeyRound, Lock, MessageCircle, Paperclip, Plus, SquarePen, Users, VenetianMask } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { loadPolicy } from "../../actions/account";
 import { acceptContact, blockContact, loadContacts, loadRequests, removeContact, requestContact } from "../../actions/contacts";
@@ -20,6 +20,8 @@ import {
   unreadFor,
 } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
+import { dismissAuthPrompt, openAuthPrompt } from "../../actions/signin";
+import { pendingAuthPrompts } from "../../lib/authPrompts";
 import { MessageText } from "../../components/MessageText";
 import { ProfileCard } from "../../components/ProfileCard";
 import { fmtRelative } from "../../lib/format";
@@ -82,6 +84,7 @@ export function Messages() {
             <Plus className="size-4" aria-hidden="true" /> New message
           </Button>
         </DestHeader>
+        <AuthPrompts />
         <TabBar className="tray-bar" aria-label="Message trays">
           {trays.map(({ id, label }) => {
             const waiting = id === "inbox" ? 0 : counts[id];
@@ -116,6 +119,50 @@ export function Messages() {
         <SquarePen className="size-6" aria-hidden="true" />
       </button>
     </>
+  );
+}
+
+/**
+ * Sign-in requests from a trusted OAuth bridge (EPIC-022). Kept apart from
+ * conversations: each is a pending action with a deadline, not a message.
+ */
+function expiresIn(timestamp: string, now = Date.now()): string {
+  const secs = Math.max(0, Math.round((Date.parse(timestamp) - now) / 1000));
+  return secs < 60 ? `expires in ${secs}s` : `expires in ${Math.ceil(secs / 60)} min`;
+}
+
+function AuthPrompts() {
+  const messages = useData((state) => state.messages);
+  const dismissed = useData((state) => state.dismissedPrompts);
+  const prompts = pendingAuthPrompts(messages, dismissed);
+  if (!prompts.length) return null;
+  return (
+    <section id="auth-prompts" aria-label="Sign-in requests" className="mx-4 mb-3 flex flex-col gap-2">
+      {prompts.map((prompt) => {
+        const app = prompt.client || prompt.clientHost || prompt.audience.replace(/^https?:\/\//, "");
+        return (
+          <div key={prompt.id} data-prompt={prompt.id} className="rounded-card border border-accent bg-accent-soft px-3.5 py-3">
+            <div className="flex items-center gap-2 text-[15px] font-semibold">
+              <KeyRound className="size-4 text-accent" aria-hidden="true" />
+              Sign-in request
+            </div>
+            <p className="mt-0.5 text-[13px] text-muted">
+              {app}
+              {prompt.clientHost && prompt.client ? ` (${prompt.clientHost})` : ""} · via {prompt.from} · {expiresIn(prompt.expiresAt)}
+            </p>
+            <p className="mt-1 text-[13px]">Approve only if you just started signing in on another screen.</p>
+            <div className="mt-2 flex gap-2">
+              <Button size="sm" className="btn-prompt-review" onClick={() => openAuthPrompt(prompt)}>
+                Review
+              </Button>
+              <Button size="sm" variant="ghost" className="btn-prompt-dismiss" onClick={() => dismissAuthPrompt(prompt.id)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 

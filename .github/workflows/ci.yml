@@ -19,6 +19,7 @@ jobs:
             apps/api/go.sum
             apps/cli/go.sum
             apps/integration/go.sum
+            apps/oauth/go.sum
             packages/identity/go.sum
 
       - name: Unit tests
@@ -26,6 +27,8 @@ jobs:
           go test ./packages/identity/...
           go test ./apps/api/...
           go test ./apps/cli/...
+          go test ./apps/guestbook/...
+          go test ./apps/oauth/...
 
       - name: Integration tests (real in-process relays)
         working-directory: apps/integration
@@ -70,6 +73,7 @@ jobs:
             packages/identity/testdata/vectors/grants.json \
             packages/identity/testdata/vectors/groups.json \
             packages/identity/testdata/vectors/names.json \
+            packages/identity/testdata/vectors/id-input.json \
             packages/identity/testdata/vectors/pow.json \
             packages/identity/testdata/vectors/pow-clamp.json \
             packages/identity/testdata/vectors/contacts.json \
@@ -102,6 +106,7 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: |
             apps/api/go.sum
+            apps/oauth/go.sum
             packages/identity/go.sum
       - uses: pnpm/action-setup@v4
         with:
@@ -121,7 +126,8 @@ jobs:
       - run: pnpm web
 
       # Playwright drives the built app at /app/ on a real Go relay — the same
-      # tree the image serves and the Capacitor shell stages.
+      # tree the image serves and the Capacitor shell stages. oauth-bridge.spec
+      # also starts the OAuth bridge (`go run ./apps/oauth/cmd/poweur-oauth`).
       - run: pnpm web:test:e2e
 
   observability:

@@ -47,5 +47,27 @@
       }
     },
     "valid": false
+  },
+  {
+    "name": "trusted-auth",
+    "raw": {
+      "version": 1,
+      "mode": "contacts_only",
+      "trusted_auth_services": [
+        "bridge.poweur.org"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "bad-trusted-auth",
+    "raw": {
+      "version": 1,
+      "mode": "open",
+      "trusted_auth_services": [
+        "not a name"
+      ]
+    },
+    "valid": false
   }
 ]

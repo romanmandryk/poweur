@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { KeyRound } from "lucide-react";
 import { chooseCustody, createIdentity, type ClaimIntent } from "../../actions/identity";
 import { cn } from "../../lib/cn";
-import { normalizeHandleInput, policyHint, webCustodyBlocked } from "../../lib/claim";
+import { claimInvite, normalizeHandleInput, policyHint, webCustodyBlocked } from "../../lib/claim";
 import { identityApiFor } from "../../lib/client.js";
 import { checkPasskeySupport, PRF_UNAVAILABLE_MESSAGE } from "../../lib/passkey.js";
 import { defaultRelayUrl } from "../../lib/storage.js";
@@ -173,6 +173,16 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
     };
   };
   const availability = useAvailability(readIntent, blocked);
+  const [invite] = useState(() => claimInvite(globalThis.location?.search ?? ""));
+
+  // A link from a sign-in page names the handle it checked: fill it and ask
+  // again — it may have gone since.
+  useEffect(() => {
+    const field = handleRef.current;
+    if (!info.probed || !field || !invite.handle || field.value) return;
+    field.value = invite.handle;
+    availability.onEdited();
+  }, [info.probed, invite.handle]);
 
   // The field's shape depends on what the relay hosts; a skeleton is the
   // honest frame for "about to know" (E15-T12).
@@ -254,6 +264,11 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
 
   return (
     <div id="claim-card" className={cn("claim-card", cardClass)}>
+      {invite.fromSignIn && (
+        <p id="claim-from-signin" className="mb-3 rounded-control bg-accent-soft px-3 py-2 text-[13px] text-fg">
+          A sign-in is waiting in your other tab. Create your ID here, then go back to that tab — it picks up your new ID.
+        </p>
+      )}
       <label htmlFor="ni-handle" className="claim-label mb-2 block text-[13px] font-semibold text-muted">
         Choose your name
       </label>

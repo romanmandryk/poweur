@@ -369,6 +369,14 @@ register a public key they do not control.
 
 Also: `GET /.well-known/poweur/id.json` (Host-routed) serves the stored document.
 
+`GET /.well-known/poweur/capabilities.json` serves the identity's own
+`poweur-sys/public/capabilities.json`, with two endpoints filled in where the file does not set
+them: `endpoints.web_signer` (`<scheme>://<identity>/app/`, when `WEB_STATIC_DIR` is set) and
+`endpoints.oauth_bridge` (when `OAUTH_BRIDGE_URL` is set). With no file, those defaults alone are
+served. When `OAUTH_BRIDGE_URL` is set, `GET /` on a hosted identity's host also carries
+`Link: <bridge>/.well-known/oauth-authorization-server; rel="indieauth-metadata"`, which is how
+IndieAuth clients discover who signs that identity in (EPIC-022).
+
 The canonical identity-registration string is:
 
 ```
