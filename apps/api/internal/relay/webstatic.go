@@ -34,7 +34,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 // mountWebStatic serves the web client SPA from dir under prefix ("/app" →
 // GET /app/): real files as themselves, every other path as index.html so the
 // app's own routes survive a reload.
-func mountWebStatic(mux *http.ServeMux, prefix, dir string) {
+func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte) {
 	if dir == "" {
 		return
 	}
@@ -46,6 +46,16 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string) {
 	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, base)
 		rel = strings.TrimPrefix(rel, "/")
+		if rel == "observability.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			if len(browserConfig) == 0 {
+				_, _ = w.Write([]byte(`{"providers":[]}`))
+				return
+			}
+			_, _ = w.Write(browserConfig)
+			return
+		}
 		if rel == "" {
 			http.ServeFile(w, r, filepath.Join(root, "index.html"))
 			return

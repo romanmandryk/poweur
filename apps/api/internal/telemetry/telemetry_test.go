@@ -31,6 +31,9 @@ func TestConfig(t *testing.T) {
 		{"weak hash", Config{Endpoint: "https://example.org", HashKey: "short"}, false},
 		{"protocol", Config{Endpoint: "https://example.org", HashKey: strings.Repeat("x", 32), Protocol: "grpc"}, false},
 		{"header injection", Config{Endpoint: "https://example.org", HashKey: strings.Repeat("x", 32), Headers: "Authorization=abc%0a"}, false},
+		{"secondary http denied", Config{SecondaryEndpoint: "http://example.org", HashKey: strings.Repeat("x", 32)}, false},
+		{"secondary https", Config{SecondaryEndpoint: "https://example.org", HashKey: strings.Repeat("x", 32)}, true},
+		{"uptime http denied", Config{UptimeURL: "http://example.org/hb"}, false},
 		{"bad level", Config{Level: "garbage"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -195,5 +198,76 @@ func TestSlowCollectorBoundedShutdown(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Fatal("shutdown exceeded bounded deadline")
+	}
+}
+
+func TestDualOTLPExport(t *testing.T) {
+	var mu sync.Mutex
+	counts := map[string]int{}
+	handler := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/logs" {
+				mu.Lock()
+				counts[name]++
+				mu.Unlock()
+			}
+			w.Header().Set("Content-Type", "application/x-protobuf")
+		}
+	}
+	a := httptest.NewServer(handler("a"))
+	defer a.Close()
+	b := httptest.NewServer(handler("b"))
+	defer b.Close()
+	r, err := New(context.Background(), Config{Endpoint: a.URL, SecondaryEndpoint: b.URL, AllowHTTP: true, HashKey: strings.Repeat("x", 32)}, "test", nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Record(context.Background(), Event{Kind: "action", Action: "registration.create"}, "", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if counts["a"] == 0 || counts["b"] == 0 {
+		t.Fatalf("both sinks must receive logs: %v", counts)
+	}
+}
+
+func TestUptimeHeartbeat(t *testing.T) {
+	got := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			select {
+			case got <- struct{}{}:
+			default:
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	r, err := New(context.Background(), Config{UptimeURL: ts.URL, AllowHTTP: true}, "test", nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("heartbeat was not sent")
+	}
+	if err := r.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBrowserConfig(t *testing.T) {
+	empty := Config{}.BrowserConfig("0.1.0")
+	if !strings.Contains(string(empty), `"providers":[]`) || strings.Contains(string(empty), "token") {
+		t.Fatalf("empty config: %s", empty)
+	}
+	on := Config{BrowserBetterStackToken: "pub_token", Environment: "production"}.BrowserConfig("0.1.11")
+	if !strings.Contains(string(on), `"type":"betterstack"`) || !strings.Contains(string(on), "pub_token") || !strings.Contains(string(on), "0.1.11") {
+		t.Fatalf("enabled config: %s", on)
 	}
 }

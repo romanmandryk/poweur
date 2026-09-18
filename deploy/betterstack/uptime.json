@@ -1,0 +1,7 @@
+{
+  "comment": "Create these in Better Stack → Uptime (HTTP) and Heartbeats. The relay already probes the same health URL via blackbox; TELEMETRY_UPTIME_URL is the optional heartbeat GET.",
+  "http_monitors": [
+    { "name": "relay health", "url": "https://relay.poweur.net/health", "method": "GET" },
+    { "name": "web app", "url": "https://poweur.net/app/", "method": "GET" }
+  ]
+}

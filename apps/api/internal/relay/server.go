@@ -300,7 +300,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
-	mountWebStatic(mux, "/app", s.cfg.WebStaticDir)
+	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	return s.instrument(mux, corsMiddleware(mux))
 }
 

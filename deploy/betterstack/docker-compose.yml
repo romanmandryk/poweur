@@ -1,0 +1,57 @@
+# Optional Better Stack collector. Host metrics, logs, and OTLP intake.
+# Not required for the relay to boot. Unset the env file and `compose down`
+# to remove it; TELEMETRY_OTLP_SECONDARY_ENDPOINT and BETTERSTACK_RUM_TOKEN
+# are the matching relay kill switches.
+#
+#   cd deploy/betterstack
+#   cp .env.example .env   # set COLLECTOR_SECRET
+#   docker compose --env-file .env up -d
+#   docker compose --env-file .env down
+
+name: better-stack
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  collector:
+    image: ghcr.io/betterstackhq/collector:latest
+    container_name: better-stack-collector
+    restart: unless-stopped
+    logging: *logging
+    uts: host
+    cpus: 1.2
+    mem_reservation: 256m
+    mem_limit: 1024m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ -x /var/lib/better-stack/collector/healthcheck.sh ]; then /var/lib/better-stack/collector/healthcheck.sh; else exit 0; fi",
+        ]
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    environment:
+      COLLECTOR_SECRET: ${COLLECTOR_SECRET:?set COLLECTOR_SECRET in .env}
+      BASE_URL: ${BASE_URL:-https://telemetry.betterstack.com}
+      CLUSTER_COLLECTOR: "false"
+      VECTOR_LOG_FORMAT: json
+      HOSTNAME: ${COLLECTOR_HOSTNAME:-poweur}
+      INSTALLED_AS: docker
+      COLLECT_OTEL_HTTP_PORT: "4318"
+      COLLECT_OTEL_GRPC_PORT: "4317"
+    volumes:
+      - /:/host:ro
+      - /var/lib/better-stack:/var/lib/better-stack
+    networks:
+      - infra_net
+
+networks:
+  infra_net:
+    name: infra_net
+    external: true
