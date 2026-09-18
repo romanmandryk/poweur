@@ -16,6 +16,7 @@
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 | E13-T7 Lively public Growth dashboard | done | Message kind `detail`, `settings.change` field events, `adopt_*` adoption gauges, redesigned Growth board (relay 0.1.6) |
+| Optional third-party overlay | trial | Dual OTLP sink + optional browser RUM/uptime heartbeat, currently Better Stack. Grafana remains canonical; unset env to remove. |
 
 ## Goal
 

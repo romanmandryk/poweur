@@ -63,6 +63,7 @@ type Runtime struct {
 	mu           sync.RWMutex
 	closed       bool
 	dropped      atomic.Int64
+	http         *http.Client
 	lp           *sdklog.LoggerProvider
 	mp           *sdkmetric.MeterProvider
 	logger       logapi.Logger
@@ -90,31 +91,53 @@ func New(ctx context.Context, c Config, version string, consent func(string) boo
 		}
 		t.cfg.HashKey = hex.EncodeToString(b)
 	}
-	if c.Endpoint == "" {
+	sinks := c.otlpSinks()
+	if len(sinks) == 0 && c.UptimeURL == "" {
 		return t, nil
 	}
-	headers, _ := parseHeaders(c.Headers)
 	client := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	logs, err := otlploghttp.New(ctx, otlploghttp.WithEndpointURL(strings.TrimRight(c.Endpoint, "/")+"/v1/logs"), otlploghttp.WithHeaders(headers), otlploghttp.WithHTTPClient(client), otlploghttp.WithRetry(otlploghttp.RetryConfig{Enabled: false}))
-	if err != nil {
-		return nil, errors.New("cannot initialize OTLP logs")
+	t.http = client
+	t.exportCtx, t.exportCancel = context.WithCancel(context.Background())
+	if c.UptimeURL != "" {
+		go t.uptimeLoop()
 	}
-	metrics, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(strings.TrimRight(c.Endpoint, "/")+"/v1/metrics"), otlpmetrichttp.WithHeaders(headers), otlpmetrichttp.WithHTTPClient(client), otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}))
-	if err != nil {
-		_ = logs.Shutdown(ctx)
-		return nil, errors.New("cannot initialize OTLP metrics")
+	if len(sinks) == 0 {
+		return t, nil
 	}
+	var logExporters []sdklog.Exporter
+	var metricReaders []sdkmetric.Option
 	env := c.Environment
 	if env == "" {
 		env = "production"
 	}
 	res := resource.NewSchemaless(attribute.String("service.name", "poweur-relay"), attribute.String("service.version", version), attribute.String("deployment.environment.name", env))
+	for _, sink := range sinks {
+		headers, _ := parseHeaders(sink.headers)
+		logs, err := otlploghttp.New(ctx, otlploghttp.WithEndpointURL(strings.TrimRight(sink.endpoint, "/")+"/v1/logs"), otlploghttp.WithHeaders(headers), otlploghttp.WithHTTPClient(client), otlploghttp.WithRetry(otlploghttp.RetryConfig{Enabled: false}))
+		if err != nil {
+			for _, e := range logExporters {
+				_ = e.Shutdown(ctx)
+			}
+			return nil, errors.New("cannot initialize OTLP logs")
+		}
+		metrics, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(strings.TrimRight(sink.endpoint, "/")+"/v1/metrics"), otlpmetrichttp.WithHeaders(headers), otlpmetrichttp.WithHTTPClient(client), otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}))
+		if err != nil {
+			_ = logs.Shutdown(ctx)
+			for _, e := range logExporters {
+				_ = e.Shutdown(ctx)
+			}
+			return nil, errors.New("cannot initialize OTLP metrics")
+		}
+		logExporters = append(logExporters, logs)
+		metricReaders = append(metricReaders, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metrics, sdkmetric.WithInterval(15*time.Second), sdkmetric.WithTimeout(3*time.Second))))
+	}
 	// One bounded queue and one batch buffer: no second SDK queue can silently
 	// discard records. The worker owns the processor and performs network I/O.
-	t.batch = &bufferedExporter{Exporter: &countingExporter{Exporter: logs, t: t}}
+	t.batch = &bufferedExporter{Exporter: &countingExporter{Exporter: &multiExporter{inner: logExporters}, t: t}}
 	t.lp = sdklog.NewLoggerProvider(sdklog.WithResource(res), sdklog.WithProcessor(sdklog.NewSimpleProcessor(t.batch)))
 	t.logger = t.lp.Logger("poweur")
-	t.mp = sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithCardinalityLimit(2000), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metrics, sdkmetric.WithInterval(15*time.Second), sdkmetric.WithTimeout(3*time.Second))))
+	meterOpts := append([]sdkmetric.Option{sdkmetric.WithResource(res), sdkmetric.WithCardinalityLimit(2000)}, metricReaders...)
+	t.mp = sdkmetric.NewMeterProvider(meterOpts...)
 	m := t.mp.Meter("poweur")
 	t.actions, _ = m.Int64Counter("poweur_actions", metricapi.WithDescription("Business transitions, independent of HTTP requests"))
 	t.requests, _ = m.Int64Counter("poweur_http_requests")
@@ -125,7 +148,6 @@ func New(ctx context.Context, c Config, version string, consent func(string) boo
 	t.queue = make(chan Event, 512)
 	t.done = make(chan struct{})
 	t.stop = make(chan struct{})
-	t.exportCtx, t.exportCancel = context.WithCancel(context.Background())
 	go t.run()
 	return t, nil
 }
@@ -151,6 +173,40 @@ func (e *countingExporter) Export(ctx context.Context, rs []sdklog.Record) error
 		e.t.local.Warn("telemetry export failed", "error_code", "otlp_export_failed")
 	}
 	return err
+}
+
+type multiExporter struct {
+	inner []sdklog.Exporter
+}
+
+func (m *multiExporter) Export(ctx context.Context, rs []sdklog.Record) error {
+	var first error
+	for _, exp := range m.inner {
+		copies := make([]sdklog.Record, len(rs))
+		for i := range rs {
+			copies[i] = rs[i].Clone()
+		}
+		if err := exp.Export(ctx, copies); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (m *multiExporter) Shutdown(ctx context.Context) error {
+	var errs []error
+	for _, exp := range m.inner {
+		errs = append(errs, exp.Shutdown(ctx))
+	}
+	return errors.Join(errs...)
+}
+
+func (m *multiExporter) ForceFlush(ctx context.Context) error {
+	var errs []error
+	for _, exp := range m.inner {
+		errs = append(errs, exp.ForceFlush(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 func (t *Runtime) Hash(actor string) string {
@@ -298,8 +354,49 @@ func (t *Runtime) Gauge(ctx context.Context, name string, n int64) {
 		t.gauges.Record(ctx, n, metricapi.WithAttributes(attribute.String("state", name)))
 	}
 }
+
+func (t *Runtime) uptimeLoop() {
+	t.pingUptime()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			t.pingUptime()
+		case <-t.exportCtx.Done():
+			return
+		}
+	}
+}
+
+func (t *Runtime) pingUptime() {
+	if t.http == nil || t.cfg.UptimeURL == "" {
+		return
+	}
+	req, err := http.NewRequestWithContext(t.exportCtx, http.MethodGet, t.cfg.UptimeURL, nil)
+	if err != nil {
+		return
+	}
+	resp, err := t.http.Do(req)
+	if err != nil {
+		t.local.Warn("uptime heartbeat failed", "error_code", "uptime_ping_failed")
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.local.Warn("uptime heartbeat failed", "error_code", "uptime_ping_failed")
+	}
+}
+
 func (t *Runtime) Shutdown(ctx context.Context) error {
-	if t == nil || t.queue == nil {
+	if t == nil {
+		return nil
+	}
+	if t.queue == nil {
+		if t.exportCancel != nil {
+			t.exportCancel()
+		}
 		return nil
 	}
 	t.once.Do(func() { t.mu.Lock(); t.closed = true; close(t.stop); t.mu.Unlock() })

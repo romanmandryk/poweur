@@ -99,6 +99,10 @@ jobs:
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
             exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true
+          if [ -f deploy/betterstack/.env ]; then
+            docker compose --env-file deploy/betterstack/.env -f deploy/betterstack/docker-compose.yml up -d \
+              || echo "betterstack collector failed (non-fatal)" >&2
+          fi
           export TELEMETRY_TRUSTED_PROXIES="$(docker inspect -f '{{(index .NetworkSettings.Networks "infra_net").IPAddress}}' infra-caddy)/32"
           docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d --pull always --force-recreate
           for _ in $(seq 1 30); do

@@ -66,7 +66,7 @@ func checkStatic(t *testing.T, ts *httptest.Server, cases []staticCase) {
 // index.html so the SPA's own routes survive a reload.
 func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"))
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
@@ -76,12 +76,13 @@ func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 		{"/app/assets/main.js", http.StatusOK, "", "// app"},
 		{"/app/some/deep/route", http.StatusOK, "", "<html>app"},
 		{"/app/assets", http.StatusOK, "", "<html>app"},
+		{"/app/observability.json", http.StatusOK, "", `"providers":[]`},
 	})
 }
 
 func TestWebStaticUnsetDirMountsNothing(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", "")
+	mountWebStatic(mux, "/app", "", nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	if status, _, _ := staticGet(t, ts, "/app/"); status != http.StatusNotFound {
@@ -103,7 +104,7 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", app)
+	mountWebStatic(mux, "/app", app, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	// ServeMux answers a dot-segment path with a redirect to the cleaned one,
@@ -113,5 +114,16 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 		if strings.Contains(body, secret) {
 			t.Errorf("%s leaked a file outside the app dir", path)
 		}
+	}
+}
+
+func TestWebStaticObservabilityJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"betterstack","token":"t"}]}`))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	status, _, body := staticGet(t, ts, "/app/observability.json")
+	if status != http.StatusOK || !strings.Contains(body, `"type":"betterstack"`) || strings.Contains(body, "<html>") {
+		t.Fatalf("status=%d body=%q", status, body)
 	}
 }

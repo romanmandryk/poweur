@@ -6,16 +6,22 @@ The relay optionally pushes OTLP/HTTP protobuf logs and metrics to an independen
 
 | Environment | Default | Purpose |
 |---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | Master switch; base URL receiving `/v1/logs` and `/v1/metrics` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | Primary OTLP sink (Grafana Alloy); base URL receiving `/v1/logs` and `/v1/metrics` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | Only supported protocol |
 | `OTEL_EXPORTER_OTLP_HEADERS` | empty | Comma-separated header=value pairs; percent-encode reserved characters |
+| `TELEMETRY_OTLP_SECONDARY_ENDPOINT` | empty | Optional second OTLP sink (Better Stack collector, another vendor). Same privacy filter as the primary. Unset to stop dual-export |
+| `TELEMETRY_OTLP_SECONDARY_HEADERS` | empty | Headers for the secondary sink |
+| `TELEMETRY_UPTIME_URL` | empty | Optional GET heartbeat (Better Stack Heartbeat URL, or any probe URL) |
+| `BETTERSTACK_RUM_TOKEN` | empty | Public JavaScript-tag token; served at `GET /app/observability.json`. Empty loads no browser tag |
 | `TELEMETRY_HASH_KEY` | empty | Required when exporting; at least 32 bytes, generated independently of identity keys |
 | `TELEMETRY_ALLOW_HTTP` | `0` | Explicit override for an isolated same-VM bridge or tests; use HTTPS remotely |
 | `TELEMETRY_TRUSTED_PROXIES` | empty | Comma-separated CIDRs; trust X-Forwarded-For only through these peers |
 | `TELEMETRY_ENVIRONMENT` | `production` | `production`, `development`, or `test`; public queries select production |
 | `LOG_LEVEL` | `info` | Diagnostic threshold; structured business events still export at higher levels |
 
-Empty endpoint disables all outbound telemetry, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
+Empty primary and secondary endpoints disable outbound OTLP, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
+
+The web client reads `GET /app/observability.json` (no-store). That file lists browser providers; an empty `providers` array loads no third-party tag. Do not identify users or send URL hashes (claim fragments carry keys). Session replay for a messenger should stay off in the vendor UI.
 
 ## Per-identity preference
 
