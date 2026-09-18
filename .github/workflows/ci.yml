@@ -106,6 +106,7 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: |
             apps/api/go.sum
+            apps/cli/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
       - uses: pnpm/action-setup@v4
@@ -120,6 +121,15 @@ jobs:
       - run: pnpm --filter @poweur/web exec playwright install chromium
       - run: pnpm client:build
       - run: pnpm web:typecheck
+
+      # The suites below `go run` the relay and the bridge (and build the CLI)
+      # inside their startup timeouts. Compile them first, so a cold module
+      # cache is a slow step here and not a "relay not healthy" there.
+      - name: Warm the Go builds the suites start
+        run: |
+          (cd apps/api && go build -o /dev/null .)
+          (cd apps/oauth && go build -o /dev/null ./cmd/poweur-oauth)
+          (cd apps/cli && go build -o /dev/null .)
 
       # The live-relay suites spawn a real Go relay (`go run`).
       - run: pnpm web:test
