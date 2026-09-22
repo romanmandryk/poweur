@@ -16,6 +16,7 @@ import { createIdentity, IdentityApi } from "../src/identity.js";
 import { sendAnonymous } from "../src/messages.js";
 import { resolveIdentity } from "../src/resolve.js";
 import { verifyDocument } from "../src/document.js";
+import { SESSION_TTL_MS } from "../src/session.js";
 import { INBOX_OPEN, ANON_CHALLENGE_POW, ANON_CHALLENGE_NONE } from "../src/types.js";
 import {
   createTestIdentity, localResolveOptions, uniqueIdentity, type TestIdentity,
@@ -112,6 +113,7 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     const first = await alice.client.sessions.ensure(alice.client.signer);
     const second = await alice.client.sessions.ensure(alice.client.signer);
     expect(second.sessionId).toBe(first.sessionId);
+    expect(Date.parse(first.expiresAt) - Date.parse(first.issuedAt)).toBe(SESSION_TTL_MS);
 
     const refreshed = await alice.client.sessions.refresh(alice.client.signer);
     expect(refreshed.sessionId).not.toBe(first.sessionId);
