@@ -6,6 +6,7 @@
  * Do not put identities, message text, or URL hashes into events — claim
  * fragments carry wrapped keys.
  */
+import { defaultRelayUrl, isShellRuntime } from "./storage.js";
 export type ObservabilityProvider = {
   type: string;
   token: string;
@@ -20,9 +21,46 @@ export type ObservabilityConfig = {
 export type Observability = {
   track(event: string, data?: Record<string, unknown>): void;
   pageChange(name: string): void;
+  captureError(error: unknown, extra?: Record<string, unknown>): void;
 };
 
-const noop: Observability = { track() {}, pageChange() {} };
+const noop: Observability = { track() {}, pageChange() {}, captureError() {} };
+
+let current: Observability = noop;
+
+/** Used by the error boundary and action catch-paths; no-ops until start() finishes. */
+export function getObservability(): Observability {
+  return current;
+}
+
+let errorsAbort: AbortController | undefined;
+
+function installGlobalErrorHandlers(api: Observability) {
+  errorsAbort?.abort();
+  errorsAbort = new AbortController();
+  const { signal } = errorsAbort;
+  window.addEventListener(
+    "error",
+    (event) => {
+      api.captureError(event.error ?? event.message, { source: "window" });
+    },
+    { signal },
+  );
+  window.addEventListener(
+    "unhandledrejection",
+    (event) => {
+      api.captureError(event.reason, { source: "rejection" });
+    },
+    { signal },
+  );
+}
+
+/** Test seam. */
+export function resetObservabilityForTests() {
+  errorsAbort?.abort();
+  errorsAbort = undefined;
+  current = noop;
+}
 
 type BetterstackFn = {
   (...args: unknown[]): void;
@@ -38,6 +76,13 @@ declare global {
 
 export function screenName(page: string, sub: string | null): string {
   return sub ? `${page}/${sub}` : page;
+}
+
+/** Relative on /app/; absolute to the relay inside the Capacitor shell. */
+export function observabilityConfigUrl(): string {
+  if (!isShellRuntime()) return "observability.json";
+  const relay = defaultRelayUrl().replace(/\/$/, "");
+  return relay ? `${relay}/app/observability.json` : "observability.json";
 }
 
 export function loadConfig(source: string | ObservabilityConfig): Promise<ObservabilityConfig> {
@@ -68,8 +113,18 @@ function installBetterStack(token: string, environment: string, release: string)
   fn("init", { environment, release, autoPageview: false });
 }
 
+export function errorPayload(error: unknown, extra?: Record<string, unknown>): Record<string, unknown> {
+  const err = error instanceof Error ? error : new Error(String(error));
+  return {
+    name: err.name.slice(0, 80),
+    message: String(err.message).slice(0, 200),
+    stack: String(err.stack ?? "").split("\n").slice(0, 12).join("\n"),
+    ...extra,
+  };
+}
+
 export async function startObservability(
-  source: string | ObservabilityConfig = "observability.json",
+  source: string | ObservabilityConfig = observabilityConfigUrl(),
 ): Promise<Observability> {
   const cfg = await loadConfig(source);
   const environment = cfg.environment || "production";
@@ -79,14 +134,27 @@ export async function startObservability(
       installBetterStack(provider.token, environment, release);
     }
   }
+  const runtime = isShellRuntime() ? "shell" : "web";
   const api: Observability = {
     track(event, data) {
       window.betterstack?.("track", event, data ?? {});
     },
     pageChange(name) {
-      window.betterstack?.("track", "page-change", { name });
+      window.betterstack?.("track", "page-change", { name, runtime });
+    },
+    captureError(error, extra) {
+      const payload = errorPayload(error, { runtime, ...extra });
+      window.betterstack?.("track", "error", payload);
+      const sentry = (window as Window & { Sentry?: { captureException?: (e: unknown) => void } }).Sentry;
+      sentry?.captureException?.(error);
     },
   };
-  if (!cfg.providers.some((p) => p.type === "betterstack" && p.token)) return noop;
+  if (!cfg.providers.some((p) => p.type === "betterstack" && p.token)) {
+    current = noop;
+    return noop;
+  }
+  current = api;
+  installGlobalErrorHandlers(api);
+  api.track("app-start", { runtime });
   return api;
 }

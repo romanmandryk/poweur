@@ -6,6 +6,7 @@ import { boot } from "./shell/boot";
 import { installTestSeam } from "./shell/testSeam";
 import { startObservability, screenName } from "./lib/observability";
 import { useRoute } from "./state/route";
+import { ErrorBoundary } from "./shell/ErrorBoundary";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing from index.html");
@@ -28,6 +29,8 @@ void boot();
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

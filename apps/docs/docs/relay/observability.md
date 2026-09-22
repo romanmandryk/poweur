@@ -21,7 +21,7 @@ The relay optionally pushes OTLP/HTTP protobuf logs and metrics to an independen
 
 Empty primary and secondary endpoints disable outbound OTLP, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
 
-The web client reads `GET /app/observability.json` (no-store). That file lists browser providers; an empty `providers` array loads no third-party tag. Do not identify users or send URL hashes (claim fragments carry keys). Session replay for a messenger should stay off in the vendor UI.
+The web client (and the Capacitor shell wrapping the same bundle) reads `GET /app/observability.json` (no-store). That file lists browser providers; an empty `providers` array loads no third-party tag. The Better Stack JavaScript tag then collects unhandled errors, web vitals, and behavioral autocapture (clicks, rage clicks, forms). The app also reports React render errors and SPA screen names. Do not identify users or send URL hashes (claim fragments carry keys). Session replay for a messenger should stay off in the vendor UI. Native iOS/Android process crashes are outside this tag.
 
 ## Per-identity preference
 
