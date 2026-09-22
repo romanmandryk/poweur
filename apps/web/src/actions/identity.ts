@@ -32,11 +32,13 @@ import {
   wrapKeysWithPRF as wrapKeysWithPRFJs,
 } from "../lib/passkey.js";
 import {
+  clearUnlockedKeys,
   defaultRelayUrl,
   getConfig,
   identityOriginUrl,
   loadIdentityRecord,
   loadSessionRecord,
+  removeIdentity,
   rpIdFor,
   saveConfig,
   saveIdentityRecord,
@@ -331,6 +333,11 @@ export async function handOffToIdentityOrigin(identity: string): Promise<boolean
   if (info.mode !== "launcher") return false;
 
   const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
+  // The record travels in the fragment. Leaving it on this origin made the
+  // next visit to the public launcher offer to open that identity.
+  removeIdentity(identity);
+  clearUnlockedKeys();
+  refreshSession();
   setLoading(true, `Taking you to ${identity}…`);
   globalThis.location.href = `${identityAppUrl(identity)}#claim=${payload}`;
   return true;
