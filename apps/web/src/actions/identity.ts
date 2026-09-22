@@ -64,6 +64,7 @@ import { useData } from "../state/data";
 import { useRoute, type SubPageId } from "../state/route";
 import { afterUnlock, lockIdentity, refreshSession, switchIdentity, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 
 const message = (error: unknown) => (error as Error)?.message ?? String(error);
 
@@ -458,6 +459,7 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
       toast("Identity created, but this device is not backed up yet — see Settings → Keys & devices", "warning", 8000);
     });
     afterUnlock();
+    trackAction("create-identity", { kind: hosted ? "hosted" : "dns" });
 
     setLoading(false);
     toast(`${identity} created`, "success");

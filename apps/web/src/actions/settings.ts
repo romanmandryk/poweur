@@ -19,6 +19,7 @@ import { generateEncryptionJwk } from "../lib/vault.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, touchSession, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 import { activeClient, errorMessage } from "./relay";
 
 // The carried modules default `seed = null`; they take a base64url seed.
@@ -144,4 +145,5 @@ export function removeIdentityFromDevice(identity: string) {
   switchIdentity(listIdentities()[0] || null);
   useRoute.getState().go("messages");
   toast("Identity removed from device", "info");
+  trackAction("remove-identity");
 }

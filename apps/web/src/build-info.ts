@@ -1,3 +1,3 @@
 /** Shown in Settings → About. Bump with package.json (AGENTS.md → Version bumps). */
 export const APP_VERSION = "0.1.26";
-export const APP_BUILD_TIME = "2026-09-22T12:00:00Z";
+export const APP_BUILD_TIME = "2026-09-22T12:20:00Z";

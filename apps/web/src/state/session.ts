@@ -6,6 +6,7 @@
  * mirror, flipped by whoever opens or clears them.
  */
 import { create } from "zustand";
+import { trackAction } from "../lib/observability";
 import {
   clearUnlockedKeys,
   getActiveIdentity,
@@ -85,6 +86,7 @@ export function onUnlocked(fn: () => void): () => void {
 /** Legacy `pullAfterUnlock()`: flip the mirror, then run every hook. */
 export function afterUnlock() {
   useSession.setState({ unlocked: true });
+  trackAction("unlock");
   for (const hook of unlockHooks) hook();
 }
 
@@ -115,6 +117,7 @@ function tearDownIdentityState() {
 export function lockIdentity() {
   tearDownIdentityState();
   useSession.setState({ unlocked: false });
+  trackAction("lock");
 }
 
 /**
@@ -125,4 +128,5 @@ export function switchIdentity(identity: string | null) {
   tearDownIdentityState();
   setActiveIdentity(identity);
   useSession.setState({ identity, unlocked: false });
+  trackAction("switch-identity");
 }

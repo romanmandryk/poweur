@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, observabilityConfigUrl, resetObservabilityForTests, screenName, startObservability } from "../../src/lib/observability";
+import { loadConfig, observabilityConfigUrl, resetObservabilityForTests, sanitizeEventData, screenName, startObservability, syncIdentifiedUser } from "../../src/lib/observability";
 import { saveConfig } from "../../src/lib/storage.js";
 
 afterEach(() => {
@@ -54,6 +54,39 @@ describe("observability facade", () => {
         ["track", "page-change", { name: "messages", runtime: "web" }],
       ]),
     );
+  });
+
+  it("identifies an unlocked identity and clears on lock", async () => {
+    const obs = await startObservability({
+      providers: [{ type: "betterstack", token: "app_token" }],
+    });
+    obs.identify({ id: "alice.poweur.net", username: "alice.poweur.net" });
+    expect(window.betterstack?.q).toEqual(
+      expect.arrayContaining([
+        ["user", { id: "alice.poweur.net", username: "alice.poweur.net", runtime: "web" }],
+      ]),
+    );
+    obs.clearUser();
+    expect(window.betterstack?.q).toEqual(expect.arrayContaining([["user", null]]));
+  });
+
+  it("syncs the vendor user from session state", async () => {
+    await startObservability({
+      providers: [{ type: "betterstack", token: "app_token" }],
+    });
+    syncIdentifiedUser("bob.poweur.net", true);
+    expect(window.betterstack?.q).toEqual(
+      expect.arrayContaining([["user", expect.objectContaining({ id: "bob.poweur.net" })]]),
+    );
+    syncIdentifiedUser("bob.poweur.net", false);
+    expect(window.betterstack?.q).toEqual(expect.arrayContaining([["user", null]]));
+  });
+
+  it("drops message text and counterpart identities from events", () => {
+    expect(sanitizeEventData({ kind: "chat", outcome: "sent", plaintext: "secret", peer: "eve.poweur.net" })).toEqual({
+      kind: "chat",
+      outcome: "sent",
+    });
   });
 
   it("records client errors without identities", async () => {

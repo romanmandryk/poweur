@@ -8,6 +8,7 @@ import { contactFor } from "../state/badges";
 import { useData, type Contact, type DataFields } from "../state/data";
 import { useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 import { activeClient, challengeSerial, errorMessage, mergeInto, parseMessage } from "./relay";
 
 const setContacts = (patch: Partial<DataFields["contacts"]>) =>
@@ -160,6 +161,7 @@ export function requestContact(identity: string, { intro, petname }: { intro?: s
   return withClient(`Requesting ${identity}…`, async (client) => {
     await client.requestContact(identity, { ...(intro ? { intro } : {}), ...(petname ? { petname } : {}) });
     toast(`Contact request sent to ${identity}`, "success");
+    trackAction("contact", { kind: "request" });
     await refreshContacts();
   });
 }
@@ -178,6 +180,7 @@ export function acceptContact(identity: string, { silent = false, petname }: { s
         notified ? "success" : "warning",
       );
     }
+    trackAction("contact", { kind: silent ? "unblock" : "accept" });
     dropIncomingRequest(identity);
     await refreshContacts();
   });
@@ -187,6 +190,7 @@ export function blockContact(identity: string) {
   return withClient(`Blocking ${identity}…`, async (client) => {
     await client.blockContact(identity);
     toast(`${identity} blocked`, "success");
+    trackAction("contact", { kind: "block" });
     dropIncomingRequest(identity);
     await refreshContacts();
   });
@@ -197,6 +201,7 @@ export function removeContact(identity: string) {
     const contacts = await client.contacts();
     await contacts.remove(identity);
     toast(`Removed ${identity}`, "success");
+    trackAction("contact", { kind: "remove" });
     await refreshContacts();
   });
 }
