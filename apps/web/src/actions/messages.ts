@@ -16,6 +16,7 @@ import { useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
 import { toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
 import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
@@ -353,10 +354,12 @@ export async function sendSigned(
       const total = sent.envelopes.length;
       setStatus(`✓ ${delivered} of ${total} delivered`, delivered === total ? "ok" : "err");
       if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+      trackAction("send", { kind: "group", outcome: "sent" });
       return { status: "sent", delivered, total };
     } catch (error) {
       setStatus(`✕ ${errorMessage(error)}`, "err");
       toast(errorMessage(error), "error");
+      trackAction("send", { kind: "group", outcome: "failed" });
       return { status: "failed" };
     }
   }
@@ -365,6 +368,7 @@ export async function sendSigned(
     setStatus("Checking their key…");
     if (!(await checkPinBeforeSend(client, to))) {
       setStatus("✕ Not sent — key not trusted", "err");
+      trackAction("send", { kind: "chat", outcome: "blocked" });
       return { status: "blocked" };
     }
     setStatus("Sending…");
@@ -393,6 +397,7 @@ export async function sendSigned(
       },
     ]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+    trackAction("send", { kind: attachment ? "attachment" : "chat", outcome: "sent" });
     return { status: "sent" };
   } catch (error) {
     if (!attachment && client.decryptor && isRetryableSendError(error)) {
@@ -400,10 +405,12 @@ export async function sendSigned(
       queueWebMessage(self, to, sealed, { signWith: "identity", ...(thread ? { threadId: thread } : {}) }, errorMessage(error));
       setStatus("· Queued — will retry when online", "ok");
       toast("Message queued until the relay is reachable", "success");
+      trackAction("send", { kind: "chat", outcome: "queued" });
       return { status: "queued" };
     }
     setStatus(`✕ ${errorMessage(error)}`, "err");
     toast(errorMessage(error), "error");
+    trackAction("send", { kind: attachment ? "attachment" : "chat", outcome: "failed" });
     return { status: "failed" };
   }
 }
@@ -424,6 +431,7 @@ export function openThread(peer: string, { thread = "", group = false }: { threa
   useData.setState({ thread: { peer, threadId: thread, group } });
   markConversationRead(peer).catch(() => {});
   useRoute.getState().push("thread", { to: peer, thread, group });
+  trackAction("open-thread", { kind: group ? "group" : "chat" });
 }
 
 /**

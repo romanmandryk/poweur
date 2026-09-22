@@ -21,6 +21,21 @@ import type { SessionProof } from "./types.js";
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const EXPIRY_SKEW_MS = 30_000;
 
+/**
+ * Issued and expiry from one clock reading. Two `Date.now()` calls can cross a
+ * second boundary; after RFC3339 truncation that becomes 24h+1s, and the
+ * relay rejects it (`session exceeds max TTL`).
+ */
+export function sessionValidityWindow(
+  now: Date = new Date(),
+  ttlMs = SESSION_TTL_MS,
+): { issuedAt: string; expiresAt: string } {
+  return {
+    issuedAt: rfc3339(now),
+    expiresAt: rfc3339(new Date(now.getTime() + ttlMs)),
+  };
+}
+
 export interface StoredSession {
   identity: string;
   sessionId: string;
@@ -120,8 +135,7 @@ export class SessionManager {
     privateKey.set(ed25519PublicKey(keypair.privateKey), 32);
 
     const sessionPublicKey = toBase64url(keypair.publicKey);
-    const issuedAt = rfc3339();
-    const expiresAt = rfc3339(new Date(Date.now() + SESSION_TTL_MS));
+    const { issuedAt, expiresAt } = sessionValidityWindow();
     const nonce = newNonce();
     const identitySignature = await signer.sign(
       canonicalSessionRegistration(

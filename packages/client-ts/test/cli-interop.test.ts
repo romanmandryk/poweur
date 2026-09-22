@@ -335,13 +335,21 @@ describe("Go CLI ↔ TypeScript client", () => {
 
     process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
     try {
-      const claimed = await tsCli([
-        "key", "claim", identity, offer.rendezvous_id,
-        "--ephemeral-key", offer.ephemeral_private_key,
-        "--relay", relay.baseUrl,
-        "--json",
-      ]);
-      expect(claimed.code).toBe(0);
+      // `key claim` is a single GET; approve can still be in flight on a
+      // busy runner, so poll the same way `--wait` does.
+      let claimed = { code: 1, stdout: "", stderr: "" };
+      for (let i = 0; i < 10; i++) {
+        claimed = await tsCli([
+          "key", "claim", identity, offer.rendezvous_id,
+          "--ephemeral-key", offer.ephemeral_private_key,
+          "--relay", relay.baseUrl,
+          "--json",
+        ]);
+        if (claimed.code === 0) break;
+        if (!claimed.stderr.includes("not approved yet")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(claimed.code, claimed.stderr || claimed.stdout).toBe(0);
       const payload = JSON.parse(claimed.stdout) as { enrolled: boolean; identity: string };
       expect(payload.enrolled).toBe(true);
       expect(payload.identity).toBe(identity);

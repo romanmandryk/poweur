@@ -1,6 +1,6 @@
 # Optional Better Stack collector. Host metrics, logs, and OTLP intake.
 # Not required for the relay to boot. Unset the env file and `compose down`
-# to remove it; TELEMETRY_OTLP_SECONDARY_ENDPOINT and BETTERSTACK_RUM_TOKEN
+# to remove it; TELEMETRY_OTLP_SECONDARY_ENDPOINT, BETTERSTACK_RUM_TOKEN and SENTRY_DSN
 # are the matching relay kill switches.
 #
 #   cd deploy/betterstack

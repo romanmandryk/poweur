@@ -11,7 +11,7 @@ import {
   setActiveIdentity,
 } from "../lib/storage.js";
 import { fromBase64url } from "../lib/vault.js";
-import { resolveMode } from "../lib/mode.js";
+import { modeNow, resolveMode } from "../lib/mode.js";
 import { beginSignInApproval } from "../actions/signin";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
@@ -84,13 +84,13 @@ export function boot(): Promise<void> {
     // domain both hosts share (E18-T4).
     useRoute.setState({ page: "messages" });
     route.push("unlock");
-  } else if (!identity) {
-    useRoute.setState({ page: "messages" });
-  } else if (!getUnlockedKeys() && !isSessionValid(loadSessionRecord(identity))) {
-    // A valid session in sessionStorage lets a reload skip re-auth.
-    route.push("unlock");
+  } else if (shouldOpenStoredIdentity(modeNow())) {
+    openStoredIdentity(identity);
   } else {
-    useRoute.setState({ page: "messages" });
+    // Unknown until the relay answers, or a launcher. A stored identity must
+    // not paint here: the launcher is a public claim page, and the record
+    // left behind by a claim belongs on the identity's own host.
+    useRoute.setState({ page: "messages", sub: null, params: {} });
   }
 
   // The first paint came from the cached mode (or `unknown`, the generic
@@ -98,7 +98,46 @@ export function boot(): Promise<void> {
   return resolveMode().then((info: ModeInfo) => {
     setDocumentIdentity(info);
     useSession.setState({ mode: info });
+    if (authInput || handedOver) return;
+    if (info.mode === "launcher") {
+      settleLauncherDoor();
+      return;
+    }
+    // The host was unknown on the first paint. Open a stored identity only
+    // if the visitor is still on that paint — a click in between stands.
+    const current = useRoute.getState();
+    if (current.page === "messages" && current.sub === null) openStoredIdentity(getActiveIdentity());
   });
+}
+
+/**
+ * A launcher host is the claim page for everyone. An identity cached on that
+ * origin (the claim hand-off writes it before navigating away) is not a
+ * reason to skip the landing.
+ */
+function shouldOpenStoredIdentity(info: ModeInfo) {
+  return info.mode === "identity" || info.mode === "shell";
+}
+
+/** Inbox, or the unlock gate when the keys are not already open. */
+function openStoredIdentity(identity: string | null) {
+  if (!identity) {
+    useRoute.setState({ page: "messages", sub: null, params: {} });
+    return;
+  }
+  if (!getUnlockedKeys() && !isSessionValid(loadSessionRecord(identity))) {
+    useRoute.getState().push("unlock");
+    return;
+  }
+  useRoute.setState({ page: "messages", sub: null, params: {} });
+}
+
+/** Drop an automatic unlock prompt once this host is known to be the launcher. */
+function settleLauncherDoor() {
+  const current = useRoute.getState();
+  if (current.page === "messages" && (current.sub === null || current.sub === "unlock")) {
+    useRoute.setState({ page: "messages", sub: null, params: {} });
+  }
 }
 
 /** Test seam. */

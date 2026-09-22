@@ -10,6 +10,7 @@ import type { InboxPolicy } from "../lib/policy";
 import { useData } from "../state/data";
 import { forgetAvatar, saveLocalAvatar } from "../state/avatars";
 import { useSession } from "../state/session";
+import { trackAction } from "../lib/observability";
 import { syncOwnAvatar } from "./avatars";
 
 const activeClient = (): any => {
@@ -38,6 +39,7 @@ export async function savePolicy(document: InboxPolicy) {
   const trusted = document.trusted_auth_services?.length ? [document.trusted_auth_services] : [];
   await client.setPolicy(document.mode, document.anonymous, document.read_receipts, ...trusted);
   await loadPolicy({ force: true });
+  trackAction("save-policy");
 }
 
 export async function loadProfile({ force = false } = {}) {
@@ -116,5 +118,6 @@ export async function saveProfile(draft: ProfileDraft, onStatus: (text: string) 
   }
   // Every card that shows us should show the new name immediately.
   primeProfile(identity, saved, relayUrlFor(identity));
+  trackAction("save-profile");
   return saved;
 }

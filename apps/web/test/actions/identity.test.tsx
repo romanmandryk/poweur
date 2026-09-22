@@ -26,8 +26,9 @@ vi.mock("@poweur/client", async (importOriginal) => ({
   })),
 }));
 
-import { createIdentity } from "../../src/actions/identity";
-import { saveIdentityRecord, setUnlockedKeys } from "../../src/lib/storage.js";
+import { createIdentity, handOffToIdentityOrigin } from "../../src/actions/identity";
+import { resolveMode } from "../../src/lib/mode.js";
+import { loadIdentityRecord, saveIdentityRecord, setActiveIdentity, setUnlockedKeys } from "../../src/lib/storage.js";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
 import { useSession } from "../../src/state/session";
@@ -57,5 +58,34 @@ describe("createIdentity", () => {
     expect(useData.getState().profile.doc).toBeNull();
     expect(useData.getState().onboard).toEqual({ step: 1 });
     expect(useRoute.getState().sub).toBe("onboarding");
+  });
+
+  it("a launcher claim leaves no copy of the identity on that origin", async () => {
+    vi.mocked(resolveMode).mockResolvedValueOnce({ mode: "launcher" } as Awaited<ReturnType<typeof resolveMode>>);
+    const assigned: string[] = [];
+    const loc = {
+      hostname: "poweur.net",
+      protocol: "https:",
+      port: "",
+      pathname: "/app/",
+    };
+    Object.defineProperty(loc, "href", {
+      set(value: string) {
+        assigned.push(value);
+      },
+      get() {
+        return "https://poweur.net/app/";
+      },
+    });
+    vi.stubGlobal("location", loc);
+
+    saveIdentityRecord("alicee.poweur.net", { identity: "alicee.poweur.net", encryptedKeys: { kdf: "prf" } });
+    setActiveIdentity("alicee.poweur.net");
+
+    await expect(handOffToIdentityOrigin("alicee.poweur.net")).resolves.toBe(true);
+    expect(loadIdentityRecord("alicee.poweur.net")).toBeNull();
+    expect(localStorage.getItem("poweur:active")).toBeNull();
+    expect(assigned[0]).toContain("https://alicee.poweur.net/app/#claim=");
+    vi.unstubAllGlobals();
   });
 });

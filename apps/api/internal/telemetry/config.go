@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/getsentry/sentry-go"
 )
 
 type Config struct {
@@ -24,8 +26,12 @@ type Config struct {
 	// BrowserBetterStackToken is the public JavaScript-tag token. Empty keeps
 	// GET /app/observability.json at {"providers":[]} so the SPA loads no tag.
 	BrowserBetterStackToken string
-	TrustedProxies          []netip.Prefix
-	AllowHTTP               bool // explicit development/isolated Docker network override
+	// SentryDSN is a Sentry-compatible ingest URL (Better Stack Errors). Empty
+	// disables the SDK. The DSN includes a public key in the URL userinfo.
+	SentryDSN       string
+	TrustedProxies  []netip.Prefix
+	AllowHTTP       bool // explicit development/isolated Docker network override
+	sentryTransport sentry.Transport
 }
 
 func FromEnv() Config {
@@ -37,6 +43,7 @@ func FromEnv() Config {
 		SecondaryHeaders:        os.Getenv("TELEMETRY_OTLP_SECONDARY_HEADERS"),
 		UptimeURL:               strings.TrimSpace(os.Getenv("TELEMETRY_UPTIME_URL")),
 		BrowserBetterStackToken: strings.TrimSpace(os.Getenv("BETTERSTACK_RUM_TOKEN")),
+		SentryDSN:               strings.TrimSpace(os.Getenv("SENTRY_DSN")),
 		HashKey:                 os.Getenv("TELEMETRY_HASH_KEY"),
 		Level:                   os.Getenv("LOG_LEVEL"),
 		Environment:             os.Getenv("TELEMETRY_ENVIRONMENT"),
@@ -119,6 +126,9 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if err := validateSentryDSN(c.SentryDSN, c.AllowHTTP); err != nil {
+		return err
+	}
 	if c.Protocol != "" && c.Protocol != "http/protobuf" {
 		return fmt.Errorf("OTLP protocol must be http/protobuf")
 	}
@@ -147,6 +157,17 @@ func validateUptimeURL(endpoint string, allowHTTP bool) error {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && allowHTTP)) {
 		return fmt.Errorf("invalid TELEMETRY_UPTIME_URL")
+	}
+	return nil
+}
+
+func validateSentryDSN(dsn string, allowHTTP bool) error {
+	if dsn == "" {
+		return nil
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" || u.User == nil || u.User.Username() == "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && allowHTTP)) {
+		return fmt.Errorf("invalid SENTRY_DSN")
 	}
 	return nil
 }

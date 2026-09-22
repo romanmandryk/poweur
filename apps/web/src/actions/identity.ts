@@ -32,11 +32,13 @@ import {
   wrapKeysWithPRF as wrapKeysWithPRFJs,
 } from "../lib/passkey.js";
 import {
+  clearUnlockedKeys,
   defaultRelayUrl,
   getConfig,
   identityOriginUrl,
   loadIdentityRecord,
   loadSessionRecord,
+  removeIdentity,
   rpIdFor,
   saveConfig,
   saveIdentityRecord,
@@ -62,6 +64,7 @@ import { useData } from "../state/data";
 import { useRoute, type SubPageId } from "../state/route";
 import { afterUnlock, lockIdentity, refreshSession, switchIdentity, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 
 const message = (error: unknown) => (error as Error)?.message ?? String(error);
 
@@ -331,6 +334,11 @@ export async function handOffToIdentityOrigin(identity: string): Promise<boolean
   if (info.mode !== "launcher") return false;
 
   const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
+  // The record travels in the fragment. Leaving it on this origin made the
+  // next visit to the public launcher offer to open that identity.
+  removeIdentity(identity);
+  clearUnlockedKeys();
+  refreshSession();
   setLoading(true, `Taking you to ${identity}…`);
   globalThis.location.href = `${identityAppUrl(identity)}#claim=${payload}`;
   return true;
@@ -451,6 +459,7 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
       toast("Identity created, but this device is not backed up yet — see Settings → Keys & devices", "warning", 8000);
     });
     afterUnlock();
+    trackAction("create-identity", { kind: hosted ? "hosted" : "dns" });
 
     setLoading(false);
     toast(`${identity} created`, "success");

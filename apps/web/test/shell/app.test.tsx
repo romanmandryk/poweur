@@ -144,4 +144,13 @@ describe("shell decision tree (E21-T4)", () => {
     expect(container.querySelector("#btn-welcome-start")).toBeNull();
     expect(container.querySelector(".landing-title")).toBeTruthy();
   });
+
+  it("a launcher host does not offer to open an identity stored on this origin", () => {
+    saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
+    useSession.setState({ identity: IDENTITY, unlocked: false, mode: { mode: "launcher", probed: true } });
+    const { container } = render(<App />);
+    expect(container.querySelector(".landing-title")).toBeTruthy();
+    expect(container.querySelector(".unlock-name")).toBeNull();
+    expect(container.querySelector(".bottom-nav")).toBeNull();
+  });
 });

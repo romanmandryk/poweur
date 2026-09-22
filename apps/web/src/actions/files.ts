@@ -9,6 +9,7 @@ import { askConfirm, askText } from "../components/Dialogs";
 import { useData, type DataFields } from "../state/data";
 import { onIdentityTeardown, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 import { activeClient, errorMessage } from "./relay";
 
 type Files = DataFields["files"];
@@ -137,6 +138,7 @@ export async function uploadFiles(fileList: FileList | File[] | null) {
     }
     setLoading(false);
     toast(`Uploaded ${files.length} file${files.length > 1 ? "s" : ""}`, "success");
+    trackAction("files", { kind: "upload", count: files.length });
     await loadFiles(path);
   } catch (error) {
     setLoading(false);
@@ -240,6 +242,7 @@ export async function addShare(path: string, { audience, permissions, expiry }: 
       ...(expiry ? { expiresAt: `${expiry}T23:59:59Z` } : {}),
     });
     toast(`Shared /${path} with ${audience.length} ${audience.length === 1 ? "person" : "people"}`, "success");
+    trackAction("files", { kind: "share" });
     await loadGrants({ force: true });
   } catch (error) {
     toast(errorMessage(error), "error");

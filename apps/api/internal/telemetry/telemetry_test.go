@@ -16,6 +16,8 @@ import (
 
 	collectlog "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/getsentry/sentry-go"
 )
 
 func TestConfig(t *testing.T) {
@@ -34,6 +36,9 @@ func TestConfig(t *testing.T) {
 		{"secondary http denied", Config{SecondaryEndpoint: "http://example.org", HashKey: strings.Repeat("x", 32)}, false},
 		{"secondary https", Config{SecondaryEndpoint: "https://example.org", HashKey: strings.Repeat("x", 32)}, true},
 		{"uptime http denied", Config{UptimeURL: "http://example.org/hb"}, false},
+		{"sentry https", Config{SentryDSN: "https://key@s.example.org/1"}, true},
+		{"sentry missing key", Config{SentryDSN: "https://s.example.org/1"}, false},
+		{"sentry http denied", Config{SentryDSN: "http://key@s.example.org/1"}, false},
 		{"bad level", Config{Level: "garbage"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -269,5 +274,66 @@ func TestBrowserConfig(t *testing.T) {
 	on := Config{BrowserBetterStackToken: "pub_token", Environment: "production"}.BrowserConfig("0.1.11")
 	if !strings.Contains(string(on), `"type":"betterstack"`) || !strings.Contains(string(on), "pub_token") || !strings.Contains(string(on), "0.1.11") {
 		t.Fatalf("enabled config: %s", on)
+	}
+}
+
+type captureTransport struct {
+	mu     sync.Mutex
+	events []*sentry.Event
+}
+
+func (t *captureTransport) Configure(sentry.ClientOptions) {}
+func (t *captureTransport) SendEvent(event *sentry.Event) {
+	t.mu.Lock()
+	t.events = append(t.events, event)
+	t.mu.Unlock()
+}
+func (t *captureTransport) Flush(time.Duration) bool              { return true }
+func (t *captureTransport) FlushWithContext(context.Context) bool { return true }
+func (t *captureTransport) Close()                                {}
+func (t *captureTransport) snapshot() []*sentry.Event {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]*sentry.Event, len(t.events))
+	copy(out, t.events)
+	return out
+}
+
+func TestSentryCapturesErrorDiagnosticsOnly(t *testing.T) {
+	tr := &captureTransport{}
+	r, err := New(context.Background(), Config{
+		SentryDSN:       "https://key@example.invalid/1",
+		sentryTransport: tr,
+		Environment:     "test",
+	}, "0.1.12", nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Record(context.Background(), Event{Kind: "action", Action: "message.submit"}, "alice.example", "192.0.2.1")
+	r.Record(context.Background(), Event{Kind: "diagnostic", Action: "server.error", ErrorCode: "rate_limited", Level: slog.LevelWarn}, "alice.example", "192.0.2.1")
+	r.Record(context.Background(), Event{
+		Kind: "diagnostic", Action: "server.error", Outcome: "failure", Route: "GET /panic",
+		ErrorCode: "panic", Stack: "github.com/poweur/api/internal/relay.instrument\n", Level: slog.LevelError,
+	}, "alice.example", "192.0.2.1")
+	if err := r.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := tr.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("captured %d events, want 1", len(got))
+	}
+	ev := got[0]
+	if ev.Level != sentry.LevelError || ev.Tags["error_code"] != "panic" || ev.Tags["route"] != "GET /panic" {
+		t.Fatalf("unexpected event: %+v tags=%v", ev, ev.Tags)
+	}
+	if strings.Contains(ev.Message, "alice") || ev.Request != nil || ev.User.ID != "" || ev.User.Email != "" {
+		t.Fatal("sentry event leaked identity or request")
+	}
+}
+
+func TestFromEnvReadsSentryDSN(t *testing.T) {
+	t.Setenv("SENTRY_DSN", "https://key@s.example.org/1")
+	if FromEnv().SentryDSN != "https://key@s.example.org/1" {
+		t.Fatal("SENTRY_DSN not loaded")
 	}
 }

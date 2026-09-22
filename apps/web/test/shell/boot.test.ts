@@ -67,6 +67,14 @@ describe("boot (E21-T4)", () => {
     expect(useRoute.getState().sub).toBe("unlock");
   });
 
+  it("a launcher host stays on the claim page when this origin still has an identity", async () => {
+    saveIdentityRecord("alicee.poweur.net", { identity: "alicee.poweur.net" });
+    setActiveIdentity("alicee.poweur.net");
+    mode.next = { mode: "launcher" };
+    await boot();
+    expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
+  });
+
   it("runs once, and corrects the door and title when the relay answers", async () => {
     mode.next = { mode: "launcher" };
     await boot();

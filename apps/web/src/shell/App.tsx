@@ -18,6 +18,8 @@ import { useMessaging } from "./useMessaging";
 
 export function App() {
   const identity = useSession((state) => state.identity);
+  const hostMode = useSession((state) => state.mode.mode);
+  const hostProbed = useSession((state) => state.mode.probed);
   const page = useRoute((state) => state.page);
   const sub = useRoute((state) => state.sub);
   useBackNavigation();
@@ -30,8 +32,13 @@ export function App() {
   const detail = sub !== null && DETAIL_SUBS.has(sub);
   const gate = sub !== null && !detail;
   // No identity on this device: the destinations are not reachable, so the
-  // door is the whole page (E15-T7).
-  const frontDoor = !identity && sub === null;
+  // door is the whole page (E15-T7). A launcher host is that door even when
+  // this origin still has an identity — the claim hand-off leaves one behind,
+  // and the public page must not offer to open it. Same while the host is
+  // still unknown: guessing from storage paints the wrong person.
+  const launcherDoor = hostMode === "launcher";
+  const doorUndecided = Boolean(identity) && hostMode === "unknown" && hostProbed === false;
+  const frontDoor = sub === null && (!identity || launcherDoor || doorUndecided);
   const shell = !gate && !frontDoor;
 
   let content: ReactNode;

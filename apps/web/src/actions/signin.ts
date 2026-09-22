@@ -10,6 +10,7 @@ import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
 import { toast } from "../state/ui";
+import { trackAction } from "../lib/observability";
 
 const patchAuth = (patch: Partial<ReturnType<typeof useData.getState>["auth"]>) =>
   useData.setState((state) => ({ auth: { ...state.auth, ...patch } }));
@@ -62,6 +63,7 @@ export async function approveSignIn(match = "") {
     // Same device: finish in this browser straight away. The resume link works
     // only here, because only this browser holds the RP's sign-in cookie.
     if (resumeUri) continueTo(resumeUri);
+    trackAction("approve-signin", { kind: match ? "code" : "same-device" });
   } catch (error) {
     patchAuth({ loading: false, error: (error as Error).message });
   }

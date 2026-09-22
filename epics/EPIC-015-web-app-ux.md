@@ -39,7 +39,7 @@
 | E15-T5 Profile, first-run onboarding & polish | **done** | profile editor, three skippable steps, a11y pass, walkthrough docs |
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
 | Durable messages & honest badges ([EPIC-009](EPIC-009-messaging-upgrades.md) E09-T1's web surface) | **done** | the message store was memory-only and the relay drains on pickup, so a refresh lost messages *permanently*; the app now redraws from the archive at `poweur-sys/private/messages/`, keeps its own sent copies, and counts unread from read marks rather than from how much it happens to hold. `test/e2e/durability.spec.js` asserts each of these after a reload |
-| **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage |
+| **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage. A launcher host always shows the claim landing — an identity left in this origin's storage by the claim hand-off is not offered there |
 | **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field |
 | **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed door + join skips the name; passkey is web-only (shell uses join / create) |
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
