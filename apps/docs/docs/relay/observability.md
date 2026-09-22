@@ -13,6 +13,7 @@ The relay optionally pushes OTLP/HTTP protobuf logs and metrics to an independen
 | `TELEMETRY_OTLP_SECONDARY_HEADERS` | empty | Headers for the secondary sink |
 | `TELEMETRY_UPTIME_URL` | empty | Optional GET heartbeat (Better Stack Heartbeat URL, or any probe URL) |
 | `BETTERSTACK_RUM_TOKEN` | empty | Public JavaScript-tag token; served at `GET /app/observability.json`. Empty loads no browser tag |
+| `SENTRY_DSN` | empty | Sentry-compatible DSN for Better Stack Errors (`sentry-go`). Empty disables the SDK. Unset to stop Go error tracking |
 | `TELEMETRY_HASH_KEY` | empty | Required when exporting; at least 32 bytes, generated independently of identity keys |
 | `TELEMETRY_ALLOW_HTTP` | `0` | Explicit override for an isolated same-VM bridge or tests; use HTTPS remotely |
 | `TELEMETRY_TRUSTED_PROXIES` | empty | Comma-separated CIDRs; trust X-Forwarded-For only through these peers |
@@ -22,6 +23,8 @@ The relay optionally pushes OTLP/HTTP protobuf logs and metrics to an independen
 Empty primary and secondary endpoints disable outbound OTLP, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
 
 The web client (and the Capacitor shell wrapping the same bundle) reads `GET /app/observability.json` (no-store). That file lists browser providers; an empty `providers` array loads no third-party tag. The Better Stack JavaScript tag then collects unhandled errors, web vitals, and behavioral autocapture (clicks, rage clicks, forms). After unlock the app calls `betterstack('user', { id, username })` with the active identity so the vendor [Users page](https://betterstack.com/docs/rum/using-the-product/analyzing-users/) can group sessions. Named UI actions (`unlock`, `send`, `open-thread`, `contact`, …) go through the same facade as custom events. Message bodies, other participants, seeds and URL hashes are stripped. Enable **Auto-capture identified user events** in Better Stack → application → Frontend to also record clicks. Session replay for a messenger should stay off in the vendor UI. Native iOS/Android process crashes are outside this tag. Unset `BETTERSTACK_RUM_TOKEN` to stop identifying anyone.
+
+Relay panics and HTTP 5xx are also sent to Better Stack Errors through the [Sentry SDK](https://betterstack.com/docs/errors/collecting-errors/sentry-sdk/) (`SENTRY_DSN`). Events carry route templates and static error codes, not request bodies, identities or recovered panic values. Tracing is off (`TracesSampleRate` 0). Unset `SENTRY_DSN` to stop Go error ingest.
 
 ## Per-identity preference
 
