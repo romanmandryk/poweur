@@ -302,6 +302,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
+	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))
 }
 

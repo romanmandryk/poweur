@@ -902,6 +902,10 @@ This is a re-skin: **token values change, token names do not.** Components alrea
       - The links are root paths (`/favicon.svg`) that Vite rewrites against `base: "./"`.
         `test/brand-assets.test.ts` checks that the files exist, their PNG sizes and the manifest.
         The mobile staging test checks that the built HTML stays relative.
+      - The relay also serves `favicon.ico`, `favicon.svg` and `apple-touch-icon.png` at the
+        host root (relay 0.1.14). A browser on `alice.poweur.net` asks that host for
+        `/favicon.ico`; `GET /` would otherwise answer with the JSON service banner, so the
+        tab stayed blank on every identity. `/app/favicon.ico` is the same file.
       - `theme-color` is unchanged.
 - [x] **Welcome gate:** the `MessageCircle` tile became `BrandTile` (96 px, 28 px radius, pop-in).
       The heading and copy stay.
@@ -927,6 +931,7 @@ This is a re-skin: **token values change, token names do not.** Components alrea
 - The source-guard test finds no hex literal outside `index.css`.
 - e2e covers four things:
   - `link[rel=icon]` and the manifest resolve at `/app/`.
+  - `GET /favicon.ico` on an identity host and on a launcher host returns the icon, not the service banner.
   - The welcome gate renders the logo `<img>` with a non-empty `alt`.
   - Dark mode swaps the flat logo to white.
   - The E21-T12 suite stays green.
