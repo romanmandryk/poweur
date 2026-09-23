@@ -88,9 +88,9 @@ export function SignInApproval() {
     return (
       <SubPage title="Approve sign-in" onBack={pop}>
         <p className="mb-2 text-[13px] text-muted">
-          Paste the code or <code>poweur://auth</code> link shown by the app.
+          Paste the sign-in code shown by the app.
         </p>
-        <Textarea ref={pasted} id="auth-request-input" rows={7} className="min-h-0" placeholder="Paste sign-in request" defaultValue={auth.input} />
+        <Textarea key={auth.input} ref={pasted} id="auth-request-input" rows={7} className="min-h-0" placeholder="Paste sign-in code" defaultValue={auth.input} />
         <ErrorLine error={auth.error} />
         <Button id="btn-auth-load" className="mt-4" onClick={() => void beginSignInApproval(pasted.current?.value ?? "")}>
           Check request

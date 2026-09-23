@@ -1,6 +1,6 @@
 /**
  * In-memory routing, mirroring the legacy `R` object: the app has no URL
- * routes (deep links stay `#claim=` / `?auth=`), so neither does this.
+ * routes (deep links stay `#claim=` / `?auth=` / `poweur://auth`), so neither does this.
  */
 import { create } from "zustand";
 import { useData } from "./data";

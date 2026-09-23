@@ -16,9 +16,28 @@ import { resetStores } from "../helpers/stores";
 
 const at = (url: string) => history.replaceState(null, "", url);
 
+type UrlHandler = (event: { url: string }) => void;
+
+function installAppPlugin(options: { launch?: string; onListen?: (handler: UrlHandler) => void }) {
+  const cap = globalThis as { Capacitor?: unknown };
+  cap.Capacitor = {
+    isNativePlatform: () => true,
+    Plugins: {
+      App: {
+        getLaunchUrl: async () => (options.launch ? { url: options.launch } : undefined),
+        addListener: (_event: string, handler: UrlHandler) => {
+          options.onListen?.(handler);
+          return { remove() {} };
+        },
+      },
+    },
+  };
+}
+
 beforeEach(() => {
   resetStores();
   mode.next = { mode: "unknown" };
+  delete (globalThis as { Capacitor?: unknown }).Capacitor;
   at("/app/");
 });
 
@@ -85,5 +104,43 @@ describe("boot (E21-T4)", () => {
     mode.next = { mode: "identity", subject: "bob.poweur.net" };
     await boot();
     expect(useSession.getState().mode.mode).toBe("launcher");
+  });
+
+  it("a poweur:// launch URL opens approve sign-in with the request filled in", async () => {
+    saveIdentityRecord("alice.poweur.net", { identity: "alice.poweur.net" });
+    setActiveIdentity("alice.poweur.net");
+    mode.next = { mode: "shell" };
+    const link = "poweur://auth?request=from-camera";
+    installAppPlugin({ launch: link });
+
+    await boot();
+
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
+    expect(useData.getState().auth.input).toBe("from-camera");
+    expect(useData.getState().auth.requireCode).toBe(true);
+  });
+
+  it("a poweur:// open while the app is running prefills approve sign-in", async () => {
+    let open: UrlHandler = () => {};
+    installAppPlugin({ onListen: (handler) => { open = handler; } });
+    await boot();
+    expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
+
+    open({ url: "poweur://auth?request=from-qr" });
+
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
+    expect(useData.getState().auth.input).toBe("from-qr");
+    expect(useData.getState().auth.requireCode).toBe(true);
+  });
+
+  it("ignores an https link opened into the shell", async () => {
+    let open: UrlHandler = () => {};
+    installAppPlugin({ onListen: (handler) => { open = handler; } });
+    await boot();
+
+    open({ url: "https://alice.poweur.net/app/?auth=abc" });
+
+    expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
+    expect(useData.getState().auth.input).toBe("");
   });
 });

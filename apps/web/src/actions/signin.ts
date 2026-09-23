@@ -1,4 +1,5 @@
 /** Approving a third-party sign-in request (EPIC-008), ported from app.js. */
+import { signInCodeFromInput } from "../lib/app-link";
 import { clientFor } from "../lib/client.js";
 import {
   appendBrowserConsent,
@@ -29,9 +30,10 @@ export function resetSignInRequest() {
   });
 }
 
-/** Verify a pasted request or `?auth=` link against the app's origin. */
+/** Verify a pasted request code, or a poweur:// link reduced to that code. */
 export async function beginSignInApproval(input: string, { requireCode = false } = {}) {
-  patchAuth({ input: String(input ?? "").trim(), loading: true, error: "", result: null, requireCode });
+  const value = signInCodeFromInput(input);
+  patchAuth({ input: value, loading: true, error: "", result: null, requireCode });
   useRoute.setState({ sub: "auth" });
   try {
     const consent: any = await loadSignInConsent(useData.getState().auth.input);

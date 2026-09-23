@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./shell/App";
-import { boot } from "./shell/boot";
+import { isShellRuntime } from "./lib/storage.js";
+import { boot, whenFirstRouteChosen } from "./shell/boot";
 import { installTestSeam } from "./shell/testSeam";
 import { startObservability, screenName, syncIdentifiedUser } from "./lib/observability";
 import { useRoute } from "./state/route";
@@ -11,6 +12,7 @@ import { ErrorBoundary } from "./shell/ErrorBoundary";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing from index.html");
+const mount = root;
 
 installTestSeam();
 
@@ -34,13 +36,23 @@ void startObservability().then((obs) => {
   });
 });
 
-// Decide the first screen before the first paint, as the legacy app did.
-void boot();
+function render() {
+  createRoot(mount).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
 
-createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-);
+// Decide the first screen before the first paint, as the legacy app did.
+// In the shell, wait until a poweur:// launch URL has been read so the
+// approval screen is that first paint. Do not wait for the relay.
+if (isShellRuntime()) {
+  void boot();
+  void whenFirstRouteChosen().then(render);
+} else {
+  void boot();
+  render();
+}
