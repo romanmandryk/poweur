@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { encodeSignInRequest, signInDeepLink } from "@poweur/client";
 import {
-  appendBrowserConsent, decodeAuthInput, deliverBrowserApproval, loadSignInConsent,
+  appendBrowserConsent, decodeAuthInput, deliverBrowserApproval, loadSignInConsent, resolveAuthInput,
   readConnectedApps, readConsentLog, revokeConnectedApp, signBrowserApproval,
 } from "../../src/lib/signin.js";
 
@@ -31,6 +31,15 @@ describe("web Sign in with Poweur ID", () => {
     for (const input of [encoded, signInDeepLink(request()), `https://poweur.net/app/?auth=${encoded}`]) {
       expect(decodeAuthInput(input).request_id).toBe("req_web");
     }
+  });
+
+  it("fetches a request passed by reference, only from its own audience", async () => {
+    const serve = (audience) => async () => new Response(JSON.stringify({ request: encodeSignInRequest({ ...request(), audience }) }));
+    const link = "https://tasks.example/r/K7QM4XP2";
+    for (const input of [link, `poweur://auth?request_uri=${encodeURIComponent(link)}`, `https://poweur.net/app/?auth=${encodeURIComponent(link)}`]) {
+      expect((await resolveAuthInput(input, { fetch: serve("https://tasks.example") })).request_id).toBe("req_web");
+    }
+    await expect(resolveAuthInput(link, { fetch: serve("https://bank.example") })).rejects.toThrow(/outside its audience/);
   });
 
   it("signs the canonical response through the WebCrypto signer seam", async () => {

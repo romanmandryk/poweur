@@ -322,6 +322,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /t/{id}/cancel", s.handleTxnCancel)
 	mux.HandleFunc("POST /t/{id}/push", s.handlePush)
 	mux.HandleFunc("POST /t/{id}/creating", s.handleCreating)
+	mux.HandleFunc("GET /r/{code}", s.handleRequestByReference)
 
 	// OIDC provider (E22-T3).
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)

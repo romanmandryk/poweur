@@ -151,7 +151,9 @@ and picks where to send the browser:
    app beside the document).
 3. The operator's default web signer (`OAUTH_DEFAULT_SIGNER`), labelled plainly as "works only
    if this browser already holds your keys there"; the `poweur://` deep link; and, for another
-   device, a QR code, the request code and the match code.
+   device, a QR code of the request's short link (`/r/<code>`, a
+   [request by reference](./sign-in.md#requests-by-reference)) and the match code. A phone
+   camera opening that link lands on a page offering the app and the web signers.
 
 The bridge never embeds or frames a signer and never receives key material.
 

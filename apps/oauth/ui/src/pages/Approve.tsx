@@ -101,9 +101,9 @@ function OtherDevice({ d, compact = false }: { d: AwaitData; compact?: boolean }
           </li>
         </ol>
       </div>
-      <Disclosure summary="Can't scan? Copy the request" className="mt-4">
+      <Disclosure summary="Can't scan? Copy the link" className="mt-4">
         <CopyValue id="request-code" value={d.request} label="Copy" />
-        <p className="mt-2 text-[13px] text-muted">Paste it into the Poweur app under Sign-in requests.</p>
+        <p className="mt-2 text-[13px] text-muted">Open it on the other device, or paste it into the Poweur app.</p>
       </Disclosure>
       <p className="mt-4 text-[13px] text-muted">Only approve a sign-in you started, on a screen in front of you.</p>
     </div>

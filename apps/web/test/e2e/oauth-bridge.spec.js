@@ -87,10 +87,14 @@ test.describe("OAuth bridge through the web signer", () => {
       // A desktop leads with the phone: the code to type and the request.
       await expect(screen.locator("h1")).toHaveText("Approve on your phone");
       const match = (await screen.locator("#match-code").textContent()).trim();
-      const request = (await screen.locator("#request-code").textContent()).trim();
+      // The QR carries a short link to the request, not the request itself.
+      const link = (await screen.locator("#request-code").textContent()).trim();
+      expect(link).toMatch(new RegExp(`^${bridge.issuer}/r/[0-9A-Z]{8}$`));
 
-      // The phone opens the request the way a scanned QR would.
-      await signer.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(request)}`);
+      // The phone's camera opens it: a page offering this phone's signers.
+      await signer.goto(link);
+      await expect(signer.locator("h1")).toHaveText("Approve on this phone");
+      await signer.click(`a.handoff-signer:has-text("${relay.addr}")`);
       await expect(signer.locator("#auth-context")).toContainText("to sign in to E2E application", { timeout: 45_000 });
       await unlockAndApprove(signer, match);
       await expect(signer.locator("#auth-result-note")).toContainText("Go back to the screen");

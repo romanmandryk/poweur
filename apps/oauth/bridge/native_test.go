@@ -65,7 +65,7 @@ func TestAwaitPageOffersSignersCodeAndQR(t *testing.T) {
 		t.Errorf("signers = %+v", ap.Signers)
 	}
 	if !strings.HasPrefix(ap.DeepLink, "poweur://auth?request=") || !strings.HasPrefix(ap.QR, `<svg xmlns="http://www.w3.org/2000/svg"`) ||
-		ap.Match != txn.Match || ap.Request != txn.Request || ap.Push != nil {
+		ap.Match != txn.Match || ap.Request != h.issuer+"/r/"+txn.RequestCode || ap.Push != nil {
 		t.Errorf("await page = %+v", ap)
 	}
 	// Nothing a page does not need: no binding or resume hashes.

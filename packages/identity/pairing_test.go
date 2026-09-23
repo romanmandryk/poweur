@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -195,19 +196,34 @@ func TestVectors_Pairing(t *testing.T) {
 	WriteVectors(t, vectorsDir, "pairing", map[string]any{"pairings": cases, "short_codes": codes})
 }
 
+var signInReferenceCases = map[string]string{
+	"https://oauth.poweur.org/r/K7QM4XP2":                                        "https://oauth.poweur.org/r/K7QM4XP2",
+	"  https://oauth.poweur.org/r/K7QM4XP2 ":                                     "https://oauth.poweur.org/r/K7QM4XP2",
+	"poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2":    "https://oauth.poweur.org/r/K7QM4XP2",
+	"https://poweur.net/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2": "https://oauth.poweur.org/r/K7QM4XP2",
+	"http://oauth.localhost:8090/r/K7QM4XP2":                                     "http://oauth.localhost:8090/r/K7QM4XP2",
+	"poweur://auth?request=eyJ4IjoxfQ":                                           "",
+	"https://poweur.net/app/?auth=eyJ4IjoxfQ":                                    "",
+	"eyJwb3dldXJfYXV0aCI6IjEifQ":                                                 "",
+	"poweur://auth?request_uri=javascript%3Aalert(1)":                            "",
+	"ftp://oauth.poweur.org/r/K7QM4XP2":                                          "",
+}
+
+var signInOriginCases = []struct {
+	URI      string `json:"uri"`
+	Audience string `json:"audience"`
+	OK       bool   `json:"ok"`
+}{
+	{"https://oauth.poweur.org/r/K7QM4XP2", "https://oauth.poweur.org", true},
+	{"https://oauth.poweur.org:443/r/K7QM4XP2", "https://OAUTH.poweur.org/", true},
+	{"http://oauth.localhost:8090/r/K7QM4XP2", "http://oauth.localhost:8090", true},
+	{"https://evil.example/r/K7QM4XP2", "https://oauth.poweur.org", false},
+	{"http://oauth.poweur.org/r/K7QM4XP2", "https://oauth.poweur.org", false},
+	{"https://oauth.poweur.org.evil.example/r/K7QM4XP2", "https://oauth.poweur.org", false},
+}
+
 func TestSignInRequestByReference(t *testing.T) {
-	for in, want := range map[string]string{
-		"https://oauth.poweur.org/r/K7QM4XP2":                                        "https://oauth.poweur.org/r/K7QM4XP2",
-		"  https://oauth.poweur.org/r/K7QM4XP2 ":                                     "https://oauth.poweur.org/r/K7QM4XP2",
-		"poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2":    "https://oauth.poweur.org/r/K7QM4XP2",
-		"https://poweur.net/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2": "https://oauth.poweur.org/r/K7QM4XP2",
-		"http://oauth.localhost:8090/r/K7QM4XP2":                                     "http://oauth.localhost:8090/r/K7QM4XP2",
-		"poweur://auth?request=eyJ4IjoxfQ":                                           "",
-		"https://poweur.net/app/?auth=eyJ4IjoxfQ":                                    "",
-		"eyJwb3dldXJfYXV0aCI6IjEifQ":                                                 "",
-		"poweur://auth?request_uri=javascript%3Aalert(1)":                            "",
-		"ftp://oauth.poweur.org/r/K7QM4XP2":                                          "",
-	} {
+	for in, want := range signInReferenceCases {
 		got, ok := SignInRequestURI(in)
 		if (want == "") == ok || got != want {
 			t.Errorf("%q = %q %v, want %q", in, got, ok, want)
@@ -216,6 +232,26 @@ func TestSignInRequestByReference(t *testing.T) {
 	if SignInReferenceDeepLink("https://oauth.poweur.org/r/K7QM4XP2") != "poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2" {
 		t.Fatal(SignInReferenceDeepLink("https://oauth.poweur.org/r/K7QM4XP2"))
 	}
+	for _, tc := range signInOriginCases {
+		err := CheckSignInRequestURI(tc.URI, SignInRequest{Audience: tc.Audience})
+		if (err == nil) != tc.OK {
+			t.Errorf("%s at %s: %v", tc.URI, tc.Audience, err)
+		}
+	}
+}
+
+func TestVectors_SignInReference(t *testing.T) {
+	type form struct {
+		Input string `json:"input"`
+		URI   string `json:"uri"`
+		OK    bool   `json:"ok"`
+	}
+	var forms []form
+	for in, uri := range signInReferenceCases {
+		forms = append(forms, form{Input: in, URI: uri, OK: uri != ""})
+	}
+	sort.Slice(forms, func(i, j int) bool { return forms[i].Input < forms[j].Input })
+	WriteVectors(t, vectorsDir, "signin-reference", map[string]any{"forms": forms, "origins": signInOriginCases})
 }
 
 func TestFetchSignInRequest(t *testing.T) {

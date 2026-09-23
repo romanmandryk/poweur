@@ -1,7 +1,8 @@
 /**
- * The request code carried by `poweur://auth?request=…`.
- * The approve screen stores and checks that code, not the link.
- * `https://` links are not claimed by the shell and are ignored here.
+ * The request carried by `poweur://auth?request=…`, or the short link in
+ * `poweur://auth?request_uri=…` (a request by reference, E08-T6), which the
+ * approve screen fetches. `https://` links are not claimed by the shell and
+ * are ignored here.
  */
 export function signInCodeFromAppUrl(url: string): string | null {
   const value = String(url ?? "").trim();
@@ -11,7 +12,7 @@ export function signInCodeFromAppUrl(url: string): string | null {
   if (fromUrl) return fromUrl;
 
   // A WebView that cannot parse this scheme still hands us the literal link.
-  const match = value.match(/^poweur:(?:\/\/)?auth\?request=([^&#\s]+)/i);
+  const match = value.match(/^poweur:(?:\/\/)?auth\?(?:request|request_uri)=([^&#\s]+)/i);
   if (!match) return null;
   try {
     return decodeURIComponent(match[1]);
@@ -37,5 +38,5 @@ function codeFromParsedUrl(value: string): string | null {
   const path = parsed.pathname.replace(/^\/+/, "");
   const auth = parsed.hostname === "auth" || path === "auth" || path.startsWith("auth/");
   if (!auth) return null;
-  return parsed.searchParams.get("request") || null;
+  return parsed.searchParams.get("request") || parsed.searchParams.get("request_uri") || null;
 }

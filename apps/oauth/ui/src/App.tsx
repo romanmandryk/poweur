@@ -4,6 +4,7 @@ import { Approve } from "./pages/Approve";
 import { ClientDetail, ClientNew, Developers } from "./pages/Developers";
 import { Consent } from "./pages/Consent";
 import { ErrorPage } from "./pages/ErrorPage";
+import { Handoff } from "./pages/Handoff";
 import { Home } from "./pages/Home";
 import { Identify } from "./pages/Identify";
 import { Abuse, Privacy, Security } from "./pages/Policy";
@@ -17,6 +18,8 @@ export function App({ page }: { page: Page }) {
       return <Identify page={page as never} />;
     case "await":
       return <Approve page={page as never} />;
+    case "handoff":
+      return <Handoff page={page as never} />;
     case "consent":
       return <Consent page={page as never} />;
     case "account":

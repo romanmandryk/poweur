@@ -14,7 +14,7 @@
 | E08-T3 Signer UX | **done** | Web approval/paste/deep-link flow with origin and scope consent, CLI `auth approve`, durable audit log, and native mobile signer contract |
 | E08-T4 Scoped resource grants | **done** | `POST /auth/grant`, one-hour path-scoped app tokens, `connected-apps.json`, immediate file-driven revocation, web list/revoke and audit UI; guestbook writes to the user's app namespace |
 | Completion binding (follow-up) | **done** | Found while designing EPIC-022: the guestbook handed its session to whoever polled with a `request_id`, so a forwarded sign-in link was an account takeover. Now a same-device approval finishes only at a single-use `resume_uri` in the browser holding the RP's binding cookie, and a cross-device one only with the match code the starting screen showed. Spec: "Who may complete a sign-in" in `auth/sign-in.md`; tracked under E22-T4 |
-| E08-T6 Short sign-in codes: request by reference | **in progress** | QR and copy carried the whole signed request (~600 characters) — a QR too dense for many cameras. They now carry a short `https://<rp>/r/<code>` link the signer fetches from the RP itself |
+| E08-T6 Short sign-in codes: request by reference | **done** | QR and copy carried the whole signed request (~600 characters) — a QR too dense for many cameras. They now carry a short `https://<rp>/r/<code>` link the signer fetches from the RP itself |
 | E08-T5 Interop bridges | **done** | Mechanical `did:web` projection at `/.well-known/did.json` with resolution coverage; OIDC bridge and SIOPv2/OpenID4VP decision record |
 
 ## Goal
@@ -139,7 +139,7 @@ The interop superpower: RP requests scopes, approval mints a relay token.
 **Acceptance:** RP writes to its app namespace in the user's home after consent; revoking in
 the web UI cuts access; audit trail visible.
 
-### E08-T6 — Short sign-in codes: request by reference
+### E08-T6 — Short sign-in codes: request by reference — **done**
 
 The QR and the "copy request" fallback carried the entire encoded request (audience, nonce,
 response URI, statement, expiry — about 600 characters), which makes a version-20-plus QR that
@@ -160,12 +160,21 @@ the 2-digit match code. That code is a different control — it proves the appro
 the screen that started the sign-in, so a forwarded QR cannot sign someone else in — and it
 must not travel in the QR.
 
-- [ ] `packages/identity`: short codes, request-URI parsing, fetch + origin check (Go), vectors;
-      TS twin in `@poweur/client`
-- [ ] Signers: CLI `auth approve <url>`, web signer `?auth=<url>`
-- [ ] RPs: the OAuth bridge (`/r/{code}`: JSON for signers, a handoff page for phone cameras;
-      its QR and copy use it) and the guestbook
-- [ ] Spec in `auth/sign-in.md`; tests in Go, TS, integration and Playwright
+- [x] `packages/identity`: `SignInRequestURI`, `CheckSignInRequestURI` (same rule as
+      `response_uri`: same-origin with the audience), `FetchSignInRequest` (no redirects),
+      `SignInReferenceDeepLink`; vectors `signin-reference.json`; TS twin in `@poweur/client`
+- [x] Signers: CLI `auth approve <link>` (the old unchecked "fetch any URL" path replaced by the
+      checked one) and the web signer (`?auth=<link>`, `poweur://auth?request_uri=`, pasted);
+      a request by reference **requires the match code** in both, since it always comes from
+      another screen
+- [x] OAuth bridge 0.1.7: `/r/{code}` (JSON + CORS for signers; a handoff page for a phone's
+      camera offering the app and the web signers; gone once claimed or superseded); the approval
+      page's QR — now 37×37 modules instead of ~100 — and "copy" carry the link
+- [x] Guestbook: `/auth/r/{code}` (JSON, or a redirect into the web signer); its page shows the
+      short link instead of the whole web-signer URL
+- [x] Spec in `auth/sign-in.md`; tests in Go (identity, CLI, bridge, guestbook), TS vectors and
+      fetch, web signer, integration, and Playwright through the camera path (short link →
+      handoff page → web signer fetching by reference → code → the desktop continues)
 
 ### E08-T5 — Interop bridges: did:web and OIDC (design first)
 

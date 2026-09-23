@@ -57,11 +57,20 @@ export interface AwaitData {
   client?: AppRef;
   signers: Signer[];
   deepLink?: string;
+  /** The short link to the request: what the QR shows and "copy" copies. */
   request: string;
   match: string;
   /** Server-drawn SVG of the deep link. */
   qr: string;
   push?: { from: string; sent: number; left: number };
+}
+
+/** A phone's camera opened the QR's short link (E08-T6). */
+export interface HandoffData {
+  identity: string;
+  client?: AppRef;
+  signers: Signer[];
+  deepLink: string;
 }
 
 export interface ConsentData {

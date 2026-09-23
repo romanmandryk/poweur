@@ -33,7 +33,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust | core complete (T4 links + T5 group identities done; **T3 share offer/accept + recipient mounts open, now unblocked**) | E03 |
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | **complete** (T1–T5; tasks dogfood = PCP-0007) | E03 |
 | [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | **complete** (T1–T5; stranger PoW gate moved to E14-T3) | E03, E06 |
-| [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | **complete** (T1–T5); T6 short codes by reference in progress | E01 |
+| [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | **complete** (T1–T6; T6: short sign-in codes by reference) | E01 |
 | [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | **complete** (T1–T6: spool, SSE push, typed messages, attachments, groups, receipts/outbox/expiry) | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | T1–T4, T8 done (T8: pairing v2 closes relay key-grinding) | E01, E02 |

@@ -22,3 +22,11 @@ describe("signInCodeFromInput", () => {
     expect(signInCodeFromInput("abc123")).toBe("abc123");
   });
 });
+
+describe("requests by reference (E08-T6)", () => {
+  it("hands the approve screen the short link from poweur://auth?request_uri=", () => {
+    expect(signInCodeFromAppUrl("poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2")).toBe(
+      "https://oauth.poweur.org/r/K7QM4XP2",
+    );
+  });
+});

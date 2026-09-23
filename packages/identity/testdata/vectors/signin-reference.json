@@ -1,0 +1,86 @@
+{
+  "forms": [
+    {
+      "input": "  https://oauth.poweur.org/r/K7QM4XP2 ",
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "ok": true
+    },
+    {
+      "input": "eyJwb3dldXJfYXV0aCI6IjEifQ",
+      "uri": "",
+      "ok": false
+    },
+    {
+      "input": "ftp://oauth.poweur.org/r/K7QM4XP2",
+      "uri": "",
+      "ok": false
+    },
+    {
+      "input": "http://oauth.localhost:8090/r/K7QM4XP2",
+      "uri": "http://oauth.localhost:8090/r/K7QM4XP2",
+      "ok": true
+    },
+    {
+      "input": "https://oauth.poweur.org/r/K7QM4XP2",
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "ok": true
+    },
+    {
+      "input": "https://poweur.net/app/?auth=eyJ4IjoxfQ",
+      "uri": "",
+      "ok": false
+    },
+    {
+      "input": "https://poweur.net/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2",
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "ok": true
+    },
+    {
+      "input": "poweur://auth?request=eyJ4IjoxfQ",
+      "uri": "",
+      "ok": false
+    },
+    {
+      "input": "poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2",
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "ok": true
+    },
+    {
+      "input": "poweur://auth?request_uri=javascript%3Aalert(1)",
+      "uri": "",
+      "ok": false
+    }
+  ],
+  "origins": [
+    {
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "audience": "https://oauth.poweur.org",
+      "ok": true
+    },
+    {
+      "uri": "https://oauth.poweur.org:443/r/K7QM4XP2",
+      "audience": "https://OAUTH.poweur.org/",
+      "ok": true
+    },
+    {
+      "uri": "http://oauth.localhost:8090/r/K7QM4XP2",
+      "audience": "http://oauth.localhost:8090",
+      "ok": true
+    },
+    {
+      "uri": "https://evil.example/r/K7QM4XP2",
+      "audience": "https://oauth.poweur.org",
+      "ok": false
+    },
+    {
+      "uri": "http://oauth.poweur.org/r/K7QM4XP2",
+      "audience": "https://oauth.poweur.org",
+      "ok": false
+    },
+    {
+      "uri": "https://oauth.poweur.org.evil.example/r/K7QM4XP2",
+      "audience": "https://oauth.poweur.org",
+      "ok": false
+    }
+  ]
+}

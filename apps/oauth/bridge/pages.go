@@ -102,7 +102,12 @@ func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
 	if strings.HasPrefix(deep, "poweur://auth?") {
 		v.DeepLink = deep
 	}
-	v.QR = qrSVG(deep)
+	// The QR and "copy" carry the short link (E08-T6); a transaction from
+	// before codes existed falls back to the whole request.
+	if link := s.requestLink(t); link != "" {
+		v.Request = link
+	}
+	v.QR = qrSVG(v.Request)
 	v.Push = s.cfg.Pusher != nil && t.Pushes < maxPushesPerTxn
 	v.PushFrom = s.cfg.PushIdentity
 	v.Pushed = t.Pushes > 0

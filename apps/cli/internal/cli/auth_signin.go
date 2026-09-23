@@ -50,6 +50,12 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "identity and relay must be configured")
 		return 1
 	}
+	// A request by reference is what a QR or a copied link carries, so the
+	// screen that started the sign-in is elsewhere: its code is required.
+	if _, byReference := idpkg.SignInRequestURI(fs.Arg(0)); byReference && *matchCode == "" && !*noDeliver {
+		fmt.Fprintln(stderr, "this sign-in was started on another screen: add --code with the digits it shows")
+		return 1
+	}
 	req, err := readSignInRequest(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -171,9 +177,20 @@ func signInSessionProof(sess session.Session) *idpkg.SignInSessionProof {
 }
 
 // readSignInRequest accepts the wire code, raw JSON, a poweur:// deep link,
-// a web-signer URL, a local file, or an HTTP endpoint returning any of those.
+// a web-signer URL, a local file, or a request by reference (E08-T6): the
+// RP's short link (what its QR shows), fetched and required to live at the
+// request's own audience.
 func readSignInRequest(source string) (idpkg.SignInRequest, error) {
 	value := strings.TrimSpace(source)
+	if ref, ok := idpkg.SignInRequestURI(value); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, req, err := idpkg.FetchSignInRequest(ctx, &http.Client{
+			Timeout:       10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}, ref)
+		return req, err
+	}
 	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
 		for _, key := range []string{"request", "auth"} {
 			if encoded := strings.TrimSpace(u.Query().Get(key)); encoded != "" {
@@ -184,21 +201,7 @@ func readSignInRequest(source string) (idpkg.SignInRequest, error) {
 	if req, err := idpkg.DecodeSignInRequest(value); err == nil {
 		return req, nil
 	}
-	var raw []byte
-	var err error
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
-		resp, getErr := (&http.Client{Timeout: 10 * time.Second}).Get(value)
-		if getErr != nil {
-			return idpkg.SignInRequest{}, getErr
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return idpkg.SignInRequest{}, fmt.Errorf("request fetch failed with status %d", resp.StatusCode)
-		}
-		raw, err = io.ReadAll(io.LimitReader(resp.Body, idpkg.MaxDocumentBytes+1))
-	} else {
-		raw, err = os.ReadFile(value)
-	}
+	raw, err := os.ReadFile(value)
 	if err != nil {
 		return idpkg.SignInRequest{}, err
 	}

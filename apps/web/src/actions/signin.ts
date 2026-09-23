@@ -1,4 +1,5 @@
 /** Approving a third-party sign-in request (EPIC-008), ported from app.js. */
+import { signInRequestUri } from "@poweur/client";
 import { signInCodeFromInput } from "../lib/app-link";
 import { clientFor } from "../lib/client.js";
 import {
@@ -33,6 +34,9 @@ export function resetSignInRequest() {
 /** Verify a pasted request code, or a poweur:// link reduced to that code. */
 export async function beginSignInApproval(input: string, { requireCode = false } = {}) {
   const value = signInCodeFromInput(input);
+  // A request by reference is what a QR or a copied link carries: the screen
+  // that started the sign-in is elsewhere, so its code is required (E08-T6).
+  requireCode = requireCode || Boolean(signInRequestUri(value));
   patchAuth({ input: value, loading: true, error: "", result: null, requireCode });
   useRoute.setState({ sub: "auth" });
   try {

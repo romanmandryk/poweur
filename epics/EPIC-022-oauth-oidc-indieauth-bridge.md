@@ -18,7 +18,7 @@
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
 | E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy, Keycloak and Authentik verified live; `poweur_proof` deferred |
 | E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer; create-an-ID funnel on the sign-in page |
-| E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
+| E22-T5 Cross-device QR journey | **done** | QR + match code + bound poll + initiator context; the QR is a short link (E08-T6) that a phone's own camera opens into a handoff page — no in-app scanner needed |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
 | E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite, live IndieAuth clients, contacts open |

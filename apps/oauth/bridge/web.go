@@ -156,10 +156,13 @@ type awaitPage struct {
 	Client   *appRef      `json:"client,omitempty"`
 	Signers  []signerPage `json:"signers"`
 	DeepLink string       `json:"deepLink,omitempty"`
-	Request  string       `json:"request"`
-	Match    string       `json:"match"`
-	QR       string       `json:"qr"`
-	Push     *pushPage    `json:"push,omitempty"`
+	// Request is the short link to the request (E08-T6): what the QR shows
+	// and "copy" copies. The whole request stays in the deep link and the
+	// web signer links, which are clicked, not scanned.
+	Request string    `json:"request"`
+	Match   string    `json:"match"`
+	QR      string    `json:"qr"`
+	Push    *pushPage `json:"push,omitempty"`
 }
 
 type consentClient struct {
@@ -276,6 +279,8 @@ func (s *Server) pageFor(name string, data any) any {
 			return contactPage{Contact: v}
 		}
 		return messagePage{Message: v}
+	case handoffPage:
+		return v
 	case identifyView:
 		return identifyPage{Txn: v.Txn.ID, Client: appRefOf(v.Client), Hint: v.Hint, Error: v.Error, Launcher: v.Launcher}
 	case awaitView:

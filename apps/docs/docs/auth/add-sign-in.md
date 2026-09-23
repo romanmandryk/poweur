@@ -200,7 +200,10 @@ exchange, revocation and the threat model.
   statement, an unresolvable name, an expired window.
 - `apps/integration/signin_test.go` drives the whole thing against a real relay and real
   hosted identities.
-- To approve from a terminal while developing: `poweur auth approve <request>`.
+- To approve from a terminal while developing: `poweur auth approve <request>` — or
+  `poweur auth approve <short link> --code <digits>` for a
+  [request by reference](./sign-in.md#requests-by-reference), which always needs the code on the
+  screen that started the sign-in.
 
 ## Frequently asked
 

@@ -46,7 +46,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <section id="auth">
   <button id="signin">Sign in with Poweur ID</button>
   <div id="pending" hidden>
-    <p>Approve on this device, or open this on your phone:</p>
+    <p>Approve on this device, or open this link on your phone:</p>
     <p id="approve"></p>
     <p>Approving on another device? It will ask for this code:
        <strong id="match" class="match"></strong></p>
@@ -97,8 +97,9 @@ $("signin").addEventListener("click", async () => {
   const start = await j("/auth/start", { method: "POST" });
   $("pending").hidden = false;
   const a = document.createElement("a");
-  a.href = start.web_link;
-  a.textContent = start.web_link;
+  // The short link, not the whole request: something a person can read out.
+  a.href = start.request_link;
+  a.textContent = start.request_link;
   $("approve").replaceChildren(a);
   $("match").textContent = start.match_code;
   if (start.consent?.length) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/poweur/identity"
 	"strings"
 	"time"
 
@@ -155,6 +156,12 @@ var migrations = []string{
 		data      TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS signins_identity ON signins(identity, at)`,
+	// Short codes for requests by reference (E08-T6): /r/{code}.
+	`CREATE TABLE IF NOT EXISTS request_codes (
+		code       TEXT PRIMARY KEY,
+		txn_id     TEXT NOT NULL,
+		expires_at INTEGER NOT NULL
+	)`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -215,6 +222,37 @@ func (s *Store) TxnIDByRequest(ctx context.Context, requestID string) (string, e
 		return "", err
 	}
 	return t.ID, nil
+}
+
+// NewRequestCode gives a transaction's current request a short code, unique
+// among live ones.
+func (s *Store) NewRequestCode(ctx context.Context, txnID string, expiresAt time.Time) (string, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		code, err := identity.NewShortCode()
+		if err != nil {
+			return "", err
+		}
+		res, err := s.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO request_codes(code, txn_id, expires_at) VALUES(?, ?, ?)`, code, txnID, unix(expiresAt))
+		if err != nil {
+			return "", err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			return code, nil
+		}
+	}
+	return "", errors.New("could not allocate a request code")
+}
+
+// TxnIDByRequestCode finds the transaction a short code was issued for.
+func (s *Store) TxnIDByRequestCode(ctx context.Context, code string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT txn_id FROM request_codes WHERE code = ? AND expires_at > ?`,
+		code, unix(s.now())).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
 }
 
 // TxnIDByResume finds the transaction a resume code belongs to.
@@ -489,6 +527,7 @@ func (s *Store) Prune(ctx context.Context, r Retention) error {
 		arg int64
 	}{
 		{`DELETE FROM transactions WHERE expires_at <= ?`, unix(now)},
+		{`DELETE FROM request_codes WHERE expires_at <= ?`, unix(now)},
 		{`DELETE FROM nonces WHERE expires_at <= ?`, unix(now)},
 		{`DELETE FROM sessions WHERE expires_at <= ?`, unix(now)},
 		{`DELETE FROM codes WHERE expires_at <= ?`, unix(now.Add(-time.Hour))},
