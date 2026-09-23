@@ -1,0 +1,11 @@
+# The bridge image needs only its own module and the identity package it
+# replaces in (BuildKit reads this file instead of the root .dockerignore,
+# which is the relay's).
+*
+!packages/identity/**
+!apps/oauth/**
+
+# Never send local environment secrets to the image builder.
+**/.env
+**/.env.*
+apps/oauth/deploy
