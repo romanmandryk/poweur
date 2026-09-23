@@ -8,6 +8,13 @@
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
   <title>Poweur ID</title>
+  <!-- Icons live in public/: Vite copies them to the build root and rewrites
+       these root paths against base "./", so they stay relative for
+       capacitor://localhost/ (checked by apps/mobile/test/stage.test.mjs). -->
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <!-- Apply the saved theme before first paint, so dark mode does not flash
        white (`poweur:theme` is shared with the legacy app at /app/). -->
   <script>
