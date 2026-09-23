@@ -385,8 +385,9 @@ browser/QR login is unchanged.
 - [x] `/metrics` on a private listener (`OAUTH_METRICS_ADDR`): requests and latency by route
       pattern, rate-limit refusals, one counter per audit event; no identities or addresses in
       labels; sample alerting rules in `apps/oauth/deploy/alerts.yml`
-- [x] Registration defaults to `closed` (`open` is an explicit operator choice); the hosted
-      bridge launches `allowlist`
+- [x] Registration defaults to `open` — any signed-in Poweur ID registers applications, which
+      is what the hosted bridge is for; `allowlist` and `closed` remain for deployments that
+      serve only their own applications
 - [x] `/privacy` (what is kept and for how long, from the running config), `/security`
       (disclosure contact, incident steps) and an expanded `/abuse`, linked in the footer
 - [x] Per-IP rate limits on authorize/login, identify, callback, token-family and console
@@ -407,8 +408,8 @@ browser/QR login is unchanged.
       route, Prometheus scrape + `blackbox-oauth` probe, Grafana alerts (`oauth-down`,
       `oauth-code-reuse`, `oauth-server-errors`), daily `poweur-oauth backup` cron; the relay
       advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/OPS.md`
-- [ ] Contacts on `/abuse` and `/security`, and the first registration allowlist entry — need a
-      mailbox and the operator's Poweur ID
+- [ ] Contacts on `/abuse` and `/security` — wait on the email bridge (`<name>@poweur.id`
+      mailboxes)
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
 **Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live

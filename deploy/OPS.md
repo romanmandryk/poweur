@@ -96,7 +96,7 @@ The bridge (`apps/oauth`, EPIC-022) runs on the same VM as its own Compose proje
 | Variable | |
 |---|---|
 | `OAUTH_KEY_ENCRYPTION_KEY` | 32 bytes, base64 (`poweur-oauth gen-key`). Seals the signing keys. **Lose it and the bridge cannot sign; every application must be reconfigured.** |
-| `OAUTH_REGISTRATION_ALLOWLIST` | Poweur IDs (or `*.domain`) that may register applications at `/developers`. Empty: nobody. |
+| `OAUTH_CLIENT_REGISTRATION`, `OAUTH_REGISTRATION_ALLOWLIST` | Optional. Registration is `open` (any Poweur ID) unless set to `allowlist` (with a CSV of IDs or `*.domain`) or `closed`. |
 | `OAUTH_ABUSE_CONTACT`, `OAUTH_SECURITY_CONTACT` | Published on `/abuse`, `/privacy`, `/security`. |
 
 After editing it: `cd /opt/apps/poweur-oauth && OAUTH_IMAGE=$(docker inspect -f '{{.Config.Image}}' poweur-oauth) docker compose -p poweur-oauth up -d`.

@@ -389,11 +389,12 @@ every consent page, and operator suspension (`poweur-oauth clients suspend`). Op
 the posture:
 
 ```
-OAUTH_CLIENT_REGISTRATION = closed (default) | allowlist | open
+OAUTH_CLIENT_REGISTRATION = open (default) | allowlist | closed
 ```
 
-The hosted `oauth.poweur.org` launches `allowlist` and opens up once abuse handling has been
-exercised; a company bridge usually runs `closed` with static clients only.
+The hosted `oauth.poweur.org` is `open`: anyone with a Poweur ID can connect an application,
+which is the point of a public bridge. A company bridge usually runs `closed` with static
+clients only, or `allowlist` for its own domain.
 
 ### 2. Static clients — operator configuration
 
@@ -489,9 +490,10 @@ configuration**, not web UI — `poweur-oauth keys rotate`, `poweur-oauth client
 A web admin surface is one more authenticated attack surface on the most sensitive service an
 operator runs; v1 does without it (E22-T8 packages the commands).
 
-Client registration defaults to **closed**: `open` lets any Poweur ID publish a consent page
-under the operator's issuer, which is a phishing surface an operator should choose knowingly.
-The hosted bridge starts `allowlist`.
+Client registration defaults to **open**. What keeps that from being a free phishing kit is
+on the consent page and in the operator's hands: it names the Poweur ID that registered the
+application and says nobody reviewed it, every page links to a report form, creation is
+rate-limited per owner, and `clients suspend` stops an application at once.
 
 Production also gets: `/health`, which answers 503 unless the database reads and a signing key
 is loaded; `GET /metrics` on a private listener (`OAUTH_METRICS_ADDR`) with per-route request,

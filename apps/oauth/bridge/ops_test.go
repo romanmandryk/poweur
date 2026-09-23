@@ -61,7 +61,7 @@ func TestPolicyPagesStateTheRunningConfig(t *testing.T) {
 	}
 }
 
-func TestRegistrationIsClosedUnlessChosen(t *testing.T) {
+func TestRegistrationIsOpenUnlessChosen(t *testing.T) {
 	store, _ := OpenStore(context.Background(), ":memory:")
 	defer store.Close()
 	keys, _ := NewMemoryKeyRing(nil)
@@ -69,7 +69,7 @@ func TestRegistrationIsClosedUnlessChosen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if srv.cfg.ClientRegistration != RegistrationClosed {
+	if srv.cfg.ClientRegistration != RegistrationOpen {
 		t.Fatalf("default registration = %q", srv.cfg.ClientRegistration)
 	}
 	if srv.cfg.SecurityContact != "a@x.example" {
