@@ -23,6 +23,7 @@
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
 | E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite, live IndieAuth clients, contacts open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
+| E22-T10 Bridge UI: React, device-aware, fewer words | **done** | Go keeps routes and security; React renders each page's data; desktop leads with another device |
 
 ## Goal
 
@@ -440,6 +441,44 @@ Three ways a client reaches the bridge, one registry interface, specified in the
 **Acceptance:** met: a console client signs in a user from another identity and redeems with its
 secret; URL clients sign in without registration; revoking from `/account` kills tokens and
 brings consent back.
+
+### E22-T10 — Bridge UI: React, device-aware, fewer words — **done**
+
+The first UI was server-rendered `html/template` pages: correct, but text-heavy, and on a
+desktop it led with "open the Poweur app on this device" while the way that works there — a
+phone — sat in a collapsed section further down. The landing page listed links instead of
+saying what to do.
+
+**Rendering.** Go keeps every route, redirect, cookie, same-origin check and error: each page
+response is the built `index.html` with the page's view model embedded as
+`<script type="application/json" id="poweur-page">` — a data block, not executable, so the CSP
+stays `script-src 'self'`. React renders it with the web app's stack and design tokens
+(React 19, Tailwind 4, lucide). Forms still POST to the same endpoints; the live parts
+(approval status, push, name availability, copy) use JSON endpoints. Not a client-routed SPA
+and not server-side React: the OAuth flow is a chain of server redirects, and the bridge stays
+one Go binary with its assets embedded, no Node in production. Pages need JavaScript, as the
+web signer does; `<noscript>` says so.
+
+**Flow.**
+- Landing, signed out: what it is in one line and **Sign in** — everything else is behind it.
+  Signed in: actions — your authorized apps, the developer console, recent sign-ins, sign out.
+- Approve step, **desktop**: approve on your phone first — QR, the code to type, *Send to my
+  Poweur app* when available; *use this browser* second (it works only if its keys are here).
+  Never "open the app on this device". **Phone**: the app and this browser first; another
+  device second.
+- One sentence of explanation per screen at most; details behind disclosure.
+
+- [x] UI package `apps/oauth/ui` (`@poweur/oauth-ui`), tokens and primitives matching `apps/web`
+- [x] Go: page payloads (`bridge/web.go`: explicit shapes per page, no binding/resume or secret
+      hashes), embedded build, `/assets/*` immutable, JSON push answer; a plain fallback page
+      when the UI was not built (Go tests do not need Node)
+- [x] Pages: landing (signed out / in), sign-in + create-an-ID, approve (device-aware),
+      consent, account, developer console (list, new, detail), privacy/security/abuse, errors
+- [x] Image builds the UI (Node stage); CI builds it before the e2e journeys; `dev.sh` too
+- [x] Go tests read page data (a guard fails any untagged field); escaping of hostile text in the
+      data block; Playwright journeys updated plus `oauth-bridge-pages.spec.js` (landing both
+      ways, console registration, phone vs. desktop approve); reviewed in desktop and phone,
+      light and dark. Bridge 0.1.6
 
 ## Non-goals
 

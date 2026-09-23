@@ -17,20 +17,17 @@ func TestIdentifyPageOffersToCreateAnID(t *testing.T) {
 	h := newHarness(t, withLauncher("https://id.poweur.net/", ""))
 	b := h.browser()
 	p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid")))
-	for _, want := range []string{
-		"Don't have a Poweur ID?",
-		`data-launcher="https://id.poweur.net"`,
-		`data-domain="poweur.net"`, // "id." dropped
-		`<span class="suffix">.poweur.net</span>`,
-		`href="https://id.poweur.net/app/?from=signin"`,
-		`target="_blank" rel="noopener"`,
-		"Relying Party signs you in with a Poweur ID instead of a password",
-		"Create a Poweur ID at id.poweur.net",
-		"/creating",
-	} {
-		if !strings.Contains(p.body, want) {
-			t.Errorf("identify page lacks %q", want)
-		}
+	var ip identifyPage
+	p.data(t, &ip)
+	// The keys the page reads (apps/oauth/ui/src/lib/page.ts).
+	if !strings.Contains(string(p.shown().Data), `"launcher":{"url":"https://id.poweur.net","domain":"poweur.net","host":"id.poweur.net"}`) {
+		t.Errorf("launcher JSON = %s", p.shown().Data)
+	}
+	if ip.Launcher == nil || *ip.Launcher != (launcherView{URL: "https://id.poweur.net", Domain: "poweur.net", Host: "id.poweur.net"}) {
+		t.Errorf("launcher = %+v (want the origin, with \"id.\" dropped for the domain)", ip.Launcher)
+	}
+	if ip.Client == nil || ip.Client.Name != "Relying Party" || ip.Client.Host != "rp.example" {
+		t.Errorf("client = %+v", ip.Client)
 	}
 	if csp := p.header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self' https://id.poweur.net;") {
 		t.Errorf("CSP = %q", csp)
@@ -41,7 +38,8 @@ func TestNoLauncherNoOffer(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid")))
-	if strings.Contains(p.body, "data-create") || strings.Contains(p.body, "have a Poweur ID") {
+	var ip identifyPage
+	if p.data(t, &ip); ip.Launcher != nil {
 		t.Fatal("offer shown without a launcher")
 	}
 	if csp := p.header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self';") {
@@ -110,14 +108,5 @@ func TestCreatingRefusals(t *testing.T) {
 	owner.post("/t/"+id+"/cancel", url.Values{})
 	if p := owner.post("/t/"+id+"/creating", url.Values{}); p.status == http.StatusOK {
 		t.Errorf("cancelled transaction extended: %s", p.body)
-	}
-}
-
-func TestWhyNamesTheApplication(t *testing.T) {
-	if got := whyPoweur(&Txn{}); !strings.HasPrefix(got, "This site signs you in") {
-		t.Fatal(got)
-	}
-	if got := whyPoweur(&Txn{Authorize: &AuthorizeRequest{ClientName: "Grafana"}}); !strings.HasPrefix(got, "Grafana signs you in") {
-		t.Fatal(got)
 	}
 }

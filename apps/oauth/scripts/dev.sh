@@ -12,6 +12,9 @@ root=$(cd "$(dirname "$0")/../../.." && pwd)
 data=${POWEUR_OAUTH_DEV_DATA:-${TMPDIR:-/tmp}/poweur-oauth-dev}
 mkdir -p "$data"
 [ -s "$data/kek" ] || (cd "$root/apps/oauth" && go run ./cmd/poweur-oauth gen-key > "$data/kek")
+# The pages are embedded at compile time (apps/oauth/ui). While editing them,
+# run `pnpm --filter @poweur/oauth-ui watch` beside this and restart it.
+(cd "$root" && pnpm --filter @poweur/oauth-ui build >/dev/null)
 
 cat > "$data/clients.json" <<JSON
 {"clients":[{"client_id":"demo","client_name":"Demo application",

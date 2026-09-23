@@ -1,51 +1,38 @@
 package bridge
 
 import (
-	"embed"
-	"html/template"
 	"net/http"
-	"slices"
+	"net/url"
 	"strings"
 
 	"github.com/poweur/identity"
 )
 
-//go:embed templates/*.html static/*
-var assets embed.FS
-
-var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"has":  func(list []string, v string) bool { return slices.Contains(list, v) },
-	"join": strings.Join,
-}).ParseFS(assets, "templates/*.html"))
-
-// pageData is what every template gets.
-type pageData struct {
-	Name    string
-	Title   string
-	Session *BrowserSession
-	Issuer  string
-	Contact string
-	Message string
-	Data    any
-	Refresh bool
-	NoIndex bool
+// render answers with a page: its name is the template name the handlers
+// have always used ("consent.html"), its data their view, which pageFor
+// narrows to what the page may show.
+func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, tmpl, title string, data any) {
+	name := strings.TrimSuffix(tmpl, ".html")
+	p := pagePayload{
+		Page:    name,
+		Title:   title,
+		Service: serviceInfo{Name: s.cfg.Name, Issuer: s.cfg.Issuer, Contact: s.cfg.ContactURI},
+		Data:    s.pageFor(name, data),
+	}
+	if sess, _ := s.currentSession(r); sess != nil {
+		p.Session = &sessionInfo{Identity: sess.Identity}
+	}
+	if err := writePage(w, status, p); err != nil {
+		s.log.Error("render", "page", name, "err", err)
+	}
 }
 
-func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, tmpl, title string, data any) {
-	sess, _ := s.currentSession(r)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	if err := pages.ExecuteTemplate(w, tmpl, pageData{
-		Name:    s.cfg.Name,
-		Title:   title,
-		Session: sess,
-		Issuer:  s.cfg.Issuer,
-		Contact: s.cfg.ContactURI,
-		Data:    data,
-	}); err != nil {
-		s.log.Error("render", "template", tmpl, "err", err)
+func urlHost(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
 	}
+	return u.Hostname(), nil
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, message string) {
@@ -66,33 +53,30 @@ type identifyView struct {
 	Error    string
 	Client   *AuthorizeRequest
 	Launcher *launcherView
-	Why      string
 }
 
 func (s *Server) renderIdentify(w http.ResponseWriter, r *http.Request, t *Txn, message string, status int) {
 	s.render(w, r, status, "identify.html", "Sign in with your Poweur ID", identifyView{
 		Txn: t, Hint: t.LoginHint, Error: message, Client: t.Authorize,
 		Launcher: s.launcherView(),
-		Why:      whyPoweur(t),
 	})
 }
 
 type signerLink struct {
-	Label string
-	Href  string
-	Note  string
+	Label   string
+	Href    string
+	Note    string
+	Default bool
 }
 
 type awaitView struct {
-	Txn     *Txn
-	Signers []signerLink
-	// DeepLink is built here from our own request; html/template would
-	// otherwise refuse the poweur: scheme.
-	DeepLink template.URL
+	Txn      *Txn
+	Signers  []signerLink
+	DeepLink string
 	Request  string
 	Match    string
 	Client   *AuthorizeRequest
-	QR       template.HTML
+	QR       string
 	// Push is set when the bridge can send the request to the user's app.
 	Push       bool
 	PushFrom   string
@@ -112,11 +96,11 @@ func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
 		if err != nil {
 			continue
 		}
-		v.Signers = append(v.Signers, signerLink{Label: sg.Label, Href: link, Note: sg.Note})
+		v.Signers = append(v.Signers, signerLink{Label: sg.Label, Href: link, Note: sg.Note, Default: sg.Default})
 	}
 	deep, _ := identity.SignInDeepLink(req)
 	if strings.HasPrefix(deep, "poweur://auth?") {
-		v.DeepLink = template.URL(deep)
+		v.DeepLink = deep
 	}
 	v.QR = qrSVG(deep)
 	v.Push = s.cfg.Pusher != nil && t.Pushes < maxPushesPerTxn
@@ -158,34 +142,16 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, t *Txn, c
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "home.html", s.cfg.Name, nil)
-}
-
-func (s *Server) handleCSS(w http.ResponseWriter, r *http.Request) {
-	s.serveAsset(w, "static/bridge.css", "text/css; charset=utf-8")
-}
-
-func (s *Server) handleJS(w http.ResponseWriter, r *http.Request) {
-	s.serveAsset(w, "static/bridge.js", "text/javascript; charset=utf-8")
-}
-
-func (s *Server) serveAsset(w http.ResponseWriter, name, contentType string) {
-	raw, err := assets.ReadFile(name)
-	if err != nil {
-		http.NotFound(w, nil)
-		return
+	v := homeView{Launcher: s.launcherView()}
+	if sess, _ := s.currentSession(r); sess != nil {
+		ctx := r.Context()
+		if consents, err := s.store.ListConsents(ctx, sess.Identity); err == nil {
+			v.Apps = len(consents)
+		}
+		if clients, err := s.store.ClientsOwnedBy(ctx, sess.Identity); err == nil {
+			v.Clients = len(clients)
+		}
+		v.CanRegister, _ = s.canRegister(sess.Identity)
 	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = w.Write(raw)
-}
-
-// whyPoweur is the one-line answer to "why do I need this?".
-func whyPoweur(t *Txn) string {
-	app := "This site"
-	if t.Authorize != nil && t.Authorize.ClientName != "" {
-		app = t.Authorize.ClientName
-	}
-	return app + " signs you in with a Poweur ID instead of a password: a name you own, " +
-		"confirmed with a key that never leaves your device. The same ID works anywhere Poweur ID is accepted."
+	s.render(w, r, http.StatusOK, "home.html", s.cfg.Name, v)
 }

@@ -50,10 +50,11 @@ func TestIndieAuthLoginWithPublishedMetadata(t *testing.T) {
 	b := h.browser()
 
 	id, p := b.signIn(indieAuthQuery(iaClient, iaRedirect, "profile", "me", "https://alice.poweur.net/"), h.users[alice])
-	for _, want := range []string{"Allow Example Notes?", "notes.example", "verified host", "IndieAuth sign-in always shares it", "public profile"} {
-		if !strings.Contains(p.body, want) {
-			t.Errorf("IndieAuth consent lacks %q", want)
-		}
+	var cp consentPage
+	p.data(t, &cp)
+	if p.shown().Title != "Allow Example Notes?" || cp.Client.Host != "notes.example" || !cp.Client.VerifiedHost ||
+		!cp.IndieAuth || cp.ProfileURL != "https://alice.poweur.net/" || len(cp.Optional) != 1 || cp.Optional[0] != ScopeProfile {
+		t.Errorf("IndieAuth consent = %q %+v", p.shown().Title, cp)
 	}
 	if strings.Contains(p.body, "cdn.elsewhere.example") {
 		t.Error("an off-origin logo was accepted")
@@ -90,7 +91,8 @@ func TestIndieAuthTokenEndpointAndMeHint(t *testing.T) {
 	b := h.browser()
 	// `me` names bob; alice signs in. IndieAuth returns who actually did.
 	id := b.identify(indieAuthQuery(iaClient, iaRedirect, "", "me", "bob.poweur.net"), h.users[alice])
-	if !strings.Contains(b.get("/t/"+id+"?change=1").body, `value="alice.poweur.net"`) {
+	var ip identifyPage
+	if b.get("/t/"+id+"?change=1").data(t, &ip); ip.Hint != "alice.poweur.net" {
 		t.Fatal("identify page should show the ID typed, not the hint, after identify")
 	}
 	_, receipt := h.deliver(h.approve(id, h.users[alice]), "")

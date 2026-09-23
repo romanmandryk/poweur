@@ -28,8 +28,10 @@ go test ./apps/api/...
 # CLI
 go test ./apps/cli/...
 
-# OAuth/OIDC bridge (EPIC-022)
+# OAuth/OIDC bridge (EPIC-022). Its pages are React (apps/oauth/ui), embedded
+# at compile time; Go tests pass without them, e2e and the image build them.
 go test ./apps/oauth/...
+pnpm --filter @poweur/oauth-ui build
 ```
 
 ### Integration tests (CLI / Go)
@@ -175,6 +177,7 @@ apps/api          Go relay
 apps/cli          Go CLI
 apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
 apps/oauth        OAuth 2.0 / OIDC / IndieAuth bridge (EPIC-022), a separate service
+apps/oauth/ui     its pages: React + Tailwind (web app tokens), embedded into the Go binary
 apps/integration  In-process E2E tests
 packages/identity Shared identity document + resolver (Go, canonical)
 packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/poweur/identity"
@@ -33,6 +34,10 @@ const (
 // handlePush sends the pending request to the user's app. It is a
 // notification only: approving still takes the code on this screen, and the
 // recipient's relay drops it unless they listed this bridge.
+//
+// The page calls it with Accept: application/json and gets
+// {"notice": sent|too-soon|too-many|failed|closed, "left": n}; a plain form
+// post is sent back to the page.
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	if !s.sameOriginPost(r) {
 		s.renderError(w, r, http.StatusForbidden, "That request did not come from this site.")
@@ -49,7 +54,15 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 	now := s.now()
 	id := t.ID
+	sent := t.Pushes
 	back := func(notice string) {
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			if notice == "not-pending" {
+				notice = "closed"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"notice": notice, "left": max(0, maxPushesPerTxn-sent)})
+			return
+		}
 		http.Redirect(w, r, "/t/"+id+"?push="+url.QueryEscape(notice), http.StatusSeeOther)
 	}
 	var send bool
@@ -67,6 +80,7 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		}
 		t.Pushes++
 		t.LastPush = now
+		sent = t.Pushes
 		send = true
 		return nil
 	})

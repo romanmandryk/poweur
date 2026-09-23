@@ -135,6 +135,10 @@ jobs:
       - run: pnpm web:test
       - run: pnpm web
 
+      # The OAuth bridge embeds its pages (apps/oauth/ui) at compile time; the
+      # oauth-bridge specs `go run` it, so build the pages first.
+      - run: pnpm --filter @poweur/oauth-ui build
+
       # Playwright drives the built app at /app/ on a real Go relay — the same
       # tree the image serves and the Capacitor shell stages. oauth-bridge.spec
       # also starts the OAuth bridge (`go run ./apps/oauth/cmd/poweur-oauth`).

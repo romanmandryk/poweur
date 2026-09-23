@@ -243,6 +243,64 @@ func (b *browser) do(method, path string, form url.Values) page {
 	return page{status: resp.StatusCode, body: string(raw), location: resp.Header.Get("Location"), header: resp.Header}
 }
 
+// shownPage is the page a response carries: web.go's data block.
+type shownPage struct {
+	Page    string          `json:"page"`
+	Title   string          `json:"title"`
+	Session *sessionInfo    `json:"session"`
+	Data    json.RawMessage `json:"data"`
+}
+
+var untaggedKey = regexp.MustCompile(`"[A-Z][A-Za-z0-9]*":`)
+
+var pageBlock = regexp.MustCompile(`<script type="application/json" id="poweur-page">(.*?)</script>`)
+
+// shown decodes the page data; the zero value when the response is no page.
+func (p page) shown() shownPage {
+	var out shownPage
+	if m := pageBlock.FindStringSubmatch(p.body); m != nil {
+		_ = json.Unmarshal([]byte(m[1]), &out)
+	}
+	return out
+}
+
+// is reports whether the response is the named page.
+func (p page) is(name string) bool { return p.shown().Page == name }
+
+// data decodes the page's data into v.
+func (p page) data(t *testing.T, v any) {
+	t.Helper()
+	sp := p.shown()
+	if sp.Page == "" {
+		t.Fatalf("not a page: %d %s", p.status, p.body)
+	}
+	// Every key is the page's contract (apps/oauth/ui/src/lib/page.ts); an
+	// exported Go field without a json tag would arrive capitalised.
+	if m := untaggedKey.FindString(string(sp.Data)); m != "" {
+		t.Fatalf("page %s data has an untagged field %s: %s", sp.Page, m, sp.Data)
+	}
+	if err := json.Unmarshal(sp.Data, v); err != nil {
+		t.Fatalf("page %s data: %v", sp.Page, err)
+	}
+}
+
+// fetchJSON posts like the pages' own scripts do: same origin, JSON wanted.
+func (b *browser) fetchJSON(path string, out any) int {
+	b.h.t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, b.h.issuer+path, nil)
+	req.Header.Set("Origin", b.h.issuer)
+	req.Header.Set("Accept", "application/json")
+	resp, err := b.client.Do(req)
+	if err != nil {
+		b.h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		b.h.t.Fatalf("%s: %v", path, err)
+	}
+	return resp.StatusCode
+}
+
 func (b *browser) get(path string) page                   { return b.do(http.MethodGet, path, nil) }
 func (b *browser) post(path string, form url.Values) page { return b.do(http.MethodPost, path, form) }
 
@@ -260,10 +318,15 @@ func (b *browser) follow(p page) page {
 }
 
 var txnPath = regexp.MustCompile(`/t/([A-Za-z0-9_-]{43})`)
+var txnField = regexp.MustCompile(`"txn":"([A-Za-z0-9_-]{43})"`)
 
 func txnIDFrom(t *testing.T, s string) string {
 	t.Helper()
 	m := txnPath.FindStringSubmatch(s)
+	if m == nil {
+		// A page carries its transaction in its data.
+		m = txnField.FindStringSubmatch(s)
+	}
 	if m == nil {
 		t.Fatalf("no transaction id in %q", s)
 	}
@@ -359,7 +422,7 @@ func (b *browser) signIn(authorizePath string, u user) (string, page) {
 	}
 	id := txnIDFrom(b.h.t, p.location)
 	p = b.follow(p)
-	if !strings.Contains(p.body, `name="identity"`) {
+	if !p.is("identify") {
 		b.h.t.Fatalf("expected the identify page, got %d %s", p.status, p.body)
 	}
 	p = b.post("/t/"+id+"/identify", url.Values{"identity": {u.id}})
@@ -468,7 +531,7 @@ func (h *harness) idClaims(token string) map[string]any {
 func (h *harness) fullFlow(b *browser, u user, scope string, release ...string) tokenResult {
 	h.t.Helper()
 	id, p := b.signIn(authorizeQuery("rp", rpRedirect, scope), u)
-	if strings.Contains(p.body, `action="/t/`+id+`/consent"`) {
+	if p.is("consent") {
 		p = b.consent(id, release...)
 	}
 	code := h.codeFrom(p, rpRedirect)

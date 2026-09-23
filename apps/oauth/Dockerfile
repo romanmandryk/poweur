@@ -1,10 +1,21 @@
 # The Poweur OAuth/OIDC bridge (EPIC-022). Built from the repo root, because
 # packages/identity is a replace-path sibling:
 #   docker build -f apps/oauth/Dockerfile -t poweur-oauth .
+# The pages (apps/oauth/ui, React) are built first: the Go binary embeds
+# them. Production has no Node; it only pulls this image.
+FROM node:22-alpine AS ui
+RUN npm install -g pnpm@10
+WORKDIR /src
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/oauth/ui ./apps/oauth/ui
+RUN pnpm install --frozen-lockfile --filter @poweur/oauth-ui...
+RUN pnpm --filter @poweur/oauth-ui build
+
 FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/oauth ./apps/oauth
+COPY --from=ui /src/apps/oauth/bridge/web/dist ./apps/oauth/bridge/web/dist
 WORKDIR /src/apps/oauth
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /poweur-oauth ./cmd/poweur-oauth
 

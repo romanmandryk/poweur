@@ -29,8 +29,9 @@ test.describe("OAuth bridge: create an ID mid-sign-in", () => {
     await stubPasskeys(page);
     const { verifier, challenge } = pkce();
     await page.goto(authorizeURL(bridge, rp, { challenge }));
-    await expect(page.locator("#create-id-section h2")).toHaveText("Don't have a Poweur ID?");
-    await expect(page.locator("#create-id-section")).toContainText("E2E application signs you in with a Poweur ID");
+    await expect(page.locator("#identify-title")).toHaveText("Sign in to E2E application");
+    await page.click("#create-open");
+    await expect(page.locator("#create-id-section h2")).toHaveText("Create a Poweur ID");
 
     // A taken-looking name is refused; a fresh one is offered.
     await page.fill("#new-handle", "admin");
@@ -59,12 +60,12 @@ test.describe("OAuth bridge: create an ID mid-sign-in", () => {
     // Back in the sign-in tab: it noticed, and the ID is filled in.
     await page.bringToFront();
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(page.locator("#created-ready")).toHaveText("newcomer.poweur.net is ready — continue to sign in with it.", {
+    await expect(page.locator("#created-ready")).toHaveText("newcomer.poweur.net is ready — continue to sign in.", {
       timeout: 30_000,
     });
     await expect(page.locator("#identity")).toHaveValue("newcomer.poweur.net");
-    await page.click("form.stack button.primary");
-    await expect(page.locator("h1")).toHaveText("Approve as newcomer.poweur.net");
+    await page.click("#identify-continue");
+    await expect(page.locator("#approve-identity")).toHaveText("newcomer.poweur.net");
 
     // The new ID approves in the launcher tab, where its keys are.
     await page.click(`a:has-text("Continue at ${relay.addr}")`);

@@ -212,7 +212,7 @@ func TestPrivateKeyJWTClient(t *testing.T) {
 	b := h.browser()
 	newCode := func() string {
 		id, p := b.signIn(authorizeQuery("jwt", "https://jwt.example/cb", "openid", "prompt", "login"), h.users[alice])
-		if strings.Contains(p.body, "/consent") {
+		if p.is("consent") {
 			p = b.consent(id)
 		}
 		return h.codeFrom(p, "https://jwt.example/cb")

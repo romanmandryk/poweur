@@ -43,13 +43,18 @@ func TestPushSendsAPromptAndStillNeedsTheCode(t *testing.T) {
 	})
 	b := h.browser()
 	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
-	if p := b.get("/t/" + id); !strings.Contains(p.body, "Send to my Poweur app") || !strings.Contains(p.body, "bridge.poweur.org") {
-		t.Fatal("no push button")
+	var ap awaitPage
+	if b.get("/t/"+id).data(t, &ap); ap.Push == nil || *ap.Push != (pushPage{From: "bridge.poweur.org", Sent: 0, Left: maxPushesPerTxn}) {
+		t.Fatalf("push offer = %+v", ap.Push)
 	}
 
-	p := b.post("/t/"+id+"/push", url.Values{})
-	if p.status != http.StatusSeeOther || !strings.HasSuffix(p.location, "push=sent") {
-		t.Fatalf("push = %d %s", p.status, p.location)
+	type answer struct {
+		Notice string `json:"notice"`
+		Left   int    `json:"left"`
+	}
+	var got answer
+	if status := b.fetchJSON("/t/"+id+"/push", &got); status != http.StatusOK || got != (answer{"sent", maxPushesPerTxn - 1}) {
+		t.Fatalf("push = %d %+v", status, got)
 	}
 	if len(rec.sent) != 1 || rec.sent[0].to != alice {
 		t.Fatalf("sent = %+v", rec.sent)
@@ -68,23 +73,22 @@ func TestPushSendsAPromptAndStillNeedsTheCode(t *testing.T) {
 	if !rec.sent[0].expires.Equal(txn.RequestExpires) {
 		t.Fatalf("prompt expiry %v, request %v", rec.sent[0].expires, txn.RequestExpires)
 	}
-	// The page now opens the code section and says so.
-	page := b.get("/t/" + id + "?push=sent")
-	if !strings.Contains(page.body, "enter the code below") || !strings.Contains(page.body, "other-device\" open") {
-		t.Fatalf("pushed page = %s", page.body)
-	}
-
 	// Spacing, then the cap.
-	if p := b.post("/t/"+id+"/push", url.Values{}); !strings.HasSuffix(p.location, "push=too-soon") {
-		t.Fatalf("second push = %s", p.location)
-	}
-	for i := 0; i < 2; i++ {
-		h.advance(pushSpacing)
-		b.post("/t/"+id+"/push", url.Values{})
+	if b.fetchJSON("/t/"+id+"/push", &got); got.Notice != "too-soon" {
+		t.Fatalf("second push = %+v", got)
 	}
 	h.advance(pushSpacing)
-	if p := b.post("/t/"+id+"/push", url.Values{}); !strings.HasSuffix(p.location, "push=too-many") {
-		t.Fatalf("fourth push = %s", p.location)
+	if b.fetchJSON("/t/"+id+"/push", &got); got != (answer{"sent", 1}) {
+		t.Fatalf("third push = %+v", got)
+	}
+	// A plain form post (no script) goes back to the page.
+	h.advance(pushSpacing)
+	if p := b.post("/t/"+id+"/push", url.Values{}); p.status != http.StatusSeeOther || !strings.HasSuffix(p.location, "push=sent") {
+		t.Fatalf("form push = %d %s", p.status, p.location)
+	}
+	h.advance(pushSpacing)
+	if b.fetchJSON("/t/"+id+"/push", &got); got != (answer{"too-many", 0}) {
+		t.Fatalf("fourth push = %+v", got)
 	}
 	if len(rec.sent) != maxPushesPerTxn {
 		t.Fatalf("%d prompts sent", len(rec.sent))

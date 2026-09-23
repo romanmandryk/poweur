@@ -41,23 +41,21 @@ func TestPolicyPagesStateTheRunningConfig(t *testing.T) {
 		c.Retention = Retention{SignIns: 30 * 24 * time.Hour}
 	})
 	b := h.browser()
-	for path, wants := range map[string][]string{
-		"/privacy":  {"30 days", "90 days", "365 days", "10 minutes", "12 hours", "different\n     for every application", "abuse@bridge.example"},
-		"/security": {"security@bridge.example", "72 hours", "Client registration on this service is <strong>open</strong>"},
-		"/abuse":    {"abuse@bridge.example", "client_id", "suspend"},
-	} {
+	want := policyView{
+		Contact: "abuse@bridge.example", SecurityContact: "security@bridge.example", Pairwise: true,
+		Audit: "90 days", SignIns: "30 days", Consents: "365 days", Session: "12 hours",
+		Txn: "10 minutes", Code: "1 minute", AccessToken: "10 minutes", Registration: "open",
+	}
+	for _, path := range []string{"/privacy", "/security"} {
+		var got policyView
 		p := b.get(path)
-		if p.status != http.StatusOK {
-			t.Fatalf("%s = %d", path, p.status)
+		if p.data(t, &got); p.status != http.StatusOK || got != want {
+			t.Errorf("%s = %d %+v, want %+v", path, p.status, got, want)
 		}
-		for _, want := range wants {
-			if !strings.Contains(p.body, want) {
-				t.Errorf("%s lacks %q", path, want)
-			}
-		}
-		if !strings.Contains(p.body, `href="/privacy"`) || !strings.Contains(p.body, `href="/security"`) {
-			t.Errorf("%s footer lacks policy links", path)
-		}
+	}
+	var abuse contactPage
+	if b.get("/abuse").data(t, &abuse); abuse.Contact != "abuse@bridge.example" {
+		t.Errorf("/abuse = %+v", abuse)
 	}
 }
 

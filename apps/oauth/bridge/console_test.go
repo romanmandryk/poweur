@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/poweur/identity/signin"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -39,7 +40,11 @@ func (b *browser) register(name string, redirects ...string) (string, string) {
 		"redirect_uris": {strings.Join(redirects, "\n")},
 		"auth_method":   {AuthSecretBasic},
 	})
-	if p.status != http.StatusOK || !strings.Contains(p.body, "copy it now") {
+	var shown clientPage
+	if p.status != http.StatusOK || !p.is("client") {
+		b.h.t.Fatalf("register = %d %s", p.status, p.body)
+	}
+	if p.data(b.h.t, &shown); shown.Secret == "" {
 		b.h.t.Fatalf("register = %d %s", p.status, p.body)
 	}
 	return clientIDPat.FindString(p.body), secretPat.FindString(p.body)
@@ -66,8 +71,9 @@ func TestConsoleClientLifecycle(t *testing.T) {
 		t.Fatalf("stored client = %+v", stored)
 	}
 	// The secret is never shown again.
-	if p := dev.get("/developers/clients/" + id); strings.Contains(p.body, secret) || !strings.Contains(p.body, id) {
-		t.Fatal("client page leaks the secret or lacks the id")
+	if p := dev.get("/developers/clients/" + id); strings.Contains(p.body, secret) || !strings.Contains(p.body, id) ||
+		strings.Contains(p.body, `"hash"`) || strings.Contains(p.body, signin.HashSecret(secret)) {
+		t.Fatal("client page leaks the secret or its hash, or lacks the id")
 	}
 	if p := dev.get("/developers"); !strings.Contains(p.body, "Team Wiki") {
 		t.Fatal("client missing from the list")
@@ -76,8 +82,9 @@ func TestConsoleClientLifecycle(t *testing.T) {
 	// A user signs in to it; the consent page names the registering ID.
 	user := h.browser()
 	txn, p := user.signIn(authorizeQuery(id, "https://wiki.example/oauth/callback", "openid"), h.users[bob])
-	if !strings.Contains(p.body, "Registered by") || !strings.Contains(p.body, alice) || !strings.Contains(p.body, "not reviewed") {
-		t.Fatalf("consent page for a console client: %s", p.body)
+	var cp consentPage
+	if p.data(t, &cp); len(cp.Client.RegisteredBy) != 1 || cp.Client.RegisteredBy[0] != alice || cp.Client.VerifiedHost {
+		t.Fatalf("consent page for a console client names no registering ID: %+v", cp)
 	}
 	code := h.codeFrom(user.consent(txn), "https://wiki.example/oauth/callback")
 	res := h.token(codeForm(code, "https://wiki.example/oauth/callback"), id, secret)
@@ -95,7 +102,7 @@ func TestConsoleClientLifecycle(t *testing.T) {
 		t.Fatalf("update = %d %s", p.status, p.body)
 	}
 	txn, p = user.signIn(authorizeQuery(id, "https://docs.other.example/cb", "openid", "prompt", "login"), h.users[bob])
-	if strings.Contains(p.body, "/consent") {
+	if p.is("consent") {
 		p = user.consent(txn)
 	}
 	code = h.codeFrom(p, "https://docs.other.example/cb")
@@ -294,8 +301,10 @@ func TestAccountRevoke(t *testing.T) {
 	b := h.browser()
 	res := h.fullFlow(b, h.users[alice], "openid poweur_id", ScopePoweurID)
 	p := b.get("/account")
-	if !strings.Contains(p.body, "Relying Party") || !strings.Contains(p.body, "Poweur ID") || !strings.Contains(p.body, "Recent sign-ins") {
-		t.Fatalf("account page = %s", p.body)
+	var ap accountPage
+	if p.data(t, &ap); len(ap.Consents) != 1 || ap.Consents[0].ClientName != "Relying Party" ||
+		len(ap.Consents[0].Granted) != 1 || ap.Consents[0].Granted[0] != ScopePoweurID || len(ap.SignIns) == 0 {
+		t.Fatalf("account page = %+v", ap)
 	}
 	p = b.post("/account/revoke", url.Values{"client_id": {"rp"}})
 	if p.status != http.StatusSeeOther {
@@ -310,7 +319,7 @@ func TestAccountRevoke(t *testing.T) {
 		t.Fatalf("token after revoke = %d", resp.StatusCode)
 	}
 	// And the app has to ask again.
-	if p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid"))); !strings.Contains(p.body, "Allow Relying Party?") {
+	if p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid"))); !p.is("consent") || p.shown().Title != "Allow Relying Party?" {
 		t.Fatal("no consent after revoke")
 	}
 	// Revoking needs a same-origin form and a session.
@@ -324,16 +333,17 @@ func TestPagesRender(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	for path, want := range map[string]string{
-		"/":                  "sign you in with any Poweur ID",
-		"/abuse":             "Report an application",
-		"/static/bridge.css": "--accent",
-		"/static/bridge.js":  "data-status-url",
-		"/health":            `"status":"ok"`,
+		"/":         "home",
+		"/abuse":    "abuse",
+		"/privacy":  "privacy",
+		"/security": "security",
 	} {
-		p := b.get(path)
-		if p.status != 200 || !strings.Contains(p.body, want) {
-			t.Errorf("%s = %d, lacks %q", path, p.status, want)
+		if p := b.get(path); p.status != 200 || !p.is(want) {
+			t.Errorf("%s = %d, not the %s page", path, p.status, want)
 		}
+	}
+	if p := b.get("/health"); !strings.Contains(p.body, `"status":"ok"`) {
+		t.Errorf("health = %s", p.body)
 	}
 	if p := b.get("/nope"); p.status != http.StatusNotFound {
 		t.Errorf("unknown path = %d", p.status)

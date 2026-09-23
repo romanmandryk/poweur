@@ -79,6 +79,9 @@ type Signer struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
 	Note  string `json:"note,omitempty"`
+	// Default marks the operator's fallback signer, as opposed to one the
+	// identity itself advertises.
+	Default bool `json:"default,omitempty"`
 }
 
 // Status is what the waiting page's poll reports.

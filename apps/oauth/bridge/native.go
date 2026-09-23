@@ -300,9 +300,10 @@ func (s *Server) discoverSigners(ctx context.Context, id string, res identity.Re
 			host = u.Host
 		}
 		add(Signer{
-			Label: "Continue at " + host,
-			URL:   s.cfg.DefaultSigner,
-			Note:  "Works only if this browser already holds your keys there.",
+			Label:   "Continue at " + host,
+			URL:     s.cfg.DefaultSigner,
+			Note:    "Works only if this browser already holds your keys there.",
+			Default: true,
 		})
 	}
 	return out

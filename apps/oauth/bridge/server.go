@@ -337,8 +337,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /introspect", s.handleIntrospect)
 
 	// Pages.
-	mux.HandleFunc("GET /static/bridge.css", s.handleCSS)
-	mux.HandleFunc("GET /static/bridge.js", s.handleJS)
+	mux.HandleFunc("GET /assets/{file}", s.handleAsset)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /{$}", s.handleHome)
 	s.extraRoutes(mux)

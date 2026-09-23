@@ -122,6 +122,23 @@ Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
   uses the Poweur ID itself). Accounts link by the pairwise `sub`, not by the Poweur ID.
 - **Grafana**: `[auth.generic_oauth]` with `use_pkce = true`, `scopes = openid poweur_id`, `login_attribute_path = poweur_id`.
 
+## Pages
+
+The pages are React + Tailwind in [`ui/`](ui), with the web app's design
+tokens. Go keeps every route, redirect, cookie and check: a page response is
+the built `index.html` with that page's data embedded as a JSON data block
+(`bridge/web.go`; the TypeScript twin is `ui/src/lib/page.ts`), so the CSP
+stays `script-src 'self'`. The build lands in `bridge/web/dist` and is
+embedded at compile time:
+
+```bash
+pnpm --filter @poweur/oauth-ui build     # before go run / go build
+pnpm --filter @poweur/oauth-ui watch     # while editing; restart the bridge to pick it up
+```
+
+Without it the bridge still answers every page with its data behind a plain
+"pages not built" notice, which is all the Go tests need. The image builds it.
+
 ## Tests
 
 ```bash
