@@ -1,6 +1,6 @@
 {
   "name": "@poweur/mobile",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Capacitor shell over the web client (EPIC-019)",
   "scripts": {
@@ -11,7 +11,7 @@
     "build:ios": "pnpm run sync && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build",
     "build:android": "pnpm run sync && ./android/gradlew -p android :app:assembleDebug",
     "install:android": "pnpm run build:android && node scripts/adb-install.mjs",
-    "test": "node --test --test-reporter=spec test/stage.test.mjs"
+    "test": "node --test --test-reporter=spec test/stage.test.mjs test/icons.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

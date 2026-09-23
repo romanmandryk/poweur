@@ -28,6 +28,64 @@
   /* Translucent header / nav behind a backdrop blur. */
   --color-chrome: rgb(255 255 255 / 0.8);
 
+  /* Brand scales (design/brand/tokens.css, OKLCH-derived). Additive: the semantic
+     tokens above keep their values until the E15-T14 remap. */
+  --color-violet-50: #f7f5fe;
+  --color-violet-100: #edeaff;
+  --color-violet-200: #dbd5ff;
+  --color-violet-300: #c3b7ff;
+  --color-violet-400: #a890fe;
+  --color-violet-500: #8b6be9;
+  --color-violet-600: #724ccf;
+  --color-violet-700: #5b39a9;
+  --color-violet-800: #452786;
+  --color-violet-900: #301563;
+  --color-violet-950: #1f0647;
+  --color-indigo-50: #f4f6fe;
+  --color-indigo-100: #e6ecff;
+  --color-indigo-200: #ced9ff;
+  --color-indigo-300: #aebffe;
+  --color-indigo-400: #889ef8;
+  --color-indigo-500: #667ce3;
+  --color-indigo-600: #4d60c9;
+  --color-indigo-700: #3b4aa4;
+  --color-indigo-800: #2a3681;
+  --color-indigo-900: #1b2360;
+  --color-indigo-950: #0e1344;
+  --color-amber-50: #fff5ea;
+  --color-amber-100: #ffe9cf;
+  --color-amber-200: #ffd29b;
+  --color-amber-300: #edb774;
+  --color-amber-400: #d59740;
+  --color-amber-500: #b67703;
+  --color-amber-600: #935f00;
+  --color-amber-700: #764b00;
+  --color-amber-800: #593800;
+  --color-amber-900: #3e2500;
+  --color-amber-950: #281600;
+  --color-teal-50: #ddfffc;
+  --color-teal-100: #c1faf5;
+  --color-teal-200: #a7e9e4;
+  --color-teal-300: #84d3ce;
+  --color-teal-400: #53b8b2;
+  --color-teal-500: #059a94;
+  --color-teal-600: #027c77;
+  --color-teal-700: #02635f;
+  --color-teal-800: #024a47;
+  --color-teal-900: #003331;
+  --color-teal-950: #00201e;
+  --color-ink-50: #f6f6fb;
+  --color-ink-100: #ececf1;
+  --color-ink-200: #dadade;
+  --color-ink-300: #c2c2c6;
+  --color-ink-400: #a4a4a8;
+  --color-ink-500: #86868a;
+  --color-ink-600: #6c6b6f;
+  --color-ink-700: #55545c;
+  --color-ink-800: #3f3f46;
+  --color-ink-900: #2b2a31;
+  --color-ink-950: #1a1a20;
+
   --radius-card: 16px;
   --radius-control: 10px;
   --radius-button: 14px;
@@ -128,6 +186,11 @@
       animation-iteration-count: 1 !important;
     }
   }
+}
+
+/* The brand glow behind the glass P (app icon, welcome tile, splash). */
+@utility bg-brand-glow {
+  background-image: radial-gradient(75% 75% at 50% 44%, var(--color-violet-500) 0%, var(--color-indigo-800) 60%, var(--color-indigo-950) 100%);
 }
 
 /* Safe areas: added to a height rather than padded into it, or content slides

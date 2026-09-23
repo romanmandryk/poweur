@@ -8,6 +8,9 @@ These scripts produce the logo files under `design/claude/`.
   function returns the whole `<svg>`.
 - `lockup.py`: the P with the Sora wordmark, shaped with HarfBuzz and converted to outlines with
   fontTools. It writes `design/claude/lockups/`.
+- `icons.py`: every icon, splash screen and social image. It writes into `apps/web`, `apps/mobile`
+  and `design/brand/assets/` (see the brand README). Set `SORA_TTF` to include the social images,
+  which carry the wordmark.
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install shapely uharfbuzz fonttools

@@ -6,6 +6,7 @@ import { listIdentities } from "../lib/storage.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
 import { Avatar } from "../ui/Avatar";
+import { Wordmark } from "../ui/Logo";
 import { ActivityIndicator } from "./ActivityIndicator";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -21,7 +22,7 @@ export function Header({ className }: { className?: string }) {
         className,
       )}
     >
-      <span className="app-wordmark text-[17px] font-bold tracking-[-.3px]">Poweur ID</span>
+      <Wordmark />
       <div className="header-actions flex items-center gap-2">
         <ThemeToggle />
         {identity ? (

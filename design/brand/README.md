@@ -132,6 +132,28 @@ rollout is tracked in [EPIC-015 E15-T14](../../epics/EPIC-015-web-app-ux.md).
 | `--shadow-accent` | indigo at 40% | `violet-600` at 35% |
 | `<meta name="theme-color">` | `#FFFFFF` / `#000000` | `#FFFFFF` / `#000000` (unchanged; the chrome stays neutral) |
 
+## Icons, splash and social images
+
+[`scripts/icons.py`](scripts/icons.py) renders all of these from the P masters (`rsvg-convert` and
+ImageMagick). Re-run it after any change to the mark or the glow.
+
+| Where | What |
+|-------|------|
+| `apps/web/public/` | `favicon.svg` (violet tile, white P), `favicon.ico` (16/32/48), `apple-touch-icon.png` (180), `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `manifest.webmanifest`, `og-image.png` (1200×630) |
+| `apps/web/src/assets/brand/` | `p-glass.svg`, `p-black.svg`, `p-white.svg`, used by `ui/Logo` |
+| iOS `AppIcon.appiconset` | 1024 px, no alpha: glow (any), night (dark), white P on black (tinted) |
+| iOS `Splash.imageset` | 2732 px: the glass P on the glow, aspect-filled |
+| Android `mipmap-*` | `ic_launcher` (rounded square), `ic_launcher_round`, adaptive `background` / `foreground` / `monochrome` at 108 dp |
+| Android `drawable-{port,land}-*` | splash at every density |
+| [`assets/icons/`](assets/icons/) | the app icon and favicon at 16–1024 px, a maskable 512, SVG masters, `favicon.ico` |
+| [`assets/social/`](assets/social/) | Open Graph 1200×630, X card 1200×600, X header 1500×500, LinkedIn banner 1584×396, GitHub social preview 1280×640, Facebook cover 1640×624, YouTube banner 2560×1440 (lockup inside the 1546×423 safe area), profile pictures 400 and 1024 (circle-safe) |
+
+Proportions of the P inside each icon:
+- App icon (full bleed): 58% of the height.
+- Adaptive and maskable icons: 44–46%, inside the platform safe zone.
+- Favicon: 70%. At 16 px only the silhouette survives, which is expected.
+- Splash: 14% of the square, 22% of the short side on Android.
+
 ## Other surfaces (follow-ups, same tokens)
 
 - **Docs** (`apps/docs/src/css/custom.css`): Infima primary moves from Tailwind blue `#2563EB` to the violet
@@ -139,8 +161,7 @@ rollout is tracked in [EPIC-015 E15-T14](../../epics/EPIC-015-web-app-ux.md).
   lightest). Replace the placeholder "e" logo in `static/img/logo.svg` with `flat/p-black.svg`.
 - **OAuth bridge** (`apps/oauth/bridge/static/bridge.css`): its accent `#2F5BD3` / `#7D9BFF` becomes
   `violet-600` / `violet-400`, and its warm greys become ink.
-- **Mobile** (EPIC-019): the app icon becomes the black glass P on the glow tile. Android's adaptive icon
-  uses the glow as background and the glass P as foreground.
+- **Mobile** (EPIC-019): done, see "Icons, splash and social images" above.
 
 ## Type
 
