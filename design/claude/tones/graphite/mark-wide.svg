@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 4 104 56" role="img" aria-label="Poweur ID">
+<title>Poweur ID</title>
+
+<defs>
+<linearGradient id="gm" gradientUnits="userSpaceOnUse" x1="10" y1="54" x2="106" y2="10"><stop offset="0" stop-color="#16181E"></stop><stop offset="1" stop-color="#6A7080"></stop></linearGradient>
+<mask id="mm" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="64"><rect x="0" y="0" width="120" height="64" fill="#fff"></rect><rect x="40" y="23.2" width="28.03" height="17.6" fill="#000"></rect></mask>
+<mask id="mem" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="64"><rect x="0" y="0" width="120" height="64" fill="#fff"></rect><rect x="40" y="26.6" width="5" height="10.8" fill="#000"></rect></mask>
+</defs>
+<g mask="url(#mm)">
+<circle cx="33" cy="32" r="21" fill="none" stroke="url(#gm)" stroke-width="2.2"></circle>
+<ellipse cx="33" cy="32" rx="7.5" ry="21" fill="none" stroke="url(#gm)" stroke-width="1.1" stroke-opacity="0.85"></ellipse>
+<ellipse cx="33" cy="32" rx="15" ry="21" fill="none" stroke="url(#gm)" stroke-width="1.1" stroke-opacity="0.7"></ellipse>
+<line x1="15.1" y1="21" x2="50.9" y2="21" stroke="url(#gm)" stroke-width="1.1" stroke-opacity="0.7"></line>
+<line x1="15.1" y1="43" x2="50.9" y2="43" stroke="url(#gm)" stroke-width="1.1" stroke-opacity="0.7"></line>
+</g>
+<ellipse cx="40" cy="32" rx="2.6" ry="8" fill="none" stroke="url(#gm)" stroke-width="2.2" mask="url(#mem)"></ellipse>
+<path d="M40 25.5 H67.03 A21 21 0 1 1 67.03 38.5 H40" fill="none" stroke="url(#gm)" stroke-width="2.2" stroke-linejoin="round"></path>
+
+</svg>
