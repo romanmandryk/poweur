@@ -923,7 +923,7 @@ This is a re-skin: **token values change, token names do not.** Components alrea
       - OAuth bridge ([`bridge.css`](../apps/oauth/bridge/static/bridge.css)): accent becomes violet,
         greys become ink.
       - These bump their own packages.
-- [x] **Mobile hand-off:** the same script writes the shell's icons and splash screens (mobile 0.1.5),
+- [x] **Mobile hand-off:** the same script writes the shell's icons and splash screens (mobile 0.1.6),
       tracked in [EPIC-019](EPIC-019-mobile-app-capacitor.md) E19-T1.
 
 **Acceptance:**

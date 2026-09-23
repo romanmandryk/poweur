@@ -1,6 +1,6 @@
 {
   "name": "@poweur/mobile",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Capacitor shell over the web client (EPIC-019)",
   "scripts": {

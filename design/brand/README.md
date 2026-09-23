@@ -141,17 +141,19 @@ ImageMagick). Re-run it after any change to the mark or the glow.
 |-------|------|
 | `apps/web/public/` | `favicon.svg` (violet tile, white P), `favicon.ico` (16/32/48), `apple-touch-icon.png` (180), `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `manifest.webmanifest`, `og-image.png` (1200×630) |
 | `apps/web/src/assets/brand/` | `p-glass.svg`, `p-black.svg`, `p-white.svg`, used by `ui/Logo` |
-| iOS `AppIcon.appiconset` | 1024 px, no alpha: glow (any), night (dark), white P on black (tinted) |
+| iOS `AppIcon.appiconset` | 1024 px, no alpha: violet-600 with the flat white P (any and dark), white P on black (tinted) |
 | iOS `Splash.imageset` | 2732 px: the glass P on the glow, aspect-filled |
-| Android `mipmap-*` | `ic_launcher` (rounded square), `ic_launcher_round`, adaptive `background` / `foreground` / `monochrome` at 108 dp |
+| Android `mipmap-*` | `ic_launcher` (violet rounded square, white P), `ic_launcher_round`, adaptive violet `background` / white-P `foreground` / `monochrome` at 108 dp |
 | Android `drawable-{port,land}-*` | splash at every density |
 | [`assets/icons/`](assets/icons/) | the app icon and favicon at 16–1024 px, a maskable 512, SVG masters, `favicon.ico` |
 | [`assets/social/`](assets/social/) | Open Graph 1200×630, X card 1200×600, X header 1500×500, LinkedIn banner 1584×396, GitHub social preview 1280×640, Facebook cover 1640×624, YouTube banner 2560×1440 (lockup inside the 1546×423 safe area), profile pictures 400 and 1024 (circle-safe) |
 
 Proportions of the P inside each icon:
-- App icon (full bleed): 58% of the height.
-- Adaptive and maskable icons: 44–46%, inside the platform safe zone.
-- Favicon: 70%. At 16 px only the silhouette survives, which is expected.
+- Favicon: 70% of the height, flat white on `violet-600`. At 16 px only the silhouette survives, which is expected.
+- iOS launcher: 64%, same mark. The squircle mask leaves enough margin at that size.
+- Android legacy (rounded square and circle): 60%, shifted right so the ink's centroid — the stem pulls it left of the viewBox centre — sits in the middle of the tile.
+- Android adaptive foreground and monochrome: 50%, with the same shift. The launcher masks this down to a 66 dp circle on the 108 dp canvas; 50% keeps the stem inside it. The background is solid `violet-600`.
+- Web install icon (glass on the glow) and maskable: 58% and 46%.
 - Splash: 14% of the square, 22% of the short side on Android.
 
 ## Other surfaces (follow-ups, same tokens)

@@ -70,33 +70,37 @@ def render(svg, out, w=None, h=None, flatten=None):
 # ---- masters (1024 units; rendered at any size) -------------------------------------------------
 N = 1024
 def app_icon(scale=0.58, uid="a"):
-    """Full-bleed square: the glass P on the glow. iOS and launchers mask the corners themselves."""
+    """Glass P on the glow. Web install icons and social profiles; native launchers use flat_violet."""
     return doc(N, N, f'<rect width="{N}" height="{N}" fill="url(#glowa)"/>' + mark("glass", N / 2, N / 2, scale * N, uid), glow("a"))
-
-def app_icon_dark():
-    return doc(N, N, f'<rect width="{N}" height="{N}" fill="{S["indigo"]["950"]}"/>' + mark("glass", N / 2, N / 2, 0.58 * N, "d"))
 
 def app_icon_tinted():
     """iOS 18 tinted: a grayscale mark on black; the system applies the tint."""
     return doc(N, N, f'<rect width="{N}" height="{N}" fill="#000000"/>' + mark("flat", N / 2, N / 2, 0.58 * N, "t", "#FFFFFF"))
 
-def rounded_icon(r=0.2):
-    return doc(N, N, f'<clipPath id="rc"><rect width="{N}" height="{N}" rx="{r * N}"/></clipPath>'
-               f'<g clip-path="url(#rc)"><rect width="{N}" height="{N}" fill="url(#glowa)"/>{mark("glass", N / 2, N / 2, 0.56 * N, "r")}</g>', glow("a"))
+# The stem is solid and the bowl is open, so the ink's centroid sits 40 viewBox
+# units left of the viewBox centre. Centring the viewBox makes the P look
+# shifted left, and on a round Android mask the stem then kisses the edge.
+OPTICAL_LEFT = 40.27
+# iOS masks a squircle, so the P can stay close to the favicon's 70%. Android
+# legacy icons are the rounded bitmap itself; adaptive icons are masked again
+# down to a 66dp circle on a 108dp canvas, which is what was clipping the stem.
+IOS_ICON = 0.64
+ANDROID_LEGACY = 0.60
+ANDROID_ADAPTIVE = 0.50
 
-def round_icon():
-    return doc(N, N, f'<clipPath id="cc"><circle cx="{N / 2}" cy="{N / 2}" r="{N / 2}"/></clipPath>'
-               f'<g clip-path="url(#cc)"><rect width="{N}" height="{N}" fill="url(#glowa)"/>{mark("glass", N / 2, N / 2, 0.52 * N, "o")}</g>', glow("a"))
+def optical_dx(scale):
+    """Canvas shift that puts the ink centroid on the centre."""
+    return OPTICAL_LEFT * scale * N / INKED
 
 def adaptive_fg():
-    """108dp canvas, 66dp safe circle: the P stays inside 44% of the height."""
-    return doc(N, N, mark("glass", N / 2, N / 2, 0.44 * N, "f"))
+    """White P on the 108dp canvas, inside Android's 66dp safe circle."""
+    return doc(N, N, mark("flat", N / 2 + optical_dx(ANDROID_ADAPTIVE), N / 2, ANDROID_ADAPTIVE * N, "f", "#FFFFFF"))
 
 def adaptive_bg():
-    return doc(N, N, f'<rect width="{N}" height="{N}" fill="url(#glowa)"/>', glow("a"))
+    return doc(N, N, f'<rect width="{N}" height="{N}" fill="{S["violet"]["600"]}"/>')
 
 def adaptive_mono():
-    return doc(N, N, mark("flat", N / 2, N / 2, 0.44 * N, "m", "#FFFFFF"))
+    return doc(N, N, mark("flat", N / 2 + optical_dx(ANDROID_ADAPTIVE), N / 2, ANDROID_ADAPTIVE * N, "m", "#FFFFFF"))
 
 def maskable():
     """PWA maskable: safe zone is the central 80% circle."""
@@ -104,8 +108,23 @@ def maskable():
 
 def favicon_svg():
     """Violet tile + flat white P: legible at 16 px on light and dark tabs alike."""
-    return doc(N, N, f'<rect width="{N}" height="{N}" rx="{0.22 * N}" fill="{S["violet"]["600"]}"/>'
-               + mark("flat", N / 2, N / 2, 0.70 * N, "v", "#FFFFFF"))
+    return flat_violet(clip="rounded")
+
+def flat_violet(scale=0.70, uid="v", clip=None, dx=0):
+    """The favicon's mark: a violet-600 field and the flat white P.
+
+    Full bleed for iOS, which masks the squircle itself. Legacy Android bakes
+    the same rounded tile or a circle, because those bitmaps are the icon.
+    """
+    inner = (f'<rect width="{N}" height="{N}" fill="{S["violet"]["600"]}"/>'
+             + mark("flat", N / 2 + dx, N / 2, scale * N, uid, "#FFFFFF"))
+    if clip == "rounded":
+        return doc(N, N, f'<clipPath id="rc{uid}"><rect width="{N}" height="{N}" rx="{0.22 * N}"/></clipPath>'
+                   f'<g clip-path="url(#rc{uid})">{inner}</g>')
+    if clip == "circle":
+        return doc(N, N, f'<clipPath id="cc{uid}"><circle cx="{N / 2}" cy="{N / 2}" r="{N / 2}"/></clipPath>'
+                   f'<g clip-path="url(#cc{uid})">{inner}</g>')
+    return doc(N, N, inner)
 
 def splash(w, h, uid="s", frac=0.16):
     return doc(w, h, f'<rect width="{w}" height="{h}" fill="url(#glow{uid})"/>' + mark("glass", w / 2, h / 2, frac * min(w, h), uid), glow(uid, cy="46%"))
@@ -152,8 +171,9 @@ def ios():
     icon = os.path.join(IOS, "AppIcon.appiconset")
     for f in os.listdir(icon):
         if f.endswith(".png"): os.remove(os.path.join(icon, f))
-    render(app_icon(), os.path.join(icon, "AppIcon-1024.png"), 1024, 1024, flatten=S["indigo"]["950"])
-    render(app_icon_dark(), os.path.join(icon, "AppIcon-1024-dark.png"), 1024, 1024, flatten=S["indigo"]["950"])
+    violet = S["violet"]["600"]
+    render(flat_violet(scale=IOS_ICON), os.path.join(icon, "AppIcon-1024.png"), 1024, 1024, flatten=violet)
+    render(flat_violet(scale=IOS_ICON, uid="d"), os.path.join(icon, "AppIcon-1024-dark.png"), 1024, 1024, flatten=violet)
     render(app_icon_tinted(), os.path.join(icon, "AppIcon-1024-tinted.png"), 1024, 1024, flatten="#000000")
     entry = lambda f, appearance=None: {**({"appearances": [{"appearance": "luminosity", "value": appearance}]} if appearance else {}),
                                         "filename": f, "idiom": "universal", "platform": "ios", "size": "1024x1024"}
@@ -168,8 +188,9 @@ DENSITY = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
 def android():
     for d, k in DENSITY.items():
         m = os.path.join(ANDROID, f"mipmap-{d}")
-        render(rounded_icon(), os.path.join(m, "ic_launcher.png"), round(48 * k), round(48 * k))
-        render(round_icon(), os.path.join(m, "ic_launcher_round.png"), round(48 * k), round(48 * k))
+        dx = optical_dx(ANDROID_LEGACY)
+        render(flat_violet(scale=ANDROID_LEGACY, clip="rounded", dx=dx, uid=f"r{d}"), os.path.join(m, "ic_launcher.png"), round(48 * k), round(48 * k))
+        render(flat_violet(scale=ANDROID_LEGACY, clip="circle", dx=dx, uid=f"o{d}"), os.path.join(m, "ic_launcher_round.png"), round(48 * k), round(48 * k))
         render(adaptive_fg(), os.path.join(m, "ic_launcher_foreground.png"), round(108 * k), round(108 * k))
         render(adaptive_bg(), os.path.join(m, "ic_launcher_background.png"), round(108 * k), round(108 * k))
         render(adaptive_mono(), os.path.join(m, "ic_launcher_monochrome.png"), round(108 * k), round(108 * k))
@@ -183,7 +204,7 @@ def android():
         open(os.path.join(ANDROID, "mipmap-anydpi-v26", name), "w").write(xml)
     open(os.path.join(ANDROID, "values", "ic_launcher_background.xml"), "w").write(
         '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
-        f'    <color name="ic_launcher_background">{S["indigo"]["950"]}</color>\n</resources>\n')
+        f'    <color name="ic_launcher_background">{S["violet"]["600"]}</color>\n</resources>\n')
     for folder in os.listdir(ANDROID):
         f = os.path.join(ANDROID, folder, "splash.png")
         if folder.startswith("drawable") and os.path.exists(f):
