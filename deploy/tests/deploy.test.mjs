@@ -96,3 +96,9 @@ test('bridge deploy runs only for bridge changes and verifies the release', () =
   assert.match(compose, /- \.env\.prod/);
   assert.doesNotMatch(compose, /OAUTH_KEY_ENCRYPTION_KEY:/);
 });
+
+test('caddy config is mounted as a directory so deploy reloads see new files', () => {
+  const compose = readFileSync(new URL('../infra/docker-compose.yml', import.meta.url), 'utf8');
+  assert.match(compose, /- \.\/caddy:\/etc\/caddy:ro/);
+  assert.doesNotMatch(compose, /\.\/caddy\/Caddyfile:/);
+});

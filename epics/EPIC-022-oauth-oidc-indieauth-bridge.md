@@ -21,7 +21,7 @@
 | E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI; conformance suite, live IndieAuth clients, prod rollout open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite, live IndieAuth clients, contacts open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 
 ## Goal
@@ -400,9 +400,15 @@ browser/QR login is unchanged.
 - [x] Live oauth2-proxy, Keycloak and **Authentik** runs (opt-in Playwright specs, Docker)
 - [ ] Two independent IndieAuth clients live — open. The well-known third-party checks
       (indieauth.rocks, indielogin.com, hosted Micropub clients) fetch the client and the
-      authorization server over the public internet, so this waits on the staging deployment
-      rather than on bridge work
-- [ ] Production deployment at `oauth.poweur.org` (ansible/Caddy) — open
+      authorization server over the public internet; now possible against `oauth.poweur.org`
+- [x] Production at **`https://oauth.poweur.org`** (bridge 0.1.4): its own Compose project in
+      `/opt/apps/poweur-oauth`, deployed by `deploy-oauth.yml` only when the bridge's sources
+      change and verified by `versionHash` inside the container and through Cloudflare; Caddy
+      route, Prometheus scrape + `blackbox-oauth` probe, Grafana alerts (`oauth-down`,
+      `oauth-code-reuse`, `oauth-server-errors`), daily `poweur-oauth backup` cron; the relay
+      advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/OPS.md`
+- [ ] Contacts on `/abuse` and `/security`, and the first registration allowlist entry — need a
+      mailbox and the operator's Poweur ID
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
 **Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live

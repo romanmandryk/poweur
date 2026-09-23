@@ -9,9 +9,9 @@ title: OAuth 2.0 / OIDC bridge
 > **Status: implemented in `apps/oauth` (EPIC-022).** Native authentication, the OIDC provider,
 > the developer console, `/account`, IndieAuth and the QR/code journey are built and tested
 > against real relays with `go-oidc` as the relying party (`apps/integration`, `TestINT_OAUTH_*`).
-> Recipes are verified against live oauth2-proxy, Keycloak and Authentik containers. Still open:
-> production rollout, third-party IndieAuth clients (E22-T8), and a phone camera for the QR code
-> (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
+> Recipes are verified against live oauth2-proxy, Keycloak and Authentik containers, and the
+> hosted bridge runs at `https://oauth.poweur.org`. Still open: third-party IndieAuth clients and
+> the conformance suite (E22-T8), and a phone camera for the QR code (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
 
 Native [Sign in with Poweur ID](./sign-in.md) needs no issuer: a relying party verifies the
 user's signature itself. Most existing software cannot do that — Keycloak, Authentik,
