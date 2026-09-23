@@ -48,6 +48,7 @@ This folder contains the epics that take Poweur from a DNS-identity messaging MV
 | [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
 | [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | Web app rewrite: React + Tailwind, side by side at `/newapp/` | Web / UX | **complete** (T1–T14; the React app is `apps/web`, served at `/app/`) | E15, E17, E19 |
 | [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | in progress (bridge built in `apps/oauth`: T1–T4, T6, T7, T9 done; T5/T8 partial — live products, prod rollout, phone camera) | E01, E08, E13 |
+| [EPIC-023](EPIC-023-email-bridge.md) | Email bridge: `john@poweur.net` for opted-in IDs, Emails tray, pluggable outbound | Messaging / Growth | proposed | E01, E06, E07, E09, E13, E14 |
 
 ## Integration epics (`integrations/`)
 
@@ -136,6 +137,12 @@ EPIC-001 + EPIC-008 + EPIC-013 ──► EPIC-022 (generic OAuth/OIDC + IndieAut
                    ├─ same-browser signer first, cross-device QR second
                    ├─ optional message push is a separate delivery channel, not a contact
                    └─ unlocks INT-000/001/003/004/005 sign-in integrations
+
+EPIC-009 + EPIC-007 + EPIC-014 + EPIC-013 ──► EPIC-023 (email bridge)
+                   ├─ separate service like EPIC-022: its own origin + MX, no relay credential
+                   ├─ inbound mail arrives as `email.message`, encrypted to the user's key
+                   ├─ outbound `email.send` gated by quotas + the E14 PoW primitive
+                   └─ growth loops: footer, invites, email → native E2E thread upgrade
 ```
 
 ## Architecture deltas at a glance
