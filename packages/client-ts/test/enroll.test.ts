@@ -9,6 +9,7 @@ import {
   formatShortCode,
   normalizeShortCode,
   pairingCommitment,
+  pairingAppLink,
   pairingLink,
   pairingSas,
   parsePairingLink,
@@ -50,6 +51,9 @@ describe("pairing v2 ↔ Go vectors", () => {
     const link = pairingLink("https://alice.poweur.net/app/", "Alice.Poweur.net", "K7QM4XP2", c);
     expect(link).toBe(`https://alice.poweur.net/app/#pair=K7QM4XP2.${c}&id=alice.poweur.net`);
     expect(parsePairingLink(link)).toEqual({ code: "K7QM4XP2", commitment: c, identity: "alice.poweur.net" });
+    const app = pairingAppLink("Alice.Poweur.net", "K7QM4XP2", c);
+    expect(app).toBe(`poweur://pair?pair=K7QM4XP2.${c}&id=alice.poweur.net`);
+    expect(parsePairingLink(app)).toEqual({ code: "K7QM4XP2", commitment: c, identity: "alice.poweur.net" });
     for (const input of [`#pair=K7QM4XP2.${c}`, `k7qm-4xp2.${c}`]) {
       expect(parsePairingLink(input)).toEqual({ code: "K7QM4XP2", commitment: c, identity: "" });
     }

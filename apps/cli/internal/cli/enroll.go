@@ -263,18 +263,21 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	appLink := idpkg.PairingAppLink(identityValue, p.Code, p.Commitment)
 	if !*jsonOut {
-		fmt.Fprintf(stdout, "On a device that already has %s, scan this, or enter the code %s:\n\n",
-			identityValue, idpkg.FormatShortCode(p.Code))
-		terminalQR(stdout, p.Link)
-		fmt.Fprintf(stdout, "\nFrom a terminal:  poweur key approve '%s'\n\n", p.Link)
+		fmt.Fprintf(stdout, "Approve on a device that already has %s.\n\nPoweur app — scan with the phone's camera:\n\n", identityValue)
+		terminalQR(stdout, appLink)
+		fmt.Fprintf(stdout, "\nBrowser — open:    %s\n", p.Link)
+		fmt.Fprintf(stdout, "Terminal — run:    poweur key approve '%s' --seed …\n", p.Link)
+		fmt.Fprintf(stdout, "Or enter the code %s there (Settings → Keys & devices → Add a device).\n\n",
+			idpkg.FormatShortCode(p.Code))
 	}
 	if !*wait {
 		if !*jsonOut {
 			fmt.Fprintf(stdout, "Then finish here:  poweur key claim %s %s\n", identityValue, p.Code)
 		}
 		return writeOutput(stdout, *jsonOut, map[string]any{
-			"identity": identityValue, "code": p.Code, "link": p.Link, "expires_at": p.ExpiresAt,
+			"identity": identityValue, "code": p.Code, "link": p.Link, "app_link": appLink, "expires_at": p.ExpiresAt,
 		}, "")
 	}
 	deadline := time.Now().Add(10 * time.Minute)

@@ -12,6 +12,7 @@ import {
   EnrollApi,
   formatShortCode,
   normalizeShortCode,
+  pairingAppLink,
   pairingLink,
   parsePairingLink,
   type ApproverSession,
@@ -161,15 +162,19 @@ export async function keyEnroll(argv: string[], streams: Streams): Promise<numbe
     expires_at: session.expiresAt,
   };
   savePairing("new", identity, file.code, file);
+  const appLink = pairingAppLink(identity, file.code, file.commitment);
   if (!jsonOut) {
     streams.stdout(
-      `On a device that already has ${identity}, open this link or enter the code ${formatShortCode(file.code)}:\n\n` +
-        `  ${file.link}\n\nFrom a terminal:  poweur key approve '${file.link}'\n\n`,
+      `Approve on a device that already has ${identity}.\n\n` +
+        `Poweur app — open:  ${appLink}\n` +
+        `Browser — open:     ${file.link}\n` +
+        `Terminal — run:     poweur key approve '${file.link}' --seed …\n` +
+        `Or enter the code ${formatShortCode(file.code)} there (Settings → Keys & devices → Add a device).\n\n`,
     );
   }
   if (!flagBool(args, "wait")) {
     if (!jsonOut) streams.stdout(`Then finish here:  poweur key claim ${identity} ${file.code}\n`);
-    return write(streams, jsonOut, { identity, code: file.code, link: file.link, expires_at: file.expires_at }, "");
+    return write(streams, jsonOut, { identity, code: file.code, link: file.link, app_link: appLink, expires_at: file.expires_at }, "");
   }
   const deadline = Date.now() + TTL_MS;
   let shown = "";

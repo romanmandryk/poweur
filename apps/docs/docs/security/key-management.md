@@ -205,9 +205,17 @@ offline target. That keeps an unreviewed primitive out of every client's trusted
   refuses to deliver otherwise. A pairing link names its identity; approvers refuse one for
   another identity.
 
-The link's content sits in the URL fragment (`#pair=…&id=…`), which browsers never send to a
-server. Opening it with a phone's own camera lands in the web app, which asks to unlock and then
-approve.
+The new device asks what will approve it, because a phone camera opens what the QR says:
+
+- **Poweur app** (the default): `poweur://pair?pair=<code>.<commitment>&id=<identity>` — the
+  camera hands it to the app, which asks to unlock and approve. An https link would open a
+  website that holds no keys.
+- **Browser**: `https://<identity>/app/#pair=…&id=…` — the values in the fragment, which browsers
+  never send to a server. If that browser does not hold the identity, it offers **Open in the
+  Poweur app** with the app form of the same link.
+- **Terminal**: `poweur key approve '<link>'` to copy.
+
+The typed code works with all three.
 
 ## Key files at rest (CLI)
 

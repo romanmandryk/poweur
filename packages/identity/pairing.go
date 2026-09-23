@@ -95,6 +95,18 @@ func PairingLink(appURL, identity, code, commitment string) string {
 	return link
 }
 
+// PairingAppLink is the same pairing for the Poweur app: a phone's camera
+// opens poweur:// in the app, where an https link would open a website that
+// holds no keys. The values ride in the query: some scanners drop fragments
+// of custom-scheme links.
+func PairingAppLink(identity, code, commitment string) string {
+	link := "poweur://pair?pair=" + code + "." + commitment
+	if identity != "" {
+		link += "&id=" + url.QueryEscape(strings.ToLower(identity))
+	}
+	return link
+}
+
 // PairingLinkParts is what a pairing link says.
 type PairingLinkParts struct {
 	Code       string
@@ -102,11 +114,14 @@ type PairingLinkParts struct {
 	Identity   string // empty when the link does not name one
 }
 
-// ParsePairingLink reads a scanned or pasted pairing link — the full URL,
-// its fragment, or "CODE.COMMITMENT".
+// ParsePairingLink reads a scanned or pasted pairing link — the web link
+// (values in the fragment), the app link (values in the query), or
+// "CODE.COMMITMENT".
 func ParsePairingLink(input string) (PairingLinkParts, error) {
 	v := strings.TrimSpace(input)
 	if i := strings.Index(v, "#"); i >= 0 {
+		v = v[i+1:]
+	} else if i := strings.Index(v, "?"); i >= 0 {
 		v = v[i+1:]
 	}
 	var parts PairingLinkParts

@@ -149,7 +149,11 @@ func TestPairingLinks(t *testing.T) {
 	if link != "https://alice.poweur.net/app/#pair=K7QM4XP2."+c+"&id=alice.poweur.net" {
 		t.Fatal(link)
 	}
-	for in, id := range map[string]string{link: "alice.poweur.net", "#pair=K7QM4XP2." + c: "", "k7qm-4xp2." + c: "", "pair=K7QM4XP2." + c: ""} {
+	app := PairingAppLink("Alice.Poweur.net", "K7QM4XP2", c)
+	if app != "poweur://pair?pair=K7QM4XP2."+c+"&id=alice.poweur.net" {
+		t.Fatal(app)
+	}
+	for in, id := range map[string]string{link: "alice.poweur.net", app: "alice.poweur.net", "#pair=K7QM4XP2." + c: "", "k7qm-4xp2." + c: "", "pair=K7QM4XP2." + c: ""} {
 		got, err := ParsePairingLink(in)
 		if err != nil || got != (PairingLinkParts{Code: "K7QM4XP2", Commitment: c, Identity: id}) {
 			t.Errorf("%q = %+v %v", in, got, err)

@@ -1,3 +1,5 @@
+import { parsePairingLink } from "@poweur/client";
+
 /**
  * The request carried by `poweur://auth?request=…`, or the short link in
  * `poweur://auth?request_uri=…` (a request by reference, E08-T6), which the
@@ -39,4 +41,16 @@ function codeFromParsedUrl(value: string): string | null {
   const auth = parsed.hostname === "auth" || path === "auth" || path.startsWith("auth/");
   if (!auth) return null;
   return parsed.searchParams.get("request") || parsed.searchParams.get("request_uri") || null;
+}
+
+/**
+ * A pairing link the shell was opened with (EPIC-011 E11-T8): the app form,
+ * `poweur://pair?pair=…` — what a new device's "Poweur app" QR carries — or
+ * a web link with `#pair=`. Returned whole for the approval screen.
+ */
+export function pairLinkFromAppUrl(url: string): string | null {
+  const value = String(url ?? "").trim();
+  const isApp = /^poweur:(\/\/)?pair\b/i.test(value);
+  if (!isApp && !value.includes("#pair=")) return null;
+  return parsePairingLink(value) ? value : null;
 }

@@ -106,6 +106,16 @@ export function pairingLink(appUrl: string, identity: string, code: string, comm
   return `${appUrl.replace(/#.*$/, "")}#pair=${code}.${commitment}${id}`;
 }
 
+/**
+ * The same pairing for the Poweur app: `poweur://` opens the app from a
+ * phone's camera, where an https link opens a website holding no keys. The
+ * values ride in the query. Mirrors `identity.PairingAppLink`.
+ */
+export function pairingAppLink(identity: string, code: string, commitment: string): string {
+  const id = identity ? `&id=${encodeURIComponent(identity.toLowerCase())}` : "";
+  return `poweur://pair?pair=${code}.${commitment}${id}`;
+}
+
 export interface PairingLinkParts {
   code: string;
   commitment: string;
@@ -113,11 +123,13 @@ export interface PairingLinkParts {
   identity: string;
 }
 
-/** A scanned or pasted pairing link (full URL, fragment, or "CODE.C"), or null. */
+/** A scanned or pasted pairing link (web link, app link, or "CODE.C"), or null. */
 export function parsePairingLink(input: string): PairingLinkParts | null {
   let v = String(input ?? "").trim();
   const hash = v.indexOf("#");
+  const query = v.indexOf("?");
   if (hash >= 0) v = v.slice(hash + 1);
+  else if (query >= 0) v = v.slice(query + 1);
   let identity = "";
   const params = new URLSearchParams(v);
   const pair = params.get("pair");

@@ -143,4 +143,20 @@ describe("boot (E21-T4)", () => {
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
     expect(useData.getState().auth.input).toBe("");
   });
+
+  it("the shell opened by a pairing QR goes to Add a device, at launch and while running (E11-T8)", async () => {
+    const C = "AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA";
+    const launch = `poweur://pair?pair=K7QM4XP2.${C}&id=bob.poweur.net`;
+    let handler: UrlHandler | undefined;
+    installAppPlugin({ launch, onListen: (h) => (handler = h) });
+    await boot();
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "pair" });
+    expect(useData.getState().pairInput).toBe(launch);
+
+    useRoute.setState({ page: "messages", sub: null, params: {} });
+    const again = `poweur://pair?pair=ZZZZ4XP2.${C}&id=bob.poweur.net`;
+    handler?.({ url: again });
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "pair" });
+    expect(useData.getState().pairInput).toBe(again);
+  });
 });

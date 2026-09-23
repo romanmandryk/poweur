@@ -14,7 +14,7 @@ import {
 import { fromBase64url } from "../lib/vault.js";
 import { modeNow, resolveMode } from "../lib/mode.js";
 import { beginSignInApproval } from "../actions/signin";
-import { signInCodeFromAppUrl } from "../lib/app-link";
+import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
@@ -130,8 +130,9 @@ function installAppUrlListener() {
   if (!app?.addListener || removeAppUrlListener) return;
   const gen = ++listenerGen;
   const result = app.addListener("appUrlOpen", (event) => {
-    if ((event?.url ?? "").includes("#pair=")) {
-      presentPairLink(event.url ?? "");
+    const pair = pairLinkFromAppUrl(event?.url ?? "");
+    if (pair) {
+      presentPairLink(pair);
       return;
     }
     const input = signInCodeFromAppUrl(event?.url ?? "");
@@ -151,7 +152,7 @@ function readLaunchUrl(): Promise<string> {
   if (!app?.getLaunchUrl) return Promise.resolve("");
   return Promise.resolve()
     .then(() => app.getLaunchUrl())
-    .then((launch) => signInCodeFromAppUrl(launch?.url ?? "") ?? "")
+    .then((launch) => launch?.url ?? "")
     .catch(() => "");
 }
 
@@ -187,9 +188,13 @@ export function boot(): Promise<void> {
   return run("");
 }
 
-function startBoot(fromLaunch: string): Promise<void> {
+function startBoot(launchUrl: string): Promise<void> {
+  // The shell's launch URL is a pairing link or a sign-in link; a browser's
+  // page load carries either in its own address.
+  const launchPair = pairLinkFromAppUrl(launchUrl);
+  const fromLaunch = launchPair ? "" : (signInCodeFromAppUrl(launchUrl) ?? "");
   const authInput = fromLaunch || locationAuthInput();
-  const pairLink = takePairLink();
+  const pairLink = launchPair || takePairLink();
   const handedOver = adoptHandOff();
   refreshSession();
   const identity = getActiveIdentity();

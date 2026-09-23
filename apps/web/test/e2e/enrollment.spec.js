@@ -43,9 +43,11 @@ async function startJoin(phonePage, relay, identity) {
 async function readJoin(phonePage) {
   await expect(phonePage.locator("#join-code")).toBeVisible({ timeout: 30_000 });
   const code = (await phonePage.locator("#join-code").innerText()).trim();
-  const link = await phonePage.locator("svg[data-qr]").getAttribute("data-qr");
+  const link = await phonePage.locator("[data-pair-link]").getAttribute("data-pair-link");
   expect(code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
   expect(link).toContain(`#pair=${code.replace("-", "")}.`);
+  // The QR on show opens the Poweur app unless another approver was chosen.
+  await expect(phonePage.locator("svg[data-qr]")).toHaveAttribute("data-qr", /^poweur:\/\/pair\?pair=/);
   // Nothing to compare until the other device answers.
   await expect(phonePage.locator("#join-sas")).toHaveCount(0);
   return { code, link };
@@ -122,6 +124,22 @@ test.describe("new-device pairing", () => {
 
     await scanned.click("#btn-pair-approve");
     await expect(phonePage.locator(".dest-title")).toHaveText("Messages", { timeout: 60_000 });
+    await laptop.close();
+    await phone.close();
+  });
+
+  test("a browser that lacks the identity hands the pairing to the Poweur app", async ({ browser }) => {
+    const { laptop, phone, laptopPage, phonePage } = await twoDevices(browser);
+    const identity = await registerIdentity(laptopPage, relay, `app${Date.now().toString(36)}`);
+    const { link } = await startJoin(phonePage, relay, identity);
+    // A third browser — say, the phone's own, where the keys live in the app.
+    const other = await browser.newContext();
+    const page = await other.newPage();
+    const url = new URL(link);
+    await page.goto(`${relay.baseUrl}${url.pathname}${url.hash}`);
+    await expect(page.locator("#pair-error")).toContainText(identity);
+    await expect(page.locator("#pair-open-app")).toHaveAttribute("href", new RegExp(`^poweur://pair\\?pair=.+&id=${identity}$`));
+    await other.close();
     await laptop.close();
     await phone.close();
   });

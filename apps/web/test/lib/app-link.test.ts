@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signInCodeFromAppUrl, signInCodeFromInput } from "../../src/lib/app-link";
+import { pairLinkFromAppUrl, signInCodeFromAppUrl, signInCodeFromInput } from "../../src/lib/app-link";
 
 describe("signInCodeFromAppUrl", () => {
   it("returns the request code from a poweur://auth link", () => {
@@ -28,5 +28,19 @@ describe("requests by reference (E08-T6)", () => {
     expect(signInCodeFromAppUrl("poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2")).toBe(
       "https://oauth.poweur.org/r/K7QM4XP2",
     );
+  });
+});
+
+describe("pairLinkFromAppUrl (E11-T8)", () => {
+  const C = "AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA";
+  it("takes the app form and the web form, whole", () => {
+    const app = `poweur://pair?pair=K7QM4XP2.${C}&id=bob.poweur.net`;
+    expect(pairLinkFromAppUrl(app)).toBe(app);
+    const web = `https://bob.poweur.net/app/#pair=K7QM4XP2.${C}&id=bob.poweur.net`;
+    expect(pairLinkFromAppUrl(web)).toBe(web);
+  });
+  it("leaves sign-in links and junk alone", () => {
+    expect(pairLinkFromAppUrl("poweur://auth?request=abc")).toBeNull();
+    expect(pairLinkFromAppUrl("poweur://pair?pair=nonsense")).toBeNull();
   });
 });

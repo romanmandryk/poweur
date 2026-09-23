@@ -533,7 +533,8 @@ On the new device:
 poweur key enroll alice.poweur.net --relay https://relay.poweur.net --label "work laptop" --wait
 ```
 
-It prints a QR code (the pairing link) and an 8-character code like `K7QM-4XP2`. On a device that
+It prints a QR code for the Poweur app (`poweur://pair?…`), the browser link, the command
+below, and an 8-character code like `K7QM-4XP2`. On a device that
 already holds the identity, either **use the link** — nothing to compare, the link carries the new
 device's commitment:
 

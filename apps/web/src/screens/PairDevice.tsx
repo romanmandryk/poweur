@@ -7,7 +7,7 @@
  * compare. Typed, both screens show six digits to compare before the keys go.
  */
 import { useEffect, useRef, useState } from "react";
-import { formatShortCode, parsePairingLink, type ApproverSession, type ApproverStep } from "@poweur/client";
+import { formatShortCode, pairingAppLink, parsePairingLink, type ApproverSession, type ApproverStep } from "@poweur/client";
 import { CircleCheck, Laptop, ScanLine, ShieldAlert } from "lucide-react";
 import { enrollApiForJoin } from "../actions/identity";
 import { activeClient } from "../actions/relay";
@@ -99,11 +99,25 @@ export function PairDevice() {
   }, [pendingLink, unlocked, identity]);
 
   if (!holdsLinkIdentity) {
+    // Most often the keys are in the Poweur app on this same phone, and the
+    // camera opened the browser link here: hand the pairing to the app.
+    const parts = parsePairingLink(pendingLink);
+    const appLink = parts ? pairingAppLink(parts.identity, parts.code, parts.commitment) : "";
     return (
       <SubPage title="Add a device">
         <p id="pair-error" className="text-[15px]">
-          This device doesn't hold <strong>{linkIdentity}</strong>. Open the link on a device that does — or type the code shown there.
+          This browser doesn't hold <strong>{linkIdentity}</strong>.
         </p>
+        {appLink && (
+          <a
+            id="pair-open-app"
+            href={appLink}
+            className="mt-4 block rounded-button bg-accent p-4 text-center text-[17px] font-semibold text-white no-underline"
+          >
+            Open in the Poweur app
+          </a>
+        )}
+        <p className="mt-3 text-[13px] text-muted">Or open the link on another device that has it, or type the code shown on the new device there.</p>
         <Button className="mt-4" variant="ghost" onClick={() => { useData.setState({ pairInput: "" }); pop(); }}>
           Close
         </Button>

@@ -567,6 +567,12 @@ grinding, not by a user skipping a step.
       digits appear only once the other device answers, labelled "compare — don't type". The
       approver is its own screen (Settings → Add a device, or the scanned link's `#pair=`, which
       survives unlock and switches to the named identity)
+- [x] **Approve with: Poweur app · Browser · Terminal** on the new device (remembered). Found
+      trying it: a phone camera opens what the QR says, and an https link opened a website with
+      no keys while the identity lived in the app. The app form is
+      `poweur://pair?pair=…&id=…` (`PairingAppLink` / `pairingAppLink`; parsers take both), the
+      shell routes it at launch and while running, and a browser that lacks the identity offers
+      **Open in the Poweur app**. Web 0.1.30, CLI 0.1.13, SDK 0.1.11
 - [x] Tests: relay unit (order, claim token, reveal must open the commitment, v1 refused); SDK
       against a real relay with a **tampering relay** (a scanned pairing refuses the swapped key;
       a typed pairing's digits differ); Go↔TS CLI interop both ways; Go drill (wrong digits end
