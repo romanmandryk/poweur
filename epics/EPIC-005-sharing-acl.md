@@ -1,6 +1,6 @@
 # EPIC-005 — Sharing, ACLs, groups & public-to-any-valid-ID
 
-- **Status:** complete except the offer/accept UX (grant engine, CLI, web dialog, link shares and group identities shipped). **E05-T3's remaining half is open and unblocked:** EPIC-009 typed messages have landed and `sys.share.offer/accept/revoked` are registered in the code, but nothing emits them yet and recipient mounts are not built
+- **Status:** complete except the offer/accept UX and adoption funnel (grant engine, CLI, web dialog, link shares and group identities shipped). **E05-T3's remaining half is open and unblocked:** EPIC-009 typed messages have landed and `sys.share.offer/accept/revoked` are registered in the code, but nothing emits them yet and recipient mounts are not built. E05-T6 adds file requests and guest-to-ID conversion.
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
@@ -20,6 +20,7 @@
 | E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest); web share dialog, revoke view and received-shares browser shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. **Deferred:** `sys.share.offer/accept/revoked` messages and recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages) — until then a recipient must be told who shared with them; unaccepted-offer policy (EPIC-007) |
 | E05-T4 Public-link shares | **done** | `audience: [{"link": …}]` grant variant (26-char base32 token, argon2id password, expiry, download cap) in `packages/identity/grants.go`; `/s/<token>` endpoint in `apps/api/internal/relay/`; `poweur share link add/ls` (revoke via `share revoke`); spec + threat model in [`sharing.md`](../apps/docs/docs/files/sharing.md); cross-relay `TestINT_SHARE_03` + web e2e |
 | E05-T5 Group identities | **done** | design doc [`group-identities.md`](../apps/docs/docs/files/group-identities.md); `admins` + `epoch` on `ShareGroup`, group's own tree at `poweur-sys/relay/groups/self.json` signed by the group's key; engine resolves named group identities out of their own trees (`apps/api/internal/files/grants.go`); `poweur group create/show/add/remove`; `TestINT_SHARE_04`. **Deferred:** cross-relay group resolution (needs a membership-check endpoint — enumeration oracle); per-admin signed updates; group messaging fan-out + key agreement = EPIC-009 E09-T5 |
+| E05-T6 File requests & guest conversion | **open** | upload-only requests, guest landing, claim-ID handoff and privacy-preserving funnel metrics; coordinates with E20-T10 `create` |
 
 ## Goal
 
@@ -168,3 +169,33 @@ addressing model E09-T5 consumes.
   `{"id": …}`, so typing a group identity there would produce a grant addressed to the
   group *as a visitor* rather than to its members. Creating, administering and addressing
   group identities in the SPA is a follow-up in EPIC-015.
+
+### E05-T6 — File requests & guest-to-ID conversion
+
+Turn a public link from a terminal download surface into an adoption loop without weakening
+the grant model. A recipient must be able to complete the immediate job before being asked to
+register; claiming an ID adds durable identity, edit access and a mounted relationship rather
+than unlocking bytes that were artificially withheld.
+
+- [ ] Extend the sharing spec with a **file-request** shape: the guest may create new objects
+      under one folder but cannot list, read, overwrite or delete another submitter's objects.
+      Use E20-T10's `create` permission once available; if a v1 upload token ships earlier,
+      specify it as a strict compatibility subset that upgrades to the same permission.
+- [ ] Public landing page for browse/download and file-request links: owner identity and pinned
+      key, expiry, password/recipient challenge, quota/error states and a clear statement of what
+      the visitor can do before creating an account.
+- [ ] Claim-ID handoff: after viewing, downloading or uploading, a guest can claim or sign in to
+      a Poweur ID and accept the share without losing the link, destination or completed action.
+- [ ] Upgrade path from link audience to an explicit ID grant; consume or retain the public link
+      according to the owner's choice, never silently broaden its audience.
+- [ ] Optional owner controls: upload count/bytes, allowed media types, per-object size, expiry,
+      password, single-recipient verification and notification on submission.
+- [ ] Privacy-preserving funnel events for the hosted service: link opened, action completed,
+      claim started, ID claimed and share accepted. Never record paths, filenames, message
+      contents, document contents or visitor IP beyond the service's short-lived abuse logs.
+- [ ] Web/SDK/CLI support and end-to-end coverage for anonymous upload, isolation between two
+      guests, quota exhaustion, expiry, claim handoff and revocation.
+
+**Acceptance:** Alice creates an upload-only request; two guests submit files without seeing each
+other; one guest claims an ID and accepts the resulting share without repeating the upload; Alice
+can revoke the link immediately and the metrics reveal conversion counts without content metadata.
