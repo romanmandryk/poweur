@@ -230,6 +230,11 @@ func (s *Server) handleIdentify(w http.ResponseWriter, r *http.Request) {
 	}
 	expires, _ := time.Parse(time.RFC3339, req.ExpiresAt)
 	signers := s.discoverSigners(r.Context(), id, res)
+	code, err := s.store.NewRequestCode(r.Context(), t.ID, expires)
+	if err != nil {
+		s.renderError(w, r, http.StatusInternalServerError, "Could not create the sign-in request.")
+		return
+	}
 
 	_, err = s.store.UpdateTxn(r.Context(), t.ID, func(t *Txn) error {
 		if err := t.usable(); err != nil {
@@ -244,6 +249,7 @@ func (s *Server) handleIdentify(w http.ResponseWriter, r *http.Request) {
 		t.Request = encoded
 		t.RequestExpires = expires
 		t.Match = match
+		t.RequestCode = code
 		t.Signers = signers
 		return nil
 	})
@@ -300,9 +306,10 @@ func (s *Server) discoverSigners(ctx context.Context, id string, res identity.Re
 			host = u.Host
 		}
 		add(Signer{
-			Label: "Continue at " + host,
-			URL:   s.cfg.DefaultSigner,
-			Note:  "Works only if this browser already holds your keys there.",
+			Label:   "Continue at " + host,
+			URL:     s.cfg.DefaultSigner,
+			Note:    "Works only if this browser already holds your keys there.",
+			Default: true,
 		})
 	}
 	return out

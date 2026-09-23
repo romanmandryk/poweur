@@ -28,8 +28,10 @@ go test ./apps/api/...
 # CLI
 go test ./apps/cli/...
 
-# OAuth/OIDC bridge (EPIC-022)
+# OAuth/OIDC bridge (EPIC-022). Its pages are React (apps/oauth/ui), embedded
+# at compile time; Go tests pass without them, e2e and the image build them.
 go test ./apps/oauth/...
+pnpm --filter @poweur/oauth-ui build
 ```
 
 ### Integration tests (CLI / Go)
@@ -146,12 +148,21 @@ bump the `Version` constant instead.
 | Go CLI (`apps/cli`) | `apps/cli/internal/buildinfo.Version` | same; printed by `poweur version` / `--version` / `-v` |
 | `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM` |
 | Web app | `apps/web/package.json` **and** `apps/web/src/build-info.ts` | `APP_VERSION` / `APP_BUILD_TIME` |
-| OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | printed by `poweur-oauth version`, `GET /health` |
+| OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | `VERSION_HASH` / `BUILD_TIME` baked into the image; `poweur-oauth version` and `GET /health` print them |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
 
 Default bump is **patch**. Minor/major is for breaking protocol or public API
 changes. `VERSION` on the relay is the semver override for tests — never pass a
 git sha as `VERSION` (that belongs in `VERSION_HASH`).
+
+Shared code counts for every package that ships it: a `packages/identity`
+change that alters what the relay, CLI or bridge does bumps each of them.
+
+**What deploys when.** A push to `master` runs **Deploy** (relay image with the
+web app, plus infra config) every time, and **Deploy OAuth bridge**
+(`.github/workflows/deploy-oauth.yml`) only when `apps/oauth/**`,
+`packages/identity/**` or `go.work` change. Both check that `/health` reports
+the pushed commit's `versionHash`. Runbook: [`deploy/OPS.md`](deploy/OPS.md).
 
 ## Style
 
@@ -166,6 +177,7 @@ apps/api          Go relay
 apps/cli          Go CLI
 apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
 apps/oauth        OAuth 2.0 / OIDC / IndieAuth bridge (EPIC-022), a separate service
+apps/oauth/ui     its pages: React + Tailwind (web app tokens), embedded into the Go binary
 apps/integration  In-process E2E tests
 packages/identity Shared identity document + resolver (Go, canonical)
 packages/client-ts @poweur/client — TS/JS SDK + `poweur` CLI (conforms to Go)

@@ -269,7 +269,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities/{identity}/enroll/offer", s.handleEnrollOffer)
 	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/fetch", s.handleEnrollFetch)
 	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/deliver", s.handleEnrollDeliver)
-	mux.HandleFunc("GET /identities/{identity}/enroll/{rendezvous}", s.handleEnrollClaim)
+	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/reveal", s.handleEnrollReveal)
+	mux.HandleFunc("GET /identities/{identity}/enroll/{rendezvous}", s.handleEnrollPoll)
 	mux.HandleFunc("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
@@ -301,6 +302,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
+	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))
 }
 

@@ -63,9 +63,9 @@ type Config struct {
 	SubjectType string
 	// StaticClients are operator-configured clients (OAUTH_STATIC_CLIENTS).
 	StaticClients []Client
-	// ClientRegistration is "closed" (default), "allowlist" or "open".
-	// Open lets any Poweur ID create clients — a phishing surface an operator
-	// should choose knowingly.
+	// ClientRegistration is "open" (default: any signed-in Poweur ID may
+	// register applications), "allowlist" or "closed" — for deployments that
+	// serve only their own applications.
 	ClientRegistration string
 	// RegistrationAllowlist lists identities (or "*.domain" suffixes) that
 	// may register clients when ClientRegistration is "allowlist".
@@ -158,7 +158,7 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	}
 	switch cfg.ClientRegistration {
 	case "":
-		cfg.ClientRegistration = RegistrationClosed
+		cfg.ClientRegistration = RegistrationOpen
 	case RegistrationOpen, RegistrationAllowlist, RegistrationClosed:
 	default:
 		return nil, fmt.Errorf("bridge: ClientRegistration must be open, allowlist or closed")
@@ -322,6 +322,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /t/{id}/cancel", s.handleTxnCancel)
 	mux.HandleFunc("POST /t/{id}/push", s.handlePush)
 	mux.HandleFunc("POST /t/{id}/creating", s.handleCreating)
+	mux.HandleFunc("GET /r/{code}", s.handleRequestByReference)
 
 	// OIDC provider (E22-T3).
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)
@@ -337,8 +338,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /introspect", s.handleIntrospect)
 
 	// Pages.
-	mux.HandleFunc("GET /static/bridge.css", s.handleCSS)
-	mux.HandleFunc("GET /static/bridge.js", s.handleJS)
+	mux.HandleFunc("GET /assets/{file}", s.handleAsset)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /{$}", s.handleHome)
 	s.extraRoutes(mux)
@@ -376,6 +376,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"service": "poweur-oauth",
 		"version": Version,
 		"issuer":  s.cfg.Issuer,
+	}
+	if VersionHash != "" {
+		out["versionHash"] = VersionHash
+	}
+	if BuildTime != "" {
+		out["buildTime"] = BuildTime
 	}
 	status := http.StatusOK
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)

@@ -866,3 +866,42 @@ func TestSignInContext(t *testing.T) {
 		t.Fatalf("answered request still has context: %d", rec.Code)
 	}
 }
+
+// The request by reference (E08-T6): a short link another device can open.
+func TestRequestByReference(t *testing.T) {
+	alice := newUser(t, who)
+	srv, _ := newServer(t, alice)
+	started := start(t, srv)
+	if !strings.HasPrefix(started.RequestLink, rpOrigin+"/auth/r/") {
+		t.Fatalf("request link = %q", started.RequestLink)
+	}
+	path := strings.TrimPrefix(started.RequestLink, rpOrigin)
+
+	// A signer gets the request itself, open to any origin.
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, r)
+	var got struct{ Request string }
+	if rec.Code != 200 || rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Request != started.Request {
+		t.Fatalf("json = %d %s", rec.Code, rec.Body)
+	}
+	decoded, err := identity.DecodeSignInRequest(got.Request)
+	if err != nil || identity.CheckSignInRequestURI(started.RequestLink, decoded) != nil {
+		t.Fatalf("the served request does not bind to its link: %v", err)
+	}
+
+	// A browser is sent into the web signer carrying the short link.
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://poweur.net/app/?auth="+url.QueryEscape(started.RequestLink) {
+		t.Fatalf("browser = %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/r/ZZZZZZZZ", nil))
+	if rec.Code != http.StatusGone {
+		t.Fatalf("unknown code = %d", rec.Code)
+	}
+}

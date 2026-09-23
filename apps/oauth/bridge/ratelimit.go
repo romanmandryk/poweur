@@ -91,7 +91,7 @@ func newLimiters(r RateLimits, now func() time.Time) limiters {
 func (l limiters) pick(r *http.Request) *limiter {
 	path := r.URL.Path
 	switch {
-	case path == "/authorize" || path == "/login":
+	case path == "/authorize" || path == "/login" || strings.HasPrefix(path, "/r/"):
 		return l.authorize
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/t/") && strings.HasSuffix(path, "/identify"):
 		return l.identify

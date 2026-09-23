@@ -84,8 +84,9 @@ One encoded form serves every transport: compact JSON, `base64url` without paddi
 
 | Transport | Form |
 |-----------|------|
-| Deep link / QR | `poweur://auth?request=<b64url>` |
-| Web signer handoff | `https://poweur.net/app/?auth=<b64url>` (URL-escaped) |
+| Deep link | `poweur://auth?request=<b64url>` |
+| QR, copied link | a **request by reference**: `https://<rp>/…/<code>` (below) |
+| Web signer handoff | `https://poweur.net/app/?auth=<b64url>` (URL-escaped), or `?auth=<reference>` |
 | Redirect | RP navigates the browser to the signer with the same parameter |
 | Cross-device paste | the user copies the encoded **response** back into the RP |
 | Cross-device poll | the signer POSTs to `response_uri` with the match code; the starting page polls the RP's `poll_uri` with its poll secret |
@@ -93,6 +94,30 @@ One encoded form serves every transport: compact JSON, `base64url` without paddi
 
 Decoders also accept raw JSON and padded base64url: a user pasting a code should not have
 to know which they copied.
+
+### Requests by reference
+
+An encoded request is about 600 characters; as a QR code that is a dense symbol many phone
+cameras will not read, and as a link nobody can read out. An RP may instead serve the request at
+a short link on its **own origin** — `https://oauth.poweur.org/r/K7QM4XP2` (an 8-character code,
+Crockford base32, living as long as the request) — and put that in the QR:
+
+- `GET <link>` with `Accept: application/json` answers `{"request": "<encoded request>"}`, with
+  `Access-Control-Allow-Origin: *` (nothing in a request is secret; the match code that completes a
+  cross-device sign-in is never served). Expired or used: `404`/`410`.
+- A signer given the link — itself, `poweur://auth?request_uri=<link>`, or a web signer's
+  `?auth=<link>` — fetches it without following redirects and **requires the link to be
+  same-origin with the request's `audience`**. The request is then exactly as authentic as one the
+  RP handed over directly: it came from that origin over TLS.
+- The same link opened in a browser — a phone's camera app — is the RP's to answer with a page
+  offering the signers (the OAuth bridge does), or a redirect into one (the guestbook does). No
+  in-app scanner is needed.
+- A request by reference always comes from another screen, so signers **require the match
+  code** for it.
+
+Helpers: Go `identity.SignInRequestURI`, `CheckSignInRequestURI`, `FetchSignInRequest`,
+`SignInReferenceDeepLink`; TS `signInRequestUri`, `checkSignInRequestUri`, `fetchSignInRequest`.
+Vectors: `signin-reference.json`.
 
 ## Response object
 

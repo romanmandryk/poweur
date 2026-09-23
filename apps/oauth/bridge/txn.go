@@ -49,9 +49,12 @@ type Txn struct {
 	Request        string    `json:"request,omitempty"`
 	RequestExpires time.Time `json:"request_expires,omitempty"`
 	Match          string    `json:"match,omitempty"`
-	Signers        []Signer  `json:"signers,omitempty"`
-	Pushes         int       `json:"pushes,omitempty"`
-	LastPush       time.Time `json:"last_push,omitempty"`
+	// RequestCode serves the request by reference at /r/{code} (E08-T6):
+	// what the QR and the copy link carry instead of the whole request.
+	RequestCode string    `json:"request_code,omitempty"`
+	Signers     []Signer  `json:"signers,omitempty"`
+	Pushes      int       `json:"pushes,omitempty"`
+	LastPush    time.Time `json:"last_push,omitempty"`
 
 	// Approval.
 	Claimed          bool      `json:"claimed,omitempty"`
@@ -79,6 +82,9 @@ type Signer struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
 	Note  string `json:"note,omitempty"`
+	// Default marks the operator's fallback signer, as opposed to one the
+	// identity itself advertises.
+	Default bool `json:"default,omitempty"`
 }
 
 // Status is what the waiting page's poll reports.

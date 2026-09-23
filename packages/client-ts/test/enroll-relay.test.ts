@@ -1,24 +1,42 @@
 /**
- * New-device enrollment ceremony against a real relay (EPIC-011 E11-T3).
+ * Device pairing v2 against a real relay (EPIC-011 E11-T8).
  *
- * Simulates both devices: a new one with no keys, and one that already holds
- * the identity. The property under test is that 32 bytes cross between them
- * with the relay seeing only ciphertext, authenticated by a six-digit code
- * that a human compares.
+ * Simulates both devices — a new one with no keys, and one that holds the
+ * identity — and, for the attacks, a relay that tampers with what it passes
+ * on. The properties: the seed crosses sealed end to end; a scanned pairing
+ * refuses a swapped key outright; a typed pairing's digits differ when the
+ * relay swaps the key, so the person comparing them catches it.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { generateEncryptionKeypair } from "../src/crypto/index.js";
 import { identityKeysFromSeed, signerFor, type Signer } from "../src/crypto/keys.js";
 import { newSeed } from "../src/crypto/seed.js";
-import { toBase64url } from "../src/encoding.js";
-import { computeSas, EnrollApi, SAS_DIGITS } from "../src/enroll.js";
-import { RelayClient } from "../src/http.js";
+import { randomBytes, toBase64url } from "../src/encoding.js";
+import {
+  EnrollApi,
+  formatShortCode,
+  PAIRING_SAS_DIGITS,
+  pairingCommitment,
+  pairingLink,
+  type EnrollSession,
+} from "../src/enroll.js";
+import { RelayClient, type RequestOptions } from "../src/http.js";
 import { createIdentity, IdentityApi } from "../src/identity.js";
 import { uniqueIdentity } from "./helpers/identities.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 
-describe("device enrollment ceremony ↔ real relay", () => {
+/** A relay client that rewrites what the approver is told. */
+class TamperingRelay extends RelayClient {
+  swap: ((path: string, body: any) => any) | null = null;
+  override async request<T>(options: RequestOptions): Promise<T> {
+    const out = await super.request<T>(options);
+    return (this.swap ? this.swap(options.path, out) : out) as T;
+  }
+}
+
+describe("device pairing v2 ↔ real relay", () => {
   let relay: RunningRelay;
   let api: EnrollApi;
 
@@ -28,20 +46,19 @@ describe("device enrollment ceremony ↔ real relay", () => {
     seed: Uint8Array;
   }
 
-  /**
-   * A fresh identity per test. The relay caps concurrent enrollment offers, so
-   * sharing one identity across tests exhausts the cap rather than exercising
-   * anything — and each test wants a clean rendezvous space anyway.
-   */
+  // One identity per test: the relay caps open offers per identity.
   async function newParty(): Promise<Party> {
     const identity = uniqueIdentity("enroll");
     const seed = newSeed();
     const keys = identityKeysFromSeed(identity, seed);
-    await createIdentity(new IdentityApi(new RelayClient(relay.baseUrl)), identity, {
-      hosted: true,
-      keys,
-    });
+    await createIdentity(new IdentityApi(new RelayClient(relay.baseUrl)), identity, { hosted: true, keys });
     return { identity, signer: signerFor(keys).signer, seed };
+  }
+
+  async function revealed(identity: string, session: EnrollSession, signer: Signer, approver: any, via = api) {
+    const newSide = await api.step(identity, session); // the new device reveals
+    const approverSide = await via.wait(signer, identity, approver);
+    return { newSide, approverSide };
   }
 
   beforeAll(async () => {
@@ -51,120 +68,131 @@ describe("device enrollment ceremony ↔ real relay", () => {
 
   afterAll(() => relay?.stop());
 
-  it("moves the seed to a new device, sealed end to end", async () => {
+  it("moves the seed by typed code, with matching digits on both screens", async () => {
     const { identity, signer, seed } = await newParty();
-
-    // New device: no keys at all, just an ephemeral pair and a code to read out.
     const session = await api.offer(identity, "Firefox on Linux");
-    expect(session.sas).toHaveLength(SAS_DIGITS);
-    expect(session.sas).toBe(computeSas(session.ephemeralPublicKey));
+    expect(session.rendezvousId).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    // Nothing happens until the approver answers — not even the reveal.
+    expect(await api.step(identity, session)).toEqual({ state: "offered" });
+    expect(session.revealed).toBe(false);
 
-    // Nothing to collect until the other side approves.
-    expect(await api.claim(identity, session)).toBeNull();
+    const approver = await api.begin(signer, identity, formatShortCode(session.rendezvousId));
+    expect(approver.mode).toBe("compare");
+    expect(approver.label).toBe("Firefox on Linux");
+    expect(await api.wait(signer, identity, approver)).toEqual({ state: "waiting" });
 
-    // Approving device: the user types the code, and both screens must agree.
-    const pending = await api.pending(signer, identity, session.rendezvousId);
-    expect(pending.sas).toBe(session.sas);
-    expect(pending.label).toBe("Firefox on Linux");
+    const { newSide, approverSide } = await revealed(identity, session, signer, approver);
+    if (newSide.state !== "compare" || approverSide.state !== "revealed") throw new Error("not revealed");
+    expect(newSide.sas).toHaveLength(PAIRING_SAS_DIGITS);
+    expect(approverSide.sas).toBe(newSide.sas);
 
-    await api.approve(signer, identity, pending, seed);
-
-    const received = await api.claim(identity, session);
-    expect(received).not.toBeNull();
-    expect(toBase64url(received!)).toBe(toBase64url(seed));
+    await api.approve(signer, identity, approver, approverSide, seed);
+    const done = await api.step(identity, session);
+    if (done.state !== "delivered") throw new Error(`state ${done.state}`);
+    expect(toBase64url(done.seed)).toBe(toBase64url(seed));
+    // The new device adopts it only because it derives the published key.
+    expect(await api.publishedKeyMatches(identity, done.seed)).toBe(true);
+    expect(await api.publishedKeyMatches(identity, newSeed())).toBe(false);
+    // Single use.
+    await expect(api.step(identity, session)).rejects.toThrow();
   });
 
-  it("finds the offer even when the request code was pasted with wrapping noise", async () => {
-    const { identity, signer } = await newParty();
-    const session = await api.offer(identity);
-    // Spaces, a newline, zero-width chars, an en-dash — the shape a phone
-    // keyboard produces when the user copies the code off the other screen.
-    const messy = `  ${session.rendezvousId.replace("-", "\u2013")}\n`.replace(
-      /(.{4})/,
-      "$1\u200b",
-    );
-    const pending = await api.pending(signer, identity, messy);
-    expect(pending.sas).toBe(session.sas);
-  });
-
-  it("consumes the rendezvous, so a captured id cannot be replayed", async () => {
+  it("moves the seed by scanned link, with no digits", async () => {
     const { identity, signer, seed } = await newParty();
     const session = await api.offer(identity);
-    const pending = await api.pending(signer, identity, session.rendezvousId);
-    await api.approve(signer, identity, pending, seed);
-    expect(await api.claim(identity, session)).not.toBeNull();
-    await expect(api.claim(identity, session)).rejects.toThrow();
+    const link = pairingLink("https://example.test/app/", identity, session.rendezvousId, session.commitment);
+    const approver = await api.begin(signer, identity, link);
+    expect(approver.mode).toBe("scan");
+    const { newSide, approverSide } = await revealed(identity, session, signer, approver);
+    expect(newSide).toEqual({ state: "scan" });
+    if (approverSide.state !== "revealed") throw new Error("not revealed");
+    await api.approve(signer, identity, approver, approverSide, seed);
+    const done = await api.step(identity, session);
+    expect(done.state === "delivered" && toBase64url(done.seed)).toBe(toBase64url(seed));
   });
 
-  it("derives the code from the key, not from what the relay says", async () => {
+  it("refuses a pairing link for another identity", async () => {
     const { identity, signer } = await newParty();
     const session = await api.offer(identity);
-    // Two independent computations of the same value — this is what the user
-    // compares, and neither side takes the relay's word for it.
-    const pending = await api.pending(signer, identity, session.rendezvousId);
-    expect(computeSas(pending.ephemeral_public_key)).toBe(session.sas);
-
-    // A different ephemeral key must yield a different code, or comparison
-    // would authenticate nothing.
-    const other = await api.offer(identity);
-    expect(other.sas).not.toBe(session.sas);
+    const link = pairingLink("https://example.test/app/", "someone.poweur.net", session.rendezvousId, session.commitment);
+    await expect(api.begin(signer, identity, link)).rejects.toMatchObject({ code: "pairing_mismatch" });
   });
 
-  it("refuses approval signed by a key that is not the identity's", async () => {
-    const { identity, signer, seed } = await newParty();
+  it("reads a code typed the way a phone keyboard mangles it", async () => {
+    const { identity, signer } = await newParty();
     const session = await api.offer(identity);
-    const pending = await api.pending(signer, identity, session.rendezvousId);
+    const code = session.rendezvousId;
+    const messy = `  ${code.slice(0, 4).toLowerCase()}–${code.slice(4)} \n`;
+    expect((await api.begin(signer, identity, messy)).code).toBe(code);
+  });
+
+  it("refuses an approver that is not the identity", async () => {
+    const { identity } = await newParty();
+    const session = await api.offer(identity);
     const impostor = signerFor(identityKeysFromSeed(identity, newSeed())).signer;
-    await expect(api.approve(impostor, identity, pending, seed)).rejects.toThrow();
-    await expect(api.pending(impostor, identity, session.rendezvousId)).rejects.toThrow();
+    await expect(api.begin(impostor, identity, session.rendezvousId)).rejects.toThrow();
   });
 
-  // Redirecting an approval is not expressible through this API: `approve`
-  // signs for the rendezvous it delivers to. (The relay-side binding — a
-  // signature for one rendezvous rejected at another — is asserted in
-  // apps/api/internal/relay/enroll_test.go, where it can be forged.) What the
-  // SDK can show is that misdirecting the delivery gains nothing: the payload
-  // is sealed to the *approved* device's key, so the other rendezvous receives
-  // ciphertext it cannot open.
-  it("seals to the approved device, so a misdirected delivery is useless", async () => {
-    const { identity, signer, seed } = await newParty();
-    const victim = await api.offer(identity);
-    const attacker = await api.offer(identity);
-    const pendingVictim = await api.pending(signer, identity, victim.rendezvousId);
+  // The attack v2 exists for: the relay hands the approver its own key.
+  function attackerCommitment() {
+    const key = toBase64url(generateEncryptionKeypair().publicKey);
+    const nonce = toBase64url(randomBytes(32));
+    return { key, nonce, commitment: pairingCommitment(key, nonce) };
+  }
 
-    await api.approve(
-      signer,
-      identity,
-      { ...pendingVictim, rendezvous_id: attacker.rendezvousId },
-      seed,
-    );
-
-    // The attacker holds the rendezvous but not the key it was sealed to.
-    await expect(api.claim(identity, attacker)).rejects.toThrow();
+  it("a relay that swaps the key cannot fool a scanned pairing", async () => {
+    const { identity, signer } = await newParty();
+    const session = await api.offer(identity);
+    const evil = new TamperingRelay(relay.baseUrl);
+    const attacker = attackerCommitment();
+    evil.swap = (path, body) => (path.endsWith("/fetch") ? { ...body, commitment: attacker.commitment } : body);
+    const link = pairingLink("https://example.test/app/", identity, session.rendezvousId, session.commitment);
+    await expect(new EnrollApi(evil).begin(signer, identity, link)).rejects.toMatchObject({ code: "pairing_mismatch" });
   });
 
-  it("rejects a payload sealed to a different ephemeral key", async () => {
-    const { identity, signer, seed } = await newParty();
-    const target = await api.offer(identity);
-    const eavesdropper = await api.offer(identity);
-    const pending = await api.pending(signer, identity, target.rendezvousId);
-    await api.approve(signer, identity, pending, seed);
-
-    // The eavesdropper knows the target's rendezvous id but not its private
-    // key; claiming with the wrong session must fail to open.
-    const wrongSession = { ...eavesdropper, rendezvousId: target.rendezvousId };
-    await expect(api.claim(identity, wrongSession)).rejects.toThrow();
+  it("a relay that swaps the key changes the typed pairing's digits", async () => {
+    const { identity, signer } = await newParty();
+    const session = await api.offer(identity);
+    const evil = new TamperingRelay(relay.baseUrl);
+    const attacker = attackerCommitment();
+    // From the start the approver sees the attacker's commitment, and later
+    // the attacker's reveal: a consistent substitute, committed before the
+    // approver's nonce existed.
+    evil.swap = (path, body) =>
+      path.endsWith("/fetch")
+        ? {
+            ...body,
+            commitment: attacker.commitment,
+            ...(body.ephemeral_public_key ? { ephemeral_public_key: attacker.key, commit_nonce: attacker.nonce } : {}),
+          }
+        : body;
+    const evilApi = new EnrollApi(evil);
+    const approver = await evilApi.begin(signer, identity, session.rendezvousId);
+    const { newSide, approverSide } = await revealed(identity, session, signer, approver, evilApi);
+    if (newSide.state !== "compare" || approverSide.state !== "revealed") throw new Error("not revealed");
+    // The person sees two different numbers and does not approve.
+    expect(approverSide.sas).not.toBe(newSide.sas);
+    expect(approverSide.ephemeralPublicKey).toBe(attacker.key);
   });
 
-  // Abandoned ceremonies must not lock an identity out until they expire.
+  it("a reveal that does not open the commitment is refused", async () => {
+    const { identity, signer } = await newParty();
+    const session = await api.offer(identity);
+    const evil = new TamperingRelay(relay.baseUrl);
+    evil.swap = (path, body) =>
+      path.endsWith("/fetch") && body.ephemeral_public_key ? { ...body, ephemeral_public_key: attackerCommitment().key } : body;
+    const evilApi = new EnrollApi(evil);
+    const approver = await evilApi.begin(signer, identity, session.rendezvousId);
+    await api.step(identity, session);
+    await expect(evilApi.wait(signer, identity, approver)).rejects.toMatchObject({ code: "pairing_mismatch" });
+  });
+
   it("frees a slot when an offer is cancelled", async () => {
     const { identity } = await newParty();
     const sessions = [];
-    for (let i = 0; i < 5; i += 1) sessions.push(await api.offer(identity));
-    await expect(api.offer(identity)).rejects.toThrow(/maximum number of open/);
-
+    for (let i = 0; i < 5; i++) sessions.push(await api.offer(identity));
+    await expect(api.offer(identity)).rejects.toThrow();
     await api.cancel(identity, sessions[0]!);
-    const replacement = await api.offer(identity);
-    expect(replacement.rendezvousId).toBeTruthy();
+    await expect(api.offer(identity)).resolves.toBeTruthy();
   });
 });

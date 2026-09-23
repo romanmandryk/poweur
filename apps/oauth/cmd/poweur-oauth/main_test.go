@@ -25,6 +25,11 @@ func TestVersionGenKeyHashSecret(t *testing.T) {
 	if code, out, _ := runCmd(t, "", "version"); code != 0 || !strings.HasPrefix(out, "poweur-oauth ") {
 		t.Fatalf("version = %d %q", code, out)
 	}
+	t.Setenv("VERSION_HASH", "abc123")
+	t.Setenv("BUILD_TIME", "2026-09-23 10:00")
+	if _, out, _ := runCmd(t, "", "version"); !strings.HasSuffix(out, "(abc123, 2026-09-23 10:00)\n") {
+		t.Fatalf("stamped version = %q", out)
+	}
 	code, out, _ := runCmd(t, "", "gen-key")
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(out))
 	if code != 0 || err != nil || len(key) != 32 {

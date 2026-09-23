@@ -21,7 +21,10 @@ import {
   SIGNIN_MATCH_CODE_DIGITS,
   SignInVerifier,
   checkResumeUri,
+  checkSignInRequestUri,
   describeSignInContext,
+  fetchSignInRequest,
+  signInRequestUri,
   fetchSignInContext,
   normalizeMatchCode,
   parseAuthRequestPayload,
@@ -842,5 +845,39 @@ describe("canonical string", () => {
     }
     expect(() => parseAuthRequestPayload(JSON.stringify(good), now + 3600_000)).toThrow();
     expect(() => parseAuthRequestPayload("{", now)).toThrow();
+  });
+});
+
+describe("requests by reference (E08-T6) ↔ Go vectors", () => {
+  const vectors = loadVectors<{
+    forms: { input: string; uri: string; ok: boolean }[];
+    origins: { uri: string; audience: string; ok: boolean }[];
+  }>("signin-reference");
+
+  it("recognises the same reference forms as Go", () => {
+    expect(vectors.forms.length).toBeGreaterThan(0);
+    for (const v of vectors.forms) expect(signInRequestUri(v.input)).toBe(v.ok ? v.uri : null);
+  });
+
+  it("binds a fetched request to its audience the same way", () => {
+    for (const v of vectors.origins) {
+      const check = () => checkSignInRequestUri(v.uri, { audience: v.audience });
+      if (v.ok) expect(check).not.toThrow();
+      else expect(check).toThrow();
+    }
+  });
+
+  it("fetches, decodes and refuses a request for another site", async () => {
+    const request = {
+      poweur_auth: "1", request_id: "rq", domain: "rp.example", audience: "https://rp.example",
+      nonce: "nnnnnnnnnnnnnnnnnnnnnnnn", issued_at: "2026-01-01T00:00:00Z", expires_at: "2026-01-01T00:05:00Z", action: "signin",
+    };
+    const serve = (audience: string) =>
+      (async () => new Response(JSON.stringify({ request: encodeSignInRequest({ ...request, audience } as never) }))) as typeof fetch;
+    const { request: got } = await fetchSignInRequest("https://rp.example/r/K7QM4XP2", { fetch: serve("https://rp.example") });
+    expect(got.request_id).toBe("rq");
+    await expect(fetchSignInRequest("https://rp.example/r/K7QM4XP2", { fetch: serve("https://bank.example") })).rejects.toThrow(/outside its audience/);
+    const gone = (async () => new Response("", { status: 410 })) as typeof fetch;
+    await expect(fetchSignInRequest("https://rp.example/r/K7QM4XP2", { fetch: gone })).rejects.toThrow(/expired/);
   });
 });

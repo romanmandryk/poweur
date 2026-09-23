@@ -1,5 +1,6 @@
 packages:
   - "apps/*"
+  - "apps/oauth/ui"
   - "packages/*"
 allowBuilds:
   # Transitive install scripts. pnpm 10+ blocks these until approved.

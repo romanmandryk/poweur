@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -146,5 +147,33 @@ func TestSendMessageDoesNotFollowRedirects(t *testing.T) {
 	resp.Body.Close()
 	if followed || resp.StatusCode != http.StatusMovedPermanently {
 		t.Fatalf("redirect followed=%v status=%d — a redirect must never read as delivery", followed, resp.StatusCode)
+	}
+}
+
+// A request by reference (E08-T6): the RP's short link, fetched, and accepted
+// only when it lives at the request's own audience.
+func TestReadSignInRequestByReference(t *testing.T) {
+	var audience string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := signInRequestForCLI(t)
+		req.Audience = audience
+		encoded, _ := idpkg.EncodeSignInRequest(req)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"request":%q}`, encoded)
+	}))
+	defer srv.Close()
+	link := srv.URL + "/r/K7QM4XP2"
+
+	audience = srv.URL
+	for _, source := range []string{link, idpkg.SignInReferenceDeepLink(link), "https://signer.example/app/?auth=" + url.QueryEscape(link)} {
+		got, err := readSignInRequest(source)
+		if err != nil || got.Audience != srv.URL {
+			t.Fatalf("%s: %+v %v", source, got, err)
+		}
+	}
+	// A link serving a request for another site is refused.
+	audience = "https://bank.example"
+	if _, err := readSignInRequest(link); err == nil {
+		t.Fatal("a request for another audience was accepted by reference")
 	}
 }

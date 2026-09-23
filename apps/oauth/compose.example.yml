@@ -32,10 +32,10 @@ services:
       OAUTH_ISSUER: https://auth.example.org
       OAUTH_DEFAULT_SIGNER: https://id.poweur.example/app/
       OAUTH_KEY_ENCRYPTION_KEY_FILE: /run/secrets/oauth_kek
-      # Start closed or allowlisted; open lets any Poweur ID publish a
-      # consent page under your issuer.
-      OAUTH_CLIENT_REGISTRATION: allowlist
-      OAUTH_REGISTRATION_ALLOWLIST: "*.example.org"
+      # Any signed-in Poweur ID may register applications (the default).
+      # A company bridge for its own tools: closed, with OAUTH_STATIC_CLIENTS;
+      # or allowlist with OAUTH_REGISTRATION_ALLOWLIST: "*.example.org".
+      # OAUTH_CLIENT_REGISTRATION: open
       OAUTH_LAUNCHER_URL: https://poweur.net
       OAUTH_ABUSE_CONTACT: abuse@example.org
       OAUTH_SECURITY_CONTACT: security@example.org

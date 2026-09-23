@@ -117,6 +117,89 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 	}
 }
 
+// Browsers ask the host itself for /favicon.ico. That has to be the brand
+// icon on the launcher and on every identity host, not the JSON service banner
+// GET / would otherwise return.
+func TestRootIconsOnLauncherAndIdentityHosts(t *testing.T) {
+	dir := writeStaticApp(t, "app")
+	files := map[string]string{
+		"favicon.ico":          "ICO-BYTES",
+		"favicon.svg":          "<svg>p</svg>",
+		"apple-touch-icon.png": "PNG-BYTES",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ts := httptest.NewServer(launcherTestServer(t, dir).Router())
+	defer ts.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	wantType := map[string]string{
+		"/favicon.ico":          "image/x-icon",
+		"/favicon.svg":          "image/svg+xml",
+		"/apple-touch-icon.png": "image/png",
+	}
+	for _, host := range []string{"poweur.net", "id.poweur.net", "alice.poweur.net"} {
+		for path, body := range map[string]string{
+			"/favicon.ico":          "ICO-BYTES",
+			"/favicon.svg":          "<svg>p</svg>",
+			"/apple-touch-icon.png": "PNG-BYTES",
+			"/app/favicon.ico":      "ICO-BYTES",
+		} {
+			req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = host
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", host, path, err)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("%s %s: status = %d, want 200; body %q", host, path, resp.StatusCode, got)
+				continue
+			}
+			if string(got) != body {
+				t.Errorf("%s %s: body = %q, want %q", host, path, got, body)
+			}
+			if ctype, ok := wantType[path]; ok && !strings.HasPrefix(resp.Header.Get("Content-Type"), ctype) {
+				t.Errorf("%s %s: Content-Type = %q, want %s", host, path, resp.Header.Get("Content-Type"), ctype)
+			}
+		}
+	}
+}
+
+// A host with the web app mounted but without an icon file must not hand the
+// service banner back as if it were an image.
+func TestRootIconMissingIsNotTheServiceBanner(t *testing.T) {
+	ts := httptest.NewServer(launcherTestServer(t, writeStaticApp(t, "app")).Router())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/favicon.ico", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "alice.poweur.net"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body %q", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "poweur-relay") {
+		t.Fatalf("missing icon returned the service banner: %s", body)
+	}
+}
+
 func TestWebStaticObservabilityJSON(t *testing.T) {
 	mux := http.NewServeMux()
 	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"betterstack","token":"t"}]}`))

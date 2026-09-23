@@ -426,58 +426,86 @@ func readKeyFileBytes(t *testing.T, home, name string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(home, ".poweur", "keys", name))
 }
 
-// Drill: enrol a new device from the terminal. This is the camera-free path —
-// a six-digit code typed by the user, no QR anywhere — and it must move the
-// seed with the relay seeing only ciphertext.
+// Drill: pair a new device from the terminal (EPIC-011 E11-T8). Both ways of
+// carrying the code — the typed code with six digits to confirm, and the
+// scanned pairing link with none — must move the seed with the relay seeing
+// only a commitment, nonces, a public key and ciphertext; and neither may
+// deliver to a device the user did not confirm.
 func TestDrill_EnrollNewDeviceViaCode(t *testing.T) {
 	relay := newDrillRelay(t, "enrolled.poweur.net", "peer5.poweur.net")
-	oldDevice, newDevice, peerHome := t.TempDir(), t.TempDir(), t.TempDir()
-
+	oldDevice, newDevice, thirdDevice, peerHome := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 	seed := createSeedIdentity(t, oldDevice, "enrolled.poweur.net", relay.url)
-
-	// New device: no keys, no config. It opens a rendezvous and shows a code.
-	stdout, _ := runCLI(t, newDevice, "key", "enroll", "enrolled.poweur.net",
-		"--relay", relay.url, "--label", "laptop", "--json")
-	var offer struct {
-		RendezvousID        string `json:"rendezvous_id"`
-		SAS                 string `json:"sas"`
-		EphemeralPrivateKey string `json:"ephemeral_private_key"`
+	approve := func(input string, extra ...string) (int, string, string) {
+		t.Helper()
+		args := append([]string{"key", "approve", input, "--use-identity", "enrolled.poweur.net",
+			"--relay", relay.url, "--seed", seed, "--json"}, extra...)
+		return runCLIFull(t, oldDevice, args...)
 	}
-	if err := json.Unmarshal([]byte(stdout), &offer); err != nil {
-		t.Fatalf("parse enroll offer: %v\n%s", err, stdout)
+	type offer struct {
+		Code string `json:"code"`
+		Link string `json:"link"`
 	}
-	if len(offer.SAS) != 6 || offer.RendezvousID == "" {
-		t.Fatalf("expected a 6-digit code and a rendezvous id: %+v", offer)
+	enroll := func(home, label string) offer {
+		t.Helper()
+		stdout, _ := runCLI(t, home, "key", "enroll", "enrolled.poweur.net", "--relay", relay.url, "--label", label, "--json")
+		var o offer
+		if err := json.Unmarshal([]byte(stdout), &o); err != nil || len(o.Code) != 8 || !strings.Contains(o.Link, "#pair="+o.Code+".") {
+			t.Fatalf("enroll offer: %v %+v\n%s", err, o, stdout)
+		}
+		return o
+	}
+	type claimed struct {
+		Enrolled bool   `json:"enrolled"`
+		SAS      string `json:"sas"`
+		Status   string `json:"status"`
+	}
+	claim := func(home, code string) claimed {
+		t.Helper()
+		stdout, _ := runCLI(t, home, "key", "claim", "enrolled.poweur.net", code, "--json")
+		var c claimed
+		if err := json.Unmarshal([]byte(stdout), &c); err != nil {
+			t.Fatalf("claim: %v\n%s", err, stdout)
+		}
+		return c
 	}
 
-	// Old device: the user types the id and the code. A wrong code must abort
-	// rather than hand over the seed.
-	t.Setenv("HOME", oldDevice)
-	var out, errBuf strings.Builder
-	if code := clipkg.Run([]string{
-		"key", "approve", offer.RendezvousID,
-		"--use-identity", "enrolled.poweur.net", "--relay", relay.url,
-		"--seed", seed, "--sas", "000000", "--json",
-	}, &out, &errBuf); code == 0 {
-		t.Fatal("approval proceeded despite a mismatched code")
+	// ── The typed code, with wrong digits: nothing is delivered, and the
+	// pairing cannot be approved again with fresh digits.
+	bad := enroll(newDevice, "laptop")
+	if code, out, _ := approve(bad.Code, "--no-wait"); code != 0 || !strings.Contains(out, "waiting for the new device") {
+		t.Fatalf("approve before reveal = %d %s", code, out)
 	}
-	if !strings.Contains(errBuf.String(), "mismatch") {
-		t.Fatalf("expected a clear mismatch warning, got: %s", errBuf.String())
+	if c := claim(newDevice, bad.Code); len(c.SAS) != 6 || c.Enrolled {
+		t.Fatalf("new device after the approver answered: %+v", c)
+	}
+	if code, _, errOut := approve(bad.Code, "--sas", "000000"); code == 0 || !strings.Contains(errOut, "do not match") {
+		t.Fatalf("mismatched digits = %d %s", code, errOut)
+	}
+	if code, _, errOut := approve(bad.Code); code == 0 {
+		t.Fatalf("a second approval after a mismatch went ahead: %s", errOut)
+	}
+	if c := claim(newDevice, bad.Code); c.Enrolled {
+		t.Fatal("a mismatched pairing delivered the seed")
+	}
+	// Approving without confirming the digits delivers nothing either.
+	blind := enroll(thirdDevice, "blind")
+	approve(blind.Code, "--no-wait")
+	claim(thirdDevice, blind.Code)
+	if code, _, errOut := approve(blind.Code); code == 0 || !strings.Contains(errOut, "--sas") {
+		t.Fatalf("approval without digits = %d %s", code, errOut)
 	}
 
-	// With the right code it goes through — including when the user pasted
-	// the request code with the wrapping spaces a phone keyboard injects.
-	runCLI(t, oldDevice, "key", "approve", "  "+offer.RendezvousID+" \n",
-		"--use-identity", "enrolled.poweur.net", "--relay", relay.url,
-		"--seed", seed, "--sas", offer.SAS, "--json")
-
-	// New device collects the sealed seed — this is the step that proves the
-	// ceremony actually moved something. It never sees the seed in any other
-	// form: only the ephemeral private key it generated itself.
-	runCLI(t, newDevice, "key", "claim", "enrolled.poweur.net", offer.RendezvousID,
-		"--ephemeral-key", offer.EphemeralPrivateKey, "--relay", relay.url, "--json")
-
-	// The keys it derived must be the identity's, not merely well-formed.
+	// ── The typed code, confirmed — typed the way a phone keyboard mangles it.
+	good := enroll(newDevice, "laptop")
+	typed := "  " + strings.ToLower(good.Code[:4]) + "\u2013" + good.Code[4:] + " "
+	approve(typed, "--no-wait")
+	c := claim(newDevice, good.Code)
+	if code, out, errOut := approve(typed, "--sas", c.SAS[:3]+" "+c.SAS[3:]); code != 0 || !strings.Contains(out, `"approved": true`) {
+		t.Fatalf("approve with the digits = %d %s %s", code, out, errOut)
+	}
+	if c := claim(newDevice, good.Code); !c.Enrolled {
+		t.Fatalf("new device did not collect the keys: %+v", c)
+	}
 	derived, _ := runCLI(t, newDevice, "key", "derive", "--seed", seed, "--json")
 	var want struct {
 		PublicKey string `json:"public_key"`
@@ -489,15 +517,41 @@ func TestDrill_EnrollNewDeviceViaCode(t *testing.T) {
 	if idpkg.NormalizePublicKeyKey(want.PublicKey) != idpkg.NormalizePublicKeyKey(doc.PublicKey) {
 		t.Fatal("enrolled device does not hold the published identity key")
 	}
+	// Spent: the pairing is gone.
+	if code, _, _ := runCLIFull(t, newDevice, "key", "claim", "enrolled.poweur.net", good.Code, "--json"); code == 0 {
+		t.Fatal("a spent pairing was claimed twice")
+	}
 
-	// A claimed rendezvous is spent: replaying it must fail.
-	t.Setenv("HOME", newDevice)
-	var replayOut, replayErr strings.Builder
-	if code := clipkg.Run([]string{
-		"key", "claim", "enrolled.poweur.net", offer.RendezvousID,
-		"--ephemeral-key", offer.EphemeralPrivateKey, "--relay", relay.url, "--json",
-	}, &replayOut, &replayErr); code == 0 {
-		t.Fatal("a spent rendezvous was claimed twice")
+	// ── The scanned link: no digits. A link whose commitment is not the one
+	// the relay holds for that code is refused.
+	scan := enroll(thirdDevice, "phone")
+	other := enroll(t.TempDir(), "someone else")
+	otherParts, err := idpkg.ParsePairingLink(other.Link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appURL := strings.SplitN(scan.Link, "#", 2)[0]
+	forged := idpkg.PairingLink(appURL, "enrolled.poweur.net", scan.Code, otherParts.Commitment)
+	if code, _, errOut := approve(forged, "--no-wait"); code == 0 || !strings.Contains(errOut, "different device") {
+		t.Fatalf("forged link = %d %s", code, errOut)
+	}
+	scanParts, _ := idpkg.ParsePairingLink(scan.Link)
+	if scanParts.Identity != "enrolled.poweur.net" {
+		t.Fatalf("link names %q", scanParts.Identity)
+	}
+	elsewhere := idpkg.PairingLink(appURL, "someone.poweur.net", scan.Code, scanParts.Commitment)
+	if code, _, errOut := approve(elsewhere, "--no-wait"); code == 0 || !strings.Contains(errOut, "is for someone.poweur.net") {
+		t.Fatalf("link for another identity = %d %s", code, errOut)
+	}
+	approve(scan.Link, "--no-wait")
+	if c := claim(thirdDevice, scan.Code); c.SAS != "" || !strings.Contains(c.Status, "Approve on the other device") {
+		t.Fatalf("scanned pairing asked for digits: %+v", c)
+	}
+	if code, out, errOut := approve(scan.Link); code != 0 || !strings.Contains(out, `"mode": "scan"`) {
+		t.Fatalf("approve by link = %d %s %s", code, out, errOut)
+	}
+	if c := claim(thirdDevice, scan.Code); !c.Enrolled {
+		t.Fatalf("scanned device did not collect the keys: %+v", c)
 	}
 
 	runCLI(t, peerHome, "identity", "create", "peer5.poweur.net",

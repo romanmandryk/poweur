@@ -16,9 +16,9 @@ const (
 
 // launcherView is what the identify page needs to offer creation.
 type launcherView struct {
-	URL    string
-	Domain string
-	Host   string
+	URL    string `json:"url"`
+	Domain string `json:"domain"`
+	Host   string `json:"host"`
 }
 
 func (s *Server) launcherView() *launcherView {

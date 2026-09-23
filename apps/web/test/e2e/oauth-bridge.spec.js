@@ -30,8 +30,8 @@ test.describe("OAuth bridge through the web signer", () => {
   async function identifyAt(page, url, identity) {
     await page.goto(url);
     await page.fill("#identity", identity);
-    await page.click("button.primary");
-    await expect(page.locator("h1")).toHaveText(`Approve as ${identity}`);
+    await page.click("#identify-continue");
+    await expect(page.locator("#approve-identity")).toHaveText(identity);
   }
 
   async function unlockAndApprove(page, code = "") {
@@ -84,12 +84,17 @@ test.describe("OAuth bridge through the web signer", () => {
       const screen = await desktop.newPage();
       const { verifier, challenge } = pkce();
       await identifyAt(screen, authorizeURL(bridge, rp, { challenge, state: "desk" }), identity);
-      await screen.click("summary");
-      const match = (await screen.locator(".match").textContent()).trim();
-      const request = await screen.locator("#request-code").inputValue();
+      // A desktop leads with the phone: the code to type and the request.
+      await expect(screen.locator("h1")).toHaveText("Approve on your phone");
+      const match = (await screen.locator("#match-code").textContent()).trim();
+      // The QR carries a short link to the request, not the request itself.
+      const link = (await screen.locator("#request-code").textContent()).trim();
+      expect(link).toMatch(new RegExp(`^${bridge.issuer}/r/[0-9A-Z]{8}$`));
 
-      // The phone opens the request the way a scanned QR would.
-      await signer.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(request)}`);
+      // The phone's camera opens it: a page offering this phone's signers.
+      await signer.goto(link);
+      await expect(signer.locator("h1")).toHaveText("Approve on this phone");
+      await signer.click(`a.handoff-signer:has-text("${relay.addr}")`);
       await expect(signer.locator("#auth-context")).toContainText("to sign in to E2E application", { timeout: 45_000 });
       await unlockAndApprove(signer, match);
       await expect(signer.locator("#auth-result-note")).toContainText("Go back to the screen");
@@ -129,9 +134,9 @@ test.describe("OAuth bridge through the web signer", () => {
       const { verifier, challenge } = pkce();
       await identifyAt(screen, authorizeURL(bridge, rp, { challenge, state: "push" }), identity);
       await expect(screen.locator("text=" + bridge.pushIdentity)).toBeVisible();
-      await screen.click('button:has-text("Send to my Poweur app")');
-      await expect(screen.locator(".status").first()).toContainText("Sent", { timeout: 30_000 });
-      const match = (await screen.locator(".match").textContent()).trim();
+      await screen.click("#push-send");
+      await expect(screen.locator("#push-notice")).toContainText("Sent", { timeout: 30_000 });
+      const match = (await screen.locator("#match-code").textContent()).trim();
       // The prompt arrives in its own list, not as a conversation.
       await expect(app.locator("#auth-prompts")).toContainText("E2E application", { timeout: 45_000 });
       await expect(app.locator("#auth-prompts")).toContainText(`via ${bridge.pushIdentity}`);

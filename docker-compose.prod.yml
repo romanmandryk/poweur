@@ -33,6 +33,10 @@ services:
       # rather than left to `apps/api/.env.prod`, because that file is written
       # by Ansible and this compose file is what the GitHub deploy re-runs.
       HOSTED_DOMAINS: poweur.net
+      # The OAuth/OIDC bridge (apps/oauth/deploy): hosted identities advertise
+      # it in capabilities.json and as their IndieAuth metadata. The relay
+      # never talks to it.
+      OAUTH_BRIDGE_URL: https://oauth.poweur.org
       # Handle policy (EPIC-018). The package default is 3 so the test
       # fixtures ("bob") keep working; production holds short handles back.
       NAME_MIN_LEN: "6"

@@ -60,7 +60,8 @@
 |------|--------|----------|-------|
 | E11-T1 Seed, multi-enrollment, recovery kit | **done** (web UI → E15) | **v1** | derivation, keystore endpoints, BIP39 kit, inventory |
 | E11-T2 Recovery-master role & elevated ops | **done** | v1 | enforceable via actor assertion; kill-lost-device |
-| E11-T3 Enrollment ceremony | **done** | v1 | typed code, no PAKE needed — see correction below |
+| E11-T3 Enrollment ceremony | **done** | v1 | typed code, no PAKE needed — see correction below; **superseded by E11-T8** |
+| E11-T8 Pairing v2: commit-then-reveal, QR, short codes | **done** | v1 | v1's six digits were a function of the key alone, so a malicious relay could grind a matching key and take the seed — see E11-T8 |
 | E11-T4 CLI/bot key storage hardening | **done** | v1 | scrypt + AES-GCM at rest; FIDO2 in CLI deferred |
 | E11-T5 Social recovery | open | later | design doc gates implementation |
 | E11-T6 Poweur ID as recovery anchor | open | later | needs EPIC-008 |
@@ -513,6 +514,70 @@ entirely absent; vault entries survive device loss via E11-T1 recovery.
 - [ ] User-facing docs: "How not to lose your Poweur ID" one-pager, surfaced during onboarding
 
 **Acceptance:** all five drills green in CI; review findings triaged into issues.
+
+### E11-T8 — Pairing v2: commit-then-reveal, QR, short codes — **done**
+
+**The flaw in T3.** The six digits were `SHA-256(ephemeral public key) mod 10^6` — a function of
+the new device's key *alone*. The relay sees that key, so a malicious or compromised relay could
+generate keys until one hashes to the same six digits (about a million X25519 key generations —
+seconds), hand that key to the approving device, and receive the seed: every key of the
+identity. Both screens would show the same number. The "first and only try" argument in T3 was
+wrong: the attacker's tries are offline. Worse, `poweur key approve` without `--sas` printed the
+code and delivered at once, so from the CLI no comparison happened at all.
+
+**Goals this must meet** (and E11-T3 did not): the relay can never read the seed or anything
+it protects, and a compromised relay cannot add a device of its own — not by guessing, not by
+grinding, not by a user skipping a step.
+
+**Protocol (changed — flagged; not yet shipped externally):**
+
+1. The new device makes an ephemeral X25519 key `K` and a random `r`, and posts only the
+   commitment `C = SHA-256("poweur/v2/enroll-commit" ‖ K ‖ r)`. The relay returns an 8-character
+   code (Crockford base32, `K7QM-4XP2`) and a claim token only the new device holds.
+2. The approving device (identity-signed) fetches `C` and posts its own random `n`.
+3. The new device, seeing `n`, reveals `K` and `r`.
+4. The approving device checks `SHA-256(… K ‖ r) = C`. Both compute the digits from
+   `C, K, r, n`. The relay had to fix any substitute key (inside a commitment) before seeing `n`,
+   and the digits depend on `n`: a substitute matches with probability 10^-6, once, visibly.
+5. Only then is the seed sealed to `K` and delivered, identity-signed and bound to the code.
+
+**Two ways to carry the code, one ceremony:**
+
+- **Scan** (default when a camera is there): the new device shows a QR of
+  `https://<identity>/app/#pair=<code>.<C>`. The scanned `C` is authentic, so `K` is too — the
+  approver approves with **no digits at all**. The fragment keeps the pairing link out of logs.
+- **Type** (no camera): type `K7QM-4XP2`; both screens then show six digits to **compare**, never
+  to type.
+
+- [x] `packages/identity`: `NewShortCode`/`NormalizeShortCode`, `PairingCommitment`,
+      `PairingSAS`, `VerifyPairingReveal`, `PairingLink`/`ParsePairingLink` (the link also names
+      the identity, `&id=`, so an app holding several unlocks the right one and an approver
+      refuses a link for someone else); vectors `pairing.json`; a test that grinds a key against
+      v1's digits and has nothing to aim at in v2
+- [x] Relay 0.1.13: commitment offer, approver nonce (once; a second one is refused), reveal
+      (claim token, only after the nonce), deliver (after the reveal), poll/cancel by claim
+      token; 8-char codes; no digits computed; v1 offers refused (`pairing_v1`)
+- [x] Go CLI 0.1.12 `key enroll` (terminal QR + code; `--wait` or step-by-step `key claim`),
+      `key approve <link | code>`: a link needs nothing, a code needs the digits (prompt or
+      `--sas`) — no blind approval; the new device saves keys only if they derive the published
+      key. State in `~/.poweur/pairing`, so the steps also run as separate commands
+- [x] SDK 0.1.10 `EnrollApi`: `offer`/`step`/`cancel` (new device), `begin`/`wait`/`approve`
+      (approver), `publishedKeyMatches`; TS CLI mirrors the Go CLI and its state files
+- [x] Web 0.1.29: the new device shows a QR (version 5 — any camera reads it) and the code large;
+      digits appear only once the other device answers, labelled "compare — don't type". The
+      approver is its own screen (Settings → Add a device, or the scanned link's `#pair=`, which
+      survives unlock and switches to the named identity)
+- [x] **Approve with: Poweur app · Browser · Terminal** on the new device (remembered). Found
+      trying it: a phone camera opens what the QR says, and an https link opened a website with
+      no keys while the identity lived in the app. The app form is
+      `poweur://pair?pair=…&id=…` (`PairingAppLink` / `pairingAppLink`; parsers take both), the
+      shell routes it at launch and while running, and a browser that lacks the identity offers
+      **Open in the Poweur app**. Web 0.1.30, CLI 0.1.13, SDK 0.1.11
+- [x] Tests: relay unit (order, claim token, reveal must open the commitment, v1 refused); SDK
+      against a real relay with a **tampering relay** (a scanned pairing refuses the swapped key;
+      a typed pairing's digits differ); Go↔TS CLI interop both ways; Go drill (wrong digits end
+      the pairing, no digits delivers nothing, forged and foreign links refused, scan path);
+      Playwright both paths across two browsers; spec in `security/key-management.md`
 
 ## Non-goals
 

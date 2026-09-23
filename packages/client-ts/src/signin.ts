@@ -769,6 +769,95 @@ export async function fetchRelyingPartyMetadata(
   }
 }
 
+// ── Requests by reference (EPIC-008 E08-T6) ─────────────────────────────────
+//
+// A QR carrying a whole request is ~600 characters — too dense for many
+// cameras. The RP may instead hand out a short link; the signer fetches the
+// request from it and requires the link to live at the request's audience.
+// Mirrors Go `SignInRequestURI` / `CheckSignInRequestURI` /
+// `FetchSignInRequest`, pinned by the `signin-reference.json` vectors.
+
+function httpLink(value: string): string | null {
+  try {
+    const u = new URL(value.trim());
+    if ((u.protocol !== "https:" && u.protocol !== "http:") || !u.host) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The link, when `input` passes a request by reference: the link itself,
+ * `poweur://auth?request_uri=…`, or a web signer link whose `auth` (or
+ * `request_uri`) holds one. Null for a request carried inline.
+ */
+export function signInRequestUri(input: string): string | null {
+  const value = String(input ?? "").trim();
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    return null;
+  }
+  if (u.protocol === "poweur:") {
+    const ref = u.searchParams.get("request_uri");
+    return ref ? httpLink(ref) : null;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  if (u.searchParams.get("request")) return null;
+  const inner = u.searchParams.get("auth") ?? u.searchParams.get("request_uri");
+  if (inner) return httpLink(inner);
+  return httpLink(value);
+}
+
+/** Throws unless the link lives at the request's audience. */
+export function checkSignInRequestUri(requestUri: string, request: Pick<SignInRequest, "audience">): void {
+  const origin = normalizeOrigin(request.audience);
+  if (!sameOrigin(origin, requestUri)) fail(`the request was fetched from outside its audience ${origin}`);
+}
+
+/** `poweur://auth?request_uri=…` for a request by reference. */
+export function signInReferenceDeepLink(requestUri: string): string {
+  return `poweur://auth?request_uri=${encodeURIComponent(requestUri)}`;
+}
+
+/** Fetch a request by reference; checks the audience binding. Redirects are refused. */
+export async function fetchSignInRequest(
+  requestUri: string,
+  options: { fetch?: typeof globalThis.fetch; timeoutMs?: number } = {},
+): Promise<{ encoded: string; request: SignInRequest }> {
+  const doFetch = options.fetch ?? globalThis.fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 8_000);
+  try {
+    const res = await doFetch(requestUri, {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (res.status === 404 || res.status === 410) {
+      throw new PoweurError("not_found", "sign-in: this sign-in code expired or was already used", { status: res.status });
+    }
+    if (!res.ok) throw new PoweurError("relay_error", `sign-in request link returned ${res.status}`, { status: res.status });
+    const text = await res.text();
+    if (text.length > 16 * 1024) fail("sign-in request too large");
+    let body: { request?: unknown };
+    try {
+      body = JSON.parse(text) as { request?: unknown };
+    } catch {
+      return fail("the link did not answer with a request");
+    }
+    if (typeof body.request !== "string" || !body.request) fail("the link did not answer with a request");
+    const encoded = body.request as string;
+    const request = decodeSignInRequest(encoded);
+    checkSignInRequestUri(requestUri, request);
+    return { encoded, request };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MAX_SIGNIN_CONTEXT_BYTES = 4 * 1024;
 
 function displayLine(value: unknown, max: number): string {

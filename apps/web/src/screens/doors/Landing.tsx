@@ -6,6 +6,7 @@ import { KeyRound, Lock, Tag, type LucideIcon } from "lucide-react";
 import { hasRelayUrl } from "../../lib/storage.js";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
+import { BrandTile } from "../../ui/Logo";
 import { ClaimCard } from "./ClaimCard";
 import { cardClass, DoorPage, LinkButton } from "./DoorPage";
 import { RelayPrompt, relayPromptVisible } from "./RelayPrompt";
@@ -28,7 +29,8 @@ export function Landing() {
 
   return (
     <DoorPage id="landing">
-      <div className="landing-hero pt-2 text-center">
+      <div className="landing-hero flex flex-col items-center pt-2 text-center">
+        <BrandTile className="landing-icon mb-5 size-20 rounded-[22px] landscape:max-h-[500px]:hidden" />
         <h1 className="landing-title animate-fade-in-up text-[30px] leading-tight font-extrabold tracking-[-.7px] landscape:max-h-[500px]:text-[22px]">
           Your name. Your inbox. Your files.
         </h1>

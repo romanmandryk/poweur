@@ -111,6 +111,9 @@ type pendingLogin struct {
 	browser     string // coarse label for the signer's context line
 	pollHash    string // the starting page's poll secret
 	match       string // shown on the starting screen
+	code        string // short code: the request by reference at /auth/r/{code}
+	encoded     string // the request /auth/r/{code} serves
+	signer      string // the web signer a browser opening the short link is sent to
 	claimed     bool   // an approval has been received; no second one is processed
 
 	finish        string // finishSameDevice or finishCrossDevice, once approved
@@ -190,6 +193,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /auth/resume", s.handleAuthResume)
 	mux.HandleFunc("GET /auth/poll", s.handleAuthPoll)
 	mux.HandleFunc("GET /auth/context", s.handleAuthContext)
+	mux.HandleFunc("GET /auth/r/{code}", s.handleAuthByReference)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/entries", s.handleEntriesGet)
@@ -233,13 +237,16 @@ func (s *Server) handleMetadata(w http.ResponseWriter, r *http.Request) {
 // Poweur ID": one request rendered into every transport it might use, plus
 // the two values only this page may know.
 type StartResponse struct {
-	RequestID string   `json:"request_id"`
-	Request   string   `json:"request"`
-	DeepLink  string   `json:"deep_link"`
-	WebLink   string   `json:"web_link"`
-	ExpiresAt string   `json:"expires_at"`
-	Scopes    []string `json:"scopes,omitempty"`
-	Consent   []string `json:"consent,omitempty"`
+	RequestID string `json:"request_id"`
+	Request   string `json:"request"`
+	// RequestLink is the request by reference (E08-T6): a short link for
+	// another device, which a signer fetches and a browser follows.
+	RequestLink string   `json:"request_link"`
+	DeepLink    string   `json:"deep_link"`
+	WebLink     string   `json:"web_link"`
+	ExpiresAt   string   `json:"expires_at"`
+	Scopes      []string `json:"scopes,omitempty"`
+	Consent     []string `json:"consent,omitempty"`
 	// PollSecret authenticates this page's polling. It is deliberately not
 	// the request_id, which travels inside the request to whoever approves.
 	PollSecret string `json:"poll_secret"`
@@ -294,6 +301,11 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	deep, _ := identity.SignInDeepLink(req)
 	web, _ := identity.SignInWebLink(signerBase(r), req)
+	code, err := identity.NewShortCode()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	expires, _ := time.Parse(time.RFC3339, req.ExpiresAt)
 	s.mu.Lock()
@@ -305,21 +317,54 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		browser:     coarseBrowser(r.UserAgent()),
 		pollHash:    signin.HashSecret(pollSecret),
 		match:       match,
+		code:        code,
+		encoded:     encoded,
+		signer:      signerBase(r),
 	}
 	s.prunePendingLocked()
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, StartResponse{
-		RequestID:  req.RequestID,
-		Request:    encoded,
-		DeepLink:   deep,
-		WebLink:    web,
-		ExpiresAt:  req.ExpiresAt,
-		Scopes:     req.Scopes,
-		Consent:    signin.DescribeScopes(req.Scopes, s.cfg.Name),
-		PollSecret: pollSecret,
-		MatchCode:  match,
+		RequestID:   req.RequestID,
+		Request:     encoded,
+		RequestLink: s.cfg.Origin + "/auth/r/" + code,
+		DeepLink:    deep,
+		WebLink:     web,
+		ExpiresAt:   req.ExpiresAt,
+		Scopes:      req.Scopes,
+		Consent:     signin.DescribeScopes(req.Scopes, s.cfg.Name),
+		PollSecret:  pollSecret,
+		MatchCode:   match,
 	})
+}
+
+// handleAuthByReference serves a pending request by its short code: JSON to a
+// signer (which checks the request names this origin as its audience), and a
+// redirect into the web signer for a browser that opened the link.
+func (s *Server) handleAuthByReference(w http.ResponseWriter, r *http.Request) {
+	code, err := identity.NormalizeShortCode(r.PathValue("code"))
+	var p *pendingLogin
+	if err == nil {
+		s.mu.Lock()
+		for _, candidate := range s.pending {
+			if candidate.code == code && !candidate.claimed && s.now().Before(candidate.expiresAt) {
+				p = candidate
+				break
+			}
+		}
+		s.mu.Unlock()
+	}
+	if p == nil {
+		writeError(w, http.StatusGone, "this sign-in code expired or was already used")
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, map[string]string{"request": p.encoded})
+		return
+	}
+	http.Redirect(w, r, p.signer+"?auth="+url.QueryEscape(s.cfg.Origin+"/auth/r/"+code), http.StatusSeeOther)
 }
 
 // browserBinding returns this browser's login-binding value, setting the

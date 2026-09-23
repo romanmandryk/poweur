@@ -14,7 +14,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file: deploy replaces the Caddyfile with
+      # `git reset --hard`, and a single-file bind mount keeps showing the old
+      # inode, so `caddy reload` silently kept the previous config.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:

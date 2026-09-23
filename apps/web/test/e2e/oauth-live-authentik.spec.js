@@ -140,7 +140,7 @@ test.describe("Authentik through the bridge (live)", () => {
       await page.click("text=Poweur ID");
       await expect(page).toHaveURL(/oauth\.localhost/, { timeout: 60_000 });
       await page.fill("#identity", identity);
-      await page.click("button.primary");
+      await page.click("#identify-continue");
       await page.click(`a:has-text("Continue at ${relay.addr}")`);
       await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 60_000 });
       if (await page.locator("#btn-auth-unlock").count()) {

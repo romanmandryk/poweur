@@ -1,6 +1,6 @@
 /**
  * In-memory routing, mirroring the legacy `R` object: the app has no URL
- * routes (deep links stay `#claim=` / `?auth=`), so neither does this.
+ * routes (deep links stay `#claim=` / `?auth=` / `poweur://auth`), so neither does this.
  */
 import { create } from "zustand";
 import { useData } from "./data";
@@ -9,7 +9,7 @@ import { useData } from "./data";
 export const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth";
+export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth" | "pair";
 
 /**
  * Sub-pages that are a *detail of the list behind them* rather than a gate

@@ -54,20 +54,23 @@ func TestAwaitPageOffersSignersCodeAndQR(t *testing.T) {
 	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
 	p := b.get("/t/" + id)
 	txn := h.txn(id)
-	for _, want := range []string{
-		"Approve as " + alice,
-		"https://alice.poweur.net/app/?auth=",      // the identity's own signer, from capabilities
-		"https://poweur.net/app/?auth=",            // the operator default
-		"Works only if this browser already holds", // …labelled for what it is
-		"poweur://auth?request=",                   // deep link
-		`<svg xmlns="http://www.w3.org/2000/svg"`,  // QR
-		`class="match"`,                            // match code…
-		txn.Match,                                  // …with its value
-		"Signing in to Relying Party",
-	} {
-		if !strings.Contains(p.body, want) {
-			t.Errorf("await page lacks %q", want)
-		}
+	var ap awaitPage
+	if p.data(t, &ap); !p.is("await") || ap.Identity != alice || ap.Client == nil || ap.Client.Name != "Relying Party" {
+		t.Fatalf("await page = %s %+v", p.shown().Page, ap)
+	}
+	if len(ap.Signers) != 2 ||
+		!strings.HasPrefix(ap.Signers[0].Href, "https://alice.poweur.net/app/?auth=") || !ap.Signers[0].Own || // the identity's own signer
+		!strings.HasPrefix(ap.Signers[1].Href, "https://poweur.net/app/?auth=") || ap.Signers[1].Own || // the operator default…
+		!strings.Contains(ap.Signers[1].Note, "Works only if this browser already holds") { // …labelled for what it is
+		t.Errorf("signers = %+v", ap.Signers)
+	}
+	if !strings.HasPrefix(ap.DeepLink, "poweur://auth?request=") || !strings.HasPrefix(ap.QR, `<svg xmlns="http://www.w3.org/2000/svg"`) ||
+		ap.Match != txn.Match || ap.Request != h.issuer+"/r/"+txn.RequestCode || ap.Push != nil {
+		t.Errorf("await page = %+v", ap)
+	}
+	// Nothing a page does not need: no binding or resume hashes.
+	if strings.Contains(p.body, txn.BindingHash) || strings.Contains(p.body, "binding") {
+		t.Error("await page carries the transaction's binding")
 	}
 	if len(txn.Match) != signin.MatchCodeDigits {
 		t.Fatalf("match = %q", txn.Match)
@@ -282,8 +285,10 @@ func TestExpiries(t *testing.T) {
 	if status, _ := h.deliver(approval, ""); status == 200 {
 		t.Fatal("a late approval was accepted")
 	}
-	if p := b.get("/t/" + id); !strings.Contains(p.body, "expired") || !strings.Contains(p.body, `name="identity"`) {
-		t.Fatalf("expired page = %s", p.body)
+	var ip identifyPage
+	pg := b.get("/t/" + id)
+	if pg.data(t, &ip); !pg.is("identify") || !strings.Contains(ip.Error, "expired") {
+		t.Fatalf("expired page = %+v", ip)
 	}
 
 	// The resume window expires.
@@ -321,7 +326,7 @@ func TestChangingIdentityBeforeApproval(t *testing.T) {
 	b := h.browser()
 	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
 	old := h.approve(id, h.users[alice])
-	if p := b.get("/t/" + id + "?change=1"); !strings.Contains(p.body, `name="identity"`) {
+	if p := b.get("/t/" + id + "?change=1"); !p.is("identify") {
 		t.Fatal("change=1 did not show the identify form")
 	}
 	b.post("/t/"+id+"/identify", url.Values{"identity": {bob}})
@@ -348,7 +353,7 @@ func TestLoginAccountAndLogout(t *testing.T) {
 	b.post("/t/"+id+"/identify", url.Values{"identity": {alice}})
 	_, receipt := h.deliver(h.approve(id, h.users[alice]), "")
 	p = b.follow(b.get(receipt.ResumeURI))
-	if p.status != 200 || !strings.Contains(p.body, "Authorized apps") || !strings.Contains(p.body, alice) {
+	if p.status != 200 || !p.is("account") || p.shown().Session == nil || p.shown().Session.Identity != alice {
 		t.Fatalf("account after login = %d %s", p.status, p.body)
 	}
 	// /login with a session goes straight through; open redirects do not.

@@ -1,7 +1,8 @@
 # EPIC-015 — Web app UX: the whole product, surfaced
 
 - **Status:** in progress — T1–T6 done (the app for someone who *has* an ID);
-  **T7–T12 open** (the front door for someone who does not, and the big screen)
+  **T7–T12 open** (the front door for someone who does not, and the big screen);
+  **T14 partial** (logo, favicon and install icons shipped; the violet palette remap is open)
 - **Code:** since [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) E21-T14 the app is the React +
   Tailwind client in `apps/web/src/`; `js/…` paths below name the legacy files a screen was
   ported from, and T7–T12 continue on the React code
@@ -45,6 +46,7 @@
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
+| **E15-T14 Brand rollout: glass P logo & violet palette** | **partial** | brand defined in [`design/brand/`](../design/brand/README.md). **Shipped (web 0.1.31):** logo in the header, front doors and welcome gate; favicon, touch icon, manifest and share image. **Open:** the token remap to violet, avatar contrast, the contrast test, and docs / bridge alignment |
 | **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
 
 ## Goal
@@ -844,6 +846,96 @@ in order with ticks; A sends while B sits in the thread and it appears without i
 after a reload the thread is intact. Once E20-T8 lands: a relay test seeds a 2k-message
 archive and asserts the tray paints having fetched at most one tail chunk per conversation,
 and that scrolling up fetches the previous one.
+
+### E15-T14 — Brand rollout: the glass P logo and the violet palette
+
+**Background.** The app has no logo and no favicon. `apps/web/index.html` links no icon, and the
+welcome gate ([`screens/gates.tsx`](../apps/web/src/screens/gates.tsx)) shows a generic
+`MessageCircle` glyph on an accent tile. Its colours are iOS system colours: accent `#5856D6`, a
+`#8B5CF6` gradient partner, and system success, danger and warning. The docs site uses Tailwind blue
+and the OAuth bridge a third blue. The brand is now defined in
+[`design/brand/README.md`](../design/brand/README.md):
+- **Logo:** a P built from three pieces and a dot (ID, messaging, file sharing; the dot is the separator
+  in a domain name). It comes in black glass, flat black and flat white.
+- **Palette:** OKLCH scales with Poweur Violet `#724CCF` as the primary, indigo night `#0E1344` as the
+  secondary, amber and teal accents, and violet-tinted ink neutrals.
+- **Tokens:** every value is in [`design/brand/tokens.css`](../design/brand/tokens.css).
+
+This is a re-skin: **token values change, token names do not.** Components already write `bg-accent`,
+`text-muted` and so on (E21-T5), so most of the change is `index.css`.
+
+- [ ] **Tokens:** remap the semantic tokens in `apps/web/src/index.css`, light and dark, per the
+      "Applying it to the web app" table in the brand README.
+      - `accent` becomes `violet-600`, and `violet-400` in dark mode.
+      - `accent-2` becomes `indigo-700`, so the gradient is `violet-600 → indigo-700`.
+      - Neutrals become ink.
+      - Success, danger and warning get the checked semantic values.
+      - `--shadow-accent` gets a violet tint.
+      - Import the brand scales as `--color-violet-*`, `--color-indigo-*`, `--color-amber-*`,
+        `--color-teal-*` and `--color-ink-*`, so a component can reach a step when a semantic
+        token does not fit.
+- [ ] **Hard-coded colours:**
+      - The welcome tile's `shadow-[0_12px_40px_rgb(88_86_214/.35)]` becomes the token.
+      - `AVATAR_PALETTE` in [`lib/identity.ts`](../apps/web/src/lib/identity.ts) becomes the eight
+        equal-lightness brand avatar hues. The current palette gives white initials only 2.1–2.2:1 on
+        three of its eight colours. The avatar colour of an identity changes once, which is acceptable.
+      - A source-guard test forbids hex literals outside `index.css`.
+- [x] **Logo assets in the app** (web 0.1.31). The SVGs live in `src/assets/brand/` rather than
+      `public/brand/`: Vite bundles them, so they resolve relatively at `/app/`, `/` and
+      `capacitor://`, and the small flat ones are inlined as `data:` URIs.
+      - `ui/Logo` takes `variant: "glass" | "flat"` and a height.
+      - Flat swaps black for white in dark mode with CSS alone (`dark:`), so there is no flash
+        while the theme loads. No `tone` prop was needed.
+      - Glass falls back to flat below 48 px (`GLASS_MIN_HEIGHT`).
+      - `Wordmark` is the P plus "Poweur ID". `BrandTile` is the glass P on `bg-brand-glow`, a new
+        utility in `index.css`.
+      - The brand scales are added to `@theme` as `--color-{violet,indigo,amber,teal,ink}-*`. This is
+        additive: the semantic tokens keep their values until the remap subtask above.
+- [x] **Favicon and install icons** in `index.html`, generated by
+      [`design/brand/scripts/icons.py`](../design/brand/scripts/icons.py) into `public/`:
+      - `favicon.svg`: a violet-600 tile with the flat white P. It reads on light and dark tabs
+        alike, so it needs no `prefers-color-scheme` swap.
+      - `favicon.ico` at 16, 32 and 48 px, in place of a single `favicon-32.png`.
+      - `apple-touch-icon.png` at 180 px: the glass P on the glow.
+      - `manifest.webmanifest`: `icon-192`, `icon-512`, a maskable 512 and the SVG.
+      - `og-image.png` at 1200 × 630.
+      - The links are root paths (`/favicon.svg`) that Vite rewrites against `base: "./"`.
+        `test/brand-assets.test.ts` checks that the files exist, their PNG sizes and the manifest.
+        The mobile staging test checks that the built HTML stays relative.
+      - The relay also serves `favicon.ico`, `favicon.svg` and `apple-touch-icon.png` at the
+        host root (relay 0.1.14). A browser on `alice.poweur.net` asks that host for
+        `/favicon.ico`; `GET /` would otherwise answer with the JSON service banner, so the
+        tab stayed blank on every identity. `/app/favicon.ico` is the same file.
+      - `theme-color` is unchanged.
+- [x] **Welcome gate:** the `MessageCircle` tile became `BrandTile` (96 px, 28 px radius, pop-in).
+      The heading and copy stay.
+- [x] **Header:** `Wordmark` in the app header and in `DoorPage`, so the front doors show it too.
+      The launcher landing shows `BrandTile` at 80 px above its headline (hidden in short
+      landscape).
+- [ ] **Primary button:** the gradient stays; its values come from the tokens. Check the focus ring
+      (`accent`) against both themes.
+- [ ] **Contrast pass:** every text and background token pairing in both themes meets WCAG AA,
+      asserted in a unit test from the token values. The pairings and ratios are listed in the brand
+      README.
+- [ ] **Aligned surfaces:** the same change on the other surfaces that show the brand.
+      - Docs ([`custom.css`](../apps/docs/src/css/custom.css)): Infima primary moves to the violet
+        scale, and the logo becomes `flat/p-black.svg`.
+      - OAuth bridge ([`bridge.css`](../apps/oauth/bridge/static/bridge.css)): accent becomes violet,
+        greys become ink.
+      - These bump their own packages.
+- [x] **Mobile hand-off:** the same script writes the shell's icons and splash screens (mobile 0.1.6),
+      tracked in [EPIC-019](EPIC-019-mobile-app-capacitor.md) E19-T1.
+
+**Acceptance:**
+- The unit contrast test is green in both themes.
+- The source-guard test finds no hex literal outside `index.css`.
+- e2e covers four things:
+  - `link[rel=icon]` and the manifest resolve at `/app/`.
+  - `GET /favicon.ico` on an identity host and on a launcher host returns the icon, not the service banner.
+  - The welcome gate renders the logo `<img>` with a non-empty `alt`.
+  - Dark mode swaps the flat logo to white.
+  - The E21-T12 suite stays green.
+- The web package gets a patch version bump.
 
 ## Forward-looking (prepare for, don't build)
 

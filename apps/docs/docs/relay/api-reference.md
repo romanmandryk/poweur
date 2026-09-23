@@ -46,7 +46,8 @@ The relay exposes two distinct surfaces and authenticates them differently:
 | `POST /identities/:identity/enroll/offer` | **open** | new device has no key yet; capped per identity |
 | `POST /identities/:identity/enroll/:rendezvous/fetch` | owner-only | identity-signed |
 | `POST /identities/:identity/enroll/:rendezvous/deliver` | owner-only | identity-signed |
-| `GET`/`DELETE /identities/:identity/enroll/:rendezvous` | bearer | rendezvous id; releases only ciphertext |
+| `POST /identities/:identity/enroll/:rendezvous/reveal` | bearer | the offer's claim token |
+| `GET`/`DELETE /identities/:identity/enroll/:rendezvous` | bearer | the offer's claim token; releases only ciphertext |
 
 ## At-least-one-local rule {#at-least-one-local-rule}
 
@@ -944,24 +945,29 @@ attacker who already extracted the seed — that is what rotation is for.
 
 ---
 
-## Device enrollment ceremony (EPIC-011)
+## Device pairing (EPIC-011 E11-T8)
 
-Moving a seed to a new device needs an **authentic** channel, not a secret one. The new device
-generates an ephemeral X25519 keypair and displays a six-digit code derived from its public key;
-the user types that code on a device that already holds the identity, which seals the seed to
-the ephemeral key. See [Key management & recovery](/security/key-management).
+Moving a seed to a new device needs an **authentic** channel, not a secret one — and the relay
+is trusted for neither: it must never read the seed, and a compromised relay must not be able to
+pair a device of its own. Pairing is **commit-then-reveal**; the exact values are in
+`packages/identity/pairing.go` (vectors: `pairing.json`). See
+[Key management & recovery](/security/key-management#pairing-a-new-device).
 
-The relay is a blind letterbox throughout: it sees an ephemeral public key and a sealed blob,
-and can open neither.
+```
+new device  → offer   {commitment}                 ← code, claim_token
+approver    → fetch   {approver_nonce, mode}       (identity-signed)
+new device  ← poll    {state: "nonce"}  → reveal {ephemeral_public_key, commit_nonce}
+approver    → fetch                                ← key + commit_nonce; checks the commitment
+approver    → deliver {sealed}                     (identity-signed)
+new device  ← poll    {state: "delivered", sealed} (once)
+```
 
-:::note Why there is no PAKE
-An earlier design had the code protect the payload, which would have made it a six-digit
-password — brute-forceable offline by anyone holding the ciphertext, hence the usual SPAKE2
-machinery. Having the *new* device generate the keypair removes the requirement entirely: the
-code authenticates a public key and encrypts nothing, so there is no offline target. Forging it
-means finding a colliding code on the first and only try. This is the numeric-comparison model
-used by Bluetooth pairing and Signal safety numbers, and it needs no exotic primitive — which
-matters, because no reviewed browser PAKE implementation exists.
+The relay computes no digits and is never asked to: every check happens on the two devices.
+
+:::caution Changed from v1
+v1 posted the ephemeral key itself and derived six digits from it alone, so a relay could grind a
+key of its own with the same digits and receive the seed. A v1 offer
+(`ephemeral_public_key` without `commitment`) is refused with `400 pairing_v1`.
 :::
 
 ### POST /identities/:identity/enroll/offer
@@ -970,39 +976,40 @@ Opened by the **new** device. Unauthenticated by necessity — it has no key yet
 capped at 5 concurrent per identity (`429 too_many_offers`) and expire after 10 minutes.
 
 ```json
-{ "ephemeral_public_key": "<32-byte x25519, base64url>", "label": "Firefox on Linux" }
+{ "commitment": "<SHA-256(\"poweur/v2/enroll-commit\\n\" + key + \"\\n\" + commit_nonce), base64url>", "label": "Firefox on Linux" }
 ```
 
-Returns `201` with `{rendezvous_id, sas, expires_at}`. **Compute the SAS yourself** from the
-ephemeral key rather than trusting the relay's copy:
-
-```
-sas = SHA-256("poweur/v1/enroll-sas\n" + ephemeral_public_key)[0:4] as uint32 mod 10^6, zero-padded to 6
-```
+Returns `201` with `{rendezvous_id, claim_token, expires_at}`. `rendezvous_id` is the 8-character
+short code people type (Crockford base32; any path accepts it typed loosely — lower case, a dash,
+O for 0). `claim_token` authenticates the new device's own calls as `Authorization: Bearer`.
 
 ### POST /identities/:identity/enroll/:rendezvous/fetch
 
-The approving device asks what it is approving. Signed with
-`enroll-fetch\n<identity>\n<rendezvous_id>\n<issued_at>\n<nonce>` — the rendezvous id is bound in,
-so an approval cannot be redirected to a different offer. Returns the ephemeral public key, the
-SAS and the device label.
+The approving device. Signed with `enroll-fetch\n<identity>\n<code>\n<issued_at>\n<nonce>`,
+the canonical code bound in. Body adds `approver_nonce` (32 random bytes, base64url) and `mode`
+(`scan` when the approver has the commitment from a scanned link, else `compare`). The first
+fetch records the nonce; a later fetch must repeat it (`409 already_approving` otherwise).
+Returns `{state, commitment, label, expires_at}` plus, once revealed, `ephemeral_public_key` and
+`commit_nonce` — which the approver must check open the commitment.
+
+### POST /identities/:identity/enroll/:rendezvous/reveal
+
+The new device opens its commitment: `{ephemeral_public_key, commit_nonce}`, bearer
+`claim_token`. Accepted only after the approver's nonce exists and only once (`409 out_of_order`).
 
 ### POST /identities/:identity/enroll/:rendezvous/deliver
 
-Posts the sealed seed. Signed with `enroll-deliver\n<identity>\n<rendezvous_id>\n<issued_at>\n<nonce>`.
-`sealed` is opaque to the relay. Delivering twice returns `409`.
+The sealed seed, after the reveal. Signed with `enroll-deliver\n<identity>\n<code>\n<issued_at>\n<nonce>`.
+`sealed` is opaque to the relay. Once only.
 
 ### GET /identities/:identity/enroll/:rendezvous
 
-Polled by the new device. Returns `{ready: false}` until approval, then `{ready: true, sealed}`
-**once** — the rendezvous is consumed, so a captured id cannot be replayed. The id acts as a
-bearer token, which is safe because it releases only ciphertext requiring the ephemeral private
-key that never left the new device.
+The new device's poll, bearer `claim_token`: `{state, approver_nonce, mode}`, then
+`{state: "delivered", sealed, ready: true}` **once** — the pairing is consumed.
 
 ### DELETE /identities/:identity/enroll/:rendezvous
 
-Abandon an offer, freeing its slot. Without this a user who backed out would occupy one of the
-five slots until it expired.
+Abandon an offer (bearer `claim_token`), freeing its slot.
 
 ---
 

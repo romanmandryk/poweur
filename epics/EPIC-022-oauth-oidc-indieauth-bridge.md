@@ -18,11 +18,12 @@
 | E22-T2 Bridge core + native Poweur authentication | **done** | `apps/oauth` (bridge 0.1.0); `TestINT_OAUTH_01` signs in IDs from two relays and DNS |
 | E22-T3 OIDC Authorization Code + PKCE provider | **done** | go-oidc, oauth2-proxy, Keycloak and Authentik verified live; `poweur_proof` deferred |
 | E22-T4 Browser signer and consent journey | **done** | Completion binding, signer discovery, consent, cookies/CSP; relay 0.1.9 publishes `web_signer`; Playwright journeys through the web signer; create-an-ID funnel on the sign-in page |
-| E22-T5 Cross-device QR journey | **partial** | QR + request code + match code + bound poll + initiator context; phone camera scan waits on EPIC-019 |
+| E22-T5 Cross-device QR journey | **done** | QR + match code + bound poll + initiator context; the QR is a short link (E08-T6) that a phone's own camera opens into a handoff page — no in-app scanner needed |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI; conformance suite, live IndieAuth clients, prod rollout open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite, live IndieAuth clients, contacts open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
+| E22-T10 Bridge UI: React, device-aware, fewer words | **done** | Go keeps routes and security; React renders each page's data; desktop leads with another device |
 
 ## Goal
 
@@ -385,8 +386,9 @@ browser/QR login is unchanged.
 - [x] `/metrics` on a private listener (`OAUTH_METRICS_ADDR`): requests and latency by route
       pattern, rate-limit refusals, one counter per audit event; no identities or addresses in
       labels; sample alerting rules in `apps/oauth/deploy/alerts.yml`
-- [x] Registration defaults to `closed` (`open` is an explicit operator choice); the hosted
-      bridge launches `allowlist`
+- [x] Registration defaults to `open` — any signed-in Poweur ID registers applications, which
+      is what the hosted bridge is for; `allowlist` and `closed` remain for deployments that
+      serve only their own applications
 - [x] `/privacy` (what is kept and for how long, from the running config), `/security`
       (disclosure contact, incident steps) and an expanded `/abuse`, linked in the footer
 - [x] Per-IP rate limits on authorize/login, identify, callback, token-family and console
@@ -400,9 +402,15 @@ browser/QR login is unchanged.
 - [x] Live oauth2-proxy, Keycloak and **Authentik** runs (opt-in Playwright specs, Docker)
 - [ ] Two independent IndieAuth clients live — open. The well-known third-party checks
       (indieauth.rocks, indielogin.com, hosted Micropub clients) fetch the client and the
-      authorization server over the public internet, so this waits on the staging deployment
-      rather than on bridge work
-- [ ] Production deployment at `oauth.poweur.org` (ansible/Caddy) — open
+      authorization server over the public internet; now possible against `oauth.poweur.org`
+- [x] Production at **`https://oauth.poweur.org`** (bridge 0.1.4): its own Compose project in
+      `/opt/apps/poweur-oauth`, deployed by `deploy-oauth.yml` only when the bridge's sources
+      change and verified by `versionHash` inside the container and through Cloudflare; Caddy
+      route, Prometheus scrape + `blackbox-oauth` probe, Grafana alerts (`oauth-down`,
+      `oauth-code-reuse`, `oauth-server-errors`), daily `poweur-oauth backup` cron; the relay
+      advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/OPS.md`
+- [ ] Contacts on `/abuse` and `/security` — wait on the email bridge (`<name>@poweur.id`
+      mailboxes)
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 
 **Acceptance:** the same image serves any issuer; relays need only `OAUTH_BRIDGE_URL`; live
@@ -433,6 +441,44 @@ Three ways a client reaches the bridge, one registry interface, specified in the
 **Acceptance:** met: a console client signs in a user from another identity and redeems with its
 secret; URL clients sign in without registration; revoking from `/account` kills tokens and
 brings consent back.
+
+### E22-T10 — Bridge UI: React, device-aware, fewer words — **done**
+
+The first UI was server-rendered `html/template` pages: correct, but text-heavy, and on a
+desktop it led with "open the Poweur app on this device" while the way that works there — a
+phone — sat in a collapsed section further down. The landing page listed links instead of
+saying what to do.
+
+**Rendering.** Go keeps every route, redirect, cookie, same-origin check and error: each page
+response is the built `index.html` with the page's view model embedded as
+`<script type="application/json" id="poweur-page">` — a data block, not executable, so the CSP
+stays `script-src 'self'`. React renders it with the web app's stack and design tokens
+(React 19, Tailwind 4, lucide). Forms still POST to the same endpoints; the live parts
+(approval status, push, name availability, copy) use JSON endpoints. Not a client-routed SPA
+and not server-side React: the OAuth flow is a chain of server redirects, and the bridge stays
+one Go binary with its assets embedded, no Node in production. Pages need JavaScript, as the
+web signer does; `<noscript>` says so.
+
+**Flow.**
+- Landing, signed out: what it is in one line and **Sign in** — everything else is behind it.
+  Signed in: actions — your authorized apps, the developer console, recent sign-ins, sign out.
+- Approve step, **desktop**: approve on your phone first — QR, the code to type, *Send to my
+  Poweur app* when available; *use this browser* second (it works only if its keys are here).
+  Never "open the app on this device". **Phone**: the app and this browser first; another
+  device second.
+- One sentence of explanation per screen at most; details behind disclosure.
+
+- [x] UI package `apps/oauth/ui` (`@poweur/oauth-ui`), tokens and primitives matching `apps/web`
+- [x] Go: page payloads (`bridge/web.go`: explicit shapes per page, no binding/resume or secret
+      hashes), embedded build, `/assets/*` immutable, JSON push answer; a plain fallback page
+      when the UI was not built (Go tests do not need Node)
+- [x] Pages: landing (signed out / in), sign-in + create-an-ID, approve (device-aware),
+      consent, account, developer console (list, new, detail), privacy/security/abuse, errors
+- [x] Image builds the UI (Node stage); CI builds it before the e2e journeys; `dev.sh` too
+- [x] Go tests read page data (a guard fails any untagged field); escaping of hostile text in the
+      data block; Playwright journeys updated plus `oauth-bridge-pages.spec.js` (landing both
+      ways, console registration, phone vs. desktop approve); reviewed in desktop and phone,
+      light and dark. Bridge 0.1.6
 
 ## Non-goals
 

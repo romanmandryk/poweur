@@ -154,49 +154,68 @@ Deleting a wrapped copy denies that authenticator the bootstrap read. It does **
 against an attacker who already extracted the seed — for that, rotate. Removal and rotation
 answer different questions, and conflating them is the mistake this section exists to prevent.
 
-## Enrolling a new device
+## Pairing a new device
 
-The kit is the path of last resort. The everyday path is a ceremony between two devices, and it
-needs an **authentic** channel rather than a secret one:
+The kit is the path of last resort. The everyday path is **pairing** two devices, and it needs an
+**authentic** channel rather than a secret one. The relay carries it but is not trusted: it must
+never be able to read the seed, and a compromised relay must not be able to pair a device of its
+own.
 
-1. The new device generates an ephemeral X25519 keypair and opens a rendezvous.
-2. It shows a six-digit code derived from its own public key.
-3. The user types the rendezvous id on a device that already holds the seed, and compares the
-   code shown on both screens.
-4. That device seals the seed to the ephemeral key; the new device opens it and re-wraps it
-   under its own custody.
+1. The new device makes an ephemeral X25519 key `K` and a random `r`, and sends only the
+   commitment `C = SHA-256("poweur/v2/enroll-commit" ‖ K ‖ r)`. It shows a QR of the pairing link
+   and an 8-character code (`K7QM-4XP2`).
+2. The approving device — the user scanned the QR, or typed the code — fetches `C` and
+   contributes a random nonce `n`, identity-signed.
+3. Only then does the new device reveal `K` and `r`. The approver checks they open `C`.
+4. **Scanned:** the link carried `C` itself, so `K` is authentic and nothing needs comparing.
+   **Typed:** both screens show six digits derived from `C, K, r, n` for the person to compare.
+5. The seed is sealed to `K` and delivered, identity-signed. The new device saves it only if it
+   derives the identity's published key.
 
-**Comparing the code is the authentication step.** Skip it and the seed goes to whoever opened
-the rendezvous.
+**Why commit first.** A relay that wants the seed must get the approver to seal it to a key the
+relay holds. It has to commit to that key before the approver's nonce exists, and the digits
+depend on the nonce — so its key matches the honest one's digits with probability 10⁻⁶, once, in
+front of the person comparing. A scanned pairing leaves it nothing at all: it cannot find another
+key that opens a commitment it did not choose.
 
-### Why there is no PAKE
+:::caution Why v1 was replaced
+The first design derived the six digits from the new device's key alone. The relay sees that key,
+so it could generate keys until one produced the same six digits — about a million attempts,
+seconds of work — and both screens would agree while the seed went to the relay. The argument
+that forging meant "a colliding code on the first and only try" was wrong: those tries happen
+offline. The lesson is narrower than "use a PAKE": **a short code can authenticate a key only if
+the key was fixed before the code's randomness existed.**
+:::
 
-An earlier draft of this design had the code protect the payload. That makes it a six-digit
-password: anyone holding the ciphertext — the relay included — could brute-force it offline,
-which is exactly the problem SPAKE2 and friends exist to solve. It would have forced a PAKE into
-the trusted path of every client, and no reviewed browser implementation of one exists.
+### Why there is still no PAKE
 
-Having the *new* device generate the keypair dissolves the requirement. The code then
-authenticates a public key and encrypts nothing, so there is no offline target at all: forging
-it means finding a colliding six-digit code on the first and only try, against a single-use
-rendezvous. This is the numeric-comparison model used by Bluetooth pairing and Signal safety
-numbers.
+A PAKE would let the code protect the seed itself. It is not needed: the seed is sealed to a key
+the approver has authenticated, so the short value never encrypts anything and there is no
+offline target. That keeps an unreviewed primitive out of every client's trusted path.
 
-The lesson generalises: **a short code can authenticate a public key safely, but cannot protect
-a secret.** Which of the two you are doing decides whether you need a PAKE.
+### What pairing guarantees
 
-### What the ceremony guarantees
+- The relay sees a commitment, two nonces, an ephemeral public key and a sealed blob, and can open
+  none of them.
+- Only the identity owner can approve: fetching and delivering are identity-signed and bound to
+  the code, so an approval cannot land on another pairing.
+- Only the new device can reveal, poll or cancel (a claim token from its offer); a pairing is
+  single-use, expires in ten minutes, and offers are capped per identity.
+- There is no blind approval: a typed code requires the digits to be confirmed, and every client
+  refuses to deliver otherwise. A pairing link names its identity; approvers refuse one for
+  another identity.
 
-- The relay sees an ephemeral public key and a sealed blob, and can open neither.
-- Only the identity owner can approve: delivery is signed by the identity key, bound to that
-  specific rendezvous, so an approval cannot be redirected to another offer.
-- A rendezvous is single-use and expires in ten minutes; a claimed one is gone.
-- Offers are capped per identity, because the offer endpoint is necessarily unauthenticated and
-  the identity name is public.
+The new device asks what will approve it, because a phone camera opens what the QR says:
 
-QR remains a valid transport for the same ceremony — it carries the ephemeral key instead of the
-user typing a code — but it is an optimisation, not the baseline. The typed code is what works
-when there is no camera, which is the common case for phone-to-laptop.
+- **Poweur app** (the default): `poweur://pair?pair=<code>.<commitment>&id=<identity>` — the
+  camera hands it to the app, which asks to unlock and approve. An https link would open a
+  website that holds no keys.
+- **Browser**: `https://<identity>/app/#pair=…&id=…` — the values in the fragment, which browsers
+  never send to a server. If that browser does not hold the identity, it offers **Open in the
+  Poweur app** with the app form of the same link.
+- **Terminal**: `poweur key approve '<link>'` to copy.
+
+The typed code works with all three.
 
 ## Key files at rest (CLI)
 

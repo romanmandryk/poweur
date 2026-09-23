@@ -73,3 +73,43 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte
 		http.ServeFile(w, r, cleanCand)
 	})
 }
+
+// rootIcons are the brand icons a browser requests at the origin, not under
+// /app/. The SPA links them from its own HTML, which Vite rewrites to sit next
+// to the page; a tab on alice.poweur.net still asks for /favicon.ico on that
+// host, and GET / would otherwise answer with the JSON service banner. Every
+// host this process serves — launcher and identity — shares one router, so
+// these routes put the same icon on any poweur.net id.
+var rootIcons = []struct {
+	path        string
+	file        string
+	contentType string
+}{
+	{"/favicon.ico", "favicon.ico", "image/x-icon"},
+	{"/favicon.svg", "favicon.svg", "image/svg+xml"},
+	{"/apple-touch-icon.png", "apple-touch-icon.png", "image/png"},
+}
+
+func mountRootIcons(mux *http.ServeMux, dir string) {
+	if dir == "" {
+		return
+	}
+	root := filepath.Clean(dir)
+	for _, icon := range rootIcons {
+		mux.HandleFunc("GET "+icon.path, func(w http.ResponseWriter, r *http.Request) {
+			serveRootIcon(w, r, root, icon.file, icon.contentType)
+		})
+	}
+}
+
+func serveRootIcon(w http.ResponseWriter, r *http.Request, root, name, contentType string) {
+	path := filepath.Join(root, name)
+	st, err := os.Stat(path)
+	if err != nil || st.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFile(w, r, path)
+}

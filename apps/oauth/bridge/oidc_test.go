@@ -150,8 +150,9 @@ func TestDeclinedScopesStayDeclinedWithoutNagging(t *testing.T) {
 	}
 	// A scope never asked about does prompt.
 	p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid profile")))
-	if !strings.Contains(p.body, "public profile") {
-		t.Fatalf("a new scope must be asked for: %s", p.body)
+	var cp consentPage
+	if p.data(t, &cp); len(cp.Optional) != 1 || cp.Optional[0] != ScopeProfile {
+		t.Fatalf("a new scope must be asked for: %+v", cp)
 	}
 }
 
@@ -173,19 +174,20 @@ func TestPromptAndMaxAge(t *testing.T) {
 	}
 	// prompt=login ignores the session.
 	p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid", "prompt", "login")))
-	if !strings.Contains(p.body, `name="identity"`) {
+	if !p.is("identify") {
 		t.Fatal("prompt=login must ask for a new signature")
 	}
 	// max_age shorter than the session's age also does.
 	h.advance(2 * time.Minute)
 	p = b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid", "max_age", "60")))
-	if !strings.Contains(p.body, `name="identity"`) {
+	if !p.is("identify") {
 		t.Fatal("max_age must force a new signature")
 	}
 	// A login_hint for someone else ignores the session too.
 	p = b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid", "login_hint", bob)))
-	if !strings.Contains(p.body, `value="`+bob+`"`) {
-		t.Fatalf("login_hint must prefill: %s", p.body)
+	var ip identifyPage
+	if p.data(t, &ip); ip.Hint != bob {
+		t.Fatalf("login_hint must prefill: %+v", ip)
 	}
 }
 
@@ -274,7 +276,7 @@ func TestTokenEndpointRefusals(t *testing.T) {
 	newCode := func() string {
 		t.Helper()
 		id, p := b.signIn(authorizeQuery("rp", rpRedirect, "openid", "prompt", "login"), h.users[alice])
-		if strings.Contains(p.body, "/consent") {
+		if p.is("consent") {
 			p = b.consent(id)
 		}
 		return h.codeFrom(p, rpRedirect)
@@ -476,7 +478,7 @@ func TestConsentRequiresTheSameSignedInIdentity(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	id, p := b.signIn(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
-	if !strings.Contains(p.body, "/consent") {
+	if !p.is("consent") {
 		t.Fatal("expected consent")
 	}
 	// The browser signs out in another tab before deciding.
@@ -519,7 +521,7 @@ func TestNonceIsOptionalAndEchoed(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	id, p := b.signIn(authorizeQuery("rp", rpRedirect, "openid", "nonce", ""), h.users[alice])
-	if strings.Contains(p.body, "/consent") {
+	if p.is("consent") {
 		p = b.consent(id)
 	}
 	res := h.token(codeForm(h.codeFrom(p, rpRedirect), rpRedirect), "rp", rpSecret)

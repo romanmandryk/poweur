@@ -567,17 +567,17 @@ func (s *Server) handleAbuse(w http.ResponseWriter, r *http.Request) {
 // policyView is what /privacy and /security state, from the running config,
 // so the page cannot drift from what the bridge does.
 type policyView struct {
-	Contact         string
-	SecurityContact string
-	Pairwise        bool
-	Audit           string
-	SignIns         string
-	Consents        string
-	Session         string
-	Txn             string
-	Code            string
-	AccessToken     string
-	Registration    string
+	Contact         string `json:"contact,omitempty"`
+	SecurityContact string `json:"securityContact,omitempty"`
+	Pairwise        bool   `json:"pairwise"`
+	Audit           string `json:"audit"`
+	SignIns         string `json:"signIns"`
+	Consents        string `json:"consents"`
+	Session         string `json:"session"`
+	Txn             string `json:"txn"`
+	Code            string `json:"code"`
+	AccessToken     string `json:"accessToken"`
+	Registration    string `json:"registration"`
 }
 
 func (s *Server) policyView() policyView {

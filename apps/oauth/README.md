@@ -39,7 +39,7 @@ repo root. [`compose.example.yml`](compose.example.yml) runs it beside a relay.
 | `OAUTH_LAUNCHER_URL` | `https://poweur.net` | Where the sign-in page sends visitors without a Poweur ID to create one (a relay serving the web app). The page checks name availability there from the browser. `none` hides the offer. |
 | `OAUTH_LAUNCHER_DOMAIN` | launcher host without `id.` | Hosted domain new names are created under (`alice.<domain>`). |
 | `OAUTH_SUBJECT_TYPE` | `pairwise` | `public` makes `sub` the Poweur ID itself. |
-| `OAUTH_CLIENT_REGISTRATION` | `closed` | Who may use `/developers`: `closed`, `allowlist`, `open`. Start closed or allowlisted: `open` lets any Poweur ID publish a consent page under your name. |
+| `OAUTH_CLIENT_REGISTRATION` | `open` | Who may register applications at `/developers`: `open` (any signed-in Poweur ID), `allowlist`, or `closed` for a bridge that serves only the operator's own (static) clients. Consent pages name who registered an application and that nobody reviewed it; `clients suspend` stops one at once. |
 | `OAUTH_REGISTRATION_ALLOWLIST` | — | CSV of IDs or `*.domain` suffixes for `allowlist`. |
 | `OAUTH_MAX_CLIENTS_PER_OWNER` | `10` | Console limit per Poweur ID. |
 | `OAUTH_STATIC_CLIENTS` | — | JSON file of operator clients; see [`clients.example.json`](clients.example.json). |
@@ -121,6 +121,23 @@ Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
   a Poweur ID carries no `preferred_username` or e-mail, so the enrolling user types one (the spec
   uses the Poweur ID itself). Accounts link by the pairwise `sub`, not by the Poweur ID.
 - **Grafana**: `[auth.generic_oauth]` with `use_pkce = true`, `scopes = openid poweur_id`, `login_attribute_path = poweur_id`.
+
+## Pages
+
+The pages are React + Tailwind in [`ui/`](ui), with the web app's design
+tokens. Go keeps every route, redirect, cookie and check: a page response is
+the built `index.html` with that page's data embedded as a JSON data block
+(`bridge/web.go`; the TypeScript twin is `ui/src/lib/page.ts`), so the CSP
+stays `script-src 'self'`. The build lands in `bridge/web/dist` and is
+embedded at compile time:
+
+```bash
+pnpm --filter @poweur/oauth-ui build     # before go run / go build
+pnpm --filter @poweur/oauth-ui watch     # while editing; restart the bridge to pick it up
+```
+
+Without it the bridge still answers every page with its data behind a plain
+"pages not built" notice, which is all the Go tests need. The image builds it.
 
 ## Tests
 

@@ -38,6 +38,13 @@ http://relay.poweur.net {
 http://grafana.poweur.net grafana.poweur.net {
     reverse_proxy infra-grafana:3000
 }
+# The OAuth/OIDC bridge (EPIC-022; apps/oauth/deploy). HTTP as well as HTTPS
+# for the same reason as grafana: Cloudflare may deliver to origin over HTTP.
+http://oauth.poweur.org oauth.poweur.org {
+    reverse_proxy poweur-oauth:8090 {
+        header_up X-Forwarded-For {client_ip}
+    }
+}
 http://poweur.net http://*.poweur.net {
     reverse_proxy poweur-relay:8080 {
         header_up X-Forwarded-For {client_ip}

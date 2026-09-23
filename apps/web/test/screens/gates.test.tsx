@@ -219,10 +219,10 @@ describe("Sign-in approval (EPIC-008)", () => {
     at("auth");
     render(<App />);
 
-    fireEvent.change($("#auth-request-input")!, { target: { value: "poweur://auth?x=1" } });
+    fireEvent.change($("#auth-request-input")!, { target: { value: "poweur://auth?request=abc123" } });
     fireEvent.click($("#btn-auth-load")!);
     await waitFor(() => expect(screen.getByText("Sign in to Example App")).toBeTruthy());
-    expect(fake.consent).toHaveBeenCalledWith("poweur://auth?x=1");
+    expect(fake.consent).toHaveBeenCalledWith("abc123");
     expect(screen.getByText("Origin verified")).toBeTruthy();
     expect(screen.getByText("This app requests sign-in only, with no home access.")).toBeTruthy();
 

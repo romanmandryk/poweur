@@ -6,6 +6,7 @@ import { isSessionValid } from "@poweur/client";
 import {
   getActiveIdentity,
   getUnlockedKeys,
+  isShellRuntime,
   loadSessionRecord,
   saveIdentityRecord,
   setActiveIdentity,
@@ -13,9 +14,35 @@ import {
 import { fromBase64url } from "../lib/vault.js";
 import { modeNow, resolveMode } from "../lib/mode.js";
 import { beginSignInApproval } from "../actions/signin";
+import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
+
+interface CapacitorAppPlugin {
+  addListener(
+    event: "appUrlOpen",
+    handler: (event: { url?: string }) => void,
+  ): Promise<{ remove(): void }> | { remove(): void };
+  getLaunchUrl(): Promise<{ url?: string } | undefined>;
+}
+
+/**
+ * A pairing link (EPIC-011 E11-T8) — the new device's QR, opened by this
+ * device's camera — arrives as `#pair=<code>.<commitment>`. It is kept for the
+ * approval screen and taken out of the address bar.
+ */
+export function takePairLink(): string {
+  const href = globalThis.location?.href ?? "";
+  const hash = globalThis.location?.hash ?? "";
+  if (!hash.startsWith("#pair=")) return "";
+  try {
+    history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+  } catch {
+    /* keep going: the link still works */
+  }
+  return href;
+}
 
 /**
  * A hand-off from the launcher arrives as `#claim=<base64url JSON>` and is
@@ -63,30 +90,130 @@ export function setDocumentIdentity(info: ModeInfo) {
 }
 
 let booted = false;
+/** A poweur:// open is on screen; the relay's mode answer must not replace it. */
+let protectAuthRoute = false;
+let removeAppUrlListener: (() => void) | undefined;
+let listenerGen = 0;
+let markRouteChosen: () => void = () => {};
+let routeChosen = Promise.resolve();
+
+function capacitorApp(): CapacitorAppPlugin | undefined {
+  return (globalThis as { Capacitor?: { Plugins?: { App?: CapacitorAppPlugin } } }).Capacitor?.Plugins?.App;
+}
+
+function locationAuthInput() {
+  return new URL(globalThis.location?.href ?? "http://localhost/").searchParams.get("auth") || "";
+}
+
+/** Settings → Add a device, with the scanned pairing link waiting. */
+function presentPairLink(link: string) {
+  protectAuthRoute = true;
+  useData.setState({ pairInput: link });
+  useRoute.setState({ page: "settings", sub: "pair", params: {} });
+}
+
+/** Settings → Approve sign-in, with the request filled in and checked. */
+function presentSignInLink(input: string, requireCode = false) {
+  const value = input.trim();
+  if (!value) return;
+  protectAuthRoute = true;
+  const auth = useData.getState().auth;
+  const route = useRoute.getState();
+  // Cold start can deliver the same link twice (launch URL and appUrlOpen).
+  if (route.page === "settings" && route.sub === "auth" && auth.input === value && auth.loading) return;
+  useRoute.setState({ page: "settings", sub: "auth", params: {} });
+  void beginSignInApproval(value, { requireCode });
+}
+
+function installAppUrlListener() {
+  const app = capacitorApp();
+  if (!app?.addListener || removeAppUrlListener) return;
+  const gen = ++listenerGen;
+  const result = app.addListener("appUrlOpen", (event) => {
+    const pair = pairLinkFromAppUrl(event?.url ?? "");
+    if (pair) {
+      presentPairLink(pair);
+      return;
+    }
+    const input = signInCodeFromAppUrl(event?.url ?? "");
+    if (input) presentSignInLink(input, true);
+  });
+  void Promise.resolve(result).then((handle) => {
+    if (gen !== listenerGen) {
+      handle?.remove();
+      return;
+    }
+    removeAppUrlListener = () => handle?.remove();
+  });
+}
+
+function readLaunchUrl(): Promise<string> {
+  const app = capacitorApp();
+  if (!app?.getLaunchUrl) return Promise.resolve("");
+  return Promise.resolve()
+    .then(() => app.getLaunchUrl())
+    .then((launch) => launch?.url ?? "")
+    .catch(() => "");
+}
+
+/**
+ * Resolves once the first screen is chosen. In the shell that waits for a
+ * `poweur://` launch URL; it does not wait for the relay.
+ */
+export function whenFirstRouteChosen(): Promise<void> {
+  return routeChosen;
+}
 
 /** Runs once, before the first render. Returns the mode lookup for tests. */
 export function boot(): Promise<void> {
   if (booted) return Promise.resolve();
   booted = true;
+  installAppUrlListener();
+  routeChosen = new Promise((resolve) => {
+    markRouteChosen = resolve;
+  });
 
-  const authInput = new URL(globalThis.location?.href ?? "http://localhost/").searchParams.get("auth") || "";
+  const run = (fromLaunch: string) => {
+    const pending = startBoot(fromLaunch);
+    markRouteChosen();
+    return pending;
+  };
+
+  // The webview never navigates to poweur://; the shell hands that URL over.
+  // Wait for it before choosing the first screen so the approval page is the
+  // first paint. A browser has no launch URL and decides synchronously.
+  if (isShellRuntime() && capacitorApp()?.getLaunchUrl) {
+    return readLaunchUrl().then(run);
+  }
+  return run("");
+}
+
+function startBoot(launchUrl: string): Promise<void> {
+  // The shell's launch URL is a pairing link or a sign-in link; a browser's
+  // page load carries either in its own address.
+  const launchPair = pairLinkFromAppUrl(launchUrl);
+  const fromLaunch = launchPair ? "" : (signInCodeFromAppUrl(launchUrl) ?? "");
+  const authInput = fromLaunch || locationAuthInput();
+  const pairLink = launchPair || takePairLink();
   const handedOver = adoptHandOff();
   refreshSession();
   const identity = getActiveIdentity();
   const route = useRoute.getState();
 
-  if (authInput) {
-    useRoute.setState({ page: "settings", sub: "auth", params: {} });
-    useData.setState((state) => ({ auth: { ...state.auth, input: authInput } }));
-    void beginSignInApproval(authInput);
-  } else if (handedOver) {
+  if (pairLink) {
+    presentPairLink(pairLink);
+  } else if (authInput) {
+    // A QR open is always another device's screen. A `?auth=` page load is
+    // the same browser that started the sign-in.
+    presentSignInLink(authInput, Boolean(fromLaunch));
+  } else if (!protectAuthRoute && handedOver) {
     // Locked on arrival: the passkey that opens the keys is scoped to the
     // domain both hosts share (E18-T4).
     useRoute.setState({ page: "messages" });
     route.push("unlock");
-  } else if (shouldOpenStoredIdentity(modeNow())) {
+  } else if (!protectAuthRoute && shouldOpenStoredIdentity(modeNow())) {
     openStoredIdentity(identity);
-  } else {
+  } else if (!protectAuthRoute) {
     // Unknown until the relay answers, or a launcher. A stored identity must
     // not paint here: the launcher is a public claim page, and the record
     // left behind by a claim belongs on the identity's own host.
@@ -98,7 +225,7 @@ export function boot(): Promise<void> {
   return resolveMode().then((info: ModeInfo) => {
     setDocumentIdentity(info);
     useSession.setState({ mode: info });
-    if (authInput || handedOver) return;
+    if (authInput || protectAuthRoute || handedOver) return;
     if (info.mode === "launcher") {
       settleLauncherDoor();
       return;
@@ -143,4 +270,11 @@ function settleLauncherDoor() {
 /** Test seam. */
 export function resetBootForTests() {
   booted = false;
+  protectAuthRoute = false;
+  listenerGen += 1;
+  removeAppUrlListener?.();
+  removeAppUrlListener = undefined;
+  markRouteChosen();
+  markRouteChosen = () => {};
+  routeChosen = Promise.resolve();
 }

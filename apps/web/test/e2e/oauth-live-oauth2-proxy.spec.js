@@ -86,7 +86,7 @@ test.describe("oauth2-proxy through the bridge (live)", () => {
       await page.goto(`http://127.0.0.1:${proxyPort}/`);
       await expect(page).toHaveURL(new RegExp(`^${bridge.issuer.replace(/\./g, "\\.")}/t/`));
       await page.fill("#identity", identity);
-      await page.click("button.primary");
+      await page.click("#identify-continue");
       await page.click(`a:has-text("Continue at ${relay.addr}")`);
       await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 45_000 });
       if (await page.locator("#btn-auth-unlock").count()) {

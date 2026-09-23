@@ -1,6 +1,6 @@
 import {
   checkRequestAgainstMetadata, checkResumeUri, decodeSignInRequest, describeSignInContext,
-  fetchSignInContext, normalizeMatchCode,
+  fetchSignInContext, fetchSignInRequest, normalizeMatchCode, signInRequestUri,
   describeScopes, encodeSignInResponse, fetchRelyingPartyMetadata,
   normalizeSignInRequest, signInResponseCanonical, summarizeSignInRequest,
   validateSignInRequest,
@@ -23,8 +23,22 @@ export function decodeAuthInput(input) {
   return validateSignInRequest(decodeSignInRequest(value));
 }
 
+/**
+ * The request, however it came: carried inline (decodeAuthInput), or by
+ * reference — the RP's short link from its QR, fetched here and required to
+ * live at the request's own audience (E08-T6).
+ */
+export async function resolveAuthInput(input, options = {}) {
+  const ref = signInRequestUri(String(input ?? ""));
+  if (ref) {
+    const { request } = await fetchSignInRequest(ref, options);
+    return validateSignInRequest(request);
+  }
+  return decodeAuthInput(input);
+}
+
 export async function loadSignInConsent(input, options = {}) {
-  const request = decodeAuthInput(input);
+  const request = await resolveAuthInput(input, options);
   const metadata = await fetchRelyingPartyMetadata(request.audience, options);
   checkRequestAgainstMetadata(request, metadata);
   // Where the sign-in was started, for someone approving from another device.

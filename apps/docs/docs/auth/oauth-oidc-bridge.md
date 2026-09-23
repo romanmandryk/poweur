@@ -9,9 +9,9 @@ title: OAuth 2.0 / OIDC bridge
 > **Status: implemented in `apps/oauth` (EPIC-022).** Native authentication, the OIDC provider,
 > the developer console, `/account`, IndieAuth and the QR/code journey are built and tested
 > against real relays with `go-oidc` as the relying party (`apps/integration`, `TestINT_OAUTH_*`).
-> Recipes are verified against live oauth2-proxy, Keycloak and Authentik containers. Still open:
-> production rollout, third-party IndieAuth clients (E22-T8), and a phone camera for the QR code
-> (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
+> Recipes are verified against live oauth2-proxy, Keycloak and Authentik containers, and the
+> hosted bridge runs at `https://oauth.poweur.org`. Still open: third-party IndieAuth clients and
+> the conformance suite (E22-T8), and a phone camera for the QR code (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/poweur/poweur/blob/main/apps/oauth/README.md).
 
 Native [Sign in with Poweur ID](./sign-in.md) needs no issuer: a relying party verifies the
 user's signature itself. Most existing software cannot do that — Keycloak, Authentik,
@@ -151,7 +151,9 @@ and picks where to send the browser:
    app beside the document).
 3. The operator's default web signer (`OAUTH_DEFAULT_SIGNER`), labelled plainly as "works only
    if this browser already holds your keys there"; the `poweur://` deep link; and, for another
-   device, a QR code, the request code and the match code.
+   device, a QR code of the request's short link (`/r/<code>`, a
+   [request by reference](./sign-in.md#requests-by-reference)) and the match code. A phone
+   camera opening that link lands on a page offering the app and the web signers.
 
 The bridge never embeds or frames a signer and never receives key material.
 
@@ -389,11 +391,12 @@ every consent page, and operator suspension (`poweur-oauth clients suspend`). Op
 the posture:
 
 ```
-OAUTH_CLIENT_REGISTRATION = closed (default) | allowlist | open
+OAUTH_CLIENT_REGISTRATION = open (default) | allowlist | closed
 ```
 
-The hosted `oauth.poweur.org` launches `allowlist` and opens up once abuse handling has been
-exercised; a company bridge usually runs `closed` with static clients only.
+The hosted `oauth.poweur.org` is `open`: anyone with a Poweur ID can connect an application,
+which is the point of a public bridge. A company bridge usually runs `closed` with static
+clients only, or `allowlist` for its own domain.
 
 ### 2. Static clients — operator configuration
 
@@ -489,9 +492,10 @@ configuration**, not web UI — `poweur-oauth keys rotate`, `poweur-oauth client
 A web admin surface is one more authenticated attack surface on the most sensitive service an
 operator runs; v1 does without it (E22-T8 packages the commands).
 
-Client registration defaults to **closed**: `open` lets any Poweur ID publish a consent page
-under the operator's issuer, which is a phishing surface an operator should choose knowingly.
-The hosted bridge starts `allowlist`.
+Client registration defaults to **open**. What keeps that from being a free phishing kit is
+on the consent page and in the operator's hands: it names the Poweur ID that registered the
+application and says nobody reviewed it, every page links to a report form, creation is
+rate-limited per owner, and `clients suspend` stops an application at once.
 
 Production also gets: `/health`, which answers 503 unless the database reads and a signing key
 is loaded; `GET /metrics` on a private listener (`OAUTH_METRICS_ADDR`) with per-route request,

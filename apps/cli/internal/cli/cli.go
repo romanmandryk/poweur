@@ -2060,9 +2060,9 @@ func printHelp(w io.Writer) {
   poweur key derive --seed <base64url|mnemonic> [--json]
   poweur key kit --seed <base64url|mnemonic> [--use-identity=...] [--json]
   poweur key ls [--use-identity=...] [--relay=...] [--json]
-  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]
-  poweur key approve <rendezvous-id> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--json]
-  poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url> [--relay=...] [--json]
+  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]   (shows a QR and a code)
+  poweur key approve <pairing-link | code> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--no-wait] [--json]
+  poweur key claim <identity> <code> [--json]                       (next step of a pairing started without --wait)
   poweur key protect|unprotect [--use-identity=...] [--passphrase=...] [--json]
   poweur identity show [--use-identity=...] [--json]
   poweur identity dns <identity> [--use-identity=...] [--json]

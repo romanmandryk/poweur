@@ -150,6 +150,12 @@ func (b *oauthBrowser) abs(loc string) string {
 
 var txnRe = regexp.MustCompile(`/t/([A-Za-z0-9_-]{43})`)
 
+// Bridge pages carry their data as JSON (apps/oauth/bridge/web.go).
+var (
+	pageTxnRe   = regexp.MustCompile(`"txn":"([A-Za-z0-9_-]{43})"`)
+	pageMatchRe = regexp.MustCompile(`"match":"(\d+)"`)
+)
+
 // startAndIdentify opens an authorization URL, enters the ID and returns the
 // transaction id and the native request the waiting page offers.
 func (b *oauthBrowser) startAndIdentify(authURL, id string) (string, string) {
@@ -187,8 +193,8 @@ func (b *oauthBrowser) finish(start string) *url.URL {
 				return u
 			}
 			next = loc
-		case resp.StatusCode == http.StatusOK && strings.Contains(body, "/consent"):
-			txn := txnRe.FindStringSubmatch(body)[1]
+		case resp.StatusCode == http.StatusOK && strings.Contains(body, `"page":"consent"`):
+			txn := pageTxnRe.FindStringSubmatch(body)[1]
 			resp, _ := b.do(http.MethodPost, b.origin+"/t/"+txn+"/consent", url.Values{
 				"decision": {"allow"}, "release_poweur_id": {"on"},
 			})
@@ -320,7 +326,7 @@ func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 	pkce := oauth2.GenerateVerifier()
 	txn, request := b.startAndIdentify(cfg.AuthCodeURL("s1", oauth2.S256ChallengeOption(pkce), oidc.Nonce("n1")), alice)
 	_, page := b.do(http.MethodGet, fx.issuer+"/t/"+txn, nil)
-	match := regexp.MustCompile(`class="match"[^>]*>(\d+)<`).FindStringSubmatch(page)
+	match := pageMatchRe.FindStringSubmatch(page)
 	if match == nil {
 		t.Fatalf("no match code on the page")
 	}
@@ -425,7 +431,7 @@ func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
 		"state": {"s"}, "nonce": {"n"}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"},
 	}.Encode(), user)
 	_, page := b.do(http.MethodGet, fx.issuer+"/t/"+txn, nil)
-	match := regexp.MustCompile(`class="match"[^>]*>(\d+)<`).FindStringSubmatch(page)[1]
+	match := pageMatchRe.FindStringSubmatch(page)[1]
 
 	push := func() string {
 		resp, _ := b.do(http.MethodPost, fx.issuer+"/t/"+txn+"/push", url.Values{})

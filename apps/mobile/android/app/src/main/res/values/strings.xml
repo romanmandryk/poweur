@@ -3,5 +3,5 @@
     <string name="app_name">Poweur ID</string>
     <string name="title_activity_main">Poweur ID</string>
     <string name="package_name">net.poweur.app</string>
-    <string name="custom_url_scheme">net.poweur.app</string>
+    <string name="custom_url_scheme">poweur</string>
 </resources>
