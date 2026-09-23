@@ -110,7 +110,8 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
       and a symlink there builds an app that works on one developer's machine
 - [x] No `location.origin` assumptions — `test/origin.test.js` has enforced that since
       E15-T1, and `test/e2e/multi-relay.spec.js` now proves the positive case
-- [x] Deep links: the `poweur://` scheme is registered in `Info.plist`. Universal links are
+- [x] Deep links: the `poweur://` scheme is registered in `Info.plist` and in the Android
+      `VIEW`/`BROWSABLE` intent filter (`custom_url_scheme`). Universal links are
       **deliberately not** here — they bind the app to the operator's domain, and E19-T3
       owns that as an optional extra for hosted identities
 - [x] **Android platform generated** (`cap add android`) and building: `:app:assembleDebug`
