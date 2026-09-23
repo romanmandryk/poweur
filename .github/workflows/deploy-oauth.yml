@@ -1,0 +1,141 @@
+name: Deploy OAuth bridge
+
+# Only when something the bridge is built from changes (EPIC-022). The relay's
+# Deploy workflow is independent; this one never touches its checkout.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - apps/oauth/**
+      - packages/identity/**
+      - go.work
+      - .github/workflows/deploy-oauth.yml
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/poweur-oauth
+
+concurrency:
+  group: poweur-oauth-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/oauth/go.sum
+            apps/integration/go.sum
+            packages/identity/go.sum
+      - name: Bridge and identity unit tests
+        run: go test ./apps/oauth/... ./packages/identity/...
+      # RP → bridge → IDs on independent relays → RP, with go-oidc as the client.
+      - name: Bridge integration tests
+        working-directory: apps/integration
+        run: go test -run 'TestINT_OAUTH' ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build timestamp
+        id: stamp
+        run: echo "time=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/oauth/Dockerfile
+          push: true
+          build-args: |
+            VERSION_HASH=${{ github.sha }}
+            BUILD_TIME=${{ steps.stamp.outputs.time }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Install pinned SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Compose up the bridge
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "poweur@$DEPLOY_HOST" "cat > /opt/apps/poweur-oauth/docker-compose.yml" < apps/oauth/deploy/docker-compose.prod.yml
+          # Same shape as the relay deploy: bake the values into a script file,
+          # because `ssh env VAR=… bash -c` loses both quoting and environment.
+          {
+            printf 'export RELEASE_SHA=%q\n' "$RELEASE_SHA"
+            printf 'export OAUTH_IMAGE=%q\n' "$RELEASE_IMAGE"
+            cat <<'EOF'
+          set -euo pipefail
+          cd /opt/apps/poweur-oauth
+          test -s .env.prod || { echo "/opt/apps/poweur-oauth/.env.prod is missing (see deploy/OPS.md)" >&2; exit 1; }
+          docker compose -p poweur-oauth -f docker-compose.yml up -d --pull always
+          for _ in $(seq 1 30); do
+            health="$(docker exec poweur-oauth wget -qO- http://127.0.0.1:8090/health || true)"
+            case "$health" in
+              *"\"versionHash\":\"$RELEASE_SHA\""*'"status":"ok"'*|*'"status":"ok"'*"\"versionHash\":\"$RELEASE_SHA\""*)
+                echo "Bridge /health ok: $health"; exit 0 ;;
+            esac
+            sleep 2
+          done
+          echo "Bridge did not report healthy with versionHash $RELEASE_SHA: ${health:-no answer}" >&2
+          docker logs --tail 40 poweur-oauth >&2 || true
+          exit 1
+          EOF
+          } | ssh "poweur@$DEPLOY_HOST" "cat > /tmp/poweur-oauth-release.sh && exec bash /tmp/poweur-oauth-release.sh"
+
+      - name: Public health through Cloudflare and Caddy
+        run: |
+          for _ in $(seq 1 20); do
+            if curl -fsS https://oauth.poweur.org/health | tee /dev/stderr | grep -q "\"versionHash\":\"$GITHUB_SHA\""; then exit 0; fi
+            sleep 3
+          done
+          echo "https://oauth.poweur.org/health does not answer with this release" >&2
+          exit 1

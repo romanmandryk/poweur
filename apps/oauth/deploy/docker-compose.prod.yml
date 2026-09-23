@@ -1,0 +1,46 @@
+# Production: the OAuth/OIDC bridge at https://oauth.poweur.org (EPIC-022).
+#
+# Deployed by .github/workflows/deploy-oauth.yml, which copies this file to
+# /opt/apps/poweur-oauth/docker-compose.yml on the VM — a directory of its own,
+# so the relay's deploy (which resets /opt/apps/poweur) never touches it.
+# Secrets and per-operator values live beside it in .env.prod (0600, never
+# committed): OAUTH_KEY_ENCRYPTION_KEY, OAUTH_REGISTRATION_ALLOWLIST,
+# OAUTH_ABUSE_CONTACT, OAUTH_SECURITY_CONTACT. See deploy/OPS.md.
+services:
+  oauth:
+    image: ${OAUTH_IMAGE:?Set OAUTH_IMAGE to a GHCR digest}
+    container_name: poweur-oauth
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+    env_file:
+      - .env.prod
+    environment:
+      # The exact origin applications configure; changing it later breaks
+      # every integration and every pairwise subject's sector. Never under a
+      # domain that hosts identities.
+      OAUTH_ISSUER: https://oauth.poweur.org
+      OAUTH_DATABASE: /data/oauth.db
+      OAUTH_DEFAULT_SIGNER: https://poweur.net/app/
+      # "Don't have a Poweur ID?" on the sign-in page creates it here.
+      OAUTH_LAUNCHER_URL: https://poweur.net
+      # Start allowlisted; open only once abuse handling has been exercised.
+      OAUTH_CLIENT_REGISTRATION: ${OAUTH_CLIENT_REGISTRATION:-allowlist}
+      # Caddy sets X-Forwarded-For to the Cloudflare-reported client IP.
+      OAUTH_TRUST_PROXY: "1"
+      # Scraped by infra-prometheus over infra_net; Caddy exposes only :8090.
+      OAUTH_METRICS_ADDR: ":9464"
+    volumes:
+      - oauth_data:/data
+    networks:
+      - infra_net
+
+volumes:
+  oauth_data:
+    name: poweur_oauth_data
+
+networks:
+  infra_net:
+    name: infra_net
+    external: true

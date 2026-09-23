@@ -377,6 +377,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": Version,
 		"issuer":  s.cfg.Issuer,
 	}
+	if VersionHash != "" {
+		out["versionHash"] = VersionHash
+	}
+	if BuildTime != "" {
+		out["buildTime"] = BuildTime
+	}
 	status := http.StatusOK
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()

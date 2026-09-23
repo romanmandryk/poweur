@@ -84,3 +84,29 @@ Then push to `master` (or dispatch Deploy). Caddy/Grafana DNS and existing Cloud
 Back up `poweur_poweur_data`, `infra_postgres_data`, `infra_grafana_data`, `infra_loki_data`, `infra_prometheus_data`, `infra_alloy_data` and Caddy's data/config volumes, plus encrypted copies of the two environment files. The relay volume includes identity documents, files, inbox/spool and consent preferences; do not rely on the old memory-only assumption. Stop writers for a consistent filesystem snapshot, or use `pg_dump` for PostgreSQL and a provider snapshot strategy. Keep backups off this VM. Restore into the same volume names, then restore matching images/configuration and verify `/health`, authenticated inbox, Grafana queries and a test alert. Never use `down -v` on production.
 
 To move observability, copy only infra volumes/configuration/secrets to the new VM, configure ingest DNS/TLS, and change the relay endpoint to HTTPS. Do not copy or mount relay `POWEUR_DATA` into the analytics stack. Keep the HMAC key on the relay stable if you want historical hashed actors to stay linkable; rotating it intentionally starts new pseudonyms. Keep the Grafana DB credentials consistent when moving its database.
+
+## OAuth/OIDC bridge (`oauth.poweur.org`)
+
+The bridge (`apps/oauth`, EPIC-022) runs on the same VM as its own Compose project, `poweur-oauth`, from `/opt/apps/poweur-oauth` — a directory of its own, so the relay deploy's `git reset --hard` of `/opt/apps/poweur` never touches it. Caddy routes `oauth.poweur.org` (HTTP and HTTPS, like Grafana) to `poweur-oauth:8090` on `infra_net`; Prometheus scrapes `poweur-oauth:9464` and probes `https://oauth.poweur.org/health` as `blackbox-oauth`; Grafana alerts `oauth-down`, `oauth-code-reuse` and `oauth-server-errors`.
+
+**Deploys** run from `.github/workflows/deploy-oauth.yml` only when `apps/oauth/**`, `packages/identity/**` or `go.work` change on `master` (or on manual dispatch): bridge unit and `TestINT_OAUTH` tests, the `poweur-oauth` GHCR image stamped with the commit, `apps/oauth/deploy/docker-compose.prod.yml` copied to `/opt/apps/poweur-oauth/docker-compose.yml`, `docker compose up`, then `/health` must report this commit's `versionHash` — inside the container and publicly through Cloudflare. Caddy, Prometheus and Grafana changes still ship with the relay's Deploy (infra `compose up` and a Caddy reload); Prometheus and Grafana read their files at start, so after changing them run `docker restart infra-prometheus infra-grafana`.
+
+**Configuration.** Non-secret settings are in the compose file. `/opt/apps/poweur-oauth/.env.prod` (owner `poweur`, mode `0600`, never committed) holds:
+
+| Variable | |
+|---|---|
+| `OAUTH_KEY_ENCRYPTION_KEY` | 32 bytes, base64 (`poweur-oauth gen-key`). Seals the signing keys. **Lose it and the bridge cannot sign; every application must be reconfigured.** |
+| `OAUTH_REGISTRATION_ALLOWLIST` | Poweur IDs (or `*.domain`) that may register applications at `/developers`. Empty: nobody. |
+| `OAUTH_ABUSE_CONTACT`, `OAUTH_SECURITY_CONTACT` | Published on `/abuse`, `/privacy`, `/security`. |
+
+After editing it: `cd /opt/apps/poweur-oauth && OAUTH_IMAGE=$(docker inspect -f '{{.Config.Image}}' poweur-oauth) docker compose -p poweur-oauth up -d`.
+
+**Operator commands** run inside the container, which already has the configuration:
+
+```sh
+docker exec poweur-oauth poweur-oauth keys list
+docker exec poweur-oauth poweur-oauth clients list
+docker exec poweur-oauth poweur-oauth clients suspend <client_id> impersonation
+```
+
+**Backup.** A root cron (`/etc/cron.d/poweur-oauth-backup`) writes a consistent copy daily with `poweur-oauth backup` into the volume's `backups/` directory and keeps 14 days. That protects against a corrupt database, not against losing the VM: copy `/var/lib/docker/volumes/poweur_oauth_data/_data/backups/` off the machine with the other volumes, and keep the key-encryption key in a separate place. Restore = stop the container, put a backup in place as `oauth.db`, start with the **same** key: every application then sees the same subjects and keys.

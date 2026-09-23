@@ -43,13 +43,23 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	bridge.VersionHash = strings.TrimSpace(os.Getenv("VERSION_HASH"))
+	bridge.BuildTime = strings.TrimSpace(os.Getenv("BUILD_TIME"))
 	cmd := "serve"
 	if len(args) > 0 {
 		cmd, args = args[0], args[1:]
 	}
 	switch cmd {
 	case "version", "--version", "-v":
-		fmt.Fprintf(stdout, "poweur-oauth %s\n", bridge.Version)
+		fmt.Fprintf(stdout, "poweur-oauth %s", bridge.Version)
+		if bridge.VersionHash != "" {
+			fmt.Fprintf(stdout, " (%s", bridge.VersionHash)
+			if bridge.BuildTime != "" {
+				fmt.Fprintf(stdout, ", %s", bridge.BuildTime)
+			}
+			fmt.Fprint(stdout, ")")
+		}
+		fmt.Fprintln(stdout)
 		return 0
 	case "gen-key":
 		key := make([]byte, 32)

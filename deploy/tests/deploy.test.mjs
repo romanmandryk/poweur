@@ -75,3 +75,24 @@ test('deploy workflow bakes release identity into the remote script', () => {
   assert.doesNotMatch(yml, /bash -s <</);
   assert.doesNotMatch(yml, /ssh "[^"]+" env RELEASE_SHA=/);
 });
+
+test('bridge deploy runs only for bridge changes and verifies the release', () => {
+  const yml = readFileSync(new URL('../../.github/workflows/deploy-oauth.yml', import.meta.url), 'utf8');
+  // Path-filtered: a relay-only or web-only push does not redeploy the bridge.
+  assert.match(yml, /paths:\n(\s+- .+\n)*\s+- apps\/oauth\/\*\*/);
+  assert.match(yml, /- packages\/identity\/\*\*/);
+  assert.match(yml, /file: apps\/oauth\/Dockerfile/);
+  assert.match(yml, /VERSION_HASH=\$\{\{ github\.sha \}\}/);
+  // Its own directory, script and lock: never the relay's checkout.
+  assert.match(yml, /cd \/opt\/apps\/poweur-oauth/);
+  assert.doesNotMatch(yml, /git reset/);
+  assert.match(yml, /cat > \/tmp\/poweur-oauth-release\.sh/);
+  assert.match(yml, /group: poweur-oauth-deploy/);
+  assert.match(yml, /versionHash/);
+  assert.doesNotMatch(yml, /bash -s <</);
+  const compose = readFileSync(new URL('../../apps/oauth/deploy/docker-compose.prod.yml', import.meta.url), 'utf8');
+  assert.match(compose, /OAUTH_ISSUER: https:\/\/oauth\.poweur\.org/);
+  assert.match(compose, /container_name: poweur-oauth/);
+  assert.match(compose, /- \.env\.prod/);
+  assert.doesNotMatch(compose, /OAUTH_KEY_ENCRYPTION_KEY:/);
+});

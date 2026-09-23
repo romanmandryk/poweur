@@ -255,8 +255,11 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
   it("solves a registration proof-of-work gate, reporting progress", async () => {
     // A relay that gates signup behind PoW is the case where a silent solve
     // looks like a broken signup screen, so the callbacks are the feature.
+    // Progress is reported between 4096-hash chunks: at 16 bits about one
+    // solve in 16 finished inside the first chunk and reported nothing. At 20
+    // bits that is about one in 256.
     const gated = await startRelay({
-      env: { REGISTRATION_GATE: "pow", REGISTRATION_POW_BITS: "16" },
+      env: { REGISTRATION_GATE: "pow", REGISTRATION_POW_BITS: "20" },
     });
     try {
       const api = new IdentityApi(new RelayClient(gated.baseUrl));

@@ -12,6 +12,25 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets: [infra-node-exporter:9100]
+  # The OAuth bridge (apps/oauth): request/latency/rate-limit/audit-event
+  # counters. Its own job, and its own probe below, so relay alerts stay
+  # about the relay.
+  - job_name: poweur-oauth
+    static_configs:
+      - targets: [poweur-oauth:9464]
+  - job_name: blackbox-oauth
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [https://oauth.poweur.org/health]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: infra-blackbox:9115
   - job_name: blackbox
     metrics_path: /probe
     params:

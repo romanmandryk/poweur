@@ -16,8 +16,14 @@ func TestHealthReportsTheDatabase(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	p := b.get("/health")
-	if p.status != http.StatusOK || !strings.Contains(p.body, `"status":"ok"`) {
+	if p.status != http.StatusOK || !strings.Contains(p.body, `"status":"ok"`) || strings.Contains(p.body, "versionHash") {
 		t.Fatalf("health = %d %s", p.status, p.body)
+	}
+	VersionHash, BuildTime = "abc123", "2026-09-23 10:00"
+	t.Cleanup(func() { VersionHash, BuildTime = "", "" })
+	p = b.get("/health")
+	if !strings.Contains(p.body, `"versionHash":"abc123"`) || !strings.Contains(p.body, `"buildTime":"2026-09-23 10:00"`) {
+		t.Fatalf("health without build stamps: %s", p.body)
 	}
 	h.store.Close()
 	p = b.get("/health")
