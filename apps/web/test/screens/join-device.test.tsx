@@ -4,9 +4,15 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react";
 const fake = vi.hoisted(() => {
   const enroll = {
     offer: vi.fn(() =>
-      Promise.resolve({ rendezvousId: "rv-123-abc", sas: "482913", expiresAt: new Date(Date.now() + 600_000).toISOString() }),
+      Promise.resolve({
+        rendezvousId: "K7QM4XP2",
+        claimToken: "token",
+        commitment: "AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA",
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      }),
     ),
-    claim: vi.fn(),
+    step: vi.fn((): Promise<any> => Promise.resolve({ state: "offered" })),
+    publishedKeyMatches: vi.fn(() => Promise.resolve(true)),
     cancel: vi.fn(() => Promise.resolve()),
   };
   return {
@@ -43,13 +49,16 @@ beforeEach(() => {
   fake.poll.options = null;
 });
 
-describe("Add this device (E11-T3)", () => {
-  it("on an identity host, shows the code at once without asking who you are", async () => {
+describe("Add this device (E11-T8)", () => {
+  it("on an identity host, shows the QR and the code at once without asking who you are", async () => {
     render(<PanelHost />);
     act(() => openJoinDevicePanel("bob.poweur.net"));
 
-    await waitFor(() => expect($(".rendezvous-code")!.textContent).toBe("rv-123-abc"));
-    expect($(".sas-code")!.textContent).toBe("482913");
+    await waitFor(() => expect($(".rendezvous-code")!.textContent).toBe("K7QM-4XP2"));
+    // The QR carries the pairing link: this app, the code and the commitment.
+    expect($("svg[data-qr]")!.getAttribute("data-qr")).toBe("http://127.0.0.1:8080/app/#pair=K7QM4XP2.AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA&id=bob.poweur.net");
+    // No digits until the other device answers.
+    expect($(".sas-code")).toBeNull();
     expect($("#panel-root")!.textContent).toContain("bob.poweur.net");
     expect($("#join-identity")).toBeNull();
     expect($("#btn-join-start")).toBeNull();
@@ -64,7 +73,23 @@ describe("Add this device (E11-T3)", () => {
 
     act(() => closePanel());
     expect(fake.poll.stop).toHaveBeenCalled();
-    expect(fake.enroll.cancel).toHaveBeenCalledWith("bob.poweur.net", expect.objectContaining({ rendezvousId: "rv-123-abc" }));
+    expect(fake.enroll.cancel).toHaveBeenCalledWith("bob.poweur.net", expect.objectContaining({ rendezvousId: "K7QM4XP2" }));
+  });
+
+  it("once the other device answers, shows the digits to compare — not the code", async () => {
+    render(<PanelHost />);
+    act(() => openJoinDevicePanel("bob.poweur.net"));
+    await waitFor(() => expect(fake.poll.options).toBeTruthy());
+
+    fake.enroll.step.mockResolvedValueOnce({ state: "compare", sas: "482913" });
+    await act(async () => expect(await fake.poll.options.claim()).toBeNull());
+    expect($("#join-sas")!.textContent).toBe("482 913");
+    expect($("#join-compare")!.textContent).toContain("don't type");
+    expect($("svg[data-qr]")).toBeNull();
+
+    fake.enroll.step.mockResolvedValueOnce({ state: "scan" });
+    await act(async () => void (await fake.poll.options.claim()));
+    expect($("#join-scan")!.textContent).toContain("Approve on your other device");
   });
 
   it("elsewhere, completes a bare handle with the host's domain", async () => {
@@ -74,7 +99,7 @@ describe("Add this device (E11-T3)", () => {
 
     fireEvent.change($("#join-identity")!, { target: { value: "Alice" } });
     fireEvent.click($("#btn-join-start")!);
-    await waitFor(() => expect($(".sas-code")).toBeTruthy());
+    await waitFor(() => expect($(".rendezvous-code")).toBeTruthy());
     expect(fake.enroll.offer).toHaveBeenCalledWith("alice.poweur.net", expect.any(String));
   });
 
@@ -87,9 +112,19 @@ describe("Add this device (E11-T3)", () => {
     expect($("#panel-root")).toBeNull();
     // Approved, so there is no rendezvous left to cancel.
     expect(fake.enroll.cancel).not.toHaveBeenCalled();
+    expect(fake.enroll.publishedKeyMatches).toHaveBeenCalledWith("bob.poweur.net", expect.any(Uint8Array));
     expect(fake.adopt).toHaveBeenCalledWith(
       expect.objectContaining({ identity: "bob.poweur.net", relayUrl: "http://127.0.0.1:8080", signingJWK: expect.any(Object) }),
     );
+  });
+
+  it("never adopts keys that are not the identity's published keys", async () => {
+    fake.enroll.publishedKeyMatches.mockResolvedValueOnce(false);
+    render(<PanelHost />);
+    act(() => openJoinDevicePanel("bob.poweur.net"));
+    await waitFor(() => expect(fake.poll.options).toBeTruthy());
+    await act(() => fake.poll.options.onSeed(new Uint8Array(32).fill(3)));
+    expect(fake.adopt).not.toHaveBeenCalled();
   });
 
   it("a terminal error offers to try again", async () => {

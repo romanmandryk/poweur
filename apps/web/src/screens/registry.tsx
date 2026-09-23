@@ -13,6 +13,7 @@ import { Messages } from "./messages/Messages";
 import { NewChat } from "./messages/NewChat";
 import { ThreadScreen } from "./messages/Thread";
 import { Onboarding } from "./Onboarding";
+import { PairDevice } from "./PairDevice";
 import { Settings } from "./settings/Settings";
 import { SignInApproval } from "./SignInApproval";
 import { Unlock } from "./Unlock";
@@ -42,6 +43,8 @@ export function SubScreen({ sub }: { sub: SubPageId }) {
       return <Claim />;
     case "auth":
       return <SignInApproval />;
+    case "pair":
+      return <PairDevice />;
     case "new-chat":
       return <NewChat />;
     case "thread":

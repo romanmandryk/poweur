@@ -28,6 +28,23 @@ interface CapacitorAppPlugin {
 }
 
 /**
+ * A pairing link (EPIC-011 E11-T8) — the new device's QR, opened by this
+ * device's camera — arrives as `#pair=<code>.<commitment>`. It is kept for the
+ * approval screen and taken out of the address bar.
+ */
+export function takePairLink(): string {
+  const href = globalThis.location?.href ?? "";
+  const hash = globalThis.location?.hash ?? "";
+  if (!hash.startsWith("#pair=")) return "";
+  try {
+    history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+  } catch {
+    /* keep going: the link still works */
+  }
+  return href;
+}
+
+/**
  * A hand-off from the launcher arrives as `#claim=<base64url JSON>` and is
  * adopted before anything else looks at storage (EPIC-018 E18-T3). The
  * fragment is always stripped, adopted or not: it carries a wrapped key record.
@@ -88,6 +105,13 @@ function locationAuthInput() {
   return new URL(globalThis.location?.href ?? "http://localhost/").searchParams.get("auth") || "";
 }
 
+/** Settings → Add a device, with the scanned pairing link waiting. */
+function presentPairLink(link: string) {
+  protectAuthRoute = true;
+  useData.setState({ pairInput: link });
+  useRoute.setState({ page: "settings", sub: "pair", params: {} });
+}
+
 /** Settings → Approve sign-in, with the request filled in and checked. */
 function presentSignInLink(input: string, requireCode = false) {
   const value = input.trim();
@@ -106,6 +130,10 @@ function installAppUrlListener() {
   if (!app?.addListener || removeAppUrlListener) return;
   const gen = ++listenerGen;
   const result = app.addListener("appUrlOpen", (event) => {
+    if ((event?.url ?? "").includes("#pair=")) {
+      presentPairLink(event.url ?? "");
+      return;
+    }
     const input = signInCodeFromAppUrl(event?.url ?? "");
     if (input) presentSignInLink(input, true);
   });
@@ -161,12 +189,15 @@ export function boot(): Promise<void> {
 
 function startBoot(fromLaunch: string): Promise<void> {
   const authInput = fromLaunch || locationAuthInput();
+  const pairLink = takePairLink();
   const handedOver = adoptHandOff();
   refreshSession();
   const identity = getActiveIdentity();
   const route = useRoute.getState();
 
-  if (authInput) {
+  if (pairLink) {
+    presentPairLink(pairLink);
+  } else if (authInput) {
     // A QR open is always another device's screen. A `?auth=` page load is
     // the same browser that started the sign-in.
     presentSignInLink(authInput, Boolean(fromLaunch));

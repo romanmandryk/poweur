@@ -37,7 +37,7 @@ export function relayAddressFromUrl(relayUrl: string): string {
   return trimmed;
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   method: string;
   path: string;
   body?: unknown;

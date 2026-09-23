@@ -14,6 +14,7 @@
 | E08-T3 Signer UX | **done** | Web approval/paste/deep-link flow with origin and scope consent, CLI `auth approve`, durable audit log, and native mobile signer contract |
 | E08-T4 Scoped resource grants | **done** | `POST /auth/grant`, one-hour path-scoped app tokens, `connected-apps.json`, immediate file-driven revocation, web list/revoke and audit UI; guestbook writes to the user's app namespace |
 | Completion binding (follow-up) | **done** | Found while designing EPIC-022: the guestbook handed its session to whoever polled with a `request_id`, so a forwarded sign-in link was an account takeover. Now a same-device approval finishes only at a single-use `resume_uri` in the browser holding the RP's binding cookie, and a cross-device one only with the match code the starting screen showed. Spec: "Who may complete a sign-in" in `auth/sign-in.md`; tracked under E22-T4 |
+| E08-T6 Short sign-in codes: request by reference | **in progress** | QR and copy carried the whole signed request (~600 characters) — a QR too dense for many cameras. They now carry a short `https://<rp>/r/<code>` link the signer fetches from the RP itself |
 | E08-T5 Interop bridges | **done** | Mechanical `did:web` projection at `/.well-known/did.json` with resolution coverage; OIDC bridge and SIOPv2/OpenID4VP decision record |
 
 ## Goal
@@ -137,6 +138,34 @@ The interop superpower: RP requests scopes, approval mints a relay token.
 
 **Acceptance:** RP writes to its app namespace in the user's home after consent; revoking in
 the web UI cuts access; audit trail visible.
+
+### E08-T6 — Short sign-in codes: request by reference
+
+The QR and the "copy request" fallback carried the entire encoded request (audience, nonce,
+response URI, statement, expiry — about 600 characters), which makes a version-20-plus QR that
+many phone cameras will not read. Add-device, meanwhile, used a short code. One pattern for both:
+**a short code and a QR of a short link.**
+
+**Protocol (added — flagged):** a request may be passed **by reference**. The RP serves
+`GET <request_uri>` → `{"request": "<encoded request>"}` (CORS `*`: nothing in it is secret),
+and a signer given an `https://` URI — or `poweur://auth?request_uri=…`, or the web signer's
+`?auth=` holding one — fetches it and **requires the URI's origin to equal the request's
+`audience`**. The request is then exactly as trustworthy as if the RP had handed it over
+directly, which it has, over TLS. The same URI opened in a browser (a phone's own camera app)
+gets a page offering the signers, so no in-app scanner is needed. Codes are 8 characters,
+Crockford base32, live as long as the request.
+
+What does **not** change: the request's content and signature rules, the audience binding, and
+the 2-digit match code. That code is a different control — it proves the approver is looking at
+the screen that started the sign-in, so a forwarded QR cannot sign someone else in — and it
+must not travel in the QR.
+
+- [ ] `packages/identity`: short codes, request-URI parsing, fetch + origin check (Go), vectors;
+      TS twin in `@poweur/client`
+- [ ] Signers: CLI `auth approve <url>`, web signer `?auth=<url>`
+- [ ] RPs: the OAuth bridge (`/r/{code}`: JSON for signers, a handoff page for phone cameras;
+      its QR and copy use it) and the guestbook
+- [ ] Spec in `auth/sign-in.md`; tests in Go, TS, integration and Playwright
 
 ### E08-T5 — Interop bridges: did:web and OIDC (design first)
 

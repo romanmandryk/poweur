@@ -8,6 +8,8 @@ export type PoweurErrorCode =
   | "invalid_signature"
   | "invalid_document"
   | "key_mismatch"
+  | "pairing_mismatch"
+  | "invalid_code"
   | "not_found"
   | "resolve_failed"
   | "relay_error"

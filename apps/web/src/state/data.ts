@@ -82,6 +82,8 @@ export function freshData() {
     custody: null as any,
     /** Sign-in prompts the user dismissed this session. */
     dismissedPrompts: [] as string[],
+    /** A pairing link opened on this device (#pair=…), waiting to be approved. */
+    pairInput: "",
     auth: {
       input: "",
       request: null as any,

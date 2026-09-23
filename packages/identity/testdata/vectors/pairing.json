@@ -1,0 +1,84 @@
+{
+  "pairings": [
+    {
+      "ephemeral_public_key": "1erW_dPRZjCq1PB_XklIYzekLlj7Tu8N6qu4FMADsTQ",
+      "commit_nonce": "5axbI-YkJyqcyoTKGIDQCrLhJsJUmQkNyWObafCV-Vw",
+      "approver_nonce": "dY648LzakJ0-BGsz3A73a9LJEP_pvN7HClchcTEmo1A",
+      "commitment": "AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA",
+      "sas": "894812"
+    },
+    {
+      "ephemeral_public_key": "vil0VGl443OebW2oXEvp8zTOMt8rn9S2_xtVwNV-nUQ",
+      "commit_nonce": "pfp3ej3GcmjK6m7qA4uhQXfjYNuoTh20TnONuuE35-8",
+      "approver_nonce": "Ua7qj_oF0mINNch0Y0ZYhed98TFx1XCHRt8anzbUfzU",
+      "commitment": "8LqPfLzoI5P8uhCI-gIJIpfw7xWnxJ4B1NBOSkkaeIk",
+      "sas": "925163"
+    },
+    {
+      "ephemeral_public_key": "fDawqd7d4RnHUWWVfGycGH5l3x7l24fExYrVA62Iy-M",
+      "commit_nonce": "IR_BhDQd4L2rs42IEpqk60IX7ucnCTP2SFwBp5IjB8M",
+      "approver_nonce": "z34rcRUcg9vrnWFJaT02_LNlj3_taAnrD2ayrbunLt4",
+      "commitment": "4KT78rGU64qlKMOnPMjvTUjzPoWXHR_7Api_6-GJQII",
+      "sas": "558132"
+    },
+    {
+      "ephemeral_public_key": "2e-BllV8naaYBvtdd39OWtbVwYWTA54P9i-f3wA7AZg",
+      "commit_nonce": "vNLilrW84pr4oqMkRncWqxde5gRA_P3Ld8s55fOyNvA",
+      "approver_nonce": "a6fvZQecQQJ6IcqIfmEJmtg0C5gGOsLRJjsgJrKlYg8",
+      "commitment": "MZNhWQwebqFeLH3j2mAe6WjOAMYvXLd_BI_b6yIV97w",
+      "sas": "293877"
+    }
+  ],
+  "short_codes": [
+    {
+      "input": "K7QM4XP2",
+      "code": "K7QM4XP2",
+      "valid": true
+    },
+    {
+      "input": "k7qm-4xp2",
+      "code": "K7QM4XP2",
+      "valid": true
+    },
+    {
+      "input": " K7QM 4XP2 ",
+      "code": "K7QM4XP2",
+      "valid": true
+    },
+    {
+      "input": "K7QM–4XP2",
+      "code": "K7QM4XP2",
+      "valid": true
+    },
+    {
+      "input": "O0IL-1234",
+      "code": "00111234",
+      "valid": true
+    },
+    {
+      "input": "K7QM-4XP",
+      "code": "",
+      "valid": false
+    },
+    {
+      "input": "K7QM-4XP23",
+      "code": "",
+      "valid": false
+    },
+    {
+      "input": "K7QU-4XP2",
+      "code": "",
+      "valid": false
+    },
+    {
+      "input": "K7QM-4XP!",
+      "code": "",
+      "valid": false
+    },
+    {
+      "input": "",
+      "code": "",
+      "valid": false
+    }
+  ]
+}

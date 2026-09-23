@@ -9,7 +9,7 @@ import { useData } from "./data";
 export const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth";
+export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth" | "pair";
 
 /**
  * Sub-pages that are a *detail of the list behind them* rather than a gate

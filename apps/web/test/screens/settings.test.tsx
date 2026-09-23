@@ -77,7 +77,10 @@ beforeEach(() => {
   });
   holder.client.dav = vi.fn(async () => ({ devices: async () => ({ devices: [{ id: "d1", name: "CLI on server", kind: "agent" }] }), write: vi.fn() }));
   holder.enroll = {
-    pending: vi.fn(async () => ({ sas: "482913", label: "New phone" })),
+    begin: vi.fn(async (_signer: unknown, _identity: string, input: string) => ({
+      code: "K7QM4XP2", mode: input.includes("#pair=") ? "scan" : "compare", approverNonce: "n", commitment: "c", label: "New phone",
+    })),
+    wait: vi.fn(async () => ({ state: "revealed", ephemeralPublicKey: "k", sas: "482913" })),
     approve: vi.fn(async () => {}),
   };
   saveIdentityRecord(ME, {
@@ -205,35 +208,36 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect(removeEnrollment).toHaveBeenCalledWith(holder.client, ME, "e2"));
   });
 
-  it("approves a new device only after showing the six digits", async () => {
+  it("a typed code approves a new device only after the digits are compared", async () => {
     render(<App />);
     fireEvent.click($("#row-keys-devices")!);
     await waitFor(() => expect($("#btn-enroll-device")).toBeTruthy());
     fireEvent.click($("#btn-enroll-device")!);
-    await waitFor(() => expect($("#enroll-rendezvous")).toBeTruthy());
+    await waitFor(() => expect($("#pair-code")).toBeTruthy());
 
-    $<HTMLInputElement>("#enroll-rendezvous")!.value = "  rv-123-abc \n";
-    fireEvent.click($("#btn-enroll-lookup")!);
-    await waitFor(() => expect($(".sas-code")?.textContent).toBe("482913"));
-    expect(holder.enroll.pending).toHaveBeenCalledWith(holder.client.signer, ME, "rv-123-abc");
+    $<HTMLInputElement>("#pair-code")!.value = " k7qm-4xp2 ";
+    fireEvent.click($("#btn-pair-continue")!);
+    await waitFor(() => expect($("#pair-sas")?.textContent).toBe("482 913"));
+    expect(holder.enroll.begin).toHaveBeenCalledWith(holder.client.signer, ME, " k7qm-4xp2 ");
+    expect($("#pair-compare")!.textContent).toContain("New phone");
     expect(holder.enroll.approve).not.toHaveBeenCalled();
 
-    fireEvent.click($("#btn-enroll-approve")!);
+    fireEvent.click($("#btn-pair-approve")!);
     await waitFor(() => expect(holder.enroll.approve).toHaveBeenCalled());
-    await waitFor(() => expect($("#panel-root")).toBeNull());
+    expect($("#pair-done")!.textContent).toContain("Keys sent");
   });
 
-  it("a wrong request code is refused rather than half-approved", async () => {
-    holder.enroll.pending.mockRejectedValueOnce(new Error("not found"));
+  it("a code nobody is waiting with is refused rather than half-approved", async () => {
+    holder.enroll.begin.mockRejectedValueOnce(new Error("rendezvous not found or expired"));
     render(<App />);
     fireEvent.click($("#row-keys-devices")!);
     await waitFor(() => expect($("#btn-enroll-device")).toBeTruthy());
     fireEvent.click($("#btn-enroll-device")!);
-    await waitFor(() => expect($("#enroll-rendezvous")).toBeTruthy());
-    $<HTMLInputElement>("#enroll-rendezvous")!.value = "not-a-real-rendezvous-id";
-    fireEvent.click($("#btn-enroll-lookup")!);
-    await waitFor(() => expect($("#toast-root")!.textContent).toContain("No pending device"));
-    expect($("#btn-enroll-approve")).toBeNull();
+    await waitFor(() => expect($("#pair-code")).toBeTruthy());
+    $<HTMLInputElement>("#pair-code")!.value = "ZZZZ-ZZZZ";
+    fireEvent.click($("#btn-pair-continue")!);
+    await waitFor(() => expect($("#pair-error")!.textContent).toContain("not found"));
+    expect($("#btn-pair-approve")).toBeNull();
   });
 
   it("shows the recovery kit and checks it typed back", async () => {

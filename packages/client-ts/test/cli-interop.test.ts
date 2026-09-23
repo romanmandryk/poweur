@@ -245,56 +245,40 @@ describe("Go CLI ↔ TypeScript client", () => {
 
     const api = new EnrollApi(new RelayClient(relay.baseUrl));
     const session = await api.offer(identity, "typescript device");
-    // A pasted request code on a phone is rarely clean.
-    const messy = `  ${session.rendezvousId}\n`;
-    await goCli([
-      "key", "approve", messy,
-      "--use-identity", identity,
-      "--relay", relay.baseUrl,
-      "--seed", seed,
-      "--sas", session.sas,
-      "--json",
-    ]);
-    const received = await api.claim(identity, session);
-    expect(received).not.toBeNull();
-    expect(toBase64url(received!)).toBe(seed);
+    const approve = (extra: string[]) =>
+      goCli(["key", "approve", `  ${session.rendezvousId.toLowerCase()}\n`, "--use-identity", identity,
+        "--relay", relay.baseUrl, "--seed", seed, "--json", ...extra]);
+    // The Go side contributes its nonce; the TS device reveals and shows digits.
+    await approve(["--no-wait"]);
+    const step = await api.step(identity, session);
+    if (step.state !== "compare") throw new Error(`state ${step.state}`);
+    await approve(["--sas", step.sas]);
+    const done = await api.step(identity, session);
+    expect(done.state === "delivered" && toBase64url(done.seed)).toBe(seed);
   }, 180_000);
 
   it("moves a seed from TypeScript to the Go CLI", async () => {
     const identity = uniqueIdentity("tsenroll");
     const seed = newSeed();
     const keys = identityKeysFromSeed(identity, seed);
-    await createIdentity(new IdentityApi(new RelayClient(relay.baseUrl)), identity, {
-      hosted: true,
-      keys,
-    });
+    await createIdentity(new IdentityApi(new RelayClient(relay.baseUrl)), identity, { hosted: true, keys });
     const { signer } = signerFor(keys);
 
     const newDevice = mkdtempSync(join(tmpdir(), "poweur-enroll-"));
-    const enrolled = await goCli(
-      ["key", "enroll", identity, "--relay", relay.baseUrl, "--json"],
-      newDevice,
-    );
-    const offer = JSON.parse(enrolled.stdout) as {
-      rendezvous_id: string;
-      sas: string;
-      ephemeral_private_key: string;
-    };
+    const enrolled = await goCli(["key", "enroll", identity, "--relay", relay.baseUrl, "--json"], newDevice);
+    const offer = JSON.parse(enrolled.stdout) as { code: string; link: string };
 
+    // Scanned: the TS approver checks the Go device's key against the link.
     const api = new EnrollApi(new RelayClient(relay.baseUrl));
-    const pending = await api.pending(signer, identity, offer.rendezvous_id);
-    expect(pending.sas).toBe(offer.sas);
-    await api.approve(signer, identity, pending, seed);
+    const approver = await api.begin(signer, identity, offer.link);
+    expect(approver.mode).toBe("scan");
+    await goCli(["key", "claim", identity, offer.code, "--json"], newDevice); // reveals
+    const revealed = await api.wait(signer, identity, approver);
+    if (revealed.state !== "revealed") throw new Error("not revealed");
+    await api.approve(signer, identity, approver, revealed, seed);
 
-    await goCli(
-      [
-        "key", "claim", identity, offer.rendezvous_id,
-        "--ephemeral-key", offer.ephemeral_private_key,
-        "--relay", relay.baseUrl,
-        "--json",
-      ],
-      newDevice,
-    );
+    const claimed = await goCli(["key", "claim", identity, offer.code, "--json"], newDevice);
+    expect(JSON.parse(claimed.stdout)).toMatchObject({ enrolled: true });
     const listed = await goCli(["identity", "show", "--use-identity", identity, "--json"], newDevice);
     const shown = JSON.parse(listed.stdout) as { public_key: string };
     expect(shown.public_key.replace(/^ed25519:/, "")).toBe(
@@ -312,49 +296,28 @@ describe("Go CLI ↔ TypeScript client", () => {
 
     const previousHome = process.env["POWEUR_HOME"];
     const newDevice = mkdtempSync(join(tmpdir(), "poweur-ts-enroll-"));
-    process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
-    let offer: { rendezvous_id: string; sas: string; ephemeral_private_key: string };
-    try {
-      const enrolled = await tsCli([
-        "key", "enroll", identity, "--relay", relay.baseUrl, "--json",
-      ]);
-      expect(enrolled.code).toBe(0);
-      offer = JSON.parse(enrolled.stdout) as typeof offer;
-    } finally {
-      process.env["POWEUR_HOME"] = previousHome;
-    }
-
-    await goCli([
-      "key", "approve", offer.rendezvous_id,
-      "--use-identity", identity,
-      "--relay", relay.baseUrl,
-      "--seed", seed,
-      "--sas", offer.sas,
-      "--json",
-    ]);
-
-    process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
-    try {
-      // `key claim` is a single GET; approve can still be in flight on a
-      // busy runner, so poll the same way `--wait` does.
-      let claimed = { code: 1, stdout: "", stderr: "" };
-      for (let i = 0; i < 10; i++) {
-        claimed = await tsCli([
-          "key", "claim", identity, offer.rendezvous_id,
-          "--ephemeral-key", offer.ephemeral_private_key,
-          "--relay", relay.baseUrl,
-          "--json",
-        ]);
-        if (claimed.code === 0) break;
-        if (!claimed.stderr.includes("not approved yet")) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+    const asNewDevice = async (args: string[]) => {
+      process.env["POWEUR_HOME"] = join(newDevice, ".poweur");
+      try {
+        return await tsCli(args);
+      } finally {
+        process.env["POWEUR_HOME"] = previousHome;
       }
-      expect(claimed.code, claimed.stderr || claimed.stdout).toBe(0);
-      const payload = JSON.parse(claimed.stdout) as { enrolled: boolean; identity: string };
-      expect(payload.enrolled).toBe(true);
-      expect(payload.identity).toBe(identity);
-    } finally {
-      process.env["POWEUR_HOME"] = previousHome;
-    }
+    };
+    const enrolled = await asNewDevice(["key", "enroll", identity, "--relay", relay.baseUrl, "--json"]);
+    expect(enrolled.code, enrolled.stderr).toBe(0);
+    const offer = JSON.parse(enrolled.stdout) as { code: string };
+    const approve = (extra: string[]) =>
+      goCli(["key", "approve", offer.code, "--use-identity", identity, "--relay", relay.baseUrl,
+        "--seed", seed, "--json", ...extra]);
+
+    await approve(["--no-wait"]);
+    const shown = await asNewDevice(["key", "claim", identity, offer.code, "--json"]);
+    const { sas } = JSON.parse(shown.stdout) as { sas: string };
+    expect(sas).toMatch(/^\d{6}$/);
+    await approve(["--sas", sas]);
+    const claimed = await asNewDevice(["key", "claim", identity, offer.code, "--json"]);
+    expect(claimed.code, claimed.stderr || claimed.stdout).toBe(0);
+    expect(JSON.parse(claimed.stdout)).toMatchObject({ enrolled: true, identity });
   }, 180_000);
 });

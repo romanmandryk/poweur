@@ -524,44 +524,49 @@ way back.
 
 ### `poweur key enroll <identity>` / `key approve` / `key claim`
 
-Move an identity to a new device using a six-digit code — **no camera, no QR, no email**.
+Pair a new device with one that holds the identity. The relay only relays: it cannot read the
+seed, and cannot pair a device of its own.
 
 On the new device:
 
 ```bash
-poweur key enroll alice.poweur.net --relay https://relay.poweur.net --label "work laptop"
+poweur key enroll alice.poweur.net --relay https://relay.poweur.net --label "work laptop" --wait
 ```
 
-It prints a rendezvous id and a code. On a device that already holds the identity:
+It prints a QR code (the pairing link) and an 8-character code like `K7QM-4XP2`. On a device that
+already holds the identity, either **use the link** — nothing to compare, the link carries the new
+device's commitment:
 
 ```bash
-poweur key approve <rendezvous-id> --seed "$(cat alice.seed)" --sas 481920
+poweur key approve 'https://alice.poweur.net/app/#pair=K7QM4XP2.…&id=alice.poweur.net' --seed "$(cat alice.seed)"
 ```
 
-Then back on the new device:
+— or **type the code**; both machines then show six digits, and this side delivers only once
+they are confirmed (typed at the prompt, or given with `--sas`):
 
 ```bash
-poweur key claim alice.poweur.net <rendezvous-id> --ephemeral-key <printed-key>
+poweur key approve K7QM-4XP2 --seed "$(cat alice.seed)"
 ```
 
-`key enroll --wait` collapses the last step by polling until approval.
+Without `--wait`, run `poweur key claim alice.poweur.net K7QM4XP2` on the new device to move each
+step along (the pairing is kept in `~/.poweur/pairing`); scripts use `key approve --no-wait`
+then `--sas` the same way.
 
 | Flag | Command | Description |
 |------|---------|-------------|
 | `--label <text>` | enroll | Device description shown to the approver |
-| `--wait` | enroll | Poll until approved, then install the keys |
+| `--wait` | enroll | Keep going until approved, then install the keys |
 | `--seed <value>` | approve | Master seed; it lives only on your devices, never on the relay |
-| `--sas <digits>` | approve | Refuse to proceed unless the code matches |
-| `--ephemeral-key <b64url>` | claim | The private key printed by `key enroll` |
+| `--sas <digits>` | approve | The six digits the new device shows (typed code only) |
+| `--no-wait` | approve | Return at once if the new device has not answered yet |
 
 :::caution
-**Comparing the code is the authentication step.** Pass `--sas` so a mismatch aborts; without it
-the CLI can only print the code and trust the operator to check. Approving without comparing
-hands the seed to whoever opened the rendezvous.
+**There is no way to approve blindly.** A typed code needs the digits; a link needs nothing
+because it is authentic by itself. A mismatch ends the pairing — start again.
 :::
 
-The code authenticates the new device's *public* key rather than protecting a secret, so there
-is nothing to brute-force offline — see [Key management & recovery](/security/key-management).
+The keys the new device receives are saved only if they derive the identity's published key. See
+[Key management & recovery](/security/key-management#pairing-a-new-device).
 
 ---
 

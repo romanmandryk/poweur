@@ -1,17 +1,20 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,51 +22,112 @@ import (
 	"github.com/poweur/cli/internal/config"
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	"github.com/poweur/cli/internal/identity"
+	idpkg "github.com/poweur/identity"
+	"rsc.io/qr"
 )
 
-// Device enrollment from the terminal (EPIC-011 E11-T3).
+// Device pairing from the terminal (EPIC-011 E11-T8, v2).
 //
-// `key enroll` runs on the machine that wants the identity: it generates an
-// ephemeral X25519 keypair, opens a rendezvous and prints a six-digit code.
-// `key approve` runs on a machine that already holds the seed: the user types
-// the rendezvous id, compares the code, and the seed is sealed to the waiting
-// device's key.
+// `key enroll` runs on the machine that wants the identity; `key approve` on
+// one that has it. The relay is not trusted: the new device commits to its
+// ephemeral key before the approver contributes a nonce, and reveals it only
+// after, so a relay cannot substitute a key it chose (see
+// packages/identity/pairing.go). Two ways to carry the code:
 //
-// The code authenticates a public key rather than protecting a secret, so
-// nothing here is brute-forceable offline — see apps/api/internal/relay/enroll.go
-// for why that removes the need for a PAKE.
+//   - the pairing link (what the QR holds): `key approve '<link>'` checks the
+//     key against the commitment inside it — nothing to compare;
+//   - the typed code: both sides then show six digits, and `key approve`
+//     delivers only once they have been confirmed (`--sas` or typed at the
+//     prompt). There is no way to approve without one or the other.
+//
+// Each side keeps its in-flight pairing in ~/.poweur/pairing, so the steps
+// also work as separate commands (scripts, CI).
 
-const enrollSASDigits = 6
+const enrollPollEvery = 2 * time.Second
 
-// normalizeRendezvousID strips transcription noise from a request code.
-// The id is case-sensitive base64url; we never fold case, only whitespace
-// and the unicode dashes mobile keyboards substitute for ASCII hyphen.
-func normalizeRendezvousID(id string) string {
-	var b strings.Builder
-	b.Grow(len(id))
-	for _, r := range id {
-		switch r {
-		case '\t', '\n', '\r', ' ', '\u00a0', '\u202f', '\u2007',
-			'\u200b', '\u200c', '\u200d', '\ufeff':
-			continue
-		case '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015',
-			'\u2212', '\ufe58', '\ufe63', '\uff0d':
-			b.WriteByte('-')
-		default:
-			b.WriteRune(r)
-		}
+// newDevicePairing is the new device's state between commands. The
+// ephemeral private key and claim token never leave this machine.
+type newDevicePairing struct {
+	Identity    string `json:"identity"`
+	Relay       string `json:"relay"`
+	Code        string `json:"code"`
+	Link        string `json:"link"`
+	Token       string `json:"claim_token"`
+	PrivateKey  string `json:"ephemeral_private_key"`
+	PublicKey   string `json:"ephemeral_public_key"`
+	CommitNonce string `json:"commit_nonce"`
+	Commitment  string `json:"commitment"`
+	ExpiresAt   string `json:"expires_at"`
+	Revealed    bool   `json:"revealed,omitempty"`
+}
+
+// approverPairing is the approving side's state: its nonce must stay the same
+// across calls, or the digits would change under the user.
+type approverPairing struct {
+	Identity      string `json:"identity"`
+	Code          string `json:"code"`
+	ApproverNonce string `json:"approver_nonce"`
+	Commitment    string `json:"commitment,omitempty"` // from a scanned link
+}
+
+func pairingDir() (string, error) {
+	path, err := config.ConfigPath()
+	if err != nil {
+		return "", err
 	}
-	return b.String()
+	return filepath.Join(filepath.Dir(path), "pairing"), nil
 }
 
-// computeEnrollSAS mirrors relay.ComputeSAS. Both ends derive it from the
-// ephemeral key so neither trusts the relay's copy.
-func computeEnrollSAS(ephemeralPublicKey string) string {
-	sum := sha256.Sum256([]byte("poweur/v1/enroll-sas\n" + ephemeralPublicKey))
-	return fmt.Sprintf("%0*d", enrollSASDigits, binary.BigEndian.Uint32(sum[:4])%1000000)
+func pairingFile(kind, identityValue, code string) (string, error) {
+	dir, err := pairingDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, kind+"-"+strings.ToLower(identityValue)+"-"+code+".json"), nil
 }
 
-func enrollHTTP(ctx context.Context, method, url string, body any, out any) (int, error) {
+func savePairing(kind, identityValue, code string, v any) error {
+	path, err := pairingFile(kind, identityValue, code)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
+}
+
+func loadPairing(kind, identityValue, code string, v any) error {
+	path, err := pairingFile(kind, identityValue, code)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, v)
+}
+
+func dropPairing(kind, identityValue, code string) {
+	if path, err := pairingFile(kind, identityValue, code); err == nil {
+		_ = os.Remove(path)
+	}
+}
+
+func randB64(n int) (string, error) {
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func enrollHTTP(ctx context.Context, method, url, token string, body any, out any) (int, error) {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -77,13 +141,16 @@ func enrollHTTP(ctx context.Context, method, url string, body any, out any) (int
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return resp.StatusCode, parseErrorResponse("enrollment request failed", resp)
+		return resp.StatusCode, parseErrorResponse("pairing request failed", resp)
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -93,7 +160,52 @@ func enrollHTTP(ctx context.Context, method, url string, body any, out any) (int
 	return resp.StatusCode, nil
 }
 
-// runKeyEnroll asks an existing device for this identity's seed.
+func enrollBase(relayURL, identityValue string) string {
+	return strings.TrimRight(relayURL, "/") + "/identities/" + url.PathEscape(identityValue) + "/enroll"
+}
+
+// pairingAppURL is where the approving person's web app lives: the identity's
+// own host for a relay on https, the relay itself in local development.
+func pairingAppURL(relayURL, identityValue string) string {
+	if strings.HasPrefix(relayURL, "https://") {
+		return "https://" + strings.ToLower(identityValue) + "/app/"
+	}
+	return strings.TrimRight(relayURL, "/") + "/app/"
+}
+
+// terminalQR draws the link with half-block characters: two rows of modules
+// per line, dark on the terminal's light.
+func terminalQR(w io.Writer, text string) {
+	code, err := qr.Encode(text, qr.L)
+	if err != nil {
+		return
+	}
+	const quiet = 2
+	size := code.Size + 2*quiet
+	dark := func(x, y int) bool {
+		x, y = x-quiet, y-quiet
+		return x >= 0 && y >= 0 && x < code.Size && y < code.Size && code.Black(x, y)
+	}
+	for y := 0; y < size; y += 2 {
+		var line strings.Builder
+		for x := 0; x < size; x++ {
+			top, bottom := dark(x, y), dark(x, y+1)
+			switch {
+			case top && bottom:
+				line.WriteString(" ")
+			case top:
+				line.WriteString("\u2584")
+			case bottom:
+				line.WriteString("\u2580")
+			default:
+				line.WriteString("\u2588")
+			}
+		}
+		fmt.Fprintln(w, line.String())
+	}
+}
+
+// runKeyEnroll opens a pairing on the machine that wants the identity.
 func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -104,7 +216,7 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	label := fs.String("label", "", "device description shown to the approver")
-	wait := fs.Bool("wait", false, "poll until the other device approves")
+	wait := fs.Bool("wait", false, "keep going until the other device approves")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--wait": true})); err != nil {
 		return 1
@@ -113,92 +225,160 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur key enroll <identity> [--relay ...] [--wait]")
 		return 1
 	}
-	identityValue := fs.Arg(0)
+	identityValue := strings.ToLower(fs.Arg(0))
 	if *relayURL == "" {
 		fmt.Fprintln(stderr, "--relay is required (this machine has no configuration yet)")
 		return 1
 	}
-	base := strings.TrimRight(*relayURL, "/") + "/identities/" + identityValue + "/enroll"
-
 	ephPub, ephPriv, err := cryptoe2e.GenerateX25519Keypair()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	ephPubB64 := base64.RawURLEncoding.EncodeToString(ephPub)
-
-	var offer struct {
-		RendezvousID string `json:"rendezvous_id"`
-		SAS          string `json:"sas"`
-		ExpiresAt    string `json:"expires_at"`
+	p := newDevicePairing{
+		Identity:   identityValue,
+		Relay:      strings.TrimRight(*relayURL, "/"),
+		PublicKey:  base64.RawURLEncoding.EncodeToString(ephPub),
+		PrivateKey: base64.RawURLEncoding.EncodeToString(ephPriv),
 	}
-	if _, err := enrollHTTP(context.Background(), http.MethodPost, base+"/offer",
-		map[string]any{"ephemeral_public_key": ephPubB64, "label": *label}, &offer); err != nil {
+	if p.CommitNonce, err = randB64(32); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	// Trust our own derivation, not the relay's.
-	sas := computeEnrollSAS(ephPubB64)
+	p.Commitment = idpkg.PairingCommitment(p.PublicKey, p.CommitNonce)
 
+	var offer struct {
+		RendezvousID string `json:"rendezvous_id"`
+		ClaimToken   string `json:"claim_token"`
+		ExpiresAt    string `json:"expires_at"`
+	}
+	if _, err := enrollHTTP(context.Background(), http.MethodPost, enrollBase(p.Relay, identityValue)+"/offer", "",
+		map[string]any{"commitment": p.Commitment, "label": *label}, &offer); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	p.Code, p.Token, p.ExpiresAt = offer.RendezvousID, offer.ClaimToken, offer.ExpiresAt
+	p.Link = idpkg.PairingLink(pairingAppURL(p.Relay, identityValue), identityValue, p.Code, p.Commitment)
+	if err := savePairing("new", identityValue, p.Code, p); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	if !*jsonOut {
-		fmt.Fprintf(stdout, "On a device that already has %s, run:\n\n"+
-			"  poweur key approve %s\n\nand confirm this code matches: %s\n\n",
-			identityValue, offer.RendezvousID, sas)
+		fmt.Fprintf(stdout, "On a device that already has %s, scan this, or enter the code %s:\n\n",
+			identityValue, idpkg.FormatShortCode(p.Code))
+		terminalQR(stdout, p.Link)
+		fmt.Fprintf(stdout, "\nFrom a terminal:  poweur key approve '%s'\n\n", p.Link)
 	}
 	if !*wait {
+		if !*jsonOut {
+			fmt.Fprintf(stdout, "Then finish here:  poweur key claim %s %s\n", identityValue, p.Code)
+		}
 		return writeOutput(stdout, *jsonOut, map[string]any{
-			"rendezvous_id":         offer.RendezvousID,
-			"sas":                   sas,
-			"expires_at":            offer.ExpiresAt,
-			"ephemeral_private_key": base64.RawURLEncoding.EncodeToString(ephPriv),
+			"identity": identityValue, "code": p.Code, "link": p.Link, "expires_at": p.ExpiresAt,
 		}, "")
 	}
-
 	deadline := time.Now().Add(10 * time.Minute)
+	shown := ""
 	for time.Now().Before(deadline) {
-		var claim struct {
-			Ready  bool   `json:"ready"`
-			Sealed string `json:"sealed"`
-		}
-		if _, err := enrollHTTP(context.Background(), http.MethodGet,
-			base+"/"+offer.RendezvousID, nil, &claim); err != nil {
+		status, _, seed, err := stepNewDevice(&p)
+		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		if claim.Ready {
-			seed, err := openSealedSeed(claim.Sealed, ephPriv)
-			if err != nil {
-				fmt.Fprintln(stderr, err)
-				return 1
-			}
-			keyPath, encKeyPath, err := identity.SaveKeysFromSeed(identityValue, seed)
-			if err != nil {
-				fmt.Fprintln(stderr, err)
-				return 1
-			}
-			cfg.Identity = identityValue
-			cfg.RelayURL = *relayURL
-			cfg.KeysDir = filepath.Dir(keyPath)
-			if err := config.Save(cfg); err != nil {
-				fmt.Fprintln(stderr, err)
-				return 1
-			}
-			return writeOutput(stdout, *jsonOut, map[string]any{
-				"identity":            identityValue,
-				"key_path":            keyPath,
-				"encryption_key_path": encKeyPath,
-				"enrolled":            true,
-			}, fmt.Sprintf("enrolled %s on this device\n", identityValue))
+		if seed != nil {
+			return adoptSeed(cfg, p, seed, stdout, stderr, *jsonOut)
 		}
-		time.Sleep(2 * time.Second)
+		if status != shown && !*jsonOut {
+			fmt.Fprintln(stdout, status)
+			shown = status
+		}
+		time.Sleep(enrollPollEvery)
 	}
 	fmt.Fprintln(stderr, "timed out waiting for approval")
 	return 1
 }
 
-// runKeyClaim completes an enrollment started earlier by `key enroll` without
-// --wait. Headless boxes and scripts need the two halves separable; the
-// ephemeral private key is the state that has to survive between them.
+// stepNewDevice advances the new device's side once: reveal when the
+// approver has answered, collect the seed when it has been delivered.
+func stepNewDevice(p *newDevicePairing) (status, sas string, seed []byte, err error) {
+	base := enrollBase(p.Relay, p.Identity) + "/" + p.Code
+	var poll struct {
+		State         string `json:"state"`
+		ApproverNonce string `json:"approver_nonce"`
+		Mode          string `json:"mode"`
+		Sealed        string `json:"sealed"`
+	}
+	if _, err := enrollHTTP(context.Background(), http.MethodGet, base, p.Token, nil, &poll); err != nil {
+		return "", "", nil, err
+	}
+	switch poll.State {
+	case "offered":
+		return "Waiting for the other device…", "", nil, nil
+	case "delivered":
+		priv, err := base64.RawURLEncoding.DecodeString(p.PrivateKey)
+		if err != nil {
+			return "", "", nil, err
+		}
+		seed, err := openSealedSeed(poll.Sealed, priv)
+		return "", "", seed, err
+	}
+	// The approver has contributed its nonce: only now reveal the key.
+	if !p.Revealed {
+		if _, err := enrollHTTP(context.Background(), http.MethodPost, base+"/reveal", p.Token,
+			map[string]string{"ephemeral_public_key": p.PublicKey, "commit_nonce": p.CommitNonce}, nil); err != nil {
+			return "", "", nil, err
+		}
+		p.Revealed = true
+		_ = savePairing("new", p.Identity, p.Code, p)
+	}
+	if poll.Mode == "scan" {
+		return "Approve on the other device.", "", nil, nil
+	}
+	sas = idpkg.PairingSAS(p.Commitment, p.PublicKey, p.CommitNonce, poll.ApproverNonce)
+	return fmt.Sprintf("Check the other device shows %s %s, then approve there.", sas[:3], sas[3:]), sas, nil, nil
+}
+
+// adoptSeed saves the keys a delivered seed derives — only if they are the
+// identity's published keys, so a seed that is not this identity's is never
+// adopted.
+func adoptSeed(cfg config.Config, p newDevicePairing, seed []byte, stdout, stderr io.Writer, jsonOut bool) int {
+	pub, _, err := identity.KeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	var published struct {
+		PublicKey string `json:"public_key"`
+	}
+	if _, err := enrollHTTP(context.Background(), http.MethodGet,
+		strings.TrimRight(p.Relay, "/")+"/identities/"+url.PathEscape(p.Identity), "", nil, &published); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if idpkg.NormalizePublicKeyKey(published.PublicKey) != idpkg.NormalizePublicKeyKey(identity.PublicKeyString(pub)) {
+		fmt.Fprintf(stderr, "the keys received are not %s's published keys — not saved\n", p.Identity)
+		return 1
+	}
+	keyPath, encKeyPath, err := identity.SaveKeysFromSeed(p.Identity, seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	cfg.Identity = p.Identity
+	cfg.RelayURL = p.Relay
+	cfg.KeysDir = filepath.Dir(keyPath)
+	if err := config.Save(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	dropPairing("new", p.Identity, p.Code)
+	return writeOutput(stdout, jsonOut, map[string]any{
+		"identity": p.Identity, "key_path": keyPath, "encryption_key_path": encKeyPath, "enrolled": true,
+	}, fmt.Sprintf("enrolled %s on this device\n", p.Identity))
+}
+
+// runKeyClaim moves a pairing started by `key enroll` (without --wait) one
+// step: reveal once the other device has answered, then collect the keys.
 func runKeyClaim(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
@@ -207,64 +387,38 @@ func runKeyClaim(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("key claim", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
-	ephemeral := fs.String("ephemeral-key", "", "ephemeral private key from `key enroll`")
 	jsonOut := fs.Bool("json", false, "output json")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url>")
+		fmt.Fprintln(stderr, "usage: poweur key claim <identity> <code>")
 		return 1
 	}
-	identityValue, rendezvousID := fs.Arg(0), normalizeRendezvousID(fs.Arg(1))
-	if *ephemeral == "" {
-		fmt.Fprintln(stderr, "--ephemeral-key is required (printed by `poweur key enroll`)")
+	identityValue := strings.ToLower(fs.Arg(0))
+	code, err := idpkg.NormalizeShortCode(fs.Arg(1))
+	if err != nil {
+		fmt.Fprintln(stderr, "that is not a pairing code")
 		return 1
 	}
-	ephPriv, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(*ephemeral))
-	if err != nil || len(ephPriv) != 32 {
-		fmt.Fprintln(stderr, "--ephemeral-key must be a 32-byte base64url value")
+	var p newDevicePairing
+	if err := loadPairing("new", identityValue, code, &p); err != nil {
+		fmt.Fprintf(stderr, "no pairing %s for %s on this machine — start one with `poweur key enroll`\n", code, identityValue)
 		return 1
 	}
-	if *relayURL == "" {
-		fmt.Fprintln(stderr, "--relay is required")
-		return 1
-	}
-	var claim struct {
-		Ready  bool   `json:"ready"`
-		Sealed string `json:"sealed"`
-	}
-	url := strings.TrimRight(*relayURL, "/") + "/identities/" + identityValue + "/enroll/" + rendezvousID
-	if _, err := enrollHTTP(context.Background(), http.MethodGet, url, nil, &claim); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if !claim.Ready {
-		fmt.Fprintln(stderr, "not approved yet — run `poweur key approve` on a device that has this identity")
-		return 1
-	}
-	seed, err := openSealedSeed(claim.Sealed, ephPriv)
+	status, sas, seed, err := stepNewDevice(&p)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	keyPath, encKeyPath, err := identity.SaveKeysFromSeed(identityValue, seed)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	if seed != nil {
+		return adoptSeed(cfg, p, seed, stdout, stderr, *jsonOut)
 	}
-	cfg.Identity = identityValue
-	cfg.RelayURL = *relayURL
-	cfg.KeysDir = filepath.Dir(keyPath)
-	if err := config.Save(cfg); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	out := map[string]any{"identity": identityValue, "code": code, "enrolled": false, "status": status}
+	if sas != "" {
+		out["sas"] = sas
 	}
-	return writeOutput(stdout, *jsonOut, map[string]any{
-		"identity": identityValue, "key_path": keyPath,
-		"encryption_key_path": encKeyPath, "enrolled": true,
-	}, fmt.Sprintf("enrolled %s on this device\n", identityValue))
+	return writeOutput(stdout, *jsonOut, out, status+"\n")
 }
 
 func openSealedSeed(sealed string, ephPriv []byte) ([]byte, error) {
@@ -290,6 +444,8 @@ func openSealedSeed(sealed string, ephPriv []byte) ([]byte, error) {
 	return seed, nil
 }
 
+var errPairingMismatch = errors.New("pairing mismatch")
+
 // runKeyApprove approves a waiting device and seals the seed to it.
 func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
@@ -302,17 +458,17 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity to enroll the device into")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	seedFlag := fs.String("seed", "", "master seed (base64url or mnemonic)")
-	expectSAS := fs.String("sas", "", "code shown on the new device; refuses to proceed if it differs")
+	expectSAS := fs.String("sas", "", "the six digits the new device shows (typed code only)")
+	noWait := fs.Bool("no-wait", false, "return at once if the new device has not answered yet")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--no-wait": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "usage: poweur key approve <rendezvous-id> [--sas 123456]")
+		fmt.Fprintln(stderr, "usage: poweur key approve <pairing-link | code> [--sas 123456]")
 		return 1
 	}
-	rendezvousID := normalizeRendezvousID(fs.Arg(0))
-	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
+	identityValue := strings.ToLower(resolveIdentity(*useIdentity, cfg.Identity))
 	if identityValue == "" || *relayURL == "" {
 		fmt.Fprintln(stderr, "identity and relay url required")
 		return 1
@@ -332,48 +488,117 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	base := strings.TrimRight(*relayURL, "/") + "/identities/" + identityValue + "/enroll/" + rendezvousID
+	// A link (scanned or pasted) carries the commitment; a code does not.
+	st := approverPairing{Identity: identityValue}
+	mode := "compare"
+	if link, perr := idpkg.ParsePairingLink(fs.Arg(0)); perr == nil {
+		if link.Identity != "" && link.Identity != identityValue {
+			fmt.Fprintf(stderr, "this pairing link is for %s, not %s — not approved\n", link.Identity, identityValue)
+			return 1
+		}
+		st.Code, st.Commitment, mode = link.Code, link.Commitment, "scan"
+	} else if st.Code, err = idpkg.NormalizeShortCode(fs.Arg(0)); err != nil {
+		fmt.Fprintln(stderr, "that is neither a pairing link nor a code (8 characters, like K7QM-4XP2)")
+		return 1
+	}
+	var saved approverPairing
+	if loadPairing("approve", identityValue, st.Code, &saved) == nil && saved.ApproverNonce != "" {
+		st.ApproverNonce = saved.ApproverNonce
+		if st.Commitment == "" {
+			st.Commitment = saved.Commitment
+		}
+	} else if st.ApproverNonce, err = randB64(32); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := savePairing("approve", identityValue, st.Code, st); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	base := enrollBase(*relayURL, identityValue) + "/" + st.Code
 	sign := func(action string) map[string]any {
 		issuedAt := time.Now().UTC().Format(time.RFC3339)
 		nonce := newAdminNonce()
-		canonical := strings.Join([]string{
-			action, strings.ToLower(identityValue), rendezvousID, issuedAt, nonce}, "\n")
+		canonical := strings.Join([]string{action, identityValue, st.Code, issuedAt, nonce}, "\n")
 		return map[string]any{
 			"issued_at": issuedAt, "nonce": nonce,
 			"identity_signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(canonical))),
 		}
 	}
-
-	var pending struct {
-		EphemeralPublicKey string `json:"ephemeral_public_key"`
+	type pendingPairing struct {
+		State              string `json:"state"`
+		Commitment         string `json:"commitment"`
 		Label              string `json:"label"`
+		EphemeralPublicKey string `json:"ephemeral_public_key"`
+		CommitNonce        string `json:"commit_nonce"`
 	}
-	if _, err := enrollHTTP(context.Background(), http.MethodPost, base+"/fetch", sign("enroll-fetch"), &pending); err != nil {
+	fetch := func() (pendingPairing, error) {
+		body := sign("enroll-fetch")
+		body["approver_nonce"], body["mode"] = st.ApproverNonce, mode
+		var out pendingPairing
+		_, err := enrollHTTP(context.Background(), http.MethodPost, base+"/fetch", "", body, &out)
+		return out, err
+	}
+	pending, err := fetch()
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	sas := computeEnrollSAS(pending.EphemeralPublicKey)
-
-	// Comparing the code IS the authentication step. Without --sas we can only
-	// print it and rely on the operator; with it, refuse a mismatch outright.
-	if *expectSAS != "" && *expectSAS != sas {
-		fmt.Fprintf(stderr, "code mismatch: this rendezvous shows %s, you expected %s\n"+
-			"Do not approve — another device may be trying to enrol.\n", sas, *expectSAS)
+	// A scanned commitment is the one the new device showed; the relay's copy
+	// must be the same, or this is not that device.
+	if st.Commitment != "" && pending.Commitment != st.Commitment {
+		fmt.Fprintln(stderr, "this code belongs to a different device than the one you scanned — not approved")
 		return 1
 	}
-	if *expectSAS == "" && !*jsonOut {
-		fmt.Fprintf(stderr, "confirm this matches the new device's screen: %s\n", sas)
+	st.Commitment = pending.Commitment
+	_ = savePairing("approve", identityValue, st.Code, st)
+
+	deadline := time.Now().Add(10 * time.Minute)
+	for pending.State == "nonce" {
+		if *noWait || time.Now().After(deadline) {
+			return writeOutput(stdout, *jsonOut, map[string]any{
+				"identity": identityValue, "code": st.Code, "approved": false, "status": "waiting for the new device",
+			}, "Waiting for the new device — run this again once it shows its digits.\n")
+		}
+		time.Sleep(enrollPollEvery)
+		if pending, err = fetch(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+	}
+	if pending.State != "revealed" {
+		fmt.Fprintln(stderr, "this request is no longer waiting for approval")
+		return 1
+	}
+	// The relay's word is not taken for any of this.
+	if err := idpkg.VerifyPairingReveal(st.Commitment, pending.EphemeralPublicKey, pending.CommitNonce); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	sas := idpkg.PairingSAS(st.Commitment, pending.EphemeralPublicKey, pending.CommitNonce, st.ApproverNonce)
+	if mode == "compare" {
+		if err := confirmSAS(sas, *expectSAS, pending.Label, stdout, stderr); err != nil {
+			if errors.Is(err, errPairingMismatch) {
+				dropPairing("approve", identityValue, st.Code)
+			}
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 
-	sealed, err := cryptoe2e.Encrypt(mustDecodeKey(pending.EphemeralPublicKey), seed)
+	ephemeral, err := base64.RawURLEncoding.DecodeString(pending.EphemeralPublicKey)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	sealed, err := cryptoe2e.Encrypt(ephemeral, seed)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	sealedJSON, err := json.Marshal(map[string]string{
-		"ciphertext":         sealed.Ciphertext,
-		"ephemeralPublicKey": sealed.EphemeralPublicKey,
-		"nonce":              sealed.Nonce,
+		"ciphertext": sealed.Ciphertext, "ephemeralPublicKey": sealed.EphemeralPublicKey, "nonce": sealed.Nonce,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -381,19 +606,48 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 	}
 	body := sign("enroll-deliver")
 	body["sealed"] = string(sealedJSON)
-	if _, err := enrollHTTP(context.Background(), http.MethodPost, base+"/deliver", body, nil); err != nil {
+	if _, err := enrollHTTP(context.Background(), http.MethodPost, base+"/deliver", "", body, nil); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	dropPairing("approve", identityValue, st.Code)
 	return writeOutput(stdout, *jsonOut, map[string]any{
-		"identity": identityValue, "rendezvous_id": rendezvousID, "sas": sas, "approved": true,
-	}, fmt.Sprintf("approved device %s for %s\n", rendezvousID, identityValue))
+		"identity": identityValue, "code": st.Code, "mode": mode, "approved": true,
+	}, fmt.Sprintf("approved the new device for %s\n", identityValue))
 }
 
-func mustDecodeKey(value string) []byte {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
-	if err != nil {
-		return nil
+// confirmSAS is the typed path's authentication step: the digits given with
+// --sas, or typed at the prompt, must be the ones this side computed. With
+// neither, nothing is delivered.
+func confirmSAS(sas, expect, label string, stdout, stderr io.Writer) error {
+	given := strings.Join(strings.Fields(expect), "")
+	if given == "" {
+		if !stdinIsTerminal() {
+			return fmt.Errorf("the new device shows six digits; run again with --sas <digits> to approve " +
+				"(this side computed them independently, and delivers only if they match)")
+		}
+		who := "the new device"
+		if label != "" {
+			who = label
+		}
+		fmt.Fprintf(stdout, "Type the six digits %s shows: ", who)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		given = strings.Join(strings.Fields(line), "")
 	}
-	return decoded
+	if given != sas {
+		return fmt.Errorf("%w: the new device's digits do not match this one's (%s %s) — not approved. "+
+			"Another device may be trying to pair; start again", errPairingMismatch, sas[:3], sas[3:])
+	}
+	return nil
+}
+
+// stdinIsTerminal reports whether someone can answer a prompt. /dev/null is
+// a character device too, so it is ruled out by identity.
+var stdinIsTerminal = func() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	return err != nil || !os.SameFile(info, null)
 }

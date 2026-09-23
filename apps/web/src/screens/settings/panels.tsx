@@ -5,9 +5,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Globe, Hexagon, Laptop, Monitor, Puzzle, ScrollText, Smartphone, Tablet, Usb, type LucideIcon } from "lucide-react";
-import { fingerprintOrKey, isSessionValid, normalizeRendezvousId } from "@poweur/client";
+import { fingerprintOrKey, isSessionValid } from "@poweur/client";
 import { loadPolicy, loadProfile, savePolicy } from "../../actions/account";
-import { enrollApiForJoin } from "../../actions/identity";
 import { activeClient, errorMessage, resolveForActive } from "../../actions/relay";
 import { refreshRelaySession, revokeRelaySession } from "../../actions/settings";
 import { askConfirm } from "../../components/Dialogs";
@@ -26,8 +25,8 @@ import {
 } from "../../lib/keystore.js";
 import { readConnectedApps, readConsentLog, revokeConnectedApp } from "../../lib/signin.js";
 import { getConfig, getUnlockedKeys, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor, saveConfig } from "../../lib/storage.js";
-import { fromBase64url } from "../../lib/vault.js";
 import { useData } from "../../state/data";
+import { useRoute } from "../../state/route";
 import { refreshSession, useSession } from "../../state/session";
 import { closePanel, openPanel, setLoading, toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
@@ -404,7 +403,7 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         className="mt-4"
         onClick={() => {
           closePanel();
-          openApproveDevicePanel();
+          useRoute.getState().push("pair");
         }}
       >
         Add a device
@@ -456,106 +455,6 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         Revoking ends that device's sessions, DAV tokens and app passwords. A device that still holds your identity key can enrol again —
         that case needs a key rotation.
       </p>
-    </div>
-  );
-}
-
-/**
- * The approving half of the enrollment ceremony (E11-T3). Comparing the six
- * digits *is* the authentication step, so the confirmation is not a formality.
- */
-export function openApproveDevicePanel() {
-  openPanel("Add a device", () => <ApproveDevice identity={activeIdentity()} />);
-}
-
-function ApproveDevice({ identity }: { identity: string }) {
-  const code = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<{ enroll: any; request: any } | null>(null);
-
-  const find = async () => {
-    const rendezvousId = normalizeRendezvousId(code.current?.value ?? "");
-    if (!rendezvousId) {
-      toast("Enter the request code from the new device", "warning");
-      return;
-    }
-    const client = requireClient();
-    if (!client) return;
-    const keys: any = getUnlockedKeys();
-    if (!keys?.seed) {
-      toast("Only seed-based identities can hand their keys to a new device — see Recovery kit", "warning", 8000);
-      return;
-    }
-    setLoading(true, "Finding the new device…");
-    try {
-      const { enroll } = await enrollApiForJoin(identity);
-      const request = await enroll.pending(client.signer, identity, rendezvousId);
-      setLoading(false);
-      setPending({ enroll, request });
-    } catch (error) {
-      setLoading(false);
-      setPending(null);
-      toast(`No pending device for that request code: ${errorMessage(error)}`, "error", 8000);
-    }
-  };
-
-  const approve = async () => {
-    const client = requireClient();
-    const keys: any = getUnlockedKeys();
-    if (!client || !pending || !keys?.seed) return;
-    setLoading(true, "Sending keys…");
-    try {
-      await pending.enroll.approve(client.signer, identity, pending.request, fromBase64url(keys.seed));
-      setLoading(false);
-      closePanel();
-      toast("The new device can now finish setting up", "success", 6000);
-    } catch (error) {
-      setLoading(false);
-      toast(errorMessage(error), "error", 8000);
-    }
-  };
-
-  return (
-    <div>
-      <ol className="steps mb-3.5 list-decimal pl-5 text-[13px] text-muted">
-        <li className="mb-1.5">
-          Open this app on the new device and choose <strong>Add this device</strong>.
-        </li>
-        <li className="mb-1.5">
-          It shows a <strong>request code</strong> and a six-digit number.
-        </li>
-        <li className="mb-1.5">Enter the request code below, then check the six digits match before approving.</li>
-      </ol>
-      <FormGroup>
-        <Label htmlFor="enroll-rendezvous">Request code from the new device</Label>
-        <Input
-          ref={code}
-          id="enroll-rendezvous"
-          type="text"
-          className="font-mono"
-          autoCapitalize="none"
-          autoCorrect="off"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="paste it here"
-        />
-      </FormGroup>
-      <Button id="btn-enroll-lookup" onClick={() => void find()}>
-        Continue
-      </Button>
-      <div id="enroll-confirm">
-        {pending && (
-          <>
-            <Notice className="mt-3.5">
-              <p>Confirm this matches the code on the new device:</p>
-              <p className="sas-code mt-2.5 mb-1 text-center font-mono text-[34px] font-bold tracking-[.18em]">{pending.request.sas}</p>
-              {pending.request.label && <p className="text-[13px] text-muted">{pending.request.label}</p>}
-            </Notice>
-            <Button id="btn-enroll-approve" onClick={() => void approve()}>
-              Codes match — send my keys
-            </Button>
-          </>
-        )}
-      </div>
     </div>
   );
 }
