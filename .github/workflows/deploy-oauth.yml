@@ -84,6 +84,8 @@ jobs:
 
   deploy:
     needs: build
+    # success() is false when test was skipped, which would skip this job too.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

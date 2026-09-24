@@ -74,6 +74,8 @@ test('deploys skip CI unless asked, so a master push only builds and ships', () 
   for (const yml of [relay, bridge]) {
     assert.match(yml, /inputs\.run_tests \|\| vars\.RUN_CI == 'true'/);
     assert.match(yml, /needs\.test\.result == 'skipped'/);
+    // A skipped test must not skip rollout. The default success() check does.
+    assert.match(yml, /needs\.build\.result == 'success'/);
   }
   assert.match(ci, /workflow_dispatch:/);
   assert.doesNotMatch(ci, /^ {2}push:/m);

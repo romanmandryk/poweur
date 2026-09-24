@@ -53,7 +53,7 @@ Caddy trusts Cloudflare's published IP ranges and rewrites X-Forwarded-For to th
 
 Push to `master` (or manual dispatch) runs Deploy: GHCR digest, `git reset --hard` on `/opt/apps/poweur`, `docker compose up` for `infra` then `poweur`. `GET /health` and `docker inspect poweur-relay` identify the running image. There is no smoke step, `.releases` pointer, or rollback. Leftover `.releases/` or `.smoke/` on the VM can be deleted.
 
-**Actions minutes.** Automatic runs are build and deploy only. CI (Go, `@poweur/client`, web, Playwright, observability) does not run on push or pull request. The OAuth bridge deploy skips its tests the same way. **External relay health** is not on a cron.
+**Actions minutes.** Automatic runs are build and deploy only. CI (Go, `@poweur/client`, web, Playwright, observability) does not run on push or pull request. The OAuth bridge deploy skips its tests the same way. Both deploy jobs run when the image build succeeded, including when the test job was skipped. **External relay health** is not on a cron.
 
 | Want | Do |
 |---|---|
