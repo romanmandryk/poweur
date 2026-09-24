@@ -395,3 +395,63 @@ func TestPolicyQueuesBoundedShareOffersByGrant(t *testing.T) {
 	})
 	mustStatus(t, resp, http.StatusForbidden, "non-expiring share offer")
 }
+
+func TestShareAcceptReachesClosedInboxWhenGrantMatches(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
+	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json",
+		`{"version":1,"mode":"contacts_and_requests"}`)
+	putShareGrant(t, ts, alice, aliceTok, idpkg.ShareGrant{
+		ShareID: "shr_direct", SourceShareID: "shr_public", Path: "shared/inbox",
+		Audience: []idpkg.ShareAudience{{ID: bob.name}}, Permissions: []string{idpkg.PermRead, idpkg.PermWrite},
+	})
+
+	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
+			"share_id": "shr_direct", "source_share_id": "shr_public",
+		},
+	})
+	out := mustStatus(t, resp, http.StatusAccepted, "granted accept")
+	if out["status"] == "request_queued" {
+		t.Fatal("acceptance must reach the inbox, not the requests queue")
+	}
+	inbox := challengeSigned(t, ts, alice, "/messages/"+alice.name)
+	messages, _ := inbox["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("inbox = %v", inbox)
+	}
+	if got := server.linkStats.Get(alice.name, "shr_public").ShareAccepted; got != 1 {
+		t.Fatalf("share accepted counter = %d want 1", got)
+	}
+	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
+			"share_id": "shr_direct", "source_share_id": "shr_public",
+		},
+	})
+	mustStatus(t, resp, http.StatusAccepted, "duplicate granted accept")
+	if got := server.linkStats.Get(alice.name, "shr_public").ShareAccepted; got != 1 {
+		t.Fatalf("duplicate changed accepted counter to %d", got)
+	}
+	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
+			"share_id": "shr_direct", "source_share_id": "shr_forged_source",
+		},
+	})
+	mustStatus(t, resp, http.StatusAccepted, "accept with mismatched accounting source")
+	if got := server.linkStats.Get(alice.name, "shr_forged_source").ShareAccepted; got != 0 {
+		t.Fatalf("mismatched source changed accepted counter to %d", got)
+	}
+
+	resp, _ = postEnvelope(t, ts, carol, alice.name, envelopeOpts{
+		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{"share_id": "shr_direct"},
+	})
+	mustStatus(t, resp, http.StatusForbidden, "accept from someone outside the grant")
+
+	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{"share_id": "shr_other"},
+	})
+	mustStatus(t, resp, http.StatusForbidden, "accept for a grant the owner did not sign")
+}

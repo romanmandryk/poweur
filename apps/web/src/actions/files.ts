@@ -273,8 +273,10 @@ export async function addFileRequest(path: string, options: {
   expiry?: string;
   password?: string;
   maxUploads?: number;
+  maxBytes?: number;
   maxObjectBytes?: number;
   allowedTypes?: string[];
+  notify?: boolean;
 }): Promise<string | null> {
   const client = activeClient();
   if (!client) {
@@ -292,6 +294,36 @@ export async function addFileRequest(path: string, options: {
     setFiles({ grants: [...useData.getState().files.grants, grant], grantsLoaded: true });
     trackAction("files", { kind: "file_request_create" });
     toast("Upload-only request created", "success");
+    return `https://${client.identity}/s/${token}`;
+  } catch (error) {
+    toast(errorMessage(error), "error");
+    return null;
+  } finally {
+    setLoading(false);
+  }
+}
+
+export async function addPublicLink(path: string, options: {
+  expiry?: string;
+  password?: string;
+  maxDownloads?: number;
+}): Promise<string | null> {
+  const client = activeClient();
+  if (!client) {
+    toast("Unlock your identity first", "warning");
+    return null;
+  }
+  setLoading(true, "Signing the public link…");
+  try {
+    const shares = await client.shares();
+    const { expiry, ...linkOptions } = options;
+    const { grant, token } = await shares.addLink(client.signer, path, {
+      ...linkOptions,
+      ...(expiry ? { expiresAt: `${expiry}T23:59:59Z` } : {}),
+    });
+    setFiles({ grants: [...useData.getState().files.grants, grant], grantsLoaded: true });
+    trackAction("files", { kind: "public_link_create" });
+    toast("Read-only public link created", "success");
     return `https://${client.identity}/s/${token}`;
   } catch (error) {
     toast(errorMessage(error), "error");

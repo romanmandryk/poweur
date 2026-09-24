@@ -331,7 +331,7 @@ export class PoweurClient {
   async offerShare(
     path: string,
     recipients: string[],
-    options: { permissions?: "read" | "rw"; expiresAt?: string } = {},
+    options: { permissions?: "read" | "rw"; expiresAt?: string; sourceShareId?: string } = {},
   ): Promise<{
     grant: ShareGrant;
     offer: ShareOffer;
@@ -346,6 +346,7 @@ export class PoweurClient {
       with: targets,
       ...(options.permissions ? { permissions: options.permissions } : {}),
       ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      ...(options.sourceShareId ? { sourceShareId: options.sourceShareId } : {}),
     });
     const offer = buildShareOffer(grant);
     const plaintext = JSON.stringify(offer);
@@ -404,7 +405,11 @@ export class PoweurClient {
     try {
       await this.send(offer.grant.owner, JSON.stringify(acceptance), {
         type: MSG_TYPE_SHARE_ACCEPT,
-        metadata: { share_id: offer.grant.share_id },
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        metadata: {
+          share_id: offer.grant.share_id,
+          ...(offer.grant.source_share_id ? { source_share_id: offer.grant.source_share_id } : {}),
+        },
       });
       return { mount, acceptance, notified: true };
     } catch {
@@ -449,6 +454,7 @@ export class PoweurClient {
     const offered = await this.offerShare(source.path, [claim.claimant], {
       permissions: options.permissions ?? "rw",
       ...(source.expires_at ? { expiresAt: source.expires_at } : {}),
+      sourceShareId: source.share_id,
     });
     let linkRevoked = false;
     if (options.consumeLink) linkRevoked = await shares.revoke(source.share_id);

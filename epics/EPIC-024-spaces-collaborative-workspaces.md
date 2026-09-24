@@ -160,6 +160,8 @@ durable activity.
       upload files) rather than generic errors.
 - [ ] First-run templates: project room, family share and client workspace. Templates create the
       same open manifest and grants; they are not proprietary server modes.
+- [ ] A fourth, lightweight template once EPIC-025-T7 and EPIC-029 land: **game party / hangout**
+      — a Space whose Apps slot pins a game and whose members share a standing `space`-bound room.
 - [ ] Product analytics limited to lifecycle counts and latency/error outcomes; no content,
       filenames or social graph export.
 
@@ -187,5 +189,6 @@ client retains access to the constituent share and thread; export/import reconst
 - Replacing signed grants, group identities or message authorization.
 - CRDT/document merging and cursor transport — EPIC-025.
 - Voice/video media infrastructure or game matchmaking.
-- Subscription plans and seat billing — EPIC-026.
+- Subscription plans and seat billing — EPIC-026. (Spaces pooled storage is an EPIC-026
+  allocation; the Space itself never checks a plan.)
 

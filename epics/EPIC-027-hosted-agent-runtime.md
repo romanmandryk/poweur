@@ -4,7 +4,8 @@
 - **Priority:** P2
 - **Depends on:** EPIC-010 (agent identities, SDK, rules and local runner), EPIC-020 (`append`,
   versioned storage), EPIC-026 (entitlements and metering)
-- **Interacts with:** INT-003, INT-005, EPIC-024 (agents in Spaces), EPIC-013 (observability)
+- **Interacts with:** INT-003, INT-005, EPIC-024 (agents in Spaces), EPIC-013 (observability),
+  EPIC-025-T7 / EPIC-029 (neutral authorities for multiplayer apps and games)
 - **Unlocks:** paid scheduled automations, always-on agents and team-controlled execution
 
 ## Progress
@@ -17,6 +18,7 @@
 | E27-T4 Audit, metering & billing | open | per-run record, compute/network/storage usage |
 | E27-T5 Packages, publishers & customer runners | open | signed packages first; payments deferred |
 | E27-T6 Operations, abuse & portability | open | egress policy, incident isolation, export/self-host |
+| E27-T7 Room-bound app authorities | open | neutral game host / validator attached to an E25-T7 room |
 
 ## Goal
 
@@ -68,6 +70,8 @@ workflow cannot exceed limits or observe another tenant's data.
 - [ ] Human approval action that pauses durably, sends a signed request and binds approval to the
       exact proposed action/hash, expiry and approver.
 - [ ] Revoke workflow, device, grant or secret and stop subsequent queued/retried actions.
+- [ ] Bring-your-own model keys: LLM API keys are ordinary sealed secrets; the runtime does not
+      resell inference, so there is no model margin to defend and no lock-in to one provider.
 - [ ] UI shows requested scopes, egress and secrets before enablement and on every material update.
 
 **Acceptance:** replacing a workflow with one requesting broader scope requires new approval;
@@ -80,6 +84,8 @@ revocation stops its next action; logs and support tooling never display secret 
 - [ ] Encrypt user-visible logs while retaining minimal operator metrics for abuse/capacity.
 - [ ] Idempotent meters for CPU duration, memory tier, network egress and retained execution data;
       integrate through EPIC-026 entitlements rather than checking plan names.
+- [ ] A small free allowance (order of an hour a month) so personal automations work on the free
+      tier; exhausting it pauses the workflow and messages its operator rather than failing silently.
 - [ ] Budget and rate controls per identity/organization/workflow; hard budget cannot strand an
       already authorized destructive action half-complete without a surfaced recovery state.
 - [ ] Cost/usage views and alerts; export in an open format consumable by a self-hosted runner.
@@ -114,6 +120,21 @@ customer runner and rolls back without changing the workflow format or identity.
 
 **Acceptance:** an abuse drill disables one package across hosted runners without stopping other
 workloads or confiscating publisher identities; affected owners can export and continue locally.
+
+### E27-T7 — Room-bound app authorities
+
+Most multiplayer apps can make the host player authoritative (EPIC-029 game kit). Some — ranked
+games, auctions, anything where no participant should be trusted — need a neutral party.
+
+- [ ] Attach a signed package to an E25-T7 room as its authority: it receives room events,
+      validates moves, writes authoritative state to the room's durable document and is
+      identified as `operated_by` the app publisher (E10-T1).
+- [ ] Lifecycle bound to the room: start on first join, idle-stop, resume from durable state.
+- [ ] Metered like any other run (T4); the room owner or the app publisher pays, declared in the
+      app manifest.
+
+**Acceptance:** an EPIC-029 demo game runs with a hosted authority; a client sending an illegal
+move is rejected; killing the authority mid-game resumes from durable state.
 
 ## Non-goals
 

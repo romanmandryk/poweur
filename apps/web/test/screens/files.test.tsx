@@ -88,6 +88,17 @@ function relayTree() {
       grants.push(grant);
       return { grant, token: "aaaaaaaaaaaaaaaaaaaaaaaaaa" };
     }),
+    addLink: vi.fn(async (_signer: unknown, path: string, options: any) => {
+      const grant = {
+        share_id: `s${grants.length + 1}`,
+        path,
+        audience: [{ link: "bbbbbbbbbbbbbbbbbbbbbbbbbb" }],
+        permissions: ["read"],
+        link: { max_downloads: options.maxDownloads },
+      };
+      grants.push(grant);
+      return { grant, token: "bbbbbbbbbbbbbbbbbbbbbbbbbb" };
+    }),
     revoke: vi.fn(async (id: string) => {
       grants.splice(grants.findIndex((grant) => grant.share_id === id), 1);
       return true;
@@ -249,14 +260,35 @@ describe("Files destination (E21-T9)", () => {
     fireEvent.click(Array.from($$("button")).find((button) => button.textContent === "Request files")!);
     const max = $<HTMLInputElement>("#request-max-uploads")!;
     fireEvent.change(max, { target: { value: "2" } });
+    fireEvent.change($<HTMLInputElement>("#request-max-bytes")!, { target: { value: "5" } });
+    expect($<HTMLInputElement>("#request-notify")!.checked).toBe(true);
     fireEvent.click($("#btn-share-go")!);
     await waitFor(() => expect(shares.addFileRequest).toHaveBeenCalledWith(
       expect.anything(),
       "shared/project-x",
-      expect.objectContaining({ maxUploads: 2 }),
+      expect.objectContaining({ maxUploads: 2, maxBytes: 5 * 1024 * 1024, notify: true }),
     ));
-    await waitFor(() => expect($<HTMLInputElement>("#file-request-url")?.value).toBe(
+    await waitFor(() => expect($<HTMLInputElement>("#capability-url")?.value).toBe(
       "https://alice.poweur.net/s/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ));
+  });
+
+  it("creates a read-only public link and shows its URL", async () => {
+    const { shares } = relayTree();
+    render(<App />);
+    await openFolder("shared");
+    fireEvent.click($('[data-share="shared/project-x"]')!);
+    await waitFor(() => expect($("#btn-share-go")).toBeTruthy());
+    fireEvent.click(Array.from($$("button")).find((button) => button.textContent === "Public link")!);
+    fireEvent.change($<HTMLInputElement>("#link-max-downloads")!, { target: { value: "3" } });
+    fireEvent.click($("#btn-share-go")!);
+    await waitFor(() => expect(shares.addLink).toHaveBeenCalledWith(
+      expect.anything(),
+      "shared/project-x",
+      expect.objectContaining({ maxDownloads: 3 }),
+    ));
+    await waitFor(() => expect($<HTMLInputElement>("#capability-url")?.value).toBe(
+      "https://alice.poweur.net/s/bbbbbbbbbbbbbbbbbbbbbbbbbb",
     ));
   });
 

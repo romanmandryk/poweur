@@ -187,6 +187,8 @@ export interface ShareLink {
 
 export interface ShareGrant {
   share_id: string;
+  /** Owner-signed provenance for a direct grant upgraded from a public link. */
+  source_share_id?: string;
   owner: string;
   path: string;
   audience: ShareAudience[];

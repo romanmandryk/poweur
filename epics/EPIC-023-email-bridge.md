@@ -12,6 +12,7 @@
   pattern this service copies: separate origin, public-protocol-only coupling)
 - **Unlocks:** `john@poweur.net` for every hosted ID that opts in; email ↔ Poweur conversation
   upgrades; email-driven automations; masked aliases
+- **Plans note (EPIC-026):** receiving is free; outbound volume, masked aliases and custom-domain mail are the paid lines. Email is also a recipient channel for E05-T7 Send and EPIC-030 buyers.
 
 ## Progress
 

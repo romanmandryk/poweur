@@ -17,6 +17,9 @@
 | E28-T4 SLO/SLA, support access & audit | open | consented access, evidence, incident communication |
 | E28-T5 Residency, compliance & sovereign dependencies | open | data map, regions, bridge/provider limitations |
 | E28-T6 Customer lifecycle & exit | open | trial, production, renewal, suspension, export, teardown |
+| E28-T7 Secondary inbox for independent relays | open | MX-backup analogue: spool for an ID whose home relay is down |
+| E28-T8 Backup target & health monitor for self-hosters | open | relay-blind chunk backup; federation probes; alerts as messages |
+| E28-T9 Public relay directory & conformance badge | open | free, opt-in; grows federation rather than competing with it |
 
 ## Goal
 
@@ -114,6 +117,36 @@ supported regional profile and receive evidence matching what the system actuall
 **Acceptance:** an exit drill moves a dedicated customer to a customer-operated deployment while
 preserving IDs and Space/share references; the former environment is verifiably retired according
 to retention policy.
+
+### E28-T7 — Secondary inbox for independent relays
+
+Self-hosters' real pain is availability. A small, sellable, protocol-level service (and free to
+run yourself):
+
+- [ ] Identity document may list a fallback relay; senders retry there after the home relay fails.
+- [ ] The secondary stores ciphertext only and forwards to the home relay on recovery over an
+      authenticated relay-to-relay request; duplicate suppression by message ID.
+- [ ] Spec, integration test and self-host documentation (two friends can back each other up).
+
+**Acceptance:** home relay down for six hours → no messages lost; the spool drains on recovery
+without duplicates.
+
+### E28-T8 — Backup target & health monitor for self-hosters
+
+- [ ] Backup target speaking the E20 chunk API; only encrypted chunks leave the source relay;
+      restore to a fresh relay is a scripted drill (reuses T3's machinery at small scale).
+- [ ] Health probes: `.well-known` resolution, TLS expiry, cross-relay send/receive, version
+      drift; alerts delivered as typed messages to the operator's ID.
+
+**Acceptance:** a self-hosted relay is restored from the backup target in the integration suite;
+an expiring certificate raises an alert message.
+
+### E28-T9 — Public relay directory & conformance badge
+
+- [ ] Conformance suite runnable against any public relay; opt-in listing with capabilities,
+      region and operator; free forever.
+
+**Acceptance:** two community relays are listed with passing conformance.
 
 ## Non-goals
 

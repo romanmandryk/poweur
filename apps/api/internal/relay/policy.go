@@ -131,6 +131,12 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	case idpkg.InboxOpen:
 		return policyAllow, ""
 	case idpkg.InboxContactsOnly, idpkg.InboxContactsAndRequests:
+		// The owner already signed a direct grant for this sender. The
+		// acceptance notice belongs in the inbox; it is not a stranger's
+		// request for a new relationship.
+		if s.shareAcceptAdmitted(ctx, msg) {
+			return policyAllow, ""
+		}
 		// A closed inbox is where the message *type* starts to matter, so
 		// the decision moves to the per-type hooks in typed.go. Everything
 		// without a hook is rejected — the default a closed inbox means.
@@ -154,6 +160,23 @@ func authPromptShapeOK(msg Message, now time.Time) bool {
 	}
 	exp, err := time.Parse(time.RFC3339, msg.ExpiresAt)
 	return err == nil && exp.After(now) && exp.Sub(now) <= maxAuthPromptLifetime
+}
+
+// shareAcceptAdmitted lets a granted identity tell the owner the mount
+// exists. The check uses the owner's own grant file: share id, live direct
+// audience, and a bounded payload. It does not open the inbox to anyone else.
+func (s *Server) shareAcceptAdmitted(ctx context.Context, msg Message) bool {
+	if idpkg.NormalizeMessageType(msg.Type) != idpkg.MsgTypeShareAccept || s.grants == nil {
+		return false
+	}
+	if len(msg.Payload) > maxShareOfferPayload {
+		return false
+	}
+	shareID := strings.TrimSpace(msg.Metadata["share_id"])
+	if shareID == "" || strings.ContainsAny(shareID, "/\\") || shareID == "." || shareID == ".." {
+		return false
+	}
+	return s.grants.Snapshot(ctx, msg.Recipient).AuthorizesAccept(shareID, msg.Sender)
 }
 
 func shareOfferShapeOK(msg Message, now time.Time) bool {

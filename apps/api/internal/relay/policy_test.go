@@ -493,4 +493,18 @@ func TestRequestStoreCooldownUnit(t *testing.T) {
 	if got := st3.Drain("alice"); len(got) != 2 {
 		t.Fatalf("share offer slots: %v", got)
 	}
+	// A claim uses its own per-grant slot, so it does not collide with a
+	// contact request or with another claim from the same sender.
+	st4 := storage.NewRequestStore()
+	contact := storage.StoredMessage{ID: "contact", Sender: "bob", Recipient: "alice", Type: "sys.contact.request"}
+	claimA := storage.StoredMessage{ID: "claim-a", Sender: "bob", Recipient: "alice", Type: "sys.share.claim", Metadata: map[string]string{"share_id": "shr_a"}}
+	claimB := storage.StoredMessage{ID: "claim-b", Sender: "bob", Recipient: "alice", Type: "sys.share.claim", Metadata: map[string]string{"share_id": "shr_b"}}
+	for _, msg := range []storage.StoredMessage{contact, claimA, claimB} {
+		if got := st4.Add("alice", "bob", msg, time.Hour); got != storage.RequestQueued {
+			t.Fatalf("add %s: %s", msg.ID, got)
+		}
+	}
+	if got := st4.Drain("alice"); len(got) != 3 {
+		t.Fatalf("claim slots: %v", got)
+	}
 }

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -350,24 +352,8 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	for _, req := range pending {
-		if req.Type == idpkg.MsgTypeShareOffer {
-			var offer idpkg.ShareOffer
-			if err := json.Unmarshal([]byte(req.Plaintext), &offer); err == nil && offer.Grant.Owner == req.Sender && offer.Grant.ShareID == req.Metadata["share_id"] {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t/%s\t(accept with `poweur share accept --offer-file <file>`)\n",
-					req.Sender, req.Type, req.Timestamp, offer.Grant.Path)
-			} else {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t(invalid offer)\n", req.Sender, req.Type, req.Timestamp)
-			}
-			continue
-		}
-		if req.Type == idpkg.MsgTypeShareClaim {
-			claim, err := idpkg.ParseShareClaim([]byte(req.Plaintext))
-			if err == nil && claim.Claimant == req.Sender && claim.Owner == req.Recipient && claim.ShareID == req.Metadata["share_id"] {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t(approve with `poweur share claim approve --claim-file <file>`)\n",
-					req.Sender, req.Type, req.Timestamp, claim.Action)
-			} else {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t(invalid claim)\n", req.Sender, req.Type, req.Timestamp)
-			}
+		if line, ok := pendingShareInstruction(req, cfg.KeysDir); ok {
+			fmt.Fprint(stdout, line)
 			continue
 		}
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n", req.Sender, req.Type, req.Timestamp, req.Sender)
@@ -423,6 +409,76 @@ func decryptRequestIntros(requests []requestEntry, encPriv []byte) {
 		}
 		req.Plaintext = string(plaintext)
 	}
+}
+
+// pendingShareInstruction formats one drained share offer or claim. Reading
+// the queue deletes it, so a valid body is written to disk and the printed
+// command names that file. Other request types return ok=false.
+func pendingShareInstruction(req requestEntry, keysDir string) (string, bool) {
+	switch req.Type {
+	case idpkg.MsgTypeShareOffer:
+		var offer idpkg.ShareOffer
+		if err := json.Unmarshal([]byte(req.Plaintext), &offer); err != nil ||
+			!strings.EqualFold(offer.Grant.Owner, req.Sender) || offer.Grant.ShareID != req.Metadata["share_id"] {
+			return fmt.Sprintf("%s\t%s\t%s\t(invalid offer)\n", req.Sender, req.Type, req.Timestamp), true
+		}
+		path, err := saveRequestDocument(keysDir, req.ID, []byte(req.Plaintext))
+		if err != nil {
+			return fmt.Sprintf("%s\t%s\t%s\t/%s\t(could not save offer: %v)\n%s\n",
+				req.Sender, req.Type, req.Timestamp, offer.Grant.Path, err, req.Plaintext), true
+		}
+		return fmt.Sprintf("%s\t%s\t%s\t/%s\t(accept with `poweur share accept --offer-file %s`)\n",
+			req.Sender, req.Type, req.Timestamp, offer.Grant.Path, path), true
+	case idpkg.MsgTypeShareClaim:
+		claim, err := idpkg.ParseShareClaim([]byte(req.Plaintext))
+		if err != nil || !strings.EqualFold(claim.Claimant, req.Sender) ||
+			!strings.EqualFold(claim.Owner, req.Recipient) || claim.ShareID != req.Metadata["share_id"] {
+			return fmt.Sprintf("%s\t%s\t%s\t(invalid claim)\n", req.Sender, req.Type, req.Timestamp), true
+		}
+		path, err := saveRequestDocument(keysDir, req.ID, []byte(req.Plaintext))
+		if err != nil {
+			return fmt.Sprintf("%s\t%s\t%s\t%s\t(could not save claim: %v)\n%s\n",
+				req.Sender, req.Type, req.Timestamp, claim.Action, err, req.Plaintext), true
+		}
+		return fmt.Sprintf("%s\t%s\t%s\t%s\t(approve with `poweur share claim approve --claim-file %s`)\n",
+			req.Sender, req.Type, req.Timestamp, claim.Action, path), true
+	default:
+		return "", false
+	}
+}
+
+func saveRequestDocument(keysDir, messageID string, body []byte) (string, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return "", fmt.Errorf("request has no id")
+	}
+	dir := filepath.Join(filepath.Dir(keysDir), "requests")
+	if keysDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".poweur", "requests")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, messageID)
+	if len(safe) > 80 {
+		safe = safe[:80]
+	}
+	path := filepath.Join(dir, safe+".json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // challengeSignedGet performs an owner-drain GET (requests / anon queues):

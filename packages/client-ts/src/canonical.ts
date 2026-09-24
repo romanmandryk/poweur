@@ -201,6 +201,7 @@ export function canonicalAudience(audience: ShareAudience[]): string {
  */
 export function canonicalShareGrant(grant: {
   share_id: string;
+  source_share_id?: string;
   owner: string;
   path: string;
   audience: ShareAudience[];
@@ -239,6 +240,9 @@ export function canonicalShareGrant(grant: {
         String(grant.link.file_request.notify ?? false),
       );
     }
+  }
+  if (grant.source_share_id) {
+    fields.push("poweur-share-source", grant.source_share_id.trim());
   }
   return fields.join("\n");
 }

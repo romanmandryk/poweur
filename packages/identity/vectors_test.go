@@ -182,6 +182,12 @@ func TestVectors_Grants(t *testing.T) {
 			Permissions: []string{PermWrite, PermRead},
 			CreatedAt:   VectorTime, ExpiresAt: "2026-06-01T00:00:00Z",
 		}},
+		{"converted-direct", ShareGrant{
+			ShareID: "shr_direct001122334", SourceShareID: "shr_request00112233",
+			Owner: "alice.poweur.net", Path: "shared/inbox",
+			Audience: []ShareAudience{{ID: "bob.example.org"}},
+			Permissions: []string{PermRead, PermWrite}, CreatedAt: VectorTime,
+		}},
 		// Link shares (E05-T4). The token is fixed (not generated) so the
 		// fixture is stable, and the password hash is a literal PHC string
 		// for the same reason — argon2id salts are random, and a vector

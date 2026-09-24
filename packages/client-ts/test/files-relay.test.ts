@@ -206,6 +206,7 @@ describe("TypeScript client ↔ real relay (files, sync, shares)", () => {
       permissions: "rw",
     });
     expect(approved.linkRevoked).toBe(true);
+    expect(approved.grant.source_share_id).toBe(request.grant.share_id);
     expect(approved.deliveries).toEqual([{ recipient: visitor.identity, delivered: true }]);
     expect((await ownerShares.list()).some((grant) => grant.share_id === request.grant.share_id)).toBe(false);
 

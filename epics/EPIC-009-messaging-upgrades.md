@@ -13,6 +13,7 @@
 > is v1. Reading it costs one request per message, so history v2 — one append-only log per
 > conversation on chunked storage — is [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8. Do not
 > add paging or compaction to the v1 layout.
+- **Plans note (EPIC-026):** 1:1 and small-group messaging stay unmetered fair use — never a pricing lever. Large 1 → many *broadcast channels* are a separate, metered shape owned by EPIC-030-T5.
 
 ## Goal
 

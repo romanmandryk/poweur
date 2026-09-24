@@ -183,7 +183,7 @@ test.describe("files sharing", () => {
    * The visitor gets a brand-new context with no storage, no identity and no
    * service worker — the closest thing to "a stranger opened the link you
    * mailed them" that a test can be. The grant itself is signed in the page
-   * by the owner's own key, exactly as the share dialog will do it.
+   * by the owner's own key through the actual share dialog.
    */
   test("a public link opens with no account, and revoking it kills the page", async ({ browser }) => {
     test.slow();
@@ -195,14 +195,14 @@ test.describe("files sharing", () => {
     const ownerId = await registerIdentity(owner, relay, `shl${suffix}`);
     await seedSharedFolder(owner, "handouts");
 
-    const { shareId, token } = await owner.evaluate(async ({ folder }) => {
-      const { clientFor } = await window.__poweurModule("client");
-      const { getActiveIdentity } = await window.__poweurModule("storage");
-      const client = clientFor(getActiveIdentity());
-      const shares = await client.shares();
-      const { grant, token } = await shares.addLink(client.signer, `shared/${folder}`, {});
-      return { shareId: grant.share_id, token };
-    }, { folder: "handouts" });
+    await owner.click('.nav-tab[data-page="files"]');
+    await owner.click('[data-open-dir="shared"]');
+    await owner.click('[data-share="shared/handouts"]');
+    await owner.getByRole("button", { name: "Public link" }).click();
+    await owner.click("#btn-share-go");
+    const publicUrl = await owner.locator("#capability-url").inputValue();
+    const token = publicUrl.split("/").pop();
+    await owner.click("#panel-close-btn");
 
     expect(token).toMatch(/^[a-z2-7]{26}$/);
 
@@ -230,12 +230,11 @@ test.describe("files sharing", () => {
     expect(outside.status()).not.toBe(200);
 
     // ── The owner revokes it; the next load is a dead end ─────────────────
-    await owner.evaluate(async ({ shareId }) => {
-      const { clientFor } = await window.__poweurModule("client");
-      const { getActiveIdentity } = await window.__poweurModule("storage");
-      const shares = await clientFor(getActiveIdentity()).shares();
-      await shares.revoke(shareId);
-    }, { shareId });
+    await owner.click('[data-nav-path=""]');
+    await owner.click("#btn-shares");
+    await expect(owner.locator(".share-row")).toContainText("public link");
+    await owner.click("[data-revoke]");
+    await expect(owner.locator("#shares-list")).toContainText("not shared anything yet", { timeout: 20_000 });
 
     const afterRevoke = await stranger.goto(linkUrl);
     expect(afterRevoke.status()).toBe(404);

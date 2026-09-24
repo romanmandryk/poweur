@@ -29,6 +29,23 @@ describe("share lifecycle", () => {
     expect(() => validateShareOffer({ ...offer, grant: { ...grant, signature: "AAAA" } }, "bob.poweur.net", signer.publicKey)).toThrow(/signature/);
   });
 
+  it("signs public-link conversion provenance for one direct recipient", async () => {
+    const { privateKey } = generateSigningKeypair();
+    const signer = new LocalSigner("alice.poweur.net", privateKey);
+    const grant = await buildGrant(signer, "shared/inbox", {
+      with: ["bob.poweur.net"],
+      permissions: "rw",
+      shareId: "shr_direct",
+      sourceShareId: "shr_public",
+    });
+    expect(grant.source_share_id).toBe("shr_public");
+    expect(canonicalShareGrant(grant)).toContain("\npoweur-share-source\nshr_public");
+    expect(() => validateGrant({
+      ...grant,
+      audience: [...grant.audience, { id: "carol.poweur.net" }],
+    })).toThrow(/exactly one direct/);
+  });
+
   it("normalizes mount names and rejects path confusion", () => {
     expect(defaultShareMountName("shared/.project-x.")).toBe("project-x");
     expect(normalizeShareMountPath("/shared/alice.poweur.net/project-x/", "alice.poweur.net")).toBe("shared/alice.poweur.net/project-x");

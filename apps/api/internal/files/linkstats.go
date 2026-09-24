@@ -25,16 +25,17 @@ import (
 
 // LinkStat is one link share's lifetime counters.
 type LinkStat struct {
-	ShareID      string    `json:"share_id"`
-	Opens        int64     `json:"opens,omitempty"`
-	Downloads    int64     `json:"downloads"`
-	Bytes        int64     `json:"bytes"`
-	Uploads      int64     `json:"uploads,omitempty"`
-	UploadBytes  int64     `json:"upload_bytes,omitempty"`
-	ClaimStarted int64     `json:"claim_started,omitempty"`
-	IDClaimed    int64     `json:"id_claimed,omitempty"`
-	FirstAt      time.Time `json:"first_at,omitempty"`
-	LastAt       time.Time `json:"last_at,omitempty"`
+	ShareID       string    `json:"share_id"`
+	Opens         int64     `json:"opens,omitempty"`
+	Downloads     int64     `json:"downloads"`
+	Bytes         int64     `json:"bytes"`
+	Uploads       int64     `json:"uploads,omitempty"`
+	UploadBytes   int64     `json:"upload_bytes,omitempty"`
+	ClaimStarted  int64     `json:"claim_started,omitempty"`
+	IDClaimed     int64     `json:"id_claimed,omitempty"`
+	ShareAccepted int64     `json:"share_accepted,omitempty"`
+	FirstAt       time.Time `json:"first_at,omitempty"`
+	LastAt        time.Time `json:"last_at,omitempty"`
 }
 
 // RecordClaimStarted records the funnel transition without visitor data.
@@ -112,7 +113,8 @@ func (ls *LinkStats) ReserveUpload(identity, shareID string, size int64, maxUplo
 }
 
 type linkStatsFile struct {
-	Shares map[string]*LinkStat `json:"shares"`
+	Shares         map[string]*LinkStat `json:"shares"`
+	AcceptedShares map[string]bool      `json:"accepted_direct_shares,omitempty"`
 }
 
 // LinkStats is the per-identity link accounting store.
@@ -144,17 +146,41 @@ func (ls *LinkStats) treeLocked(identity string) *linkStatsFile {
 	if t, ok := ls.trees[key]; ok {
 		return t
 	}
-	t := &linkStatsFile{Shares: make(map[string]*LinkStat)}
+	t := &linkStatsFile{Shares: make(map[string]*LinkStat), AcceptedShares: make(map[string]bool)}
 	if p, err := ls.path(identity); err == nil && p != "" {
 		if raw, err := os.ReadFile(p); err == nil {
 			_ = json.Unmarshal(raw, t)
 			if t.Shares == nil {
 				t.Shares = make(map[string]*LinkStat)
 			}
+			if t.AcceptedShares == nil {
+				t.AcceptedShares = make(map[string]bool)
+			}
 		}
 	}
 	ls.trees[key] = t
 	return t
+}
+
+// RecordShareAccepted records the last funnel transition once per resulting
+// direct grant. The persisted idempotency key is an opaque share id; no
+// recipient identity, path, filename or message content is retained.
+func (ls *LinkStats) RecordShareAccepted(identity, sourceShareID, directShareID string) bool {
+	if ls == nil || sourceShareID == "" || directShareID == "" {
+		return false
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	tree := ls.treeLocked(identity)
+	if tree.AcceptedShares[directShareID] {
+		return false
+	}
+	tree.AcceptedShares[directShareID] = true
+	st := ls.statLocked(identity, sourceShareID)
+	st.ShareAccepted++
+	st.LastAt = time.Now().UTC()
+	ls.persistLocked(identity)
+	return true
 }
 
 func (ls *LinkStats) persistLocked(identity string) {

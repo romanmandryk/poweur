@@ -163,11 +163,11 @@ func TestFileRequestUploadsAreCreateOnlyAndIsolated(t *testing.T) {
 		t.Fatal("subscribe owner stream")
 	}
 	defer fx.server.hub.unsubscribe(fx.alice.name, streamID)
-	fx.server.recordShareClaimDelivery(context.Background(), Message{
+	fx.server.recordShareLifecycleDelivery(context.Background(), Message{
 		Type: idpkg.MsgTypeShareClaim, Recipient: fx.alice.name,
 		Metadata: map[string]string{"share_id": "shr_request"},
 	})
-	fx.server.recordShareClaimDelivery(context.Background(), Message{
+	fx.server.recordShareLifecycleDelivery(context.Background(), Message{
 		Type: idpkg.MsgTypeShareClaim, Recipient: fx.alice.name,
 		Metadata: map[string]string{"share_id": "shr_not_a_request"},
 	})
@@ -277,6 +277,53 @@ func TestFileRequestObjectAndMediaLimits(t *testing.T) {
 	}
 	if got := fx.server.linkStats.Get(fx.alice.name, "shr_request_limits").Uploads; got != 0 {
 		t.Fatalf("rejected uploads consumed count quota: %d", got)
+	}
+}
+
+func TestFileRequestHonorsRelayStorageLimits(t *testing.T) {
+	fx := newShareFixture(t)
+	token := putLinkGrant(t, fx, "shr_quota", "shared/project", &idpkg.ShareLink{
+		FileRequest: &idpkg.ShareFileRequest{},
+	}, "")
+	fx.server.cfg.MaxFileBytes = 3
+	resp, page := fx.linkUpload(t, token, "big.txt", "four")
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(page, "larger than this relay") {
+		t.Fatalf("max file: %d %s", resp.StatusCode, page)
+	}
+	fx.server.cfg.MaxFileBytes = 0
+	fx.server.cfg.MaxIdentityBytes = 1
+	resp, page = fx.linkUpload(t, token, "small.txt", "x")
+	if resp.StatusCode != http.StatusInsufficientStorage || !strings.Contains(page, "no room") {
+		t.Fatalf("identity quota: %d %s", resp.StatusCode, page)
+	}
+	if got := fx.server.linkStats.Get(fx.alice.name, "shr_quota").Uploads; got != 0 {
+		t.Fatalf("rejected relay-limit uploads consumed count quota: %d", got)
+	}
+}
+
+func TestDownloadLinkPreservesClaimContext(t *testing.T) {
+	fx := newShareFixture(t)
+	fx.server.cfg.LauncherHost = "id.poweur.net"
+	token := putLinkGrant(t, fx, "shr_link_claim", "shared/project", nil, "")
+	resp, page := fx.linkGet(t, fx.linkPath(token))
+	if resp.StatusCode != http.StatusOK || !strings.Contains(page, fx.linkPath(token, "claim")+"?action=viewed") {
+		t.Fatalf("listing claim handoff: %d %s", resp.StatusCode, page)
+	}
+	if strings.Contains(page, "https://id.poweur.net/app/") {
+		t.Fatalf("listing sent the bare launcher URL: %s", page)
+	}
+	resp, _ = fx.linkGet(t, fx.linkPath(token, "claim")+"?action=downloaded")
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("claim redirect: %d", resp.StatusCode)
+	}
+	encoded := strings.TrimPrefix(resp.Header.Get("Location"), "https://id.poweur.net/app/#share=")
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("claim fragment: %v", err)
+	}
+	var handoff map[string]string
+	if err := json.Unmarshal(raw, &handoff); err != nil || handoff["token"] != token || handoff["action"] != "downloaded" || handoff["share_id"] != "shr_link_claim" {
+		t.Fatalf("claim payload = %s err=%v", raw, err)
 	}
 }
 

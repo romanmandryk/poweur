@@ -168,16 +168,11 @@ func (s *Server) handleShareLink(w http.ResponseWriter, r *http.Request) {
 		s.writeLinkPasswordForm(w, req, http.StatusUnauthorized, "")
 		return
 	}
+	if req.rest == "claim" && r.Method == http.MethodGet {
+		s.handleShareClaimRedirect(w, r, req, grant)
+		return
+	}
 	if grant.IsFileRequest() {
-		if req.rest == "claim" && r.Method == http.MethodGet {
-			action := r.URL.Query().Get("action")
-			if action != "uploaded" {
-				action = "viewed"
-			}
-			s.linkStats.RecordClaimStarted(req.owner, grant.ShareID)
-			http.Redirect(w, r, s.shareClaimURL(req, grant, action), http.StatusSeeOther)
-			return
-		}
 		if req.rest != "" {
 			s.writeLinkPage(w, http.StatusNotFound, "Not in this request",
 				"File requests do not expose uploaded files.")
@@ -222,9 +217,13 @@ func (s *Server) writeFileRequestForm(w http.ResponseWriter, req shareLinkReques
 
 func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request, req shareLinkRequest, grant idpkg.ShareGrant) {
 	options := grant.Link.FileRequest
-	limit := maxFileRequestBytes
-	if options.MaxObjectBytes > 0 && options.MaxObjectBytes < limit {
-		limit = options.MaxObjectBytes
+	objectLimit := maxFileRequestBytes
+	if options.MaxObjectBytes > 0 && options.MaxObjectBytes < objectLimit {
+		objectLimit = options.MaxObjectBytes
+	}
+	limit := objectLimit
+	if s.cfg.MaxFileBytes > 0 && s.cfg.MaxFileBytes < limit {
+		limit = s.cfg.MaxFileBytes
 	}
 	// Leave bounded room for multipart headers while enforcing the file's
 	// exact size below.
@@ -239,7 +238,11 @@ func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	defer file.Close()
-	if header.Size < 0 || header.Size > limit {
+	if s.cfg.MaxFileBytes > 0 && header.Size > s.cfg.MaxFileBytes {
+		s.writeFileRequestForm(w, req, grant, http.StatusRequestEntityTooLarge, "That file is larger than this relay allows.")
+		return
+	}
+	if header.Size < 0 || header.Size > objectLimit {
 		s.writeFileRequestForm(w, req, grant, http.StatusRequestEntityTooLarge, "That file is larger than this request allows.")
 		return
 	}
@@ -253,6 +256,13 @@ func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		s.writeFileRequestForm(w, req, grant, http.StatusBadRequest, err.Error())
 		return
+	}
+	if s.cfg.MaxIdentityBytes > 0 {
+		used, usedErr := s.filesProvider.UsedBytes(r.Context(), req.owner)
+		if usedErr == nil && used+header.Size > s.cfg.MaxIdentityBytes {
+			s.writeLinkPage(w, http.StatusInsufficientStorage, "Storage is full", "The owner has no room for this upload.")
+			return
+		}
 	}
 	if fi, err := s.filesProvider.Stat(r.Context(), req.owner, grant.Path); err != nil || !fi.IsDir() {
 		s.writeLinkPage(w, http.StatusConflict, "Upload folder unavailable", "The owner needs to recreate the destination folder.")
@@ -298,12 +308,40 @@ func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request,
 	s.writeLinkHTML(w, http.StatusCreated, "Upload complete", body, false)
 }
 
+func (s *Server) handleShareClaimRedirect(w http.ResponseWriter, r *http.Request, req shareLinkRequest, grant idpkg.ShareGrant) {
+	if s.claimURL() == "" {
+		s.writeLinkPage(w, http.StatusNotFound, "No ID claim here", "This relay does not offer Poweur IDs.")
+		return
+	}
+	action := claimHandoffAction(r.URL.Query().Get("action"), grant.IsFileRequest())
+	s.linkStats.RecordClaimStarted(req.owner, grant.ShareID)
+	http.Redirect(w, r, s.shareClaimURL(req, grant, action), http.StatusSeeOther)
+}
+
+func claimHandoffAction(raw string, fileRequest bool) string {
+	switch raw {
+	case "uploaded":
+		if fileRequest {
+			return "uploaded"
+		}
+	case "downloaded":
+		if !fileRequest {
+			return "downloaded"
+		}
+	}
+	return "viewed"
+}
+
 func (s *Server) shareClaimCTA(req shareLinkRequest, action string) string {
 	if s.claimURL() == "" {
 		return ""
 	}
 	href := req.base + "/claim?action=" + action
-	return `<p class="upsell"><a href="` + html.EscapeString(href) + `" rel="noreferrer">Get a Poweur ID</a> and ask the owner for ongoing access. Your upload stays complete.</p>`
+	note := "The files stay available through this link."
+	if action == "uploaded" {
+		note = "Your upload stays complete."
+	}
+	return `<p class="upsell"><a href="` + html.EscapeString(href) + `" rel="noreferrer">Get a Poweur ID</a> and ask the owner for ongoing access. ` + note + `</p>`
 }
 
 func (s *Server) shareClaimURL(req shareLinkRequest, grant idpkg.ShareGrant, action string) string {
@@ -470,7 +508,8 @@ func (s *Server) serveLinkListing(w http.ResponseWriter, r *http.Request, req sh
 	if len(entries) == 0 {
 		body.WriteString(`<p class="muted">This folder is empty.</p>`)
 	}
-	s.writeLinkHTML(w, http.StatusOK, title, body.String(), true)
+	body.WriteString(s.shareClaimCTA(req, "viewed"))
+	s.writeLinkHTML(w, http.StatusOK, title, body.String(), false)
 }
 
 // shareLinkDetails gives a capability holder enough public, non-secret context

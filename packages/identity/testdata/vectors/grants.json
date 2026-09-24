@@ -46,6 +46,27 @@
     "canonical": "poweur-share-grant\nshr_8899aabbccddeeff\nalice.poweur.net\napps/notes/shared\ngroup:team,id:bob.example.org,id:zoe.example.org\nread,write\n2026-01-15T09:30:00Z\n2026-06-01T00:00:00Z"
   },
   {
+    "name": "converted-direct",
+    "grant": {
+      "share_id": "shr_direct001122334",
+      "source_share_id": "shr_request00112233",
+      "owner": "alice.poweur.net",
+      "path": "shared/inbox",
+      "audience": [
+        {
+          "id": "bob.example.org"
+        }
+      ],
+      "permissions": [
+        "read",
+        "write"
+      ],
+      "created_at": "2026-01-15T09:30:00Z",
+      "signature": "liK8OrJ2VjANC92n7TzWZavBH9taAK1JgX4UJ8C5J-fURA2f45y5_3P-59AmLQgbCv-IzHnQdOOKstPRqj3yAw"
+    },
+    "canonical": "poweur-share-grant\nshr_direct001122334\nalice.poweur.net\nshared/inbox\nid:bob.example.org\nread,write\n2026-01-15T09:30:00Z\n\npoweur-share-source\nshr_request00112233"
+  },
+  {
     "name": "link-plain",
     "grant": {
       "share_id": "shr_link0011223344",

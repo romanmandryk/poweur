@@ -126,13 +126,17 @@ type ShareFileRequest struct {
 
 // ShareGrant is the signed grant document.
 type ShareGrant struct {
-	ShareID     string          `json:"share_id"`
-	Owner       string          `json:"owner"`
-	Path        string          `json:"path"` // clean tree path, e.g. "shared/project-x"
-	Audience    []ShareAudience `json:"audience"`
-	Permissions []string        `json:"permissions"`
-	CreatedAt   string          `json:"created_at"`
-	ExpiresAt   string          `json:"expires_at,omitempty"`
+	ShareID string `json:"share_id"`
+	// SourceShareID binds a direct grant created from a public capability to
+	// that capability. It is owner-signed provenance used for aggregate
+	// conversion accounting; it is never authority by itself.
+	SourceShareID string          `json:"source_share_id,omitempty"`
+	Owner         string          `json:"owner"`
+	Path          string          `json:"path"` // clean tree path, e.g. "shared/project-x"
+	Audience      []ShareAudience `json:"audience"`
+	Permissions   []string        `json:"permissions"`
+	CreatedAt     string          `json:"created_at"`
+	ExpiresAt     string          `json:"expires_at,omitempty"`
 	// Link is set only on link-share grants (audience = one link token).
 	Link      *ShareLink `json:"link,omitempty"`
 	Signature string     `json:"signature"`
@@ -171,6 +175,14 @@ func (g ShareGrant) Validate() error {
 	if strings.TrimSpace(g.ShareID) == "" {
 		return fmt.Errorf("share_id is required")
 	}
+	if g.SourceShareID != "" {
+		if strings.TrimSpace(g.SourceShareID) == "" || strings.TrimSpace(g.SourceShareID) != g.SourceShareID || strings.ContainsAny(g.SourceShareID, "/\\") || g.SourceShareID == "." || g.SourceShareID == ".." {
+			return fmt.Errorf("invalid source_share_id")
+		}
+		if g.SourceShareID == g.ShareID {
+			return fmt.Errorf("source_share_id must differ from share_id")
+		}
+	}
 	if strings.TrimSpace(g.Owner) == "" {
 		return fmt.Errorf("owner is required")
 	}
@@ -203,6 +215,11 @@ func (g ShareGrant) Validate() error {
 	}
 	if err := g.validateLink(links); err != nil {
 		return err
+	}
+	if g.SourceShareID != "" {
+		if links != 0 || len(g.Audience) != 1 || strings.TrimSpace(g.Audience[0].ID) == "" {
+			return fmt.Errorf("source_share_id requires exactly one direct identity recipient")
+		}
 	}
 	if len(g.Permissions) == 0 {
 		return fmt.Errorf("permissions is empty")
@@ -383,7 +400,8 @@ func canonicalAudience(audience []ShareAudience) string {
 //
 // A grant carrying link options (E05-T4) appends the marker, password hash
 // and download cap. A file request appends its marker and five limit fields.
-// Grants without a `link` object retain the original eight-line format.
+// A direct grant upgraded from a public capability appends its source marker.
+// Grants without either extension retain the original eight-line format.
 func (g ShareGrant) Canonical() string {
 	perms := append([]string(nil), g.Permissions...)
 	sort.Strings(perms)
@@ -419,6 +437,9 @@ func (g ShareGrant) Canonical() string {
 				strconv.FormatBool(g.Link.FileRequest.Notify),
 			)
 		}
+	}
+	if g.SourceShareID != "" {
+		fields = append(fields, "poweur-share-source", strings.TrimSpace(g.SourceShareID))
 	}
 	return strings.Join(fields, "\n")
 }

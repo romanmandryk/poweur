@@ -313,6 +313,43 @@ func (gs *GrantSet) VisibleShares(visitor string) []idpkg.ShareGrant {
 	return out
 }
 
+// AuthorizesAccept reports whether visitor may deliver sys.share.accept for
+// shareID. The owner already signed a live direct grant naming that visitor;
+// the accept is a notification, not a new authority.
+func (gs *GrantSet) AuthorizesAccept(shareID, visitor string) bool {
+	if gs == nil || shareID == "" || strings.TrimSpace(visitor) == "" {
+		return false
+	}
+	for _, grant := range gs.grants {
+		if grant.ShareID != shareID || grant.Expired(gs.now) || grant.IsLink() {
+			continue
+		}
+		if gs.audienceMatches(grant, visitor) {
+			return true
+		}
+	}
+	return false
+}
+
+// AcceptedConversionSource returns the public capability that a live,
+// owner-signed direct grant upgrades. The recipient must be in that grant's
+// audience. An empty result means the acceptance is valid as a lifecycle
+// notice but is not attributable to the public-link funnel.
+func (gs *GrantSet) AcceptedConversionSource(shareID, visitor string) string {
+	if gs == nil || shareID == "" || strings.TrimSpace(visitor) == "" {
+		return ""
+	}
+	for _, grant := range gs.grants {
+		if grant.ShareID != shareID || grant.SourceShareID == "" || grant.Expired(gs.now) || grant.IsLink() {
+			continue
+		}
+		if gs.audienceMatches(grant, visitor) {
+			return grant.SourceShareID
+		}
+	}
+	return ""
+}
+
 // HasFileRequest reports whether shareID names a verified, live upload-only
 // capability. It supports aggregate accounting and grants no authority.
 func (gs *GrantSet) HasFileRequest(shareID string) bool {

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	gopath "path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -323,7 +324,7 @@ func runShareClaimApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	grant := idpkg.ShareGrant{
-		ShareID: newID, Owner: owner, Path: source.Path,
+		ShareID: newID, SourceShareID: source.ShareID, Owner: owner, Path: source.Path,
 		Audience: []idpkg.ShareAudience{{ID: claim.Claimant}}, Permissions: permissions,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339), ExpiresAt: source.ExpiresAt,
 	}
@@ -458,8 +459,12 @@ func runShareAccept(args []string, stdout, stderr io.Writer) int {
 		Owner: offer.Grant.Owner, Recipient: recipient, MountPath: mountPath, AcceptedAt: acceptedAt,
 	}
 	acceptRaw, _ := json.Marshal(acceptance)
-	notified := sendShareLifecycle(recipient, offer.Grant.Owner, idpkg.MsgTypeShareAccept,
-		offer.Grant.ShareID, "", acceptRaw, stderr) == 0
+	acceptMetadata := map[string]string{"share_id": offer.Grant.ShareID}
+	if offer.Grant.SourceShareID != "" {
+		acceptMetadata["source_share_id"] = offer.Grant.SourceShareID
+	}
+	notified := sendShareLifecycleWithMetadata(recipient, offer.Grant.Owner, idpkg.MsgTypeShareAccept,
+		acceptMetadata, time.Now().UTC().Add(7*24*time.Hour).Format(time.RFC3339), acceptRaw, stderr) == 0
 	result := map[string]any{"mount": mount, "mount_path": mountPath, "owner_notified": notified}
 	return writeOutput(stdout, *jsonOut, result,
 		fmt.Sprintf("share %s mounted at /%s (owner notified: %t)\n", offer.Grant.ShareID, mountPath, notified))
@@ -1071,12 +1076,24 @@ func runShareRevoke(args []string, stdout, stderr io.Writer) int {
 }
 
 func sendShareLifecycle(useIdentity, recipient, msgType, shareID, expiresAt string, payload []byte, stderr io.Writer) int {
+	return sendShareLifecycleWithMetadata(useIdentity, recipient, msgType,
+		map[string]string{"share_id": shareID}, expiresAt, payload, stderr)
+}
+
+func sendShareLifecycleWithMetadata(useIdentity, recipient, msgType string, metadata map[string]string, expiresAt string, payload []byte, stderr io.Writer) int {
 	args := []string{
 		"--use-identity=" + useIdentity,
 		"--sign-with=identity",
 		"--via-home-relay",
 		"--type=" + msgType,
-		"--meta=share_id=" + shareID,
+	}
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		args = append(args, "--meta="+key+"="+metadata[key])
 	}
 	if expiresAt != "" {
 		args = append(args, "--expires="+expiresAt)

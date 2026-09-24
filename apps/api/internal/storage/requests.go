@@ -40,12 +40,20 @@ func requestKey(recipient, sender string) string {
 
 func requestSlot(sender string, msg StoredMessage) string {
 	slot := strings.ToLower(sender)
-	if strings.EqualFold(strings.TrimSpace(msg.Type), "sys.share.offer") {
-		if shareID := strings.TrimSpace(msg.Metadata["share_id"]); shareID != "" {
-			return slot + "\nshare:" + shareID
-		}
+	shareID := strings.TrimSpace(msg.Metadata["share_id"])
+	if shareID == "" {
+		return slot
 	}
-	return slot
+	switch strings.ToLower(strings.TrimSpace(msg.Type)) {
+	case "sys.share.offer":
+		return slot + "\nshare:" + shareID
+	case "sys.share.claim":
+		// Distinct from offers and from the contact-request slot, so one
+		// person can claim several links without blocking a contact request.
+		return slot + "\nclaim:" + shareID
+	default:
+		return slot
+	}
 }
 
 // Add queues a contact request. A sender holds at most one pending slot per

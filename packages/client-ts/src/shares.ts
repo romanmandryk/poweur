@@ -103,6 +103,15 @@ export function grantIsLink(grant: Pick<ShareGrant, "audience">): boolean {
 /** Structural validation — everything except the signature. */
 export function validateGrant(grant: Omit<ShareGrant, "signature">): void {
   if (!grant.share_id?.trim()) throw new PoweurError("invalid_argument", "share_id is required");
+  if (grant.source_share_id) {
+    assertShareId(grant.source_share_id);
+    if (grant.source_share_id.trim() !== grant.source_share_id) {
+      throw new PoweurError("invalid_argument", "source_share_id must not contain surrounding whitespace");
+    }
+    if (grant.source_share_id === grant.share_id) {
+      throw new PoweurError("invalid_argument", "source_share_id must differ from share_id");
+    }
+  }
   if (!grant.owner?.trim()) throw new PoweurError("invalid_argument", "owner is required");
   normalizeGrantPath(grant.path);
   if (!grant.audience?.length) throw new PoweurError("invalid_argument", "audience is empty");
@@ -125,6 +134,12 @@ export function validateGrant(grant: Omit<ShareGrant, "signature">): void {
     }
   }
   validateGrantLink(grant, links);
+  if (grant.source_share_id && (links !== 0 || grant.audience.length !== 1 || !grant.audience[0]?.id?.trim())) {
+    throw new PoweurError(
+      "invalid_argument",
+      "source_share_id requires exactly one direct identity recipient",
+    );
+  }
   if (!grant.permissions?.length) {
     throw new PoweurError("invalid_argument", "permissions is empty");
   }
@@ -361,6 +376,8 @@ export interface CreateShareOptions {
   permissions?: "read" | "rw";
   expiresAt?: string;
   shareId?: string;
+  /** Public capability this single-recipient direct grant upgrades. */
+  sourceShareId?: string;
 }
 
 /** Build and sign a grant without writing it — useful for offline flows. */
@@ -380,6 +397,7 @@ export async function buildGrant(
     options.permissions === "rw" ? [PERM_READ, PERM_WRITE] : [PERM_READ];
   const draft = {
     share_id: options.shareId ?? newShareId(),
+    ...(options.sourceShareId ? { source_share_id: options.sourceShareId } : {}),
     owner: signer.identity,
     path: normalizeGrantPath(path),
     audience,

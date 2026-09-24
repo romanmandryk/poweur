@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	idpkg "github.com/poweur/identity"
 )
@@ -215,5 +217,54 @@ func TestShareRequestUsageAndGrantShape(t *testing.T) {
 	}
 	if err := grant.Validate(); err != nil {
 		t.Fatalf("CLI file-request shape: %v", err)
+	}
+}
+
+func TestPendingShareInstructionSavesTheDrainedBody(t *testing.T) {
+	token, err := idpkg.GenerateLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := idpkg.ShareClaim{
+		Version: idpkg.ShareLifecycleVersion, ShareID: "shr_request", Owner: "alice.poweur.net",
+		Token: token, Claimant: "bob.poweur.net", Action: "uploaded",
+		ClaimedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	raw, err := json.Marshal(claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	line, ok := pendingShareInstruction(requestEntry{
+		ID: "msg/claim-1", Sender: claim.Claimant, Recipient: claim.Owner,
+		Type: idpkg.MsgTypeShareClaim, Timestamp: claim.ClaimedAt,
+		Metadata: map[string]string{"share_id": claim.ShareID}, Plaintext: string(raw),
+	}, filepath.Join(home, "keys"))
+	if !ok {
+		t.Fatal("claim was not recognized")
+	}
+	saved := filepath.Join(home, "requests", "msg_claim-1.json")
+	if !strings.Contains(line, "poweur share claim approve --claim-file "+saved) {
+		t.Fatalf("instruction = %q", line)
+	}
+	got, err := os.ReadFile(saved)
+	if err != nil || string(got) != string(raw) {
+		t.Fatalf("saved claim %q err=%v", got, err)
+	}
+	info, err := os.Stat(saved)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("claim file mode = %v err=%v", info, err)
+	}
+
+	mismatch, ok := pendingShareInstruction(requestEntry{
+		ID: "msg/claim-2", Sender: "mallory.poweur.net", Recipient: claim.Owner,
+		Type: idpkg.MsgTypeShareClaim, Timestamp: claim.ClaimedAt,
+		Metadata: map[string]string{"share_id": claim.ShareID}, Plaintext: string(raw),
+	}, filepath.Join(home, "keys"))
+	if !ok || !strings.Contains(mismatch, "invalid claim") {
+		t.Fatalf("mismatched sender instruction = %q", mismatch)
+	}
+	if _, err := os.Stat(filepath.Join(home, "requests", "msg_claim-2.json")); !os.IsNotExist(err) {
+		t.Fatalf("invalid claim was written: %v", err)
 	}
 }
