@@ -66,6 +66,22 @@ test('setup refuses missing imports and invalid arguments without creating secre
   assert.notEqual(run('setup-observability.sh', ['--unknown']).status, 0);
 });
 
+test('deploys skip CI unless asked, so a master push only builds and ships', () => {
+  const relay = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  const bridge = readFileSync(new URL('../../.github/workflows/deploy-oauth.yml', import.meta.url), 'utf8');
+  const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const health = readFileSync(new URL('../../.github/workflows/health-monitor.yml', import.meta.url), 'utf8');
+  for (const yml of [relay, bridge]) {
+    assert.match(yml, /inputs\.run_tests \|\| vars\.RUN_CI == 'true'/);
+    assert.match(yml, /needs\.test\.result == 'skipped'/);
+  }
+  assert.match(ci, /workflow_dispatch:/);
+  assert.doesNotMatch(ci, /^ {2}push:/m);
+  assert.doesNotMatch(ci, /^ {2}pull_request:/m);
+  assert.doesNotMatch(health, /^ {2}schedule:/m);
+  assert.match(health, /workflow_dispatch:/);
+});
+
 test('deploy workflow bakes release identity into the remote script', () => {
   const yml = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
   assert.match(yml, /printf 'export RELEASE_SHA=%q\\n'/);

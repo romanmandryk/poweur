@@ -2,6 +2,11 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run the full CI suite before building
+        type: boolean
+        default: false
   push:
     branches: [master]
 
@@ -15,10 +20,12 @@ concurrency:
 
 jobs:
   test:
+    if: ${{ inputs.run_tests || vars.RUN_CI == 'true' }}
     uses: ./.github/workflows/ci.yml
 
   build:
     needs: test
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
