@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en" data-root="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poweur — One open ID</title>
+  <meta name="description" content="Poweur is an open-source identity, messaging and data-sharing layer. One ID to sign in, message, share, collaborate, play, prove and sign — on your domain or ours.">
+  <meta property="og:title" content="Poweur — One open ID">
+  <meta property="og:description" content="Identity, messaging and data sharing. Three open primitives, endless apps, no walled gardens.">
+  <meta property="og:image" content="assets/brand/og-image.png">
+  <meta name="theme-color" content="#07060B">
+  <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+  <!-- TODO: self-host Sora/Inter per design/brand/README.md before launch -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header id="nav"></header>
+
+<main>
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="hero-bg" aria-hidden="true">
+      <!-- Hero video slot. Drop an original/licensed glass loop at assets/hero.mp4 and uncomment:
+      <video autoplay muted loop playsinline poster="assets/hero-poster.jpg"><source src="assets/hero.mp4" type="video/mp4"></video>
+      The CSS scene below is the placeholder until then. -->
+      <div class="glass-scene">
+        <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+        <div class="pane p1"></div><div class="pane p2"></div><div class="pane p3"></div>
+      </div>
+    </div>
+    <div class="wrap">
+      <a class="pill" href="https://github.com/romanmandryk/poweur"><b>Open source</b> Identity, messaging &amp; files — pre-1.0, running today →</a>
+      <h1 class="h1">
+        <span class="gradient-text">One open ID to</span>
+        <span class="rotator" aria-label="sign in, message, share data, collaborate, play, prove ownership, sign">
+          <ul aria-hidden="true">
+            <li>sign in</li><li>message</li><li>share data</li><li>collaborate</li><li>play</li><li>prove ownership</li><li>sign</li><li>sign in</li>
+          </ul>
+        </span>
+      </h1>
+      <p class="lede">Your Poweur ID is your name, your inbox and your drive — in one open, cryptographic identity. Use it on our servers, your own domain or your own relay, and never ask a big-tech company for permission to exist online again.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="#claim">Claim your ID</a>
+        <a class="btn btn-ghost" href="https://docs.poweur.org">Read the docs</a>
+      </div>
+      <div class="hero-id">
+        <span class="dot"></span>
+        <span class="who">alice<i>.poweur.net</i></span>
+        <span class="tags"><span>verified key</span><span>inbox</span><span>12 GB home</span></span>
+      </div>
+      <div class="hero-shot">
+        <div class="ph ph-hero"><span>PRODUCT SHOT · web app: messages + shared folder (1920×1080)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROTOCOLS ============ -->
+  <div class="strip">
+    <p>Built on proven open standards — not a new silo</p>
+    <div class="marquee"><div class="marquee-track">
+      <span class="chip">DNS</span><span class="chip">HTTPS <em>/.well-known</em></span><span class="chip">Ed25519</span>
+      <span class="chip">X25519</span><span class="chip">ChaCha20-Poly1305</span><span class="chip">Passkeys / WebAuthn</span>
+      <span class="chip">WebDAV</span><span class="chip">OAuth 2.0</span><span class="chip">OpenID Connect</span>
+      <span class="chip">IndieAuth</span><span class="chip">did:web</span><span class="chip">Server-Sent Events</span>
+      <span class="chip">BIP39 recovery</span><span class="chip">MLS <em>planned</em></span><span class="chip">SMTP bridge <em>planned</em></span>
+    </div></div>
+  </div>
+
+  <!-- ============ THREE PRIMITIVES ============ -->
+  <section id="primitives">
+    <div class="wrap primitives">
+      <div class="pmark reveal">
+        <div class="glow"></div>
+        <img src="assets/brand/p-black-glass.svg" alt="The Poweur P: stem, two bowls and a dot">
+        <span class="tag" style="left:0;top:48%">ID · the stem</span>
+        <span class="tag" style="right:0;top:18%">Messaging · upper bowl</span>
+        <span class="tag" style="right:4%;top:72%">Files · lower bowl</span>
+        <span class="tag" style="left:30%;top:6%">the dot in alice.poweur.net</span>
+      </div>
+      <div class="reveal">
+        <div class="eyebrow">Three primitives</div>
+        <h2 class="h2">ID, messaging, data. <span class="muted">Cleverly stitched together.</span></h2>
+        <p class="lede" style="margin-top:18px">Almost everything you do online is someone proving who they are, talking to someone, and working on some shared data. Poweur makes those three things open, interoperable and yours — so you can live most of your online life without renting it from big tech.</p>
+        <div class="prim-list" style="margin-top:32px">
+          <div class="prim"><div class="ph ph-icon">id</div><div>
+            <h3>Poweur ID</h3>
+            <p>A human-readable internet name backed by keys only your devices hold. Bring your own domain or pick a name on a hosted relay.</p>
+            <small>alice.poweur.net · carl.com</small></div></div>
+          <div class="prim"><div class="ph ph-icon">msg</div><div>
+            <h3>Messaging</h3>
+            <p>Signed, end-to-end encrypted messages between any two IDs on any relay — plain chat for people, typed messages for apps and agents.</p>
+            <small>E2EE · groups · receipts · typed</small></div></div>
+          <div class="prim"><div class="ph ph-icon">files</div><div>
+            <h3>Data sharing</h3>
+            <p>Every ID has a syncable home. Share any folder with any other ID, group or agent — with granular, instantly revocable permissions.</p>
+            <small>WebDAV · sync · grants · links</small></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PYRAMID ============ -->
+  <section id="stack" style="padding-top:40px">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <div class="eyebrow">The Poweur stack</div>
+        <h2 class="h2">Small at the top. <span class="violet-text">Limitless at the bottom.</span></h2>
+        <p class="lede">Each layer uses the ones above it. Together they make things possible that none can do alone.</p>
+      </div>
+      <div class="pyramid reveal">
+        <div class="tier t1"><div class="shape">
+          <div class="num">Layer 1</div><h3>ID</h3>
+          <div class="items"><span>Strong cryptography</span><span>Multi-device</span><span>Open source</span></div>
+        </div></div>
+        <div class="tier t2"><div class="shape">
+          <div class="num">Layer 2</div><h3>Messaging</h3>
+          <div class="items"><span>Plain &amp; formatted messages</span><span>Email bridge</span><span>System &amp; protocol transport</span><span>Extensible typed messages for apps</span></div>
+        </div></div>
+        <div class="tier t3"><div class="shape">
+          <div class="num">Layer 3</div><h3>Data sharing</h3>
+          <div class="items"><span>Own your files</span><span>Share with any ID</span><span>Granular permissions</span><span>Co-work with people &amp; agents</span></div>
+        </div></div>
+        <div class="tier t4"><div class="shape">
+          <div class="num">Together they enable</div><h3>Apps without servers</h3>
+          <div class="items"><span>Payments</span><span>Proof of ownership</span><span>Identity proofs</span><span>Signatures</span><span>Poweured stateless apps</span><span>Agents</span><span>Your own website</span></div>
+        </div></div>
+      </div>
+      <p class="pyramid-note">ID also: self-hostable · choose your own domain · any platform (web, iOS, Android, CLI, SDK)</p>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ============ WHY NOT EMAIL / PHONE / BIG TECH ============ -->
+  <section id="why">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Why an open ID</div>
+        <h2 class="h2">Email is from 1971. Phone numbers belong to your carrier. <span class="muted">Your account belongs to them.</span></h2>
+        <p class="lede">We keep patching the same three things — an address people can reach, a login apps can trust, and a place to share files — across a dozen incompatible accounts. Poweur is one identity that does all three, and you can take it with you.</p>
+      </div>
+
+      <div class="compare-wrap reveal">
+        <table class="compare">
+          <thead><tr>
+            <th></th><th class="us">Poweur ID</th><th>Email address</th><th>Phone number</th><th>Big-tech account</th>
+          </tr></thead>
+          <tbody>
+            <tr><td>A name you own and can move</td><td class="us y">✓ your domain</td><td class="p">~ if custom domain</td><td class="n">✕ carrier-owned</td><td class="n">✕ can be banned</td></tr>
+            <tr><td>Cryptographically verifiable sender</td><td class="us y">✓ every message</td><td class="p">~ DKIM, per domain</td><td class="n">✕ spoofable</td><td class="p">~ inside their app</td></tr>
+            <tr><td>End-to-end encrypted by default</td><td class="us y">✓</td><td class="n">✕</td><td class="n">✕ SMS</td><td class="p">~ some apps</td></tr>
+            <tr><td>Spam gate: contacts first, strangers pay a cost</td><td class="us y">✓ proof-of-work</td><td class="n">✕ filters guess</td><td class="n">✕</td><td class="p">~ centralised</td></tr>
+            <tr><td>Share files &amp; live data with anyone</td><td class="us y">✓ any ID, any relay</td><td class="p">~ attachments</td><td class="n">✕</td><td class="p">~ same vendor only</td></tr>
+            <tr><td>Sign in to third-party apps</td><td class="us y">✓ OAuth / OIDC</td><td class="p">~ magic links</td><td class="p">~ SMS codes</td><td class="y">✓ and they watch</td></tr>
+            <tr><td>Apps store data in <em>your</em> home</td><td class="us y">✓ scoped grants</td><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td></tr>
+            <tr><td>Agents &amp; bots as first-class members</td><td class="us y">✓ own IDs</td><td class="p">~</td><td class="n">✕</td><td class="p">~ platform APIs</td></tr>
+            <tr><td>Open source, self-hostable</td><td class="us y">✓</td><td class="y">✓ (painfully)</td><td class="n">✕</td><td class="n">✕</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cards-3">
+        <div class="card reveal"><div class="kicker">vs. walled gardens</div><h3>No landlord for your identity</h3><p>Your ID is a DNS name plus keys you hold. No platform can suspend it, mine it, or hold your contacts and files hostage when you leave.</p></div>
+        <div class="card reveal"><div class="kicker">vs. email</div><h3>Reachable, not just addressable</h3><p>Email delivers text to a mailbox. A Poweur ID also verifies who sent it, shares folders, signs in to apps and speaks structured data that software understands.</p></div>
+        <div class="card reveal"><div class="kicker">vs. phone numbers</div><h3>Private by design</h3><p>Stop handing out a SIM-bound number that leaks your location, invites SIM-swap attacks and gets recycled to a stranger. Share a name instead.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ YOUR NAME, REACHABLE ============ -->
+  <section id="reachable">
+    <div class="wrap split">
+      <div class="reveal">
+        <div class="eyebrow">Your name, reachable</div>
+        <h2 class="h2">Share data, files and messages with anyone who has an ID.</h2>
+        <p class="lede" style="margin-top:18px">Type a name, not a link. Messages and shared folders travel between IDs on any relay — hosted, self-hosted or your company's — and arrive already verified.</p>
+        <ul class="checks">
+          <li>Contact requests and pinned keys: you decide who can reach you</li>
+          <li>Share a folder with a person, a group or an agent; revoke in one click</li>
+          <li>Groups, threads, attachments, read receipts and expiring messages</li>
+          <li>Works across devices: web, iOS, Android, CLI and SDK</li>
+        </ul>
+      </div>
+      <div class="mock reveal">
+        <div class="mock-bar"><span class="lights"><i></i><i></i><i></i></span><span>bob.poweur.net</span><span style="margin-left:auto">🔒 end-to-end encrypted</span></div>
+        <div class="mock-body">
+          <div class="msg in"><small>bob.poweur.net</small>Hey! Ready for the Lisbon trip?</div>
+          <div class="msg out">Almost. I've shared the planning folder with you and Carl.</div>
+          <div class="attach"><div class="ico">📁</div><div><b>/shared/lisbon-2026</b><span>alice → bob, carl.com · can edit</span></div></div>
+          <div class="msg in"><small>carl.com</small>Added flights.pdf 🙌 — my agent booked the table too.</div>
+          <div class="typed"><span class="t">type</span>: "reservation.confirmed"<br><span class="t">from</span>: "concierge.carl.com"<br><span class="t">when</span>: "2026-10-03T20:00+01:00"</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ USE CASES ============ -->
+  <section id="use-cases">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Use cases</div>
+        <h2 class="h2">One ID. <span class="muted">Everything you'd otherwise need five accounts for.</span></h2>
+      </div>
+      <div class="bento">
+        <div class="card c4 reveal"><span class="status live">Available</span><div class="kicker">Sign in</div><h3>Sign in with Poweur — anywhere</h3><p>Stateless challenge-response sign-in, plus a standard OAuth 2.0 / OpenID Connect bridge, so any app that supports "Sign in with…" can accept a Poweur ID. No passwords, no tracking pixels.</p><div class="ph"><span>ILLUSTRATION · sign-in approval on phone</span></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Message</div><h3>Private messaging</h3><p>E2EE chats and groups between IDs on any relay, with contacts-first spam control.</p><div class="ph"><span>ICON · chat</span></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Share data</div><h3>Share with any ID</h3><p>Folders, files and links with read/write grants and instant revocation.</p><div class="ph"><span>ICON · folder share</span></div></div>
+        <div class="card c2 reveal"><span class="status wip">In progress</span><div class="kicker">Collaborate</div><h3>Co-work with people &amp; agents</h3><p>Shared spaces, activity and real-time documents — agents join with their own IDs.</p><div class="ph"><span>ICON · cursors</span></div></div>
+        <div class="card c2 reveal"><span class="status next">Roadmap</span><div class="kicker">Play</div><h3>Multiplayer, no game server</h3><p>A game is a shared document plus a room. Invite friends by ID and play across relays.</p><div class="ph"><span>ICON · game</span></div></div>
+        <div class="card c3 reveal"><span class="status live">Available</span><div class="kicker">Prove ownership</div><h3>Prove it's you — and it's yours</h3><p>Control of a domain, a file, an account or a device, proven with signatures anyone can verify. Projects to <code>did:web</code> for the wider identity ecosystem.</p><div class="ph"><span>ILLUSTRATION · verified badge</span></div></div>
+        <div class="card c3 reveal"><span class="status next">Roadmap</span><div class="kicker">Sign &amp; pay</div><h3>Sign documents, send payment proofs</h3><p>Sign agreements with your ID key, request and prove payments through typed messages, and price your inbox for strangers with pay-to-send.</p><div class="ph"><span>ILLUSTRATION · signed document</span></div></div>
+        <div class="card c2 reveal"><span class="status next">Roadmap</span><div class="kicker">Publish</div><h3>Your website lives in your home</h3><p>Publish a site from your ID's public folder, with a contact form that lands in your inbox.</p><div class="ph"><span>ICON · globe</span></div></div>
+        <div class="card c2 reveal"><span class="status next">Roadmap</span><div class="kicker">Email bridge</div><h3>Talk to the old world</h3><p>Opt into <code>you@poweur.id</code> and read email in a separate tray, filtered by your rules.</p><div class="ph"><span>ICON · envelope</span></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Recover</div><h3>Many devices, one ID</h3><p>Add a phone by scanning a code, remove a lost laptop, restore from a recovery kit.</p><div class="ph"><span>ICON · devices</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ============ APPS ============ -->
+  <section id="apps">
+    <div class="wrap split reverse">
+      <div class="reveal">
+        <div class="eyebrow">Poweured apps</div>
+        <h2 class="h2">An app is just a folder. <span class="muted">Your data stays in yours.</span></h2>
+        <p class="lede" style="margin-top:18px">Because every user already has an identity, an inbox and a drive, an app needs no backend of its own. It signs you in, asks for a scoped grant to <code>/apps/&lt;app&gt;/</code>, keeps state in your home or a shared group folder, and talks to other IDs with typed messages.</p>
+        <ul class="checks">
+          <li>No servers to run, no database to secure, no user table to leak</li>
+          <li>Open data conventions: two apps from different vendors can share one file</li>
+          <li>Uninstall revokes the grant — the data stays with you</li>
+          <li><code>@poweur/client</code> for browser, Node, Bun and Deno</li>
+        </ul>
+        <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
+          <a class="btn btn-primary" href="https://docs.poweur.org/docs/clients/js-sdk">SDK docs</a>
+          <a class="btn btn-ghost" href="https://docs.poweur.org/docs/conventions/app-data">App-data conventions</a>
+        </div>
+      </div>
+      <!-- Illustrative API shape; align with @poweur/client before launch -->
+      <div class="code reveal">
+        <div class="code-tabs"><span class="on">tasks-app.ts</span><span>agent.ts</span><span>app.json</span></div>
+<pre><span class="tok-k">import</span> { PoweurClient } <span class="tok-k">from</span> <span class="tok-s">"@poweur/client"</span>;
+
+<span class="tok-c">// 1. Sign in with the user's ID, ask for a scoped grant</span>
+<span class="tok-k">const</span> me = <span class="tok-k">await</span> PoweurClient.<span class="tok-f">signIn</span>({
+  app: <span class="tok-s">"tasks.example"</span>,
+  grant: <span class="tok-s">"/apps/tasks/"</span>,
+});
+
+<span class="tok-c">// 2. State lives in the user's home, not on our server</span>
+<span class="tok-k">await</span> me.files.<span class="tok-f">put</span>(<span class="tok-s">"/apps/tasks/lisbon.json"</span>, list);
+
+<span class="tok-c">// 3. Share it with a friend on any relay</span>
+<span class="tok-k">await</span> me.shares.<span class="tok-f">grant</span>(<span class="tok-s">"/apps/tasks/lisbon.json"</span>, {
+  to: <span class="tok-s">"carl.com"</span>, access: <span class="tok-s">"write"</span>,
+});
+
+<span class="tok-c">// 4. Tell them — with a typed message their app understands</span>
+<span class="tok-k">await</span> me.<span class="tok-f">send</span>(<span class="tok-s">"carl.com"</span>, {
+  type: <span class="tok-s">"org.poweur.tasks.invite"</span>, path: <span class="tok-s">"/apps/tasks/lisbon.json"</span>,
+});</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AGENTS ============ -->
+  <section id="agents" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <div class="eyebrow">Agents</div>
+        <h2 class="h2">Agents get IDs too.</h2>
+        <p class="lede">An agent with its own Poweur ID can be messaged, trusted, granted a single folder and fired with one click. Messages and shared folders become the neutral handoff layer between people and AI — whatever model or vendor runs it.</p>
+      </div>
+      <div class="cards-3">
+        <div class="card reveal"><div class="ph ph-icon"></div><h3>Accountable</h3><p>Every agent ID names an operator. You see who acts on your data and revoke them instantly.</p></div>
+        <div class="card reveal"><div class="ph ph-icon"></div><h3>Scoped</h3><p>Grant one folder, read-only or read-write, for an hour or forever — never your whole account.</p></div>
+        <div class="card reveal"><div class="ph ph-icon"></div><h3>Interoperable</h3><p>MCP, n8n, LangChain and agent gateways plug in through the same SDK and typed messages.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ============ HOSTING ============ -->
+  <section id="hosting" class="hosting">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Hosting is a choice</div>
+        <h2 class="h2">Start hosted. Bring your domain. <span class="muted">Or run the whole thing.</span></h2>
+        <p class="lede">The same protocol everywhere. Move between options without changing your ID or losing a message.</p>
+      </div>
+      <div class="cards-3">
+        <div class="card reveal"><div class="kicker">Easiest</div><h3>Hosted name</h3><div class="id">alice<i>.poweur.net</i></div><p class="muted" style="margin-top:12px">Pick a name in seconds. Keys are created on your device; the relay never sees them.</p><a class="btn btn-sm btn-ghost" href="https://poweur.net/app/">Claim a name</a></div>
+        <div class="card reveal"><div class="kicker">Your brand</div><h3>Your own domain</h3><div class="id">carl<i>.com</i></div><p class="muted" style="margin-top:12px">Publish one <code>/.well-known</code> file or DNS record and your domain is your ID, on any relay.</p><a class="btn btn-sm btn-ghost" href="https://docs.poweur.org/docs/protocol/web-identity">How it works</a></div>
+        <div class="card reveal"><div class="kicker">Full sovereignty</div><h3>Your own relay</h3><div class="id">relay<i>.yourcompany.com</i></div><p class="muted" style="margin-top:12px">One Go binary or container. Host your team's IDs, messages and files on your own hardware.</p><a class="btn btn-sm btn-ghost" href="https://docs.poweur.org/docs/relay/overview">Self-host guide</a></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STATUS ============ -->
+  <section id="status" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="eyebrow">Honest status</div>
+        <h2 class="h2">The substrate works today.</h2>
+        <p class="lede">Poweur is pre-1.0 and built in the open. Here's what ships, what's in flight and what's next.</p>
+      </div>
+      <div class="roadmap">
+        <div class="card reveal"><h3><span class="status live" style="position:static">Shipped</span></h3><ul>
+          <li>Web &amp; DNS identity resolution, hosted names</li><li>E2EE relay-to-relay messaging, groups, receipts</li>
+          <li>Contacts, blocking, proof-of-work anti-spam</li><li>WebDAV home, sync, sharing, groups, links</li>
+          <li>Sign in with Poweur + OAuth/OIDC bridge</li><li>Multi-device, recovery kits, device enrollment</li>
+          <li>Web app, Go CLI, TypeScript SDK</li></ul></div>
+        <div class="card reveal"><h3><span class="status wip" style="position:static">In progress</span></h3><ul>
+          <li>Desktop &amp; tablet web layout</li><li>iOS &amp; Android apps (Capacitor)</li>
+          <li>File requests and share offers</li><li>npm release of <code>@poweur/client</code></li>
+          <li>More live OAuth integrations</li></ul></div>
+        <div class="card reveal"><h3><span class="status next" style="position:static">Next</span></h3><ul>
+          <li>Identity websites &amp; contact forms</li><li>Email bridge (<code>@poweur.id</code>)</li>
+          <li>Spaces &amp; real-time collaboration</li><li>Poweur Apps platform &amp; game kit</li>
+          <li>Pay-to-send &amp; payment integrations</li><li>Storage v2 with relay-blind encryption</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BLOG ============ -->
+  <section id="blog" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal" style="display:flex;justify-content:space-between;align-items:end;gap:24px;max-width:none;flex-wrap:wrap">
+        <div><div class="eyebrow">From the blog</div><h2 class="h2">Notes from the build.</h2></div>
+        <a class="btn btn-ghost" href="blog/index.html">All posts</a>
+      </div>
+      <div class="posts">
+        <a class="post reveal" href="blog/index.html"><div class="ph"><span>COVER</span></div><div class="meta">Manifesto · 6 min</div><h3>It's just ID, messaging and files. It always has been.</h3><p>Why three open primitives beat a hundred closed apps.</p></a>
+        <a class="post reveal" href="blog/index.html"><div class="ph"><span>COVER</span></div><div class="meta">Engineering · 9 min</div><h3>Your domain is your identity: how Poweur resolves an ID</h3><p>/.well-known first, DNS as a fallback, and why conflicts fail closed.</p></a>
+        <a class="post reveal" href="blog/index.html"><div class="ph"><span>COVER</span></div><div class="meta">Product · 5 min</div><h3>Apps without servers: ordering pizza over typed messages</h3><p>A walkthrough of a four-message commerce flow between two IDs.</p></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section id="claim" style="padding-top:0">
+    <div class="wrap">
+      <div class="cta-box reveal">
+        <h2 class="h2">Claim your name on the open internet.</h2>
+        <p class="lede">Free hosted IDs while we're in beta. Bring your own domain any time.</p>
+        <form class="claim" action="https://poweur.net/app/" method="get" onsubmit="return false">
+          <input aria-label="Choose a name" placeholder="yourname" autocomplete="off"><span>.poweur.net</span>
+          <button class="btn btn-primary" type="button" onclick="location.href='https://poweur.net/app/'">Claim</button>
+        </form>
+        <div class="ctas">
+          <a class="btn btn-ghost" href="https://github.com/romanmandryk/poweur">★ Star on GitHub</a>
+          <a class="btn btn-ghost" href="architecture.html">See the architecture</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>
