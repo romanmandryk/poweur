@@ -32,7 +32,7 @@
     <div class="wrap">
       <div class="section-head reveal">
         <h2 class="h2">The network at a glance</h2>
-        <p class="lede">Alice and Bob use the hosted relay at poweur.net. Carl runs his own relay for <code>carl.com</code>. Files can live on the relay's disk or in separate cloud object storage.</p>
+        <p class="lede">Alice and Bob use the hosted relay at poweur.net. Carl runs his own relay for <code>carl.example.com</code>. Files can live on the relay's disk or in separate cloud object storage.</p>
       </div>
       <figure class="diagram reveal" style="margin:0">
         <svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif" role="img" aria-label="Topology: Alice and Bob on a shared relay, Carl on a self-hosted relay, DNS resolution and cloud storage">
@@ -82,18 +82,18 @@
 
           <!-- Carl devices -->
           <rect x="744" y="96" width="232" height="112" rx="16" fill="rgba(5,154,148,.14)" stroke="#53B8B2" stroke-opacity=".6"/>
-          <text x="764" y="126" fill="#fff" font-size="15" font-weight="600">carl.com</text>
+          <text x="764" y="126" fill="#fff" font-size="15" font-weight="600">carl.example.com</text>
           <text x="764" y="152" fill="#A7E9E4" font-size="12.5">Carl's laptop · shop tablet</text>
           <text x="764" y="174" fill="#A4A4A8" font-size="12">+ order agent</text>
-          <text x="764" y="194" fill="#6C6B6F" font-size="11" font-family="JetBrains Mono, monospace">orders.carl.com</text>
+          <text x="764" y="194" fill="#6C6B6F" font-size="11" font-family="JetBrains Mono, monospace">orders.carl.example.com</text>
 
           <!-- Carl relay -->
           <rect x="744" y="262" width="232" height="140" rx="18" fill="rgba(5,154,148,.14)" stroke="#53B8B2" stroke-opacity=".75"/>
-          <text x="764" y="292" fill="#fff" font-size="15" font-weight="600">relay.carl.com</text>
-          <text x="956" y="292" text-anchor="end" fill="#84D3CE" font-size="10.5" font-family="JetBrains Mono, monospace">SELF-HOSTED</text>
+          <text x="764" y="292" fill="#fff" font-size="15" font-weight="600">relay.carl.example.com</text>
+          <text x="976" y="252" text-anchor="end" fill="#84D3CE" font-size="10.5" font-family="JetBrains Mono, monospace">SELF-HOSTED</text>
           <text x="764" y="320" fill="#A7E9E4" font-size="12.5">one Go binary / container</text>
           <text x="764" y="344" fill="#A4A4A8" font-size="12">inbox · files · shares</text>
-          <text x="764" y="366" fill="#A4A4A8" font-size="12">for *.carl.com IDs</text>
+          <text x="764" y="366" fill="#A4A4A8" font-size="12">for *.carl.example.com IDs</text>
           <text x="764" y="388" fill="#6C6B6F" font-size="11" font-family="JetBrains Mono, monospace">own hardware / EU cloud</text>
 
           <!-- Storage -->
@@ -134,7 +134,7 @@
       <div class="diagram-caption">
         <div><b>IDs are DNS names</b>Resolved web-first from <code>/.well-known/poweur/id.json</code>, DNS TXT as fallback. Conflicts fail closed.</div>
         <div><b>Relays hold no private keys</b>They verify signatures, enforce inbox policy, spool and push. Message bodies are end-to-end encrypted.</div>
-        <div><b>Federation is the default</b>relay.poweur.net and relay.carl.com speak the same protocol; neither needs permission from the other.</div>
+        <div><b>Federation is the default</b>relay.poweur.net and relay.carl.example.com speak the same protocol; neither needs permission from the other.</div>
         <div><b>Move freely</b>Export an ID, point the name at a new relay, keep every contact.</div>
       </div>
     </div>
@@ -155,12 +155,12 @@
   "lanes": [
     {"id":"a","title":"Alice's phone","sub":"alice.poweur.net","tone":"violet"},
     {"id":"r1","title":"relay.poweur.net","sub":"shared relay","tone":"violet"},
-    {"id":"dns","title":"carl.com","sub":"/.well-known","tone":"ink"},
-    {"id":"r2","title":"relay.carl.com","sub":"self-hosted","tone":"teal"},
-    {"id":"c","title":"Carl's laptop","sub":"carl.com","tone":"teal"}
+    {"id":"dns","title":"carl.example.com","sub":"/.well-known","tone":"ink"},
+    {"id":"r2","title":"relay.carl.example.com","sub":"self-hosted","tone":"teal"},
+    {"id":"c","title":"Carl's laptop","sub":"carl.example.com","tone":"teal"}
   ],
   "steps": [
-    {"from":"a","to":"dns","label":"Resolve carl.com","sub":"GET id.json → keys + relay","tone":"ink","dashed":true},
+    {"from":"a","to":"dns","label":"Resolve carl.example.com","sub":"GET id.json → keys + relay","tone":"ink","dashed":true},
     {"from":"a","to":"a","label":"Encrypt + sign","sub":"X25519 · Ed25519"},
     {"from":"a","to":"r1","label":"Send envelope","sub":"POST /messages"},
     {"from":"r1","to":"r2","label":"Forward","sub":"relay-to-relay, signed","tone":"teal"},
@@ -171,7 +171,7 @@
   ] }
       </script></figure>
       <ol class="steps">
-        <li>Alice's app looks up <code>carl.com</code>'s public keys and home relay over HTTPS — the same way a browser finds a website.</li>
+        <li>Alice's app looks up <code>carl.example.com</code>'s public keys and home relay over HTTPS — the same way a browser finds a website.</li>
         <li>The message is encrypted to Carl's key and signed with Alice's, on her device.</li>
         <li>Carl's relay checks the signature and Carl's inbox policy: contacts go straight in, strangers need a request or a proof-of-work stamp.</li>
       </ol>
@@ -184,20 +184,20 @@
       <div class="section-head reveal">
         <div class="eyebrow">Flow 2 · typed messages</div>
         <h2 class="h2">Ordering a pepperoni pizza — no platform in between</h2>
-        <p class="lede">Alice asks her agent (or taps in a Poweured pizza app). Carl's pizzeria at <code>carl.com</code> runs an order agent. Four typed messages replace a delivery platform, its fees and its tracking.</p>
+        <p class="lede">Alice asks her agent (or taps in a Poweured pizza app). Carl's pizzeria at <code>carl.example.com</code> runs an order agent. Four typed messages replace a delivery platform, its fees and its tracking.</p>
       </div>
       <figure class="diagram reveal" style="margin:0" data-seq><script type="application/json">
 { "title": "Pizza order sequence",
   "lanes": [
     {"id":"u","title":"Alice","sub":"UI · voice · chat","tone":"violet"},
     {"id":"ag","title":"Pizza app / agent","sub":"acts as alice.poweur.net","tone":"amber"},
-    {"id":"rel","title":"Relays","sub":"poweur.net ⇄ carl.com","tone":"ink"},
-    {"id":"shop","title":"Order agent","sub":"orders.carl.com","tone":"teal"},
-    {"id":"k","title":"Kitchen tablet","sub":"carl.com","tone":"teal"}
+    {"id":"rel","title":"Relays","sub":"relay ⇄ relay","tone":"ink"},
+    {"id":"shop","title":"Order agent","sub":"orders.carl.example.com","tone":"teal"},
+    {"id":"k","title":"Kitchen tablet","sub":"carl.example.com","tone":"teal"}
   ],
   "steps": [
     {"from":"u","to":"ag","label":"“Large pepperoni, usual place”","tone":"violet"},
-    {"from":"ag","to":"shop","label":"Read public menu","sub":"carl.com/public/menu.json","tone":"ink","dashed":true},
+    {"from":"ag","to":"shop","label":"Read public menu","sub":"carl.example.com/public/menu.json","tone":"ink","dashed":true},
     {"note":"Alice confirms: pepperoni L · €14.50 · deliver to home","over":["u","ag"],"tone":"violet"},
     {"from":"ag","to":"shop","label":"① order.request →","sub":"{item: pepperoni, size: L}","tone":"amber"},
     {"from":"shop","to":"ag","label":"← ② payment.request","sub":"{pay_to: IBAN X, ref: N, €14.50}","tone":"teal"},
@@ -216,7 +216,7 @@
         <div><b>④ order.confirmed</b><code>{"type":"food.order.confirmed","order":184,"eta_min":35}</code></div>
       </div>
       <ol class="steps">
-        <li>Every message is signed: Carl knows the order really came from <code>alice.poweur.net</code>, Alice knows the payment details really came from <code>carl.com</code> — no phishing invoice can slip in.</li>
+        <li>Every message is signed: Carl knows the order really came from <code>alice.poweur.net</code>, Alice knows the payment details really came from <code>carl.example.com</code> — no phishing invoice can slip in.</li>
         <li>A human stays in the loop where money moves. The agent drafts; Alice approves.</li>
         <li>No server of the app's own: the order history lives in Alice's home, the ticket in Carl's. <em class="muted">Message types shown are illustrative; payment conventions are on the roadmap.</em></li>
       </ol>
@@ -271,11 +271,11 @@
     {"id":"a","title":"Alice","sub":"alice.poweur.net","tone":"violet"},
     {"id":"r","title":"Alice's relay","sub":"her home","tone":"violet"},
     {"id":"b","title":"Bob","sub":"bob.poweur.net","tone":"violet"},
-    {"id":"g","title":"Research agent","sub":"agent.carl.com","tone":"teal"}
+    {"id":"g","title":"Research agent","sub":"agent.carl.example.com","tone":"teal"}
   ],
   "steps": [
-    {"from":"a","to":"r","label":"Sign grant","sub":"/shared/lisbon → bob: write"},
-    {"from":"a","to":"r","label":"Sign grant","sub":"/shared/lisbon → agent: read, 7d","tone":"teal"},
+    {"from":"a","to":"r","label":"Sign grant","sub":"/shared/trip-2026 → bob: write"},
+    {"from":"a","to":"r","label":"Sign grant","sub":"/shared/trip-2026 → agent: read, 7d","tone":"teal"},
     {"from":"a","to":"b","label":"share.offer message","sub":"typed, E2EE"},
     {"from":"b","to":"r","label":"Mount + write flights.pdf","sub":"WebDAV, grant checked"},
     {"from":"r","to":"g","label":"change event","sub":"journal cursor","tone":"teal","dashed":true},

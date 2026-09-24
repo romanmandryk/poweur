@@ -10,17 +10,37 @@ python3 -m http.server 4321 --directory apps/site
 
 | File | What |
 |------|------|
-| `index.html` | Landing page: hero, protocols strip, three primitives, pyramid, comparison, use cases, apps, agents, hosting, status, blog teaser, CTA |
+| `index.html` | Landing page: hero, protocols strip, three primitives, pyramid, comparison, use cases, apps, agents, hosting, CTA |
 | `architecture.html` | Topology diagram + four flows (hello, pizza order, device enrollment, folder sharing) |
-| `blog/index.html` | Blog index (placeholder posts) |
 | `assets/site.js` | Shared nav + footer (edit links in `LINKS`), scroll reveals |
 | `assets/seq.js` | Renders sequence diagrams from inline JSON (`<figure data-seq>`) |
 | `assets/brand/` | Copied from `design/` — regenerate there, not here |
+| `product-shot.html` | 1920×1080 canvas of the hero composition, for social/press |
+| `assets/shots/` | Real web-app screenshots + exported `product-shot-1920x1080.png` |
 | `social/memes.md` | Social copy and meme drafts (not linked from the site) |
 
 ## Placeholders to replace before launch
 
-- Anything with class `ph` (striped box with a label): product shots, icons, illustrations, blog covers.
+- Anything with class `ph` (striped box with a label): the icons in the primitives and agents sections.
+
+## Regenerating the screenshots
+
+The screens are the real web app, driven by Playwright against a local relay with
+`alice.poweur.net`, `bob.poweur.net` and `carl.example.com` (see
+`apps/web/test/shots/product-shots.spec.js`). DNS-over-HTTPS is blocked in that browser so the
+real poweur.net records don't interfere.
+
+```bash
+pnpm web
+cd apps/web && SHOTS_DIR=../site/assets/shots npx playwright test -c playwright.shots.config.js
+python3 ../site/scripts/crop-cards.py   # use-case card crops
+# with the site served on :4321:
+npx playwright screenshot --viewport-size=1920,1080 --wait-for-timeout=1500 \
+  http://localhost:4321/product-shot.html ../site/assets/shots/product-shot-1920x1080.png
+```
+
+Use-case cards: messaging, sharing and devices are real crops (`card-*-crop.png`); the rest are small
+HTML scenes (`.art-*` in `site.css`) styled like the app. The terminal window is HTML text shaped like the `poweur` CLI's output, not a capture.
 - Hero video: drop an original or licensed loop at `assets/hero.mp4` and uncomment the `<video>` in `index.html`.
 - X / LinkedIn links in `assets/site.js` (`#` until the accounts exist).
 - The SDK snippet in the Apps section shows the intended API shape, not the current `@poweur/client` surface.

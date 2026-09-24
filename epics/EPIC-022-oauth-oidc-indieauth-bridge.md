@@ -410,7 +410,7 @@ browser/QR login is unchanged.
       route, Prometheus scrape + `blackbox-oauth` probe, Grafana alerts (`oauth-down`,
       `oauth-code-reuse`, `oauth-server-errors`), daily `poweur-oauth backup` cron; the relay
       advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/OPS.md`
-- [ ] Contacts on `/abuse` and `/security` — wait on the email bridge (`<name>@poweur.id`
+- [ ] Contacts on `/abuse` and `/security` — wait on the email bridge (`<name>@poweur.net`
       mailboxes)
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)
 

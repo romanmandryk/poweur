@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Poweur Product Shot</title>
+  <meta name="robots" content="noindex">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/site.css">
+  <style>
+    /* 1920×1080 canvas for social/press. Regenerate:
+       npx playwright screenshot --viewport-size=1920,1080 http://localhost:4321/product-shot.html assets/shots/product-shot-1920x1080.png */
+    html, body { width: 1920px; height: 1080px; overflow: hidden; }
+    body { display: grid; place-items: center;
+      background: radial-gradient(70% 80% at 50% 10%, #2A3681 0%, #1B1147 45%, var(--bg) 85%); }
+    .showcase { width: 1480px; margin-top: 30px; }
+    .showcase::before { opacity: .9; }
+  </style>
+</head>
+<body>
+        <div class="showcase hero-layout">
+          <div class="dev-browser">
+            <div class="bar"><i></i><i></i><i></i><div class="url">alice.poweur.net/app</div></div>
+            <img src="assets/shots/desktop-thread-bob.png" alt="Poweur web app: Alice's inbox and her conversation with Bob" loading="eager">
+          </div>
+          <div class="dev-term" aria-label="Carl sending a message from the Poweur CLI">
+            <div class="bar"><i></i><i></i><i></i><b>carl@shop — poweur</b></div>
+<pre><span class="pr">~ $</span> <span class="cm">poweur identity lookup alice.poweur.net</span>
+<span class="k">identity</span>  alice.poweur.net
+<span class="k">source  </span>  both <span class="k">(web + dns)</span>
+<span class="k">relay   </span>  relay.poweur.net
+<span class="k">key     </span>  <span class="v">ed25519:3xQmR7…Kc9v</span>
+<span class="pr">~ $</span> <span class="cm">poweur send alice.poweur.net "Dinner on Friday is booked 🍕"</span>
+<span class="ok">✓</span> encrypted · signed · delivered <span class="k">(relay.poweur.net)</span>
+<span class="pr">~ $</span> <span class="caret"></span></pre>
+          </div>
+          <div class="dev-phone">
+            <div class="screen">
+              <div class="sbar"><span>9:41</span><span><svg viewBox="0 0 68 12" aria-hidden="true"><g fill="#fff"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/><path d="M30 3.2a10 10 0 0 1 13 0l-1.4 1.5a8 8 0 0 0-10.2 0zM32.6 6a6 6 0 0 1 7.8 0L39 7.5a4 4 0 0 0-5 0zM36.5 11.5 34.6 9.4a2.8 2.8 0 0 1 3.8 0z"/><rect x="47" y="1" width="18" height="10" rx="3" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="49" y="3" width="13" height="6" rx="1.5"/><rect x="66" y="4" width="1.6" height="4" rx=".8" fill-opacity=".5"/></g></svg></span></div>
+              <img src="assets/shots/phone-bob-thread.png" alt="Bob's phone: the same conversation with Alice">
+            </div>
+          </div>
+        </div>
+</body>
+</html>

@@ -27,7 +27,6 @@ if (nav) {
         ${navLink("index.html#use-cases", "Use cases")}
         ${navLink("index.html#apps", "Apps")}
         ${navLink("architecture.html", "Architecture")}
-        ${navLink("blog/index.html", "Blog")}
         ${navLink(LINKS.docs, "Docs", 'class="ext" target="_blank" rel="noopener"')}
         ${navLink(LINKS.github, "GitHub", 'class="ext" target="_blank" rel="noopener"')}
       </ul>
@@ -71,7 +70,6 @@ if (footer) {
           <li><a href="${LINKS.github}">GitHub</a></li>
           <li><a href="${LINKS.github}/tree/master/epics">Roadmap</a></li>
           <li><a href="${LINKS.github}/blob/master/CONTRIBUTING.md">Contributing</a></li>
-          <li><a href="${root}blog/index.html">Blog</a></li>
         </ul></div>
         <div><h4>Community</h4><ul>
           <li><a href="${LINKS.x}">X / Twitter<span class="soon">soon</span></a></li>
