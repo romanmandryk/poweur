@@ -96,6 +96,9 @@ jobs:
           git reset --hard "$RELEASE_SHA"
           export RELAY_IMAGE="$RELEASE_IMAGE"
           export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
+          # Caddy bind-mounts the website/docs root (deploy-web.yml fills it). Create it
+          # as the deploy user first, or Docker creates it root-owned and deploy-web cannot write.
+          mkdir -p /opt/apps/poweur-web
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
             exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true

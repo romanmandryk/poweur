@@ -102,3 +102,19 @@ test('caddy config is mounted as a directory so deploy reloads see new files', (
   assert.match(compose, /- \.\/caddy:\/etc\/caddy:ro/);
   assert.doesNotMatch(compose, /\.\/caddy\/Caddyfile:/);
 });
+
+test('website (with docs under /docs) is static files outside the relay checkout, served by Caddy', () => {
+  const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
+  assert.match(caddy, /tmpwww\.poweur\.org[\s\S]*?root \* \/srv\/web\/www/);
+  assert.match(caddy, /redir \/docs \/docs\/ 308/);
+  assert.doesNotMatch(caddy, /tmpdocs/);
+  const compose = readFileSync(new URL('../infra/docker-compose.yml', import.meta.url), 'utf8');
+  assert.match(compose, /\/opt\/apps\/poweur-web\}:\/srv\/web:ro/);
+  const deploy = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  assert.match(deploy, /mkdir -p \/opt\/apps\/poweur-web/);
+  const web = readFileSync(new URL('../../.github/workflows/deploy-web.yml', import.meta.url), 'utf8');
+  assert.match(web, /group: poweur-web-deploy/);
+  assert.match(web, /--exclude=\.\/social/);
+  assert.match(web, /cp -R apps\/docs\/build out\/docs/);
+  assert.doesNotMatch(web, /bash -s <</);
+});

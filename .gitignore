@@ -73,3 +73,6 @@ apps/docs/.docusaurus/
 .deploy.lock
 .smoke/
 
+
+# Local copy of the docs build for previewing the site (deploy-web.yml assembles it in CI)
+apps/site/docs/

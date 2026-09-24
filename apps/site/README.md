@@ -1,6 +1,8 @@
 # poweur.org — marketing site
 
-Static HTML/CSS/JS, no build step. Deploy the folder as-is to any static host.
+Static HTML/CSS/JS, no build step. In production the docs (`apps/docs`) are built into this
+tree at `/docs` by `.github/workflows/deploy-web.yml` (see `deploy/OPS.md`); locally, `/docs`
+links 404 unless you copy `apps/docs/build` to `apps/site/docs` (gitignore it).
 
 ```bash
 python3 -m http.server 4321 --directory apps/site

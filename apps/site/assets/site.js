@@ -1,6 +1,6 @@
 // Shared nav + footer, scroll reveals. No build step: every page includes this file.
 const LINKS = {
-  docs: "https://docs.poweur.org",
+  docs: "/docs", // the Docusaurus build, served under the website (apps/docs, baseUrl /docs/)
   github: "https://github.com/romanmandryk/poweur",
   app: "https://poweur.net/app/",
   x: "#", // not online yet
@@ -62,9 +62,9 @@ if (footer) {
         <div><h4>Developers</h4><ul>
           <li><a href="${LINKS.docs}">Documentation</a></li>
           <li><a href="${root}architecture.html">Architecture</a></li>
-          <li><a href="${LINKS.docs}/docs/clients/js-sdk">TypeScript SDK</a></li>
-          <li><a href="${LINKS.docs}/docs/clients/cli-reference">CLI</a></li>
-          <li><a href="${LINKS.docs}/docs/auth/add-sign-in">Sign in with Poweur</a></li>
+          <li><a href="${LINKS.docs}/clients/js-sdk">TypeScript SDK</a></li>
+          <li><a href="${LINKS.docs}/clients/cli-reference">CLI</a></li>
+          <li><a href="${LINKS.docs}/auth/add-sign-in">Sign in with Poweur</a></li>
         </ul></div>
         <div><h4>Project</h4><ul>
           <li><a href="${LINKS.github}">GitHub</a></li>

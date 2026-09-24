@@ -61,6 +61,12 @@ type sessionInfo struct {
 
 // writePage answers with index.html carrying p.
 func writePage(w http.ResponseWriter, status int, p pagePayload) error {
+	return writePageWithHead(w, status, p, "")
+}
+
+// writePageWithHead is writePage with trusted markup (a constant tag, never
+// page data) added at the end of <head>.
+func writePageWithHead(w http.ResponseWriter, status int, p pagePayload, head string) error {
 	raw, err := json.Marshal(p) // escapes <, > and &: no way out of the script element
 	if err != nil {
 		return err
@@ -72,6 +78,9 @@ func writePage(w http.ResponseWriter, status int, p pagePayload) error {
 		title = p.Title + " · " + p.Service.Name
 	}
 	doc = strings.Replace(doc, titleTag, "<title>"+html.EscapeString(title)+"</title>", 1)
+	if head != "" {
+		doc = strings.Replace(doc, "</head>", head+"</head>", 1)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)

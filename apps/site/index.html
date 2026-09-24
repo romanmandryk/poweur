@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Poweur — One open ID</title>
+  <title>Poweur — Open-source ID, messaging and data sharing for an open internet</title>
   <meta name="description" content="Poweur is an open-source identity, messaging and data-sharing layer. One ID to sign in, message, share, collaborate, play, prove and sign — on your domain or ours.">
-  <meta property="og:title" content="Poweur — One open ID">
+  <meta property="og:title" content="Poweur — Open-source ID, messaging and data sharing for an open internet">
   <meta property="og:description" content="Identity, messaging and data sharing. Three open primitives, endless apps, no walled gardens.">
   <meta property="og:image" content="assets/brand/og-image.png">
   <meta name="theme-color" content="#07060B">
@@ -15,6 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/betterstack.js"></script>
 </head>
 <body>
 <header id="nav"></header>
@@ -44,7 +45,7 @@
       <p class="lede">Your Poweur ID is your name, your inbox and your drive — in one open, cryptographic identity. Use it on our servers, your own domain or your own relay, and never ask a big-tech company for permission to exist online again.</p>
       <div class="ctas">
         <a class="btn btn-primary" href="#claim">Claim your ID</a>
-        <a class="btn btn-ghost" href="https://docs.poweur.org">Read the docs</a>
+        <a class="btn btn-ghost" href="/docs/">Read the docs</a>
         <a class="btn btn-ghost" href="https://github.com/romanmandryk/poweur">★ Star on GitHub</a>
       </div>
       <div class="hero-id">
@@ -283,8 +284,8 @@
           <li><code>@poweur/client</code> for browser, Node, Bun and Deno</li>
         </ul>
         <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
-          <a class="btn btn-primary" href="https://docs.poweur.org/docs/clients/js-sdk">SDK docs</a>
-          <a class="btn btn-ghost" href="https://docs.poweur.org/docs/conventions/app-data">App-data conventions</a>
+          <a class="btn btn-primary" href="/docs/clients/js-sdk">SDK docs</a>
+          <a class="btn btn-ghost" href="/docs/conventions/app-data">App-data conventions</a>
         </div>
       </div>
       <!-- Illustrative API shape; align with @poweur/client before launch -->
@@ -342,8 +343,8 @@
       </div>
       <div class="cards-3">
         <div class="card reveal"><div class="kicker">Easiest</div><h3>Hosted name</h3><div class="id">alice<i>.poweur.net</i></div><p class="muted" style="margin-top:12px">Pick a name in seconds. Keys are created on your device; the relay never sees them.</p><a class="btn btn-sm btn-ghost" href="https://poweur.net/app/">Claim a name</a></div>
-        <div class="card reveal"><div class="kicker">Your brand</div><h3>Your own domain</h3><div class="id">carl<i>.example.com</i></div><p class="muted" style="margin-top:12px">Publish one <code>/.well-known</code> file or DNS record and your domain is your ID, on any relay.</p><a class="btn btn-sm btn-ghost" href="https://docs.poweur.org/docs/protocol/web-identity">How it works</a></div>
-        <div class="card reveal"><div class="kicker">Full sovereignty</div><h3>Your own relay</h3><div class="id">relay<i>.yourcompany.com</i></div><p class="muted" style="margin-top:12px">One Go binary or container. Host your team's IDs, messages and files on your own hardware.</p><a class="btn btn-sm btn-ghost" href="https://docs.poweur.org/docs/relay/overview">Self-host guide</a></div>
+        <div class="card reveal"><div class="kicker">Your brand</div><h3>Your own domain</h3><div class="id">carl<i>.example.com</i></div><p class="muted" style="margin-top:12px">Publish one <code>/.well-known</code> file or DNS record and your domain is your ID, on any relay.</p><a class="btn btn-sm btn-ghost" href="/docs/protocol/web-identity">How it works</a></div>
+        <div class="card reveal"><div class="kicker">Full sovereignty</div><h3>Your own relay</h3><div class="id">relay<i>.yourcompany.com</i></div><p class="muted" style="margin-top:12px">One Go binary or container. Host your team's IDs, messages and files on your own hardware.</p><a class="btn btn-sm btn-ghost" href="/docs/relay/overview">Self-host guide</a></div>
       </div>
     </div>
   </section>

@@ -38,6 +38,7 @@ repo root. [`compose.example.yml`](compose.example.yml) runs it beside a relay.
 | `OAUTH_DEFAULT_SIGNER` | — | Web signer offered when an identity advertises none. |
 | `OAUTH_LAUNCHER_URL` | `https://poweur.net` | Where the sign-in page sends visitors without a Poweur ID to create one (a relay serving the web app). The page checks name availability there from the browser. `none` hides the offer. |
 | `OAUTH_LAUNCHER_DOMAIN` | launcher host without `id.` | Hosted domain new names are created under (`alice.<domain>`). |
+| `OAUTH_ANALYTICS_TOKEN` | — | Better Stack web-analytics token. Loads their script on the public information pages (home, privacy, security, abuse) only, never on sign-in, consent, account or developer pages, and widens the CSP on those pages alone. |
 | `OAUTH_SUBJECT_TYPE` | `pairwise` | `public` makes `sub` the Poweur ID itself. |
 | `OAUTH_CLIENT_REGISTRATION` | `open` | Who may register applications at `/developers`: `open` (any signed-in Poweur ID), `allowlist`, or `closed` for a bridge that serves only the operator's own (static) clients. Consent pages name who registered an application and that nobody reviewed it; `clients suspend` stops one at once. |
 | `OAUTH_REGISTRATION_ALLOWLIST` | — | CSV of IDs or `*.domain` suffixes for `allowlist`. |

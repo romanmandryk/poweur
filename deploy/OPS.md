@@ -85,6 +85,18 @@ Back up `poweur_poweur_data`, `infra_postgres_data`, `infra_grafana_data`, `infr
 
 To move observability, copy only infra volumes/configuration/secrets to the new VM, configure ingest DNS/TLS, and change the relay endpoint to HTTPS. Do not copy or mount relay `POWEUR_DATA` into the analytics stack. Keep the HMAC key on the relay stable if you want historical hashed actors to stay linkable; rotating it intentionally starts new pseudonyms. Keep the Grafana DB credentials consistent when moving its database.
 
+## Website and docs (`tmpwww.poweur.org`, docs at `/docs`)
+
+The poweur.org website (`apps/site`, plain static files) and the docs (`apps/docs`, Docusaurus with `baseUrl: /docs/`) are one static tree served by infra Caddy straight from disk: `/opt/apps/poweur-web/www`, bind-mounted read-only at `/srv/web`, with the docs in its `docs/` folder. The directory sits outside the relay checkout, so the relay deploy's `git reset --hard` never touches it. The host is temporary while the site is new, so it answers with `X-Robots-Tag: noindex`. Unknown site paths redirect to `/`; unknown `/docs/` paths get the docs' own 404 page.
+
+**Deploys** run from `.github/workflows/deploy-web.yml` when `apps/site/**` or `apps/docs/**` change on `master` (or on manual dispatch): build the docs with `SITE_URL=https://tmpwww.poweur.org`, copy the site without `social/`, `scripts/` and `README.md`, add the docs as `docs/`, copy the tree to the VM, unpack it beside the live one and swap it in with a rename, then fetch `/` and `/docs/clients/js-sdk` through Cloudflare. The Caddy route and the `/srv/web` mount ship with the relay's Deploy, like every other Caddy change; that deploy also creates `/opt/apps/poweur-web` as `poweur` so Docker does not create it root-owned.
+
+**DNS.** Add a proxied Cloudflare record `tmpwww.poweur.org` pointing at the VM (A record, or a CNAME to `oauth.poweur.org`). poweur.org is in Full TLS mode, so Caddy must hold a certificate for the name; it obtains one on first request once DNS points here. Until then Cloudflare shows 525.
+
+**Analytics.** The site and the docs load Better Stack web analytics (`apps/site/assets/betterstack.js`, `apps/docs/static/js/betterstack.js`; skipped on localhost). The OAuth bridge loads it on its public information pages only, when `OAUTH_ANALYTICS_TOKEN` is set (see the bridge section).
+
+**Moving to the real name** (`poweur.org`, with `www.poweur.org` redirecting to it): add those names to the Caddy site block, drop the `X-Robots-Tag` header, and set `SITE_URL` in `deploy-web.yml` to `https://poweur.org`.
+
 ## OAuth/OIDC bridge (`oauth.poweur.org`)
 
 The bridge (`apps/oauth`, EPIC-022) runs on the same VM as its own Compose project, `poweur-oauth`, from `/opt/apps/poweur-oauth` — a directory of its own, so the relay deploy's `git reset --hard` of `/opt/apps/poweur` never touches it. Caddy routes `oauth.poweur.org` (HTTP and HTTPS, like Grafana) to `poweur-oauth:8090` on `infra_net`; Prometheus scrapes `poweur-oauth:9464` and probes `https://oauth.poweur.org/health` as `blackbox-oauth`; Grafana alerts `oauth-down`, `oauth-code-reuse` and `oauth-server-errors`.
@@ -98,6 +110,7 @@ The bridge (`apps/oauth`, EPIC-022) runs on the same VM as its own Compose proje
 | `OAUTH_KEY_ENCRYPTION_KEY` | 32 bytes, base64 (`poweur-oauth gen-key`). Seals the signing keys. **Lose it and the bridge cannot sign; every application must be reconfigured.** |
 | `OAUTH_CLIENT_REGISTRATION`, `OAUTH_REGISTRATION_ALLOWLIST` | Optional. Registration is `open` (any Poweur ID) unless set to `allowlist` (with a CSV of IDs or `*.domain`) or `closed`. |
 | `OAUTH_ABUSE_CONTACT`, `OAUTH_SECURITY_CONTACT` | Published on `/abuse`, `/privacy`, `/security`. |
+| `OAUTH_ANALYTICS_TOKEN` | Set in the compose file (not a secret). Better Stack web analytics on the public information pages only; sign-in, consent, account and developer pages never load it. |
 
 After editing it: `cd /opt/apps/poweur-oauth && OAUTH_IMAGE=$(docker inspect -f '{{.Config.Image}}' poweur-oauth) docker compose -p poweur-oauth up -d`.
 

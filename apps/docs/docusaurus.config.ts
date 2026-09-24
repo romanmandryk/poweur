@@ -2,14 +2,17 @@ import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
+const siteUrl = process.env.SITE_URL || 'https://poweur.org';
+
 const config: Config = {
   title: 'Poweur ID Protocol',
   tagline: 'Open, DNS-native identity and messaging protocol',
   favicon: 'img/favicon.ico',
 
-  // Production URL — deploy standalone
-  url: 'https://docs.poweur.com',
-  baseUrl: '/',
+  // The docs live under the website at /docs. SITE_URL overrides the host
+  // (https://tmpwww.poweur.org while the site is new).
+  url: siteUrl,
+  baseUrl: '/docs/',
 
   organizationName: 'poweur',
   projectName: 'poweur',
@@ -28,6 +31,10 @@ const config: Config = {
 
   themes: ['@docusaurus/theme-mermaid'],
 
+  // Better Stack web analytics; same file as apps/site/assets/betterstack.js.
+  // Script src is not prefixed with baseUrl, hence /docs/.
+  scripts: [{ src: '/docs/js/betterstack.js', async: false }],
+
   presets: [
     [
       'classic',
@@ -35,7 +42,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
-          editUrl: 'https://github.com/poweur/poweur/edit/main/apps/docs/',
+          editUrl: 'https://github.com/romanmandryk/poweur/edit/master/apps/docs/',
         },
         blog: false,
         theme: {
@@ -61,18 +68,25 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          href: '/relay/api-reference',
+          to: '/relay/api-reference',
           label: 'API Reference',
           position: 'left',
         },
         {
           label: 'Get Started',
-          href: '/',
+          to: '/',
           position: 'right',
           className: 'navbar__item--cta',
         },
         {
-          href: '#',
+          // The website itself, on the same host.
+          href: `${siteUrl}/`,
+          target: '_self',
+          label: 'poweur.org',
+          position: 'right',
+        },
+        {
+          href: 'https://github.com/romanmandryk/poweur',
           label: 'GitHub',
           position: 'right',
         },
@@ -103,7 +117,7 @@ const config: Config = {
           items: [
             { label: 'Security Model', to: '/security/model' },
             { label: 'Future Capabilities', to: '/future/capabilities' },
-            { label: 'GitHub', href: '#' },
+            { label: 'GitHub', href: 'https://github.com/romanmandryk/poweur' },
           ],
         },
       ],
