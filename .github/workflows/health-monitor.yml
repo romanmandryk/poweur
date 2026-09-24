@@ -1,8 +1,13 @@
 name: External relay health
+# Schedule is paused. Every 15 minutes is about 2,900 minutes/month: each run
+# rounds up to 1 minute, which is more than the free private-repo quota by itself.
+# Run by hand: Actions → External relay health → Run workflow.
+# Restore the probe by uncommenting the schedule. Same-VM Grafana cannot see a
+# total VM outage; Better Stack uptime (deploy/betterstack/uptime.json) can.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
+  # schedule:
+  #   - cron: '*/15 * * * *'
 permissions:
   contents: read
 jobs:

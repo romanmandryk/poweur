@@ -66,6 +66,24 @@ test('setup refuses missing imports and invalid arguments without creating secre
   assert.notEqual(run('setup-observability.sh', ['--unknown']).status, 0);
 });
 
+test('deploys skip CI unless asked, so a master push only builds and ships', () => {
+  const relay = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  const bridge = readFileSync(new URL('../../.github/workflows/deploy-oauth.yml', import.meta.url), 'utf8');
+  const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const health = readFileSync(new URL('../../.github/workflows/health-monitor.yml', import.meta.url), 'utf8');
+  for (const yml of [relay, bridge]) {
+    assert.match(yml, /inputs\.run_tests \|\| vars\.RUN_CI == 'true'/);
+    assert.match(yml, /needs\.test\.result == 'skipped'/);
+    // A skipped test must not skip rollout. The default success() check does.
+    assert.match(yml, /needs\.build\.result == 'success'/);
+  }
+  assert.match(ci, /workflow_dispatch:/);
+  assert.doesNotMatch(ci, /^ {2}push:/m);
+  assert.doesNotMatch(ci, /^ {2}pull_request:/m);
+  assert.doesNotMatch(health, /^ {2}schedule:/m);
+  assert.match(health, /workflow_dispatch:/);
+});
+
 test('deploy workflow bakes release identity into the remote script', () => {
   const yml = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
   assert.match(yml, /printf 'export RELEASE_SHA=%q\\n'/);
@@ -101,4 +119,20 @@ test('caddy config is mounted as a directory so deploy reloads see new files', (
   const compose = readFileSync(new URL('../infra/docker-compose.yml', import.meta.url), 'utf8');
   assert.match(compose, /- \.\/caddy:\/etc\/caddy:ro/);
   assert.doesNotMatch(compose, /\.\/caddy\/Caddyfile:/);
+});
+
+test('website (with docs under /docs) is static files outside the relay checkout, served by Caddy', () => {
+  const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
+  assert.match(caddy, /tmpwww\.poweur\.org[\s\S]*?root \* \/srv\/web\/www/);
+  assert.match(caddy, /redir \/docs \/docs\/ 308/);
+  assert.doesNotMatch(caddy, /tmpdocs/);
+  const compose = readFileSync(new URL('../infra/docker-compose.yml', import.meta.url), 'utf8');
+  assert.match(compose, /\/opt\/apps\/poweur-web\}:\/srv\/web:ro/);
+  const deploy = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  assert.match(deploy, /mkdir -p \/opt\/apps\/poweur-web/);
+  const web = readFileSync(new URL('../../.github/workflows/deploy-web.yml', import.meta.url), 'utf8');
+  assert.match(web, /group: poweur-web-deploy/);
+  assert.match(web, /--exclude=\.\/social/);
+  assert.match(web, /cp -R apps\/docs\/build out\/docs/);
+  assert.doesNotMatch(web, /bash -s <</);
 });

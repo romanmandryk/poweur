@@ -210,3 +210,57 @@
 @utility bottom-above-nav {
   bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
 }
+
+/* poweur.org's hero ground, behind the front doors: violet and indigo light
+   drifting under a glass pane. Decorative only, and still under reduced motion. */
+.brand-scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.brand-scene i {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.3;
+  animation: brand-drift 18s ease-in-out infinite alternate;
+}
+.brand-scene .b1 { width: 520px; height: 520px; left: -12%; top: -180px; background: var(--color-violet-400); }
+.brand-scene .b2 { width: 420px; height: 420px; right: -18%; top: 40px; background: var(--color-indigo-400); animation-delay: -6s; }
+.brand-scene .b3 { width: 300px; height: 300px; left: 30%; top: 260px; background: var(--color-violet-300); opacity: 0.2; animation-delay: -12s; }
+.brand-scene .pane {
+  position: absolute;
+  width: 150px;
+  height: 200px;
+  right: -76px;
+  top: 64px;
+  border-radius: 28px;
+  transform: rotate(14deg);
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.02));
+  border: 1px solid rgb(255 255 255 / 0.45);
+  backdrop-filter: blur(22px) saturate(140%);
+}
+[data-theme="dark"] .brand-scene i { opacity: 0.5; }
+[data-theme="dark"] .brand-scene .b1 { background: var(--color-violet-600); }
+[data-theme="dark"] .brand-scene .b2 { background: var(--color-indigo-700); }
+[data-theme="dark"] .brand-scene .b3 { background: var(--color-violet-400); opacity: 0.22; }
+[data-theme="dark"] .brand-scene .pane {
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0.01));
+  border-color: rgb(255 255 255 / 0.14);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 30px 80px rgb(0 0 0 / 0.4);
+}
+@keyframes brand-drift {
+  to { transform: translate(40px, 30px) scale(1.1); }
+}
+
+/* Headline type from poweur.org: white fading to translucent on night, ink on light. */
+@utility text-brand-gradient {
+  background-image: linear-gradient(180deg, var(--color-ink-950) 30%, var(--color-ink-700));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  [data-theme="dark"] & {
+    background-image: linear-gradient(180deg, #fff 20%, rgb(255 255 255 / 0.55));
+  }
+}

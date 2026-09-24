@@ -11,9 +11,20 @@ files, sync, shares, contacts, policy and proof-of-work. It runs in the
 browser, in Node ≥18, and in Bun and Deno, and it ships a `poweur` CLI that is
 command-for-command with the Go one.
 
+:::note Not on npm yet
+The package is not published to the npm registry yet. Until it is, build it from the
+repository and install the packed file:
+
 ```bash
-npm install @poweur/client
+git clone https://github.com/romanmandryk/poweur.git && cd poweur
+pnpm install && pnpm client:build
+cd packages/client-ts && npm pack          # → poweur-client-<version>.tgz
+cd /your/project && npm install /path/to/poweur-client-<version>.tgz
+npx poweur --help                          # the CLI comes with it
 ```
+
+Once published, this becomes `npm install @poweur/client`.
+:::
 
 **The Go implementation stays canonical.** `packages/identity` and the relay
 define the protocol; this package conforms to them through shared conformance
@@ -163,11 +174,13 @@ from `globalThis`. Three things differ by runtime:
 
 ## CLI
 
+Installed with the package (see the note at the top):
+
 ```bash
-npx @poweur/client identity create myagent.poweur.net --hosted --relay https://poweur.net
-npx @poweur/client send alice.poweur.net "hello"
-npx @poweur/client inbox
-npx @poweur/client share add shared/project-x --with alice.poweur.net --perm rw
+npx poweur identity create myagent.poweur.net --hosted --relay https://poweur.net
+npx poweur send alice.poweur.net "hello"
+npx poweur inbox
+npx poweur share add shared/project-x --with alice.poweur.net --perm rw
 ```
 
 It reads and writes the **same `~/.poweur` tree as the Go CLI**:
@@ -227,6 +240,6 @@ changed in Go without a matching TypeScript change turns the build red.
 ## Versioning
 
 Semver on the package, plus an exported `PROTOCOL_VERSION`. The
-[EPIC-009](https://github.com/poweur/poweur) reserved envelope fields (`type`,
+[EPIC-009](https://github.com/romanmandryk/poweur/blob/master/epics/EPIC-009-messaging-upgrades.md) reserved envelope fields (`type`,
 `thread_id`, `expires_at`, `metadata`) are already typed, so adopting them is a
 minor version.

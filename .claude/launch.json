@@ -31,6 +31,18 @@
       ],
       "port": 8090,
       "url": "http://oauth.localhost:8090"
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4321",
+        "--directory",
+        "apps/site"
+      ],
+      "port": 4321
     }
   ]
 }

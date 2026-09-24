@@ -108,6 +108,35 @@ const rejectedDetail = "recipient does not accept messages from this sender (sen
 var inboxTypeHooks = map[string]inboxTypeHook{
 	idpkg.MsgTypeContactRequest: hookContactRequest,
 	idpkg.MsgTypeContactAccept:  hookContactAccept,
+	idpkg.MsgTypeShareOffer:     hookShareOffer,
+	idpkg.MsgTypeShareClaim:     hookShareClaim,
+}
+
+// hookShareOffer gives a stranger one bounded, expiring consent gesture under
+// contacts_and_requests. It never opens the normal message stream. Accepted
+// contacts and open inboxes receive offers normally; contacts_only refuses
+// them. The signed share_id metadata gives the request store one slot per
+// grant without decrypting the offer.
+func hookShareOffer(c closedInboxCtx) (policyVerdict, string) {
+	if c.mode != idpkg.InboxContactsAndRequests {
+		return policyReject, rejectedDetail
+	}
+	if !shareOfferShapeOK(c.msg, time.Now().UTC()) {
+		return policyReject, "share offer must be bounded, expiring, and identify its grant"
+	}
+	return policyQueueRequest, ""
+}
+
+// A claim is another bounded consent gesture. It proves only that the sender
+// retained a capability token; the owner still has to approve a direct grant.
+func hookShareClaim(c closedInboxCtx) (policyVerdict, string) {
+	if c.mode != idpkg.InboxContactsAndRequests {
+		return policyReject, rejectedDetail
+	}
+	if !shareOfferShapeOK(c.msg, time.Now().UTC()) {
+		return policyReject, "share claim must be bounded, expiring, and identify its grant"
+	}
+	return policyQueueRequest, ""
 }
 
 // hookFor returns the hook for a type, or the closed-inbox default.

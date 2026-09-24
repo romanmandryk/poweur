@@ -66,3 +66,49 @@ func TestAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyticsOnlyOnPublicPages(t *testing.T) {
+	// Off by default: no script, no route, the strict CSP everywhere.
+	off := newHarness(t)
+	if p := off.browser().get("/"); strings.Contains(p.body, "analytics.js") || strings.Contains(p.header.Get("Content-Security-Policy"), "betterstack") {
+		t.Fatalf("analytics without a token: %s", p.header.Get("Content-Security-Policy"))
+	}
+	rec := httptest.NewRecorder()
+	off.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/analytics.js", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/analytics.js without a token = %d", rec.Code)
+	}
+
+	h := newHarness(t, func(c *Config) { c.AnalyticsToken = "testToken123" })
+	for _, path := range []string{"/", "/privacy", "/security", "/abuse"} {
+		p := h.browser().get(path)
+		csp := p.header.Get("Content-Security-Policy")
+		if !strings.Contains(p.body, `<script src="/analytics.js" async></script></head>`) ||
+			!strings.Contains(csp, "script-src 'self' https://betterstack.net;") || strings.Contains(csp, "unsafe") {
+			t.Errorf("%s: analytics missing or CSP wrong: %s", path, csp)
+		}
+	}
+	// Anything that is part of signing in or managing access stays first-party only.
+	for _, name := range []string{"identify", "await", "handoff", "consent", "account", "developers", "client_new", "client", "error"} {
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Security-Policy", h.srv.csp)
+		h.srv.render(rec, httptest.NewRequest(http.MethodGet, "/", nil), http.StatusOK, name+".html", "", nil)
+		if strings.Contains(rec.Body.String(), "analytics.js") || rec.Header().Get("Content-Security-Policy") != h.srv.csp {
+			t.Errorf("%s page loads analytics", name)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	h.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/analytics.js", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `'betterstack',"testToken123")`) ||
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") {
+		t.Fatalf("/analytics.js = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAnalyticsTokenIsValidated(t *testing.T) {
+	cfg := Config{AnalyticsToken: `x");alert(1)//`}
+	if _, err := New(t.Context(), cfg); err == nil || !strings.Contains(err.Error(), "AnalyticsToken") {
+		t.Fatalf("hostile token accepted: %v", err)
+	}
+}

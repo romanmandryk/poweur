@@ -19,6 +19,7 @@ import { toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
+import { loadGrants, processShareRevocations } from "./files";
 import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
 
 const selfIdentity = () => useSession.getState().identity ?? "";
@@ -110,6 +111,7 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       if (lost) toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
       await verifyGroupInboxMessages(client, messages);
       mergeMessages(messages);
+      processShareRevocations(messages).catch((error) => console.warn("Share revocation processing failed:", errorMessage(error)));
       useData.setState((state) => ({ acks: mergeInto(state.acks, acks) }));
       processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
     } catch (error) {
@@ -228,6 +230,10 @@ export function startEventStream() {
       // Each queue has its own event, because each is read by a different call.
       if (event.type === "request") void loadRequests({ force: true });
       else if (event.type === "anon") void loadAnon({ force: true });
+      else if (event.type === "file_request") {
+        void loadGrants({ force: true });
+        toast("A file request received a new upload.", "success");
+      }
       else void loadInbox({ force: true });
     },
     onError: (error: Error) => console.warn("Push stream dropped, retrying:", error.message),

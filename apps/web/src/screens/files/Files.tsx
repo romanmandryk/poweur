@@ -13,6 +13,7 @@ import {
   grantsForPath,
   isShareablePath,
   loadFiles,
+  loadMounts,
   newFolder,
   openOwnerTree,
   renameEntry,
@@ -48,6 +49,7 @@ export function Files() {
     if (!unlocked) return;
     if (!files.loaded && !files.picking) void loadFiles(files.path);
     void loadContacts();
+    void loadMounts();
   }, [unlocked, files.loaded, files.owner, files.picking]);
 
   // The changes feed runs only while Files is on screen, per open tree.
@@ -260,12 +262,43 @@ function Listing() {
  */
 function OwnerPicker() {
   const contacts = useData((state) => state.contacts.list);
+  const mounts = useData((state) => state.files.mounts);
   const accepted = contacts.filter((contact) => contact.state === "accepted");
   usePeerAvatars(accepted.map((contact) => contact.identity));
   return (
     <div className="owner-picker px-4 pb-4">
       <p className="mb-2 text-[13px] text-muted">Open someone's tree to see what they have shared with you.</p>
       <IdentityInput resolve={resolveForActive} contacts={contacts} label="Whose files?" preview={false} onSubmit={openOwnerTree} />
+      {mounts.length > 0 && (
+        <>
+          <SectionLabel className="px-0">Accepted shares</SectionLabel>
+          <div className="conv-list overflow-hidden rounded-card bg-surface">
+            {mounts.map((entry: any) => {
+              const open = () => openOwnerTree(entry.mount.owner);
+              return (
+                <div
+                  key={entry.mount.share_id}
+                  role="button"
+                  tabIndex={0}
+                  data-open-share={entry.mount.share_id}
+                  onClick={open}
+                  onKeyDown={onActivateKeys(open)}
+                  className="conv-row flex min-h-13 cursor-pointer items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0 [@media(hover:hover)]:hover:bg-surface-2"
+                >
+                  <FolderOpen className="size-5 shrink-0 text-accent" aria-hidden="true" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-base font-semibold">/{entry.mount.source_path}</div>
+                    <div className="truncate text-sm text-muted">{entry.mount.owner}</div>
+                  </div>
+                  <Chip tone={entry.mount.permissions.includes("write") ? "warning" : "accent"}>
+                    {entry.mount.permissions.includes("write") ? "read + write" : "read"}
+                  </Chip>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
       {accepted.length > 0 ? (
         <>
           <SectionLabel className="px-0">Contacts</SectionLabel>

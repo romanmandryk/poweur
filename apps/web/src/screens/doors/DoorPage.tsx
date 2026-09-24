@@ -5,16 +5,23 @@ import { Wordmark } from "../../ui/Logo";
 
 /**
  * A front door is the whole page: no destination nav, because there are no
- * destinations to reach until an identity exists (E15-T7).
+ * destinations to reach until an identity exists (E15-T7). It stands on
+ * poweur.org's ground: the night background and its drifting violet light.
  */
 export function DoorPage({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
   return (
-    <div id={id} className={cn("landing flex h-dvh flex-col overflow-y-auto bg-bg", className)}>
+    <div id={id} className={cn("landing relative isolate flex h-dvh flex-col overflow-y-auto bg-bg dark:bg-[#07060b]", className)}>
+      <div className="brand-scene -z-10" aria-hidden="true">
+        <i className="b1" />
+        <i className="b2" />
+        <i className="b3" />
+        <span className="pane" />
+      </div>
       <header className="landing-bar flex h-header shrink-0 items-center justify-between px-4 pt-safe">
         <Wordmark />
         <ThemeToggle />
       </header>
-      <div className="landing-body mx-auto flex w-full max-w-[460px] flex-1 flex-col gap-6 px-5 pt-2 pb-[calc(32px+env(safe-area-inset-bottom,0px))] landscape:max-h-[500px]:gap-3.5">
+      <div className="landing-body mx-auto flex w-full max-w-[480px] flex-1 flex-col gap-6 px-4 pt-2 pb-[calc(32px+env(safe-area-inset-bottom,0px))] landscape:max-h-[500px]:gap-3.5">
         {children}
       </div>
     </div>
@@ -35,4 +42,6 @@ export function LinkButton({ id, onClick, children }: { id: string; onClick: () 
   );
 }
 
-export const cardClass = "rounded-card bg-surface p-5 shadow-card animate-fade-in-up";
+/** A card on the brand ground: frosted, with the hairline border poweur.org's panels use. */
+export const cardClass =
+  "rounded-card border border-black/5 bg-surface/85 p-5 shadow-card backdrop-blur-xl animate-fade-in-up dark:border-white/8 dark:bg-white/4";

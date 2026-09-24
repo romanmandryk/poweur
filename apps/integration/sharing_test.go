@@ -4,15 +4,275 @@
 package integration_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	clipkg "github.com/poweur/cli/pkg/cli"
 )
+
+// TestINT_SHARE_07 proves the CLI-first transfer front door: local bytes go
+// through the resumable upload endpoint, then a short-lived public grant makes
+// them downloadable without an account.
+func TestINT_SHARE_07_CLITransferCreate(t *testing.T) {
+	zone := newZone(t)
+	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	defer ts.Close()
+	relayURL := "http://" + addr
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	home := t.TempDir()
+	const owner = "sender.poweur.net"
+	runCLI(t, home, "identity", "create", owner, "--hosted", "--relay", relayURL, "--json")
+	local := filepath.Join(t.TempDir(), "package.txt")
+	if err := os.WriteFile(local, []byte("transfer payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := runCLI(t, home, "transfer", "create", local, "--max-downloads", "1", "--json")
+	var created struct {
+		TransferID string `json:"transfer_id"`
+		ShareID    string `json:"share_id"`
+		Path       string `json:"path"`
+		URL        string `json:"url"`
+		ExpiresAt  string `json:"expires_at"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil || !strings.HasPrefix(created.TransferID, "tr_") || created.ShareID == "" {
+		t.Fatalf("transfer create: %s err=%v", out, err)
+	}
+	if !strings.HasPrefix(created.Path, "shared/.transfers/"+created.TransferID+"/") || created.ExpiresAt == "" {
+		t.Fatalf("transfer result: %+v", created)
+	}
+	token := created.URL[strings.LastIndex(created.URL, "/")+1:]
+	resp, err := http.Get(relayURL + "/s/" + owner + "/" + token + "/package.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "transfer payload" {
+		t.Fatalf("transfer download: %d %q", resp.StatusCode, body)
+	}
+	resp, err = http.Get(relayURL + "/s/" + owner + "/" + token + "/package.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("transfer download cap: %d want 410", resp.StatusCode)
+	}
+}
+
+// TestINT_SHARE_06: the complete guest-to-ID lifecycle is operable from the
+// CLI. The guest requests a claim, the owner explicitly approves and consumes
+// the link, then the guest accepts the ordinary offer into a local mount.
+func TestINT_SHARE_06_CLIFileRequestClaimLifecycle(t *testing.T) {
+	zone := newZone(t)
+	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	defer ts.Close()
+	relayURL := "http://" + addr
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	ownerHome := t.TempDir()
+	claimantHome := t.TempDir()
+	const owner = "claimowner.poweur.net"
+	const claimant = "claimant.poweur.net"
+	runCLI(t, ownerHome, "identity", "create", owner, "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, claimantHome, "identity", "create", claimant, "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, ownerHome, "policy", "set", "contacts_and_requests")
+	runCLI(t, claimantHome, "policy", "set", "contacts_and_requests")
+
+	ownerToken := mintTokenViaCLI(t, ownerHome, "--use-identity", owner)
+	ownerDAV := relayURL + "/dav/" + owner
+	resp := davDo(t, "MKCOL", ownerDAV+"/shared/inbox", ownerToken, nil, nil)
+	resp.Body.Close()
+	resp = davDo(t, http.MethodPut, ownerDAV+"/shared/inbox/already-uploaded.txt", ownerToken, []byte("kept"), nil)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("seed upload: %d", resp.StatusCode)
+	}
+
+	createdRaw, _ := runCLI(t, ownerHome, "share", "request", "add", "/shared/inbox", "--max-uploads", "2", "--json")
+	var created struct {
+		ShareID string `json:"share_id"`
+		Token   string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(createdRaw), &created); err != nil || created.ShareID == "" || created.Token == "" {
+		t.Fatalf("file request output: %s err=%v", createdRaw, err)
+	}
+
+	linkURL := relayURL + "/s/" + owner + "/" + created.Token
+	for _, body := range []string{"from-guest-a", "from-guest-b"} {
+		resp = postFileRequest(t, linkURL, "same.txt", body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("anonymous upload %q: %d", body, resp.StatusCode)
+		}
+	}
+	resp = postFileRequest(t, linkURL, "late.txt", "nope")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("upload past cap: %d want 410", resp.StatusCode)
+	}
+	hidden, err := http.Get(linkURL + "/same.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenBody, _ := io.ReadAll(hidden.Body)
+	hidden.Body.Close()
+	if hidden.StatusCode != http.StatusNotFound || strings.Contains(string(hiddenBody), "from-guest") {
+		t.Fatalf("request leaked an upload: %d %s", hidden.StatusCode, hiddenBody)
+	}
+	uploads := inboxUploads(t, relayURL, owner, ownerToken)
+	if len(uploads) != 2 {
+		t.Fatalf("isolated uploads = %v", uploads)
+	}
+
+	runCLI(t, claimantHome, "share", "claim", "request", owner,
+		"--share-id", created.ShareID, "--token", created.Token, "--action", "uploaded", "--json")
+	ownerRequests, _ := runCLI(t, ownerHome, "requests", "--json")
+	claimJSON := lifecyclePlaintext(t, ownerRequests, "sys.share.claim")
+	claimFile := filepath.Join(t.TempDir(), "claim.json")
+	if err := os.WriteFile(claimFile, []byte(claimJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	approvedRaw, _ := runCLI(t, ownerHome, "share", "claim", "approve",
+		"--claim-file", claimFile, "--consume-link", "--perm", "rw", "--json")
+	var approved struct {
+		Grant struct {
+			ShareID       string `json:"share_id"`
+			SourceShareID string `json:"source_share_id"`
+		} `json:"grant"`
+		LinkRevoked bool `json:"link_revoked"`
+	}
+	if err := json.Unmarshal([]byte(approvedRaw), &approved); err != nil || approved.Grant.ShareID == "" || approved.Grant.SourceShareID != created.ShareID || !approved.LinkRevoked {
+		t.Fatalf("claim approval output: %s err=%v", approvedRaw, err)
+	}
+
+	claimantRequests, _ := runCLI(t, claimantHome, "requests", "--json")
+	offerJSON := lifecyclePlaintext(t, claimantRequests, "sys.share.offer")
+	offerFile := filepath.Join(t.TempDir(), "offer.json")
+	if err := os.WriteFile(offerFile, []byte(offerJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	acceptedRaw, _ := runCLI(t, claimantHome, "share", "accept", "--offer-file", offerFile, "--json")
+	if !strings.Contains(acceptedRaw, `"owner_notified": true`) || !strings.Contains(acceptedRaw, `shared/`+owner+`/inbox`) {
+		t.Fatalf("share accept output: %s", acceptedRaw)
+	}
+
+	claimantToken := mintTokenViaCLI(t, claimantHome, "--use-identity", claimant)
+	resp = davDo(t, http.MethodGet, relayURL+"/dav/"+claimant+"/shared/"+owner+"/inbox/.poweur-mount.json", claimantToken, nil, nil)
+	mountRaw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(mountRaw), approved.Grant.ShareID) {
+		t.Fatalf("recipient mount: %d %s", resp.StatusCode, mountRaw)
+	}
+
+	visitorToken := mintTokenViaCLI(t, claimantHome, "--use-identity", claimant,
+		"--audience", owner, "--scope", "dav:full", "--relay", relayURL)
+	resp = davDo(t, http.MethodGet, ownerDAV+"/"+uploads[0], visitorToken, nil, nil)
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || (string(got) != "from-guest-a" && string(got) != "from-guest-b") {
+		t.Fatalf("claimed guest upload %s: %d %q", uploads[0], resp.StatusCode, got)
+	}
+	resp = davDo(t, http.MethodGet, ownerDAV+"/shared/inbox/already-uploaded.txt", visitorToken, nil, nil)
+	got, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(got) != "kept" {
+		t.Fatalf("claimed existing upload: %d %q", resp.StatusCode, got)
+	}
+	resp = davDo(t, http.MethodPut, ownerDAV+"/shared/inbox/identified-edit.txt", visitorToken, []byte("edited"), nil)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("claimed share write: %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(relayURL + "/s/" + owner + "/" + created.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("consumed public link: %d want 404", resp.StatusCode)
+	}
+}
+
+func postFileRequest(t *testing.T, linkURL, filename, body string) *http.Response {
+	t.Helper()
+	var encoded bytes.Buffer
+	form := multipart.NewWriter(&encoded)
+	part, err := form.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(part, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, linkURL, &encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func inboxUploads(t *testing.T, relayURL, owner, token string) []string {
+	t.Helper()
+	resp := davDo(t, http.MethodGet, relayURL+"/sync/"+url.PathEscape(owner)+"/manifest?paths="+url.QueryEscape("/shared/inbox/"), token, nil, nil)
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("manifest: %d %s", resp.StatusCode, raw)
+	}
+	var names []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		var entry struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal([]byte(line), &entry) != nil || !strings.HasSuffix(entry.Path, "-same.txt") {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(entry.Path, "/"))
+	}
+	return names
+}
+
+func lifecyclePlaintext(t *testing.T, raw, messageType string) string {
+	t.Helper()
+	var queue struct {
+		Requests []struct {
+			Type      string `json:"type"`
+			Plaintext string `json:"plaintext"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal([]byte(raw), &queue); err != nil {
+		t.Fatalf("decode requests: %v: %s", err, raw)
+	}
+	for _, request := range queue.Requests {
+		if request.Type == messageType && request.Plaintext != "" {
+			return request.Plaintext
+		}
+	}
+	t.Fatalf("%s not found in requests: %s", messageType, raw)
+	return ""
+}
 
 // TestINT_SHARE_01: alice (hosted on relay A) shares a folder with bob
 // (DNS identity on relay B) via `poweur share add`; bob reads and writes

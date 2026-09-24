@@ -1,10 +1,19 @@
 name: CI
 
+# Off the automatic path while Actions minutes are tight. A master push used to
+# run this suite twice (this file, then Deploy calling it again).
+#
+# Run by hand: Actions → CI → Run workflow.
+# Gate deploys on it again: repository variable RUN_CI=true
+#   (Settings → Secrets and variables → Actions → Variables).
+# Pull-request checks: uncomment `pull_request` below. Leave `push` commented —
+# Deploy is what runs on master, and uncommenting `push` bills this suite twice.
 on:
+  workflow_dispatch:
   workflow_call:
-  push:
-    branches: [master]
-  pull_request:
+  # pull_request:
+  # push:
+  #   branches: [master]
 
 jobs:
   go:

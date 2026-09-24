@@ -1,6 +1,6 @@
 # EPIC-005 — Sharing, ACLs, groups & public-to-any-valid-ID
 
-- **Status:** complete except the offer/accept UX and adoption funnel (grant engine, CLI, web dialog, link shares and group identities shipped). **E05-T3's remaining half is open and unblocked:** EPIC-009 typed messages have landed and `sys.share.offer/accept/revoked` are registered in the code, but nothing emits them yet and recipient mounts are not built. E05-T6 adds file requests and guest-to-ID conversion.
+- **Status:** complete except the adoption funnel in E05-T6 and the E05-T7 Send product. Grant enforcement, encrypted offer/accept/revoke lifecycle, credential-free recipient mounts, CLI/web UX, link shares and group identities have shipped.
 - **Priority:** P1
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
@@ -15,12 +15,13 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E05-T1 Sharing & permissions spec | **done** | [`apps/docs/docs/files/sharing.md`](../apps/docs/docs/files/sharing.md); grant/group canonical signing in `packages/identity/grants.go`; inheritance = whole-subtree, no per-file exceptions (documented why); mount model deferred with T3 |
+| E05-T1 Sharing & permissions spec | **done** | [`apps/docs/docs/files/sharing.md`](../apps/docs/docs/files/sharing.md); grant/group canonical signing in `packages/identity/grants.go`; inheritance = whole-subtree, no per-file exceptions; T3 selected and shipped client-direct recipient mounts |
 | E05-T2 Relay grant engine | **done** | `apps/api/internal/files/grants.go`: per-request verified snapshot (revocation immediate, no ≤60 s window — app-password pattern); enforced on DAV + changes + manifest + chunked upload; visitor writes journal `actor`; forged/replayed/malformed grants rejected loudly; extensive scenario matrix in `apps/api/internal/relay/shares_test.go` + cross-relay `TestINT_SHARE_01` |
-| E05-T3 Share lifecycle UX | **partial** | CLI shipped: `poweur share add/ls/revoke`, `share group set/ls/remove` (grants written over DAV, listed via the sync manifest); web share dialog, revoke view and received-shares browser shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. **Deferred:** `sys.share.offer/accept/revoked` messages and recipient-side `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages) — until then a recipient must be told who shared with them; unaccepted-offer policy (EPIC-007) |
-| E05-T4 Public-link shares | **done** | `audience: [{"link": …}]` grant variant (26-char base32 token, argon2id password, expiry, download cap) in `packages/identity/grants.go`; `/s/<token>` endpoint in `apps/api/internal/relay/`; `poweur share link add/ls` (revoke via `share revoke`); spec + threat model in [`sharing.md`](../apps/docs/docs/files/sharing.md); cross-relay `TestINT_SHARE_03` + web e2e |
+| E05-T3 Share lifecycle UX | **done** | Versioned `sys.share.offer/accept/revoked` bodies in `packages/identity` + `@poweur/client`; CLI/web share creation emits encrypted offers; Requests accepts after resolving the owner and verifying the signed grant; credential-free `shared/<owner>/<name>/.poweur-mount.json` pointers drive “Shared with me”; revoke removes authority immediately and best-effort notices prune mounts. Stranger offers follow inbox policy, have one slot per grant, a 64 KiB cap and ≤7-day expiry. Real-relay SDK coverage plus Playwright proves accept → edit/audit → revoke. |
+| E05-T4 Public-link shares | **done** | `audience: [{"link": …}]` grant variant (26-char base32 token, argon2id password, expiry, download cap) in `packages/identity/grants.go`; `/s/<token>` endpoint; CLI and web share-dialog creation; spec + threat model; cross-relay `TestINT_SHARE_03` + web coverage |
 | E05-T5 Group identities | **done** | design doc [`group-identities.md`](../apps/docs/docs/files/group-identities.md); `admins` + `epoch` on `ShareGroup`, group's own tree at `poweur-sys/relay/groups/self.json` signed by the group's key; engine resolves named group identities out of their own trees (`apps/api/internal/files/grants.go`); `poweur group create/show/add/remove`; `TestINT_SHARE_04`. **Deferred:** cross-relay group resolution (needs a membership-check endpoint — enumeration oracle); per-admin signed updates; group messaging fan-out + key agreement = EPIC-009 E09-T5 |
-| E05-T6 File requests & guest conversion | **open** | upload-only requests, guest landing, claim-ID handoff and privacy-preserving funnel metrics; coordinates with E20-T10 `create` |
+| E05-T6 File requests & guest conversion | **partial** | Create-only requests, isolated uploads, owner context/quotas, opt-in live notifications, claim continuity, explicit owner-approved ID upgrades, and verified/idempotent accepted-share accounting ship across CLI, SDK and web. Single-recipient challenge and durable/offline notification UX remain. |
+| E05-T7 Send: transfer front door, receipts & expiring transfers | **partial** | CLI-first `poweur transfer create` uploads through the resumable endpoint into `/shared/.transfers/<id>/`, issues an expiring read-only link, and supports password/download caps. Multi-file UI/mobile, durable resume state, cleanup, recipient delivery and receipts remain. |
 
 ## Goal
 
@@ -71,10 +72,9 @@ can't ACL a DNS identity; Poweur makes the identity itself the ACL subject).
       inheritance (grants apply to subtree; no per-file exceptions in v1 — document why),
       expiry, revocation semantics (tombstone + token invalidation timing)
 - [x] Group document format, membership update rules, max sizes
-- [ ] Mount model for recipients — **deferred with E05-T3** (v1 recipients access the
-      owner's relay directly with a visitor token): how `/shared/<owner>/<name>/` paths resolve to the owner's
-      relay (recipient's relay proxies vs client connects to owner's relay directly — decide:
-      v1 = client-direct, proxy later for privacy parity with messaging's privacy-proxy mode)
+- [x] Mount model for recipients — `/shared/<owner>/<name>/` is a credential-free pointer;
+      v1 clients resolve it by connecting directly to the owner's relay with a fresh visitor
+      token. Relay proxying remains a later privacy-parity option.
 - [x] Threat analysis: audience enumeration, grant replay across relays, group-membership
       privacy (who can see who's in a group), revoked-but-cached access windows
 
@@ -101,20 +101,21 @@ revocation and expiry tests pass.
 
 ### E05-T3 — Share lifecycle UX: offer, accept, mount, list
 
-- [ ] **Deferred (EPIC-009):** `sys.share.offer` / `sys.share.accept` / `sys.share.revoked` message types (uses the
-      typed-message groundwork from EPIC-009; if that hasn't landed, define `type` in payload
-      JSON — coordinate)
-- [ ] **Deferred (with offer flow):** recipient's relay materializes accepted shares as mount-references under
-      `/shared/<owner>/…` (a small JSON pointer file; sync clients and DAV resolve through it)
-- [x] CLI: `poweur share add <path> --with bob.example.org --perm rw`, `poweur share ls`,
-      `poweur share revoke`, plus `poweur share group set/ls/remove` (`poweur shares`
-      received-view deferred with the offer flow)
-- [x] Web app share dialog on any file/folder (audience picker fed by contacts), a
-      received-shares view (name the owner, browse their tree with a visitor token) and
-      "Shared" badges — shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T4. The
-      received view has to *ask* who shared with them until the offer flow above exists
-- [ ] **Deferred (EPIC-007):** unaccepted-offer policy: offers expire after N days; offers from non-contacts follow
-      EPIC-007 inbox policy (shares are spam vectors too)
+- [x] `sys.share.offer` / `sys.share.accept` / `sys.share.revoked` versioned encrypted
+      lifecycle messages; the complete owner-signed grant travels inside the offer and is
+      re-verified after owner resolution before acceptance
+- [x] Recipient clients materialize accepted shares as credential-free mount references at
+      `/shared/<owner>/<name>/.poweur-mount.json`; Poweur-aware clients resolve the owner relay
+      and mint fresh visitor authority rather than storing a bearer token
+- [x] CLI: `poweur share add <path> --with bob.example.org --perm rw` sends offers by default
+      (`--no-notify` opts out), `poweur share ls`, `poweur share revoke` sends best-effort
+      notices, `poweur requests` recognizes offers, plus `share group set/ls/remove`
+- [x] Web app share dialog on any file/folder, Requests tray acceptance, accepted-mount list,
+      manual-owner compatibility path, revoke pruning and "Shared" badges — built on
+      [EPIC-015](EPIC-015-web-app-ux.md) E15-T4
+- [x] Unaccepted-offer policy: at most seven days, 64 KiB encrypted payload cap, required
+      signed `share_id` metadata, one pending slot per grant for strangers under
+      `contacts_and_requests`, and rejection under `contacts_only`
 
 **Acceptance:** end-to-end demo test: alice shares a folder with bob, bob accepts in web UI,
 edits a file, alice sees the edit + audit trail; alice revokes, bob loses access.
@@ -177,25 +178,84 @@ the grant model. A recipient must be able to complete the immediate job before b
 register; claiming an ID adds durable identity, edit access and a mounted relationship rather
 than unlocking bytes that were artificially withheld.
 
-- [ ] Extend the sharing spec with a **file-request** shape: the guest may create new objects
+- [x] Extend the sharing spec with a **file-request** shape: the guest may create new objects
       under one folder but cannot list, read, overwrite or delete another submitter's objects.
       Use E20-T10's `create` permission once available; if a v1 upload token ships earlier,
       specify it as a strict compatibility subset that upgrades to the same permission.
-- [ ] Public landing page for browse/download and file-request links: owner identity and pinned
+- [x] Public landing page for browse/download and file-request links: owner identity and pinned
       key, expiry, password/recipient challenge, quota/error states and a clear statement of what
       the visitor can do before creating an account.
-- [ ] Claim-ID handoff: after viewing, downloading or uploading, a guest can claim or sign in to
+- [x] Claim-ID handoff: after viewing, downloading or uploading, a guest can claim or sign in to
       a Poweur ID and accept the share without losing the link, destination or completed action.
-- [ ] Upgrade path from link audience to an explicit ID grant; consume or retain the public link
+- [x] Upgrade path from link audience to an explicit ID grant; consume or retain the public link
       according to the owner's choice, never silently broaden its audience.
-- [ ] Optional owner controls: upload count/bytes, allowed media types, per-object size, expiry,
-      password, single-recipient verification and notification on submission.
-- [ ] Privacy-preserving funnel events for the hosted service: link opened, action completed,
+- [x] Optional owner controls: upload count/bytes, allowed media types, per-object size, expiry,
+      password and opt-in live notification on submission.
+- [ ] Single-recipient challenge for guests — deferred to EPIC-023's verified-email delivery;
+      passwords already cover shared-secret links, and inventing a second password field would
+      not verify a recipient.
+- [ ] Durable/offline submission-notification UX — defer the user-visible notification queue to
+      EPIC-009; uploaded objects, the changes journal and aggregate counters are already durable.
+- [x] Privacy-preserving funnel events for the hosted service: link opened, action completed,
       claim started, ID claimed and share accepted. Never record paths, filenames, message
       contents, document contents or visitor IP beyond the service's short-lived abuse logs.
-- [ ] Web/SDK/CLI support and end-to-end coverage for anonymous upload, isolation between two
+- [x] Web/SDK/CLI support and end-to-end coverage for anonymous upload, isolation between two
       guests, quota exhaustion, expiry, claim handoff and revocation.
+
+**Implemented v1 slice:** Go and TypeScript share the signed `link.file_request` canonical
+shape and conformance vector. `/s/<token>` accepts create-exclusive, randomly prefixed uploads
+without exposing a listing or read path; count/byte/type/object-size limits and revocation are
+covered at the real relay. SDK, CLI (`share request add`) and web owner UI create requests.
+Landing pages show the owner's identity-key fingerprint, expiry, password state and applicable
+remaining upload quota without exposing the token or any submitted filename. Browse and
+file-request pages transfer claim context in a URL fragment, so it is not sent to the launcher
+server; after unlock the claimant sends an encrypted `sys.share.claim`. Claims have their own
+request slot per grant. Anonymous uploads honor the relay file-size and identity-storage caps.
+The owner must approve before a fresh direct-ID grant and encrypted offer are created, and
+explicitly chooses whether the public capability is retained or consumed. `sys.share.accept`
+is delivered to that owner's inbox when the sender is on the live grant, including under a
+closed inbox policy. `poweur requests` writes the decrypted offer or claim to a `0600` file
+and prints the next command. SDK and CLI integration tests cover anonymous upload, isolation,
+the upload cap, claim, approval, mount, access to the guest's upload and subsequent editing.
+Persisted privacy-safe metrics record opens, upload counts/bytes, claim starts, signed-ID
+continuations and accepted shares. Conversion grants bind their source capability into the
+owner's signature; the relay increments `share_accepted` only for a matching signed recipient
+acceptance and deduplicates retries by the resulting direct grant ID. The unchecked owner-control
+item remains open for single-recipient challenge and durable/offline submission notification UX.
 
 **Acceptance:** Alice creates an upload-only request; two guests submit files without seeing each
 other; one guest claims an ID and accepts the resulting share without repeating the upload; Alice
 can revoke the link immediately and the metrics reveal conversion counts without content metadata.
+
+### E05-T7 — Send: transfer front door, receipts & expiring transfers
+
+T4 links and T6's claim loop are the mechanics; this task is the *product* people already pay
+WeTransfer/Smash for, with a trust story those lack: the recipient sees a verified sender ID, not
+an unverifiable email address. Every transfer is an introduction to Poweur.
+
+- [x] CLI-first foundation: `poweur transfer create <file>` always uses the chunked-upload
+      endpoint for non-empty files, defaults to seven-day expiry, and creates a passwordable,
+      download-capped public link. Real-relay `TestINT_SHARE_07` proves anonymous download and
+      cap exhaustion.
+
+- [ ] Single-screen **Send** (web + mobile share sheet): drop files, optional message, expiry,
+      password → link. Always uses resumable chunked upload (E04-T3 today, E20 later) so multi-GB
+      transfers survive flaky networks.
+- [ ] Transfers live in the dedicated `/shared/.transfers/<transfer-id>/` namespace with a TTL;
+      a cleanup job deletes
+      expired transfers and releases quota. Transfers are never permanent public hosting.
+- [ ] Recipients: a link; a Poweur ID (grant + typed message, E2E); or an email address via the
+      EPIC-023 bridge (link + footer).
+- [ ] Recipient page reuses T6's landing: sender ProfileCard and verification state, zip-on-the-fly
+      for many files, "claim your ID and reply" with the sender pre-added as a contact request.
+- [ ] Receipts: first-download notification to the sender as a typed message; per-transfer view
+      built on the existing link bandwidth counters (`internal/files/linkstats.go`).
+- [ ] Guest senders: a visitor without an ID can send files *to* an ID through its inbox policy
+      (EPIC-014 anon ingress + PoW or E16 payment); files land on the recipient's quota only if the
+      policy allows attachments.
+- [ ] Limits are entitlements (EPIC-026): max transfer size, retention days, egress; branding and
+      longer retention are the natural paid line.
+
+**Acceptance:** a 5 GB transfer resumes after a dropped connection; an email recipient downloads
+without an account and claims an ID with the sender already requested as a contact; an expired
+transfer disappears and its bytes leave the owner's usage.

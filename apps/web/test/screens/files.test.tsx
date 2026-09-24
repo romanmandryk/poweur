@@ -67,6 +67,7 @@ function relayTree() {
   };
   const shares = {
     list: vi.fn(async () => [...grants]),
+    listMounts: vi.fn(async () => []),
     add: vi.fn(async (_signer: unknown, path: string, options: any) => {
       grants.push({
         share_id: `s${grants.length + 1}`,
@@ -76,6 +77,28 @@ function relayTree() {
         ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
       });
     }),
+    addFileRequest: vi.fn(async (_signer: unknown, path: string, options: any) => {
+      const grant = {
+        share_id: `s${grants.length + 1}`,
+        path,
+        audience: [{ link: "aaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+        permissions: ["create"],
+        link: { file_request: { max_uploads: options.maxUploads, max_object_bytes: options.maxObjectBytes } },
+      };
+      grants.push(grant);
+      return { grant, token: "aaaaaaaaaaaaaaaaaaaaaaaaaa" };
+    }),
+    addLink: vi.fn(async (_signer: unknown, path: string, options: any) => {
+      const grant = {
+        share_id: `s${grants.length + 1}`,
+        path,
+        audience: [{ link: "bbbbbbbbbbbbbbbbbbbbbbbbbb" }],
+        permissions: ["read"],
+        link: { max_downloads: options.maxDownloads },
+      };
+      grants.push(grant);
+      return { grant, token: "bbbbbbbbbbbbbbbbbbbbbbbbbb" };
+    }),
     revoke: vi.fn(async (id: string) => {
       grants.splice(grants.findIndex((grant) => grant.share_id === id), 1);
       return true;
@@ -83,6 +106,13 @@ function relayTree() {
   };
   holder.client.dav = vi.fn(async () => davClient);
   holder.client.shares = vi.fn(async () => shares);
+  holder.client.offerShare = vi.fn(async (path: string, audience: string[], options: any) => {
+    await shares.add(holder.client.signer, path, { with: audience, ...options });
+    return { grant: grants.at(-1), deliveries: audience.map((recipient) => ({ recipient, delivered: true })) };
+  });
+  holder.client.revokeShareAndNotify = vi.fn(async (shareId: string) => ({
+    revoked: await shares.revoke(shareId), notifications: [],
+  }));
   return { tree, davClient, shares };
 }
 
@@ -219,6 +249,47 @@ describe("Files destination (E21-T9)", () => {
     fireEvent.click($("[data-revoke]")!);
     await waitFor(() => expect($("#shares-list")!.textContent).toContain("not shared anything yet"));
     expect(shares.revoke).toHaveBeenCalledWith("s1");
+  });
+
+  it("creates an upload-only file request and shows its URL", async () => {
+    const { shares } = relayTree();
+    render(<App />);
+    await openFolder("shared");
+    fireEvent.click($('[data-share="shared/project-x"]')!);
+    await waitFor(() => expect($("#btn-share-go")).toBeTruthy());
+    fireEvent.click(Array.from($$("button")).find((button) => button.textContent === "Request files")!);
+    const max = $<HTMLInputElement>("#request-max-uploads")!;
+    fireEvent.change(max, { target: { value: "2" } });
+    fireEvent.change($<HTMLInputElement>("#request-max-bytes")!, { target: { value: "5" } });
+    expect($<HTMLInputElement>("#request-notify")!.checked).toBe(true);
+    fireEvent.click($("#btn-share-go")!);
+    await waitFor(() => expect(shares.addFileRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      "shared/project-x",
+      expect.objectContaining({ maxUploads: 2, maxBytes: 5 * 1024 * 1024, notify: true }),
+    ));
+    await waitFor(() => expect($<HTMLInputElement>("#capability-url")?.value).toBe(
+      "https://alice.poweur.net/s/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ));
+  });
+
+  it("creates a read-only public link and shows its URL", async () => {
+    const { shares } = relayTree();
+    render(<App />);
+    await openFolder("shared");
+    fireEvent.click($('[data-share="shared/project-x"]')!);
+    await waitFor(() => expect($("#btn-share-go")).toBeTruthy());
+    fireEvent.click(Array.from($$("button")).find((button) => button.textContent === "Public link")!);
+    fireEvent.change($<HTMLInputElement>("#link-max-downloads")!, { target: { value: "3" } });
+    fireEvent.click($("#btn-share-go")!);
+    await waitFor(() => expect(shares.addLink).toHaveBeenCalledWith(
+      expect.anything(),
+      "shared/project-x",
+      expect.objectContaining({ maxDownloads: 3 }),
+    ));
+    await waitFor(() => expect($<HTMLInputElement>("#capability-url")?.value).toBe(
+      "https://alice.poweur.net/s/bbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ));
   });
 
   it("opens someone else's tree from the owner picker, and leaves it", async () => {

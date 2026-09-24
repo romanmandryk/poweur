@@ -56,6 +56,7 @@ func TestShareGrantTamperDetection(t *testing.T) {
 		func(g *ShareGrant) { g.ExpiresAt = "2030-01-01T00:00:00Z" },
 		func(g *ShareGrant) { g.Owner = "mallory.poweur.net" },
 		func(g *ShareGrant) { g.ShareID = "shr_other" },
+		func(g *ShareGrant) { g.SourceShareID = "shr_public" },
 	}
 	for i, mutate := range tamper {
 		g := testGrant()
@@ -102,6 +103,12 @@ func TestShareGrantValidation(t *testing.T) {
 		{"bad expiry", func(g *ShareGrant) { g.ExpiresAt = "tomorrow" }, "invalid expires_at"},
 		{"missing owner", func(g *ShareGrant) { g.Owner = "" }, "owner is required"},
 		{"missing share id", func(g *ShareGrant) { g.ShareID = "" }, "share_id is required"},
+		{"source same as direct", func(g *ShareGrant) { g.SourceShareID = g.ShareID }, "must differ"},
+		{"source traversal", func(g *ShareGrant) { g.SourceShareID = "../public" }, "invalid source_share_id"},
+		{"source needs one recipient", func(g *ShareGrant) {
+			g.SourceShareID = "shr_public"
+			g.Audience = append(g.Audience, ShareAudience{ID: "carol.example.org"})
+		}, "exactly one direct"},
 	}
 	for _, tc := range cases {
 		g := testGrant()
@@ -116,6 +123,17 @@ func TestShareGrantValidation(t *testing.T) {
 	g.Path = "apps/net.poweur.tasks/project-1"
 	if err := g.Validate(); err != nil {
 		t.Fatalf("apps subtree must be shareable: %v", err)
+	}
+}
+
+func TestShareGrantConversionSourceIsSigned(t *testing.T) {
+	g := testGrant()
+	g.SourceShareID = "shr_public"
+	if err := g.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(g.Canonical(), "\npoweur-share-source\nshr_public") {
+		t.Fatalf("canonical source marker missing: %q", g.Canonical())
 	}
 }
 

@@ -5,7 +5,10 @@
 - **Depends on:** EPIC-020 (versioned chunks, append logs, CAS), EPIC-024 (Space membership),
   EPIC-017 (`@poweur/client`)
 - **Interacts with:** EPIC-009 (typed messages/SSE), EPIC-011 (key epochs), EPIC-019 (mobile)
-- **Unlocks:** interoperable co-editing applications, whiteboards and live tools on Poweur
+- **Unlocks:** interoperable co-editing applications, whiteboards and live tools on Poweur;
+  the generic room transport that EPIC-029 apps and games build on
+- **Monetizes (hosted):** TURN relay bytes, room size and retained update history — through
+  EPIC-026 entitlements, never plan names in the protocol
 
 ## Progress
 
@@ -17,6 +20,8 @@
 | E25-T4 Authorization, encryption & membership changes | open | roles, guests, epochs, removal and offline devices |
 | E25-T5 Collaborative Markdown reference app | open | offline-first editor, comments, attachments and history |
 | E25-T6 Federation, conformance & performance | open | multi-relay convergence, reconnect, load and abuse limits |
+| E25-T7 General-purpose rooms API for non-document apps | open | the T3 transport exposed for games/tools; `@poweur/live` SDK |
+| E25-T8 TURN fallback & metering | open | ephemeral per-identity TURN credentials; bytes metered via E26 |
 
 ## Goal
 
@@ -138,10 +143,50 @@ converge; export produces a usable Markdown bundle; removal during editing fails
 malicious participant is throttled without corrupting the durable document or starving unrelated
 Spaces.
 
+### E25-T7 — General-purpose rooms API for non-document apps
+
+T3's session transport is useful beyond documents: game moves, shared pointers, live polls, a
+"who is looking at this file" indicator. Expose it once, generically, instead of every EPIC-029
+app inventing a side channel.
+
+- [ ] Room reference `room:<host-id>/<room-id>` with three binding kinds: `document` (T3/T4
+      authorization), `space` (EPIC-024 membership) and `invite` (signed, expiring invite token
+      for ad-hoc sessions such as a game with a friend-of-a-friend, gated by inbox policy).
+- [ ] Topology: clients connect to their own relay, which holds one upstream per remote room to
+      the host relay (star, not mesh); the host relay fans out and assigns per-sender sequence
+      numbers, nothing else. Payloads stay opaque and may be sealed with a room key sent over
+      ordinary E2E messages.
+- [ ] Limits advertised in `capabilities.json` (max peers, message size, messages/second, TURN
+      available) so apps and self-hosters negotiate rather than guess.
+- [ ] `@poweur/live` in `packages/`: `joinRoom(ref) → { broadcast, on, presence, peers,
+      channel(name) }`, resume-from-sequence reconnect, automatic upgrade to a WebRTC data
+      channel when T3's peer path succeeds; framework-free core plus React hooks.
+- [ ] Presence/awareness encoding compatible with the Yjs awareness protocol so existing editor
+      bindings (Tiptap, CodeMirror, tldraw/Excalidraw) plug in directly.
+
+**Acceptance:** a < 50-line "shared counter" example runs across two relays; an invite-bound room
+rejects a replayed or expired invite; the same SDK drives the T5 editor's awareness.
+
+### E25-T8 — TURN fallback & metering
+
+Peer-to-peer is free to operate; relayed media/data is the real cost line of live features.
+
+- [ ] coturn profile in `deploy/`; relay mints short-lived TURN credentials (REST-style shared
+      secret) bound to an authenticated identity and room.
+- [ ] Per-identity TURN byte meter feeding the EPIC-026 usage ledger; entitlement resource
+      `turn_bytes_monthly`; behaviour at the limit is "relay fallback only", never a dropped
+      document update.
+- [ ] Self-host documentation: run your own TURN, point at a third-party one, or disable it.
+
+**Acceptance:** a symmetric-NAT test peer connects via TURN; its bytes appear in usage; with the
+allowance exhausted the session degrades to relay fallback and durable edits still converge.
+
 ## Non-goals
 
 - A generic server-side merger for arbitrary files.
 - A Figma-compatible design model, office-file engine or game-state protocol.
-- Voice/video media relay, TURN service implementation or matchmaking.
+- Voice/video calls and SFU media relay (a later epic once rooms and TURN exist; 1:1 calls are
+  the obvious first consumer).
+- Matchmaking and game rules — EPIC-029's game kit builds on the T7 rooms API.
 - Hiding membership from the collaboration peers who must exchange keys and updates.
 

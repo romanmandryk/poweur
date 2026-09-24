@@ -16,6 +16,7 @@ export type PoweurErrorCode =
   | "session_expired"
   | "challenge_required"
   | "decrypt_failed"
+  | "conflict"
   | "policy_rejected"
   | "unsupported";
 

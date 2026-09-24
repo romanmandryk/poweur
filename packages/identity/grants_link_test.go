@@ -239,3 +239,70 @@ func TestLinkGrantCanonicalAndSignature(t *testing.T) {
 		}
 	}
 }
+
+func TestFileRequestGrantValidationAndCanonical(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := GenerateLinkToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := ShareGrant{
+		ShareID: "shr_request", Owner: "alice.example", Path: "shared/inbox",
+		Audience: []ShareAudience{{Link: token}}, Permissions: []string{PermCreate},
+		CreatedAt: "2026-09-23T20:00:00Z",
+		Link: &ShareLink{FileRequest: &ShareFileRequest{
+			MaxUploads: 2, MaxBytes: 2048, MaxObjectBytes: 1024,
+			AllowedTypes: []string{"image/png", "text/plain"}, Notify: true,
+		}},
+	}
+	if err := g.Sign(priv); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	for _, line := range []string{"poweur-file-request", "2", "2048", "1024", "image/png,text/plain", "true"} {
+		if !strings.Contains(g.Canonical(), line) {
+			t.Fatalf("canonical missing %q:\n%s", line, g.Canonical())
+		}
+	}
+	if err := g.VerifySignature(pub); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		edit func(*ShareGrant)
+	}{
+		{"read permission", func(v *ShareGrant) { v.Permissions = []string{PermRead} }},
+		{"write permission", func(v *ShareGrant) { v.Permissions = []string{PermWrite} }},
+		{"download cap", func(v *ShareGrant) { v.Link.MaxDownloads = 1 }},
+		{"negative upload cap", func(v *ShareGrant) { v.Link.FileRequest.MaxUploads = -1 }},
+		{"negative bytes", func(v *ShareGrant) { v.Link.FileRequest.MaxBytes = -1 }},
+		{"bad media type", func(v *ShareGrant) { v.Link.FileRequest.AllowedTypes = []string{"text/plain; charset=utf-8"} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := g
+			link := *g.Link
+			request := *g.Link.FileRequest
+			request.AllowedTypes = append([]string(nil), g.Link.FileRequest.AllowedTypes...)
+			link.FileRequest = &request
+			bad.Link = &link
+			tc.edit(&bad)
+			if err := bad.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestCreatePermissionRejectedOutsideFileRequest(t *testing.T) {
+	g := testLinkGrant(t)
+	g.Audience = []ShareAudience{{ID: "bob.example"}}
+	g.Link = nil
+	g.Permissions = []string{PermCreate}
+	if err := g.Validate(); err == nil || !strings.Contains(err.Error(), "limited to file-request") {
+		t.Fatalf("Validate() = %v", err)
+	}
+}

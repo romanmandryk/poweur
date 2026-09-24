@@ -29,6 +29,12 @@ const requestCooldown = 7 * 24 * time.Hour
 // (spec: short intro; base64 + envelope overhead allowed for).
 const maxContactRequestPayload = 4096
 
+// Share offers contain a complete signed grant inside the encrypted payload.
+// They remain bounded and must expire so ignored offers cannot accumulate as
+// permanent invitations in a recipient's requests tray.
+const maxShareOfferPayload = 64 * 1024
+const maxShareOfferLifetime = 7*24*time.Hour + time.Minute
+
 // Policy verdicts.
 type policyVerdict int
 
@@ -125,6 +131,12 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	case idpkg.InboxOpen:
 		return policyAllow, ""
 	case idpkg.InboxContactsOnly, idpkg.InboxContactsAndRequests:
+		// The owner already signed a direct grant for this sender. The
+		// acceptance notice belongs in the inbox; it is not a stranger's
+		// request for a new relationship.
+		if s.shareAcceptAdmitted(ctx, msg) {
+			return policyAllow, ""
+		}
 		// A closed inbox is where the message *type* starts to matter, so
 		// the decision moves to the per-type hooks in typed.go. Everything
 		// without a hook is rejected — the default a closed inbox means.
@@ -148,6 +160,35 @@ func authPromptShapeOK(msg Message, now time.Time) bool {
 	}
 	exp, err := time.Parse(time.RFC3339, msg.ExpiresAt)
 	return err == nil && exp.After(now) && exp.Sub(now) <= maxAuthPromptLifetime
+}
+
+// shareAcceptAdmitted lets a granted identity tell the owner the mount
+// exists. The check uses the owner's own grant file: share id, live direct
+// audience, and a bounded payload. It does not open the inbox to anyone else.
+func (s *Server) shareAcceptAdmitted(ctx context.Context, msg Message) bool {
+	if idpkg.NormalizeMessageType(msg.Type) != idpkg.MsgTypeShareAccept || s.grants == nil {
+		return false
+	}
+	if len(msg.Payload) > maxShareOfferPayload {
+		return false
+	}
+	shareID := strings.TrimSpace(msg.Metadata["share_id"])
+	if shareID == "" || strings.ContainsAny(shareID, "/\\") || shareID == "." || shareID == ".." {
+		return false
+	}
+	return s.grants.Snapshot(ctx, msg.Recipient).AuthorizesAccept(shareID, msg.Sender)
+}
+
+func shareOfferShapeOK(msg Message, now time.Time) bool {
+	if len(msg.Payload) > maxShareOfferPayload || msg.ExpiresAt == "" {
+		return false
+	}
+	shareID := strings.TrimSpace(msg.Metadata["share_id"])
+	if shareID == "" || strings.ContainsAny(shareID, "/\\") || shareID == "." || shareID == ".." {
+		return false
+	}
+	expires, err := time.Parse(time.RFC3339, msg.ExpiresAt)
+	return err == nil && expires.After(now) && expires.Sub(now) <= maxShareOfferLifetime
 }
 
 // senderRelayKey names the relay accountable for a sender, for metering

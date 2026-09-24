@@ -49,6 +49,18 @@ read,write                         ← sorted
 <expires_at or empty>
 ```
 
+A direct grant created by upgrading a public capability carries the optional,
+owner-signed `source_share_id`. Its canonical string appends:
+
+```
+poweur-share-source
+<source_share_id>
+```
+
+This provenance is allowed only on a grant with exactly one direct identity recipient. It
+does not grant authority; it lets the relay attribute a later, signed acceptance to the
+correct public-link funnel without inspecting encrypted message content.
+
 Groups use the same pattern (`poweur-share-group\n<name>\n<owner>\n<members sorted>\n<updated_at>`).
 
 ### What is shareable
@@ -119,10 +131,16 @@ The token is 16 random bytes as lowercase unpadded base32 — 26 characters of
 survives a mail client that lowercases it, and the alphabet has no `0`/`1`/`8`
 to be misread when a link is copied by hand.
 
-Visit it at **`https://<owner-identity>/s/<token>`** — read-only browse and
-download, no account, no client software. (`https://<relay>/s/<owner>/<token>`
+Visit it at **`https://<owner-identity>/s/<token>`** — browse/download, or an
+upload-only file request, with no account or client software. (`https://<relay>/s/<owner>/<token>`
 addresses the same share where the owner has no vanity host. The two forms
 cannot be confused: a token never contains a dot, and an identity always does.)
+
+Folder and file-request landing pages show the owner ID and its comparable signing-key
+fingerprint, plus the signed expiry and password state when present. File requests also show
+the remaining upload count and aggregate capacity set by the signed grant. This context lets a
+visitor verify who asked and understand the boundary before acting; it never includes the
+capability token, storage path, submitted filenames or visitor data.
 
 ### Rules the format enforces
 
@@ -130,8 +148,8 @@ cannot be confused: a token never contains a dot, and an identity always does.)
   audiences and link tokens are enforced on completely different code paths;
   mixing them in one document would mean one grant with two very different
   meanings.
-- **Read-only in v1.** A grant that names a link and asks for `write` is
-  rejected at signing and on load, so a leaked URL can never mutate the tree.
+- **Read-only or create-only.** Ordinary links carry exactly `read`. A file-request link
+  carries exactly `create`; no link may ask for `write`.
 - **Options are signed.** `link.password` and `link.max_downloads` are part of
   the canonical string, so the relay that *stores* the grant cannot strip the
   password off it or raise the cap. Passwords are argon2id PHC hashes (the same
@@ -145,6 +163,12 @@ poweur-share-grant
 poweur-share-link                  ← only when a `link` object is present
 <password hash, or empty>
 <max_downloads, 0 = unlimited>
+poweur-file-request                ← only when `link.file_request` is present
+<max_uploads>
+<max_bytes>
+<max_object_bytes>
+<sorted allowed_types, comma-separated>
+<notify: true|false>
 ```
 
 ### Threat model
@@ -207,6 +231,118 @@ the signed grant and the CLI keeps nothing, so a lost URL means issuing a new
 link. `poweur share ls` shows a link share's audience as `link` rather than
 printing the token.
 
+## File requests (upload-only links)
+
+A file request is a public-link grant with a signed `link.file_request` object and exactly
+the `create` permission:
+
+```json
+{
+  "share_id": "shr_request00112233",
+  "owner": "alice.poweur.net",
+  "path": "shared/inbox",
+  "audience": [{"link": "k7m4qz2rt6vwx3ab5cdefghijn"}],
+  "permissions": ["create"],
+  "link": {"file_request": {
+    "max_uploads": 10,
+    "max_bytes": 104857600,
+    "max_object_bytes": 10485760,
+    "allowed_types": ["image/*", "text/plain"],
+    "notify": true
+  }},
+  "created_at": "2026-09-24T00:00:00Z",
+  "signature": "…"
+}
+```
+
+The token authorizes only creation of a fresh object below the named folder. It does not
+authorize a directory listing, download, overwrite, rename or delete. The relay prefixes
+each submitted filename with fresh randomness and opens the destination with create-exclusive
+semantics, so two guests can submit `photo.jpg` without observing or replacing one another.
+Nested GETs always return the request's not-found page. The relay also enforces a 64 MiB hard
+per-object safety ceiling until resumable anonymous uploads exist.
+
+Count and aggregate-byte reservations are atomic and happen before bytes are committed. An
+aborted attempt may consume quota; failing closed prevents concurrent requests from racing
+the final slot. Persisted metrics contain only opens, upload counts, upload bytes and
+timestamps per share — never IPs, paths, filenames, contents, tokens or user agents.
+Revocation is the ordinary grant deletion and takes effect on the next request.
+
+```text
+poweur share request add /shared/inbox [--password … | --password-stdin] \
+    [--expires 2026-12-31T00:00:00Z] [--max-uploads 10] \
+    [--max-bytes 104857600] [--max-object-bytes 10485760] \
+    [--allow-type 'image/*'] [--notify]
+poweur share revoke shr_…
+```
+
+The terminal can complete the identity-upgrade lifecycle without switching to the web app.
+`poweur requests --json` exposes the decrypted lifecycle body; save its `plaintext` field to a
+mode-0600 file (or pipe it on standard input) for the explicit approval/accept steps:
+
+```text
+# Claimant: prove continuity with the public capability.
+printf '%s' '<token>' | poweur share claim request alice.poweur.net \
+  --share-id shr_… --token-file - --action uploaded
+
+# Owner: verify the live source grant, issue a direct offer, then optionally consume the link.
+poweur share claim approve --claim-file claim.json --perm rw --consume-link
+
+# Claimant: verify the owner signature and create the credential-free local mount.
+poweur share accept --offer-file offer.json
+```
+
+`poweur requests` drains the queue. For each valid offer or claim it writes the decrypted
+body to `~/.poweur/requests/<message-id>.json` (mode `0600`) and prints the accept or approve
+command with that path. An invalid body is not written.
+
+Approval always delivers the new offer before deleting the public grant. A delivery failure
+leaves both the new direct grant and the public link in place and exits non-zero, so the owner
+can inspect or retry without silently cutting off either party. Acceptance resolves the owner,
+verifies the signed grant, confirms the accepting identity is a direct audience member and only
+then writes `shared/<owner>/<name>/.poweur-mount.json`. The owner's relay delivers that
+`sys.share.accept` into the inbox when the sender is a direct audience member of the live
+grant named in `metadata.share_id`, including while the inbox is `contacts_and_requests` or
+`contacts_only`. Anyone else is still rejected.
+
+`notify` is signed owner intent. After a successful upload the relay emits a payload-free
+`file_request` event to the owner's authenticated live stream, carrying only the share ID as
+the wake-up key. The files tree and persisted counters remain truth, so dropping a stream event
+cannot lose an upload. Durable/offline submission notification UX remains E05-T6 work.
+
+### Claiming an identity after a public action
+
+Viewing, downloading or uploading remains complete without an account. Folder listings and
+file-request pages link **Get a Poweur ID** to `/claim`, which redirects to the configured
+launcher with a base64url-encoded claim context in the URL fragment: `share_id`, owner,
+capability token and the completed action (`viewed`, `downloaded`, or `uploaded`). The fragment
+is not sent in the HTTP request. The web app removes it from the address bar immediately and
+preserves it through sign-in or identity creation. Download links do not send the visitor to
+the bare launcher URL.
+
+After the identity is unlocked, the claimant sends that context to the owner as an encrypted,
+seven-day `sys.share.claim` message. Possession of the token proves continuity with the public
+action but grants no new authority. The owner client checks that the source grant still exists,
+is unexpired and contains the same token, then asks the owner to choose one of two explicit
+actions:
+
+- **Grant access** creates a fresh direct-ID grant and encrypted `sys.share.offer`, retaining
+  the public link.
+- **Grant + close link** creates and offers the direct grant first, then deletes the public
+  grant. If offer creation fails, the public capability is left intact.
+
+The claimant accepts the ordinary offer and gets the same credential-free mount as any other
+direct share. The already-completed upload is not repeated or moved: the new grant points at
+the existing folder. Claim messages carry the token only inside end-to-end encrypted content;
+the plaintext envelope exposes only the registered type and `share_id`. The resulting direct
+grant binds `source_share_id` into the owner's signature. Its acceptance envelope repeats that
+opaque source ID so the relay can compare it to the grant without decrypting the body. The relay
+records only aggregate `claim_started`, `id_claimed`, and `share_accepted` counters.
+`id_claimed` advances only after a signed
+identity claim is accepted for a verified, live file-request grant; no claimant ID is retained
+with the capability metrics. `share_accepted` advances at most once per resulting direct grant,
+and only after the named recipient's signed acceptance matches its signed source binding.
+
 ## Groups
 
 `poweur-sys/relay/groups/<name>.json` — an owner-local, owner-signed member list:
@@ -239,6 +375,46 @@ meaning the same thing.
 - DAV bearer tokens held by the recipient keep working for *other* things they're entitled
   to; the grant check happens per request, so token lifetime never extends a revoked share.
 
+## Offer, accept and recipient mounts
+
+Direct-identity grants are announced over the encrypted message channel. The plaintext
+envelope exposes only the registered `sys.share.*` type and a signed `metadata.share_id`;
+the lifecycle body and grant remain end-to-end encrypted.
+
+An offer carries the complete owner-signed grant because the recipient cannot read the
+owner's private grant directory:
+
+```json
+{"version":1,"grant":{"share_id":"shr_…","owner":"alice.poweur.net","path":"shared/project-x","audience":[{"id":"bob.example.org"}],"permissions":["read","write"],"created_at":"…","signature":"…"},"offered_at":"…"}
+```
+
+Before showing or accepting it, a client MUST resolve the owner, verify the grant signature,
+and confirm that its own identity is a direct audience member. The offer is discovery
+evidence, not authority: every read or write still obtains a fresh visitor token and the
+owner's relay reloads the authoritative grant on that request.
+
+Acceptance writes a credential-free pointer into the recipient's own tree at
+`shared/<owner>/<name>/.poweur-mount.json`:
+
+```json
+{"version":1,"share_id":"shr_…","owner":"alice.poweur.net","source_path":"shared/project-x","permissions":["read","write"],"accepted_at":"…"}
+```
+
+A Poweur-aware client follows that pointer by resolving `owner`; an ordinary DAV client sees
+the small JSON file and cannot mistake cached remote bytes for local data. The recipient then
+sends `sys.share.accept` with `share_id`, `owner`, `recipient`, `mount_path`, and
+`accepted_at`. A conversion acceptance also carries the non-secret `source_share_id` in signed
+envelope metadata; the relay accepts it for accounting only when the live direct grant binds the
+same source and names that sender. Deleting the grant revokes authority immediately; `sys.share.revoked` is a
+best-effort hint that lets recipients remove or mark a dead pointer sooner.
+
+Unaccepted offers expire: SDK-created offer envelopes live for at most seven days (or until
+the grant expiry, whichever comes first). For a stranger, `contacts_and_requests` admits one
+pending slot per `share_id`; `contacts_only` rejects the offer. Accepted contacts and an open
+inbox receive it in the normal message stream. The relay caps encrypted offers at 64 KiB and
+requires the expiry plus `metadata.share_id`, so offers cannot become an unbounded chat side
+channel.
+
 ## CLI
 
 ```
@@ -253,10 +429,10 @@ poweur share group remove team
 Group identities have their own verbs (`poweur group create|show|add|remove`) and are
 addressed with `--with-group <poweur-id>` — see [Group identities](group-identities.md).
 
-The recipient needs no ceremony in v1: they mint a DAV token for the owner's tree at the
-owner's relay (`poweur dav token --audience alice.poweur.net --scope dav:full --relay …`)
-and the grant engine does the rest — including cross-relay recipients, whose keys the
-owner's relay verifies through the resolver chain.
+For a manual or older-client flow, the recipient may still mint a DAV token for the owner's
+tree directly (`poweur dav token --audience alice.poweur.net --scope dav:full --relay …`).
+The lifecycle flow automates owner discovery and records the local mount pointer; both paths
+use the same grant engine.
 
 ## Web app
 
@@ -266,13 +442,12 @@ grant is signed **in the browser** with the identity key and PUT into the owner'
 so the same relay-cannot-forge-it property holds; **Files → 🔗** at the root lists every
 grant with a Revoke button, which deletes the document.
 
-**Files → Shared with me** is the recipient side: name an owner and browse their tree with
-a visitor token minted at `dav:full` — the scope is not the permission, the owner's signed
-grant is, so a read-only token would refuse a write the owner actually allowed. Because
-read covers the ancestors of a granted path and listings filter siblings, an owner who
-shared one folder shows exactly that folder and nothing else. There is no "shares granted
-to me" listing: grants live in the owner's `poweur-sys`, which only they can read, and
-changing that is the `sys.share.offer` work below.
+**Files → Shared with me** is the recipient side. Accepted offers appear from the local mount
+pointers; manually naming an owner remains available for grants made by older clients. A
+visitor token is minted at `dav:full` — the scope is not the permission, the owner's signed
+grant is, so a read-only token would refuse a write the owner actually allowed. Because read
+covers ancestors of a granted path and listings filter siblings, an owner who shared one
+folder shows exactly that folder and nothing else.
 
 ## Threat notes
 
@@ -289,12 +464,23 @@ changing that is the `sys.share.offer` work below.
 
 ## Deferred (tracked in EPIC-005)
 
-- `sys.share.offer` / accept / revoked notification messages and recipient-side
-  `/shared/<owner>/…` mount-references (needs EPIC-009 typed messages). Until then a
-  recipient has to be told *who* shared with them out of band — the web app's
-  "Shared with me" asks for the owner by name for exactly this reason.
-- Link shares in the **web app's** share dialog — E05-T4 ships the format, the
-  `/s/<token>` endpoint and the CLI; the browser-side dialog for issuing one is
-  still to come (the grant is signed client-side, so it is UI work, not protocol).
+- File-request links are implemented as the strict create-only v1 subset. Guest-to-ID claim
+  continuity and owner-approved link-to-ID upgrade are implemented; opt-in live submission
+  notifications, the full CLI lifecycle, and privacy-safe conversion counters ship, while
+  durable/offline notification UX stays in E05-T6. Direct Poweur-ID offers,
+  acceptance, mounts and revocation pruning are implemented; manual owner entry remains a
+  compatibility path for grants created by older clients.
 - Write access through a link, and per-link revocation without deleting the
   grant. Both are deliberate v1 omissions, not oversights.
+
+## Expiring transfers (E05-T7, CLI foundation)
+
+`poweur transfer create <file>` uploads a non-empty local file through the resumable chunked
+endpoint into `shared/.transfers/<transfer-id>/`, then signs a read-only public-link grant for
+that folder. Transfers expire after seven days by default and accept the same password and
+download-cap controls as other public links. The command returns the URL once both the bytes and
+grant are durable; a grant failure removes the just-uploaded transfer folder.
+
+This is the CLI-first foundation, not the completed Send product. Multi-file web/mobile UX,
+client-persisted resume state after a process restart, expiry cleanup that releases storage,
+Poweur-ID/email delivery and first-download receipts remain tracked in E05-T7.

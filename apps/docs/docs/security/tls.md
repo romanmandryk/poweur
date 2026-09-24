@@ -6,126 +6,75 @@ title: TLS Configuration
 
 # TLS Configuration
 
-All relay-to-relay and client-to-relay communication must use HTTPS. This page describes the TLS certificate strategy, provisioning approach, and renewal automation for Poweur ID relay deployments.
+All client-to-relay and relay-to-relay traffic uses HTTPS, and identity documents are fetched
+from `https://<identity>/.well-known/poweur/id.json`. The relay process itself speaks plain
+HTTP (`LISTEN_ADDR`, default `:8080`) and **never terminates TLS**: a reverse proxy in front of
+it does. This page covers which certificates you need and the two ways we recommend getting
+them. For the full setup, see [Self-hosting a relay](/relay/self-hosting).
 
-## Wildcard Certificate Strategy
+## Which certificate you need
 
-A relay hosting identities on a domain (e.g. `poweur.net`) needs a TLS certificate that covers all identity subdomains (`alice.poweur.net`, `bob.poweur.net`, etc.). The correct strategy is a **single wildcard certificate** for `*.poweur.net`.
+**A relay that hosts identities under a domain** (`alice.example.com`, `bob.example.com`, …)
+needs a certificate that covers every identity host. Use a **wildcard certificate** for
+`*.example.com`, plus the bare `example.com`:
 
-Why a wildcard:
+- **One certificate covers every identity.** A new sign-up needs no certificate change.
+- **No per-identity issuance**, so no rate-limit or latency cost when people sign up.
+- **One-level wildcards are enough.** `*.example.com` covers `alice.example.com` but not
+  `deep.alice.example.com`, and hosted identities only ever use the first level.
 
-- **One cert covers all identities.** Adding a new identity (`carol.poweur.net`) requires no certificate change.
-- **No per-identity provisioning.** There is no need to run ACME HTTP-01 or DNS-01 challenges per identity.
-- **Simpler renewal.** A single cert to track, renew, and deploy.
+**A single identity on your own domain** (`alice.com`, served by any relay or from your own web
+server) needs only an ordinary certificate for that name, like any website.
 
-The one-level wildcard limitation (`*.poweur.net` covers `alice.poweur.net` but not `deep.alice.poweur.net`) is not a concern because the protocol uses only first-level subdomains for identities.
+## Getting a wildcard certificate
 
-## Challenge Type: DNS-01 (Required)
+Let's Encrypt issues wildcards only through the **DNS-01** challenge: the issuer proves control
+of the domain by creating a temporary `_acme-challenge.example.com` TXT record. HTTP-01 cannot
+prove control over `*.example.com`.
 
-The ACME DNS-01 challenge is **required** for wildcard certificates. HTTP-01 cannot prove control over `*.poweur.net`.
+### Option A — Caddy with a DNS provider plugin
 
-DNS-01 works by having the certificate provisioner create a temporary `TXT` record (`_acme-challenge.poweur.net`) that Let's Encrypt verifies before issuing the certificate.
+[Caddy](https://caddyserver.com) obtains and renews the wildcard certificate itself, using your
+DNS provider's API for the challenge. It needs a build with the provider's plugin (for example
+[caddy-dns/cloudflare](https://github.com/caddy-dns/cloudflare) or
+[caddy-dns/hetzner](https://github.com/caddy-dns/hetzner)):
 
-The Poweur ID infrastructure (`apps/infra`) automates DNS-01 via the Terraform ACME provider, using the same Hetzner DNS API credentials used for identity record management. No additional provider accounts are needed.
-
-## Provisioning with Terraform ACME
-
-The recommended approach for production deployments is to provision and renew the wildcard certificate using the **Terraform ACME provider** against **Let's Encrypt**.
-
-```hcl
-# Simplified excerpt from apps/infra
-
-terraform {
-  required_providers {
-    acme    = { source = "vancluever/acme",  version = "~> 2.0" }
-    hetzner = { source = "hetznercloud/hcloud" }
-    dns     = { source = "hashicorp/dns" }
-  }
-}
-
-provider "acme" {
-  server_url = "https://acme-v02.api.letsencrypt.org/directory"
-}
-
-resource "tls_private_key" "acme_account" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
-}
-
-resource "acme_registration" "relay" {
-  account_key_pem = tls_private_key.acme_account.private_key_pem
-  email_address   = "ops@poweur.net"
-}
-
-resource "acme_certificate" "wildcard" {
-  account_key_pem           = acme_registration.relay.account_key_pem
-  common_name               = "*.poweur.net"
-  subject_alternative_names = ["poweur.net"]
-
-  dns_challenge {
-    provider = "hetzner"
-    config = {
-      HETZNER_API_KEY = var.hetzner_dns_token
+```caddyfile
+example.com, *.example.com {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
     }
-  }
+    reverse_proxy relay:8080 {
+        header_up X-Forwarded-For {client_ip}
+    }
 }
 ```
 
-The certificate and private key are written to the Hetzner server via Terraform provisioner, or stored in Hetzner Object Storage for the relay to fetch at startup.
+Scope the API token to editing DNS in that one zone. Renewal is automatic; Caddy keeps its
+certificates in its data volume. [Self-hosting a relay](/relay/self-hosting#3-tls-for-every-hosted-name)
+shows how to build the Caddy image.
 
-### Renewal
+### Option B — Cloudflare's proxy
 
-Renewal is handled by re-running `terraform apply`. The ACME provider checks the certificate's expiry and renews automatically when it falls within the renewal window (typically 30 days before expiry).
+With the domain on Cloudflare and the apex and wildcard records proxied, Cloudflare's edge
+certificate covers `example.com` and `*.example.com` automatically and forwards traffic to your
+server. This is how poweur.net runs.
 
-The recommended approach is to schedule `terraform apply` via a CI job (e.g. a GitHub Actions workflow on a weekly cron schedule). All certificate state is in Terraform — no on-server renewal daemon is needed.
+- Prefer SSL mode **Full (strict)**, with a [Cloudflare origin certificate](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)
+  (a free wildcard, valid for 15 years) configured in Caddy, so traffic is encrypted all the
+  way to your server.
+- Configure the proxy to trust Cloudflare's IP ranges for `X-Forwarded-For`, so logs show real
+  client addresses. `deploy/infra/caddy/Caddyfile` in the repository is a working example.
+- A non-proxied (grey cloud) name must get its own certificate from Caddy as usual.
 
-## Fallback: On-Server Renewal with certbot
+## What relays check
 
-If Terraform-managed renewal is not suitable, certificates can be managed on the relay server using `certbot` with the Hetzner DNS plugin.
-
-```bash
-# Install certbot and Hetzner DNS plugin
-pip install certbot certbot-dns-hetzner
-
-# Obtain wildcard certificate
-certbot certonly \
-  --dns-hetzner \
-  --dns-hetzner-credentials ~/.secrets/hetzner-dns.ini \
-  -d "*.poweur.net" \
-  -d "poweur.net"
-```
-
-Where `~/.secrets/hetzner-dns.ini` contains:
-
-```ini
-dns_hetzner_api_token = <hetzner-dns-token>
-```
-
-Renewal is handled by certbot's built-in renewal timer (`/etc/cron.d/certbot` or `systemd certbot.timer`).
-
-The on-server approach is simpler to set up but splits infrastructure state between Terraform and the server, making it harder to audit and reproduce.
-
-## Load Balancer TLS Termination
-
-For production deployments, TLS is terminated at the **Hetzner Load Balancer** in front of the relay server(s), not at the relay process itself:
-
-1. The provisioned wildcard certificate is uploaded to the Hetzner Load Balancer.
-2. The load balancer handles TLS termination and forwards plaintext HTTP to relay instances.
-3. Relay instances bind to port 8080 (or as configured) with `TLS_ENABLE=false`.
-4. Communication between the load balancer and relay instances is over a private Hetzner network (not exposed to the internet).
-
-This offloads TLS from the relay process and allows the certificate to be updated at the load balancer without touching relay instances.
-
-## TLS Certificate Deployment Options
-
-| Option | Pros | Cons |
-|--------|------|------|
-| Terraform ACME provider (recommended) | All state in Terraform; automated renewal via CI | Requires Terraform access for renewal |
-| certbot on-server | Simple; self-contained | Splits state; requires server-level cron |
-| Load balancer managed cert | Delegate renewal to Hetzner | Some providers have cert count limits |
+Relays and clients verify certificates normally when they fetch identity documents or deliver
+to another relay. `RELAY_SCHEME=http` and `RESOLVER_ALLOW_PRIVATE=1` exist for local
+development and tests only; never set them on a public relay.
 
 ## Related
 
-- [Security Model](/security/model)
-- [Relay Configuration](/relay/configuration)
-- [Routing](/protocol/routing)
+- [Self-hosting a relay](/relay/self-hosting)
+- [Security model](/security/model)
+- [Web identity](/protocol/web-identity)

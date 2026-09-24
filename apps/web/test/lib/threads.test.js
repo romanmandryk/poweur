@@ -172,6 +172,16 @@ describe("buildConversationRows", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].preview).toBe("actual chat");
   });
+
+  it("keeps share lifecycle actions out of conversations", () => {
+    const rows = buildConversationRows(
+      ["sys.share.offer", "sys.share.accept", "sys.share.revoked"].map((type, index) =>
+        msg({ id: `s${index}`, type, plaintext: "{}" }),
+      ),
+      ME,
+    );
+    expect(rows).toEqual([]);
+  });
 });
 
 describe("threadLabel", () => {

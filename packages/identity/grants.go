@@ -26,6 +26,10 @@ import (
 const (
 	PermRead  = "read"
 	PermWrite = "write"
+	// PermCreate is currently valid only for file-request link grants. It is
+	// the strict v1 subset of the granular create permission planned by
+	// EPIC-020: create a new object, with no list/read/overwrite/delete.
+	PermCreate = "create"
 )
 
 // Limits (E05-T1: max sizes).
@@ -105,17 +109,34 @@ type ShareLink struct {
 	// MaxDownloads caps successful file downloads through the link.
 	// 0 = unlimited.
 	MaxDownloads int `json:"max_downloads,omitempty"`
+	// FileRequest turns the capability into an upload-only drop box. Its
+	// presence is signed and requires permissions=["create"].
+	FileRequest *ShareFileRequest `json:"file_request,omitempty"`
+}
+
+// ShareFileRequest contains owner-selected upload limits. Zero means the
+// relay default/unlimited within the relay's own hard safety limits.
+type ShareFileRequest struct {
+	MaxUploads     int      `json:"max_uploads,omitempty"`
+	MaxBytes       int64    `json:"max_bytes,omitempty"`
+	MaxObjectBytes int64    `json:"max_object_bytes,omitempty"`
+	AllowedTypes   []string `json:"allowed_types,omitempty"`
+	Notify         bool     `json:"notify,omitempty"`
 }
 
 // ShareGrant is the signed grant document.
 type ShareGrant struct {
-	ShareID     string          `json:"share_id"`
-	Owner       string          `json:"owner"`
-	Path        string          `json:"path"` // clean tree path, e.g. "shared/project-x"
-	Audience    []ShareAudience `json:"audience"`
-	Permissions []string        `json:"permissions"`
-	CreatedAt   string          `json:"created_at"`
-	ExpiresAt   string          `json:"expires_at,omitempty"`
+	ShareID string `json:"share_id"`
+	// SourceShareID binds a direct grant created from a public capability to
+	// that capability. It is owner-signed provenance used for aggregate
+	// conversion accounting; it is never authority by itself.
+	SourceShareID string          `json:"source_share_id,omitempty"`
+	Owner         string          `json:"owner"`
+	Path          string          `json:"path"` // clean tree path, e.g. "shared/project-x"
+	Audience      []ShareAudience `json:"audience"`
+	Permissions   []string        `json:"permissions"`
+	CreatedAt     string          `json:"created_at"`
+	ExpiresAt     string          `json:"expires_at,omitempty"`
 	// Link is set only on link-share grants (audience = one link token).
 	Link      *ShareLink `json:"link,omitempty"`
 	Signature string     `json:"signature"`
@@ -154,6 +175,14 @@ func (g ShareGrant) Validate() error {
 	if strings.TrimSpace(g.ShareID) == "" {
 		return fmt.Errorf("share_id is required")
 	}
+	if g.SourceShareID != "" {
+		if strings.TrimSpace(g.SourceShareID) == "" || strings.TrimSpace(g.SourceShareID) != g.SourceShareID || strings.ContainsAny(g.SourceShareID, "/\\") || g.SourceShareID == "." || g.SourceShareID == ".." {
+			return fmt.Errorf("invalid source_share_id")
+		}
+		if g.SourceShareID == g.ShareID {
+			return fmt.Errorf("source_share_id must differ from share_id")
+		}
+	}
 	if strings.TrimSpace(g.Owner) == "" {
 		return fmt.Errorf("owner is required")
 	}
@@ -187,12 +216,20 @@ func (g ShareGrant) Validate() error {
 	if err := g.validateLink(links); err != nil {
 		return err
 	}
+	if g.SourceShareID != "" {
+		if links != 0 || len(g.Audience) != 1 || strings.TrimSpace(g.Audience[0].ID) == "" {
+			return fmt.Errorf("source_share_id requires exactly one direct identity recipient")
+		}
+	}
 	if len(g.Permissions) == 0 {
 		return fmt.Errorf("permissions is empty")
 	}
 	for _, p := range g.Permissions {
-		if p != PermRead && p != PermWrite {
-			return fmt.Errorf("unknown permission %q (v1 vocabulary: read, write)", p)
+		if p != PermRead && p != PermWrite && p != PermCreate {
+			return fmt.Errorf("unknown permission %q (v1 vocabulary: read, write, create)", p)
+		}
+		if p == PermCreate && !g.IsFileRequest() {
+			return fmt.Errorf("create is currently limited to file-request links")
 		}
 	}
 	if g.CreatedAt != "" {
@@ -214,8 +251,8 @@ func (g ShareGrant) Validate() error {
 // A link grant is a *capability*: whoever holds the URL is the audience.
 // That is why v1 keeps it deliberately narrow — one token per grant, no
 // mixing with identity/group audiences (the two are enforced on completely
-// different code paths), and read-only, so a leaked URL can never mutate
-// the owner's tree.
+// different code paths). Ordinary links are read-only; file requests are a
+// separately marked create-only subset that cannot inspect existing objects.
 func (g ShareGrant) validateLink(links int) error {
 	switch {
 	case links > 1:
@@ -225,7 +262,7 @@ func (g ShareGrant) validateLink(links int) error {
 			return fmt.Errorf("a link grant's audience is the link alone (no ids or groups)")
 		}
 		if g.AllowsWrite() {
-			return fmt.Errorf("link shares are read-only in v1")
+			return fmt.Errorf("link shares are read-only or create-only and cannot grant write")
 		}
 	case g.Link != nil:
 		return fmt.Errorf("link options require a link audience entry")
@@ -238,6 +275,31 @@ func (g ShareGrant) validateLink(links int) error {
 	}
 	if g.Link.MaxDownloads < 0 || g.Link.MaxDownloads > MaxLinkDownloads {
 		return fmt.Errorf("max_downloads must be between 0 (unlimited) and %d", MaxLinkDownloads)
+	}
+	request := g.Link.FileRequest
+	if request == nil {
+		if len(g.Permissions) != 1 || g.Permissions[0] != PermRead {
+			return fmt.Errorf("download links require exactly the read permission")
+		}
+		return nil
+	}
+	if len(g.Permissions) != 1 || g.Permissions[0] != PermCreate {
+		return fmt.Errorf("file-request links require exactly the create permission")
+	}
+	if g.Link.MaxDownloads != 0 {
+		return fmt.Errorf("file-request links cannot set max_downloads")
+	}
+	if request.MaxUploads < 0 || request.MaxUploads > MaxLinkDownloads {
+		return fmt.Errorf("max_uploads must be between 0 (unlimited) and %d", MaxLinkDownloads)
+	}
+	if request.MaxBytes < 0 || request.MaxObjectBytes < 0 {
+		return fmt.Errorf("file-request byte limits cannot be negative")
+	}
+	for _, mediaType := range request.AllowedTypes {
+		mediaType = strings.TrimSpace(strings.ToLower(mediaType))
+		if mediaType == "" || strings.ContainsAny(mediaType, " \t\r\n;") || !strings.Contains(mediaType, "/") {
+			return fmt.Errorf("invalid allowed media type %q", mediaType)
+		}
 	}
 	return nil
 }
@@ -289,6 +351,11 @@ func (g ShareGrant) MaxDownloads() int {
 	return g.Link.MaxDownloads
 }
 
+// IsFileRequest reports whether the link is an upload-only capability.
+func (g ShareGrant) IsFileRequest() bool {
+	return g.Link != nil && g.Link.FileRequest != nil
+}
+
 // Expired reports whether the grant is past its expiry at now.
 func (g ShareGrant) Expired(now time.Time) bool {
 	if g.ExpiresAt == "" {
@@ -331,11 +398,10 @@ func canonicalAudience(audience []ShareAudience) string {
 // Canonical returns the string the owner signs. Field order is fixed;
 // audience and permissions are sorted so JSON ordering doesn't matter.
 //
-// A grant carrying link options (E05-T4) appends three more lines — the
-// marker, the password hash and the download cap — so those cannot be
-// edited off a signed grant by whoever stores the file. Grants without a
-// `link` object sign exactly the eight lines they always did, so adding
-// link shares did not invalidate a single existing signature.
+// A grant carrying link options (E05-T4) appends the marker, password hash
+// and download cap. A file request appends its marker and five limit fields.
+// A direct grant upgraded from a public capability appends its source marker.
+// Grants without either extension retain the original eight-line format.
 func (g ShareGrant) Canonical() string {
 	perms := append([]string(nil), g.Permissions...)
 	sort.Strings(perms)
@@ -356,6 +422,24 @@ func (g ShareGrant) Canonical() string {
 			g.Link.Password,
 			strconv.Itoa(g.Link.MaxDownloads),
 		)
+		if g.Link.FileRequest != nil {
+			types := append([]string(nil), g.Link.FileRequest.AllowedTypes...)
+			for i := range types {
+				types[i] = strings.ToLower(strings.TrimSpace(types[i]))
+			}
+			sort.Strings(types)
+			fields = append(fields,
+				"poweur-file-request",
+				strconv.Itoa(g.Link.FileRequest.MaxUploads),
+				strconv.FormatInt(g.Link.FileRequest.MaxBytes, 10),
+				strconv.FormatInt(g.Link.FileRequest.MaxObjectBytes, 10),
+				strings.Join(types, ","),
+				strconv.FormatBool(g.Link.FileRequest.Notify),
+			)
+		}
+	}
+	if g.SourceShareID != "" {
+		fields = append(fields, "poweur-share-source", strings.TrimSpace(g.SourceShareID))
 	}
 	return strings.Join(fields, "\n")
 }

@@ -103,6 +103,7 @@
       loop:
         - /opt/apps
         - "{{ app_dir }}"
+        - /opt/apps/poweur-web
 
     # ── 5. Infra config ────────────────────────────────────────────────────────
 

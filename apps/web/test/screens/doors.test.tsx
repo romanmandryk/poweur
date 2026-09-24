@@ -139,24 +139,91 @@ describe("the launcher landing (E15-T8)", () => {
     expect($<HTMLButtonElement>("#btn-claim").disabled).toBe(true);
   });
 
-  it("I already have an ID on the launcher is passkey sign-in only", () => {
+  it("the claim is poweur.org's closing box: one control with its button", () => {
     useSession.setState({ mode: launcher });
     render(<App />);
-    fireEvent.click($("#opt-have-id"));
-    expect(useRoute.getState().sub).toBe("add-id");
-    expect($("#signin-id-input")).toBeTruthy();
-    expect(document.querySelector("#opt-join-device")).toBeNull();
-    expect(document.querySelector("#opt-create-new")).toBeNull();
+    expect($("#claim-card").className).toContain("claim-hero");
+    expect($(".claim-title").textContent).toBe("Claim your name on the open internet.");
+    expect($(".claim-lede").textContent).toContain("Free hosted IDs on poweur.net.");
+    expect($("#btn-claim").closest(".claim-field")).toBe($("#ni-handle").closest(".claim-field"));
+    expect($("#btn-claim").textContent).toBe("Claim");
   });
 
-  it("Use my own domain opens the DNS claim", () => {
+  it("I already have an ID on the launcher opens the ID's own door when it exists", async () => {
+    useSession.setState({ mode: launcher });
+    relay.availability.mockResolvedValue({ available: false, reason: "taken" });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, protocol: "http:", port: "", pathname: "/app/", search: "" });
+    try {
+      render(<App />);
+      // No passkey question here: the keys live on the ID's own origin.
+      expect(document.querySelector("#opt-have-id")).toBeNull();
+      fireEvent.input($("#have-id-input"), { target: { value: "Bob" } });
+      fireEvent.click($("#btn-have-id"));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("http://bob.poweur.net/app/"));
+      expect(relay.availability).toHaveBeenCalledWith("bob", "poweur.net");
+      expect(useRoute.getState().sub).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("I already have an ID says a missing name doesn't exist and can be claimed above", async () => {
+    useSession.setState({ mode: launcher });
+    relay.availability.mockResolvedValue({ available: true, identity: "nobody.poweur.net" });
+    render(<App />);
+    fireEvent.input($("#have-id-input"), { target: { value: "nobody.poweur.net" } });
+    fireEvent.keyDown($("#have-id-input"), { key: "Enter" });
+    await waitFor(() => expect($("#have-id-error").textContent).toBe("nobody.poweur.net doesn't exist yet. You can claim it above."));
+    expect($("#have-id-error").getAttribute("role")).toBe("alert");
+
+    // Free but not claimable (too short, blocked): it still does not exist.
+    relay.availability.mockResolvedValue({ available: false, reason: "too_short", message: "Names need at least 6 characters." });
+    fireEvent.input($("#have-id-input"), { target: { value: "abc" } });
+    expect(document.querySelector("#have-id-error")).toBeNull();
+    fireEvent.click($("#btn-have-id"));
+    await waitFor(() => expect($("#have-id-error").textContent).toBe("abc.poweur.net doesn't exist."));
+  });
+
+  it("I already have an ID does not ask the relay about names it does not host", async () => {
     useSession.setState({ mode: launcher });
     render(<App />);
-    fireEvent.click($("#opt-own-domain"));
-    expect($(".sub-title").textContent).toBe("Use my own domain");
-    for (const id of ["#ni-handle", "#ni-domain", "#ni-provider", "#ni-token", "#ni-invite", "#btn-claim"]) {
-      expect(document.querySelector(id), id).toBeTruthy();
-    }
+    fireEvent.input($("#have-id-input"), { target: { value: "carl.example.com" } });
+    fireEvent.click($("#btn-have-id"));
+    await waitFor(() => expect($("#have-id-error").dataset.state).toBe("elsewhere"));
+    expect(relay.availability).not.toHaveBeenCalled();
+
+    fireEvent.input($("#have-id-input"), { target: { value: "" } });
+    fireEvent.click($("#btn-have-id"));
+    await waitFor(() => expect($("#have-id-error").textContent).toBe("Enter your ID, like alice.poweur.net."));
+  });
+
+  it("an unreachable relay is not reported as a missing name", async () => {
+    useSession.setState({ mode: launcher });
+    relay.availability.mockRejectedValue(new Error("offline"));
+    render(<App />);
+    fireEvent.input($("#have-id-input"), { target: { value: "bob" } });
+    fireEvent.click($("#btn-have-id"));
+    await waitFor(() => expect($("#have-id-error").dataset.state).toBe("offline"));
+  });
+
+  it("in the shell, I already have an ID is still the add-identity screen", () => {
+    useSession.setState({ mode: { ...launcher, mode: "shell" } });
+    render(<App />);
+    expect(document.querySelector("#have-id-input")).toBeNull();
+    fireEvent.click($("#opt-have-id"));
+    expect(useRoute.getState().sub).toBe("add-id");
+  });
+
+  it("self-hosting links to the guide instead of a DNS form", () => {
+    useSession.setState({ mode: launcher });
+    render(<App />);
+    const link = $<HTMLAnchorElement>("#opt-own-domain");
+    expect(link.tagName).toBe("A");
+    expect(link.href).toBe("https://poweur.org/docs/relay/self-hosting");
+    expect(link.target).toBe("_blank");
+    expect(document.querySelector("#ni-provider")).toBeNull();
+    expect(document.querySelector("#ni-token")).toBeNull();
   });
 });
 

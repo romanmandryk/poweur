@@ -162,7 +162,9 @@ change that alters what the relay, CLI or bridge does bumps each of them.
 web app, plus infra config) every time, and **Deploy OAuth bridge**
 (`.github/workflows/deploy-oauth.yml`) only when `apps/oauth/**`,
 `packages/identity/**` or `go.work` change. Both check that `/health` reports
-the pushed commit's `versionHash`. Runbook: [`deploy/OPS.md`](deploy/OPS.md).
+the pushed commit's `versionHash`. Neither runs CI unless the dispatch checks
+**Run tests** or the `RUN_CI` repository variable is `true`. Runbook:
+[`deploy/OPS.md`](deploy/OPS.md).
 
 ## Style
 

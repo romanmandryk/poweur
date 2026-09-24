@@ -1,0 +1,112 @@
+name: Deploy website and docs
+
+# The poweur.org website (apps/site, static) with the docs (apps/docs, Docusaurus)
+# under /docs, published as one tree into /opt/apps/poweur-web/www on the relay VM,
+# where infra Caddy serves it as tmpwww.poweur.org. The Caddy route and the mount
+# ship with the relay's Deploy workflow.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - apps/site/**
+      - apps/docs/**
+      - .github/workflows/deploy-web.yml
+
+env:
+  SITE_URL: https://tmpwww.poweur.org
+
+concurrency:
+  group: poweur-web-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @poweur/docs
+      - name: Build docs
+        run: pnpm --filter @poweur/docs build
+        env:
+          SITE_URL: ${{ env.SITE_URL }}
+      - name: Package
+        run: |
+          # Drafts and tooling stay out of the public site; the docs go in at /docs.
+          mkdir out
+          tar -cf - -C apps/site --exclude=./social --exclude=./scripts --exclude=./README.md . | tar -xf - -C out
+          cp -R apps/docs/build out/docs
+          tar -czf www.tgz -C out .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: www.tgz
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Install pinned SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Publish files
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp www.tgz "poweur@$DEPLOY_HOST:/tmp/"
+          # Same shape as the other deploys: a script file, not `ssh bash -c`.
+          # The tree is unpacked beside the live one and swapped in with a rename,
+          # so Caddy never serves a half-extracted site.
+          cat <<'EOF' | ssh "poweur@$DEPLOY_HOST" "cat > /tmp/poweur-web-release.sh && exec bash /tmp/poweur-web-release.sh"
+          set -euo pipefail
+          root=/opt/apps/poweur-web
+          mkdir -p "$root"
+          rm -rf "$root/docs" # the pre-/docs layout
+          for name in www; do
+            rm -rf "$root/$name.new" "$root/$name.old"
+            mkdir "$root/$name.new"
+            tar -xzf "/tmp/$name.tgz" -C "$root/$name.new"
+            chmod -R a+rX "$root/$name.new"
+            if [ -d "$root/$name" ]; then mv "$root/$name" "$root/$name.old"; fi
+            mv "$root/$name.new" "$root/$name"
+            rm -rf "$root/$name.old" "/tmp/$name.tgz"
+          done
+          ls -la "$root"
+          EOF
+
+      - name: Public check through Cloudflare and Caddy
+        run: |
+          # Up to 15 minutes: on the first rollout the Caddy routes arrive with the
+          # relay's Deploy, which runs the full CI before it reaches the VM.
+          check() {
+            for _ in $(seq 1 90); do
+              if curl -fsS "$1" | grep -q "$2"; then echo "ok $1"; return 0; fi
+              sleep 10
+            done
+            echo "$1 does not serve the new release (looked for: $2)" >&2
+            return 1
+          }
+          check "$SITE_URL/" "One open ID to"
+          check "$SITE_URL/docs/clients/js-sdk" "@poweur/client"

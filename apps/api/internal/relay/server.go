@@ -892,13 +892,14 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			outcome := s.requests.Add(msg.Recipient, msg.Sender, storedFromMessage(msg), requestCooldown)
 			if outcome != storage.RequestQueued {
 				writeError(w, http.StatusConflict, outcome,
-					"a contact request from this sender is already pending or in cooldown")
+					"a request with this consent scope is already pending or in cooldown")
 				return
 			}
+			s.recordShareLifecycleDelivery(r.Context(), msg)
 			// A queued request is a delivery too: without this, a contact
 			// request waits silently until the recipient happens to open the
 			// app, which is exactly the wait push exists to remove.
-			s.event(r.Context(), "contact.queue", "success")
+			s.event(r.Context(), messageKind(msg.Type)+".queue", "success")
 			s.notify(msg.Recipient, "request", msg.ID)
 			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
 			return
@@ -908,6 +909,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return
 		}
+		s.recordShareLifecycleDelivery(r.Context(), msg)
 		// Tell anyone listening that there is something to pick up (E09-T2).
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
@@ -925,6 +927,32 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
+}
+
+// recordShareLifecycleDelivery advances aggregate conversion counters only
+// after a signed identity message was accepted. Encrypted bodies remain
+// opaque, and claimant/recipient names are not stored with link stats.
+func (s *Server) recordShareLifecycleDelivery(ctx context.Context, msg Message) {
+	if s.grants == nil {
+		return
+	}
+	switch idpkg.NormalizeMessageType(msg.Type) {
+	case idpkg.MsgTypeShareClaim:
+		shareID := strings.TrimSpace(msg.Metadata["share_id"])
+		if s.grants.Snapshot(ctx, msg.Recipient).HasFileRequest(shareID) {
+			s.linkStats.RecordIDClaimed(msg.Recipient, shareID)
+		}
+	case idpkg.MsgTypeShareAccept:
+		directID := strings.TrimSpace(msg.Metadata["share_id"])
+		sourceID := strings.TrimSpace(msg.Metadata["source_share_id"])
+		if sourceID == "" {
+			return
+		}
+		boundSource := s.grants.Snapshot(ctx, msg.Recipient).AcceptedConversionSource(directID, msg.Sender)
+		if boundSource == sourceID {
+			s.linkStats.RecordShareAccepted(msg.Recipient, sourceID, directID)
+		}
+	}
 }
 
 // handleAcksPost is open/messaging-class. It mirrors handleMessagesPost

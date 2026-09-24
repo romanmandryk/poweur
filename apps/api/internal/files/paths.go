@@ -15,9 +15,10 @@ const (
 	MaxPathBytes    = 4096
 	MaxDepth        = 32
 
-	// WebPublicMarker is the per-folder opt-in marker for public web serving
-	// (E03-T6). The only .poweur-* name allowed in user trees.
-	WebPublicMarker = ".poweur-web-public"
+	// Documented protocol markers are the only .poweur-* names allowed in
+	// user trees. Everything else stays reserved for forward-compatible use.
+	WebPublicMarker  = ".poweur-web-public"
+	ShareMountMarker = ".poweur-mount.json"
 )
 
 // Top-level roots of every identity tree. Nothing else may exist at the top
@@ -78,7 +79,7 @@ func validateSegment(seg string) error {
 			return fmt.Errorf("path segment contains control characters")
 		}
 	}
-	if strings.HasPrefix(seg, ".poweur-") && seg != WebPublicMarker {
+	if strings.HasPrefix(seg, ".poweur-") && seg != WebPublicMarker && seg != ShareMountMarker {
 		return fmt.Errorf("the .poweur- name prefix is reserved")
 	}
 	return nil

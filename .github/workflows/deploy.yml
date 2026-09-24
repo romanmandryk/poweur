@@ -2,6 +2,11 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run the full CI suite before building
+        type: boolean
+        default: false
   push:
     branches: [master]
 
@@ -15,10 +20,12 @@ concurrency:
 
 jobs:
   test:
+    if: ${{ inputs.run_tests || vars.RUN_CI == 'true' }}
     uses: ./.github/workflows/ci.yml
 
   build:
     needs: test
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,6 +62,8 @@ jobs:
 
   deploy:
     needs: build
+    # success() is false when test was skipped, which would skip this job too.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -96,6 +105,9 @@ jobs:
           git reset --hard "$RELEASE_SHA"
           export RELAY_IMAGE="$RELEASE_IMAGE"
           export RELAY_ENV_FILE=/opt/apps/poweur/apps/api/.env.prod
+          # Caddy bind-mounts the website/docs root (deploy-web.yml fills it). Create it
+          # as the deploy user first, or Docker creates it root-owned and deploy-web cannot write.
+          mkdir -p /opt/apps/poweur-web
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
             exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true

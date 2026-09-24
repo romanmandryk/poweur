@@ -18,6 +18,7 @@ import { EnrollApi } from "./enroll.js";
 import {
   HISTORY_QUEUE_ANONYMOUS,
   HISTORY_QUEUE_INBOX,
+  HISTORY_QUEUE_REQUESTS,
   HISTORY_QUEUE_SENT,
   MessageHistory,
   type HistoryRecord,
@@ -25,13 +26,19 @@ import {
 import { IdentityApi } from "./identity.js";
 import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
-import { Messaging, type SendOptions, type SendResult } from "./messages.js";
+import { Messaging, resolveRecipientRelayUrl, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
-import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
+import {
+  MSG_TYPE_AUTH_REQUEST,
+  MSG_TYPE_SHARE_ACCEPT,
+  MSG_TYPE_SHARE_CLAIM,
+  MSG_TYPE_SHARE_OFFER,
+  MSG_TYPE_SHARE_REVOKED,
+} from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
-import type { ResolveOptions } from "./resolve.js";
+import { resolveIdentity, type ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
-import { Shares } from "./shares.js";
+import { buildShareOffer, grantExpired, grantIsLink, linkToken, Shares, validateShareClaim, validateShareOffer } from "./shares.js";
 import { SyncClient } from "./sync.js";
 import {
   CONTACT_ACCEPTED,
@@ -47,6 +54,11 @@ import {
   type InboxMode,
   type InboxPolicy,
   type Profile,
+  type ShareAccept,
+  type ShareClaim,
+  type ShareGrant,
+  type ShareOffer,
+  type ShareRevoked,
 } from "./types.js";
 
 export interface PoweurClientOptions extends RelayClientOptions {
@@ -281,7 +293,17 @@ export class PoweurClient {
   /** A DAV client for our own tree, minted once and reused. */
   async dav(options: { audience?: string; scope?: string; force?: boolean } = {}): Promise<DavClient> {
     if (this.#dav && !options.force && !options.audience) return this.#dav;
-    const dav = await DavClient.connect(this.relay, this.signer, options);
+    let relay = this.relay;
+    if (options.audience && options.audience.toLowerCase() !== this.signer.identity.toLowerCase()) {
+      const scheme = this.relay.relayUrl.startsWith("http://") ? "http" : "https";
+      const relayUrl = await resolveRecipientRelayUrl(options.audience, scheme, this.#resolveOptions);
+      if (relayUrl.replace(/\/+$/, "") !== this.relay.relayUrl) {
+        relay = new RelayClient(relayUrl, {
+          ...(this.#resolveOptions.fetch ? { fetch: this.#resolveOptions.fetch } : {}),
+        });
+      }
+    }
+    const dav = await DavClient.connect(relay, this.signer, options);
     if (!options.audience) this.#dav = dav;
     return dav;
   }
@@ -301,6 +323,175 @@ export class PoweurClient {
     return new Shares(dav, new SyncClient(this.relay, dav.identity, dav.token));
   }
 
+  /**
+   * Create a direct-ID grant and notify each recipient with an encrypted
+   * `sys.share.offer`. A failed notification does not roll the signed grant
+   * back: callers get the per-recipient result and can retry it safely.
+   */
+  async offerShare(
+    path: string,
+    recipients: string[],
+    options: { permissions?: "read" | "rw"; expiresAt?: string; sourceShareId?: string } = {},
+  ): Promise<{
+    grant: ShareGrant;
+    offer: ShareOffer;
+    deliveries: Array<{ recipient: string; delivered: boolean; error?: string }>;
+  }> {
+    const targets = [...new Set(recipients.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    if (targets.length === 0) {
+      throw new PoweurError("invalid_argument", "at least one direct recipient is required");
+    }
+    const shares = await this.shares();
+    const grant = await shares.add(this.signer, path, {
+      with: targets,
+      ...(options.permissions ? { permissions: options.permissions } : {}),
+      ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      ...(options.sourceShareId ? { sourceShareId: options.sourceShareId } : {}),
+    });
+    const offer = buildShareOffer(grant);
+    const plaintext = JSON.stringify(offer);
+    const defaultExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const requestedExpiry = options.expiresAt ? Date.parse(options.expiresAt) : Number.NaN;
+    const envelopeExpiry = Number.isFinite(requestedExpiry) && requestedExpiry < Date.parse(defaultExpiry)
+      ? options.expiresAt!
+      : defaultExpiry;
+    const deliveries = [] as Array<{ recipient: string; delivered: boolean; error?: string }>;
+    for (const recipient of targets) {
+      try {
+        await this.send(recipient, plaintext, {
+          type: MSG_TYPE_SHARE_OFFER,
+          expiresAt: envelopeExpiry,
+          metadata: { share_id: grant.share_id },
+        });
+        deliveries.push({ recipient, delivered: true });
+      } catch (error) {
+        deliveries.push({
+          recipient,
+          delivered: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { grant, offer, deliveries };
+  }
+
+  /** Verify, mount and acknowledge a decrypted `sys.share.offer`. */
+  async acceptShareOffer(
+    offer: ShareOffer,
+    options: { name?: string } = {},
+  ): Promise<{
+    mount: Awaited<ReturnType<Shares["acceptOffer"]>>;
+    acceptance: ShareAccept;
+    notified: boolean;
+  }> {
+    const resolved = await resolveIdentity(offer.grant.owner, this.#resolveOptions);
+    validateShareOffer(offer, this.signer.identity, resolved.document.public_key);
+    const acceptedAt = new Date().toISOString();
+    const shares = await this.shares();
+    const mount = await shares.acceptOffer(
+      offer,
+      this.signer.identity,
+      resolved.document.public_key,
+      { ...(options.name ? { name: options.name } : {}), acceptedAt },
+    );
+    const acceptance: ShareAccept = {
+      version: 1,
+      share_id: offer.grant.share_id,
+      owner: offer.grant.owner,
+      recipient: this.signer.identity,
+      mount_path: mount.mountPath,
+      accepted_at: acceptedAt,
+    };
+    try {
+      await this.send(offer.grant.owner, JSON.stringify(acceptance), {
+        type: MSG_TYPE_SHARE_ACCEPT,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        metadata: {
+          share_id: offer.grant.share_id,
+          ...(offer.grant.source_share_id ? { source_share_id: offer.grant.source_share_id } : {}),
+        },
+      });
+      return { mount, acceptance, notified: true };
+    } catch {
+      return { mount, acceptance, notified: false };
+    }
+  }
+
+  /** Ask a capability owner to replace the anonymous relationship with an explicit ID grant. */
+  async requestShareClaim(input: Omit<ShareClaim, "version" | "claimant" | "claimed_at">): Promise<ShareClaim> {
+    const claim: ShareClaim = {
+      version: 1,
+      share_id: input.share_id,
+      owner: input.owner.trim().toLowerCase(),
+      token: input.token.trim().toLowerCase(),
+      claimant: this.signer.identity,
+      action: input.action,
+      claimed_at: new Date().toISOString(),
+    };
+    validateShareClaim(claim);
+    await this.send(claim.owner, JSON.stringify(claim), {
+      type: MSG_TYPE_SHARE_CLAIM,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      metadata: { share_id: claim.share_id },
+    });
+    return claim;
+  }
+
+  /** Owner approval: verify capability continuity, issue a direct grant, and optionally consume the link. */
+  async approveShareClaim(
+    claim: ShareClaim,
+    options: { consumeLink?: boolean; permissions?: "read" | "rw" } = {},
+  ): Promise<Awaited<ReturnType<PoweurClient["offerShare"]>> & { linkRevoked: boolean }> {
+    validateShareClaim(claim);
+    if (claim.owner.trim().toLowerCase() !== this.signer.identity.toLowerCase()) {
+      throw new PoweurError("policy_rejected", "share claim owner does not match this identity");
+    }
+    const shares = await this.shares();
+    const source = (await shares.list()).find((grant) => grant.share_id === claim.share_id);
+    if (!source || !grantIsLink(source) || linkToken(source) !== claim.token || grantExpired(source)) {
+      throw new PoweurError("policy_rejected", "source capability is missing, expired, revoked, or does not match");
+    }
+    const offered = await this.offerShare(source.path, [claim.claimant], {
+      permissions: options.permissions ?? "rw",
+      ...(source.expires_at ? { expiresAt: source.expires_at } : {}),
+      sourceShareId: source.share_id,
+    });
+    let linkRevoked = false;
+    if (options.consumeLink) linkRevoked = await shares.revoke(source.share_id);
+    return { ...offered, linkRevoked };
+  }
+
+  /** Delete a grant first, then best-effort notify every direct recipient. */
+  async revokeShareAndNotify(shareId: string): Promise<{
+    revoked: boolean;
+    notifications: Array<{ recipient: string; delivered: boolean }>;
+  }> {
+    const shares = await this.shares();
+    const grant = (await shares.list()).find((entry) => entry.share_id === shareId);
+    const revoked = await shares.revoke(shareId);
+    if (!revoked || !grant) return { revoked, notifications: [] };
+    const payload: ShareRevoked = {
+      version: 1,
+      share_id: shareId,
+      owner: this.signer.identity,
+      revoked_at: new Date().toISOString(),
+    };
+    const recipients = [...new Set(grant.audience.map((entry) => entry.id?.trim().toLowerCase()).filter((value): value is string => Boolean(value)))];
+    const notifications: Array<{ recipient: string; delivered: boolean }> = [];
+    for (const recipient of recipients) {
+      try {
+        await this.send(recipient, JSON.stringify(payload), {
+          type: MSG_TYPE_SHARE_REVOKED,
+          metadata: { share_id: shareId },
+        });
+        notifications.push({ recipient, delivered: true });
+      } catch {
+        notifications.push({ recipient, delivered: false });
+      }
+    }
+    return { revoked, notifications };
+  }
+
   async contacts(): Promise<Contacts> {
     return new Contacts(await this.dav(), this.#resolveOptions);
   }
@@ -308,6 +499,32 @@ export class PoweurClient {
   /** Pending contact requests, with their intros decrypted when we can. */
   requests(): Promise<ContactRequestEntry[]> {
     return fetchRequests(this.relay, this.signer, this.decryptor);
+  }
+
+  /** Drain pending consent gestures and durably archive decrypted entries. */
+  async requestsAndArchive(): Promise<{
+    requests: ContactRequestEntry[];
+    archived: number;
+    lost: number;
+  }> {
+    const requests = await this.requests();
+    const { archived, lost } = await this.archive(
+      requests
+        .filter((entry) => entry.plaintext !== null && entry.plaintext !== undefined)
+        .map((entry) => ({
+          id: entry.id,
+          sender: entry.sender,
+          recipient: entry.recipient || this.signer.identity,
+          timestamp: entry.timestamp,
+          ...(entry.type ? { type: entry.type } : {}),
+          ...(entry.thread_id ? { thread_id: entry.thread_id } : {}),
+          ...(entry.expires_at ? { expires_at: entry.expires_at } : {}),
+          ...(entry.metadata ? { metadata: entry.metadata } : {}),
+          queue: HISTORY_QUEUE_REQUESTS as typeof HISTORY_QUEUE_REQUESTS,
+          body: entry.plaintext ?? "",
+        })),
+    );
+    return { requests, archived, lost };
   }
 
   /**

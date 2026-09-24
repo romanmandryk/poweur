@@ -6,6 +6,7 @@
   (inbox policy — especially anonymous / open receive), EPIC-009 (typed messages)
 - **Unlocks:** personal/landing pages per ID; contact forms that become Poweur messages;
   “every ID can be a tiny website” without a separate hosting product
+- **Apps note:** decide the separate site origin (E12-T1/T2) together with [EPIC-029](EPIC-029-poweur-apps-platform.md), which needs the same sandboxed sister host for app bundles. Custom domains on hosted infra and site egress are EPIC-026 entitlements; E30-T4 adds a storefront block.
 
 ## Progress
 

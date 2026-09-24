@@ -105,15 +105,19 @@ func TestLinkStatsSurviveRestart(t *testing.T) {
 	first.Reserve("alice.poweur.net", "shr_p", 0)
 	first.Reserve("alice.poweur.net", "shr_p", 0)
 	first.AddBytes("alice.poweur.net", "shr_p", 4096)
+	first.RecordShareAccepted("alice.poweur.net", "shr_p", "shr_direct")
 
 	// A brand-new store over the same directory is what a relay restart is.
 	second := NewLinkStats(home)
 	got := second.Get("alice.poweur.net", "shr_p")
-	if got.Downloads != 2 || got.Bytes != 4096 {
+	if got.Downloads != 2 || got.Bytes != 4096 || got.ShareAccepted != 1 {
 		t.Fatalf("counters did not survive a restart: %+v", got)
 	}
 	if second.Exhausted("alice.poweur.net", "shr_p", 2) != true {
 		t.Fatal("a cap reached before the restart must still be reached after it")
+	}
+	if second.RecordShareAccepted("alice.poweur.net", "shr_p", "shr_direct") {
+		t.Fatal("accepted-share idempotency must survive a restart")
 	}
 }
 
@@ -163,5 +167,35 @@ func TestLinkStatsWithoutHomeDir(t *testing.T) {
 	}
 	if nilStats.All("alice.poweur.net") != nil {
 		t.Fatal("nil store lists nothing")
+	}
+}
+
+func TestLinkStatsUploadQuotaAndOpenMetrics(t *testing.T) {
+	ls, _ := newTestLinkStats(t)
+	ls.RecordOpen("alice.example", "shr_request")
+	ls.RecordOpen("alice.example", "shr_request")
+	ls.RecordClaimStarted("alice.example", "shr_request")
+	ls.RecordIDClaimed("alice.example", "shr_request")
+	if !ls.RecordShareAccepted("alice.example", "shr_request", "shr_direct") {
+		t.Fatal("first share acceptance was not recorded")
+	}
+	if ls.RecordShareAccepted("alice.example", "shr_request", "shr_direct") {
+		t.Fatal("duplicate share acceptance was recorded")
+	}
+	if _, ok := ls.ReserveUpload("alice.example", "shr_request", 4, 2, 10); !ok {
+		t.Fatal("first upload rejected")
+	}
+	if _, ok := ls.ReserveUpload("alice.example", "shr_request", 6, 2, 10); !ok {
+		t.Fatal("second upload rejected")
+	}
+	if got, ok := ls.ReserveUpload("alice.example", "shr_request", 1, 2, 10); ok {
+		t.Fatalf("third upload accepted: %+v", got)
+	}
+	got := ls.Get("alice.example", "shr_request")
+	if got.Opens != 2 || got.Uploads != 2 || got.UploadBytes != 10 || got.ClaimStarted != 1 || got.IDClaimed != 1 || got.ShareAccepted != 1 {
+		t.Fatalf("metrics = %+v", got)
+	}
+	if _, ok := ls.ReserveUpload("alice.example", "shr_bytes", 11, 0, 10); ok {
+		t.Fatal("oversize aggregate upload accepted")
 	}
 }

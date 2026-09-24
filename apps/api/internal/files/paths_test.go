@@ -17,6 +17,7 @@ func TestCleanPath(t *testing.T) {
 		{"/private/" + string(rune(0x07)), "", true},
 		{"/private/.poweur-evil", "", true},
 		{"/public/.poweur-web-public", "public/.poweur-web-public", false},
+		{"/shared/alice.poweur.net/project/.poweur-mount.json", "shared/alice.poweur.net/project/.poweur-mount.json", false},
 	}
 	for _, c := range cases {
 		got, err := CleanPath(c.in)

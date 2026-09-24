@@ -18,7 +18,7 @@ A relay is the **home** for the identities it locally hosts. It does **not** act
 
 **Message routing.** For privacy-proxy / `--via-home-relay` sends where the sender is local and the recipient is remote, resolve the recipient's relay and forward the signed envelope.
 
-**Message delivery.** Store messages for local identities until drained via inbox poll (in-memory today; durable inbox is a later epic).
+**Message delivery.** Keep messages for local identities in a durable spool on disk until their devices collect them, and push new mail to connected devices over SSE.
 
 **Ack ingestion.** Accept signed `delivered_client` acks at `POST /acks` under the same locality rules.
 
@@ -37,12 +37,14 @@ The relay still holds **no identity private keys**. With `POWEUR_DATA` configure
 |-------|---------|:-----------------:|
 | Identity documents (`poweur-sys/public/id.json`) | Hosted identity publication | Yes |
 | File trees (`/public`, `/private`, …) | Per-identity home filesystem | Yes |
+| Inbox spool and ack queue (`spool/`) | Messages and receipts waiting for devices | Yes |
+| Shares and groups (`poweur-sys/`) | Grants, links, group membership | Yes |
+| Pending contact requests | The requests tray | No |
 | Rate limit counters | Per-sender + global buckets | No |
 | DNS / resolve caches | Peer addresses, identity resolve TTL | No |
-| Identity inbox / ack store | Pending messages and acks | No (MVP) |
-| Session + DAV token caches | Short-lived credentials | No |
+| Session + DAV token caches | Short-lived credentials | No (clients sign in again) |
 
-Losing ephemeral state on restart is acceptable for messaging MVP behaviour; losing `POWEUR_DATA` is not — back it up (see `deploy/BACKUP.md`).
+Messages, files and shares survive a restart; losing `POWEUR_DATA` does not — back it up (see [Self-hosting](/relay/self-hosting#back-up-and-upgrade)).
 
 ## Discovery and DNS
 
@@ -61,15 +63,20 @@ Losing ephemeral state on restart is acceptable for messaging MVP behaviour; los
 
 ## Deployment
 
-1. A domain for the relay hostname (and optionally a `HOSTED_DOMAINS` parent with a wildcard `A`/`CNAME`)
-2. TLS covering the relay and wildcard identities (see [TLS](/security/tls))
-3. `POWEUR_DATA` volume for durable identities and files
+The relay ships as one Docker image (`apps/api/Dockerfile`) that also serves the web app at
+`/app/`. It speaks HTTP and runs behind a TLS reverse proxy. You need:
+
+1. A domain, with a wildcard record if you host identities under it (`*.example.com`)
+2. TLS covering the domain and every hosted name (see [TLS](/security/tls))
+3. A `POWEUR_DATA` volume for durable state
 4. Environment variables from [Configuration](/relay/configuration)
 
-The `apps/infra` directory contains Terraform examples for deploying on Hetzner Cloud.
+[Self-hosting a relay](/relay/self-hosting) walks through all of it. The production setup
+behind poweur.net (Docker Compose, Caddy, Ansible, Grafana) is in `deploy/` in the repository.
 
 ## Related
 
+- [Self-hosting a relay](/relay/self-hosting)
 - [API Reference](/relay/api-reference)
 - [Configuration](/relay/configuration)
 - [DNS Management](/relay/dns-management)

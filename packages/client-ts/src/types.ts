@@ -160,6 +160,16 @@ export interface ShareAudience {
 
 export const PERM_READ = "read";
 export const PERM_WRITE = "write";
+/** Create-only is currently restricted to upload-only file-request links. */
+export const PERM_CREATE = "create";
+
+export interface ShareFileRequest {
+  max_uploads?: number;
+  max_bytes?: number;
+  max_object_bytes?: number;
+  allowed_types?: string[];
+  notify?: boolean;
+}
 
 /**
  * Options that only make sense for a link share (E05-T4). They are part of
@@ -171,10 +181,14 @@ export interface ShareLink {
   password?: string;
   /** Cap on successful downloads through the link; 0/absent = unlimited. */
   max_downloads?: number;
+  /** Present when the capability is an upload-only file request. */
+  file_request?: ShareFileRequest;
 }
 
 export interface ShareGrant {
   share_id: string;
+  /** Owner-signed provenance for a direct grant upgraded from a public link. */
+  source_share_id?: string;
   owner: string;
   path: string;
   audience: ShareAudience[];
@@ -184,6 +198,61 @@ export interface ShareGrant {
   /** Set only on link-share grants (audience = one link token). */
   link?: ShareLink;
   signature: string;
+}
+
+/** Decrypted body of `sys.share.offer` (EPIC-005 E05-T3). */
+export interface ShareOffer {
+  version: 1;
+  /** Complete owner-signed grant; discovery evidence, never an authority token. */
+  grant: ShareGrant;
+  offered_at: string;
+}
+
+/** Decrypted body of `sys.share.accept`. */
+export interface ShareAccept {
+  version: 1;
+  share_id: string;
+  owner: string;
+  recipient: string;
+  /** Recipient-local virtual path: shared/<owner>/<name>. */
+  mount_path: string;
+  accepted_at: string;
+}
+
+/** Decrypted body of `sys.share.revoked`. */
+export interface ShareRevoked {
+  version: 1;
+  share_id: string;
+  owner: string;
+  revoked_at: string;
+}
+
+/** Encrypted request to turn a public capability relationship into an ID grant. */
+export interface ShareClaim {
+  version: 1;
+  share_id: string;
+  owner: string;
+  token: string;
+  claimant: string;
+  action: "viewed" | "downloaded" | "uploaded";
+  claimed_at: string;
+}
+
+/**
+ * Recipient-local pointer at
+ * `shared/<owner>/<name>/.poweur-mount.json`.
+ *
+ * It contains no bearer credential and grants no access. Poweur-aware
+ * clients resolve the owner and mint a fresh visitor token on every session.
+ */
+export interface ShareMount {
+  version: 1;
+  share_id: string;
+  owner: string;
+  source_path: string;
+  permissions: string[];
+  accepted_at: string;
+  expires_at?: string;
 }
 
 /**
@@ -362,6 +431,9 @@ export interface ContactRequestEntry {
   recipient: string;
   timestamp: string;
   type?: string;
+  thread_id?: string;
+  expires_at?: string;
+  metadata?: Record<string, string>;
   payload: string;
   /** Present because the queued envelope is E2E-encrypted like any message. */
   encryption?: EncryptionMeta;

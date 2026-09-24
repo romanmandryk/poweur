@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appBasePath,
   claimInvite,
+  existingIdFrom,
   identityAppUrl,
   joinIdentityFor,
   launcherAppUrl,
@@ -107,5 +108,29 @@ describe("claimInvite", () => {
       expect(claimInvite(`?handle=${encodeURIComponent(bad)}`).handle).toBe("");
     }
     expect(claimInvite("?from=elsewhere").fromSignIn).toBe(false);
+  });
+});
+
+describe("existingIdFrom", () => {
+  it("completes a bare handle with the launcher's domain", () => {
+    expect(existingIdFrom("Alice", hosted)).toEqual({ identity: "alice.poweur.net", handle: "alice", domain: "poweur.net", hosted: true });
+  });
+
+  it("takes a full ID, @handle or a pasted link to the ID's app", () => {
+    for (const raw of ["alice.poweur.net", "@alice", " https://alice.poweur.net/app/#x ", "alice.poweur.net."]) {
+      expect(existingIdFrom(raw, hosted)?.identity, raw).toBe("alice.poweur.net");
+    }
+    expect(existingIdFrom("bob.example.org", hosted)).toMatchObject({ handle: "bob", domain: "example.org", hosted: true });
+  });
+
+  it("marks names this relay does not host, including nested ones", () => {
+    expect(existingIdFrom("carl.example.com", hosted)).toEqual({ identity: "carl.example.com", handle: "carl", domain: "example.com", hosted: false });
+    expect(existingIdFrom("a.b.poweur.net", hosted)?.hosted).toBe(false);
+  });
+
+  it("is null for nothing, or for something that is not a name", () => {
+    expect(existingIdFrom("   ", hosted)).toBeNull();
+    expect(existingIdFrom("not a name", hosted)).toBeNull();
+    expect(existingIdFrom("alice", { domain: "", hostedDomains: [] })).toBeNull();
   });
 });

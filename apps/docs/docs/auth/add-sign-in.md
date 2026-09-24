@@ -12,7 +12,7 @@ anybody. If you are used to OAuth, the surprising part is how much is missing.
 
 The [protocol spec](./sign-in.md) is normative; this page is the shortest path to a working
 login. The complete working version of everything below is
-[`apps/guestbook`](https://github.com/poweur/poweur/tree/master/apps/guestbook) — a real
+[`apps/guestbook`](https://github.com/romanmandryk/poweur/tree/master/apps/guestbook) — a real
 site you can run: `GUESTBOOK_ORIGIN=https://you.example go run ./cmd/guestbook`.
 
 ## 0. What you are about to build

@@ -18,7 +18,7 @@ import { PoweurError } from "./errors.js";
 import type { RelayClient } from "./http.js";
 
 export interface StreamEvent {
-  /** `ready` on connect, then `message` / `ack`. */
+  /** `ready` on connect, then queue events or the `file_request` owner hint. */
   type: string;
   identity: string;
   message_id?: string;
