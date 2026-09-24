@@ -344,4 +344,54 @@ func TestHookForFallsBackAndNormalizes(t *testing.T) {
 	if verdict, _ := hookFor(idpkg.MsgTypeContactRequest)(closedInboxCtx{mode: idpkg.InboxContactsOnly}); verdict != policyReject {
 		t.Fatalf("contact request under contacts_only must be rejected, got %v", verdict)
 	}
+	offer := Message{
+		Type: idpkg.MsgTypeShareOffer, Payload: "cipher", Metadata: map[string]string{"share_id": "shr_1"},
+		ExpiresAt: time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	}
+	if verdict, _ := hookFor(idpkg.MsgTypeShareOffer)(closedInboxCtx{mode: idpkg.InboxContactsAndRequests, msg: offer}); verdict != policyQueueRequest {
+		t.Fatalf("bounded share offer under contacts_and_requests: verdict %v", verdict)
+	}
+	if verdict, _ := hookFor(idpkg.MsgTypeShareOffer)(closedInboxCtx{mode: idpkg.InboxContactsOnly, msg: offer}); verdict != policyReject {
+		t.Fatalf("share offer under contacts_only must be rejected, got %v", verdict)
+	}
+	claim := offer
+	claim.Type = idpkg.MsgTypeShareClaim
+	if verdict, _ := hookFor(idpkg.MsgTypeShareClaim)(closedInboxCtx{mode: idpkg.InboxContactsAndRequests, msg: claim}); verdict != policyQueueRequest {
+		t.Fatalf("bounded share claim under contacts_and_requests: verdict %v", verdict)
+	}
+	if verdict, _ := hookFor(idpkg.MsgTypeShareClaim)(closedInboxCtx{mode: idpkg.InboxContactsOnly, msg: claim}); verdict != policyReject {
+		t.Fatalf("share claim under contacts_only must be rejected, got %v", verdict)
+	}
+}
+
+func TestPolicyQueuesBoundedShareOffersByGrant(t *testing.T) {
+	server, ts := newDAVTestServer(t, 0, 0)
+	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json",
+		`{"version":1,"mode":"contacts_and_requests"}`)
+
+	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	for _, shareID := range []string{"shr_one", "shr_two"} {
+		resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+			msgType: idpkg.MsgTypeShareOffer, expiresAt: expires,
+			metadata: map[string]string{"share_id": shareID},
+		})
+		out := mustStatus(t, resp, http.StatusAccepted, "share offer")
+		if out["status"] != "request_queued" {
+			t.Fatalf("share offer outcome: %v", out)
+		}
+	}
+	queued := challengeSigned(t, ts, alice, "/requests/"+alice.name)
+	requests, _ := queued["requests"].([]any)
+	if len(requests) != 2 {
+		t.Fatalf("independent grant offers must have independent slots: %v", queued)
+	}
+
+	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
+		msgType:  idpkg.MsgTypeShareOffer,
+		metadata: map[string]string{"share_id": "shr_no_expiry"},
+	})
+	mustStatus(t, resp, http.StatusForbidden, "non-expiring share offer")
 }

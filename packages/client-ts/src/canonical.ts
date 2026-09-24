@@ -195,10 +195,9 @@ export function canonicalAudience(audience: ShareAudience[]): string {
 /**
  * Share-grant signing input (ShareGrant.Canonical).
  *
- * A grant carrying link options (E05-T4) appends three more lines — the
- * marker, the password hash and the download cap. A grant with no `link`
- * object signs exactly the eight lines it always did, so adding link shares
- * invalidated no existing signature.
+ * A grant carrying link options appends its marker, password hash and
+ * download cap. File requests append a second marker and their five signed
+ * controls. Grants with no `link` retain the original eight-line format.
  */
 export function canonicalShareGrant(grant: {
   share_id: string;
@@ -227,6 +226,19 @@ export function canonicalShareGrant(grant: {
       grant.link.password ?? "",
       String(grant.link.max_downloads ?? 0),
     );
+    if (grant.link.file_request) {
+      fields.push(
+        "poweur-file-request",
+        String(grant.link.file_request.max_uploads ?? 0),
+        String(grant.link.file_request.max_bytes ?? 0),
+        String(grant.link.file_request.max_object_bytes ?? 0),
+        [...(grant.link.file_request.allowed_types ?? [])]
+          .map((value) => value.trim().toLowerCase())
+          .sort()
+          .join(","),
+        String(grant.link.file_request.notify ?? false),
+      );
+    }
   }
   return fields.join("\n");
 }

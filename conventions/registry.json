@@ -32,19 +32,25 @@
       "type": "sys.share.offer",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "reserved"
+      "status": "experimental"
     },
     {
       "type": "sys.share.accept",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "reserved"
+      "status": "experimental"
     },
     {
       "type": "sys.share.revoked",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "reserved"
+      "status": "experimental"
+    },
+    {
+      "type": "sys.share.claim",
+      "owner": "poweur core",
+      "pcp": "pcp-0003-share-grant",
+      "status": "experimental"
     },
     {
       "type": "sys.sync.changed",

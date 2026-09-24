@@ -37,6 +37,10 @@
           },
           "group": {
             "type": "string"
+          },
+          "link": {
+            "type": "string",
+            "pattern": "^[a-z2-7]{26}$"
           }
         },
         "minProperties": 1,
@@ -50,9 +54,32 @@
       "items": {
         "enum": [
           "read",
-          "write"
+          "write",
+          "create"
         ]
       }
+    },
+    "link": {
+      "type": "object",
+      "properties": {
+        "password": {"type": "string", "pattern": "^\\$argon2id\\$"},
+        "max_downloads": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "file_request": {
+          "type": "object",
+          "properties": {
+            "max_uploads": {"type": "integer", "minimum": 0, "maximum": 1000000},
+            "max_bytes": {"type": "integer", "minimum": 0},
+            "max_object_bytes": {"type": "integer", "minimum": 0},
+            "allowed_types": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^[^ ;\\s]+/[^ ;\\s]+$"}
+            },
+            "notify": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "created_at": {
       "type": "string",

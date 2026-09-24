@@ -30,7 +30,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (E02-T1 SQLite/bbolt index open) | E01 |
 | [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete (S3 provider deferred) | E02 |
 | [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | core complete (T1–T4, T6 device registry done; T5 desktop/mobile + fsnotify daemon deferred) | E03 |
-| [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust / Growth | core complete (T4 links + T5 groups done; **T3 offer/accept/mount + T6 file requests/conversion open**) | E03 |
+| [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust / Growth | core complete (T3 offer/accept/mount + T4 links + T5 groups done; **T6 file requests/conversion open**) | E03 |
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | **complete** (T1–T5; tasks dogfood = PCP-0007) | E03 |
 | [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | **complete** (T1–T5; stranger PoW gate moved to E14-T3) | E03, E06 |
 | [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | **complete** (T1–T6; T6: short sign-in codes by reference) | E01 |

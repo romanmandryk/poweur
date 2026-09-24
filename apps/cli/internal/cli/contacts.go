@@ -350,8 +350,27 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	for _, req := range pending {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n",
-			req.Sender, req.Type, req.Timestamp, req.Sender)
+		if req.Type == idpkg.MsgTypeShareOffer {
+			var offer idpkg.ShareOffer
+			if err := json.Unmarshal([]byte(req.Plaintext), &offer); err == nil && offer.Grant.Owner == req.Sender && offer.Grant.ShareID == req.Metadata["share_id"] {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t/%s\t(accept with `poweur share accept --offer-file <file>`)\n",
+					req.Sender, req.Type, req.Timestamp, offer.Grant.Path)
+			} else {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t(invalid offer)\n", req.Sender, req.Type, req.Timestamp)
+			}
+			continue
+		}
+		if req.Type == idpkg.MsgTypeShareClaim {
+			claim, err := idpkg.ParseShareClaim([]byte(req.Plaintext))
+			if err == nil && claim.Claimant == req.Sender && claim.Owner == req.Recipient && claim.ShareID == req.Metadata["share_id"] {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t(approve with `poweur share claim approve --claim-file <file>`)\n",
+					req.Sender, req.Type, req.Timestamp, claim.Action)
+			} else {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t(invalid claim)\n", req.Sender, req.Type, req.Timestamp)
+			}
+			continue
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t(accept with `poweur contacts accept %s`)\n", req.Sender, req.Type, req.Timestamp, req.Sender)
 		if req.Plaintext != "" {
 			fmt.Fprintf(stdout, "  🔒 %s\n", req.Plaintext)
 		}
@@ -362,14 +381,17 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 // requestEntry mirrors the relay's stored request envelope. Plaintext is
 // filled in locally by decryptRequestIntros — it is never on the wire.
 type requestEntry struct {
-	ID         string          `json:"id"`
-	Sender     string          `json:"sender"`
-	Recipient  string          `json:"recipient"`
-	Timestamp  string          `json:"timestamp"`
-	Type       string          `json:"type,omitempty"`
-	Payload    string          `json:"payload"`
-	Encryption *EncryptionMeta `json:"encryption,omitempty"`
-	Plaintext  string          `json:"plaintext,omitempty"`
+	ID         string            `json:"id"`
+	Sender     string            `json:"sender"`
+	Recipient  string            `json:"recipient"`
+	Timestamp  string            `json:"timestamp"`
+	Type       string            `json:"type,omitempty"`
+	ThreadID   string            `json:"thread_id,omitempty"`
+	ExpiresAt  string            `json:"expires_at,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	Payload    string            `json:"payload"`
+	Encryption *EncryptionMeta   `json:"encryption,omitempty"`
+	Plaintext  string            `json:"plaintext,omitempty"`
 }
 
 // decryptRequestIntros opens each request's E2E-encrypted intro in place.

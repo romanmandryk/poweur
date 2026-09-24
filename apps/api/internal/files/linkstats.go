@@ -25,11 +25,90 @@ import (
 
 // LinkStat is one link share's lifetime counters.
 type LinkStat struct {
-	ShareID   string    `json:"share_id"`
-	Downloads int64     `json:"downloads"`
-	Bytes     int64     `json:"bytes"`
-	FirstAt   time.Time `json:"first_at,omitempty"`
-	LastAt    time.Time `json:"last_at,omitempty"`
+	ShareID      string    `json:"share_id"`
+	Opens        int64     `json:"opens,omitempty"`
+	Downloads    int64     `json:"downloads"`
+	Bytes        int64     `json:"bytes"`
+	Uploads      int64     `json:"uploads,omitempty"`
+	UploadBytes  int64     `json:"upload_bytes,omitempty"`
+	ClaimStarted int64     `json:"claim_started,omitempty"`
+	IDClaimed    int64     `json:"id_claimed,omitempty"`
+	FirstAt      time.Time `json:"first_at,omitempty"`
+	LastAt       time.Time `json:"last_at,omitempty"`
+}
+
+// RecordClaimStarted records the funnel transition without visitor data.
+func (ls *LinkStats) RecordClaimStarted(identity, shareID string) {
+	if ls == nil {
+		return
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	st := ls.statLocked(identity, shareID)
+	st.ClaimStarted++
+	st.LastAt = time.Now().UTC()
+	ls.persistLocked(identity)
+}
+
+// RecordIDClaimed records that a signed Poweur identity continued a public
+// capability flow. No claimant identity is retained with this counter.
+func (ls *LinkStats) RecordIDClaimed(identity, shareID string) {
+	if ls == nil {
+		return
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	st := ls.statLocked(identity, shareID)
+	st.IDClaimed++
+	st.LastAt = time.Now().UTC()
+	ls.persistLocked(identity)
+}
+
+// RecordOpen records an anonymous landing-page view without retaining a
+// visitor address, user agent, token, path or filename.
+func (ls *LinkStats) RecordOpen(identity, shareID string) {
+	if ls == nil {
+		return
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	st := ls.statLocked(identity, shareID)
+	st.Opens++
+	st.LastAt = time.Now().UTC()
+	ls.persistLocked(identity)
+}
+
+func (ls *LinkStats) statLocked(identity, shareID string) *LinkStat {
+	tree := ls.treeLocked(identity)
+	st, ok := tree.Shares[shareID]
+	if !ok {
+		st = &LinkStat{ShareID: shareID, FirstAt: time.Now().UTC()}
+		tree.Shares[shareID] = st
+	}
+	return st
+}
+
+// ReserveUpload atomically charges a file-request upload against its count
+// and byte caps. Failed/aborted transfers remain charged, which prevents an
+// attacker from racing or repeatedly aborting the last quota slot.
+func (ls *LinkStats) ReserveUpload(identity, shareID string, size int64, maxUploads int, maxBytes int64) (LinkStat, bool) {
+	if ls == nil {
+		return LinkStat{ShareID: shareID}, true
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	st := ls.statLocked(identity, shareID)
+	if maxUploads > 0 && st.Uploads >= int64(maxUploads) {
+		return *st, false
+	}
+	if maxBytes > 0 && (size > maxBytes || st.UploadBytes > maxBytes-size) {
+		return *st, false
+	}
+	st.Uploads++
+	st.UploadBytes += size
+	st.LastAt = time.Now().UTC()
+	ls.persistLocked(identity)
+	return *st, true
 }
 
 type linkStatsFile struct {

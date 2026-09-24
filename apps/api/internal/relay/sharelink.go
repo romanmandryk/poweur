@@ -1,10 +1,14 @@
 package relay
 
 import (
+	"bufio"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -23,19 +27,17 @@ import (
 
 // Public-link shares (EPIC-005 E05-T4) — capability URLs.
 //
-// `https://<identity>/s/<token>` serves a read-only browse/download view of
-// one signed link grant to anyone holding the token, with no Poweur
-// identity and no authentication. The token IS the credential, which sets
-// the whole shape of this file:
+// `https://<identity>/s/<token>` serves either a browse/download view or an
+// upload-only file request from one signed link grant. No Poweur identity is
+// required. The token IS the credential, which sets the whole shape here:
 //
 //   - It is compared in constant time and never logged, echoed into an
 //     error, or put in a page the browser might send onward.
 //   - Every page here sends `Referrer-Policy: no-referrer` so the token does
 //     not leak to whatever a document links to, and `noindex` so a crawler
 //     that gets hold of one does not publish it.
-//   - The endpoint is read-only at the protocol level (the grant format
-//     refuses `write` on a link grant) so a leaked URL can never mutate the
-//     owner's tree.
+//   - Ordinary links are read-only. A file request can only create fresh,
+//     uniquely named objects and can never list/read/replace/delete.
 //   - Grants are re-read per request like every other grant, so revocation
 //     is a file delete that takes effect on the next click. There is no
 //     cache window.
@@ -58,6 +60,9 @@ const (
 	// maxLinkListing bounds a directory page so a huge folder cannot be
 	// turned into a bandwidth amplifier.
 	maxLinkListing = 2000
+	// maxFileRequestBytes is the relay safety ceiling even when an owner sets
+	// no per-request limit. Larger transfers belong on resumable uploads.
+	maxFileRequestBytes int64 = 64 << 20
 )
 
 // shareLinkRequest is one parsed /s/ request.
@@ -163,6 +168,29 @@ func (s *Server) handleShareLink(w http.ResponseWriter, r *http.Request) {
 		s.writeLinkPasswordForm(w, req, http.StatusUnauthorized, "")
 		return
 	}
+	if grant.IsFileRequest() {
+		if req.rest == "claim" && r.Method == http.MethodGet {
+			action := r.URL.Query().Get("action")
+			if action != "uploaded" {
+				action = "viewed"
+			}
+			s.linkStats.RecordClaimStarted(req.owner, grant.ShareID)
+			http.Redirect(w, r, s.shareClaimURL(req, grant, action), http.StatusSeeOther)
+			return
+		}
+		if req.rest != "" {
+			s.writeLinkPage(w, http.StatusNotFound, "Not in this request",
+				"File requests do not expose uploaded files.")
+			return
+		}
+		if r.Method == http.MethodPost {
+			s.handleFileRequestUpload(w, r, req, grant)
+			return
+		}
+		s.linkStats.RecordOpen(req.owner, grant.ShareID)
+		s.writeFileRequestForm(w, req, grant, http.StatusOK, "")
+		return
+	}
 	if r.Method == http.MethodPost {
 		// A password POST to a link that needs none: nothing to do but show
 		// the share.
@@ -171,6 +199,146 @@ func (s *Server) handleShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.serveLinkTarget(w, r, req, grant)
+}
+
+func (s *Server) writeFileRequestForm(w http.ResponseWriter, req shareLinkRequest, grant idpkg.ShareGrant, status int, problem string) {
+	var body strings.Builder
+	fmt.Fprintf(&body, `<p class="crumb">Requested by %s</p>`, html.EscapeString(req.owner))
+	body.WriteString(s.shareLinkDetails(req, grant))
+	body.WriteString(`<p class="muted">You can upload a new file. You cannot see, replace, or remove anyone else's uploads.</p>`)
+	if problem != "" {
+		fmt.Fprintf(&body, `<p class="bad">%s</p>`, html.EscapeString(problem))
+	}
+	accept := ""
+	if request := grant.Link.FileRequest; len(request.AllowedTypes) > 0 {
+		accept = ` accept="` + html.EscapeString(strings.Join(request.AllowedTypes, ",")) + `"`
+	}
+	fmt.Fprintf(&body, `<form class="upload" method="post" enctype="multipart/form-data" action="%s">`+
+		`<input type="file" name="file" required%s><button type="submit">Upload</button></form>`,
+		html.EscapeString(req.base), accept)
+	body.WriteString(s.shareClaimCTA(req, "viewed"))
+	s.writeLinkHTML(w, status, "Send a file", body.String(), false)
+}
+
+func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request, req shareLinkRequest, grant idpkg.ShareGrant) {
+	options := grant.Link.FileRequest
+	limit := maxFileRequestBytes
+	if options.MaxObjectBytes > 0 && options.MaxObjectBytes < limit {
+		limit = options.MaxObjectBytes
+	}
+	// Leave bounded room for multipart headers while enforcing the file's
+	// exact size below.
+	r.Body = http.MaxBytesReader(w, r.Body, limit+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		s.writeFileRequestForm(w, req, grant, http.StatusRequestEntityTooLarge, "That upload is too large or malformed.")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		s.writeFileRequestForm(w, req, grant, http.StatusBadRequest, "Choose one file to upload.")
+		return
+	}
+	defer file.Close()
+	if header.Size < 0 || header.Size > limit {
+		s.writeFileRequestForm(w, req, grant, http.StatusRequestEntityTooLarge, "That file is larger than this request allows.")
+		return
+	}
+	reader := bufio.NewReader(file)
+	prefixBytes, _ := reader.Peek(512)
+	if !validFileRequestType(http.DetectContentType(prefixBytes), options.AllowedTypes) {
+		s.writeFileRequestForm(w, req, grant, http.StatusUnsupportedMediaType, "That file type is not accepted.")
+		return
+	}
+	name, err := fileRequestName(header.Filename)
+	if err != nil {
+		s.writeFileRequestForm(w, req, grant, http.StatusBadRequest, err.Error())
+		return
+	}
+	if fi, err := s.filesProvider.Stat(r.Context(), req.owner, grant.Path); err != nil || !fi.IsDir() {
+		s.writeLinkPage(w, http.StatusConflict, "Upload folder unavailable", "The owner needs to recreate the destination folder.")
+		return
+	}
+	prefix, err := idpkg.GenerateLinkToken()
+	if err != nil {
+		s.writeLinkPage(w, http.StatusInternalServerError, "Upload failed", "Please try again.")
+		return
+	}
+	destination, err := files.CleanPath(grant.Path + "/" + prefix[:12] + "-" + name)
+	if err != nil {
+		s.writeFileRequestForm(w, req, grant, http.StatusBadRequest, "That filename cannot be stored.")
+		return
+	}
+	dst, err := s.filesProvider.OpenFile(r.Context(), req.owner, destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		s.writeLinkPage(w, http.StatusConflict, "Upload failed", "Please retry; no existing file was replaced.")
+		return
+	}
+	if _, ok := s.linkStats.ReserveUpload(req.owner, grant.ShareID, header.Size, options.MaxUploads, options.MaxBytes); !ok {
+		_ = dst.Close()
+		_ = s.filesProvider.RemoveAll(r.Context(), req.owner, destination)
+		s.writeLinkPage(w, http.StatusGone, "This request is full", "It reached the upload limit its owner set.")
+		return
+	}
+	hash := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(dst, hash), io.LimitReader(reader, limit+1))
+	closeErr := dst.Close()
+	if copyErr != nil || closeErr != nil || written != header.Size || written > limit {
+		_ = s.filesProvider.RemoveAll(r.Context(), req.owner, destination)
+		s.writeLinkPage(w, http.StatusBadRequest, "Upload failed", "The file was incomplete; please try again.")
+		return
+	}
+	s.filesIndex.RecordWrite(req.owner, destination, hex.EncodeToString(hash.Sum(nil)), written, time.Now().UTC(), "public-link:"+grant.ShareID)
+	if options.Notify {
+		// This is a wake-up hint, never a forged owner message: the signed
+		// grant opted in, while the files tree and counters remain truth.
+		s.notify(req.owner, "file_request", grant.ShareID)
+	}
+	body := `<p>Your file <strong>` + html.EscapeString(name) + `</strong> was delivered.</p>` +
+		`<p class="muted">Other submissions remain private.</p>` + s.shareClaimCTA(req, "uploaded")
+	s.writeLinkHTML(w, http.StatusCreated, "Upload complete", body, false)
+}
+
+func (s *Server) shareClaimCTA(req shareLinkRequest, action string) string {
+	if s.claimURL() == "" {
+		return ""
+	}
+	href := req.base + "/claim?action=" + action
+	return `<p class="upsell"><a href="` + html.EscapeString(href) + `" rel="noreferrer">Get a Poweur ID</a> and ask the owner for ongoing access. Your upload stays complete.</p>`
+}
+
+func (s *Server) shareClaimURL(req shareLinkRequest, grant idpkg.ShareGrant, action string) string {
+	payload, _ := json.Marshal(map[string]string{
+		"share_id": grant.ShareID, "owner": req.owner, "token": req.token, "action": action,
+	})
+	return s.claimURL() + "#share=" + base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func fileRequestName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
+		return "", fmt.Errorf("that filename is not valid")
+	}
+	if strings.HasPrefix(strings.ToLower(name), ".poweur-") || len([]byte(name)) > 180 {
+		return "", fmt.Errorf("that filename is reserved or too long")
+	}
+	if _, err := files.CleanPath("shared/" + name); err != nil {
+		return "", fmt.Errorf("that filename is not valid")
+	}
+	return name, nil
+}
+
+func validFileRequestType(got string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	got = strings.ToLower(strings.TrimSpace(strings.Split(got, ";")[0]))
+	for _, want := range allowed {
+		want = strings.ToLower(strings.TrimSpace(want))
+		if got == want || (strings.HasSuffix(want, "/*") && strings.HasPrefix(got, strings.TrimSuffix(want, "*"))) {
+			return true
+		}
+	}
+	return false
 }
 
 // serveLinkTarget resolves the requested path inside the share and serves
@@ -278,6 +446,7 @@ func (s *Server) serveLinkListing(w http.ResponseWriter, r *http.Request, req sh
 
 	var body strings.Builder
 	fmt.Fprintf(&body, `<p class="crumb">Shared by %s</p>`, html.EscapeString(req.owner))
+	body.WriteString(s.shareLinkDetails(req, grant))
 	body.WriteString(`<ul class="ls">`)
 	if rel != "" {
 		parent := req.base
@@ -302,6 +471,47 @@ func (s *Server) serveLinkListing(w http.ResponseWriter, r *http.Request, req sh
 		body.WriteString(`<p class="muted">This folder is empty.</p>`)
 	}
 	s.writeLinkHTML(w, http.StatusOK, title, body.String(), true)
+}
+
+// shareLinkDetails gives a capability holder enough public, non-secret context
+// to verify who issued it and understand the boundary before acting. It never
+// includes the token, storage path, filenames or visitor data.
+func (s *Server) shareLinkDetails(req shareLinkRequest, grant idpkg.ShareGrant) string {
+	var details []string
+	if entry, ok := s.identities.Get(req.owner); ok && len(entry.PublicKeyBytes) == ed25519.PublicKeySize {
+		details = append(details, "Identity key <code>"+html.EscapeString(idpkg.KeyFingerprintBytes(entry.PublicKeyBytes))+"</code>")
+	}
+	if grant.ExpiresAt != "" {
+		if expiry, err := time.Parse(time.RFC3339, grant.ExpiresAt); err == nil {
+			details = append(details, "Expires <time datetime=\""+html.EscapeString(grant.ExpiresAt)+"\">"+
+				html.EscapeString(expiry.UTC().Format("2 Jan 2006, 15:04 UTC"))+"</time>")
+		}
+	}
+	if grant.Link != nil && grant.Link.Password != "" {
+		details = append(details, "Password protected")
+	}
+	if grant.Link != nil && grant.Link.FileRequest != nil {
+		request := grant.Link.FileRequest
+		stat := s.linkStats.Get(req.owner, grant.ShareID)
+		if request.MaxUploads > 0 {
+			remaining := int64(request.MaxUploads) - stat.Uploads
+			if remaining < 0 {
+				remaining = 0
+			}
+			details = append(details, fmt.Sprintf("%d of %d uploads remaining", remaining, request.MaxUploads))
+		}
+		if request.MaxBytes > 0 {
+			remaining := request.MaxBytes - stat.UploadBytes
+			if remaining < 0 {
+				remaining = 0
+			}
+			details = append(details, formatLinkSize(remaining)+" upload capacity remaining")
+		}
+	}
+	if len(details) == 0 {
+		return ""
+	}
+	return `<p class="muted link-details">` + strings.Join(details, " · ") + `</p>`
 }
 
 // --- password gate -------------------------------------------------------
@@ -446,8 +656,8 @@ func (s *Server) writeLinkHTML(w http.ResponseWriter, status int, title, body st
 		// moment is that an ID of their own gets them more than read-only.
 		claim := s.claimURL()
 		if claim != "" {
-			fmt.Fprintf(w, `<p class="upsell">Read-only view. `+
-				`<a href="%s" rel="noreferrer noopener">Get a Poweur ID</a> to share and edit files of your own.</p>`,
+			fmt.Fprintf(w, `<p class="upsell">`+
+				`<a href="%s" rel="noreferrer noopener">Get a Poweur ID</a> to keep sharing and collaborating.</p>`,
 				html.EscapeString(claim))
 		}
 	}

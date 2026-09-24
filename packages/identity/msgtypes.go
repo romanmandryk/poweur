@@ -44,6 +44,7 @@ const (
 	MsgTypeShareOffer   = "sys.share.offer"   // EPIC-005 pcp-0003
 	MsgTypeShareAccept  = "sys.share.accept"  // EPIC-005 pcp-0003
 	MsgTypeShareRevoked = "sys.share.revoked" // EPIC-005 pcp-0003
+	MsgTypeShareClaim   = "sys.share.claim"   // EPIC-005 E05-T6
 	MsgTypeSyncChanged  = "sys.sync.changed"  // EPIC-004 pcp-0005
 	MsgTypeAbuseReport  = "sys.abuse.report"  // EPIC-007
 	MsgTypeAuthRequest  = "sys.auth.request"  // EPIC-022 E22-T7
@@ -64,6 +65,7 @@ var systemMessageTypes = []string{
 	MsgTypeShareOffer,
 	MsgTypeShareAccept,
 	MsgTypeShareRevoked,
+	MsgTypeShareClaim,
 	MsgTypeSyncChanged,
 	MsgTypeAbuseReport,
 	MsgTypeAuthRequest,

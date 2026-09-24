@@ -198,6 +198,16 @@ func TestVectors_Grants(t *testing.T) {
 			ExpiresAt: "2026-06-01T00:00:00Z",
 			Link:      &ShareLink{Password: vectorLinkPasswordHash, MaxDownloads: 25},
 		}},
+		{"file-request", ShareGrant{
+			ShareID: "shr_request00112233", Owner: "alice.poweur.net",
+			Path: "shared/inbox", Audience: []ShareAudience{{Link: vectorLinkToken}},
+			Permissions: []string{PermCreate}, CreatedAt: VectorTime,
+			ExpiresAt: "2026-06-01T00:00:00Z",
+			Link: &ShareLink{FileRequest: &ShareFileRequest{
+				MaxUploads: 10, MaxBytes: 104857600, MaxObjectBytes: 10485760,
+				AllowedTypes: []string{"text/plain", "image/*"}, Notify: true,
+			}},
+		}},
 	} {
 		grant := entry.grant
 		if err := grant.Sign(priv); err != nil {

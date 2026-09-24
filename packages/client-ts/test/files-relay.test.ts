@@ -10,6 +10,7 @@ import { RelayError } from "../src/errors.js";
 import { SyncClient } from "../src/sync.js";
 import { normalizeGrantPath, verifyGrantSignature } from "../src/shares.js";
 import { PROFILE_PATH } from "../src/profile.js";
+import type { ShareClaim, ShareOffer, ShareRevoked } from "../src/types.js";
 import { createTestIdentity, type TestIdentity } from "./helpers/identities.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 
@@ -130,6 +131,97 @@ describe("TypeScript client ↔ real relay (files, sync, shares)", () => {
     expect(await shares.revoke(grant.share_id)).toBe(true);
     const afterRevoke = await visitor.client.dav({ audience: owner.identity, force: true });
     await expect(afterRevoke.readText("shared/project-x/plan.md")).rejects.toBeTruthy();
+  });
+
+  it("offers, accepts, mounts, edits and revokes a direct share", async () => {
+    await dav.mkdir("shared/lifecycle");
+    await dav.write("shared/lifecycle/plan.md", "one");
+
+    const offered = await owner.client.offerShare("shared/lifecycle", [visitor.identity], {
+      permissions: "rw",
+    });
+    expect(offered.deliveries).toEqual([{ recipient: visitor.identity, delivered: true }]);
+
+    const incoming = await visitor.client.inbox();
+    const message = incoming.messages.find(
+      (entry) => entry.type === "sys.share.offer" && entry.metadata?.share_id === offered.grant.share_id,
+    );
+    expect(message?.plaintext).toBeTruthy();
+    const offer = JSON.parse(message!.plaintext!) as ShareOffer;
+    const accepted = await visitor.client.acceptShareOffer(offer);
+    expect(accepted.notified).toBe(true);
+    expect(accepted.mount.mountPath).toBe(`shared/${owner.identity}/lifecycle`);
+
+    const visitorShares = await visitor.client.shares();
+    expect((await visitorShares.listMounts()).map((entry) => entry.mount.share_id)).toContain(
+      offered.grant.share_id,
+    );
+
+    // The pointer carries no token. The recipient resolves the owner and asks
+    // for fresh visitor authority before following source_path.
+    const mountedDav = await visitor.client.dav({ audience: offer.grant.owner, scope: "dav:full" });
+    await mountedDav.write(`${offer.grant.path}/plan.md`, "two");
+    expect(await dav.readText("shared/lifecycle/plan.md")).toBe("two");
+
+    const revoked = await owner.client.revokeShareAndNotify(offered.grant.share_id);
+    expect(revoked.revoked).toBe(true);
+    expect(revoked.notifications).toEqual([{ recipient: visitor.identity, delivered: true }]);
+
+    const revocations = await visitor.client.inbox();
+    const revokedMessage = revocations.messages.find(
+      (entry) => entry.type === "sys.share.revoked" && entry.metadata?.share_id === offered.grant.share_id,
+    );
+    const payload = JSON.parse(revokedMessage!.plaintext!) as ShareRevoked;
+    expect(payload.share_id).toBe(offered.grant.share_id);
+    const afterRevoke = await visitor.client.dav({ audience: owner.identity, force: true });
+    await expect(afterRevoke.readText("shared/lifecycle/plan.md")).rejects.toBeTruthy();
+  });
+
+  it("upgrades a file-request capability to an owner-approved ID grant", async () => {
+    await dav.mkdir("shared/claim-lifecycle");
+    await dav.write("shared/claim-lifecycle/submission.txt", "already uploaded");
+
+    const ownerShares = await owner.client.shares();
+    const request = await ownerShares.addFileRequest(
+      owner.client.signer,
+      "shared/claim-lifecycle",
+      { maxUploads: 2 },
+    );
+    const sent = await visitor.client.requestShareClaim({
+      share_id: request.grant.share_id,
+      owner: owner.identity,
+      token: request.token,
+      action: "uploaded",
+    });
+    expect(sent.claimant).toBe(visitor.identity);
+
+    const ownerInbox = await owner.client.inbox();
+    const claimMessage = ownerInbox.messages.find(
+      (entry) => entry.type === "sys.share.claim" && entry.metadata?.share_id === request.grant.share_id,
+    );
+    expect(claimMessage?.plaintext).toBeTruthy();
+    const claim = JSON.parse(claimMessage!.plaintext!) as ShareClaim;
+    const approved = await owner.client.approveShareClaim(claim, {
+      consumeLink: true,
+      permissions: "rw",
+    });
+    expect(approved.linkRevoked).toBe(true);
+    expect(approved.deliveries).toEqual([{ recipient: visitor.identity, delivered: true }]);
+    expect((await ownerShares.list()).some((grant) => grant.share_id === request.grant.share_id)).toBe(false);
+
+    const visitorInbox = await visitor.client.inbox();
+    const offerMessage = visitorInbox.messages.find(
+      (entry) => entry.type === "sys.share.offer" && entry.metadata?.share_id === approved.grant.share_id,
+    );
+    expect(offerMessage?.plaintext).toBeTruthy();
+    const offer = JSON.parse(offerMessage!.plaintext!) as ShareOffer;
+    const accepted = await visitor.client.acceptShareOffer(offer);
+    expect(accepted.mount.mount.source_path).toBe("shared/claim-lifecycle");
+
+    const mountedDav = await visitor.client.dav({ audience: owner.identity, scope: "dav:full" });
+    expect(await mountedDav.readText("shared/claim-lifecycle/submission.txt")).toBe("already uploaded");
+    await mountedDav.write("shared/claim-lifecycle/after-claim.txt", "identified");
+    expect(await dav.readText("shared/claim-lifecycle/after-claim.txt")).toBe("identified");
   });
 
   it("manages groups and shares to them", async () => {

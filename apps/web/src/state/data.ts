@@ -46,6 +46,9 @@ export const freshFiles = () => ({
   picking: false,
   grants: [] as any[],
   grantsLoaded: false,
+  /** Credential-free pointers for offers this identity accepted. */
+  mounts: [] as any[],
+  mountsLoaded: false,
   /** Changes-feed cursor for the auto-refresh (EPIC-004). */
   cursor: "",
   polling: false,

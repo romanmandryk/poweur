@@ -8,11 +8,139 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	clipkg "github.com/poweur/cli/pkg/cli"
 )
+
+// TestINT_SHARE_06: the complete guest-to-ID lifecycle is operable from the
+// CLI. The guest requests a claim, the owner explicitly approves and consumes
+// the link, then the guest accepts the ordinary offer into a local mount.
+func TestINT_SHARE_06_CLIFileRequestClaimLifecycle(t *testing.T) {
+	zone := newZone(t)
+	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	defer ts.Close()
+	relayURL := "http://" + addr
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	ownerHome := t.TempDir()
+	claimantHome := t.TempDir()
+	const owner = "claimowner.poweur.net"
+	const claimant = "claimant.poweur.net"
+	runCLI(t, ownerHome, "identity", "create", owner, "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, claimantHome, "identity", "create", claimant, "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, ownerHome, "policy", "set", "contacts_and_requests")
+	runCLI(t, claimantHome, "policy", "set", "contacts_and_requests")
+
+	ownerToken := mintTokenViaCLI(t, ownerHome, "--use-identity", owner)
+	ownerDAV := relayURL + "/dav/" + owner
+	resp := davDo(t, "MKCOL", ownerDAV+"/shared/inbox", ownerToken, nil, nil)
+	resp.Body.Close()
+	resp = davDo(t, http.MethodPut, ownerDAV+"/shared/inbox/already-uploaded.txt", ownerToken, []byte("kept"), nil)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("seed upload: %d", resp.StatusCode)
+	}
+
+	createdRaw, _ := runCLI(t, ownerHome, "share", "request", "add", "/shared/inbox", "--max-uploads", "2", "--json")
+	var created struct {
+		ShareID string `json:"share_id"`
+		Token   string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(createdRaw), &created); err != nil || created.ShareID == "" || created.Token == "" {
+		t.Fatalf("file request output: %s err=%v", createdRaw, err)
+	}
+
+	runCLI(t, claimantHome, "share", "claim", "request", owner,
+		"--share-id", created.ShareID, "--token", created.Token, "--action", "uploaded", "--json")
+	ownerRequests, _ := runCLI(t, ownerHome, "requests", "--json")
+	claimJSON := lifecyclePlaintext(t, ownerRequests, "sys.share.claim")
+	claimFile := filepath.Join(t.TempDir(), "claim.json")
+	if err := os.WriteFile(claimFile, []byte(claimJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	approvedRaw, _ := runCLI(t, ownerHome, "share", "claim", "approve",
+		"--claim-file", claimFile, "--consume-link", "--perm", "rw", "--json")
+	var approved struct {
+		Grant struct {
+			ShareID string `json:"share_id"`
+		} `json:"grant"`
+		LinkRevoked bool `json:"link_revoked"`
+	}
+	if err := json.Unmarshal([]byte(approvedRaw), &approved); err != nil || approved.Grant.ShareID == "" || !approved.LinkRevoked {
+		t.Fatalf("claim approval output: %s err=%v", approvedRaw, err)
+	}
+
+	claimantRequests, _ := runCLI(t, claimantHome, "requests", "--json")
+	offerJSON := lifecyclePlaintext(t, claimantRequests, "sys.share.offer")
+	offerFile := filepath.Join(t.TempDir(), "offer.json")
+	if err := os.WriteFile(offerFile, []byte(offerJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The acceptance acknowledgement is a normal encrypted lifecycle message;
+	// open the owner's inbox for this final response.
+	runCLI(t, ownerHome, "policy", "set", "open")
+	acceptedRaw, _ := runCLI(t, claimantHome, "share", "accept", "--offer-file", offerFile, "--json")
+	if !strings.Contains(acceptedRaw, `"owner_notified": true`) || !strings.Contains(acceptedRaw, `shared/`+owner+`/inbox`) {
+		t.Fatalf("share accept output: %s", acceptedRaw)
+	}
+
+	claimantToken := mintTokenViaCLI(t, claimantHome, "--use-identity", claimant)
+	resp = davDo(t, http.MethodGet, relayURL+"/dav/"+claimant+"/shared/"+owner+"/inbox/.poweur-mount.json", claimantToken, nil, nil)
+	mountRaw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(mountRaw), approved.Grant.ShareID) {
+		t.Fatalf("recipient mount: %d %s", resp.StatusCode, mountRaw)
+	}
+
+	visitorToken := mintTokenViaCLI(t, claimantHome, "--use-identity", claimant,
+		"--audience", owner, "--scope", "dav:full", "--relay", relayURL)
+	resp = davDo(t, http.MethodGet, ownerDAV+"/shared/inbox/already-uploaded.txt", visitorToken, nil, nil)
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(got) != "kept" {
+		t.Fatalf("claimed existing upload: %d %q", resp.StatusCode, got)
+	}
+	resp = davDo(t, http.MethodPut, ownerDAV+"/shared/inbox/identified-edit.txt", visitorToken, []byte("edited"), nil)
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("claimed share write: %d", resp.StatusCode)
+	}
+
+	resp, err := http.Get(relayURL + "/s/" + owner + "/" + created.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("consumed public link: %d want 404", resp.StatusCode)
+	}
+}
+
+func lifecyclePlaintext(t *testing.T, raw, messageType string) string {
+	t.Helper()
+	var queue struct {
+		Requests []struct {
+			Type      string `json:"type"`
+			Plaintext string `json:"plaintext"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal([]byte(raw), &queue); err != nil {
+		t.Fatalf("decode requests: %v: %s", err, raw)
+	}
+	for _, request := range queue.Requests {
+		if request.Type == messageType && request.Plaintext != "" {
+			return request.Plaintext
+		}
+	}
+	t.Fatalf("%s not found in requests: %s", messageType, raw)
+	return ""
+}
 
 // TestINT_SHARE_01: alice (hosted on relay A) shares a folder with bob
 // (DNS identity on relay B) via `poweur share add`; bob reads and writes

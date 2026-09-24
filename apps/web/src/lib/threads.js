@@ -10,7 +10,7 @@
  * `packages/identity/msgtypes.go`). This module must not restate them.
  */
 
-import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST } from "@poweur/client";
+import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST, MSG_TYPE_SHARE_ACCEPT, MSG_TYPE_SHARE_OFFER, MSG_TYPE_SHARE_REVOKED } from "@poweur/client";
 
 /**
  * What the tray shows as a conversation's one-line preview.
@@ -63,10 +63,8 @@ export function threadMessages(messages, selfIdentity, peer, threadId = "") {
   for (const raw of messages) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!message.sender) continue;
-    // The handshake is not chat: the tray leaves it out, so the thread does too.
-    if (isContactHandshake(message.type)) continue;
-    // A sign-in prompt is a notification with its own tray (EPIC-022).
-    if (normalizeMessageType(message.type) === "sys.auth.request") continue;
+    // Consent gestures and notifications have their own surfaces, never chat.
+    if (isActionNotice(message.type)) continue;
     if (conversationPeer(message, selfIdentity).toLowerCase() !== wanted) continue;
     if ((message.thread_id || "") !== (threadId || "")) continue;
     out.push(message);
@@ -107,6 +105,12 @@ export function deliveryState(message, acks) {
 function isContactHandshake(type) {
   const normalized = normalizeMessageType(type);
   return normalized === MSG_TYPE_CONTACT_REQUEST || normalized === MSG_TYPE_CONTACT_ACCEPT;
+}
+
+function isActionNotice(type) {
+  const normalized = normalizeMessageType(type);
+  return isContactHandshake(normalized) || normalized === "sys.auth.request" ||
+    normalized === MSG_TYPE_SHARE_OFFER || normalized === MSG_TYPE_SHARE_ACCEPT || normalized === MSG_TYPE_SHARE_REVOKED;
 }
 
 /**
@@ -154,8 +158,7 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     // An unsigned message has nobody to thread under; it belongs to the
     // anonymous tray, which renders it as a different kind of object.
     if (!message.sender) continue;
-    if (isContactHandshake(message.type)) continue;
-    if (normalizeMessageType(message.type) === "sys.auth.request") continue;
+    if (isActionNotice(message.type)) continue;
     // A verified fan-out carries the group in signed metadata. File it under
     // that address rather than under whichever member happened to speak.
     const contact = conversationPeer(message, selfIdentity);
@@ -217,7 +220,7 @@ export function unreadTotal(messages, selfIdentity, conversations = {}) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!message.sender || message.sender.toLowerCase() === self) continue;
     // A request is counted once, on Contacts — not again as a message.
-    if (isContactHandshake(message.type)) continue;
+    if (isActionNotice(message.type)) continue;
     const conversation = String(message.group_verified ? message.metadata?.group : message.sender).toLowerCase();
     if (markCovers(conversations?.[conversation], message.timestamp, message.id ?? "")) continue;
     count += 1;

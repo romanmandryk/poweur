@@ -29,6 +29,12 @@ const requestCooldown = 7 * 24 * time.Hour
 // (spec: short intro; base64 + envelope overhead allowed for).
 const maxContactRequestPayload = 4096
 
+// Share offers contain a complete signed grant inside the encrypted payload.
+// They remain bounded and must expire so ignored offers cannot accumulate as
+// permanent invitations in a recipient's requests tray.
+const maxShareOfferPayload = 64 * 1024
+const maxShareOfferLifetime = 7*24*time.Hour + time.Minute
+
 // Policy verdicts.
 type policyVerdict int
 
@@ -148,6 +154,18 @@ func authPromptShapeOK(msg Message, now time.Time) bool {
 	}
 	exp, err := time.Parse(time.RFC3339, msg.ExpiresAt)
 	return err == nil && exp.After(now) && exp.Sub(now) <= maxAuthPromptLifetime
+}
+
+func shareOfferShapeOK(msg Message, now time.Time) bool {
+	if len(msg.Payload) > maxShareOfferPayload || msg.ExpiresAt == "" {
+		return false
+	}
+	shareID := strings.TrimSpace(msg.Metadata["share_id"])
+	if shareID == "" || strings.ContainsAny(shareID, "/\\") || shareID == "." || shareID == ".." {
+		return false
+	}
+	expires, err := time.Parse(time.RFC3339, msg.ExpiresAt)
+	return err == nil && expires.After(now) && expires.Sub(now) <= maxShareOfferLifetime
 }
 
 // senderRelayKey names the relay accountable for a sender, for metering

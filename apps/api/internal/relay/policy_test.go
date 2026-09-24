@@ -479,4 +479,18 @@ func TestRequestStoreCooldownUnit(t *testing.T) {
 	if got := st2.Add("a", "b", msg, 0); got != storage.RequestQueued {
 		t.Fatalf("zero-cooldown re-add: %s", got)
 	}
+	// Share offers from one sender are independently bounded by share_id,
+	// rather than collapsing into the contact-handshake slot.
+	st3 := storage.NewRequestStore()
+	first := storage.StoredMessage{ID: "offer-1", Sender: "bob", Recipient: "alice", Type: "sys.share.offer", Metadata: map[string]string{"share_id": "shr_1"}}
+	second := storage.StoredMessage{ID: "offer-2", Sender: "bob", Recipient: "alice", Type: "sys.share.offer", Metadata: map[string]string{"share_id": "shr_2"}}
+	if got := st3.Add("alice", "bob", first, time.Hour); got != storage.RequestQueued {
+		t.Fatalf("first offer: %s", got)
+	}
+	if got := st3.Add("alice", "bob", second, time.Hour); got != storage.RequestQueued {
+		t.Fatalf("second offer: %s", got)
+	}
+	if got := st3.Drain("alice"); len(got) != 2 {
+		t.Fatalf("share offer slots: %v", got)
+	}
 }

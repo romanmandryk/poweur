@@ -4,12 +4,13 @@
  * signed here with the identity key, and the changes feed refreshing the open
  * folder while Files is on screen.
  */
-import { DEFAULT_CHUNK_THRESHOLD, grantExpired, SHARE_ROOTS, SyncClient } from "@poweur/client";
+import { DEFAULT_CHUNK_THRESHOLD, grantExpired, SHARE_ROOTS, SyncClient, validateShareClaim } from "@poweur/client";
 import { askConfirm, askText } from "../components/Dialogs";
 import { useData, type DataFields } from "../state/data";
 import { onIdentityTeardown, useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
+import { clearPendingShareClaim, pendingShareClaim } from "../lib/share-claim";
 import { activeClient, errorMessage } from "./relay";
 
 type Files = DataFields["files"];
@@ -61,7 +62,7 @@ export function grantsForPath(grants: any[], path: string) {
 }
 
 export function describeAudience(grant: any): string {
-  return (grant.audience ?? []).map((entry: any) => entry.id || `group:${entry.group}`).join(", ");
+  return (grant.audience ?? []).map((entry: any) => entry.id || (entry.group ? `group:${entry.group}` : grant.link?.file_request ? "file request" : "public link")).join(", ");
 }
 
 /** Switch between our tree and someone else's; everything cached is per tree. */
@@ -222,6 +223,19 @@ export async function loadGrants({ force = false } = {}) {
   }
 }
 
+export async function loadMounts({ force = false } = {}) {
+  const files = useData.getState().files;
+  if (files.mountsLoaded && !force) return;
+  const client = activeClient();
+  if (!client) return;
+  try {
+    const shares = await client.shares();
+    setFiles({ mounts: await shares.listMounts(), mountsLoaded: true });
+  } catch (error) {
+    console.warn("Share mounts failed:", errorMessage(error));
+  }
+}
+
 /**
  * Grant access to one path. Signed here with the identity key and stored in
  * our own tree — the relay verifies the signature, so it cannot widen the audience.
@@ -234,18 +248,108 @@ export async function addShare(path: string, { audience, permissions, expiry }: 
   }
   setLoading(true, "Signing the grant…");
   try {
-    const shares = await client.shares();
-    await shares.add(client.signer, path, {
-      with: audience,
+    const result = await client.offerShare(path, audience, {
       permissions,
       // A date input gives a day; "until the 5th" means the end of that day.
       ...(expiry ? { expiresAt: `${expiry}T23:59:59Z` } : {}),
     });
-    toast(`Shared /${path} with ${audience.length} ${audience.length === 1 ? "person" : "people"}`, "success");
+    const failed = result.deliveries.filter((delivery: any) => !delivery.delivered).length;
+    toast(
+      failed
+        ? `Access granted, but ${failed} ${failed === 1 ? "offer" : "offers"} could not be delivered`
+        : `Shared /${path} with ${audience.length} ${audience.length === 1 ? "person" : "people"}`,
+      failed ? "warning" : "success",
+    );
     trackAction("files", { kind: "share" });
     await loadGrants({ force: true });
   } catch (error) {
     toast(errorMessage(error), "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+export async function addFileRequest(path: string, options: {
+  expiry?: string;
+  password?: string;
+  maxUploads?: number;
+  maxObjectBytes?: number;
+  allowedTypes?: string[];
+}): Promise<string | null> {
+  const client = activeClient();
+  if (!client) {
+    toast("Unlock your identity first", "warning");
+    return null;
+  }
+  setLoading(true, "Signing the file request…");
+  try {
+    const shares = await client.shares();
+    const { expiry, ...requestOptions } = options;
+    const { grant, token } = await shares.addFileRequest(client.signer, path, {
+      ...requestOptions,
+      ...(expiry ? { expiresAt: `${expiry}T23:59:59Z` } : {}),
+    });
+    setFiles({ grants: [...useData.getState().files.grants, grant], grantsLoaded: true });
+    trackAction("files", { kind: "file_request_create" });
+    toast("Upload-only request created", "success");
+    return `https://${client.identity}/s/${token}`;
+  } catch (error) {
+    toast(errorMessage(error), "error");
+    return null;
+  } finally {
+    setLoading(false);
+  }
+}
+
+let claimSubmission: Promise<void> | null = null;
+
+/** Send a preserved anonymous-link context once an identity is unlocked. */
+export function submitPendingShareClaim(): Promise<void> {
+  if (claimSubmission) return claimSubmission;
+  const pending = pendingShareClaim();
+  const client = activeClient();
+  if (!pending || !client) return Promise.resolve();
+  claimSubmission = (async () => {
+    try {
+      await client.requestShareClaim(pending);
+      clearPendingShareClaim();
+      trackAction("files", { kind: "share_claim_sent" });
+      toast(`Asked ${pending.owner} for ongoing access`, "success", 7000);
+    } catch (error) {
+      toast(`Could not request access: ${errorMessage(error)}`, "error", 8000);
+    } finally {
+      claimSubmission = null;
+    }
+  })();
+  return claimSubmission;
+}
+
+/** Approve an encrypted claim request by issuing a fresh direct-ID grant. */
+export async function approveShareClaimMessage(message: any, consumeLink: boolean): Promise<boolean> {
+  const client = activeClient();
+  const identity = useSession.getState().identity;
+  if (!client || !identity || !message?.plaintext) return false;
+  try {
+    const claim = JSON.parse(message.plaintext);
+    validateShareClaim(claim);
+    if (String(message.sender).toLowerCase() !== claim.claimant.toLowerCase() ||
+        String(claim.owner).toLowerCase() !== identity.toLowerCase() ||
+        String(message.metadata?.share_id ?? "") !== claim.share_id) {
+      throw new Error("Claim message roles do not match its signed envelope");
+    }
+    setLoading(true, "Granting ongoing access…");
+    await client.approveShareClaim(claim, { consumeLink, permissions: "rw" });
+    useData.setState((state) => ({
+      requests: { ...state.requests, incoming: state.requests.incoming.filter((entry: any) => entry.id !== message.id) },
+      messages: state.messages.filter((entry: any) => entry.id !== message.id),
+    }));
+    await loadGrants({ force: true });
+    trackAction("files", { kind: "share_claim_approved", consumeLink });
+    toast(consumeLink ? "Access granted and public link closed" : "Ongoing access granted", "success");
+    return true;
+  } catch (error) {
+    toast(errorMessage(error), "error");
+    return false;
   } finally {
     setLoading(false);
   }
@@ -256,14 +360,67 @@ export async function revokeShare(shareId: string): Promise<boolean> {
   const client = activeClient();
   if (!client) return false;
   try {
-    const shares = await client.shares();
-    await shares.revoke(shareId);
+    const result = await client.revokeShareAndNotify(shareId);
+    if (!result.revoked) throw new Error("Share was already revoked");
     await loadGrants({ force: true });
     toast("Access revoked", "success");
     return true;
   } catch (error) {
     toast(errorMessage(error), "error");
     return false;
+  }
+}
+
+/** Verify an encrypted offer, write its local mount pointer and acknowledge it. */
+export async function acceptShareOffer(message: any): Promise<boolean> {
+  const client = activeClient();
+  if (!client || !message?.plaintext) return false;
+  setLoading(true, "Accepting share…");
+  try {
+    const offer = JSON.parse(message.plaintext);
+    const result = await client.acceptShareOffer(offer);
+    useData.setState((state) => ({
+      requests: { ...state.requests, incoming: state.requests.incoming.filter((entry: any) => entry.id !== message.id) },
+      messages: state.messages.filter((entry: any) => entry.id !== message.id),
+    }));
+    await loadMounts({ force: true });
+    toast(result.notified ? `Mounted files from ${offer.grant.owner}` : `Mounted files from ${offer.grant.owner}; acceptance could not be delivered`, result.notified ? "success" : "warning");
+    trackAction("files", { kind: "share_accept" });
+    return true;
+  } catch (error) {
+    toast(errorMessage(error), "error");
+    return false;
+  } finally {
+    setLoading(false);
+  }
+}
+
+/** Remove local pointers when a verified sender says its grant is gone. */
+export async function processShareRevocations(messages: any[]): Promise<void> {
+  const revocations = (messages ?? []).filter((message) => message.type === "sys.share.revoked" && message.plaintext);
+  if (!revocations.length) return;
+  const client = activeClient();
+  if (!client) return;
+  const shares = await client.shares();
+  const mounts = await shares.listMounts();
+  let removed = 0;
+  for (const message of revocations) {
+    try {
+      const payload = JSON.parse(message.plaintext);
+      if (
+        payload?.version !== 1 || payload.owner !== message.sender ||
+        payload.share_id !== message.metadata?.share_id
+      ) continue;
+      for (const entry of mounts.filter((mount: any) => mount.mount.share_id === payload.share_id && mount.mount.owner === payload.owner)) {
+        if (await shares.removeMount(entry.mountPath, entry.mount.owner)) removed += 1;
+      }
+    } catch {
+      // A malformed notice cannot remove local state.
+    }
+  }
+  if (removed) {
+    await loadMounts({ force: true });
+    toast(`${removed} revoked share ${removed === 1 ? "mount was" : "mounts were"} removed`, "info");
   }
 }
 

@@ -63,7 +63,8 @@ Notes:
 - Segments must not be empty, `.`, or `..`. Max segment length **255 bytes**, max path length
   **4096 bytes**, max depth **32** segments.
 - The prefix `.poweur-` is reserved for documented marker files (currently:
-  `.poweur-web-public`); other `.poweur-*` names are rejected.
+  `.poweur-web-public` and the credential-free `.poweur-mount.json` share pointer); other
+  `.poweur-*` names are rejected.
 - **Symlinks are forbidden.** The provider never creates or follows them; a symlink found on
   disk is treated as nonexistent.
 - **Case collisions are rejected**: creating a name that differs from an existing sibling only

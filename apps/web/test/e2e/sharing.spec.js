@@ -72,11 +72,21 @@ test.describe("files sharing", () => {
     await expect(owner.locator(".share-row")).toContainText(granteeId);
     await owner.click("#panel-close-btn");
 
-    // ── The grantee opens the owner's tree and reads it ────────────────────
+    // ── The grantee accepts the encrypted offer and follows its mount ─────
+    await grantee.click('.nav-tab[data-page="messages"]');
+    await grantee.click('.tray-tab[data-tray="requests"]');
+    const offer = grantee.locator(`[data-share-offer]`);
+    await expect(offer).toContainText("/shared/project-x", { timeout: 20_000 });
+    await expect(offer).toContainText(ownerId);
+    await grantee.click("[data-accept-share]");
+    await expect(offer).toHaveCount(0, { timeout: 20_000 });
+
     await grantee.click('.nav-tab[data-page="files"]');
     await grantee.click("#btn-files-shared");
-    await grantee.fill(".owner-picker .idin input", ownerId);
-    await grantee.press(".owner-picker .idin input", "Enter");
+    const mount = grantee.locator("[data-open-share]");
+    await expect(mount).toContainText("/shared/project-x", { timeout: 20_000 });
+    await expect(mount).toContainText(ownerId);
+    await mount.click();
     await expect(grantee.locator(".visitor-banner")).toContainText(ownerId, { timeout: 20_000 });
 
     await grantee.click('[data-open-dir="shared"]');
@@ -84,6 +94,11 @@ test.describe("files sharing", () => {
     await expect(grantee.locator(".conv-name")).toContainText("notes.txt", { timeout: 20_000 });
 
     // …and writes, because the grant said read and write.
+    const ownerCursor = await owner.evaluate(async () => {
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
+      return (await clientFor(getActiveIdentity()).sync()).manifest().then(({ cursor }) => cursor);
+    });
     const wrote = await grantee.evaluate(async ({ owner, path }) => {
       const { clientFor } = await window.__poweurModule("client");
       const { getActiveIdentity } = await window.__poweurModule("storage");
@@ -92,6 +107,19 @@ test.describe("files sharing", () => {
       return dav.readText(path);
     }, { owner: ownerId, path: "shared/project-x/reply.txt" });
     expect(wrote).toBe("grantee was here");
+
+    const ownerSaw = await owner.evaluate(async ({ cursor }) => {
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
+      const client = clientFor(getActiveIdentity());
+      const [body, delta] = await Promise.all([
+        client.dav().then((dav) => dav.readText("shared/project-x/reply.txt")),
+        client.sync().then((sync) => sync.changes(cursor)),
+      ]);
+      const change = delta.changes.find((entry) => entry.path === "shared/project-x/reply.txt");
+      return { body, actor: change?.actor };
+    }, { cursor: ownerCursor });
+    expect(ownerSaw).toEqual({ body: "grantee was here", actor: granteeId });
 
     // ── The owner revokes, and the next request is refused ─────────────────
     await owner.click("#btn-shares");
@@ -110,6 +138,15 @@ test.describe("files sharing", () => {
       }
     }, { owner: ownerId });
     expect(refused).toMatch(/^refused:/);
+
+    // The revocation notice also prunes the credential-free local pointer.
+    // Opening Messages forces a drain even if the push stream happened to be
+    // reconnecting at the exact moment the owner revoked.
+    await grantee.click('.nav-tab[data-page="messages"]');
+    await grantee.waitForTimeout(500);
+    await grantee.click('.nav-tab[data-page="files"]');
+    await grantee.click("#btn-leave-owner");
+    await expect(grantee.locator("[data-open-share]")).toHaveCount(0, { timeout: 20_000 });
 
     await ownerCtx.close();
     await granteeCtx.close();

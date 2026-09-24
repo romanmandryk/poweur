@@ -313,6 +313,20 @@ func (gs *GrantSet) VisibleShares(visitor string) []idpkg.ShareGrant {
 	return out
 }
 
+// HasFileRequest reports whether shareID names a verified, live upload-only
+// capability. It supports aggregate accounting and grants no authority.
+func (gs *GrantSet) HasFileRequest(shareID string) bool {
+	if gs == nil || shareID == "" {
+		return false
+	}
+	for _, grant := range gs.grants {
+		if grant.ShareID == shareID && grant.IsFileRequest() && !grant.Expired(gs.now) {
+			return true
+		}
+	}
+	return false
+}
+
 // LinkGrant returns the verified link grant whose capability token matches
 // (E05-T4). Tokens are compared in constant time, so a wrong guess reveals
 // nothing about how close it was.

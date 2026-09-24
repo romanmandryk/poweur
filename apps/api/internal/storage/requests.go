@@ -6,13 +6,14 @@ import (
 	"time"
 )
 
-// RequestStore holds pending contact requests (EPIC-007): a non-contact
-// sender under `contacts_and_requests` gets exactly one pending slot per
-// recipient — no message stream until accepted. Memory-only like the inbox
-// (durability arrives with EPIC-009).
+// RequestStore holds pending consent gestures (contact requests/accepts and
+// share offers). Contact handshakes retain one slot per sender; share offers
+// get one slot per signed share_id so one sender can offer independent grants
+// without creating a message stream. Memory-only like the inbox (durability
+// arrives with EPIC-009).
 type RequestStore struct {
 	mu      sync.Mutex
-	pending map[string]map[string]StoredMessage // recipient -> sender -> request
+	pending map[string]map[string]StoredMessage // recipient -> request slot -> message
 	// last records when a sender's request was queued, surviving Drain, so
 	// re-requests respect the cooldown even after the recipient saw (and
 	// ignored) the first one.
@@ -37,25 +38,36 @@ func requestKey(recipient, sender string) string {
 	return strings.ToLower(recipient) + "\n" + strings.ToLower(sender)
 }
 
+func requestSlot(sender string, msg StoredMessage) string {
+	slot := strings.ToLower(sender)
+	if strings.EqualFold(strings.TrimSpace(msg.Type), "sys.share.offer") {
+		if shareID := strings.TrimSpace(msg.Metadata["share_id"]); shareID != "" {
+			return slot + "\nshare:" + shareID
+		}
+	}
+	return slot
+}
+
 // Add queues a contact request. A sender holds at most one pending slot per
 // recipient, and after the slot is drained a re-request is only accepted
 // once cooldown has passed.
 func (s *RequestStore) Add(recipient, sender string, msg StoredMessage, cooldown time.Duration) string {
 	rk := strings.ToLower(recipient)
-	sk := strings.ToLower(sender)
+	sk := requestSlot(sender, msg)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.pending[rk][sk]; ok {
 		return RequestDup
 	}
-	if at, ok := s.last[requestKey(recipient, sender)]; ok && cooldown > 0 && time.Since(at) < cooldown {
+	lastKey := strings.ToLower(recipient) + "\n" + sk
+	if at, ok := s.last[lastKey]; ok && cooldown > 0 && time.Since(at) < cooldown {
 		return RequestCooldown
 	}
 	if s.pending[rk] == nil {
 		s.pending[rk] = make(map[string]StoredMessage)
 	}
 	s.pending[rk][sk] = msg
-	s.last[requestKey(recipient, sender)] = time.Now()
+	s.last[lastKey] = time.Now()
 	return RequestQueued
 }
 

@@ -22,7 +22,14 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     remove: vi.fn(async () => {}),
   };
   let sent = 0;
+  const requests = vi.fn(async () => [] as any[]);
+  const sharesApi = {
+    list: vi.fn(async () => [] as any[]),
+    listMounts: vi.fn(async () => [] as any[]),
+    removeMount: vi.fn(async () => false),
+  };
   return {
+    identity: "alice.poweur.net",
     signer: {},
     relay: {},
     decryptor: null as any,
@@ -31,7 +38,8 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     history: vi.fn(async () => store),
     contacts: vi.fn(async () => contactsApi),
     inboxAndArchive: vi.fn(async () => ({ messages: [] as any[], acks: [] as any[], lost: 0 })),
-    requests: vi.fn(async () => [] as any[]),
+    requests,
+    requestsAndArchive: vi.fn(async () => ({ requests: await requests(), archived: 0, lost: 0 })),
     anonAndArchive: vi.fn(async () => ({ messages: [] as any[], lost: 0 })),
     policy: vi.fn(async () => ({ policy: { version: 1, mode: "open" } as any, explicit: false })),
     profile: vi.fn(async () => ({ profile: { version: 1 } as any, explicit: false })),
@@ -47,6 +55,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     blockContact: vi.fn(async () => {}),
     requestContact: vi.fn(async () => {}),
     downloadAttachment: vi.fn(),
+    shares: vi.fn(async () => sharesApi),
     sessions: { ensure: vi.fn(async () => ({})) },
     ...overrides,
   };

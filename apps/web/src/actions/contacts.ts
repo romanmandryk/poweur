@@ -61,8 +61,9 @@ export function loadRequests({ force = false } = {}): Promise<void> {
   setRequests({ loading: true });
   requestsInFlight = challengeSerial(async () => {
     try {
-      const incoming = await client.requests();
+      const { requests: incoming, lost } = await client.requestsAndArchive();
       setRequests({ incoming: mergeInto(useData.getState().requests.incoming, incoming), loaded: true, error: null });
+      if (lost) toast(`${lost} request${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
       processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
     } catch (error) {
       setRequests({ error: `Could not read requests: ${errorMessage(error)}` });

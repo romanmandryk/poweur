@@ -165,3 +165,27 @@ func TestLinkStatsWithoutHomeDir(t *testing.T) {
 		t.Fatal("nil store lists nothing")
 	}
 }
+
+func TestLinkStatsUploadQuotaAndOpenMetrics(t *testing.T) {
+	ls, _ := newTestLinkStats(t)
+	ls.RecordOpen("alice.example", "shr_request")
+	ls.RecordOpen("alice.example", "shr_request")
+	ls.RecordClaimStarted("alice.example", "shr_request")
+	ls.RecordIDClaimed("alice.example", "shr_request")
+	if _, ok := ls.ReserveUpload("alice.example", "shr_request", 4, 2, 10); !ok {
+		t.Fatal("first upload rejected")
+	}
+	if _, ok := ls.ReserveUpload("alice.example", "shr_request", 6, 2, 10); !ok {
+		t.Fatal("second upload rejected")
+	}
+	if got, ok := ls.ReserveUpload("alice.example", "shr_request", 1, 2, 10); ok {
+		t.Fatalf("third upload accepted: %+v", got)
+	}
+	got := ls.Get("alice.example", "shr_request")
+	if got.Opens != 2 || got.Uploads != 2 || got.UploadBytes != 10 || got.ClaimStarted != 1 || got.IDClaimed != 1 {
+		t.Fatalf("metrics = %+v", got)
+	}
+	if _, ok := ls.ReserveUpload("alice.example", "shr_bytes", 11, 0, 10); ok {
+		t.Fatal("oversize aggregate upload accepted")
+	}
+}
