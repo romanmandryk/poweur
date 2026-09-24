@@ -8,6 +8,7 @@ import { KeyRound, Smartphone } from "lucide-react";
 import { probeDoor, retryDoor } from "../../actions/door";
 import { createIdentity, signInWithPasskey } from "../../actions/identity";
 import { launcherAppUrl } from "../../lib/claim";
+import { cn } from "../../lib/cn";
 import { domainOf, handleOf } from "../../lib/identity";
 import { useData } from "../../state/data";
 import { useSession, type ModeInfo } from "../../state/session";
@@ -17,11 +18,11 @@ import { Skeleton } from "../../ui/Display";
 import { Note } from "../../ui/Field";
 import { openJoinDevicePanel } from "../JoinDevice";
 import { usePeerAvatars } from "../../actions/avatars";
-import { DoorPage } from "./DoorPage";
+import { cardClass, DoorPage } from "./DoorPage";
 
 function DoorCard({ children }: { children: ReactNode }) {
   return (
-    <div className="door-card flex animate-fade-in-up flex-col items-center gap-1.5 rounded-card bg-surface px-5 pt-7 pb-5 text-center shadow-card">
+    <div className={cn(cardClass, "door-card flex flex-col items-center gap-1.5 px-5 pt-7 pb-5 text-center")}>
       {children}
     </div>
   );

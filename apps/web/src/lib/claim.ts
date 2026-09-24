@@ -3,6 +3,7 @@
  * no stores: what a typed handle means, which relay a preset names, and where
  * this app lives so links stay inside the app they were opened from.
  */
+import { isValidIdentityName } from "@poweur/client";
 import type { ModeInfo } from "../state/session";
 
 /** Custody and passkey probes as `chooseCustody()` / `checkPasskeySupport()` answer them. */
@@ -40,6 +41,39 @@ export function normalizeHandleInput(raw: string, info: Pick<ModeInfo, "domain" 
     }
   }
   return value;
+}
+
+/** An identity someone says they already have, split the way the relay asks about it. */
+export interface ExistingIdTarget {
+  identity: string;
+  handle: string;
+  domain: string;
+  /** Under one of this relay's `hosted_domains`, one label deep: the relay can answer for it. */
+  hosted: boolean;
+}
+
+/**
+ * What "I already have an ID" was given. A bare handle is completed with the
+ * launcher's domain, and a pasted link (`https://alice.poweur.net/app/`) or
+ * `@alice` means the identity it names. Anything that is still not a name is
+ * `null`.
+ */
+export function existingIdFrom(raw: string, info: Pick<ModeInfo, "domain" | "hostedDomains">): ExistingIdTarget | null {
+  let value = String(raw ?? "").trim().toLowerCase().replace(/^@+/, "");
+  value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/[/?#].*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
+  if (!value) return null;
+  if (!value.includes(".")) {
+    if (!info.domain) return null;
+    value = `${value}.${info.domain}`;
+  }
+  if (!isValidIdentityName(value)) return null;
+  for (const domain of info.hostedDomains ?? []) {
+    if (!domain || !value.endsWith(`.${domain}`)) continue;
+    const handle = value.slice(0, value.length - domain.length - 1);
+    if (handle && !handle.includes(".")) return { identity: value, handle, domain, hosted: true };
+  }
+  const dot = value.indexOf(".");
+  return { identity: value, handle: value.slice(0, dot), domain: value.slice(dot + 1), hosted: false };
 }
 
 /**

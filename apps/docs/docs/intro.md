@@ -5,56 +5,83 @@ sidebar_position: 1
 title: Introduction
 ---
 
-# What is the Poweur ID Protocol?
+# Poweur documentation
 
-Poweur ID is an **open, DNS-named identity and messaging protocol**. Every participant — human, bot, or autonomous agent — is identified by a domain name they control (an FQDN), such as `alice.com` if they own that domain, or a hosted name like `alice.poweur.net` on a relay that offers wildcard hosting. That name is their globally unique, human-readable identity. The public key bound to that name is their cryptographic identity.
+Poweur is an **open-source identity, messaging and data-sharing layer**. A Poweur ID is an
+internet name, such as `alice.poweur.net` or `alice.com`, that is at once:
 
-There is no central username database and no OAuth provider you must join. **DNS remains the naming layer** (your identity *is* a domain name), while keys and capabilities are discovered **web-first** at `https://<identity>/.well-known/poweur/` — with DNS `TXT` records as a fallback for self-hosted setups that prefer DNS publication.
+- **an identity**, backed by keys that stay on your devices;
+- **an address** that people, apps and agents can send signed, end-to-end encrypted messages to;
+- **a home** for your files, which you can share with any other ID, group or agent;
+- **a login** for third-party apps, without passwords.
 
-## Why a DNS name — and why also the web?
+Anyone can run a relay, host IDs on their own domain, or build an app on the same three
+primitives. The network does not depend on any one operator, including us.
 
-DNS is already the internet's naming layer. Every device can resolve a domain. DNS is:
+:::note
+A Poweur ID proves control of a name and its keys. It does not by itself prove a legal
+identity or a unique human. Those can be added later as attestations without changing the ID.
+:::
 
-- **Decentralised by design** — names are controlled by the domain owner, not a platform.
-- **Globally available** — any relay can look up any identity without calling home.
-- **Already trusted** — decades of infrastructure protect and serve DNS reliably.
-- **Human-readable** — `alice.com` or `alice.poweur.net` is as readable as an email address.
+## Start here
 
-Poweur keeps the **DNS name as the canonical identifier**, but does **not** require every identity to publish keys only in DNS. Hosted identities on a wildcard domain (`*.poweur.net` → one relay) publish a signed [identity document](/protocol/web-identity) over HTTPS. Self-hosters may publish the same document from their own origin, and/or publish keys in DNS `TXT` records. Relays and clients resolve **web first, DNS second**, and fail closed if both are present and disagree.
+| I want to… | Read |
+|------------|------|
+| **Get an ID and use it** | [Claim your ID](/web/claim-your-id), then the [web app walkthrough](/web/walkthrough) |
+| **Run my own relay** for my family, team or community | [Self-hosting a relay](/relay/self-hosting) |
+| **Use my own domain** as my ID, on any relay | [Web identity](/protocol/web-identity) and [DNS records](/protocol/dns-records) |
+| **Add "Sign in with Poweur"** to my app | [Add sign-in to an app](/auth/add-sign-in), or the [OAuth/OIDC bridge](/auth/oauth-oidc-bridge) for any app that already speaks OpenID Connect |
+| **Work from the terminal, or give an AI agent an ID** | [CLI](/clients/overview#cli) |
+| **Build an app or an agent** | [JavaScript/TypeScript SDK](/clients/js-sdk), [CLI reference](/clients/cli-reference), [app-data conventions](/conventions/app-data) |
+| **Understand the protocol** | [Protocol overview](/protocol/overview), [identity model](/protocol/identity-model), [message format](/protocol/message-format) |
+| **Review the security** | [Security model](/security/model), [key management](/security/key-management) |
 
-`alice.poweur.net` in examples is a **hosted-service illustration**, not a requirement to use that parent. You still need *some* domain name: if you own `alice.com` (or `bot.example.org`), that FQDN can be your Poweur ID. There is no protocol path without a resolvable name.
+## What works today
 
-## What can you do with a Poweur ID?
+Poweur is pre-1.0, and the core works end to end today:
 
-Identities are used for **end-to-end encrypted, cryptographically verified messaging**: signing and sending messages that any recipient can verify came from you, without trusting any server with your private key.
+- **Identity.** Hosted names under a relay's domain, or your own domain. Keys resolve web-first
+  from `https://<id>/.well-known/poweur/id.json`, with DNS `TXT` as a fallback, and fail closed
+  when the two disagree. Key rotation, export and moving between relays.
+- **Messaging.** Signed, end-to-end encrypted messages between IDs on any relay. A durable
+  inbox, real-time push (SSE), delivery and read receipts, threads, attachments, groups,
+  expiring messages, and typed messages that apps and agents understand.
+- **Contacts and spam control.** Contact requests, pinned keys, blocking, per-identity inbox
+  policy, relay-level abuse limits, and opt-in anonymous messages protected by proof of work.
+- **Files and sharing.** A WebDAV home per ID with public, shared, private and per-app areas;
+  sync with change journals; signed read/write grants to people and groups; share links;
+  instant revocation; quotas.
+- **Sign-in.** "Sign in with Poweur" for apps, scoped grants to an app's own folder, a
+  `did:web` projection, and an OAuth 2.0 / OpenID Connect / IndieAuth bridge.
+- **Devices and recovery.** Passkey-protected keys, several devices per ID, adding a device
+  by code or QR, removing a lost one, and recovery kits.
+- **Clients.** The web app, iOS and Android apps (the web app in a native shell), a Go CLI,
+  and `@poweur/client` for browsers, Node, Bun and Deno.
 
-The same name is also a **home filesystem** on your relay (WebDAV, public/shared/private trees — see [File storage](/files/storage-model)), and is designed to grow into publishing, payments, and third-party sign-in without a separate account system.
+Identity websites, the email bridge, collaborative spaces, the app platform and payments are
+on the [roadmap](https://github.com/romanmandryk/poweur/tree/master/epics).
 
-Planned and in-progress capabilities include:
+## How it works, in one paragraph
 
-- **Messaging** — active
-- **Files & WebDAV** — active (per-identity home on the relay)
-- **Publishing** — signed content under your identity (see also [identity websites](/files/webdav#public-web-serving-pub) for file sharing; full sites are a later epic)
-- **Receiving payments** — payment address advertisement via capability records
-- **Authentication** — prove identity to third-party services without passwords
+Your private keys live on your devices and never leave them in plaintext. Your public keys are
+published in a signed identity document at `/.well-known/poweur/id.json` (and optionally in
+DNS). To send a message, your client signs and encrypts it and hands it to the recipient's
+relay. That relay looks up your keys the same way a browser finds a website, verifies the
+signature, applies the recipient's inbox policy, stores the ciphertext and pushes it to their
+devices. Relays route, store and enforce policy; they never hold identity private keys. See
+<a href="../architecture.html" data-noBrokenLinkCheck={true}>Architecture</a> for diagrams.
 
-## How it works in one paragraph
+## Components
 
-You control a domain name. Your private key lives on your device (passkey / secure storage) — it never leaves in plaintext. Your public keys are published in a signed identity document at `/.well-known/poweur/id.json` (and optionally in DNS `TXT`). When you send a message, your client signs and encrypts it. The recipient (or their relay) resolves your identity over HTTPS or DNS, verifies the signature, and delivers the ciphertext. No central server holds your private key.
+All in [one repository](https://github.com/romanmandryk/poweur):
 
-## System components
-
-- **Relay (`apps/api`)** — Go server that routes and verifies messages, hosts identity documents and per-identity file trees (`POWEUR_DATA`), and optionally writes DNS records for self-hosted registration. Holds no identity private keys.
-- **Web client (`apps/web`)** — browser SPA for hosted identity creation, messaging, and files.
-- **CLI (`apps/cli`)** — scriptable client for developers, bots, and agents.
-- **Mobile apps (`apps/ios`, `apps/android`)** — native clients; the device is the user's cryptographic vault.
-- **Infrastructure (`apps/infra`)** — Terraform for deploying a relay (e.g. on Hetzner Cloud).
-
-## Next steps
-
-- [Protocol Overview](/protocol/overview) — design principles and architecture
-- [Web Identity](/protocol/web-identity) — `/.well-known/poweur/` discovery (primary)
-- [Identity Model](/protocol/identity-model) — how identities and keys work
-- [DNS Records](/protocol/dns-records) — DNS publication format (fallback / self-host)
-- [File storage](/files/storage-model) — per-identity home filesystem
-- [Relay API Reference](/relay/api-reference) — HTTP API endpoints
+| Component | Path | What it is |
+|-----------|------|------------|
+| Relay | `apps/api` | Go server: identity hosting, message verification and routing, durable inbox, file homes over WebDAV, sharing. Serves the web app at `/app/`. |
+| Web app | `apps/web` | React client for creating an ID, messaging, contacts, files, sharing, sign-in approval, devices and recovery. |
+| Mobile apps | `apps/mobile` | The web app in a Capacitor shell for iOS and Android, with native key storage. |
+| Go CLI | `apps/cli` | Your ID in the terminal: sync and share project folders, message from scripts, and let AI coding agents use Poweur. Also for CI, bots and operators. |
+| TypeScript SDK | `packages/client-ts` | `@poweur/client` and a `poweur` CLI that matches the Go one command for command. |
+| Identity package | `packages/identity` | Canonical wire formats, signatures, grants and resolution in Go, with conformance vectors. |
+| OAuth/OIDC bridge | `apps/oauth` | Lets any OpenID Connect or IndieAuth app accept Poweur IDs. |
+| Deployment | `deploy/` | Docker Compose, Caddy, Ansible and the observability stack behind poweur.net. |

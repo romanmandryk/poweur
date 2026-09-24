@@ -7,14 +7,14 @@ import { useSession } from "../state/session";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { Note } from "../ui/Field";
-import { BrandTile } from "../ui/Logo";
+import { BrandMark } from "../ui/Logo";
 
 /** The honest fallback: an unrecognised host, so no claim is offered. */
 export function Welcome() {
   const push = useRoute((state) => state.push);
   return (
     <div className="welcome-wrap flex min-h-[70vh] flex-col items-center justify-center gap-4 p-8 text-center landscape:max-h-[500px]:min-h-0">
-      <BrandTile className="welcome-icon" />
+      <BrandMark className="welcome-icon mb-4" />
       <h1 className="welcome-title animate-fade-in-up text-[28px] font-extrabold tracking-[-.5px]">Welcome to Poweur ID</h1>
       <p className="welcome-sub max-w-[260px] animate-fade-in-up text-base leading-normal text-muted">
         Encrypted, identity-first messaging. No phone number required.

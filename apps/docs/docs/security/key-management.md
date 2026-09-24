@@ -69,7 +69,7 @@ Normative details:
   clamp internally, matching how randomly generated encryption keys are already stored.
 - **Wire form** is unpadded base64url, used by `--seed`, keystore entries and recovery kits.
 
-The implementations are [`packages/identity/seed.go`](https://github.com/poweur/poweur/blob/master/packages/identity/seed.go)
+The implementations are [`packages/identity/seed.go`](https://github.com/romanmandryk/poweur/blob/master/packages/identity/seed.go)
 (canonical) and `packages/client-ts/src/crypto/seed.ts`, pinned to each other by
 `testdata/vectors/seed-derivation.json`. The vectors sign a fixed message with every derived
 key, so a key that matches byte-for-byte but cannot actually sign still fails.

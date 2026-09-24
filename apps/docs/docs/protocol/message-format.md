@@ -171,7 +171,7 @@ The message type. **Absent means `chat.text`** — absence is the wire encoding 
 
 Shape: two or more dot-separated segments of lowercase letters, digits and inner hyphens (`chat.text`, `chat.attachment`, `net.poweur.tasks.assigned`). A bare single word is rejected, so every type carries a namespace that says who owns it. Maximum 64 bytes.
 
-**`sys.*` is reserved for the platform.** No application may define one. A relay refuses an envelope whose `sys.*` type it does not know with `400 unsupported_type` rather than forwarding it — otherwise an application could mint `sys.contact.request` and borrow the relay's routing authority, since every client treats that type as a consent gesture. The registered set lives in [`conventions/registry.json`](https://github.com/poweur/poweur/blob/master/conventions/registry.json):
+**`sys.*` is reserved for the platform.** No application may define one. A relay refuses an envelope whose `sys.*` type it does not know with `400 unsupported_type` rather than forwarding it — otherwise an application could mint `sys.contact.request` and borrow the relay's routing authority, since every client treats that type as a consent gesture. The registered set lives in [`conventions/registry.json`](https://github.com/romanmandryk/poweur/blob/master/conventions/registry.json):
 
 | Type | Purpose |
 |------|---------|

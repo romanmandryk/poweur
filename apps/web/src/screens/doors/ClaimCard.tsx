@@ -1,12 +1,13 @@
 /**
  * The name field, shared by the landing and the `claim` sub-page (E15-T8/T10).
+ * Self-hosting is a relay of your own, not a form here: the landing links to
+ * the self-hosting guide instead of collecting DNS credentials.
  *
  * `#ni-handle`, `#ni-availability` and `#btn-claim` are the contract the e2e
  * specs use. The fields are uncontrolled, as in the legacy app: the DOM value
  * is what a claim reads, and the relay-refused path writes the attempt back.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { KeyRound } from "lucide-react";
 import { chooseCustody, createIdentity, type ClaimIntent } from "../../actions/identity";
 import { cn } from "../../lib/cn";
 import { claimInvite, normalizeHandleInput, policyHint, webCustodyBlocked } from "../../lib/claim";
@@ -18,7 +19,7 @@ import { useSession, type ModeInfo } from "../../state/session";
 import { toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { Skeleton } from "../../ui/Display";
-import { FormGroup, Input, inputClass, Label, Note } from "../../ui/Field";
+import { Note } from "../../ui/Field";
 import { cardClass } from "./DoorPage";
 
 const AVAILABILITY_DEBOUNCE_MS = 350;
@@ -98,10 +99,11 @@ function useAvailability(readIntent: () => ClaimIntent, blocked: boolean) {
   return { status, schedule, onEdited, disabled: blocked || pending || available === false };
 }
 
-function ClaimNote({ info, passkey, custody, blocked }: { info: ModeInfo; passkey: any; custody: any; blocked: boolean }) {
-  const base = "claim-note mt-2.5 text-[13px]";
+function ClaimNote({ info, passkey, custody, blocked, hero }: { info: ModeInfo; passkey: any; custody: any; blocked: boolean; hero: boolean }) {
+  const base = cn("claim-note mt-2.5 text-[13px]", hero && "mx-auto max-w-[360px] text-white/65");
+  const warn = hero ? "val-warn text-amber-200" : "val-warn text-warning";
   if (info.reachable === false && info.resolved) {
-    return <Note className={cn(base, "val-warn text-warning")}>Can't reach the relay right now — names can't be checked until it answers.</Note>;
+    return <Note className={cn(base, warn)}>Can't reach the relay right now — names can't be checked until it answers.</Note>;
   }
   if (custody?.kind === "native") {
     return (
@@ -112,7 +114,7 @@ function ClaimNote({ info, passkey, custody, blocked }: { info: ModeInfo; passke
   }
   if (blocked) {
     return (
-      <Note id="claim-prf-required" className={cn(base, "val-warn text-warning")}>
+      <Note id="claim-prf-required" className={cn(base, warn)}>
         {passkey?.reason || PRF_UNAVAILABLE_MESSAGE}
       </Note>
     );
@@ -125,7 +127,7 @@ function ClaimNote({ info, passkey, custody, blocked }: { info: ModeInfo; passke
   );
 }
 
-function StatusLine({ status, fallback, className }: { status: Status; fallback: string; className?: string }) {
+function StatusLine({ status, fallback, className, hero = false }: { status: Status; fallback: string; className?: string; hero?: boolean }) {
   const shown = status ?? { text: fallback, tone: "" as const };
   return (
     <p
@@ -135,8 +137,9 @@ function StatusLine({ status, fallback, className }: { status: Status; fallback:
       aria-describedby={undefined}
       className={cn(
         "idin-status mt-2 min-h-5 text-[13px] text-muted",
-        shown.tone === "ok" && "val-ok text-success",
-        shown.tone === "warn" && "val-warn text-warning",
+        hero && "text-white/70",
+        shown.tone === "ok" && (hero ? "val-ok text-emerald-300" : "val-ok text-success"),
+        shown.tone === "warn" && (hero ? "val-warn text-amber-200" : "val-warn text-warning"),
         className,
       )}
     >
@@ -152,8 +155,18 @@ function refocus(field: HTMLInputElement | null, value: string) {
   field.select?.();
 }
 
+/**
+ * poweur.org's closing call to action: the violet night box with the field and
+ * its button joined into one control. The landing draws the claim this way;
+ * the in-app sub-page keeps the plain card.
+ */
+const heroClass =
+  "claim-hero relative animate-fade-in-up overflow-hidden rounded-[24px] border border-white/12 px-5 pt-8 pb-6 text-center text-white " +
+  "bg-[radial-gradient(75%_90%_at_50%_0%,var(--color-violet-600)_0%,var(--color-indigo-800)_50%,var(--color-indigo-950)_100%)] " +
+  "shadow-[0_24px_60px_-20px_color-mix(in_srgb,var(--color-violet-700)_60%,transparent)]";
+
 /** The hosted claim: a handle with the domain as a suffix inside the field. */
-export function ClaimCard({ info }: { info: ModeInfo }) {
+export function ClaimCard({ info, hero = false }: { info: ModeInfo; hero?: boolean }) {
   const config = useSession((state) => state.config);
   const policy = useData((state) => state.door.policy);
   const { passkey, custody, blocked } = useCustodySupport();
@@ -188,12 +201,13 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
   // honest frame for "about to know" (E15-T12).
   if (!info.probed) {
     return (
-      <div id="claim-card-pending" className={cn("claim-card", cardClass)}>
+      <div id="claim-card-pending" className={cn("claim-card", hero ? heroClass : cardClass)}>
+        {hero && <ClaimHeading domain={domains[0] ?? info.domain} />}
         <div className="skeleton-stack my-4 flex w-full flex-col gap-2.5" aria-hidden="true">
-          <Skeleton className="h-13 w-full rounded-button" />
-          <Skeleton className="h-3.5 w-3/5 self-center" />
+          <Skeleton className={cn("h-13 w-full rounded-button", hero && "bg-white/15")} />
+          <Skeleton className={cn("h-3.5 w-3/5 self-center", hero && "bg-white/15")} />
         </div>
-        <p role="status" className="text-[13px] text-muted">
+        <p role="status" className={cn("text-[13px] text-muted", hero && "text-white/70")}>
           Connecting…
         </p>
       </div>
@@ -219,7 +233,10 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
   };
 
   let suffix: ReactNode;
-  const suffixClass = "claim-suffix flex max-w-[55%] shrink-0 items-center truncate pr-3.5 text-[17px] whitespace-nowrap text-muted";
+  const suffixClass = cn(
+    "claim-suffix flex max-w-[55%] shrink-0 items-center truncate pr-3.5 text-[17px] whitespace-nowrap text-muted",
+    hero && "font-mono text-[15px] text-white/60",
+  );
   if (domains.length > 1) {
     suffix = (
       <select
@@ -231,7 +248,7 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
         className={cn(suffixClass, "claim-suffix-select cursor-pointer border-none bg-transparent")}
       >
         {domains.map((domain) => (
-          <option key={domain} value={domain}>
+          <option key={domain} value={domain} className="text-fg">
             .{domain}
           </option>
         ))}
@@ -257,140 +274,109 @@ export function ClaimCard({ info }: { info: ModeInfo }) {
         autoCorrect="off"
         spellCheck={false}
         onInput={availability.schedule}
-        className="claim-suffix-input min-w-0 border-l border-sep bg-transparent px-3 text-base text-fg outline-none"
+        className={cn(
+          "claim-suffix-input min-w-0 border-l border-sep bg-transparent px-3 text-base text-fg outline-none",
+          hero && "border-white/20 text-white placeholder:text-white/40",
+        )}
       />
+    );
+  }
+
+  const input = (
+    <input
+      ref={handleRef}
+      id="ni-handle"
+      type="text"
+      placeholder="yourname"
+      autoComplete="off"
+      spellCheck={false}
+      autoCapitalize="none"
+      autoCorrect="off"
+      enterKeyHint="go"
+      aria-describedby="ni-availability"
+      className={cn(
+        "claim-input min-w-0 flex-1 border-none bg-transparent py-[15px] pr-1 pl-3.5 text-lg font-semibold text-fg outline-none placeholder:font-normal placeholder:text-faint",
+        hero && "pl-4 font-mono text-base font-medium text-white placeholder:text-white/40",
+      )}
+      onInput={(event) => {
+        // A pasted `alice.poweur.net` or `@alice` means `alice`.
+        const field = event.currentTarget;
+        const cleaned = normalizeHandleInput(field.value, info);
+        if (cleaned !== field.value) field.value = cleaned;
+        availability.onEdited();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") claim();
+      }}
+    />
+  );
+
+  const fromSignIn = invite.fromSignIn && (
+    <p
+      id="claim-from-signin"
+      className={cn("mb-3 rounded-control bg-accent-soft px-3 py-2 text-[13px] text-fg", hero && "mt-5 bg-white/12 text-left text-white")}
+    >
+      A sign-in is waiting in your other tab. Create your ID here, then go back to that tab — it picks up your new ID.
+    </p>
+  );
+
+  if (hero) {
+    return (
+      <div id="claim-card" className={cn("claim-card", heroClass)}>
+        <ClaimHeading domain={domains[0] ?? info.domain} />
+        {fromSignIn}
+        <label htmlFor="ni-handle" className="claim-label sr-only">
+          Choose your name
+        </label>
+        {/* One control, as on poweur.org: the name, its domain and the button
+            share a border. Below 400px the button wraps under the field. */}
+        <div className="claim-field mt-6 flex flex-wrap items-stretch overflow-hidden rounded-xl border border-white/20 bg-black/35 text-left transition-colors focus-within:border-white/50">
+          {input}
+          {suffix}
+          <Button
+            id="btn-claim"
+            className="claim-submit h-[52px] basis-full rounded-none bg-white px-6 py-0 text-base text-[#0b0a10] min-[400px]:basis-auto min-[400px]:w-auto"
+            disabled={availability.disabled}
+            onClick={claim}
+          >
+            Claim
+          </Button>
+        </div>
+        <StatusLine hero status={availability.status} fallback={policyHint(info, policy)} />
+        <ClaimNote hero info={info} passkey={passkey} custody={custody} blocked={blocked} />
+      </div>
     );
   }
 
   return (
     <div id="claim-card" className={cn("claim-card", cardClass)}>
-      {invite.fromSignIn && (
-        <p id="claim-from-signin" className="mb-3 rounded-control bg-accent-soft px-3 py-2 text-[13px] text-fg">
-          A sign-in is waiting in your other tab. Create your ID here, then go back to that tab — it picks up your new ID.
-        </p>
-      )}
+      {fromSignIn}
       <label htmlFor="ni-handle" className="claim-label mb-2 block text-[13px] font-semibold text-muted">
         Choose your name
       </label>
       <div className="claim-field flex items-stretch overflow-hidden rounded-control border-[1.5px] border-transparent bg-surface-2 transition-colors focus-within:border-accent focus-within:bg-surface">
-        <input
-          ref={handleRef}
-          id="ni-handle"
-          type="text"
-          placeholder="yourname"
-          autoComplete="off"
-          spellCheck={false}
-          autoCapitalize="none"
-          autoCorrect="off"
-          enterKeyHint="go"
-          aria-describedby="ni-availability"
-          className="claim-input min-w-0 flex-1 border-none bg-transparent py-[15px] pr-1 pl-3.5 text-lg font-semibold text-fg outline-none placeholder:font-normal placeholder:text-faint"
-          onInput={(event) => {
-            // A pasted `alice.poweur.net` or `@alice` means `alice`.
-            const field = event.currentTarget;
-            const cleaned = normalizeHandleInput(field.value, info);
-            if (cleaned !== field.value) field.value = cleaned;
-            availability.onEdited();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") claim();
-          }}
-        />
+        {input}
         {suffix}
       </div>
       <StatusLine status={availability.status} fallback={policyHint(info, policy)} />
       <Button id="btn-claim" className="claim-submit mt-3.5" disabled={availability.disabled} onClick={claim}>
         Create ID
       </Button>
-      <ClaimNote info={info} passkey={passkey} custody={custody} blocked={blocked} />
+      <ClaimNote hero={false} info={info} passkey={passkey} custody={custody} blocked={blocked} />
     </div>
   );
 }
 
-/**
- * The self-hosted path: the relay writes the DNS records with a scoped token
- * that is never stored. A different intent, not a checkbox (E15-T10).
- */
-export function DnsClaimCard({ info }: { info: ModeInfo }) {
-  const config = useSession((state) => state.config);
-  const { blocked, passkey } = useCustodySupport();
-  const form = useRef<HTMLDivElement>(null);
-  const field = (id: string) => form.current?.querySelector<HTMLInputElement & HTMLSelectElement>(`#${id}`) ?? null;
-
-  const readIntent = (): ClaimIntent => {
-    const domain = (field("ni-domain")?.value ?? "").trim().toLowerCase().replace(/^\.+/, "");
-    return {
-      handle: normalizeHandleInput(field("ni-handle")?.value ?? "", info),
-      domain,
-      hosted: (info.hostedDomains ?? []).includes(domain),
-      provider: field("ni-provider")?.value,
-      dnsToken: field("ni-token")?.value.trim() ?? "",
-      inviteCode: field("ni-invite")?.value.trim() ?? "",
-    };
-  };
-  const availability = useAvailability(readIntent, blocked);
-
-  const claim = () => {
-    if (blocked) {
-      toast(passkey?.reason || PRF_UNAVAILABLE_MESSAGE, "error", 9000);
-      return;
-    }
-    const intent = readIntent();
-    if (!intent.handle) {
-      refocus(field("ni-handle"), "");
-      toast("Choose a name", "warning");
-      return;
-    }
-    if (!intent.domain) {
-      toast("Enter the domain your identity lives under", "warning");
-      return;
-    }
-    void createIdentity(intent, { onNameRefused: (handle) => refocus(field("ni-handle"), handle) });
-  };
-
-  const textProps = { autoComplete: "off", spellCheck: false, autoCapitalize: "none", autoCorrect: "off" } as const;
-
+function ClaimHeading({ domain }: { domain: string }) {
   return (
-    <div ref={form} id="claim-card" className="form-card rounded-card bg-surface px-4 py-5">
-      <p className="mb-4 text-[13px] text-muted">
-        Your identity lives under a domain you control. The relay writes the DNS records for you with a scoped API token, which is never
-        stored.
+    <>
+      <h2 className="claim-title text-[26px] leading-[1.12] font-semibold tracking-[-.6px] text-balance">
+        Claim your name on the open internet.
+      </h2>
+      <p className="claim-lede mx-auto mt-3 max-w-[340px] text-[15px] leading-normal text-white/75">
+        {domain ? `Free hosted IDs on ${domain}.` : "Free hosted IDs."} Pick a name in seconds.
       </p>
-      <FormGroup>
-        <Label htmlFor="ni-handle">Name</Label>
-        <Input id="ni-handle" type="text" placeholder="yourname" {...textProps} onInput={availability.onEdited} />
-      </FormGroup>
-      <FormGroup>
-        <Label htmlFor="ni-domain">Your domain</Label>
-        <Input
-          id="ni-domain"
-          type="text"
-          placeholder="example.org"
-          defaultValue={config.parentDomain || ""}
-          {...textProps}
-          onInput={availability.schedule}
-        />
-      </FormGroup>
-      <FormGroup>
-        <Label htmlFor="ni-provider">DNS provider</Label>
-        <select id="ni-provider" className={cn(inputClass, "cursor-pointer")} defaultValue={config.dnsProvider || "cloudflare"}>
-          <option value="cloudflare">Cloudflare</option>
-          <option value="hetzner">Hetzner</option>
-        </select>
-      </FormGroup>
-      <FormGroup>
-        <Label htmlFor="ni-token">DNS API token</Label>
-        <Input id="ni-token" type="password" placeholder="Scoped API token" autoComplete="off" />
-      </FormGroup>
-      <FormGroup>
-        <Label htmlFor="ni-invite">Invite code (if this relay asks for one)</Label>
-        <Input id="ni-invite" type="text" placeholder="optional" autoComplete="off" />
-      </FormGroup>
-      <StatusLine status={availability.status} fallback="" />
-      <Button id="btn-claim" variant="passkey" disabled={availability.disabled} onClick={claim}>
-        <KeyRound className="size-5" aria-hidden="true" /> Create with passkey
-      </Button>
-      <Note className="mt-2.5 text-[13px]">Keys are generated locally and never leave your device in plain form.</Note>
-    </div>
+    </>
   );
 }
+

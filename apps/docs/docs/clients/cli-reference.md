@@ -6,22 +6,21 @@ title: CLI Reference
 
 # CLI Reference
 
-The Poweur ID CLI (`poweur`) is a scriptable command-line tool for developers, bots, and automated agents. It provides full access to the Poweur ID Protocol: identity management, message sending, inbox retrieval, and relay diagnostics.
+The Poweur ID CLI (`poweur`) puts your ID in the terminal: identity and keys, messages, contacts, files, sync, sharing and relay diagnostics. Use it on your desktop to sync and share project folders and message people without switching apps; give it to an AI coding agent (Claude Code, Codex, Cursor…), which can drive every command and read `--json` output; or run it in CI, cron jobs and bots. See [Clients overview](/clients/overview#cli) for examples.
 
 ## Installation
 
-The CLI is distributed as a single binary. It can also be run via the monorepo:
+The CLI is a single Go binary. Build it from the repository (Go 1.25 or newer):
 
 ```bash
-pnpm --filter @poweur/cli start
+git clone https://github.com/romanmandryk/poweur.git && cd poweur/apps/cli
+go build -o poweur .
+sudo mv poweur /usr/local/bin/     # or anywhere on your PATH
+poweur --help
 ```
 
-Or built and installed globally:
-
-```bash
-pnpm --filter @poweur/cli build
-cp dist/poweur /usr/local/bin/
-```
+To try it without installing, run `go run . --help` in `apps/cli`. The
+[TypeScript SDK](/clients/js-sdk) ships a `poweur` CLI with the same commands.
 
 ## Configuration
 

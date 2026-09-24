@@ -2,6 +2,8 @@ import { cn } from "../lib/cn";
 import glassUrl from "../assets/brand/p-glass.svg";
 import blackUrl from "../assets/brand/p-black.svg";
 import whiteUrl from "../assets/brand/p-white.svg";
+import lockupBlackUrl from "../assets/brand/lockup-black.svg";
+import lockupWhiteUrl from "../assets/brand/lockup-white.svg";
 
 /** Below this the glass lighting turns to mush (design/brand/README.md); flat takes over. */
 export const GLASS_MIN_HEIGHT = 48;
@@ -38,26 +40,35 @@ export function Logo({
   );
 }
 
-/** The P and the product name, as the header and the front doors show them. */
-export function Wordmark({ className }: { className?: string }) {
+/** The lockup's artwork is 3164 × 864 (design/claude/lockups); width follows height. */
+const lockupWidthFor = (height: number) => Math.round((height * 3164) / 864);
+
+/**
+ * The P and the Sora wordmark, outlined — the lockup poweur.org's nav uses.
+ * Black in the light theme and white in the dark one, swapped with CSS alone.
+ */
+export function Wordmark({ className, height = 22 }: { className?: string; height?: number }) {
+  const size = { width: lockupWidthFor(height), height };
   return (
-    <span className={cn("app-brand flex items-center gap-2", className)}>
-      <Logo height={24} alt="" />
-      <span className="app-wordmark text-[17px] font-bold tracking-[-.3px]">Poweur ID</span>
+    <span className={cn("app-brand logo-lockup inline-flex shrink-0 items-center", className)}>
+      <img src={lockupBlackUrl} {...size} alt="Poweur" draggable={false} className="select-none dark:hidden" />
+      <img src={lockupWhiteUrl} {...size} alt="Poweur" draggable={false} className="hidden select-none dark:block" />
     </span>
   );
 }
 
-/** The glass P on the brand glow: the app icon, drawn in the page. */
-export function BrandTile({ className }: { className?: string }) {
+/**
+ * The glass P floating on the brand glow, as poweur.org draws it: no tile,
+ * just the mark and a soft violet light behind it.
+ */
+export function BrandMark({ className, height = 88 }: { className?: string; height?: number }) {
   return (
-    <div
-      className={cn(
-        "brand-tile flex size-24 animate-pop-in items-center justify-center overflow-hidden rounded-[28px] bg-brand-glow shadow-[0_12px_40px_color-mix(in_srgb,var(--color-violet-600)_35%,transparent)]",
-        className,
-      )}
-    >
-      <Logo variant="glass" height={62} alt="Poweur" />
+    <div className={cn("brand-mark relative flex animate-pop-in items-center justify-center", className)}>
+      <div
+        aria-hidden="true"
+        className="brand-mark-glow absolute inset-[-30%] rounded-full bg-[radial-gradient(circle,var(--color-violet-500),var(--color-indigo-800)_55%,transparent_72%)] opacity-60 blur-2xl dark:opacity-80"
+      />
+      <Logo variant="glass" height={height} alt="Poweur" className="relative drop-shadow-[0_18px_36px_rgb(0_0_0/.45)]" />
     </div>
   );
 }

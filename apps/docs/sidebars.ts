@@ -1,5 +1,7 @@
 import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';
 
+// Ordered by reader: people getting an ID, then operators, then developers,
+// then the protocol reference.
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     {
@@ -9,72 +11,36 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Protocol',
+      label: 'Get started',
       collapsed: false,
       items: [
-        'protocol/overview',
-        'protocol/identity-model',
-        'protocol/web-identity',
-        'protocol/dns-records',
-        'protocol/message-format',
-        'protocol/routing',
-        'protocol/delivery-acks',
-        'protocol/group-messaging',
-        'protocol/interoperability',
-        'protocol/rate-limiting',
+        'web/claim-your-id',
+        'web/walkthrough',
       ],
     },
     {
       type: 'category',
-      label: 'Relay',
+      label: 'Run a relay',
       collapsed: false,
       items: [
+        'relay/self-hosting',
         'relay/overview',
-        'relay/api-reference',
         'relay/configuration',
+        'relay/observability',
         'relay/dns-management',
+        'relay/api-reference',
       ],
     },
     {
       type: 'category',
-      label: 'Files',
-      collapsed: false,
-      items: [
-        'files/storage-model',
-        'files/webdav',
-        'files/sharing',
-        'files/group-identities',
-        'files/sync-protocol',
-        'files/e2ee-design',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Clients',
+      label: 'Build with Poweur',
       collapsed: false,
       items: [
         'clients/overview',
-        'clients/cli-reference',
         'clients/js-sdk',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Trust & anti-spam',
-      collapsed: false,
-      items: [
-        'trust/contacts',
-        'trust/anonymous-and-challenges',
-        'trust/relay-reputation',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Web app',
-      collapsed: false,
-      items: [
-        'web/walkthrough',
-        'web/claim-your-id',
+        'clients/cli-reference',
+        'conventions/app-data',
+        'conventions/poweur-sys',
       ],
     },
     {
@@ -92,8 +58,48 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Protocol',
+      collapsed: true,
+      items: [
+        'protocol/overview',
+        'protocol/identity-model',
+        'protocol/web-identity',
+        'protocol/dns-records',
+        'protocol/message-format',
+        'protocol/routing',
+        'protocol/delivery-acks',
+        'protocol/group-messaging',
+        'protocol/interoperability',
+        'protocol/rate-limiting',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Files',
+      collapsed: true,
+      items: [
+        'files/storage-model',
+        'files/webdav',
+        'files/sharing',
+        'files/group-identities',
+        'files/sync-protocol',
+        'files/e2ee-design',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Trust & anti-spam',
+      collapsed: true,
+      items: [
+        'trust/contacts',
+        'trust/anonymous-and-challenges',
+        'trust/relay-reputation',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Security',
-      collapsed: false,
+      collapsed: true,
       items: [
         'security/model',
         'security/key-management',

@@ -6,7 +6,9 @@ title: Configuration
 
 # Relay Configuration
 
-The relay is configured via environment variables. On startup, the relay also loads a local `.env` file (if present) so you can run `go run .` without exporting variables manually. All settings have sensible defaults suitable for a single-node development deployment; production deployments should review and override as appropriate.
+The relay is configured via environment variables. On startup, the relay also loads a local `.env` file (if present) so you can run `go run .` without exporting variables manually. All settings have defaults suitable for a single-node development deployment; for a production setup, start from [Self-hosting a relay](/relay/self-hosting).
+
+Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as `60` is not a valid duration and is ignored, so the default applies. Counts and byte sizes are plain integers.
 
 ## Environment Variables
 
@@ -14,24 +16,38 @@ The relay is configured via environment variables. On startup, the relay also lo
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LISTEN_ADDR` | `:8080` | Address the relay binds to |
-| `RELAY_ADDRESS` | *(required)* | Public host or IP of this relay (e.g. `relay.poweur.net`). Do not include a port. |
-| `RELAY_SCHEME` | `https` | Scheme used for relay-to-relay calls (`http` or `https`) |
-| `VERSION` | `0.1.1` | Relay semver exposed in `GET /` and `GET /health`. Override for tests; do not put a git sha here. |
-| `BUILD_TIME` | *(VCS `vcs.time`)* | Build timestamp (RFC3339 or `YYYY-MM-DD HH:MM`); advertised as `buildTime` |
-| `VERSION_HASH` | *(VCS `vcs.revision`)* | Git revision advertised as `versionHash` |
-| `POWEUR_DATA` | *(empty)* | Durable identity store root (`identities/…/id.json`) |
-| `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net`) |
-| `REGISTRATION_GATE` | `open` | `open` or `invite` for hosted registrations |
-| `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when gate=`invite` |
-| `RESOLVER_ALLOW_PRIVATE` | `false` | Allow well-known resolve to private IPs (dev/test) |
-| `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Per-identity storage quota; `0` = unlimited. Enforced on WebDAV `PUT`/`MKCOL` with `507` |
-| `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Max single uploaded file; `0` = unlimited |
-| `STORAGE_PROVIDER` | `relay-fs` | File-body backend. v1 supports `relay-fs` only (`POWEUR_DATA` required for DAV) |
+| `LISTEN_ADDR` | `:8080` | Address the relay binds to. The relay speaks HTTP only; terminate TLS in a reverse proxy (see [TLS](/security/tls)) |
+| `RELAY_ADDRESS` | *(required)* | This relay's public host name (e.g. `relay.poweur.net`), without a port. Written into identity documents as their home relay |
+| `RELAY_SCHEME` | `https` | Scheme for relay-to-relay calls (`http` only for local tests) |
+| `POWEUR_DATA` | *(empty)* | Root of all durable state: identity documents, inbox spool, files, shares. Without it the relay cannot host identities or files |
+| `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net` → `alice.poweur.net`) |
+| `WEB_STATIC_DIR` | *(empty; `/web` in the Docker image)* | Directory of the built web app (`apps/web/dist`), served at `/app/` |
+| `LAUNCHER_HOST` | `id.<first hosted domain>` | The host that serves the "create an ID" flow |
+| `LAUNCHER_HOSTS` | `id.<domain>` and `<domain>` for each hosted domain | Comma-separated set of such hosts; wins over `LAUNCHER_HOST` |
+| `OAUTH_BRIDGE_URL` | *(empty)* | Public URL of an [OAuth/OIDC bridge](/auth/oauth-oidc-bridge). Hosted identities advertise it in `capabilities.json` and as IndieAuth metadata; the relay never calls it |
+| `REGISTRATION_GATE` | `open` | `open`, or `invite` to require a code for hosted registration |
+| `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when the gate is `invite` |
+| `RESOLVER_ALLOW_PRIVATE` | `false` | Allow identity resolution to private IP addresses (local development and tests only) |
+| `VERSION` | *(build's version)* | Relay semver in `GET /` and `GET /health`. Override for tests only |
+| `BUILD_TIME` | *(VCS time)* | Build timestamp, advertised as `buildTime` |
+| `VERSION_HASH` | *(VCS revision)* | Git revision, advertised as `versionHash` |
+
+### Storage and delivery
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_PROVIDER` | `relay-fs` | File-body backend. Only `relay-fs` exists today (files under `POWEUR_DATA`) |
+| `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Storage quota per identity; `0` = unlimited. WebDAV writes over quota get `507` |
+| `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Largest single uploaded file; `0` = unlimited |
+| `MAX_INBOX_PER_IDENTITY` | `50` | Undelivered messages that may wait for one identity; further mail is refused until they collect it |
+| `MAX_ACKS_PER_IDENTITY` | `50` | Pending delivery receipts per identity |
 | `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
-| `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push streams per identity; `0` = unlimited |
-| `STREAM_IDLE_TIMEOUT` | `1h` | Closes a push stream regardless of traffic, so a forgotten tab does not hold a connection forever |
-| `LAUNCHER_HOST` | `id.<first hosted domain>` | Host that serves the claim flow for people with no identity yet |
+| `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push (SSE) streams per identity; `0` = unlimited |
+| `STREAM_IDLE_TIMEOUT` | `1h` | Closes a push stream regardless of traffic; clients reconnect and catch up from their cursor |
+| `CHALLENGE_TTL` | `60s` | How long an authentication challenge stays valid |
+| `DNS_TTL` | `300s` | How long resolved identities and relay addresses are cached |
+
+Message and upload body sizes are fixed limits in the relay, not settings.
 
 ### Hosted handle policy
 
@@ -59,14 +75,16 @@ the rules of the relay it happens to be talking to.
 File trees live under `$POWEUR_DATA/identities/<id>/` and are served at `/dav/<identity>/`
 (see [WebDAV access](/files/webdav)).
 
-### DNS Provider
+### DNS registration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DNS_PROVIDER` | *(required)* | Default DNS provider: `cloudflare` or `hetzner` |
-| `DNS_PROXY_MODE` | `auto` | Proxy identity routing records in Cloudflare: `auto`, `always`, or `never` |
+| `DNS_PROXY_MODE` | `auto` | For DNS-mode registration on Cloudflare: proxy identity routing records `auto`, `always` or `never`. `auto` proxies only when the relay host is a `*.cfargotunnel.com` CNAME |
 
-In the MVP, the DNS provider and its API token are supplied **by the client** during identity registration (`POST /identities`). The `DNS_PROVIDER` setting may be used for operator-side defaults or validation, but clients can supply any supported provider. `DNS_PROXY_MODE=auto` proxies identity routing records only if the relay hostname resolves to a `*.cfargotunnel.com` CNAME.
+DNS-mode registration (an identity on a domain whose DNS the relay writes) uses a provider and
+API token **supplied by the client** in `POST /identities`; the relay has no DNS credentials of
+its own. See [Cloudflare](#cloudflare-dns-provider-setup) and [Hetzner](#hetzner-dns-provider-setup)
+below. Hosted identities need no DNS writes at all.
 
 ### Rate Limiting
 
@@ -76,7 +94,11 @@ In the MVP, the DNS provider and its API token are supplied **by the client** du
 | `RATE_LIMIT_HOUR` | `200` | Max messages per sender per hour |
 | `RATE_LIMIT_DAY` | `1000` | Max messages per sender per day |
 
-Set any value to `0` to disable that window's check. Set to `-1` to block all messages (maintenance mode).
+| `GLOBAL_RATE_LIMIT_MINUTE` | `1000` | Max messages through this relay per minute, all senders together |
+| `GLOBAL_RATE_LIMIT_HOUR` | `100000` | …per hour |
+| `GLOBAL_RATE_LIMIT_DAY` | `1000000` | …per day |
+
+Set any value to `0` to disable that window's check. Set a per-sender value to `-1` to block all messages (maintenance mode).
 
 #### Per-sender-relay request metering
 
@@ -96,55 +118,34 @@ contacts is never metered here. See
 `0` disables a window; all three at `0` turns the meter off. Rejections are `429` with
 `"scope": "sender_relay"`.
 
-### TLS
+### Observability
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TLS_CERT_FILE` | *(empty)* | Path to TLS certificate PEM file |
-| `TLS_KEY_FILE` | *(empty)* | Path to TLS private key PEM file |
-| `TLS_ENABLE` | `false` | Enable TLS termination at the relay |
-
-For production deployments, TLS termination is typically handled by a load balancer (see [TLS Configuration](/security/tls)) rather than at the relay process. Set `TLS_ENABLE=false` when TLS is terminated upstream.
-
-### Message Limits
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAX_MESSAGE_SIZE` | `524288` | Maximum request body size in bytes (default: 512 KB) |
-
-### Challenge Expiry
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CHALLENGE_TTL` | `60` | Seconds before an auth challenge expires |
-
-### DNS Cache
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DNS_CACHE_TTL` | *(follows DNS TTL)* | Override for DNS routing cache TTL in seconds. If unset, uses the DNS record's TTL. |
-| `DNS_RESOLVER` | *(system default)* | Custom DNS resolver address (e.g. `1.1.1.1:53`) |
+Logs, metrics, error tracking and the browser analytics tag are configured with the
+`OTEL_*`, `TELEMETRY_*`, `SENTRY_DSN`, `BETTERSTACK_RUM_TOKEN` and `LOG_LEVEL` variables,
+described in [Observability](/relay/observability). All are off when unset.
 
 ## Example `.env` File
 
-```bash
-# Core
-LISTEN_ADDR=:8080
-RELAY_ADDRESS=relay.poweur.net
-RELAY_SCHEME=https
-VERSION=0.1.1
+A hosted relay for `example.com` behind a TLS reverse proxy:
 
-# DNS
-DNS_PROVIDER=cloudflare
+```bash
+LISTEN_ADDR=:8080
+RELAY_ADDRESS=relay.example.com
+RELAY_SCHEME=https
+POWEUR_DATA=/data
+HOSTED_DOMAINS=example.com
+WEB_STATIC_DIR=/web            # already set in the Docker image
+
+# Handles of at least 6 characters, like poweur.net
+NAME_MIN_LEN=6
 
 # Rate limits (defaults shown)
 RATE_LIMIT_MINUTE=20
 RATE_LIMIT_HOUR=200
 RATE_LIMIT_DAY=1000
-
-# TLS (terminated at load balancer)
-TLS_ENABLE=false
 ```
+
+For local development, see `apps/api/README.md` in the repository.
 
 ## Cloudflare DNS Provider Setup
 

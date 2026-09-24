@@ -97,9 +97,10 @@ endpoint above 64 MB. The folder in view refreshes itself from the changes feed.
 **🔗 on a folder or file** under `/shared` or `/apps` opens the share dialog: audience
 (contacts or a typed identity), read or read-write, optional expiry. The grant is signed
 in the browser and stored in your own tree; **🔗 at the root** lists every grant with a
-Revoke button. **Shared with me** opens someone else's tree — you name the owner,
-because grants live in *their* `poweur-sys` and there is no "shared with me" listing
-until EPIC-005's offer flow. You will see only what they granted you.
+Revoke button. Sharing also sends the recipient an encrypted **share offer**, which
+appears in their **Requests** tray; accepting it adds the folder to **Files → Shared with
+me**, where it opens in the owner's tree with only what they granted. Revoking takes effect
+at once. See [sharing](../files/sharing.md).
 
 ## Keys, devices and recovery
 
@@ -111,9 +112,8 @@ identity through the six-digit comparison ceremony — see
 
 ## What is not here yet
 
-- Unread badge counts on the message trays.
-- Group editing (the audience picker consumes owner-local groups; the editor is
-  EPIC-005 T5).
+- Editing groups in the web app. The share dialog uses your groups, but you create and
+  change them with the CLI (`poweur share group set <name> --members=<id,id>`) for now.
 - Rotating a pre-EPIC-011 identity onto a recovery seed, and nominating a recovery
   master, both owned by EPIC-011.
 - Nothing here is blocked by the Host-routed well-known path. A profile card fetches

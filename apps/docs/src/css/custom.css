@@ -1,27 +1,27 @@
 /**
- * Poweur ID Protocol docs — custom theme overrides
+ * Poweur docs — brand violet (design/brand/tokens.css)
  */
 
 :root {
-  --ifm-color-primary: #2563eb;
-  --ifm-color-primary-dark: #1d4ed8;
-  --ifm-color-primary-darker: #1e40af;
-  --ifm-color-primary-darkest: #1e3a8a;
-  --ifm-color-primary-light: #3b82f6;
-  --ifm-color-primary-lighter: #60a5fa;
-  --ifm-color-primary-lightest: #93c5fd;
+  --ifm-color-primary: #724CCF;
+  --ifm-color-primary-dark: #5B39A9;
+  --ifm-color-primary-darker: #452786;
+  --ifm-color-primary-darkest: #301563;
+  --ifm-color-primary-light: #8B6BE9;
+  --ifm-color-primary-lighter: #A890FE;
+  --ifm-color-primary-lightest: #C3B7FF;
   --ifm-code-font-size: 90%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #60a5fa;
-  --ifm-color-primary-dark: #3b82f6;
-  --ifm-color-primary-darker: #2563eb;
-  --ifm-color-primary-darkest: #1d4ed8;
-  --ifm-color-primary-light: #93c5fd;
-  --ifm-color-primary-lighter: #bfdbfe;
-  --ifm-color-primary-lightest: #dbeafe;
+  --ifm-color-primary: #A890FE;
+  --ifm-color-primary-dark: #8B6BE9;
+  --ifm-color-primary-darker: #724CCF;
+  --ifm-color-primary-darkest: #5B39A9;
+  --ifm-color-primary-light: #C3B7FF;
+  --ifm-color-primary-lighter: #DBD5FF;
+  --ifm-color-primary-lightest: #EDEAFF;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
 

@@ -5,9 +5,9 @@ import type * as Preset from '@docusaurus/preset-classic';
 const siteUrl = process.env.SITE_URL || 'https://poweur.org';
 
 const config: Config = {
-  title: 'Poweur ID Protocol',
-  tagline: 'Open, DNS-native identity and messaging protocol',
-  favicon: 'img/favicon.ico',
+  title: 'Poweur docs',
+  tagline: 'Open-source ID, messaging and data sharing for an open internet',
+  favicon: 'img/favicon.svg',
 
   // The docs live under the website at /docs. SITE_URL overrides the host
   // (https://tmpwww.poweur.org while the site is new).
@@ -55,10 +55,11 @@ const config: Config = {
   themeConfig: {
     image: 'img/social-card.png',
     navbar: {
-      title: 'Poweur ID Protocol',
+      title: 'Poweur docs',
       logo: {
         alt: 'Poweur ID Logo',
         src: 'img/logo.svg',
+        srcDark: 'img/logo-dark.svg',
       },
       items: [
         {
@@ -107,6 +108,7 @@ const config: Config = {
         {
           title: 'Relay',
           items: [
+            { label: 'Self-hosting', to: '/relay/self-hosting' },
             { label: 'Relay Overview', to: '/relay/overview' },
             { label: 'API Reference', to: '/relay/api-reference' },
             { label: 'Configuration', to: '/relay/configuration' },
