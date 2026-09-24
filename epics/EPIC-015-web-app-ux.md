@@ -41,12 +41,12 @@
 | E15-T6 Import `@poweur/client` | **done** | protocol modules deleted; `js/client.js` is the only construction site |
 | Durable messages & honest badges ([EPIC-009](EPIC-009-messaging-upgrades.md) E09-T1's web surface) | **done** | the message store was memory-only and the relay drains on pickup, so a refresh lost messages *permanently*; the app now redraws from the archive at `poweur-sys/private/messages/`, keeps its own sent copies, and counts unread from read marks rather than from how much it happens to hold. `test/e2e/durability.spec.js` asserts each of these after a reload |
 | **E15-T7 App modes: one SPA, three front doors** | **open** | `js/mode.js`; boot routes on host, not on storage. A launcher host always shows the claim landing — an identity left in this origin's storage by the claim hand-off is not offered there |
-| **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field |
+| **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field. **Web 0.1.36:** poweur.org's look (glass P on its glow, night ground, the site's "Claim your name on the open internet" box as the claim); "I already have an ID" checks the name and redirects to its door; the DNS "Use my own domain" form is replaced by a link to the self-hosting guide |
 | **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed door + join skips the name; passkey is web-only (shell uses join / create) |
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
-| **E15-T14 Brand rollout: glass P logo & violet palette** | **partial** | brand defined in [`design/brand/`](../design/brand/README.md). **Shipped (web 0.1.31):** logo in the header, front doors and welcome gate; favicon, touch icon, manifest and share image. **Open:** the token remap to violet, avatar contrast, the contrast test, and docs / bridge alignment |
+| **E15-T14 Brand rollout: glass P logo & violet palette** | **partial** | brand defined in [`design/brand/`](../design/brand/README.md). **Shipped (web 0.1.31):** logo in the header, front doors and welcome gate; favicon, touch icon, manifest and share image. **Web 0.1.36:** the header wordmark is poweur.org's horizontal lockup, and the app-icon tile on the front doors is replaced by the glass P on its glow. **Open:** the token remap to violet, avatar contrast, the contrast test, and docs / bridge alignment |
 | **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
 
 ## Goal
@@ -653,8 +653,13 @@ human on a hosted domain.
       no step 2
 - [ ] When `hosted_domains` holds more than one entry the suffix becomes a `<select>` inside the
       same control. Still not free text
-- [ ] Demoted, not deleted, below the fold: **"I already have an ID"** → the sign-in flow, and
-      **"Use my own domain"** → the DNS path with its provider/token fields
+- [x] Demoted, below the fold: **"I already have an ID"** and self-hosting. *Changed (web
+      0.1.36):* on the launcher "I already have an ID" is a field, not a passkey prompt — the
+      keys of a hosted name live on its own origin, so the launcher checks the name
+      (`GET /hosted/availability`) and sends the visitor to `<name>.<domain>/app/`, or says it
+      doesn't exist and can be claimed above. The shell keeps the add-identity screen.
+      **"Use my own domain" is gone**: the DNS form is removed, and the landing links to the
+      [self-hosting guide](../apps/docs/docs/relay/self-hosting.md) instead
 - [ ] The existing hand-off (E18-T3) carries the new record to the identity origin unchanged
 
 **Acceptance:** e2e on the launcher host — a visitor types a name, is told it is reserved and
@@ -705,7 +710,9 @@ the user unticks it on a relay that hosts nothing else.
 - [ ] Keep `renderRelayPrompt()` for `shell` and unknown hosts only — a relay-served SPA already
       knows which relay it is on
 - [ ] **Nothing here removes self-hosting.** The DNS path keeps every field it has; it moves
-      behind an explicit choice that reveals them
+      behind an explicit choice that reveals them. *Superseded (web 0.1.36):* the web DNS form
+      is removed — self-hosting means running a relay for your domain, and the landing links to
+      its guide. `createIdentity` still accepts a DNS token, and the CLI keeps the DNS path
 - [ ] The CLI keeps `--hosted`, and that divergence is correct: a CLI has no host to infer from
 
 **Acceptance:** unit tests over the derivation (`domain ∈ hosted_domains`), e2e asserting neither
