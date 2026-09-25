@@ -131,5 +131,12 @@
   {
     "input": "www.example.com",
     "valid": false
+  },
+  {
+    "input": "support.example.com",
+    "id": "support.example.com",
+    "profile_url": "https://support.example.com/",
+    "did": "did:web:support.example.com",
+    "valid": true
   }
 ]

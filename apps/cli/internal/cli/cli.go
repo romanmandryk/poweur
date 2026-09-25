@@ -146,6 +146,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	dnsToken := fs.String("dns-token", "", "dns provider api token")
 	hosted := fs.Bool("hosted", false, "register as hosted identity (no DNS token; requires HOSTED_DOMAINS on relay)")
 	inviteCode := fs.String("invite-code", "", "invite code when REGISTRATION_GATE=invite")
+	operatorToken := fs.String("operator-token", os.Getenv("POWEUR_OPERATOR_TOKEN"), "relay OPERATOR_TOKEN: register a reserved or short hosted name (operator only; default $POWEUR_OPERATOR_TOKEN)")
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
@@ -274,6 +275,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		if *inviteCode != "" {
 			req.InviteCode = *inviteCode
 		}
+		req.OperatorToken = strings.TrimSpace(*operatorToken)
 		if *hosted {
 			docRaw, err := buildSignedIdentityDocument(priv, identityValue, publicKey, encPublicKey, relayAddr, issuedAt)
 			if err != nil {
@@ -2057,7 +2059,7 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 
 func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--json]
+  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--operator-token=...] [--json]
   poweur key recover <identity> --seed <base64url|mnemonic> [--relay=...] [--parent-domain=...] [--json]
   poweur key derive --seed <base64url|mnemonic> [--json]
   poweur key kit --seed <base64url|mnemonic> [--use-identity=...] [--json]

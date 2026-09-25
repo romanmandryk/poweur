@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-root="../../">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy · Poweur</title>
+  <meta name="description" content="What the Poweur hosted service stores, what it can't see, who else is involved, and your rights.">
+  <meta name="theme-color" content="#07060B">
+  <link rel="icon" href="../../assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../assets/site.css">
+  <script src="../../assets/faro.js" defer></script>
+</head>
+<body>
+<header id="nav"></header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap legal-wrap">
+      <div class="eyebrow">Legal</div>
+      <h1 class="h2 gradient-text">Privacy Policy</h1>
+      <p class="legal-meta">Last updated 24 September 2026</p>
+      <nav class="legal-nav" aria-label="Legal pages">
+        <a href="../">Overview &amp; contact</a>
+        <a href="./" aria-current="page">Privacy Policy</a>
+        <a href="../terms/">Terms of Service</a>
+      </nav>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap legal-wrap prose">
+      <div class="summary">
+        <p><strong>The short version</strong></p>
+        <ul>
+          <li>Your private keys are created on your device and never reach us. We can't read your messages: they are end-to-end encrypted.</li>
+          <li>Files you upload are stored on our servers and are <strong>not</strong> end-to-end encrypted yet. Treat them like files in any cloud drive.</li>
+          <li>Your ID, public keys and anything you publish are public by design: that's how others find and verify you.</li>
+          <li>We keep logs and anonymous diagnostics (which screens are used, errors, speed) to run and improve the service. They contain no Poweur ID and no IP address, and nothing is stored on your device for them. Your ID is included only if you tick <em>Include my ID</em> in Settings → Diagnostics.</li>
+          <li>We don't sell data, show ads or build profiles.</li>
+        </ul>
+      </div>
+
+      <h2 id="scope">1. Who we are and what this covers</h2>
+      <p>This policy covers the Poweur services we operate:</p>
+      <ul>
+        <li>the hosted relay and web app at <strong>poweur.net</strong> and your ID's own address (for example <code>alice.poweur.net</code>);</li>
+        <li>the sign-in bridge at <strong>oauth.poweur.org</strong>;</li>
+        <li>the website and documentation at <strong>poweur.org</strong>.</li>
+      </ul>
+      <p>The data controller is Roman Mandryk, trading as Poweur, R. Prudêncio Franco da Trindade 4, 2655-344 Ericeira, Portugal (VAT / NIF PT307974510). Contact us about privacy at <a href="mailto:info@poweur.org">info@poweur.org</a>, or message support.poweur.net from the app.</p>
+      <p>Poweur is open-source software that anyone can run. A relay someone else operates, including one on your own domain, is <strong>their</strong> service under <strong>their</strong> privacy policy. This policy only covers the services listed above.</p>
+
+      <h2 id="cannot-see">2. What we can't see</h2>
+      <ul>
+        <li><strong>Your private keys.</strong> They are generated on your device. What reaches us is at most an encrypted copy, locked with your passkey or your phone's keystore. We can't unlock it, which also means we can't recover your ID for you: your recovery kit can.</li>
+        <li><strong>Message contents.</strong> Messages are encrypted on the sender's device for the recipient. We store and forward ciphertext. Your message history is stored in your home encrypted to your own key.</li>
+        <li><strong>Your passkey.</strong> Your browser or phone keeps it. We see only the public part needed to check a sign-in.</li>
+      </ul>
+
+      <h2 id="collect">3. What we store, and why</h2>
+      <table>
+        <thead><tr><th>Data</th><th>Why</th><th>How long</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Your ID document</strong>: your name, public keys, which relay hosts you</td><td>So anyone can find and verify you. <strong>Public.</strong></td><td>Until you delete your ID</td></tr>
+          <tr><td><strong>Profile</strong> you choose to publish (display name, picture)</td><td>Shown to people who look you up. <strong>Public.</strong></td><td>Until you change or delete it</td></tr>
+          <tr><td><strong>Encrypted key backup</strong> and device list</td><td>So your own devices can unlock and add each other</td><td>Until you delete your ID</td></tr>
+          <tr><td><strong>Messages in transit</strong>: ciphertext plus sender, recipient, time and size</td><td>To deliver messages, including while you're offline</td><td>Until delivered; undelivered messages expire after 30 days</td></tr>
+          <tr><td><strong>Files</strong> you upload, and folder and share settings</td><td>To store and share them as you ask. <strong>Not end-to-end encrypted today</strong>, so treat them like files in any cloud drive.</td><td>Until you delete them or your ID</td></tr>
+          <tr><td><strong>Contacts, inbox rules, shares and app grants</strong></td><td>The relay has to read these to deliver messages and enforce your permissions</td><td>Until you change them or delete your ID</td></tr>
+          <tr><td><strong>Public links and link statistics</strong> (download counts)</td><td>So you can share files with people without an ID and see that they were used</td><td>Until the link expires or you remove it</td></tr>
+          <tr><td><strong>Sign-in sessions</strong></td><td>To keep you signed in on a device</td><td>Short-lived and held in memory only</td></tr>
+          <tr><td><strong>Server logs and metrics</strong>: route, result, timing, errors</td><td>To keep the service running, debug it and stop abuse</td><td>Logs 14 days; aggregate metrics 30 days</td></tr>
+          <tr><td><strong>Backups</strong> of the above</td><td>So a hardware failure doesn't lose your data. Daily copies of the whole server, kept by our hosting provider (Hetzner) in the EU. For recovering the service, not for restoring individual files</td><td>7 days, then deleted</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Diagnostics.</strong> The app, the sign-in bridge, the website and the docs send anonymous diagnostics to our own server: which screens and pages are viewed, errors and loading speed, with your browser name, version, operating system and screen size. Before anything leaves your browser, Poweur IDs, domain names and email addresses are replaced with placeholders and link queries and fragments are removed; no IP address is kept and nothing is stored on your device. We keep them for 14 days. If you tick <em>Include my ID</em> in Settings → Diagnostics, the app’s diagnostics carry your ID and relay logs about your requests include your ID and IP address, which lets us find problems you run into. Untick it at any time: from then on, logs record only a keyed hash of your ID and no IP address.</p>
+
+      <h3 id="sign-in">Signing in to other apps</h3>
+      <p>When you use your ID to sign in to another website through oauth.poweur.org, the bridge learns which site asked, your ID, and what you approved, and it issues that site a token. The site then receives your ID and whatever profile details you approved. What that site does with them is covered by its own privacy policy. The <em>Connected apps</em> page in the app lists the sites you've approved and lets you disconnect them.</p>
+
+      <h3 id="storage-limits">Storage limits and support</h3>
+      <p>Free storage is limited. If you message our support ID to ask for more, we see that conversation like any other contact would, and we keep a note of the higher limit next to your ID.</p>
+
+      <h2 id="third-parties">4. Who else is involved</h2>
+      <p>We use a small number of service providers. They process data on our behalf and only as needed for the service:</p>
+      <table>
+        <thead><tr><th>Provider</th><th>What for</th><th>Data</th></tr></thead>
+        <tbody>
+          <tr><td>Hetzner Online GmbH (Germany)</td><td>The servers the relay, bridge and website run on, in data centres in the EU</td><td>Everything in section 3, encrypted where described above</td></tr>
+          <tr><td>Cloudflare</td><td>DNS and network protection in front of some of our addresses</td><td>IP addresses and request data passing through it</td></tr>
+          <tr><td>Better Stack</td><td>Uptime checks, and error reports from our servers</td><td>Server-side only: request routes, error codes and timings, with IDs hashed unless you opted in. Nothing from your browser.</td></tr>
+          <tr><td>Google Fonts</td><td>Fonts on poweur.org</td><td>Your IP address and browser details when the site loads its fonts</td></tr>
+        </tbody>
+      </table>
+      <p>Some of these providers are outside the European Economic Area. Where that applies, transfers rely on the European Commission's adequacy decisions or standard contractual clauses.</p>
+      <p><strong>Messages to people on other relays</strong> go to the relay that hosts them. That relay stores and delivers them under its operator's policy.</p>
+      <p>We don't sell or rent personal data, and we don't use it for advertising.</p>
+
+      <h2 id="legal-bases">5. Legal bases</h2>
+      <p>Where the EU or UK GDPR applies, we rely on:</p>
+      <ul>
+        <li><strong>contract</strong>: hosting your ID, delivering your messages and storing your files is the service you asked for;</li>
+        <li><strong>legitimate interests</strong>: security, preventing spam and abuse, backups, pseudonymous logs, and anonymous diagnostics to keep the service working;</li>
+        <li><strong>consent</strong>: including your ID in diagnostics (<em>Include my ID</em>), off unless you tick it and withdrawable at any time in Settings;</li>
+        <li><strong>legal obligation</strong>: where the law requires us to keep or disclose data.</li>
+      </ul>
+
+      <h2 id="rights">6. Your choices and rights</h2>
+      <ul>
+        <li><strong>Download your data</strong> at any time through the app, WebDAV or the CLI. Your ID and files use open formats.</li>
+        <li><strong>Move</strong> your ID to your own domain or another relay: the protocol is designed for it.</li>
+        <li><strong>Delete</strong> your ID: message support.poweur.net from the ID, or email us from an address you can prove is yours. We delete your home, ID document and waiting messages within 30 days, and from our backups at most 7 days after that.</li>
+        <li>Under the GDPR you can also ask for <strong>access, correction, restriction</strong> or <strong>portability</strong>, and you can <strong>object</strong> to processing based on legitimate interests. Write to <a href="mailto:info@poweur.org">info@poweur.org</a>.</li>
+        <li>You can complain to a data protection authority. Ours is the Portuguese <a href="https://www.cnpd.pt/">Comissão Nacional de Proteção de Dados (CNPD)</a>, and you can also complain to the authority where you live.</li>
+      </ul>
+      <p>Other people may keep copies of what you sent them or shared with them. Deleting your ID can't remove those.</p>
+
+      <h2 id="law-enforcement">7. Requests from authorities</h2>
+      <p>We only disclose data when the law requires it and the request is valid. We can only hand over what we have: we don't have your keys or message contents. Where we're allowed to, we'll tell you before disclosing anything.</p>
+
+      <h2 id="security">8. Security</h2>
+      <p>Everything travels over HTTPS. Keys stay on your devices, and messages and message history are end-to-end encrypted. Access to our servers is limited and logged. Poweur is pre-1.0 and has <strong>not</strong> had an independent security audit yet. Please report vulnerabilities as described on <a href="../#security">the legal overview</a>.</p>
+
+      <h2 id="children">9. Children</h2>
+      <p>The service is not intended for children under 16. If you believe a child has created an ID, please contact us.</p>
+
+      <h2 id="changes">10. Changes</h2>
+      <p>If we change this policy in a way that matters, we'll announce it on poweur.org and in the app before it takes effect. The date at the top shows the latest version, and the <a href="https://github.com/romanmandryk/poweur/commits/master/apps/site/legal/privacy/index.html">change history</a> is public.</p>
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

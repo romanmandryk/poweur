@@ -16,6 +16,7 @@ RUN npm install -g pnpm@10
 WORKDIR /src
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/client-ts ./packages/client-ts
+COPY packages/faro ./packages/faro
 COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile --filter @poweur/web...
 RUN pnpm --filter @poweur/client build && pnpm --filter @poweur/web build

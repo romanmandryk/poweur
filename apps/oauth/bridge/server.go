@@ -32,10 +32,12 @@ type Config struct {
 	// origin serving the web app's claim flow, e.g. "https://poweur.net".
 	// Empty hides the offer.
 	LauncherURL string
-	// AnalyticsToken is a Better Stack web-analytics token. When set, the public
-	// information pages (home, privacy, security, abuse) load its script; the
-	// sign-in, consent, account and developer pages never do. Optional.
-	AnalyticsToken string
+	// TelemetryURL is the same-origin path of a Grafana Faro collector
+	// ("/faro/collect", routed by Caddy to Alloy). When set, every page sends
+	// anonymous page views, errors and web vitals from the bundled UI, with
+	// IDs and transaction codes scrubbed (@poweur/faro). No third-party script
+	// runs, so the CSP stays connect-src 'self'. Optional.
+	TelemetryURL string
 	// LauncherDomain is the hosted domain new names are created under.
 	// Defaults to the launcher's host without a leading "id.".
 	LauncherDomain string
@@ -110,24 +112,23 @@ type Config struct {
 
 // Server is the bridge.
 type Server struct {
-	cfg          Config
-	store        *Store
-	verifier     *signin.Verifier
-	keys         *KeyRing
-	pairwise     []byte
-	mux          *http.ServeMux
-	log          *slog.Logger
-	secure       bool
-	limits       limiters
-	csp          string
-	cspAnalytics string // csp plus Better Stack, for analyticsPages; empty when analytics is off
-	metrics      *metrics
+	cfg      Config
+	store    *Store
+	verifier *signin.Verifier
+	keys     *KeyRing
+	pairwise []byte
+	mux      *http.ServeMux
+	log      *slog.Logger
+	secure   bool
+	limits   limiters
+	csp      string
+	metrics  *metrics
 }
 
 // New validates cfg and builds a Server.
 func New(ctx context.Context, cfg Config) (*Server, error) {
-	if cfg.AnalyticsToken != "" && !analyticsTokenRE.MatchString(cfg.AnalyticsToken) {
-		return nil, errors.New("bridge: AnalyticsToken must be 8-64 letters and digits")
+	if cfg.TelemetryURL != "" && (!strings.HasPrefix(cfg.TelemetryURL, "/") || strings.HasPrefix(cfg.TelemetryURL, "//")) {
+		return nil, errors.New("bridge: TelemetryURL must be a same-origin path such as /faro/collect")
 	}
 	issuer, err := identity.NormalizeOrigin(cfg.Issuer)
 	if err != nil {
@@ -261,12 +262,6 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	}
 	s.csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
 		"connect-src " + connect + "; frame-ancestors 'none'; base-uri 'none'"
-	// Analytics widens the policy only on the pages that load it (analyticsPages).
-	if cfg.AnalyticsToken != "" {
-		s.cspAnalytics = "default-src 'none'; script-src 'self' " + analyticsScriptOrigin + "; style-src 'self'; " +
-			"img-src 'self' data: " + analyticsDataOrigin + "; connect-src " + connect + " " + analyticsDataOrigin +
-			"; worker-src blob:; frame-ancestors 'none'; base-uri 'none'"
-	}
 	s.keys = cfg.Keys
 	if s.keys == nil {
 		if len(cfg.KeyEncryptionKey) != 32 {
@@ -353,7 +348,6 @@ func (s *Server) routes() {
 
 	// Pages.
 	mux.HandleFunc("GET /assets/{file}", s.handleAsset)
-	mux.HandleFunc("GET /analytics.js", s.handleAnalytics)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /{$}", s.handleHome)
 	s.extraRoutes(mux)

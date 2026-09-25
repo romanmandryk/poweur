@@ -288,7 +288,7 @@ func configFromEnv(ctx context.Context, log *slog.Logger) (bridge.Config, error)
 		DefaultSigner:         env("OAUTH_DEFAULT_SIGNER", ""),
 		LauncherURL:           launcherURL(env("OAUTH_LAUNCHER_URL", "https://poweur.net")),
 		LauncherDomain:        env("OAUTH_LAUNCHER_DOMAIN", ""),
-		AnalyticsToken:        env("OAUTH_ANALYTICS_TOKEN", ""),
+		TelemetryURL:          env("OAUTH_FARO_URL", ""),
 		KeyEncryptionKey:      kek,
 		SubjectType:           env("OAUTH_SUBJECT_TYPE", ""),
 		ClientRegistration:    env("OAUTH_CLIENT_REGISTRATION", ""),

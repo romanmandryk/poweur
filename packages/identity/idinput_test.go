@@ -34,7 +34,8 @@ var idInputCases = []struct {
 	{"xn--80ak6aa92e.example", false, "xn--80ak6aa92e.example"},
 	{"192.168.0.1", false, ""},
 	{"https://192.168.0.1/", false, ""},
-	{"www.example.com", false, ""}, // reserved leftmost label; never an alias
+	{"www.example.com", false, ""}, // a website, never an alias
+	{"support.example.com", false, "support.example.com"}, // reserved to claim, not to use
 }
 
 func TestNormalizeIDInput(t *testing.T) {

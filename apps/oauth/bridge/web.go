@@ -47,6 +47,14 @@ type pagePayload struct {
 	Service serviceInfo  `json:"service"`
 	Session *sessionInfo `json:"session,omitempty"`
 	Data    any          `json:"data"`
+	// Telemetry tells the UI where to send anonymous Faro signals; absent
+	// when the operator has none.
+	Telemetry *telemetryInfo `json:"telemetry,omitempty"`
+}
+
+type telemetryInfo struct {
+	URL     string `json:"url"`
+	Version string `json:"version"`
 }
 
 type serviceInfo struct {

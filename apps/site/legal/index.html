@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-root="../">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Legal &amp; Contact · Poweur</title>
+  <meta name="description" content="Who runs Poweur, how to contact us, report abuse or a vulnerability, and links to the privacy policy and terms.">
+  <meta name="theme-color" content="#07060B">
+  <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/faro.js" defer></script>
+</head>
+<body>
+<header id="nav"></header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap legal-wrap">
+      <div class="eyebrow">Legal</div>
+      <h1 class="h2 gradient-text">Legal &amp; contact</h1>
+      <nav class="legal-nav" aria-label="Legal pages">
+        <a href="./" aria-current="page">Overview &amp; contact</a>
+        <a href="privacy/">Privacy Policy</a>
+        <a href="terms/">Terms of Service</a>
+      </nav>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap legal-wrap prose">
+      <h2 id="operator">Who runs Poweur</h2>
+      <p>The hosted service at poweur.net and oauth.poweur.org, and this website, are provided by:</p>
+      <p>Roman Mandryk, trading as Poweur<br>
+        R. Prudêncio Franco da Trindade 4<br>
+        2655-344 Ericeira, Portugal<br>
+        VAT / NIF: PT307974510<br>
+        Email: <a href="mailto:info@poweur.org">info@poweur.org</a></p>
+
+      <h2 id="contact">Contact</h2>
+      <table>
+        <tbody>
+          <tr><th>Help with your ID, storage limits</th><td>Message <strong>support.poweur.net</strong> from the app</td></tr>
+          <tr><th>Everything else: general, press, privacy, abuse, security</th><td><a href="mailto:info@poweur.org">info@poweur.org</a></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="abuse">Reporting abuse</h2>
+      <p>To report spam, impersonation, illegal content or other abuse by an ID hosted on poweur.net, write to <a href="mailto:info@poweur.org">info@poweur.org</a> or message support.poweur.net. Include the ID (for example <code>name.poweur.net</code>), what happened and when, and any links. You can also block the ID in the app. From the CLI, <code>poweur report</code> sends a signed report that carries message IDs, never message contents.</p>
+      <p>We can't read end-to-end encrypted messages, so we act on what you show us and on what is public. IDs on other relays are the responsibility of their operators. Their ID document names the relay that hosts them.</p>
+
+      <h2 id="security">Reporting a vulnerability</h2>
+      <p>Please email <a href="mailto:info@poweur.org">info@poweur.org</a> with the details and, if you can, steps to reproduce. Don't open a public GitHub issue for a security problem. We'll acknowledge your report within a few days, keep you updated, and credit you once it's fixed, if you'd like. Good-faith research that avoids other people's data and doesn't disrupt the service is welcome, and we won't pursue it legally. Poweur is pre-1.0 and has not had an independent audit yet. Machine-readable details are in <a href="../.well-known/security.txt">security.txt</a>.</p>
+
+      <h2 id="complaints">Complaints and consumer disputes</h2>
+      <p>Tell us first, and we'll try to sort it out. You can also use the <a href="https://www.livroreclamacoes.pt/">Livro de Reclamações Eletrónico</a> (Portugal's official complaints book). For consumer disputes, the alternative dispute resolution body is <a href="https://www.cniacc.pt/">CNIACC – Centro Nacional de Informação e Arbitragem de Conflitos de Consumo</a>. More information on consumer dispute resolution is at <a href="https://www.consumidor.gov.pt/">consumidor.gov.pt</a>.</p>
+
+      <h2 id="documents">Documents</h2>
+      <ul>
+        <li><a href="privacy/">Privacy Policy</a>: what we store, what we can't see, your rights.</li>
+        <li><a href="terms/">Terms of Service</a>: the rules for hosted IDs, including acceptable use.</li>
+        <li><a href="https://github.com/romanmandryk/poweur#license">Software licenses</a>: AGPL-3.0 for the services, Apache-2.0 for the SDK, CLI and identity libraries.</li>
+        <li><a href="https://github.com/romanmandryk/poweur/blob/master/TRADEMARKS.md">Name and logo</a>: how to refer to Poweur.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>

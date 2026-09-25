@@ -27,6 +27,7 @@ import { readConnectedApps, readConsentLog, revokeConnectedApp } from "../../lib
 import { getConfig, getUnlockedKeys, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor, saveConfig } from "../../lib/storage.js";
 import { useData } from "../../state/data";
 import { useRoute } from "../../state/route";
+import { setAnalyticsConsent } from "../../lib/observability";
 import { refreshSession, useSession } from "../../state/session";
 import { closePanel, openPanel, setLoading, toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
@@ -736,11 +737,11 @@ function DnsPanel({ close }: { close: () => void }) {
   );
 }
 
-// ─── Relay analytics consent (EPIC-013) ───────────────────────────────────────
+// ─── Diagnostics: include my ID (EPIC-013 consent) ───────────────────────────
 
 export function openAnalyticsPanel() {
   if (!requireClient()) return;
-  openPanel("Relay analytics", (close) => <AnalyticsPanel close={close} />);
+  openPanel("Diagnostics", (close) => <AnalyticsPanel close={close} />);
 }
 
 function AnalyticsPanel({ close }: { close: () => void }) {
@@ -765,8 +766,10 @@ function AnalyticsPanel({ close }: { close: () => void }) {
   return (
     <div>
       <p className="mb-3">
-        When your relay exports analytics, timestamps and actions are recorded. With detailed analytics off, your identity is hashed and your
-        IP is omitted. Turning it on includes your raw identity and IP. Message contents and keys are never included.
+        To keep Poweur working, the app and relay always record anonymous diagnostics: which screens are used, errors and speed, with no
+        Poweur ID, no IP address and nothing stored on your device. Including your ID lets us find and fix problems you run into: the relay
+        then records your ID and IP with your requests, and the app's error reports carry your ID. Message contents, files and keys are never
+        included.
       </p>
       <div id="analytics-host" role="status">
         {!preference ? (
@@ -777,7 +780,7 @@ function AnalyticsPanel({ close }: { close: () => void }) {
           <>
             <label className="flex items-center gap-2">
               <input ref={box} id="analytics-consent" type="checkbox" className="size-5 accent-accent" defaultChecked={preference.granted} />
-              Allow detailed relay analytics for {identity}
+              Include my ID ({identity}) in diagnostics
             </label>
             <p className="my-2 text-[13px] text-muted">Changes affect future exports. Existing records expire under the relay's retention settings.</p>
             <Button
@@ -787,7 +790,9 @@ function AnalyticsPanel({ close }: { close: () => void }) {
                 if (activeIdentity() !== identity) return;
                 setSaving(true);
                 try {
-                  await requireClient()?.setAnalyticsConsent(Boolean(box.current?.checked));
+                  const granted = Boolean(box.current?.checked);
+                  await requireClient()?.setAnalyticsConsent(granted);
+                  setAnalyticsConsent(identity, granted);
                   toast("Analytics preference saved", "success");
                   close();
                 } catch (error) {

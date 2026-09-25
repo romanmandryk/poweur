@@ -7,6 +7,7 @@ FROM node:22-alpine AS ui
 RUN npm install -g pnpm@10
 WORKDIR /src
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/faro ./packages/faro
 COPY apps/oauth/ui ./apps/oauth/ui
 RUN pnpm install --frozen-lockfile --filter @poweur/oauth-ui...
 RUN pnpm --filter @poweur/oauth-ui build

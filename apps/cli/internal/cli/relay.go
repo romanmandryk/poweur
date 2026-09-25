@@ -239,6 +239,9 @@ type IdentityRegisterRequest struct {
 	IssuedAt            string          `json:"issued_at"`
 	Nonce               string          `json:"nonce"`
 	IdentitySignature   string          `json:"identity_signature"`
+	// OperatorToken is the relay's OPERATOR_TOKEN, sent as a header (never in
+	// the body) so the operator can register a name the policy holds back.
+	OperatorToken string `json:"-"`
 }
 
 type IdentityExportRequest struct {
@@ -269,6 +272,9 @@ func RegisterIdentity(ctx context.Context, relayURL string, req IdentityRegister
 		return IdentityResponse{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if req.OperatorToken != "" {
+		httpReq.Header.Set("X-Poweur-Operator-Token", req.OperatorToken)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {

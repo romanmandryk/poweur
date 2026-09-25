@@ -246,12 +246,9 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds max file size")
 			return
 		}
-		if s.cfg.MaxIdentityBytes > 0 {
-			used, err := s.filesProvider.UsedBytes(r.Context(), owner)
-			if err == nil && used+r.ContentLength > s.cfg.MaxIdentityBytes {
-				writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "identity storage quota exceeded")
-				return
-			}
+		if s.overQuota(r.Context(), owner, r.ContentLength) {
+			s.writeQuotaExceeded(w)
+			return
 		}
 	}
 
@@ -364,7 +361,8 @@ func (s *Server) handleFilesQuota(w http.ResponseWriter, r *http.Request) {
 		"identity":    owner,
 		"provider":    s.filesProvider.Name(),
 		"used_bytes":  used,
-		"quota_bytes": s.cfg.MaxIdentityBytes,
+		"quota_bytes": s.storageQuota(owner),
 		"change_id":   s.filesIndex.ChangeID(owner),
+		"contact":     s.cfg.QuotaContact,
 	})
 }

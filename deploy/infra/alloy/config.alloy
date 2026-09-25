@@ -30,3 +30,54 @@ otelcol.exporter.otlphttp "loki" {
     endpoint = "http://infra-loki:3100/otlp"
   }
 }
+
+// ── Browser telemetry (Grafana Faro) ────────────────────────────────────────
+// The web app, the OAuth bridge's pages, the website and the docs post to
+// /faro/collect on their own origin; Caddy strips /faro and forwards here
+// without the client's IP. The browser already scrubbed Poweur IDs unless the
+// user opted in (packages/faro); this pipeline redacts again as a backstop.
+// No CORS here: web pages post same-origin, and Caddy answers the mobile
+// shell's preflights (Alloy's receiver refuses Faro's Idempotency-Key header).
+faro.receiver "web" {
+  server {
+    listen_address           = "0.0.0.0"
+    listen_port              = 12347
+    max_allowed_payload_size = "256KiB"
+    rate_limiting {
+      enabled    = true
+      rate       = 100
+      burst_size = 200
+    }
+  }
+  extra_log_labels = { source = "faro" }
+  output {
+    logs = [loki.process.faro.receiver]
+  }
+}
+
+loki.process "faro" {
+  // kind: event | exception | measurement | log; app: poweur-web, poweur-oauth,
+  // poweur-site, poweur-docs. Both low-cardinality, so labels.
+  stage.logfmt {
+    mapping = { kind = "", app = "app_name" }
+  }
+  stage.labels {
+    values = { kind = "", app = "" }
+  }
+  // Anonymous entries (no user_id) never keep a hosted Poweur ID.
+  stage.match {
+    selector = "{source=\"faro\"} !~ \"user_id=\""
+    stage.replace {
+      expression = "([a-z0-9][a-z0-9-]*\\.poweur\\.net)"
+      replace    = "<id>"
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://infra-loki:3100/loki/api/v1/push"
+  }
+}
+

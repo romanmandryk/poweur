@@ -23,9 +23,11 @@ type Config struct {
 	// UptimeURL is an optional GET heartbeat (Better Stack Heartbeat, or any
 	// URL). Empty disables it. Grafana blackbox remains the in-stack probe.
 	UptimeURL string
-	// BrowserBetterStackToken is the public JavaScript-tag token. Empty keeps
-	// GET /app/observability.json at {"providers":[]} so the SPA loads no tag.
-	BrowserBetterStackToken string
+	// BrowserFaroURL is where the web app sends Grafana Faro telemetry, usually
+	// the same-origin path "/faro/collect" that Caddy routes to Alloy. Empty
+	// keeps GET /app/observability.json at {"providers":[]}: the SPA sends
+	// nothing.
+	BrowserFaroURL string
 	// SentryDSN is a Sentry-compatible ingest URL (Better Stack Errors). Empty
 	// disables the SDK. The DSN includes a public key in the URL userinfo.
 	SentryDSN       string
@@ -36,18 +38,18 @@ type Config struct {
 
 func FromEnv() Config {
 	return Config{
-		Endpoint:                os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		Protocol:                os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
-		Headers:                 os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
-		SecondaryEndpoint:       os.Getenv("TELEMETRY_OTLP_SECONDARY_ENDPOINT"),
-		SecondaryHeaders:        os.Getenv("TELEMETRY_OTLP_SECONDARY_HEADERS"),
-		UptimeURL:               strings.TrimSpace(os.Getenv("TELEMETRY_UPTIME_URL")),
-		BrowserBetterStackToken: strings.TrimSpace(os.Getenv("BETTERSTACK_RUM_TOKEN")),
-		SentryDSN:               strings.TrimSpace(os.Getenv("SENTRY_DSN")),
-		HashKey:                 os.Getenv("TELEMETRY_HASH_KEY"),
-		Level:                   os.Getenv("LOG_LEVEL"),
-		Environment:             os.Getenv("TELEMETRY_ENVIRONMENT"),
-		AllowHTTP:               os.Getenv("TELEMETRY_ALLOW_HTTP") == "1",
+		Endpoint:          os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		Protocol:          os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
+		Headers:           os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
+		SecondaryEndpoint: os.Getenv("TELEMETRY_OTLP_SECONDARY_ENDPOINT"),
+		SecondaryHeaders:  os.Getenv("TELEMETRY_OTLP_SECONDARY_HEADERS"),
+		UptimeURL:         strings.TrimSpace(os.Getenv("TELEMETRY_UPTIME_URL")),
+		BrowserFaroURL:    strings.TrimSpace(os.Getenv("FARO_COLLECT_URL")),
+		SentryDSN:         strings.TrimSpace(os.Getenv("SENTRY_DSN")),
+		HashKey:           os.Getenv("TELEMETRY_HASH_KEY"),
+		Level:             os.Getenv("LOG_LEVEL"),
+		Environment:       os.Getenv("TELEMETRY_ENVIRONMENT"),
+		AllowHTTP:         os.Getenv("TELEMETRY_ALLOW_HTTP") == "1",
 	}
 }
 
@@ -69,8 +71,8 @@ func (c Config) otlpSinks() []otlpSink {
 // BrowserConfig is the public SPA file at GET /app/observability.json.
 func (c Config) BrowserConfig(release string) []byte {
 	type provider struct {
-		Type  string `json:"type"`
-		Token string `json:"token"`
+		Type string `json:"type"`
+		URL  string `json:"url"`
 	}
 	doc := struct {
 		Environment string     `json:"environment,omitempty"`
@@ -80,8 +82,8 @@ func (c Config) BrowserConfig(release string) []byte {
 	if doc.Environment == "" {
 		doc.Environment = "production"
 	}
-	if c.BrowserBetterStackToken != "" {
-		doc.Providers = append(doc.Providers, provider{Type: "betterstack", Token: c.BrowserBetterStackToken})
+	if c.BrowserFaroURL != "" {
+		doc.Providers = append(doc.Providers, provider{Type: "faro", URL: c.BrowserFaroURL})
 	}
 	b, _ := json.Marshal(doc)
 	return b

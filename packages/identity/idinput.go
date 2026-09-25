@@ -13,8 +13,8 @@ import (
 // `alice.example.com.`) or a profile URL with an empty or root path
 // (`https://alice.example.com/`). Refused: any other path, a port, query,
 // fragment, userinfo, a non-https scheme (unless allowHTTP, for local
-// development), and anything ValidateIdentityName refuses — which includes
-// raw Unicode, so an IDN must already be in its xn-- form.
+// development), a `www.` name, and anything ValidateIdentityName refuses —
+// which includes raw Unicode, so an IDN must already be in its xn-- form.
 //
 // No alias is ever inferred: "www." is neither stripped nor added, because a
 // Poweur ID is exactly the name whose document resolves.
@@ -60,6 +60,12 @@ func NormalizeIDInput(input string, allowHTTP bool) (string, error) {
 	value = strings.TrimSuffix(strings.ToLower(value), ".")
 	if err := ValidateIdentityName(value); err != nil {
 		return "", err
+	}
+	// A typed "www.example.com" is someone's website, not their ID. Refused
+	// explicitly (it once fell out of the reserved-label check, which now
+	// guards claiming names rather than using them).
+	if strings.HasPrefix(value, "www.") {
+		return "", fmt.Errorf("that is a website address (%s), not a Poweur ID", value)
 	}
 	return value, nil
 }

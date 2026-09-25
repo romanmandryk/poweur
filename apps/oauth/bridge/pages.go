@@ -22,11 +22,10 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, tmpl
 	if sess, _ := s.currentSession(r); sess != nil {
 		p.Session = &sessionInfo{Identity: sess.Identity}
 	}
-	var head string
-	if s.analyticsFor(w, name) {
-		head = analyticsTag
+	if s.cfg.TelemetryURL != "" {
+		p.Telemetry = &telemetryInfo{URL: s.cfg.TelemetryURL, Version: Version}
 	}
-	if err := writePageWithHead(w, status, p, head); err != nil {
+	if err := writePageWithHead(w, status, p, ""); err != nil {
 		s.log.Error("render", "page", name, "err", err)
 	}
 }

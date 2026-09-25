@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const consent = vi.hoisted(() => ({ set: vi.fn(async (_granted: boolean) => ({})) }));
+
 vi.mock("../../src/lib/native.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   hasNativeKeystore: () => true,
@@ -16,7 +18,12 @@ vi.mock("../../src/lib/mode.js", async (importOriginal) => ({
 }));
 vi.mock("../../src/lib/client.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  clientFor: () => ({ sessions: { ensure: vi.fn(() => Promise.resolve({})) }, signer: {} }),
+  clientFor: () => ({
+    sessions: { ensure: vi.fn(() => Promise.resolve({})) },
+    signer: {},
+    setAnalyticsConsent: consent.set,
+    analyticsPreference: vi.fn(async () => ({ granted: true })),
+  }),
   identityApiFor: () => ({}),
 }));
 vi.mock("@poweur/client", async (importOriginal) => ({
@@ -35,6 +42,7 @@ import { useSession } from "../../src/state/session";
 import { resetStores } from "../helpers/stores";
 
 beforeEach(() => {
+  consent.set.mockClear();
   resetStores();
   localStorage.setItem("poweur:config", JSON.stringify({ relayUrl: "http://127.0.0.1:8080" }));
   useSession.setState({ config: { relayUrl: "http://127.0.0.1:8080" } });
@@ -58,6 +66,11 @@ describe("createIdentity", () => {
     expect(useData.getState().profile.doc).toBeNull();
     expect(useData.getState().onboard).toEqual({ step: 1 });
     expect(useRoute.getState().sub).toBe("onboarding");
+  });
+
+  it("claiming does not opt in to identified diagnostics: that is a separate choice", async () => {
+    await createIdentity({ handle: "eeeeee", domain: "poweur.net", hosted: true });
+    expect(consent.set).not.toHaveBeenCalled();
   });
 
   it("a launcher claim leaves no copy of the identity on that origin", async () => {

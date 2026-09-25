@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { registrableDomain, validateHostedHandle, validateIdentityName } from "../src/names.js";
+import { registrableDomain, validateClaimableName, validateHostedHandle, validateIdentityName } from "../src/names.js";
 
 describe("registrableDomain", () => {
   it("scopes a hosted identity to the domain its launcher shares", () => {
@@ -46,7 +46,14 @@ describe("hosted handle validation matches the relay's fixed rules", () => {
 
   it("keeps the expanded reserved list in step with Go", () => {
     for (const reserved of ["www", "admin", "support", "verify", "id", "launcher"]) {
-      expect(() => validateIdentityName(`${reserved}.poweur.net`), reserved).toThrow(/reserved/);
+      expect(() => validateClaimableName(`${reserved}.poweur.net`), reserved).toThrow(/reserved/);
+      expect(() => validateHostedHandle(`${reserved}.poweur.net`), reserved).toThrow(/reserved/);
     }
+  });
+
+  it("holds reserved names back from claiming, not from use", () => {
+    // An operator-created support.poweur.net must be reachable like any other ID.
+    expect(() => validateIdentityName("support.poweur.net")).not.toThrow();
+    expect(() => validateClaimableName("alice.poweur.net")).not.toThrow();
   });
 });

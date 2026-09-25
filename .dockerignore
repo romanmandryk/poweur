@@ -8,6 +8,7 @@
 !pnpm-workspace.yaml
 !pnpm-lock.yaml
 !packages/client-ts/**
+!packages/faro/**
 !apps/web/**
 **/node_modules
 **/dist

@@ -67,48 +67,42 @@ func TestAssets(t *testing.T) {
 	}
 }
 
-func TestAnalyticsOnlyOnPublicPages(t *testing.T) {
-	// Off by default: no script, no route, the strict CSP everywhere.
+func TestTelemetryIsFirstPartyAndOptional(t *testing.T) {
+	// Off by default: no telemetry in the page, and no third-party anything.
 	off := newHarness(t)
-	if p := off.browser().get("/"); strings.Contains(p.body, "analytics.js") || strings.Contains(p.header.Get("Content-Security-Policy"), "betterstack") {
-		t.Fatalf("analytics without a token: %s", p.header.Get("Content-Security-Policy"))
+	p := off.browser().get("/")
+	if strings.Contains(p.body, `"telemetry"`) || strings.Contains(p.body, "betterstack") {
+		t.Fatalf("telemetry without a URL: %s", p.body)
 	}
 	rec := httptest.NewRecorder()
 	off.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/analytics.js", nil))
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("/analytics.js without a token = %d", rec.Code)
+		t.Fatalf("/analytics.js = %d, the Better Stack loader is gone", rec.Code)
 	}
 
-	h := newHarness(t, func(c *Config) { c.AnalyticsToken = "testToken123" })
-	for _, path := range []string{"/", "/privacy", "/security", "/abuse"} {
-		p := h.browser().get(path)
-		csp := p.header.Get("Content-Security-Policy")
-		if !strings.Contains(p.body, `<script src="/analytics.js" async></script></head>`) ||
-			!strings.Contains(csp, "script-src 'self' https://betterstack.net;") || strings.Contains(csp, "unsafe") {
-			t.Errorf("%s: analytics missing or CSP wrong: %s", path, csp)
-		}
-	}
-	// Anything that is part of signing in or managing access stays first-party only.
-	for _, name := range []string{"identify", "await", "handoff", "consent", "account", "developers", "client_new", "client", "error"} {
+	// On: every page tells the bundled UI where to send, same origin, and the
+	// CSP is the strict one everywhere — nothing but 'self' to connect to.
+	h := newHarness(t, func(c *Config) { c.TelemetryURL = "/faro/collect" })
+	for _, name := range []string{"home", "identify", "await", "consent", "account", "developers", "error"} {
 		rec := httptest.NewRecorder()
 		rec.Header().Set("Content-Security-Policy", h.srv.csp)
 		h.srv.render(rec, httptest.NewRequest(http.MethodGet, "/", nil), http.StatusOK, name+".html", "", nil)
-		if strings.Contains(rec.Body.String(), "analytics.js") || rec.Header().Get("Content-Security-Policy") != h.srv.csp {
-			t.Errorf("%s page loads analytics", name)
+		body := rec.Body.String()
+		if !strings.Contains(body, `"telemetry":{"url":"/faro/collect","version":"`+Version+`"}`) {
+			t.Errorf("%s: no telemetry in the page: %s", name, body)
+		}
+		if strings.Contains(body, "<script src=") && !strings.Contains(body, `src="/assets/`) {
+			t.Errorf("%s loads a script from elsewhere", name)
 		}
 	}
-
-	rec = httptest.NewRecorder()
-	h.srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/analytics.js", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `'betterstack',"testToken123")`) ||
-		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") {
-		t.Fatalf("/analytics.js = %d %q", rec.Code, rec.Body.String())
+	if csp := h.srv.csp; strings.Contains(csp, "betterstack") || !strings.Contains(csp, "script-src 'self';") {
+		t.Fatalf("CSP widened: %s", csp)
 	}
-}
 
-func TestAnalyticsTokenIsValidated(t *testing.T) {
-	cfg := Config{AnalyticsToken: `x");alert(1)//`}
-	if _, err := New(t.Context(), cfg); err == nil || !strings.Contains(err.Error(), "AnalyticsToken") {
-		t.Fatalf("hostile token accepted: %v", err)
+	// Only a same-origin path is accepted.
+	for _, bad := range []string{"https://collect.example/faro", "//collect.example/faro", "faro/collect"} {
+		if _, err := New(t.Context(), Config{TelemetryURL: bad}); err == nil || !strings.Contains(err.Error(), "TelemetryURL") {
+			t.Errorf("TelemetryURL %q: %v", bad, err)
+		}
 	}
 }

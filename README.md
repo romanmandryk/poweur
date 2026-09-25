@@ -265,12 +265,28 @@ storage formats may still evolve. Check each epic's progress table before relyin
 capability.
 
 The code is developed in public with the goal of permitting independent clients, relays, apps,
-and hosted services. A repository-wide license must be selected before the project is treated as
-open source for redistribution; package-level metadata alone does not license the entire
-workspace.
+and hosted services. See [License](#license).
 
 ## Contributing
 
 Roadmap epics are the issue tracker until corresponding GitHub issues exist. Start with
 [Contributing](CONTRIBUTING.md), choose an unblocked task from the [epic index](epics/README.md),
 and keep protocol changes documented and covered by integration tests.
+
+## License
+
+Poweur uses two licenses. The services are copyleft, and the pieces other software builds on are
+permissive:
+
+| Part | License |
+|------|---------|
+| Relay (`apps/api`), OAuth/OIDC bridge (`apps/oauth`), web app (`apps/web`), mobile shell (`apps/mobile`), integration tests, deploy and everything else not listed below | [AGPL-3.0-only](LICENSE) |
+| Identity package (`packages/identity`), TypeScript SDK and its CLI (`packages/client-ts`), Go CLI (`apps/cli`), conventions and schemas (`conventions`), docs (`apps/docs`), the guestbook example (`apps/guestbook`) | [Apache-2.0](packages/identity/LICENSE) (a `LICENSE` file in each directory) |
+
+A directory's own `LICENSE` file wins over the root one. If you run a modified relay, bridge or
+web app as a network service, the AGPL requires you to offer your users its source. Building an
+app, bot, agent or client on the SDK, the identity package or the protocol carries no such
+obligation, whether your code is open or closed.
+
+The Poweur name and logo are not covered by either license; see [TRADEMARKS.md](TRADEMARKS.md).
+

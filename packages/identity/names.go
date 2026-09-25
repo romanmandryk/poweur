@@ -45,7 +45,13 @@ var ReservedLabels = map[string]struct{}{
 	"system": {}, "bot": {}, "test": {}, "demo": {}, "example": {},
 }
 
-// ValidateIdentityName checks FQDN shape and reserved leftmost labels.
+// ValidateIdentityName checks that identity is a well-formed FQDN: what every
+// resolve, message, grant and sign-in accepts.
+//
+// It does not check ReservedLabels. Reserved names are held back from being
+// *claimed* (ValidateClaimableName, the hosted NamePolicy), not from being
+// used: an operator may create `support.example.org` deliberately, and every
+// client must be able to reach it once it exists.
 func ValidateIdentityName(identity string) error {
 	identity = strings.TrimSpace(strings.ToLower(identity))
 	if identity == "" {
@@ -61,15 +67,24 @@ func ValidateIdentityName(identity string) error {
 	if len(labels) < 2 {
 		return fmt.Errorf("identity must be a FQDN with at least two labels")
 	}
-	for i, label := range labels {
+	for _, label := range labels {
 		if err := validateLabel(label); err != nil {
 			return fmt.Errorf("label %q: %w", label, err)
 		}
-		if i == 0 {
-			if _, reserved := ReservedLabels[label]; reserved {
-				return fmt.Errorf("label %q is reserved", label)
-			}
-		}
+	}
+	return nil
+}
+
+// ValidateClaimableName is ValidateIdentityName plus the reserved leftmost
+// labels: what a self-service registration may take. Hosted handles go
+// through NamePolicy, which checks the same list and the operator's own.
+func ValidateClaimableName(identity string) error {
+	if err := ValidateIdentityName(identity); err != nil {
+		return err
+	}
+	label := strings.Split(strings.TrimSpace(strings.ToLower(identity)), ".")[0]
+	if _, reserved := ReservedLabels[label]; reserved {
+		return fmt.Errorf("label %q is reserved", label)
 	}
 	return nil
 }

@@ -271,8 +271,8 @@ func TestBrowserConfig(t *testing.T) {
 	if !strings.Contains(string(empty), `"providers":[]`) || strings.Contains(string(empty), "token") {
 		t.Fatalf("empty config: %s", empty)
 	}
-	on := Config{BrowserBetterStackToken: "pub_token", Environment: "production"}.BrowserConfig("0.1.11")
-	if !strings.Contains(string(on), `"type":"betterstack"`) || !strings.Contains(string(on), "pub_token") || !strings.Contains(string(on), "0.1.11") {
+	on := Config{BrowserFaroURL: "/faro/collect", Environment: "production"}.BrowserConfig("0.1.11")
+	if !strings.Contains(string(on), `"type":"faro"`) || !strings.Contains(string(on), `"url":"/faro/collect"`) || !strings.Contains(string(on), "0.1.11") {
 		t.Fatalf("enabled config: %s", on)
 	}
 }

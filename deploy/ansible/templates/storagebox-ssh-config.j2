@@ -1,0 +1,9 @@
+# Hetzner Storage Box: SFTP with restic runs on port 23.
+Host storagebox
+  HostName {{ storage_box_host }}
+  Port 23
+  User {{ storage_box_user }}
+  IdentityFile /root/.ssh/id_ed25519
+  UserKnownHostsFile /root/.ssh/known_hosts
+  StrictHostKeyChecking yes
+  ServerAliveInterval 60

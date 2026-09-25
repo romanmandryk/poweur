@@ -139,7 +139,10 @@ describe("Files destination (E21-T9)", () => {
     render(<App />);
     await waitFor(() => expect($$(".file-row")).toHaveLength(3));
     expect($('[data-open-dir="shared"]')!.textContent).toContain("grants");
-    expect(document.body.textContent).toContain("1.0 KB of 10 KB used");
+    // The limit itself is not advertised, only what is used.
+    expect(document.body.textContent).toContain("1.0 KB used");
+    expect(document.body.textContent).not.toContain("10 KB");
+    expect(document.querySelector("#quota-warning")).toBeNull();
     // At the root: the shares list, but no upload or new folder.
     expect($("#btn-shares")).toBeTruthy();
     expect($("#ff-upload")).toBeNull();
@@ -170,6 +173,31 @@ describe("Files destination (E21-T9)", () => {
     await waitFor(() => expect(davClient.write).toHaveBeenCalledWith("shared/project-x/hello.txt", picked));
     await waitFor(() => expect($(".conv-list")!.textContent).toContain("hello.txt"));
     expect($(".toast.success")!.textContent).toContain("Uploaded 1 file");
+  });
+
+  it("says nothing about the limit until it is nearly reached, then names who to ask", async () => {
+    const { davClient } = relayTree();
+    davClient.quota.mockResolvedValue({ used_bytes: 9.5 * 1024, quota_bytes: 10 * 1024, provider: "relay-fs", contact: "helpdesk.poweur.net" } as any);
+    render(<App />);
+    await waitFor(() => expect($("#quota-warning")).toBeTruthy());
+    expect($("#quota-warning")!.textContent).toBe(
+      "You're almost out of storage. Message helpdesk.poweur.net to ask for more space, and tell us what you need it for.",
+    );
+    expect(document.body.textContent).not.toContain("10 KB");
+  });
+
+  it("an upload over the limit says the storage is full and who to message", async () => {
+    const { davClient } = relayTree();
+    davClient.quota.mockResolvedValue({ used_bytes: 1024, quota_bytes: 10 * 1024, provider: "relay-fs", contact: "helpdesk.poweur.net" } as any);
+    davClient.write.mockRejectedValueOnce(Object.assign(new Error("identity storage quota exceeded"), { status: 507 }));
+    render(<App />);
+    await openFolder("shared");
+    fireEvent.change($<HTMLInputElement>("#ff-upload")!, { target: { files: [new File(["x"], "big.bin")] } });
+    await waitFor(() =>
+      expect($(".toast.error")!.textContent).toContain(
+        "Your storage is full. Message helpdesk.poweur.net to ask for more space, and tell us what you need it for.",
+      ),
+    );
   });
 
   it("creates, renames and deletes through dialogs, not prompt()", async () => {

@@ -3,6 +3,7 @@
 # which is the relay's).
 *
 !packages/identity/**
+!packages/faro/**
 !apps/oauth/**
 !package.json
 !pnpm-workspace.yaml

@@ -69,15 +69,16 @@ func (s *Server) handleHostedAvailability(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Policy first, registration last: answering "taken" for a name the policy
-	// would have refused anyway would leak whether a reserved handle is also
-	// registered.
-	if err := policy.ValidateHandleLabel(handle); err != nil {
-		respond(idpkg.ReasonOf(err), availabilityMessage(idpkg.ReasonOf(err), err.Error()))
-		return
-	}
+	// Registration first: a name that exists is "taken", even one the policy
+	// would refuse to anyone else. The operator creates reserved names like
+	// support.<domain> on purpose, and their doors must offer sign-in rather
+	// than "reserved". Nothing leaks: a registered ID's document is public.
 	if s.identities.Exists(handle + "." + domain) {
 		respond(idpkg.ReasonTaken, "That name is already taken.")
+		return
+	}
+	if err := policy.ValidateHandleLabel(handle); err != nil {
+		respond(idpkg.ReasonOf(err), availabilityMessage(idpkg.ReasonOf(err), err.Error()))
 		return
 	}
 	respond(idpkg.ReasonAvailable, "That name is available.")

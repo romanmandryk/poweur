@@ -18,6 +18,7 @@
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 | E13-T7 Lively public Growth dashboard | done | Message kind `detail`, `settings.change` field events, `adopt_*` adoption gauges, redesigned Growth board (relay 0.1.6) |
 | Optional third-party overlay | trial | Dual OTLP sink + optional browser RUM/uptime heartbeat, currently Better Stack. Grafana remains canonical; unset env to remove. |
+| Browser telemetry (Grafana Faro) | done | Replaces the Better Stack browser tag on every frontend (web app, mobile shell, OAuth bridge UI, website, docs). `@poweur/faro` sends first-party to `/faro/collect` → Caddy → Alloy `faro.receiver` → Loki `{source="faro"}`; anonymous by default (IDs, domains, emails, URL queries/fragments and the user-agent scrubbed in the browser, nothing stored, Alloy redacts again), ID attached only with the per-identity consent. Dashboard `poweur-web`. Relay `FARO_COLLECT_URL`, bridge `OAUTH_FARO_URL` |
 
 ## Goal
 

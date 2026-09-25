@@ -16,7 +16,7 @@
 | E26-T1 Commercial boundary & entitlement model | open | billing account is not a Poweur identity |
 | E26-T2 Customer accounts & organization ownership | open | payer, members, roles, identity assignments |
 | E26-T3 Plans, checkout, invoices & lifecycle | open | provider adapter; upgrades, failure, grace, cancellation |
-| E26-T4 Usage metering & quota enforcement | open | storage, public transfer, email, auth and later compute |
+| E26-T4 Usage metering & quota enforcement | open | storage, public transfer, email, auth and later compute. **Interim (relay 0.1.19):** per-identity storage overrides in `STORAGE_QUOTAS_FILE` (re-read on change) and `QUOTA_CONTACT` named in 507s and `/files/{id}/quota`; poweur.net runs a small, unadvertised free quota raised by support on request. Entitlements from a billing service should write the same file until T4 replaces it |
 | E26-T5 Hosted-service UI & support tools | open | plan, usage, seats, invoices, export/delete; audited support |
 | E26-T6 Privacy, abuse, portability & financial operations | open | tax, refunds, suspension separation, reconciliation |
 | E26-T7 Organization identity features | open | org-issued IDs, membership attestations, org-scoped OIDC (E22), org recovery guardians |

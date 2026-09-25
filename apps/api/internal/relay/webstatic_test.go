@@ -202,11 +202,11 @@ func TestRootIconMissingIsNotTheServiceBanner(t *testing.T) {
 
 func TestWebStaticObservabilityJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"betterstack","token":"t"}]}`))
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"faro","url":"/faro/collect"}]}`))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	status, _, body := staticGet(t, ts, "/app/observability.json")
-	if status != http.StatusOK || !strings.Contains(body, `"type":"betterstack"`) || strings.Contains(body, "<html>") {
+	if status != http.StatusOK || !strings.Contains(body, `"type":"faro"`) || strings.Contains(body, "<html>") {
 		t.Fatalf("status=%d body=%q", status, body)
 	}
 }

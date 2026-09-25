@@ -109,9 +109,18 @@ export async function loadFiles(path: string) {
   }
 }
 
+/**
+ * What a full drive says. The free limit is not advertised; running into it
+ * is the moment to ask the operator's contact for more, and to say what for.
+ */
+export function storageFullMessage(contact: string | null | undefined, full = true): string {
+  const lead = full ? "Your storage is full." : "You're almost out of storage.";
+  return contact ? `${lead} Message ${contact} to ask for more space, and tell us what you need it for.` : lead;
+}
+
 /** Which of the two "no" answers this was. */
 export function uploadErrorMessage(error: any, owner: string | null): string {
-  if (error?.status === 507) return "Storage quota exceeded";
+  if (error?.status === 507) return storageFullMessage(useData.getState().files.quota?.contact);
   if (error?.status === 403 && owner) return `${owner} granted you read-only access here`;
   return errorMessage(error);
 }
@@ -143,7 +152,7 @@ export async function uploadFiles(fileList: FileList | File[] | null) {
     await loadFiles(path);
   } catch (error) {
     setLoading(false);
-    toast(uploadErrorMessage(error, owner), "error");
+    toast(uploadErrorMessage(error, owner), "error", (error as any)?.status === 507 ? 12000 : 3500);
   }
 }
 

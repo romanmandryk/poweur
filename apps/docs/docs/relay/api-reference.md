@@ -512,9 +512,10 @@ Always `200` with a verdict — the failure modes are answers, not errors:
 [handle policy](/relay/configuration) so a client can validate inline without hardcoding
 the rules of the relay it is talking to.
 
-**Policy is evaluated before registration.** A name the policy refuses reports *why it is
-refused*, never `taken`, so the endpoint cannot be used to ask whether a reserved handle is
-also registered.
+**Registration is checked first.** A name that exists answers `taken`, including a reserved
+or short one the operator created, so its own page offers sign-in. That reveals nothing
+new: a registered ID's document is public. A name nobody holds reports *why* the policy
+refuses it (`reserved`, `too_short`, …).
 
 | Status | Meaning |
 |--------|---------|

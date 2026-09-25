@@ -215,6 +215,22 @@ describe("the launcher landing (E15-T8)", () => {
     expect(useRoute.getState().sub).toBe("add-id");
   });
 
+  it("links the hosted service's privacy policy and terms, and says claiming agrees to them", () => {
+    useSession.setState({ mode: launcher });
+    render(<App />);
+    expect($<HTMLAnchorElement>("#link-privacy").href).toBe("https://poweur.org/legal/privacy/");
+    expect($<HTMLAnchorElement>("#link-terms").href).toBe("https://poweur.org/legal/terms/");
+    expect($<HTMLAnchorElement>("#link-legal").href).toBe("https://poweur.org/legal/");
+    expect($("#claim-agreement").textContent).toBe("By creating an ID you agree to the Terms and Privacy Policy.");
+  });
+
+  it("a self-hosted relay's landing shows none of poweur.net's legal pages", () => {
+    useSession.setState({ mode: { ...launcher, domain: "example.org", hostedDomains: ["example.org"] } });
+    render(<App />);
+    expect(document.querySelector("#link-privacy")).toBeNull();
+    expect(document.querySelector("#claim-agreement")).toBeNull();
+  });
+
   it("self-hosting links to the guide instead of a DNS form", () => {
     useSession.setState({ mode: launcher });
     render(<App />);
