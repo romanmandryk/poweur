@@ -28,7 +28,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 |----|-------|-------|--------|------------|
 | [EPIC-001](EPIC-001-web-identity.md) | Web-based identity resolution (`/.well-known/poweur/`) | Identity | complete | — |
 | [EPIC-002](EPIC-002-relay-registration-and-persistence.md) | Relay-only registration, wildcard identities & durable relay storage | Identity / Infra | complete (E02-T1 SQLite/bbolt index open) | E01 |
-| [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete (S3 provider deferred) | E02 |
+| [EPIC-003](EPIC-003-file-storage-webdav.md) | Per-identity file storage & WebDAV access | Files | complete, **deprecated** → EPIC-020 | E02 |
 | [EPIC-004](EPIC-004-file-sync.md) | File sync protocol & sync clients | Files | core complete (T1–T4, T6 device registry done; T5 desktop/mobile + fsnotify daemon deferred) | E03 |
 | [EPIC-005](EPIC-005-sharing-acl.md) | Sharing, ACLs, groups & public-to-any-valid-ID | Files / Trust / Growth | core complete (T3 offer/accept/mount + T4 links + T5 groups done; **T6 file requests/conversion partial; T7 Send open**) | E03 |
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | **complete** (T1–T5; tasks dogfood = PCP-0007) | E03 |
@@ -45,7 +45,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | in progress (T1–T6 + T8 done; docs shipped; npm publish/release workflow open in T7) | E01, E03, E04, E05, E14 |
 | [EPIC-018](EPIC-018-identity-onboarding-naming.md) | Hosted identity onboarding: launcher, name policy & credential scope | Identity / UX | **complete** (T1–T5) | E02, E01, E14 |
 | [EPIC-019](EPIC-019-mobile-app-capacitor.md) | Mobile app: Capacitor shell over the web client | Clients / Mobile | in progress (iOS simulator verified; Android generated and builds; push/background sync, packaging and existing-ID transfer open) | E15, E17, E18, E11 |
-| [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage protocol v2: separable files service, chunked content-addressed sync & capability sharing | Files / Trust / Infra | proposed | E03, E04, E05, E06, E11, E13 |
+| [EPIC-020](EPIC-020-storage-protocol-v2.md) | Storage v2: end-to-end encrypted drive, stateless relay, filesystem/S3 providers, replace/append commits | Files / Trust / Infra | proposed, **P0** (rewritten 2026-09-25) | E05, E06, E09, E11 |
 | [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | React + Tailwind web app rewrite and `/app/` cutover | Web / UX | **complete** (T1–T14; the React app is `apps/web`, served at `/app/`; legacy app removed) | E15, E17, E19 |
 | [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | in progress (T1–T7, T9–T10 done; T8 partial — conformance, additional live clients and remaining operations work) | E01, E08, E13 |
 | [EPIC-023](EPIC-023-email-bridge.md) | Email bridge: `john@poweur.net` for opted-in IDs, Emails tray, pluggable outbound | Messaging / Growth | proposed | E01, E06, E07, E09, E13, E14 |
@@ -131,13 +131,13 @@ EPIC-015 + EPIC-017 + EPIC-018 ──► EPIC-019 (Capacitor mobile shell)
                    └─ `kdf:"native"` key custody frees the store build from
                       associated-domains, so self-hosters need no fork
 
-EPIC-003/004/005/006/011/013 ──► EPIC-020 (storage v2: chunks, versions, capability sharing)
-                   ├─ Wave 0: files split out as a declared, separately deployable service;
-                   │  id + messaging stay one control-plane process
-                   ├─ WebDAV becomes a compatibility view, not the storage model
-                   ├─ message history v2 (supersedes E09-T1 layout) → E15-T13 paging
-                   └─ lands E03-T7 relay-blind storage, upgrades E05-T3's v1 mounts to immutable
-                      chunks, and adds append/excerpt/time-boxed shares and delegation
+EPIC-005/006/009/011 ──► EPIC-020 (storage v2: E2EE drive, stateless relay)
+                   ├─ replaces EPIC-003's model: no relay WebDAV, no fixed roots, no relay database
+                   ├─ Proton-style key tree; shares on any node; key-in-fragment links
+                   ├─ relay settings are `.poweur/` files the owner (or an agent) edits
+                   ├─ filesystem or S3 provider; presigned client ↔ bucket transfers
+                   ├─ replace + append commits; message history v2 → E15-T13 paging
+                   └─ append files are the substrate EPIC-025 builds realtime on
 
 EPIC-001 + EPIC-008 + EPIC-013 ──► EPIC-022 (generic OAuth/OIDC + IndieAuth bridge)
                    ├─ one issuer can authenticate IDs hosted on any public Poweur relay
@@ -195,6 +195,10 @@ the hosted service, use the following sequence unless user evidence changes it:
 
 ### Now — close the viral sharing loop
 
+0. **Storage v2 first (EPIC-020 waves 1–4).** Pre-launch is the cheapest moment to change the
+   storage model, and the remaining sharing work (E05-T6 notifications, E05-T7 Send) should be
+   built once, on node shares and encrypted links, not twice.
+
 1. Finish **E05-T3** share offer → accept → recipient mount. The primitives exist and this is the
    missing end-to-end journey.
 2. Build **E05-T6** file requests and guest-to-ID handoff. A guest completes the job first; claiming
@@ -220,8 +224,8 @@ file/message activity, email opt-in and successful third-party sign-ins/integrat
 
 ### Then — differentiated collaboration
 
-8. Land the EPIC-020 portions EPIC-025 actually needs: compare-and-swap versions, append frames,
-   encrypted key domains and authorization.
+8. Land the EPIC-020 portion EPIC-025 actually needs on top of waves 1–4: append latency and
+   batching (E20-T15).
 9. Build **EPIC-025** around one collaborative Markdown application. Do not begin with a generic
    Figma/office/game platform; use the reference app to validate the open session and document
    formats.
@@ -301,9 +305,9 @@ proprietary.
 
 ### Important current limitations
 
-- Storage is whole-file and `relay-fs` only. It has no content-defined chunks, compare-and-swap
-  version commits, relay-blind chunk encryption, S3 provider or separately deployable files
-  service; those are EPIC-020.
+- Storage is whole-file, plaintext on the relay (only `poweur-sys/private` items such as message
+  history are client-encrypted; attachment bytes are not), `relay-fs` only, with no
+  version-checked commits or S3 provider. EPIC-020 replaces it with an end-to-end encrypted drive.
 - Recipient share mounts and the share offer/accept/revoke lifecycle are incomplete, so recipients
   currently need to know who shared with them. File-request and guest-conversion flows are E05-T6.
 - Desktop continuous sync, native Files/Storage integration, mobile push/background sync and store
@@ -316,9 +320,10 @@ proprietary.
 
 ### Planned architecture
 
-- **EPIC-020** replaces whole-file storage with versioned, encrypted content-addressed chunks,
-  compare-and-swap commits and a separately deployable files-service boundary while retaining
-  WebDAV as a compatibility view.
+- **EPIC-020** replaces EPIC-003's storage with an end-to-end encrypted drive (Proton-style key
+  tree, node shares, key-in-fragment links), a relay whose only durable state is files in the
+  drive (`.poweur/`), filesystem or S3 providers, and replace/append commits; WebDAV is dropped
+  from the relay and reached on desktop through the sync daemon or rclone.
 - **EPIC-023** adds an isolated email bridge that translates opted-in email traffic into encrypted
   Poweur messages without giving the bridge relay credentials.
 - **EPIC-024 and EPIC-025** compose existing groups, grants, messages and files into portable

@@ -5,10 +5,11 @@
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-010 (watch-folder automations), offline-capable apps
 
-> **Continues in [EPIC-020](EPIC-020-storage-protocol-v2.md).** The changes journal, cursor and
-> SSE notification stay; bodies move from whole-file DAV transfer to chunks + version-checked
-> commits (E20-T3), and `poweur sync` moves onto them (E20-T6), so conflicts are detected by the
-> relay's `409` instead of client-side guesswork.
+> **Replaced by [EPIC-020](EPIC-020-storage-protocol-v2.md).** The v1 sync protocol (DAV bodies,
+> `/sync` manifest, tus-style upload) is removed in E20-T12. The cursor + SSE idea carries over
+> to the drive changes feed (E20-T5); conflicts are detected by the relay's `409` and merged by
+> the client per file type (E20-T9, `poweur sync --watch`). E04-T5's desktop/mobile items move
+> to E20-T13 (rclone) and E20-T14 (native file providers).
 
 ## Progress
 

@@ -35,7 +35,7 @@ expiry moves forward on each successful charge; a lapse is simply expiry.
 - EPIC-016 turns the reserved `payment` challenge slot real and defines the hosted-gateway cut
   model for pay-to-send. The same gateway, settlement callback and accounting serve grants.
 - Grants honour `expires_at` on every request with no cache window (E05); time-boxed and
-  per-audience shares are planned in E20-T11.
+  per-audience shares are planned in E20-T16.
 
 ## Tasks
 

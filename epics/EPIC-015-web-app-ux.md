@@ -47,7 +47,7 @@
 | **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
 | **E15-T14 Brand rollout: glass P logo & violet palette** | **partial** | brand defined in [`design/brand/`](../design/brand/README.md). **Shipped (web 0.1.31):** logo in the header, front doors and welcome gate; favicon, touch icon, manifest and share image. **Web 0.1.36:** the header wordmark is poweur.org's horizontal lockup, and the app-icon tile on the front doors is replaced by the glass P on its glow. **Open:** the token remap to violet, avatar contrast, the contrast test, and docs / bridge alignment |
-| **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 history v2 |
+| **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T11 history v2 |
 
 ## Goal
 
@@ -813,10 +813,10 @@ filtering a conversation still means opening everything.
 - [ ] Read marks advance as the thread is viewed (to the newest visible message), not on the
       row tap
 - [ ] **Paging comes from history v2, not the v1 layout** —
-      [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T8 (one append-only log per conversation
+      [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T11 (one append-only log per conversation
       on chunked storage, `tail` / `before` APIs in both SDKs, CLI `--limit/--before`). The
       conversation screen above can ship first on today's full load; the two items below wait
-      for E20-T8
+      for E20-T11
 - [ ] Web: unlock loads one tail chunk per conversation for the tray; the thread view fetches
       older chunks on scroll-to-top with the scroll position preserved; chunks cached in
       IndexedDB (immutable, never revalidated)
@@ -832,7 +832,7 @@ filtering a conversation still means opening everything.
   - the "new messages ↓" pill;
   - outbox pending/failed bubbles;
   - read marks per visible message (still marked when the conversation opens);
-  - download paging (E20-T8).
+  - download paging (E20-T11).
 
 
 **Chat-style composer and nav badges (web 0.1.13):**
@@ -850,7 +850,7 @@ filtering a conversation still means opening everything.
 
 **Acceptance:** e2e — A and B exchange messages; B opens the conversation and sees both sides
 in order with ticks; A sends while B sits in the thread and it appears without interaction;
-after a reload the thread is intact. Once E20-T8 lands: a relay test seeds a 2k-message
+after a reload the thread is intact. Once E20-T11 lands: a relay test seeds a 2k-message
 archive and asserts the tray paints having fetched at most one tail chunk per conversation,
 and that scrolling up fetches the previous one.
 

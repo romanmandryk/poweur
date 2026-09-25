@@ -2,7 +2,7 @@
 
 - **Status:** proposed; begin after organizational demand, not before the shared hosted service
 - **Priority:** P3 / demand-led
-- **Depends on:** EPIC-013 (deployment/observability), EPIC-020 (service topology), EPIC-026
+- **Depends on:** EPIC-013 (deployment/observability), EPIC-020 (S3 providers, multi-instance relays E20-T17), EPIC-026
   (organizations and commercial lifecycle)
 - **Interacts with:** EPIC-011 (recovery), EPIC-022/023 (bridges), EPIC-027 (runners)
 - **Unlocks:** dedicated, regional, customer-cloud and air-gapped commercial deployments

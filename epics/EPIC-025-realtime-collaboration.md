@@ -2,7 +2,7 @@
 
 - **Status:** proposed
 - **Priority:** P2 (build after Spaces makes collaboration discoverable and usable)
-- **Depends on:** EPIC-020 (versioned chunks, append logs, CAS), EPIC-024 (Space membership),
+- **Depends on:** EPIC-020 (append-mode files, version-checked commits, E20-T15 latency), EPIC-024 (Space membership),
   EPIC-017 (`@poweur/client`)
 - **Interacts with:** EPIC-009 (typed messages/SSE), EPIC-011 (key epochs), EPIC-019 (mobile)
 - **Unlocks:** interoperable co-editing applications, whiteboards and live tools on Poweur;

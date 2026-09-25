@@ -5,11 +5,13 @@
 - **Depends on:** EPIC-003 (storage + cross-identity auth); interacts with EPIC-004 (sync), EPIC-007 (contacts)
 - **Unlocks:** EPIC-010 (cross-identity pipelines), collaborative apps
 
-> **Extended by [EPIC-020](EPIC-020-storage-protocol-v2.md) Wave 3.** Grants stay path-based
-> signed documents; v2 adds authorization of versions and chunks (E20-T9), the `append` and
-> `create` permissions (E20-T10), snapshot / excerpt / time-boxed shares (E20-T11) and the
-> reserved `share` permission as attenuated delegation (E20-T12). E05-T3's recipient mounts
-> benefit from immutable, cacheable chunks.
+> **Re-based on [EPIC-020](EPIC-020-storage-protocol-v2.md) (E20-T7).** Shares move from path
+> grants to owner-signed documents on **node ids** (any file or folder, no `/shared` root), with
+> node keys sealed to each member — content is end-to-end encrypted. Roles become
+> `read`/`write`/`append`/`create`/`admin`; revocation also rotates keys; links carry the key in
+> the URL fragment; file requests seal to the folder's public key. Offer/accept/mount (T3), the
+> claim loop (T6) and Send (T7) keep their product shape. Time-boxed, snapshot and delegated
+> shares are E20-T16.
 
 ## Progress
 
@@ -180,7 +182,7 @@ than unlocking bytes that were artificially withheld.
 
 - [x] Extend the sharing spec with a **file-request** shape: the guest may create new objects
       under one folder but cannot list, read, overwrite or delete another submitter's objects.
-      Use E20-T10's `create` permission once available; if a v1 upload token ships earlier,
+      Use E20-T7's `create` role once available; if a v1 upload token ships earlier,
       specify it as a strict compatibility subset that upgrades to the same permission.
 - [x] Public landing page for browse/download and file-request links: owner identity and pinned
       key, expiry, password/recipient challenge, quota/error states and a clear statement of what
