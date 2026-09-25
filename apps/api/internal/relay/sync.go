@@ -247,12 +247,9 @@ func (s *Server) handleUploadCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds max file size")
 		return
 	}
-	if s.cfg.MaxIdentityBytes > 0 {
-		used, err := s.filesProvider.UsedBytes(r.Context(), owner)
-		if err == nil && used+length > s.cfg.MaxIdentityBytes {
-			writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "identity storage quota exceeded")
-			return
-		}
+	if s.overQuota(r.Context(), owner, length) {
+		s.writeQuotaExceeded(w)
+		return
 	}
 	info, err := s.uploads.Create(owner, clean, length, principal.Identity)
 	if err != nil {

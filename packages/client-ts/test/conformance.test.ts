@@ -43,6 +43,7 @@ import {
 import {
   isValidIdentityName,
   sanitizeIdentityDirName,
+  validateClaimableName,
   validateHostedHandle,
 } from "../src/names.js";
 import { validateInboxPolicy } from "../src/policy.js";
@@ -281,6 +282,7 @@ describe("name policy matches Go", () => {
   interface NameVector {
     identity: string;
     valid: boolean;
+    claimable: boolean;
     hosted_valid: boolean;
     dir_name?: string;
   }
@@ -288,6 +290,13 @@ describe("name policy matches Go", () => {
   for (const vector of loadVectors<NameVector[]>("names")) {
     it(`agrees on "${vector.identity}"`, () => {
       expect(isValidIdentityName(vector.identity)).toBe(vector.valid);
+      let claimable = true;
+      try {
+        validateClaimableName(vector.identity);
+      } catch {
+        claimable = false;
+      }
+      expect(claimable).toBe(vector.claimable);
       let hostedValid = true;
       try {
         validateHostedHandle(vector.identity);

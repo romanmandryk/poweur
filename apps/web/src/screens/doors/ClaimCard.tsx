@@ -13,6 +13,7 @@ import { cn } from "../../lib/cn";
 import { claimInvite, normalizeHandleInput, policyHint, webCustodyBlocked } from "../../lib/claim";
 import { identityApiFor } from "../../lib/client.js";
 import { checkPasskeySupport, PRF_UNAVAILABLE_MESSAGE } from "../../lib/passkey.js";
+import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { defaultRelayUrl } from "../../lib/storage.js";
 import { useData } from "../../state/data";
 import { useSession, type ModeInfo } from "../../state/session";
@@ -344,6 +345,7 @@ export function ClaimCard({ info, hero = false }: { info: ModeInfo; hero?: boole
         </div>
         <StatusLine hero status={availability.status} fallback={policyHint(info, policy)} />
         <ClaimNote hero info={info} passkey={passkey} custody={custody} blocked={blocked} />
+        {showsPoweurLegal(domains) && <ClaimAgreement hero />}
       </div>
     );
   }
@@ -363,7 +365,26 @@ export function ClaimCard({ info, hero = false }: { info: ModeInfo; hero?: boole
         Create ID
       </Button>
       <ClaimNote hero={false} info={info} passkey={passkey} custody={custody} blocked={blocked} />
+      {showsPoweurLegal(domains) && <ClaimAgreement hero={false} />}
     </div>
+  );
+}
+
+/** Creating a hosted ID is agreeing to the service's legal documents; say so where it happens. */
+export function ClaimAgreement({ hero }: { hero: boolean }) {
+  const link = cn("underline underline-offset-2", hero ? "text-white/80 hover:text-white" : "text-muted hover:text-fg");
+  return (
+    <p id="claim-agreement" className={cn("claim-agreement mt-2 text-center text-xs text-faint", hero && "text-white/55")}>
+      By creating an ID you agree to the{" "}
+      <a href={LEGAL_LINKS.terms} target="_blank" rel="noopener" className={link}>
+        Terms
+      </a>{" "}
+      and{" "}
+      <a href={LEGAL_LINKS.privacy} target="_blank" rel="noopener" className={link}>
+        Privacy Policy
+      </a>
+      .
+    </p>
   );
 }
 

@@ -1,27 +1,31 @@
 # EPIC-003 — Per-identity file storage & WebDAV access
 
-- **Status:** complete (`relay-fs` shipped; S3 provider deferred)
+- **Status:** complete, **deprecated** — replaced by [EPIC-020](EPIC-020-storage-protocol-v2.md) storage v2 (removal in E20-T12)
 - **Priority:** P0
 - **Depends on:** EPIC-002 (durable per-identity storage)
 - **Unlocks:** EPIC-004 (sync), EPIC-005 (sharing), EPIC-006 (conventions), EPIC-009 (attachments)
 
-> **Superseded as the storage model by [EPIC-020](EPIC-020-storage-protocol-v2.md).** Whole-file
-> storage with WebDAV as the model forced workarounds upstream (one file per message in E09-T1).
-> v2 stores files as versioned chunk lists; WebDAV stays as a compatibility view (E20-T4), and
-> E03-T7's relay-blind design lands as E20-T5's chunk format.
+> **Deprecated (2026-09-25) — replaced by [EPIC-020](EPIC-020-storage-protocol-v2.md).** Storage
+> v2 is an end-to-end encrypted drive (Proton-style key tree) with a stateless relay, S3 or
+> filesystem providers, and chunked replace/append commits. What goes away: **WebDAV on the
+> relay**, DAV tokens and app passwords, the fixed roots (`/public`, `/shared`, `/private`,
+> `/apps`), path-scoped audiences, `poweur-sys/` (becomes `.poweur/`), and `relay-fs` whole-file
+> plaintext storage. What carries over: per-identity drives, quotas, `/pub` web serving (from
+> folders marked public), `/.well-known/poweur/` (from `.poweur/public`), and the provider idea
+> (now filesystem + S3). Do not extend anything in this epic; v1 code is removed in E20-T12.
 
 ## Progress
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E03-T1 Storage-layer spec | **done** | [`apps/docs/docs/files/storage-model.md`](../apps/docs/docs/files/storage-model.md) |
-| E03-T2 WebDAV server | **done** | `/dav/{identity}/` + Host vanity; canonical path wins when both apply (identity Host + `/dav/<id>/…`); Class 2 in-mem locks; etags; quota 507 |
-| E03-T3 Auth bridge | **done** | `POST /auth/dav-token`, app passwords in `poweur-sys/relay/`, CLI `poweur dav` |
-| E03-T4 Cross-identity `/public` | **done** | Visitor tokens + access.log; integration `TestINT_DAV_02` |
-| E03-T5 Web file browser | **done** | shipped as `apps/web/js/files.js` + a SPA panel; since E15-T6/T1 the DAV client is `packages/client-ts/src/files.ts` and the browser is a first-class Files destination. Vitest/Playwright coverage |
-| E03-T6 `/pub` web serving | **done** | `.poweur-web-public` marker; Host-routed `/pub/` |
-| E03-T7 E2EE design doc | **done** | [`apps/docs/docs/files/e2ee-design.md`](../apps/docs/docs/files/e2ee-design.md) |
-| E03-T8 Storage providers | **done** (relay-fs) | `StorageProvider` interface; `STORAGE_PROVIDER=relay-fs`; S3 deferred |
+| E03-T1 Storage-layer spec | **done**, deprecated → E20-T1 | [`apps/docs/docs/files/storage-model.md`](../apps/docs/docs/files/storage-model.md); fixed roots and relay-visible model retired |
+| E03-T2 WebDAV server | **done**, deprecated → removed in E20-T12 (tools via E20-T13 rclone) | `/dav/{identity}/` + Host vanity; canonical path wins when both apply (identity Host + `/dav/<id>/…`); Class 2 in-mem locks; etags; quota 507 |
+| E03-T3 Auth bridge | **done**, deprecated → E20-T5 auth (no DAV tokens or app passwords) | `POST /auth/dav-token`, app passwords in `poweur-sys/relay/`, CLI `poweur dav` |
+| E03-T4 Cross-identity `/public` | **done**, deprecated → public folders + node shares (E20-T7) | Visitor tokens + access.log; integration `TestINT_DAV_02` |
+| E03-T5 Web file browser | **done**, deprecated → E20-T10 | shipped as `apps/web/js/files.js` + a SPA panel; since E15-T6/T1 the DAV client is `packages/client-ts/src/files.ts` and the browser is a first-class Files destination. Vitest/Playwright coverage |
+| E03-T6 `/pub` web serving | **done**, carries over — served from folders marked public (E20-T5) | `.poweur-web-public` marker; Host-routed `/pub/` |
+| E03-T7 E2EE design doc | **done**, superseded → E20-T2 (E2EE is the default, not opt-in) | [`apps/docs/docs/files/e2ee-design.md`](../apps/docs/docs/files/e2ee-design.md) |
+| E03-T8 Storage providers | **done** (relay-fs), superseded → E20-T3 (filesystem + S3) | `StorageProvider` interface; `STORAGE_PROVIDER=relay-fs`; S3 deferred |
 
 **Litmus CI deferred** (manual/optional): owner-access covered by Go unit + `apps/integration` DAV suite.
 

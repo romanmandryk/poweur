@@ -1,0 +1,22 @@
+{
+  "name": "@poweur/faro",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Privacy-first browser telemetry for Poweur frontends: Grafana Faro with IDs, URLs and secrets scrubbed unless the user opted in.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@grafana/faro-web-sdk": "^2.12.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "typescript": "~5.9.3"
+  }
+}

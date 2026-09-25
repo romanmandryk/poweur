@@ -1,8 +1,8 @@
 {
   "name": "@poweur/client",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Poweur protocol client — identity, messaging, files, sync, shares and proof-of-work for browser, Node, Bun and Deno.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "poweur": "./dist/cli/bin.js"

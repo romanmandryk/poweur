@@ -1,0 +1,8 @@
+# Security contact for Poweur: the hosted service at poweur.net and
+# oauth.poweur.org, the poweur.org website, and the open-source code at
+# https://github.com/romanmandryk/poweur
+Contact: mailto:info@poweur.org
+Expires: 2027-09-24T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://poweur.org/.well-known/security.txt
+Policy: https://poweur.org/legal/#security

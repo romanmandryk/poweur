@@ -4,6 +4,7 @@ import {
   ArrowLeftRight,
   BadgeCheck,
   ChartColumn,
+  ExternalLink,
   FileText,
   Globe,
   IdCard,
@@ -15,6 +16,7 @@ import {
   Package,
   Puzzle,
   RefreshCw,
+  Scale,
   ScrollText,
   Search,
   Server,
@@ -33,6 +35,7 @@ import { APP_BUILD_TIME, APP_VERSION } from "../../build-info";
 import { askConfirm } from "../../components/Dialogs";
 import { identityApiFor } from "../../lib/client.js";
 import { CUSTODY_COPY, custodyOf } from "../../lib/custody";
+import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { domainOf, handleOf } from "../../lib/identity";
 import { defaultRelayUrl, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor } from "../../lib/storage.js";
 import { useData } from "../../state/data";
@@ -161,7 +164,7 @@ export function Settings() {
             </SettingsGroup>
 
             <SettingsGroup label="Inbox">
-              <SettingsRow id="row-analytics" icon={ChartColumn} label="Relay analytics" onClick={openAnalyticsPanel} />
+              <SettingsRow id="row-analytics" icon={ChartColumn} label="Diagnostics" onClick={openAnalyticsPanel} />
               <SettingsRow id="row-policy" icon={Shield} label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
               <SettingsRow
                 id="row-policy-anon"
@@ -238,10 +241,36 @@ export function Settings() {
           />
           <AboutRow icon={Package} label="SDK" value={SDK_VERSION} valueId="about-sdk-version" meta={SDK_BUILD_TIME} metaId="about-sdk-build" />
           <AboutRelay identity={identity || mode.subject || ""} />
+          {showsPoweurLegal(mode.hostedDomains, identity || mode.subject) && (
+            <>
+              <LegalRow id="row-privacy" href={LEGAL_LINKS.privacy} label="Privacy Policy" />
+              <LegalRow id="row-terms" href={LEGAL_LINKS.terms} label="Terms of Service" />
+              <LegalRow id="row-legal" href={LEGAL_LINKS.legal} label="Legal & contact" />
+            </>
+          )}
         </SettingsGroup>
       </section>
       <div className="h-8" />
     </>
+  );
+}
+
+/** A document on the web, opened outside the app. */
+function LegalRow({ id, href, label }: { id: string; href: string; label: string }) {
+  return (
+    <a
+      id={id}
+      href={href}
+      target="_blank"
+      rel="noopener"
+      className="settings-row settings-row-link flex min-h-13 w-full items-center gap-3 border-b border-sep px-4 py-3.5 text-left text-fg no-underline transition-colors last:border-b-0 active:bg-surface-2 focus-visible:-outline-offset-2 [@media(hover:hover)]:hover:bg-surface-2"
+    >
+      <span className="settings-row-icon flex w-7 shrink-0 justify-center text-accent">
+        <Scale className="size-5" strokeWidth={1.9} aria-hidden="true" />
+      </span>
+      <span className="settings-row-label flex-1 text-base">{label}</span>
+      <ExternalLink className="size-4 shrink-0 text-faint" aria-hidden="true" />
+    </a>
   );
 }
 

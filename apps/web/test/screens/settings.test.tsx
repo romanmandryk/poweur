@@ -121,6 +121,14 @@ describe("Settings destination (E21-T11)", () => {
     expect($("#btn-settings-unlock")).toBeNull();
   });
 
+  it("About links the hosted service's privacy policy, terms and contact", () => {
+    render(<App />);
+    expect($<HTMLAnchorElement>("#row-privacy")!.href).toBe("https://poweur.org/legal/privacy/");
+    expect($<HTMLAnchorElement>("#row-terms")!.href).toBe("https://poweur.org/legal/terms/");
+    expect($<HTMLAnchorElement>("#row-legal")!.href).toBe("https://poweur.org/legal/");
+    expect($<HTMLAnchorElement>("#row-terms")!.target).toBe("_blank");
+  });
+
   it("while locked, identity settings wait behind unlock and device settings stay usable", async () => {
     useSession.setState({ unlocked: false });
     render(<App />);

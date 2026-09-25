@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 import { ArrowUpRight, KeyRound, Lock, Tag, type LucideIcon } from "lucide-react";
 import { goToIdentityDoor, lookUpExistingId, type ExistingIdVerdict } from "../../actions/door";
 import { cn } from "../../lib/cn";
+import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { hasRelayUrl } from "../../lib/storage.js";
 import { useRoute } from "../../state/route";
 import { useSession, type ModeInfo } from "../../state/session";
@@ -81,7 +82,7 @@ export function Landing() {
           </li>
         ))}
       </ol>
-      <div className="landing-alt flex justify-center">
+      <div className="landing-alt flex flex-col items-center gap-1">
         <a
           id="opt-own-domain"
           href={SELF_HOSTING_DOCS_URL}
@@ -92,8 +93,33 @@ export function Landing() {
           Host your own relay and domain
           <ArrowUpRight className="size-3.5" aria-hidden="true" />
         </a>
+        {showsPoweurLegal(info.hostedDomains) && <LegalLinks />}
       </div>
     </DoorPage>
+  );
+}
+
+/** Privacy and terms for the hosted service, at the foot of its front door. */
+function LegalLinks() {
+  const link = "px-1 py-2 text-[13px] text-faint hover:text-muted hover:underline";
+  return (
+    <nav aria-label="Legal" className="landing-legal flex items-center gap-1.5">
+      <a id="link-privacy" href={LEGAL_LINKS.privacy} target="_blank" rel="noopener" className={link}>
+        Privacy
+      </a>
+      <span aria-hidden="true" className="text-faint">
+        ·
+      </span>
+      <a id="link-terms" href={LEGAL_LINKS.terms} target="_blank" rel="noopener" className={link}>
+        Terms
+      </a>
+      <span aria-hidden="true" className="text-faint">
+        ·
+      </span>
+      <a id="link-legal" href={LEGAL_LINKS.legal} target="_blank" rel="noopener" className={link}>
+        Contact
+      </a>
+    </nav>
   );
 }
 

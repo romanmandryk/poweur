@@ -185,7 +185,7 @@ func TestVectors_Grants(t *testing.T) {
 		{"converted-direct", ShareGrant{
 			ShareID: "shr_direct001122334", SourceShareID: "shr_request00112233",
 			Owner: "alice.poweur.net", Path: "shared/inbox",
-			Audience: []ShareAudience{{ID: "bob.example.org"}},
+			Audience:    []ShareAudience{{ID: "bob.example.org"}},
 			Permissions: []string{PermRead, PermWrite}, CreatedAt: VectorTime,
 		}},
 		// Link shares (E05-T4). The token is fixed (not generated) so the
@@ -380,8 +380,10 @@ func TestVectors_Fingerprints(t *testing.T) {
 type nameVector struct {
 	Identity string `json:"identity"`
 	Valid    bool   `json:"valid"`
-	Hosted   bool   `json:"hosted_valid"`
-	DirName  string `json:"dir_name,omitempty"`
+	// Claimable: a self-service registration may take it (not reserved).
+	Claimable bool   `json:"claimable"`
+	Hosted    bool   `json:"hosted_valid"`
+	DirName   string `json:"dir_name,omitempty"`
 }
 
 func TestVectors_Names(t *testing.T) {
@@ -395,13 +397,15 @@ func TestVectors_Names(t *testing.T) {
 		// while both used a Unicode letter class.
 		"аdmin.poweur.net", "аlice.poweur.net", "xn--80ak6aa92e.example.org",
 		// Newly reserved labels, so a TS list that drifts from Go's is caught.
+		// Reserved names are valid (usable) but not claimable.
 		"support.poweur.net", "verify.poweur.net", "id.poweur.net",
 		"oauth.poweur.net", "indieauth.poweur.net",
 	} {
 		vector := nameVector{
-			Identity: name,
-			Valid:    ValidateIdentityName(name) == nil,
-			Hosted:   ValidateHostedHandle(name) == nil,
+			Identity:  name,
+			Valid:     ValidateIdentityName(name) == nil,
+			Claimable: ValidateClaimableName(name) == nil,
+			Hosted:    ValidateHostedHandle(name) == nil,
 		}
 		if dir, err := SanitizeIdentityDirName(name); err == nil {
 			vector.DirName = dir

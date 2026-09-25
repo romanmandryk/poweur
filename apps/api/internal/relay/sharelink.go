@@ -257,12 +257,9 @@ func (s *Server) handleFileRequestUpload(w http.ResponseWriter, r *http.Request,
 		s.writeFileRequestForm(w, req, grant, http.StatusBadRequest, err.Error())
 		return
 	}
-	if s.cfg.MaxIdentityBytes > 0 {
-		used, usedErr := s.filesProvider.UsedBytes(r.Context(), req.owner)
-		if usedErr == nil && used+header.Size > s.cfg.MaxIdentityBytes {
-			s.writeLinkPage(w, http.StatusInsufficientStorage, "Storage is full", "The owner has no room for this upload.")
-			return
-		}
+	if s.overQuota(r.Context(), req.owner, header.Size) {
+		s.writeLinkPage(w, http.StatusInsufficientStorage, "Storage is full", "The owner has no room for this upload.")
+		return
 	}
 	if fi, err := s.filesProvider.Stat(r.Context(), req.owner, grant.Path); err != nil || !fi.IsDir() {
 		s.writeLinkPage(w, http.StatusConflict, "Upload folder unavailable", "The owner needs to recreate the destination folder.")

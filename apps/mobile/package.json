@@ -2,6 +2,7 @@
   "name": "@poweur/mobile",
   "version": "0.1.6",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "Capacitor shell over the web client (EPIC-019)",
   "scripts": {
     "stage": "pnpm --filter @poweur/web build && node scripts/stage-web.mjs",

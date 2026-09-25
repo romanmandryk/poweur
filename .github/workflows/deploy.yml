@@ -111,6 +111,10 @@ jobs:
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
             exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true
+          # `up -d` keeps a running Alloy on its old config when only the
+          # bind-mounted file changed; SIGHUP makes it reload (faro.receiver etc.).
+          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
+            kill -s SIGHUP alloy </dev/null || true
           if [ -f deploy/betterstack/.env ]; then
             docker compose --env-file deploy/betterstack/.env -f deploy/betterstack/docker-compose.yml up -d \
               || echo "betterstack collector failed (non-fatal)" >&2

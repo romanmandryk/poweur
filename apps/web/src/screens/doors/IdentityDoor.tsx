@@ -9,6 +9,7 @@ import { probeDoor, retryDoor } from "../../actions/door";
 import { createIdentity, signInWithPasskey } from "../../actions/identity";
 import { launcherAppUrl } from "../../lib/claim";
 import { cn } from "../../lib/cn";
+import { showsPoweurLegal } from "../../lib/legal";
 import { domainOf, handleOf } from "../../lib/identity";
 import { useData } from "../../state/data";
 import { useSession, type ModeInfo } from "../../state/session";
@@ -18,6 +19,7 @@ import { Skeleton } from "../../ui/Display";
 import { Note } from "../../ui/Field";
 import { openJoinDevicePanel } from "../JoinDevice";
 import { usePeerAvatars } from "../../actions/avatars";
+import { ClaimAgreement } from "./ClaimCard";
 import { cardClass, DoorPage } from "./DoorPage";
 
 function DoorCard({ children }: { children: ReactNode }) {
@@ -123,6 +125,7 @@ export function IdentityDoor() {
             You are claiming <strong>{subject}</strong> — the name this page is served from. Your keys are generated here and never leave in
             plain form.
           </Note>
+          {showsPoweurLegal(info.hostedDomains, subject) && <ClaimAgreement hero={false} />}
         </DoorCard>
         <DoorFooter info={info} />
       </DoorPage>

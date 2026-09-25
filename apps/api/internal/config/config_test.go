@@ -95,3 +95,27 @@ func TestRequestRelayLimitsFromEnv(t *testing.T) {
 		t.Fatalf("overrides: %+v", got)
 	}
 }
+
+func TestStorageQuotaSettingsFromEnv(t *testing.T) {
+	t.Setenv("POWEUR_DATA", "/data")
+	t.Setenv("STORAGE_QUOTAS_FILE", "")
+	t.Setenv("QUOTA_CONTACT", " HelpDesk.poweur.net ")
+	cfg := FromEnv()
+	if cfg.StorageQuotasFile != "/data/storage-quotas.json" {
+		t.Fatalf("default quotas file = %q", cfg.StorageQuotasFile)
+	}
+	if cfg.QuotaContact != "helpdesk.poweur.net" {
+		t.Fatalf("contact = %q", cfg.QuotaContact)
+	}
+
+	t.Setenv("STORAGE_QUOTAS_FILE", "/etc/poweur/quotas.json")
+	if got := FromEnv().StorageQuotasFile; got != "/etc/poweur/quotas.json" {
+		t.Fatalf("explicit quotas file = %q", got)
+	}
+
+	t.Setenv("STORAGE_QUOTAS_FILE", "")
+	t.Setenv("POWEUR_DATA", "")
+	if got := FromEnv().StorageQuotasFile; got != "" {
+		t.Fatalf("no data dir, no file: %q", got)
+	}
+}

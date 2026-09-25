@@ -89,7 +89,7 @@ func TestIdentifyRefusesBadAndUnknownIDs(t *testing.T) {
 		"not an id":                     "does not look like",
 		"https://alice.poweur.net/blog": "root of the identity",
 		"carol.poweur.net":              "No Poweur ID named carol.poweur.net",
-		"www.poweur.net":                "reserved",
+		"www.poweur.net":                "is a website address",
 	} {
 		p := b.post("/t/"+id+"/identify", url.Values{"identity": {input}})
 		if p.status != http.StatusBadRequest || !strings.Contains(p.body, want) {

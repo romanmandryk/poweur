@@ -18,7 +18,7 @@ Public keys are published via a signed [Identity Document](/protocol/web-identit
 Identities are FQDNs:
 
 - Must be a valid domain name, e.g. `alice.com` or `alice.poweur.net`
-- Reserved leftmost labels (`www`, `admin`, `relay`, …) are rejected
+- Reserved leftmost labels (`www`, `admin`, `support`, `relay`, …) can't be **claimed** by self-service registration. They are still valid names: an operator can create one (`OPERATOR_TOKEN`, see [relay configuration](/relay/configuration)), and once it exists every client resolves and messages it like any other ID
 - **Hosted** names under a parent (e.g. `*.poweur.net`) additionally require the leftmost label to meet a minimum length (currently 8 characters) to reduce squatting on short public handles
 - Self-hosted apex names (`alice.com`) are not subject to that hosted-handle length rule beyond normal DNS label rules
 - The parent domain for hosted registration is configured on the relay (`HOSTED_DOMAINS`)

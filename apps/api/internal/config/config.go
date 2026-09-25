@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -140,9 +141,21 @@ type Config struct {
 	LauncherHosts []string
 	// RegistrationInviteCodes are accepted invite_code values when gate=invite.
 	RegistrationInviteCodes []string
+	// OperatorToken lets the operator register a hosted name the name policy
+	// holds back from everyone else (support.<domain>, a short handle). Sent
+	// as X-Poweur-Operator-Token on POST /identities; the keys are still made
+	// and held by the client. Empty (the default) disables it.
+	OperatorToken string
 	// MaxIdentityBytes is the per-identity storage quota (0 = unlimited).
 	// Enforced on WebDAV PUT/MKCOL with 507 Insufficient Storage.
 	MaxIdentityBytes int64
+	// StorageQuotasFile gives individual identities their own quota, overriding
+	// MaxIdentityBytes (default POWEUR_DATA/storage-quotas.json). The relay
+	// re-reads it when it changes, so raising a limit needs no restart.
+	StorageQuotasFile string
+	// QuotaContact is who to ask for more space (a Poweur ID, usually),
+	// named in over-quota errors and the quota report. Empty names nobody.
+	QuotaContact string
 	// MaxFileBytes caps a single uploaded file (0 = unlimited).
 	MaxFileBytes int64
 	// StorageProvider selects the file-body backend (E03-T8). v1: "relay-fs".
@@ -257,8 +270,11 @@ func FromEnv() Config {
 		LauncherHosts:           launcherHostsFromEnv(),
 		NameBlockedFile:         strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
 		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
+		OperatorToken:           strings.TrimSpace(os.Getenv("OPERATOR_TOKEN")),
 		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
 		MaxFileBytes:            getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
+		StorageQuotasFile:       storageQuotasFileFromEnv(),
+		QuotaContact:            strings.ToLower(strings.TrimSpace(os.Getenv("QUOTA_CONTACT"))),
 		StorageProvider:         strings.ToLower(getenv("STORAGE_PROVIDER", DefaultStorageProvider)),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
@@ -439,6 +455,18 @@ func getenvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// storageQuotasFileFromEnv is STORAGE_QUOTAS_FILE, or storage-quotas.json in
+// POWEUR_DATA. Without either there is no override file.
+func storageQuotasFileFromEnv() string {
+	if path := strings.TrimSpace(os.Getenv("STORAGE_QUOTAS_FILE")); path != "" {
+		return path
+	}
+	if dir := strings.TrimSpace(os.Getenv("POWEUR_DATA")); dir != "" {
+		return filepath.Join(dir, "storage-quotas.json")
+	}
+	return ""
 }
 
 func getenvInt64(key string, fallback int64) int64 {

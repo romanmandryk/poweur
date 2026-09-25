@@ -18,13 +18,13 @@ import {
   openOwnerTree,
   renameEntry,
   setFilesOwner,
+  storageFullMessage,
   uploadFiles,
   watchChanges,
 } from "../../actions/files";
 import { resolveForActive } from "../../actions/relay";
 import { IdentityInput } from "../../components/IdentityInput";
 import { onActivateKeys } from "../../lib/a11y";
-import { cn } from "../../lib/cn";
 import { handleOf } from "../../lib/identity";
 import { useData } from "../../state/data";
 import { useSession } from "../../state/session";
@@ -138,21 +138,22 @@ export function Files() {
   );
 }
 
+/**
+ * How much is used. The limit itself is not shown: free storage is small and
+ * not advertised, so the bar only speaks up when it is nearly reached.
+ */
 function QuotaBar({ quota }: { quota: any }) {
-  const percent = quota.quota_bytes > 0 ? Math.min(100, Math.round((quota.used_bytes / quota.quota_bytes) * 100)) : 0;
+  const ratio = quota.quota_bytes > 0 ? quota.used_bytes / quota.quota_bytes : 0;
   return (
     <div className="quota-bar px-4 pb-3">
-      <div className="quota-line mb-1.5 flex justify-between text-[13px] text-muted">
-        <span>
-          {formatBytes(quota.used_bytes)}
-          {quota.quota_bytes > 0 ? ` of ${formatBytes(quota.quota_bytes)}` : ""} used
-        </span>
+      <div className="quota-line flex justify-between text-[13px] text-muted">
+        <span>{formatBytes(quota.used_bytes)} used</span>
         <span>{quota.provider ?? ""}</span>
       </div>
-      {quota.quota_bytes > 0 && (
-        <div className="quota-track h-1 overflow-hidden rounded-xs bg-surface-3" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-          <div className={cn("quota-fill h-full rounded-xs", percent > 90 ? "bg-danger" : "bg-success")} style={{ width: `${percent}%` }} />
-        </div>
+      {ratio >= 0.9 && (
+        <p id="quota-warning" role="status" className="quota-warning mt-2 rounded-control bg-warning/12 px-3 py-2 text-[13px] text-fg">
+          {storageFullMessage(quota.contact, ratio >= 1)}
+        </p>
       )}
     </div>
   );

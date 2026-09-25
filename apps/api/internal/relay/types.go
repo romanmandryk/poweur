@@ -89,6 +89,9 @@ type InboxResponse struct {
 type ErrorResponse struct {
 	Error  string `json:"error"`
 	Detail string `json:"detail"`
+	// Contact is who to ask about this error, where the operator has said
+	// (quota_exceeded names QUOTA_CONTACT).
+	Contact string `json:"contact,omitempty"`
 }
 
 type ChallengeResponse struct {

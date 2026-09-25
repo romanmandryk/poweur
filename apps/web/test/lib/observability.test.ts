@@ -1,14 +1,51 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, observabilityConfigUrl, resetObservabilityForTests, sanitizeEventData, screenName, startObservability, syncIdentifiedUser } from "../../src/lib/observability";
-import { saveConfig } from "../../src/lib/storage.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const faro = vi.hoisted(() => {
+  const t = { pageView: vi.fn(), event: vi.fn(), error: vi.fn(), setIdentity: vi.fn(), identified: false };
+  return { t, started: false };
+});
+vi.mock("@poweur/faro", () => ({
+  startFaro: vi.fn(() => {
+    faro.started = true;
+    return faro.t;
+  }),
+  // Before start, telemetry() is Faro's no-op; the facade never needs to know.
+  telemetry: () => faro.t,
+  resetTelemetryForTests: vi.fn(),
+}));
+
+import { startFaro } from "@poweur/faro";
+import {
+  collectorUrl,
+  getObservability,
+  loadConfig,
+  observabilityConfigUrl,
+  resetObservabilityForTests,
+  sanitizeEventData,
+  screenName,
+  setAnalyticsConsent,
+  startObservability,
+  syncIdentifiedUser,
+  trackAction,
+} from "../../src/lib/observability";
+import { saveConfig } from "../../src/lib/storage.js";
+import { APP_VERSION } from "../../src/build-info";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  faro.started = false;
+});
 afterEach(() => {
-  document.head.innerHTML = "";
   localStorage.clear();
   resetObservabilityForTests();
-  delete (window as { betterstack?: unknown }).betterstack;
   delete (globalThis as { Capacitor?: unknown }).Capacitor;
+  vi.unstubAllGlobals();
 });
+
+const shell = () => {
+  (globalThis as { Capacitor?: unknown }).Capacitor = { isNativePlatform: () => true };
+  saveConfig({ relayUrl: "https://poweur.net" });
+};
 
 describe("observability facade", () => {
   it("names screens without params or hashes", () => {
@@ -18,68 +55,70 @@ describe("observability facade", () => {
 
   it("loads observability.json from the document on the web, and from the relay in the shell", () => {
     expect(observabilityConfigUrl()).toBe("observability.json");
-    const cap = globalThis as { Capacitor?: { isNativePlatform?: () => boolean } };
-    cap.Capacitor = { isNativePlatform: () => true };
-    saveConfig({ relayUrl: "https://poweur.net" });
+    shell();
     expect(observabilityConfigUrl()).toBe("https://poweur.net/app/observability.json");
-    delete cap.Capacitor;
+  });
+
+  it("sends to the page's own origin on the web, and to the relay from the shell", () => {
+    expect(collectorUrl({ type: "faro", url: "/faro/collect" })).toBe("/faro/collect");
+    shell();
+    expect(collectorUrl({ type: "faro", url: "/faro/collect" })).toBe("https://poweur.net/faro/collect");
+    expect(collectorUrl({ type: "faro", url: "https://collect.example/faro" })).toBe("https://collect.example/faro");
   });
 
   it("treats a missing config file as no providers", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false })));
     await expect(loadConfig("observability.json")).resolves.toEqual({ providers: [] });
-    vi.unstubAllGlobals();
   });
 
-  it("loads no tag when providers are empty", async () => {
-    const obs = await startObservability({ providers: [] });
-    obs.pageChange("settings");
-    expect(document.querySelector("script[src*='betterstack.net']")).toBeNull();
-    expect(window.betterstack).toBeUndefined();
+  it("starts nothing without a Faro provider", async () => {
+    await startObservability({ providers: [] });
+    await startObservability({ providers: [{ type: "betterstack" }] });
+    expect(startFaro).not.toHaveBeenCalled();
   });
 
-  it("installs the Better Stack tag and records page changes", async () => {
-    const obs = await startObservability({
-      environment: "production",
-      release: "0.1.23",
-      providers: [{ type: "betterstack", token: "app_token" }],
-    });
-    const src = document.querySelector("script[src*='betterstack.net']")?.getAttribute("src");
-    expect(src).toContain("app_token");
-    obs.pageChange("messages");
-    expect(window.betterstack?.q).toEqual(
-      expect.arrayContaining([
-        ["init", { environment: "production", release: "0.1.23", autoPageview: false }],
-        ["track", "app-start", { runtime: "web" }],
-        ["track", "page-change", { name: "messages", runtime: "web" }],
-      ]),
-    );
+  it("starts the anonymous tier with a Faro provider", async () => {
+    await startObservability({ environment: "production", release: "0.1.40", providers: [{ type: "faro", url: "/faro/collect" }] });
+    expect(startFaro).toHaveBeenCalledWith({ url: "/faro/collect", app: "poweur-web", version: APP_VERSION, environment: "production" });
+    expect(faro.t.event).toHaveBeenCalledWith("app-start", { runtime: "web" });
+    expect(faro.t.setIdentity).not.toHaveBeenCalledWith(expect.any(String));
   });
 
-  it("identifies an unlocked identity and clears on lock", async () => {
-    const obs = await startObservability({
-      providers: [{ type: "betterstack", token: "app_token" }],
-    });
-    obs.identify({ id: "alice.poweur.net", username: "alice.poweur.net" });
-    expect(window.betterstack?.q).toEqual(
-      expect.arrayContaining([
-        ["user", { id: "alice.poweur.net", username: "alice.poweur.net", runtime: "web" }],
-      ]),
-    );
-    obs.clearUser();
-    expect(window.betterstack?.q).toEqual(expect.arrayContaining([["user", null]]));
+  it("routes actions, screens and errors through, with free-form content dropped", async () => {
+    await startObservability({ providers: [{ type: "faro", url: "/faro/collect" }] });
+    trackAction("messages", { kind: "chat", plaintext: "secret", peer: "eve.poweur.net" });
+    expect(faro.t.event).toHaveBeenCalledWith("messages", { runtime: "web", kind: "chat" });
+    getObservability().pageChange("settings");
+    expect(faro.t.pageView).toHaveBeenCalledWith("settings");
+    const error = new Error("send failed");
+    getObservability().captureError(error, { source: "react", token: "abc" });
+    expect(faro.t.error).toHaveBeenCalledWith(error, { runtime: "web", source: "react" });
   });
 
-  it("syncs the vendor user from session state", async () => {
-    await startObservability({
-      providers: [{ type: "betterstack", token: "app_token" }],
-    });
-    syncIdentifiedUser("bob.poweur.net", true);
-    expect(window.betterstack?.q).toEqual(
-      expect.arrayContaining([["user", expect.objectContaining({ id: "bob.poweur.net" })]]),
-    );
-    syncIdentifiedUser("bob.poweur.net", false);
-    expect(window.betterstack?.q).toEqual(expect.arrayContaining([["user", null]]));
+  it("attaches the ID only after opting in, and drops it on lock, switch or opt-out", async () => {
+    await startObservability({ providers: [{ type: "faro", url: "/faro/collect" }] });
+    setAnalyticsConsent("alice.poweur.net", true);
+    expect(faro.t.setIdentity).toHaveBeenLastCalledWith("alice.poweur.net");
+
+    syncIdentifiedUser("alice.poweur.net", true); // same identity, still unlocked: kept
+    expect(faro.t.setIdentity).toHaveBeenLastCalledWith("alice.poweur.net");
+
+    syncIdentifiedUser("alice.poweur.net", false); // locked
+    expect(faro.t.setIdentity).toHaveBeenLastCalledWith(null);
+
+    setAnalyticsConsent("alice.poweur.net", true);
+    syncIdentifiedUser("bob.poweur.net", true); // another identity, whose choice is not known yet
+    expect(faro.t.setIdentity).toHaveBeenLastCalledWith(null);
+
+    setAnalyticsConsent("bob.poweur.net", false);
+    expect(faro.t.setIdentity).toHaveBeenLastCalledWith(null);
+  });
+
+  it("an opt-in that arrives before the config loads still applies", async () => {
+    setAnalyticsConsent("alice.poweur.net", true);
+    vi.mocked(faro.t.setIdentity).mockClear();
+    await startObservability({ providers: [{ type: "faro", url: "/faro/collect" }] });
+    expect(faro.t.setIdentity).toHaveBeenCalledWith("alice.poweur.net");
   });
 
   it("drops message text and counterpart identities from events", () => {
@@ -87,17 +126,5 @@ describe("observability facade", () => {
       kind: "chat",
       outcome: "sent",
     });
-  });
-
-  it("records client errors without identities", async () => {
-    const obs = await startObservability({
-      providers: [{ type: "betterstack", token: "app_token" }],
-    });
-    obs.captureError(new Error("send failed"), { source: "react" });
-    expect(window.betterstack?.q).toEqual(
-      expect.arrayContaining([
-        expect.arrayContaining(["track", "error", expect.objectContaining({ name: "Error", message: "send failed", source: "react", runtime: "web" })]),
-      ]),
-    );
   });
 });

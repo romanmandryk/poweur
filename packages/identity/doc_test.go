@@ -59,8 +59,16 @@ func TestValidateIdentityName(t *testing.T) {
 	if err := ValidateIdentityName("alice.poweur.net"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateIdentityName("www.poweur.net"); err == nil {
-		t.Fatal("reserved")
+	// Reserved names are held back from claiming, not from use: an operator
+	// may create one, and then everyone must be able to reach it.
+	if err := ValidateIdentityName("support.poweur.net"); err != nil {
+		t.Fatalf("reserved but existing name refused: %v", err)
+	}
+	if err := ValidateClaimableName("support.poweur.net"); err == nil {
+		t.Fatal("reserved name claimable")
+	}
+	if err := ValidateClaimableName("alice.poweur.net"); err != nil {
+		t.Fatal(err)
 	}
 	if err := ValidateIdentityName("127.0.0.1"); err == nil {
 		t.Fatal("ip literal")
@@ -78,8 +86,12 @@ func TestSanitizeIdentityDirName(t *testing.T) {
 	if s != "alice__poweur__net" {
 		t.Fatal(s)
 	}
-	if _, err := SanitizeIdentityDirName("admin.poweur.net"); err == nil {
-		t.Fatal("reserved should fail validate")
+	// An operator-created reserved name still needs a home directory.
+	if s, err := SanitizeIdentityDirName("support.poweur.net"); err != nil || s != "support__poweur__net" {
+		t.Fatalf("reserved name dir: %q %v", s, err)
+	}
+	if _, err := SanitizeIdentityDirName("../evil"); err == nil {
+		t.Fatal("path should fail validate")
 	}
 }
 

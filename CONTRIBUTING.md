@@ -21,3 +21,12 @@ Coding agents should follow [`AGENTS.md`](AGENTS.md). Summary:
 
 - Prefer small PRs mapped to an epic task ID (`E02-T2: …`).
 - Do not commit `.env`, DNS tokens, or private keys.
+
+## Licensing of contributions
+
+Contributions are accepted under the license of the directory they change (see
+[README → License](README.md#license)): AGPL-3.0-only for the services, Apache-2.0 for the
+SDK, identity package, CLI, conventions and docs. Sign off every commit (`git commit -s`) to
+certify the [Developer Certificate of Origin](https://developercertificate.org/): that you
+wrote the change, or otherwise have the right to submit it under that license.
+

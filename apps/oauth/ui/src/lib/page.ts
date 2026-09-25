@@ -187,12 +187,20 @@ export interface ErrorData {
   message: string;
 }
 
+/** Where the bundled Faro client sends anonymous telemetry (same origin). */
+export interface Telemetry {
+  url: string;
+  version: string;
+}
+
 export interface Page<T = unknown> {
   page: string;
   title: string;
   service: Service;
   session?: Session;
   data: T;
+  /** Absent when the operator collects none. */
+  telemetry?: Telemetry;
 }
 
 /** Read the page the server embedded; a missing block is a broken deploy. */

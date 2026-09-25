@@ -33,6 +33,7 @@ const (
 )
 
 type Server struct {
+	quotas          *quotaOverrides
 	telemetry       *telemetry.Runtime
 	startupFailures []string
 	stop            chan struct{}
@@ -154,6 +155,10 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}
+	s.quotas = newQuotaOverrides(cfg.StorageQuotasFile, func(err error) {
+		s.event(context.Background(), "storage.quotas", "invalid")
+		logQuotaFileError(err)
+	})
 	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
 	// only ever talks to the StorageProvider interface.
 	if cfg.DataDir != "" {
@@ -434,7 +439,24 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if hosted && s.regGate.Mode() == RegistrationGatePow {
+	// An operator registration (OPERATOR_TOKEN) may take a hosted name the
+	// policy holds back: reserved, short or blocked. Everything else — the
+	// hosted domain, the signed envelope and document, name shape — still
+	// applies. A wrong token is refused outright rather than treated as a
+	// normal request, so a typo can't quietly produce an ordinary one.
+	operator, ok := s.operatorRegistration(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid_operator_token", "operator token is not valid on this relay")
+		return
+	}
+	if operator && !hosted {
+		writeError(w, http.StatusBadRequest, "invalid_request", "operator registration is for hosted names only")
+		return
+	}
+
+	if operator {
+		// The operator is not a stranger: no proof-of-work or invite.
+	} else if hosted && s.regGate.Mode() == RegistrationGatePow {
 		// PoW gate (EPIC-014 E14-T5): verified here rather than inside the
 		// gate because the handler holds the challenge secret.
 		if !s.checkRegistrationPow(w, req) {
@@ -468,12 +490,20 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 	// Hosted handles answer to the operator's policy (EPIC-018 E18-T1); the
 	// reason code travels with the error so a client can react to *why*
 	// without parsing the message.
-	if err := idpkg.ValidateHostedHandleWithPolicy(req.Identity, s.cfg.NamePolicy); err != nil && hosted {
-		writeError(w, http.StatusBadRequest, "invalid_identity",
-			fmt.Sprintf("%s (%s)", err.Error(), idpkg.ReasonOf(err)))
-		return
+	if !operator {
+		if err := idpkg.ValidateHostedHandleWithPolicy(req.Identity, s.cfg.NamePolicy); err != nil && hosted {
+			writeError(w, http.StatusBadRequest, "invalid_identity",
+				fmt.Sprintf("%s (%s)", err.Error(), idpkg.ReasonOf(err)))
+			return
+		}
 	}
-	if err := idpkg.ValidateIdentityName(req.Identity); err != nil {
+	// Reserved labels hold names back from self-service claims only; once an
+	// operator has created one, every client can reach it.
+	validateName := idpkg.ValidateClaimableName
+	if operator {
+		validateName = idpkg.ValidateIdentityName
+	}
+	if err := validateName(req.Identity); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_identity", err.Error())
 		return
 	}
@@ -517,6 +547,10 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifiedActor(r, req.Identity)
+	if operator {
+		// Audit trail: operator-created names bypass the policy.
+		s.event(r.Context(), "identity.operator_register", "accepted")
+	}
 
 	var docJSON []byte
 	if len(req.IdentityDocument) > 0 {

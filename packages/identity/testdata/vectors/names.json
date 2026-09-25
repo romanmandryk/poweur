@@ -2,107 +2,134 @@
   {
     "identity": "alice.poweur.net",
     "valid": true,
+    "claimable": true,
     "hosted_valid": true,
     "dir_name": "alice__poweur__net"
   },
   {
     "identity": "a-b.example.org",
     "valid": true,
+    "claimable": true,
     "hosted_valid": true,
     "dir_name": "a-b__example__org"
   },
   {
     "identity": "bob.co.uk",
     "valid": true,
+    "claimable": true,
     "hosted_valid": true,
     "dir_name": "bob__co__uk"
   },
   {
     "identity": "ab.poweur.net",
     "valid": true,
+    "claimable": true,
     "hosted_valid": false,
     "dir_name": "ab__poweur__net"
   },
   {
     "identity": "www.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "www__poweur__net"
   },
   {
     "identity": "dav.example.org",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "dav__example__org"
   },
   {
     "identity": "nodots",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "192.168.0.1",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "-bad.example.org",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "bad-.example.org",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "UPPER.Example.ORG",
     "valid": true,
+    "claimable": true,
     "hosted_valid": true,
     "dir_name": "upper__example__org"
   },
   {
     "identity": "",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "аdmin.poweur.net",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "аlice.poweur.net",
     "valid": false,
+    "claimable": false,
     "hosted_valid": false
   },
   {
     "identity": "xn--80ak6aa92e.example.org",
     "valid": true,
+    "claimable": true,
     "hosted_valid": false,
     "dir_name": "xn--80ak6aa92e__example__org"
   },
   {
     "identity": "support.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "support__poweur__net"
   },
   {
     "identity": "verify.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "verify__poweur__net"
   },
   {
     "identity": "id.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "id__poweur__net"
   },
   {
     "identity": "oauth.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "oauth__poweur__net"
   },
   {
     "identity": "indieauth.poweur.net",
-    "valid": false,
-    "hosted_valid": false
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "indieauth__poweur__net"
   }
 ]

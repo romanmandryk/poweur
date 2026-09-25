@@ -84,6 +84,9 @@ Notes:
 Quota is enforced on `PUT` and `MKCOL`: if the tree's used bytes plus the incoming
 `Content-Length` would exceed the quota, the relay answers `507 Insufficient Storage`.
 Setting `MAX_IDENTITY_BYTES=0` disables the quota (not recommended on public relays).
+An operator can give individual identities a different quota in `STORAGE_QUOTAS_FILE`
+(default `$POWEUR_DATA/storage-quotas.json`) without restarting the relay; `QUOTA_CONTACT`
+names who to ask for more (see [configuration](../relay/configuration.md)).
 
 ## Metadata model
 

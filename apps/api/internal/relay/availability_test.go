@@ -118,11 +118,16 @@ func TestAvailabilityEchoesPolicy(t *testing.T) {
 	}
 }
 
-// A reserved name that is *also* registered must still answer "reserved":
-// answering "taken" would confirm that someone holds it.
-func TestAvailabilityDoesNotLeakRegistrationOfPolicyRejections(t *testing.T) {
+// A reserved name the operator has registered answers "taken", so its door
+// offers sign-in; one nobody holds still answers "reserved". The ID document
+// of a registered name is public, so "taken" reveals nothing new.
+func TestAvailabilityOfOperatorCreatedReservedName(t *testing.T) {
 	ts, server := availabilityServer(t)
 	defer ts.Close()
+
+	if got := availability(t, ts, "handle=admin").Reason; got != string(idpkg.ReasonReserved) {
+		t.Fatalf("unregistered: reason = %q, want reserved", got)
+	}
 
 	pub, _, _ := ed25519.GenerateKey(nil)
 	server.identities.Add(storage.Identity{
@@ -132,8 +137,8 @@ func TestAvailabilityDoesNotLeakRegistrationOfPolicyRejections(t *testing.T) {
 		CreatedAt:      time.Now().UTC(),
 	})
 
-	if got := availability(t, ts, "handle=admin").Reason; got != string(idpkg.ReasonReserved) {
-		t.Fatalf("reason = %q, want reserved", got)
+	if got := availability(t, ts, "handle=admin").Reason; got != string(idpkg.ReasonTaken) {
+		t.Fatalf("registered: reason = %q, want taken", got)
 	}
 }
 

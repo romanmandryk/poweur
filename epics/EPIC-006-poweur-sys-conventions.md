@@ -5,6 +5,12 @@
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-007 (contacts file), EPIC-010 (app ecosystem), every third-party app
 
+> **Layout changes in [EPIC-020](EPIC-020-storage-protocol-v2.md) (E20-T6).** `poweur-sys/` becomes
+> `.poweur/` with `public/` (world-readable), `relay/` (owner-written, relay-read), `state/`
+> (relay-written) and `private/` (encrypted). The fixed top-level roots, `/apps/<app-id>/`
+> included, become ordinary folders. The document schemas and commit-time validation carry over;
+> validation moves from DAV `PUT` to drive commits.
+
 ## Progress
 
 | Task | Status | Notes |

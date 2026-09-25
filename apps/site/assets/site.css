@@ -642,3 +642,27 @@ footer { border-top: 1px solid var(--line); padding: 64px 0 40px; margin-top: 80
   .bento { grid-template-columns: 1fr; }
   .hero-id .tags { display: none; }
 }
+
+/* ---------- Legal pages ---------- */
+.legal-wrap { max-width: 760px; }
+.legal-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
+.legal-nav a { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); font-size: 14px; }
+.legal-nav a:hover, .legal-nav a[aria-current="page"] { color: var(--fg); background: var(--panel-2); }
+.legal-meta { font: 13px var(--mono); color: var(--faint); margin-top: 18px; }
+.prose { color: var(--ink-300); font-size: 16px; line-height: 1.7; }
+.prose h2 { font-size: 24px; color: var(--fg); margin: 48px 0 12px; scroll-margin-top: 90px; }
+.prose h3 { font-size: 18px; color: var(--fg); margin: 28px 0 8px; }
+.prose p, .prose ul, .prose ol { margin: 0 0 14px; }
+.prose ul, .prose ol { padding-left: 22px; }
+.prose li { margin-bottom: 6px; }
+.prose a { color: var(--violet-300); text-decoration: underline; text-underline-offset: 3px; }
+.prose strong { color: var(--fg); font-weight: 600; }
+.prose table { width: 100%; border-collapse: collapse; margin: 8px 0 18px; font-size: 14.5px; }
+.prose th, .prose td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.prose th { color: var(--fg); font-weight: 500; }
+.prose .summary { border: 1px solid var(--line-2); background: var(--panel); border-radius: var(--radius); padding: 18px 22px; margin: 28px 0 8px; }
+.prose .summary p:last-child, .prose .summary ul:last-child { margin-bottom: 0; }
+/* Details the operator has to fill in before publishing. */
+.fill { background: rgba(213, 151, 64, .18); color: var(--amber-300); border: 1px dashed rgba(213, 151, 64, .6); border-radius: 5px; padding: 0 5px; font-family: var(--mono); font-size: .88em; }
+@media (max-width: 640px) { .prose table { display: block; overflow-x: auto; } }
+.foot-bottom a { color: var(--muted); } .foot-bottom a:hover { color: var(--fg); }

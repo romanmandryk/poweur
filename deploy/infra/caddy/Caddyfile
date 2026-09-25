@@ -9,6 +9,50 @@
     }
 }
 
+# Browser telemetry (Grafana Faro, apps/*, packages/faro): each site posts to
+# /faro/collect on its own origin and this hands it to Alloy's faro.receiver,
+# without the client's IP. Imported by every site that sends it.
+(faro) {
+    # CORS for the mobile shell only (capacitor://localhost on iOS,
+    # https://localhost on Android); every web page posts same-origin. Caddy
+    # answers it because Faro sends an Idempotency-Key header that Alloy's
+    # receiver does not allow in a preflight.
+    @faro_cors {
+        path /faro/collect
+        header_regexp Origin ^(capacitor://localhost|https://localhost)$
+    }
+    header @faro_cors {
+        Access-Control-Allow-Origin {http.request.header.Origin}
+        Access-Control-Allow-Methods "POST, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Idempotency-Key, X-Faro-Session-Id"
+        Access-Control-Max-Age 86400
+        Vary Origin
+    }
+    @faro_preflight {
+        method OPTIONS
+        path /faro/collect
+    }
+    handle @faro_preflight {
+        respond 204
+    }
+    @faro {
+        method POST
+        path /faro/collect
+    }
+    handle @faro {
+        request_body {
+            max_size 256KB
+        }
+        uri strip_prefix /faro
+        reverse_proxy infra-alloy:12347 {
+            header_up -X-Forwarded-For
+            header_up -X-Real-IP
+            header_up -CF-Connecting-IP
+            header_up -CF-IPCountry
+        }
+    }
+}
+
 # HTTPS for remote exporters; the same-VM relay talks directly to Alloy.
 # Alloy authenticates both paths. No request/access log is enabled here.
 ingest.poweur.net {
@@ -41,8 +85,11 @@ http://grafana.poweur.net grafana.poweur.net {
 # The OAuth/OIDC bridge (EPIC-022; apps/oauth/deploy). HTTP as well as HTTPS
 # for the same reason as grafana: Cloudflare may deliver to origin over HTTP.
 http://oauth.poweur.org oauth.poweur.org {
-    reverse_proxy poweur-oauth:8090 {
-        header_up X-Forwarded-For {client_ip}
+    import faro
+    handle {
+        reverse_proxy poweur-oauth:8090 {
+            header_up X-Forwarded-For {client_ip}
+        }
     }
 }
 # poweur.org website (apps/site) with the docs (apps/docs, Docusaurus) under /docs,
@@ -51,6 +98,7 @@ http://oauth.poweur.org oauth.poweur.org {
 # search engines not to index it. HTTP as well as HTTPS for the same reason as
 # grafana and oauth.
 http://tmpwww.poweur.org tmpwww.poweur.org {
+    import faro
     root * /srv/web/www
     encode zstd gzip
     header {
@@ -78,7 +126,10 @@ http://tmpwww.poweur.org tmpwww.poweur.org {
     }
 }
 http://poweur.net http://*.poweur.net {
-    reverse_proxy poweur-relay:8080 {
-        header_up X-Forwarded-For {client_ip}
+    import faro
+    handle {
+        reverse_proxy poweur-relay:8080 {
+            header_up X-Forwarded-For {client_ip}
+        }
     }
 }

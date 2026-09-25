@@ -27,6 +27,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `OAUTH_BRIDGE_URL` | *(empty)* | Public URL of an [OAuth/OIDC bridge](/auth/oauth-oidc-bridge). Hosted identities advertise it in `capabilities.json` and as IndieAuth metadata; the relay never calls it |
 | `REGISTRATION_GATE` | `open` | `open`, or `invite` to require a code for hosted registration |
 | `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when the gate is `invite` |
+| `OPERATOR_TOKEN` | *(empty: off)* | Lets the operator register a hosted name the name policy holds back from everyone else (reserved like `support`, or shorter than `NAME_MIN_LEN`). The client sends it as `X-Poweur-Operator-Token` on `POST /identities` (`poweur identity create … --operator-token`); keys are still generated and held by the client, and the domain, signatures and name shape are still checked. A wrong token is refused with `401 invalid_operator_token`. Use a long random value and unset it when you're not creating names |
 | `RESOLVER_ALLOW_PRIVATE` | `false` | Allow identity resolution to private IP addresses (local development and tests only) |
 | `VERSION` | *(build's version)* | Relay semver in `GET /` and `GET /health`. Override for tests only |
 | `BUILD_TIME` | *(VCS time)* | Build timestamp, advertised as `buildTime` |
@@ -38,6 +39,8 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 |----------|---------|-------------|
 | `STORAGE_PROVIDER` | `relay-fs` | File-body backend. Only `relay-fs` exists today (files under `POWEUR_DATA`) |
 | `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Storage quota per identity; `0` = unlimited. WebDAV writes over quota get `507` |
+| `STORAGE_QUOTAS_FILE` | `$POWEUR_DATA/storage-quotas.json` | Per-identity quotas that override `MAX_IDENTITY_BYTES`: a JSON object from identity to bytes or a size string (`{"alice.example.com": "2GB"}`, `0` = unlimited). Re-read when it changes, so no restart; an invalid edit keeps the last good version |
+| `QUOTA_CONTACT` | — | Who to ask for more space, usually a Poweur ID. Over-quota `507` responses and `GET /files/{identity}/quota` name it (`contact`) |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Largest single uploaded file; `0` = unlimited |
 | `MAX_INBOX_PER_IDENTITY` | `50` | Undelivered messages that may wait for one identity; further mail is refused until they collect it |
 | `MAX_ACKS_PER_IDENTITY` | `50` | Pending delivery receipts per identity |
@@ -121,7 +124,7 @@ contacts is never metered here. See
 ### Observability
 
 Logs, metrics, error tracking and the browser analytics tag are configured with the
-`OTEL_*`, `TELEMETRY_*`, `SENTRY_DSN`, `BETTERSTACK_RUM_TOKEN` and `LOG_LEVEL` variables,
+`OTEL_*`, `TELEMETRY_*`, `SENTRY_DSN`, `FARO_COLLECT_URL` and `LOG_LEVEL` variables,
 described in [Observability](/relay/observability). All are off when unset.
 
 ## Example `.env` File

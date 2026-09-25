@@ -63,7 +63,14 @@ function validateLabel(label: string): void {
   }
 }
 
-/** Throws when the identity is not a usable FQDN. */
+/**
+ * Throws when the identity is not a usable FQDN: what every resolve, message,
+ * grant and sign-in accepts, as `ValidateIdentityName` in names.go.
+ *
+ * Reserved labels are not checked here. They hold a name back from being
+ * *claimed* (`validateClaimableName`, `validateHostedHandle`), not from being
+ * used: an operator may create `support.example.org`, and it must be reachable.
+ */
 export function validateIdentityName(identity: string): void {
   const value = identity.trim().toLowerCase();
   if (value === "") throw new Error("identity is empty");
@@ -71,12 +78,16 @@ export function validateIdentityName(identity: string): void {
   if (looksLikeIpLiteral(value)) throw new Error("IP-literal identities are not allowed");
   const labels = value.split(".");
   if (labels.length < 2) throw new Error("identity must be a FQDN with at least two labels");
-  labels.forEach((label, index) => {
-    validateLabel(label);
-    if (index === 0 && RESERVED_LABELS.has(label)) {
-      throw new Error(`label "${label}" is reserved`);
-    }
-  });
+  labels.forEach((label) => validateLabel(label));
+}
+
+/** `validateIdentityName` plus the reserved leftmost labels: what self-service registration may take. */
+export function validateClaimableName(identity: string): void {
+  validateIdentityName(identity);
+  const label = identity.trim().toLowerCase().split(".")[0] as string;
+  if (RESERVED_LABELS.has(label)) {
+    throw new Error(`label "${label}" is reserved`);
+  }
 }
 
 export function isValidIdentityName(identity: string): boolean {
@@ -97,7 +108,7 @@ export function isValidIdentityName(identity: string): boolean {
  * checked here is what every relay enforces: shape, charset, and no IDN.
  */
 export function validateHostedHandle(identity: string): void {
-  validateIdentityName(identity);
+  validateClaimableName(identity);
   const label = identity.trim().toLowerCase().split(".")[0] as string;
   if (label.startsWith("xn--")) {
     throw new Error("hosted handles may not start with xn-- (no IDN in v1)");

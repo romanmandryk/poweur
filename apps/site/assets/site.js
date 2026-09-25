@@ -70,6 +70,7 @@ if (footer) {
           <li><a href="${LINKS.github}">GitHub</a></li>
           <li><a href="${LINKS.github}/tree/master/epics">Roadmap</a></li>
           <li><a href="${LINKS.github}/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="${root}legal/#security">Security</a></li>
         </ul></div>
         <div><h4>Community</h4><ul>
           <li><a href="${LINKS.x}">X / Twitter<span class="soon">soon</span></a></li>
@@ -78,7 +79,7 @@ if (footer) {
         </ul></div>
       </div>
       <div class="foot-bottom">
-        <span>© ${new Date().getFullYear()} Poweur contributors · Open source</span>
+        <span>© ${new Date().getFullYear()} Poweur contributors · Open source · <a href="${root}legal/privacy/">Privacy</a> · <a href="${root}legal/terms/">Terms</a> · <a href="${root}legal/">Legal &amp; contact</a></span>
         <span>Poweur proves control of a name and its keys, not a legal identity.</span>
       </div>
     </div>`;

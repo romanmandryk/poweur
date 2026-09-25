@@ -253,6 +253,100 @@
       community.general.ufw:
         state: enabled
 
+    # ── 10b. Backups (restic → Hetzner Storage Box) ─────────────────────────────
+    # Needs storage_box_user, storage_box_host and restic_password in secrets.yml;
+    # skipped until they are set. Runbook: deploy/BACKUP.md.
+
+    - name: Backup config directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [/etc/poweur-backup, /etc/poweur-backup/ssh]
+      when: storage_box_user is defined
+
+    - name: Generate the Storage Box SSH key
+      ansible.builtin.command:
+        cmd: ssh-keygen -t ed25519 -N "" -C "poweur-backup@{{ inventory_hostname }}" -f /etc/poweur-backup/ssh/id_ed25519
+        creates: /etc/poweur-backup/ssh/id_ed25519
+      register: storagebox_key
+      when: storage_box_user is defined
+
+    - name: Storage Box ssh config
+      ansible.builtin.template:
+        src: templates/storagebox-ssh-config.j2
+        dest: /etc/poweur-backup/ssh/config
+        mode: '0600'
+      when: storage_box_user is defined
+
+    # known_hosts is matched by the real host name ([host]:23), not the alias.
+    - name: Record the Storage Box host key (port 23)
+      ansible.builtin.shell:
+        cmd: ssh-keyscan -p 23 -t ed25519 {{ storage_box_host }} > /etc/poweur-backup/ssh/known_hosts && test -s /etc/poweur-backup/ssh/known_hosts
+        creates: /etc/poweur-backup/ssh/known_hosts
+      when: storage_box_user is defined
+
+    - name: Restic repository password (keep a copy outside the server)
+      ansible.builtin.copy:
+        content: "{{ restic_password }}\n"
+        dest: /etc/poweur-backup/restic-password
+        mode: '0600'
+      no_log: true
+      when: storage_box_user is defined
+
+    - name: Backup settings
+      ansible.builtin.template:
+        src: templates/backup.env.j2
+        dest: /etc/poweur-backup/backup.env
+        mode: '0600'
+      when: storage_box_user is defined
+
+    - name: Install the backup script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../backup/poweur-backup.sh"
+        dest: /usr/local/sbin/poweur-backup
+        mode: '0750'
+      when: storage_box_user is defined
+
+    - name: Install the backup service and timer
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../backup/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        mode: '0644'
+      loop: [poweur-backup.service, poweur-backup.timer]
+      when: storage_box_user is defined
+
+    - name: Enable the nightly backup timer
+      ansible.builtin.systemd_service:
+        name: poweur-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: storage_box_user is defined
+
+    - name: Initialise the restic repository (needs the key installed on the Storage Box)
+      ansible.builtin.command: /usr/local/sbin/poweur-backup init
+      register: restic_init
+      changed_when: "'created restic repository' in restic_init.stdout + restic_init.stderr"
+      failed_when: false
+      when: storage_box_user is defined
+
+    - name: Read the Storage Box public key
+      ansible.builtin.slurp:
+        src: /etc/poweur-backup/ssh/id_ed25519.pub
+      register: storagebox_pubkey
+      when: storage_box_user is defined
+
+    - name: "ACTION — install the backup key on the Storage Box, then re-run"
+      ansible.builtin.debug:
+        msg:
+          - "Run on your laptop (asks for the Storage Box password once):"
+          - "echo '{{ storagebox_pubkey.content | b64decode | trim }}' | ssh -p 23 {{ storage_box_user }}@{{ storage_box_host }} install-ssh-key"
+          - "Then re-run the playbook to initialise the repository, and test with: sudo poweur-backup run"
+      when: storage_box_user is defined and (restic_init.rc | default(0)) != 0
+
     # ── 11. Post-run instructions ──────────────────────────────────────────────
 
     - name: Read git deploy public key

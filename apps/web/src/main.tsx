@@ -5,6 +5,7 @@ import { App } from "./shell/App";
 import { isShellRuntime } from "./lib/storage.js";
 import { boot, whenFirstRouteChosen } from "./shell/boot";
 import { installTestSeam } from "./shell/testSeam";
+import { refreshAnalyticsConsent } from "./actions/analytics";
 import { startObservability, screenName, syncIdentifiedUser } from "./lib/observability";
 import { useRoute } from "./state/route";
 import { useSession } from "./state/session";
@@ -27,12 +28,18 @@ void startObservability().then((obs) => {
   });
   let lastId = useSession.getState().identity;
   let lastUnlocked = useSession.getState().unlocked;
-  syncIdentifiedUser(lastId, lastUnlocked);
+  // Nothing is sent until the unlocked identity has consented (its "Relay
+  // analytics" preference); locking or switching stops it at once.
+  const sync = () => {
+    syncIdentifiedUser(lastId, lastUnlocked);
+    if (lastId && lastUnlocked) void refreshAnalyticsConsent();
+  };
+  sync();
   useSession.subscribe((state) => {
     if (state.identity === lastId && state.unlocked === lastUnlocked) return;
     lastId = state.identity;
     lastUnlocked = state.unlocked;
-    syncIdentifiedUser(lastId, lastUnlocked);
+    sync();
   });
 });
 

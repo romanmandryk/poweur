@@ -1,6 +1,8 @@
 package relay
 
 import (
+	"crypto/subtle"
+	"net/http"
 	"strings"
 	"sync"
 )
@@ -17,9 +19,9 @@ const (
 
 // RegistrationGate checks invite codes (and later PoW) before hosted registration.
 type RegistrationGate struct {
-	mode   string
-	codes  map[string]struct{}
-	mu     sync.RWMutex
+	mode  string
+	codes map[string]struct{}
+	mu    sync.RWMutex
 }
 
 func NewRegistrationGate(mode string, inviteCodes []string) *RegistrationGate {
@@ -76,3 +78,21 @@ type gateError struct {
 }
 
 func (e gateError) Error() string { return e.detail }
+
+// operatorRegistration reports whether this registration carries the
+// operator's token. ok is false when a token was sent but does not match (or
+// the relay has none), which the caller refuses rather than ignoring.
+func (s *Server) operatorRegistration(r *http.Request) (operator, ok bool) {
+	sent := strings.TrimSpace(r.Header.Get(operatorTokenHeader))
+	if sent == "" {
+		return false, true
+	}
+	want := s.cfg.OperatorToken
+	if want == "" || subtle.ConstantTimeCompare([]byte(sent), []byte(want)) != 1 {
+		return false, false
+	}
+	return true, true
+}
+
+// operatorTokenHeader carries OPERATOR_TOKEN on POST /identities.
+const operatorTokenHeader = "X-Poweur-Operator-Token"
