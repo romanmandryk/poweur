@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
+	"strings"
 
 	"github.com/poweur/identity/drive"
 )
@@ -27,10 +29,34 @@ func (e *Engine) validate(ctx context.Context, h *driveHandle, req Request) (jou
 	case req.Manifest != nil:
 		return e.validateManifest(ctx, h, req)
 	case len(req.Records) > 0:
-		return e.validateAppend(ctx, h, req.Records)
+		return e.validateAppend(ctx, h, req.Records, req.Author)
 	default:
 		return e.validateTrim(ctx, h, req)
 	}
+}
+
+// writeSubject is who a write is authorized and charged as: its author, or
+// for a guest-authored write the link that committed it. Guests write only
+// through links; an identity writes only as itself.
+func writeSubject(author, committer string) (string, error) {
+	if drive.IsGuest(author) {
+		if !strings.HasPrefix(committer, linkActorPrefix) {
+			return "", fmt.Errorf("%w: guest authors write only through a link", ErrForbidden)
+		}
+		return committer, nil
+	}
+	if committer != "" && !strings.EqualFold(committer, author) {
+		return "", fmt.Errorf("%w: %s cannot commit %s's writes", ErrForbidden, committer, author)
+	}
+	return author, nil
+}
+
+// authorKey resolves a signing key; guest keys are read from the name.
+func (e *Engine) authorKey(ctx context.Context, author string) (ed25519.PublicKey, error) {
+	if key, ok := drive.GuestKey(author); ok {
+		return key, nil
+	}
+	return e.opts.Keys(ctx, author)
 }
 
 func invalid(format string, args ...any) error {
@@ -42,30 +68,30 @@ func invalid(format string, args ...any) error {
 // needs create on the destination, and a key rotation needs admin. New
 // content under a key a revoked member still holds is refused until the
 // node rotates.
-func (e *Engine) authorizeManifest(st *state, m drive.Manifest) error {
+func (e *Engine) authorizeManifest(st *state, m drive.Manifest, subject string) error {
 	switch m.Operation {
 	case drive.OpCreate:
 		if m.Folder == "" {
-			return e.permit(st, m.Author, "", needOwner)
+			return e.permit(st, subject, "", needOwner)
 		}
-		if err := e.permit(st, m.Author, m.Folder, drive.RoleCreate); err != nil {
+		if err := e.permit(st, subject, m.Folder, drive.RoleCreate); err != nil {
 			return err
 		}
 		return rotationRequired(st, m.Folder)
 	case drive.OpReplace:
-		if err := e.permit(st, m.Author, m.Node, drive.RoleWrite); err != nil {
+		if err := e.permit(st, subject, m.Node, drive.RoleWrite); err != nil {
 			return err
 		}
 		return rotationRequired(st, m.Node)
 	case drive.OpMove:
-		if err := e.permit(st, m.Author, m.Node, drive.RoleWrite); err != nil {
+		if err := e.permit(st, subject, m.Node, drive.RoleWrite); err != nil {
 			return err
 		}
-		return e.permit(st, m.Author, m.Folder, drive.RoleCreate)
+		return e.permit(st, subject, m.Folder, drive.RoleCreate)
 	case drive.OpRotate:
-		return e.permit(st, m.Author, m.Node, drive.RoleAdmin)
+		return e.permit(st, subject, m.Node, drive.RoleAdmin)
 	default:
-		return e.permit(st, m.Author, m.Node, drive.RoleWrite)
+		return e.permit(st, subject, m.Node, drive.RoleWrite)
 	}
 }
 
@@ -77,10 +103,14 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 	if m.Drive != st.Drive {
 		return journalOp{}, invalid("manifest is for drive %s", m.Drive)
 	}
-	if err := e.authorizeManifest(st, m); err != nil {
+	subject, err := writeSubject(m.Author, req.Author)
+	if err != nil {
 		return journalOp{}, err
 	}
-	key, err := e.opts.Keys(ctx, m.Author)
+	if err := e.authorizeManifest(st, m, subject); err != nil {
+		return journalOp{}, err
+	}
+	key, err := e.authorKey(ctx, m.Author)
 	if err != nil {
 		return journalOp{}, fmt.Errorf("%w: cannot resolve %s: %v", ErrForbidden, m.Author, err)
 	}
@@ -194,7 +224,7 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 	case drive.OpRotate:
 		need = drive.RoleAdmin
 	}
-	spent, err := st.chargeFor(m.Author, target, need, charge{Bytes: uint64(added), Files: files}, e.now)
+	spent, err := st.chargeFor(subject, target, need, charge{Bytes: uint64(added), Files: files}, e.now)
 	if err != nil {
 		return journalOp{}, err
 	}
@@ -205,7 +235,7 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 	return journalOp{Kind: kindManifest, Manifest: &m, ManifestHash: hash, NewPages: newPages, Charge: spent}, nil
 }
 
-func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []drive.AppendRecord) (journalOp, error) {
+func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []drive.AppendRecord, committer string) (journalOp, error) {
 	st := h.st
 	if len(records) > 1024 {
 		return journalOp{}, invalid("at most 1024 records per commit")
@@ -236,10 +266,14 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 		if record.Generation != n.Generation {
 			return journalOp{}, invalid("record generation %d is not the node's %d", record.Generation, n.Generation)
 		}
-		if err := e.permit(st, record.Author, target, drive.RoleAppend); err != nil {
+		subject, err := writeSubject(record.Author, committer)
+		if err != nil {
 			return journalOp{}, err
 		}
-		key, err := e.opts.Keys(ctx, record.Author)
+		if err := e.permit(st, subject, target, drive.RoleAppend); err != nil {
+			return journalOp{}, err
+		}
+		key, err := e.authorKey(ctx, record.Author)
 		if err != nil {
 			return journalOp{}, fmt.Errorf("%w: cannot resolve %s: %v", ErrForbidden, record.Author, err)
 		}
@@ -272,7 +306,8 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 		return journalOp{}, ErrQuota
 	}
 	// One commit's records share an author (the relay requires it).
-	spent, err := st.chargeFor(records[0].Author, target, drive.RoleAppend, charge{Bytes: uint64(added), Records: uint64(len(records))}, e.now)
+	subject, _ := writeSubject(records[0].Author, committer)
+	spent, err := st.chargeFor(subject, target, drive.RoleAppend, charge{Bytes: uint64(added), Records: uint64(len(records))}, e.now)
 	if err != nil {
 		return journalOp{}, err
 	}

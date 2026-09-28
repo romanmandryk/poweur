@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { fromBase64 } from "../src/encoding.js";
-import { canonicalShare, roleGrants, shareHash, signShare, validateShare, verifierHash, verifyShare, type Share } from "../src/drive/share.js";
+import { canonicalShare, guestAuthor, guestKey, roleGrants, shareHash, signShare, validateShare, verifierHash, verifyShare, type Share } from "../src/drive/share.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../identity/testdata/vectors/drive-shares.json", import.meta.url), "utf8")) as {
   shares: Array<{ name: string; share: Share; seed: string; public_key: string; canonical: string; hash: string }>;
+  guests: Array<{ seed: string; public_key: string; author: string }>;
 };
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -23,7 +24,7 @@ describe("signed shares match Go", () => {
     const member = vectors.shares[0]!.share;
     for (const changes of [
       { link: "c3".repeat(16) }, { member: "" }, { role: "owner" as never }, { role: "append" as const },
-      { expires: "2027-01-01T00:00:00+00:00" }, { pow: 33 }, { kdf: "argon2id-m65536-t3-p1" },
+      { expires: "2027-01-01T00:00:00+00:00" }, { pow: 31 }, { kdf: "argon2id-m65536-t3-p1" },
     ]) {
       expect(() => validateShare({ ...member, ...changes })).toThrow();
     }
@@ -35,5 +36,14 @@ describe("signed shares match Go", () => {
     expect(roleGrants("create", "read")).toBe(false);
     expect(roleGrants("admin", "write")).toBe(true);
     expect(verifierHash(new TextEncoder().encode("verifier"))).toBe(vectors.shares[1]!.share.verifier_hash);
+  });
+
+  it("names guest authors like Go", () => {
+    for (const g of vectors.guests) {
+      expect(guestAuthor(fromBase64(g.public_key))).toBe(g.author);
+      expect(guestKey(g.author)).toEqual(fromBase64(g.public_key));
+    }
+    expect(guestKey("alice.poweur.net")).toBeNull();
+    expect(guestKey(vectors.guests[0]!.author.toUpperCase())).toBeNull();
   });
 });

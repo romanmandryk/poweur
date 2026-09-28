@@ -95,7 +95,7 @@ export function validateShare(s: Share): void {
   if (strictBase64(s.node_public).length !== 32) throw new Error("invalid node public key");
   if ((s.expires && !validTime(s.expires)) || !validTime(s.issued)) throw new Error("invalid share times");
   for (const v of [s.caps.bytes, s.caps.files, s.caps.records, s.caps.downloads, s.caps.per_hour, s.pow]) counter(v);
-  if ((s.pow ?? 0) > 32) throw new Error("proof-of-work difficulty above 32 bits");
+  if ((s.pow ?? 0) > 30) throw new Error("proof-of-work difficulty above the protocol maximum");
   if (s.kdf || s.salt || s.verifier_hash) {
     if (link === "" || s.kdf !== SHARE_KDF || strictBase64(s.salt ?? "").length !== 16 || !validHex(s.verifier_hash ?? "", 32)) {
       throw new Error("invalid link password parameters");
@@ -130,4 +130,47 @@ export function shareHash(s: Share): string {
 /** SHA-256 of a link-password verifier, lowercase hex (what the relay stores). */
 export function verifierHash(verifier: Uint8Array): string {
   return hex(sha256(verifier));
+}
+
+/**
+ * Guest authors: `g<base32 key>.guest.invalid` names an anonymous writer's
+ * ephemeral Ed25519 key. `.invalid` never resolves, so the key is read from
+ * the name; relays accept guests only on writes authorized by a link.
+ */
+export const GUEST_SUFFIX = ".guest.invalid";
+const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
+
+export function guestAuthor(publicKey: Uint8Array): string {
+  if (publicKey.length !== 32) throw new Error("guest key must be 32 bytes");
+  let bits = 0, value = 0, out = "";
+  for (const byte of publicKey) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31];
+  return "g" + out + GUEST_SUFFIX;
+}
+
+export function guestKey(author: string): Uint8Array | null {
+  if (!author.endsWith(GUEST_SUFFIX) || !author.startsWith("g")) return null;
+  const label = author.slice(1, -GUEST_SUFFIX.length);
+  if (label.length !== 52) return null;
+  const out: number[] = [];
+  let bits = 0, value = 0;
+  for (const char of label) {
+    const index = BASE32.indexOf(char);
+    if (index < 0) return null;
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  if ((value & ((1 << bits) - 1)) !== 0) return null;
+  return new Uint8Array(out);
 }

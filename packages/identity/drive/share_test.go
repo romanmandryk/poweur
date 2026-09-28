@@ -64,7 +64,7 @@ func TestShareShapes(t *testing.T) {
 		"short node public":     func(s *Share) { s.NodePublic = enc(make([]byte, 31)) },
 		"non-canonical time":    func(s *Share) { s.Issued = "2026-09-28T12:00:00+00:00" },
 		"zero generation":       func(s *Share) { s.Generation = 0 },
-		"excessive pow":         func(s *Share) { s.PoW = 33 },
+		"excessive pow":         func(s *Share) { s.PoW = 31 },
 		"uppercase member name": func(s *Share) { s.Member = "Bob.poweur.net" },
 	} {
 		s := testShare()
@@ -111,9 +111,17 @@ func TestVectors_DriveShares(t *testing.T) {
 	link := testShare()
 	link.Member, link.Link, link.Role, link.NodeKey, link.Expires = "", strings.Repeat("c3", 16), RoleCreate, nil, ""
 	link.KDF, link.Salt, link.VerifierHash, link.PoW, link.Caps = ShareKDF, enc(bytes.Repeat([]byte{7}, 16)), VerifierHash([]byte("verifier")), 12, Caps{Files: 1, PerHour: 10}
-	var out struct {
-		Shares []vector `json:"shares"`
+	type guestVector struct {
+		Seed      string `json:"seed"`
+		PublicKey string `json:"public_key"`
+		Author    string `json:"author"`
 	}
+	var out struct {
+		Shares []vector      `json:"shares"`
+		Guests []guestVector `json:"guests"`
+	}
+	guest := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{5}, 32))
+	out.Guests = append(out.Guests, guestVector{enc(guest.Seed()), enc(guest.Public().(ed25519.PublicKey)), GuestAuthor(guest.Public().(ed25519.PublicKey))})
 	for _, c := range []struct {
 		name string
 		s    Share

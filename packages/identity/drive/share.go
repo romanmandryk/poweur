@@ -156,8 +156,8 @@ func (s Share) Validate() error {
 			return errors.New("share limit out of range")
 		}
 	}
-	if s.PoW > 32 {
-		return errors.New("proof-of-work difficulty above 32 bits")
+	if s.PoW > uint64(identity.PowMaxBits) {
+		return errors.New("proof-of-work difficulty above the protocol maximum")
 	}
 	password := s.KDF != "" || s.Salt != "" || s.VerifierHash != ""
 	if password {

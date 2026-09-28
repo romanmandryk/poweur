@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"testing"
@@ -118,5 +119,48 @@ func TestLinks(t *testing.T) {
 	}
 	if _, err := f.eng.Link(ctx, owner, "0123456789abcdef0123456789abcdef"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown link: %v", err)
+	}
+}
+
+func TestGuestWritesThroughLinks(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	root := f.root()
+	inbox := f.folder(root, nameHash(1))
+	linkID, _ := drive.NewShareID()
+	f.grantWith(inbox, "", drive.RoleCreate, func(s *drive.Share) { s.Member, s.Link, s.Caps.Files = "", linkID, 1 })
+	_, guestPriv, _ := ed25519.GenerateKey(nil)
+	guest := drive.GuestAuthor(guestPriv.Public().(ed25519.PublicKey))
+	submission := func(committer string) error {
+		m := drive.Manifest{Format: 1, Drive: owner, Node: hexID(16), Version: hexID(16), Operation: drive.OpCreate, Author: guest,
+			Generation: 1, Kind: drive.KindFile, Mode: drive.ModeReplace, Folder: inbox, Name: payload(2), NameHash: hexID(32),
+			NodeKey: payload(3), ContentKey: payload(4), Pages: []string{}}
+		if err := m.Sign(guestPriv); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.eng.Commit(ctx, owner, Request{ID: hexID(16), Manifest: &m, Author: committer})
+		return err
+	}
+	if err := submission(""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("guest without a link: %v", err)
+	}
+	if err := submission(bob); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("guest through an identity: %v", err)
+	}
+	if err := submission(LinkActor(hexID(16))); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("guest through an unknown link: %v", err)
+	}
+	if err := submission(LinkActor(linkID)); err != nil {
+		t.Fatalf("guest through the link: %v", err)
+	}
+	if err := submission(LinkActor(linkID)); !errors.Is(err, ErrCap) {
+		t.Fatalf("link's file cap: %v", err)
+	}
+	// An identity cannot pass off another identity's signed manifest.
+	m := drive.Manifest{Format: 1, Drive: owner, Node: hexID(16), Version: hexID(16), Operation: drive.OpCreate, Author: owner,
+		Generation: 1, Kind: drive.KindFolder, Folder: root, Name: payload(2), NameHash: nameHash(9), NodeKey: payload(3), Pages: []string{}}
+	f.sign(&m)
+	if _, err := f.eng.Commit(ctx, owner, Request{ID: hexID(16), Manifest: &m, Author: bob}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("replayed manifest: %v", err)
 	}
 }

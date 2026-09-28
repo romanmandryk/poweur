@@ -261,6 +261,10 @@ const registrationPurpose = "registration"
 // REGISTRATION_GATE=pow).
 func (s *Server) handleAuthPow(w http.ResponseWriter, r *http.Request) {
 	purpose := r.URL.Query().Get("purpose")
+	if purpose == "drive-link" {
+		s.issueLinkPow(w, r)
+		return
+	}
 	if purpose != registrationPurpose {
 		writeError(w, http.StatusBadRequest, "invalid_request", "purpose must be \"registration\"")
 		return

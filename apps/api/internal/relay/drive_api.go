@@ -324,15 +324,26 @@ func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	// The caller commits only what it signed itself: a signed manifest or
 	// record someone else obtained cannot be replayed through their session.
-	if body.Manifest != nil && body.Manifest.Author != actor {
+	// A link holder signs as a guest (a key it made for this write).
+	link := strings.HasPrefix(actor, "link:")
+	ownWrite := func(author string) bool {
+		if link {
+			return drive.IsGuest(author)
+		}
+		return author == actor
+	}
+	if body.Manifest != nil && !ownWrite(body.Manifest.Author) {
 		writeError(w, http.StatusForbidden, "forbidden", "the manifest author must be the caller")
 		return
 	}
 	for _, record := range body.Records {
-		if record.Author != actor {
+		if !ownWrite(record.Author) || record.Author != body.Records[0].Author {
 			writeError(w, http.StatusForbidden, "forbidden", "every record author must be the caller")
 			return
 		}
+	}
+	if link && !s.linkProofOfWork(w, r, driveID, strings.TrimPrefix(actor, "link:")) {
+		return
 	}
 	if body.Share != nil && body.Share.Issuer != actor {
 		writeError(w, http.StatusForbidden, "forbidden", "the share issuer must be the caller")

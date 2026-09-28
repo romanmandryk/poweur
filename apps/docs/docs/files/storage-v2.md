@@ -430,6 +430,17 @@ allowed the write: `caps.files` counts creates, `caps.records` appended records 
 `429 share_limit`), `caps.bytes` new chunk bytes (`507`). The owner is never capped. The
 decrypting viewer at `/s/<token>#<secret>` is web work (Phase 8/9).
 
+**Implemented anonymous writes (file requests).** Someone with only a link signs with a
+throwaway Ed25519 key as a **guest author** `g<base32 key>.guest.invalid` (`drive/guest.go`,
+`guestAuthor` in TS; pinned in `drive-shares.json`). `.invalid` is reserved, so the key is
+read from the name and never resolved. The engine accepts guest-authored manifests and records
+only when a link commits them, authorizes and charges them as that link, and refuses an
+identity committing anyone's writes but its own. When the link's share sets `pow`, every link
+commit carries `X-Poweur-PoW-Token` / `X-Poweur-PoW-Solution` for a single-use challenge from
+`GET /auth/pow?purpose=drive-link&identity=…&link=…` (at most 30 bits). A create-only
+submitter seals the new node's key to the folder's `node_public`, uses a random name token,
+and can neither list the folder nor read any submission — including their own.
+
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the
 other chunk IDs in a new manifest. Two replacements against one base produce one

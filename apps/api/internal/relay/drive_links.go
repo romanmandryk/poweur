@@ -3,12 +3,14 @@ package relay
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/poweur/api/internal/drive/engine"
+	idpkg "github.com/poweur/identity"
 )
 
 // Link access (E20-T7). A link holder authenticates with the link ID in
@@ -141,4 +143,64 @@ func (s *Server) handleDriveLink(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	writeJSON(w, http.StatusOK, info)
+}
+
+// linkPowPurpose binds a proof-of-work to one link of one drive.
+func linkPowPurpose(driveID, linkID string) string { return "drive-link:" + driveID + "/" + linkID }
+
+// linkProofOfWork requires a fresh proof-of-work on a link write when the
+// link's owner asked for one (X-Poweur-PoW-Token, X-Poweur-PoW-Solution;
+// challenges from GET /auth/pow?purpose=drive-link&identity=&link=).
+func (s *Server) linkProofOfWork(w http.ResponseWriter, r *http.Request, driveID, linkID string) bool {
+	info, err := s.engine.Link(r.Context(), driveID, linkID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no such link")
+		return false
+	}
+	if info.PoW == 0 {
+		return true
+	}
+	token, solution := r.Header.Get("X-Poweur-PoW-Token"), r.Header.Get("X-Poweur-PoW-Solution")
+	if token == "" || solution == "" {
+		writeError(w, http.StatusForbidden, "pow_required", fmt.Sprintf("this link requires proof-of-work (%d bits)", info.PoW))
+		return false
+	}
+	challenge, err := idpkg.VerifyPowSolution(s.powSecret, token, solution, linkPowPurpose(driveID, linkID))
+	if err != nil || uint64(challenge.Bits) < info.PoW {
+		writeError(w, http.StatusForbidden, "pow_failed", "proof-of-work does not meet this link's difficulty")
+		return false
+	}
+	if !s.anon.consumeNonce(challenge.Nonce, time.Unix(challenge.ExpiresAt, 0)) {
+		writeError(w, http.StatusForbidden, "pow_replayed", "proof-of-work already used")
+		return false
+	}
+	return true
+}
+
+// issueLinkPow mints a challenge at a link's difficulty.
+func (s *Server) issueLinkPow(w http.ResponseWriter, r *http.Request) {
+	if s.engine == nil {
+		writeError(w, http.StatusServiceUnavailable, "drive_unavailable", "this relay has no drive storage")
+		return
+	}
+	driveID := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("identity")))
+	linkID := r.URL.Query().Get("link")
+	info, err := s.engine.Link(r.Context(), driveID, linkID)
+	if err != nil || !s.identities.Exists(driveID) {
+		writeError(w, http.StatusNotFound, "not_found", "no such link")
+		return
+	}
+	if info.PoW == 0 {
+		writeError(w, http.StatusConflict, "pow_not_required", "this link does not require proof-of-work")
+		return
+	}
+	token, challenge, err := idpkg.NewPowChallenge(s.powSecret, linkPowPurpose(driveID, linkID), int(info.PoW), anonChallengeTTL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "challenge_failed", "failed to mint challenge")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"type": idpkg.AnonChallengePow, "algo": idpkg.PowAlgo, "token": token, "bits": challenge.Bits,
+		"expires_at": time.Unix(challenge.ExpiresAt, 0).UTC().Format(time.RFC3339),
+	})
 }
