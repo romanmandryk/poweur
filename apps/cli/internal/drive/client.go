@@ -24,6 +24,7 @@ type Client struct {
 	SessionID              string
 	Key                    ed25519.PrivateKey
 	HTTP                   *http.Client
+	Cache                  ChunkCache
 }
 
 type Error struct {
@@ -178,9 +179,18 @@ func (c *Client) Commit(ctx context.Context, input Commit) (Result, error) {
 func (c *Client) Upload(ctx context.Context, ciphertext []byte) (protocol.ChunkRef, error) {
 	ref := protocol.ChunkRef{ID: protocol.ChunkID(ciphertext), Size: uint64(len(ciphertext))}
 	_, err := c.request(ctx, "PUT", "/chunks/"+ref.ID, ciphertext)
+	if err == nil && c.Cache != nil {
+		_ = c.Cache.Put(ref.ID, ciphertext)
+	}
 	return ref, err
 }
 func (c *Client) Chunk(ctx context.Context, node, version string, ref protocol.ChunkRef) ([]byte, error) {
+	if c.Cache != nil {
+		cached, err := c.Cache.Get(ref.ID)
+		if err == nil && uint64(len(cached)) == ref.Size && protocol.ChunkID(cached) == ref.ID {
+			return cached, nil
+		}
+	}
 	path := "/nodes/" + url.PathEscape(node)
 	if version != "" {
 		path += "/versions/" + url.PathEscape(version)
@@ -191,6 +201,9 @@ func (c *Client) Chunk(ctx context.Context, node, version string, ref protocol.C
 	}
 	if uint64(len(data)) != ref.Size || protocol.ChunkID(data) != ref.ID {
 		return nil, fmt.Errorf("invalid chunk hash or size")
+	}
+	if c.Cache != nil {
+		_ = c.Cache.Put(ref.ID, data)
 	}
 	return data, nil
 }

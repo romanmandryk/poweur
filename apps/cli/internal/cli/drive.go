@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 
 	driveclient "github.com/poweur/cli/internal/drive"
 )
@@ -18,6 +19,8 @@ func runDrive(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	switch args[0] {
+	case "put", "get", "mkdir", "mv", "rm", "list":
+		return runDriveFiles(args, stdout, stderr)
 	case "info", "node", "ls", "changes", "records":
 	default:
 		fmt.Fprintln(stderr, usage)
@@ -32,6 +35,9 @@ func runDrive(args []string, stdout, stderr io.Writer) int {
 	jsonOut := fs.Bool("json", false, "JSON output")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
 		return 1
+	}
+	if args[0] == "ls" && fs.NArg() == 1 && !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(fs.Arg(0)) && *limit == 100 {
+		return runDriveFiles(append([]string{"list"}, args[1:]...), stdout, stderr)
 	}
 	needsNode := args[0] == "node" || args[0] == "ls" || args[0] == "records"
 	want := 0

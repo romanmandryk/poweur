@@ -5,3 +5,5 @@ export * from "./records.js";
 export * from "./manifest.js";
 export * from "./share.js";
 export * from "./client.js";
+
+export * from "./files.js";

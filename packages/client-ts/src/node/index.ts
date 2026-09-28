@@ -15,3 +15,5 @@ export * from "./dns.js";
 export * from "./dialfetch.js";
 export * from "./toml.js";
 export * from "./session-factory.js";
+
+export { FileChunkCache } from "./drive-cache.js";

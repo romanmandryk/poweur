@@ -1,3 +1,4 @@
+import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
 import { sessionSigner } from "../src/session.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -44,3 +45,25 @@ it("uses a session key for system files, devices and drive reads, then rejects i
   await expect(files.readOptional(".poweur/public/profile.json")).rejects.toMatchObject({ status: 401 });
   await expect(drive.info()).rejects.toMatchObject({ status: 401 });
 });
+
+it("encrypts multi-chunk files, replaces, moves and reopens their key tree", async () => {
+  const files = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const root = await files.root();
+  const folder = await files.create(root, "projects", "folder");
+  const bytes = new Uint8Array(4 * 1024 * 1024 + 37).fill(91);
+  const file = await files.create(folder, "cafe\u0301.bin", "file", bytes);
+  const read = async (file: OpenFile) => { const chunks = []; for await (const chunk of files.read(file)) chunks.push(chunk); return Buffer.concat(chunks); };
+  expect(await read(await files.resolve("/projects/café.bin"))).toEqual(Buffer.from(bytes));
+  const stale = await files.open(file.manifest.node);
+  await files.replace(file, new TextEncoder().encode("replaced"));
+  await expect(files.replace(stale, new Uint8Array([1]))).rejects.toMatchObject({ status: 409 });
+  await files.move(file, root, "renamed.bin");
+  expect((await read(await files.resolve("/renamed.bin"))).toString()).toBe("replaced");
+  expect((await files.list(folder)).length).toBe(0);
+  await expect(files.resolve("/../renamed.bin")).rejects.toThrow();
+  await files.remove(file);
+  await expect(files.resolve("/renamed.bin")).rejects.toThrow("not found");
+  const empty = await files.create(folder, "empty", "file");
+  expect((await read(await files.open(empty.manifest.node))).length).toBe(0);
+  await expect(files.create(folder, "../escape", "file")).rejects.toThrow();
+}, 60_000);

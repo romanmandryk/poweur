@@ -82,13 +82,13 @@ export class DriveClient {
   async upload(bytes: Uint8Array): Promise<ChunkRef> {
     const ref = { id: chunkID(bytes), size: bytes.length };
     await this.request("PUT", `/chunks/${ref.id}`, bytes);
-    await this.cache?.put(ref.id, bytes);
+    await this.cache?.put(ref.id, bytes).catch(() => {});
     return ref;
   }
   /** Download ciphertext through its authorized node/version reference and
    * verify its address even when a local cache supplied the bytes. */
   async chunk(node: string, ref: ChunkRef, version?: string): Promise<Uint8Array> {
-    const cached = await this.cache?.get(ref.id);
+    const cached = await this.cache?.get(ref.id).catch(() => null);
     if (cached && cached.length === ref.size && chunkID(cached) === ref.id) return cached;
     const suffix = `/nodes/${segment(node)}${version ? `/versions/${segment(version)}` : ""}/chunks/${segment(ref.id)}`;
     const response = await this.relay.raw({ method: "GET", path: this.path(suffix), headers: await this.auth() });
@@ -99,7 +99,7 @@ export class DriveClient {
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.length !== ref.size || chunkID(bytes) !== ref.id) throw new Error("invalid chunk hash or size");
-    await this.cache?.put(ref.id, bytes);
+    await this.cache?.put(ref.id, bytes).catch(() => {});
     return bytes;
   }
 }
