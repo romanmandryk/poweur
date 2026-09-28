@@ -103,9 +103,13 @@ func (f *fixture) newEngine() *Engine {
 			}
 			return nil, errors.New("unknown identity")
 		},
-		Quota:    func(string) int64 { return f.quota },
-		Now:      func() time.Time { return f.clock },
-		OnCommit: func(_ string, c Change) { f.mu.Lock(); f.changes = append(f.changes, c); f.mu.Unlock() },
+		Quota: func(string) int64 { return f.quota },
+		Now:   func() time.Time { return f.clock },
+		OnCommit: func(_ string, c Change, _ []PositionedRecord) {
+			f.mu.Lock()
+			f.changes = append(f.changes, c)
+			f.mu.Unlock()
+		},
 	})
 }
 

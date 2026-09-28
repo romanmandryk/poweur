@@ -38,8 +38,10 @@ type Options struct {
 	UploadTTL time.Duration
 	// SnapshotEvery writes a snapshot after this many segments (default 64).
 	SnapshotEvery uint64
-	// OnCommit is told about each change after it is durable.
-	OnCommit func(driveID string, change Change)
+	// OnCommit is told about each change after it is durable, while the
+	// drive is still locked (it must not call back into the engine). For an
+	// append, records are the appended records with their positions.
+	OnCommit func(driveID string, change Change, records []PositionedRecord)
 	Now      func() time.Time
 }
 
@@ -240,6 +242,27 @@ func (e *Engine) PutChunk(ctx context.Context, driveID string, data []byte) (dri
 	return ref, nil
 }
 
+// UploadURL presigns a direct upload of one chunk to the store, bound to its
+// hash. It returns provider.ErrUnsupported when the store cannot presign (the
+// filesystem, or S3 with presigning off); the client then uploads through
+// the relay with PutChunk. The commit still checks the stored size.
+func (e *Engine) UploadURL(ctx context.Context, driveID string, ref drive.ChunkRef, ttl time.Duration) (provider.SignedURL, error) {
+	if ref.Size < 40+drive.PaddingBucket || ref.Size > drive.MaxChunkBytes || (ref.Size-40)%drive.PaddingBucket != 0 || len(ref.ID) != 64 || !isHex(ref.ID) {
+		return provider.SignedURL{}, fmt.Errorf("%w: not a valid encrypted chunk reference", ErrInvalid)
+	}
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return provider.SignedURL{}, err
+	}
+	used, prefix := h.st.Used, h.prefix
+	quota := e.opts.Quota(h.st.Drive)
+	h.mu.Unlock()
+	if quota > 0 && used+int64(ref.Size) > quota {
+		return provider.SignedURL{}, ErrQuota
+	}
+	return e.opts.Store.PresignPut(ctx, prefix+"chunks/"+ref.ID, ref.ID, int64(ref.Size), ttl)
+}
+
 // Missing returns the refs whose chunks are not stored yet.
 func (e *Engine) Missing(ctx context.Context, driveID string, refs []drive.ChunkRef) ([]drive.ChunkRef, error) {
 	h, err := e.open(ctx, driveID)
@@ -298,9 +321,9 @@ type Request struct {
 // Trim drops an append file's records before a position, covered by a
 // committed snapshot version.
 type Trim struct {
-	Node     string
-	Before   uint64
-	Snapshot SnapshotRef
+	Node     string      `json:"node"`
+	Before   uint64      `json:"before"`
+	Snapshot SnapshotRef `json:"snapshot"`
 }
 
 // Result is what a commit produced.
@@ -375,7 +398,14 @@ func (e *Engine) publish(ctx context.Context, h *driveHandle, op journalOp) erro
 	}
 	if e.opts.OnCommit != nil {
 		for _, change := range st.Changes[changesBefore:] {
-			e.opts.OnCommit(st.Drive, change)
+			var records []PositionedRecord
+			if op.Kind == kindAppend && change.Operation == "append" {
+				first := change.Position + 1 - uint64(len(op.Records))
+				for i, r := range op.Records {
+					records = append(records, PositionedRecord{Position: first + uint64(i), Record: r.Record})
+				}
+			}
+			e.opts.OnCommit(st.Drive, change, records)
 		}
 	}
 	return nil

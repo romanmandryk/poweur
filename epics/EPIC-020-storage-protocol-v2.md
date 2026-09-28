@@ -26,7 +26,7 @@
 | E20-T3 Storage providers: filesystem & S3 | **done** | Interface, filesystem and minio-go S3. Conformance and a mismatched presigned checksum verified on local Docker MinIO. Relay config is `STORAGE_PROVIDER=fs\|s3` |
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **in progress** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
-| E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
+| E20-T5 Drive HTTP API & change stream | **in progress** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
 | E20-T6 `.poweur` system files & stateless relay | **open** | settings as files the relay validates and applies; no relay state outside the drive |
 | E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
@@ -80,7 +80,12 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       request IDs, quota, version retention and orphan GC. Tests run on fs and, with
       `POWEUR_TEST_S3_*`, on an existing S3 bucket (verified on MinIO). Still open in
       E20-T4: group commit, per-member accounting, journal compaction.
-- [ ] Phases 5–10: API, stateless system files, node shares, clients,
+- [x] Phase 5 owner drive API (`internal/relay/drive_api.go`): uploads (relay or presigned
+      S3), commits, reads, history, changes, append tails and `drive.changed` events;
+      integration `INT_DRIVE_01` covers resume, conflict, appends, live events, a
+      cross-relay visitor, restart over the same data and a plaintext scan. Member
+      streams, public serving and presigned downloads wait on E20-T6/T7.
+- [ ] Phases 6–10: stateless system files, node shares, clients,
       complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation:** Phase 0 introduced an operational owner-authenticated
@@ -479,19 +484,20 @@ commit fuzz never removes a live chunk.
 
 ### E20-T5 — Drive HTTP API & change stream
 
-- [ ] Endpoints under `/drive/{identity}/`: `chunks/missing` (returns presigned or relay URLs),
+- [x] Endpoints under `/drive/{identity}/`: `chunks/missing` (returns presigned or relay URLs),
       chunk upload (filesystem mode), `commit`, node read (head + manifest), chunk read through
       an authorized version, children listing, version history, changes feed with cursor
-- [ ] Auth: existing session and signed-challenge auth for owners and visitors; no DAV tokens,
+- [x] Auth: existing session and signed-challenge auth for owners and visitors; no DAV tokens,
       no app passwords
-- [ ] Read an append file from a position (`?from=N`), with the next position returned
-- [ ] SSE `drive.changed` events per node; appends ≤ 16 KiB carried inline
+- [x] Read an append file from a position (`?from=N`), with the next position returned
+- [x] SSE `drive.changed` events per node; appends ≤ 16 KiB carried inline
 - [ ] **Share members subscribe too:** a member on another relay opens an event stream on the
       host relay for the nodes shared with them (visitor auth), filtered to what they may read;
       revocation closes the stream
 - [ ] `/pub` and `/.well-known/poweur/` served from public nodes and `.poweur/public`
 - [ ] Public nodes CDN-cacheable (immutable chunk URLs, short-lived feed heads with `ETag`) and
       the relay subscription proxy + batch feed heads (memory only) specified in EPIC-032 E32-T4
+- [ ] Presigned chunk downloads (reads go through the relay for now)
 
 **Acceptance:** integration suite (`apps/integration`, real relays) covers upload, resume,
 replace conflict, append ordering, listing, history and live events across two relays.

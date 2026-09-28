@@ -37,7 +37,9 @@ type streamEvent struct {
 	Type      string `json:"type"`
 	Identity  string `json:"identity"`
 	MessageID string `json:"message_id,omitempty"`
-	Timestamp string `json:"timestamp"`
+	// Drive is set on `drive.changed` events (E20-T5).
+	Drive     *driveEvent `json:"drive,omitempty"`
+	Timestamp string      `json:"timestamp"`
 }
 
 // hub tracks who is listening for which identity.

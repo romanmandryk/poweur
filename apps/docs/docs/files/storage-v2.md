@@ -316,30 +316,50 @@ current choices:
 - **Trim** releases the chunks of trimmed records; the segments that hold them stay until
   journal compaction.
 
-## HTTP surface (planned)
+## HTTP surface
 
-All drive endpoints are under `/drive/{identity}` and use existing owner sessions
-or the signed challenge flow for visitors. Authorization is checked on every
-request; knowing a hash is never permission to read a chunk.
+All drive endpoints are under `/drive/{identity}` (`apps/api/internal/relay/drive_api.go`).
+Every request is authenticated like an inbox pickup: `GET /auth/challenge?identity=<caller>`,
+then `X-Poweur-Identity`, `X-Poweur-Challenge` and `X-Poweur-Signature` (the challenge signed by
+the identity key or a session key with `X-Poweur-Session-Id`). The caller may be a visitor homed
+on another relay; its key is resolved like any peer's. Until node shares (E20-T7) only the drive's
+owner is permitted (`403` otherwise). Knowing a hash is never permission to read a chunk.
 
-| Operation | Request |
-|---|---|
-| Missing chunks / transfer URLs | `POST /chunks/missing` |
-| Proxied upload | `PUT /chunks/{hash}` |
-| Commit replace, append, move, remove or trim | `POST /commit` |
-| Node and head | `GET /nodes/{node}` |
-| Authorized version and chunk | `GET /nodes/{node}/versions/{version}`, then `/chunks/{hash}` beneath that version |
-| Children / retained history | `GET /nodes/{node}/children`, `/history` |
-| Incremental tree changes | `GET /changes?cursor=...` |
-| Append tail | `GET /nodes/{node}/records?from=N&limit=...` |
+| Operation | Request | Response |
+|---|---|---|
+| Drive root, usage, quota | `GET /drive/{identity}` | `{drive, root, used, quota}` |
+| Missing chunks / transfer URLs | `POST /chunks/missing` `{chunks:[{id,size}]}` (≤ 1024) | `{missing:[{id,size,upload:{method,url,headers}}]}` |
+| Upload through the relay | `PUT /chunks/{hash}` (body = encrypted chunk) | `{id,size}`; `422` if bytes do not hash to `{hash}` |
+| Commit | `POST /commit` `{id, manifest, pages}` or `{id, records}` or `{id, trim:{node,before,snapshot:{node,version}}}` | `{seq, head, positions}`; `409 {head}` on a stale base |
+| Changes | `GET /changes?cursor=N&limit=` | `{changes, cursor}` |
+| Node at head | `GET /nodes/{node}` | node info (`ETag` = head) |
+| Children | `GET /nodes/{node}/children?cursor=&limit=` | `{children, cursor}` |
+| Retained history | `GET /nodes/{node}/history` | `{versions}` |
+| Signed manifest / page | `GET /nodes/{node}/versions/{version}`, `…/pages/{page}` | immutable JSON |
+| Chunk through a version | `GET /nodes/{node}/versions/{version}/chunks/{hash}` | immutable bytes |
+| Chunk of an append record | `GET /nodes/{node}/chunks/{hash}` | immutable bytes |
+| Append tail | `GET /nodes/{node}/records?from=N&limit=` | `{records:[{position,record}], next}`; `410 {trimmed_before, snapshot}` |
 
-Listings and history are bounded and cursor-paged. Cursors bind drive, query and
-sequence; invalid cursors return a client error, expired cursors require resync.
-`drive.changed` travels on the existing SSE hub, only after durable commit.
-Appends up to 16 KiB can ride inline. Cross-relay members authenticate directly to
-the host relay; subscriptions are filtered by current permission and revoked
-streams close. Notification delivery is advisory: reconnecting clients read the
-changes cursor to recover missed events.
+`upload.url` is either the relay's own `PUT /chunks/{hash}` or, on S3 with `S3_PRESIGN=1`, a
+15-minute presigned PUT whose `x-amz-checksum-sha256` header binds the chunk hash. Commit
+requires the manifest or record author to be the authenticated caller, so a signed object
+cannot be replayed through someone else's session. Commit request IDs are 16 random bytes
+(hex); retrying one returns the first result. Limits: 16 MiB commit bodies, 4 MiB chunks,
+1000 entries per listing page. Content-addressed responses carry
+`Cache-Control: private, max-age=31536000, immutable`; everything else is `no-store`.
+
+After a commit is durable the owner's event stream (`GET /events/{identity}`) receives
+
+```json
+{"type":"drive.changed","identity":"alice.example","timestamp":"…",
+ "drive":{"drive":"alice.example","seq":7,"node":"…","operation":"append","position":3,
+          "records":[{"position":3,"record":{…}}]}}
+```
+
+Appends whose records serialize to at most 16 KiB carry them inline. Events are advisory:
+a reconnecting client reads `changes` from its cursor. Cross-relay member subscriptions,
+presigned downloads and serving `/.well-known/poweur/` from `.poweur/public` come with
+shares (E20-T7) and system files (E20-T6).
 
 ## Shares, links and worked flows
 

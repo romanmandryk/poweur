@@ -21,6 +21,7 @@ import (
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
 	"github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/drive/engine"
 	"github.com/poweur/api/internal/drive/provider"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
@@ -71,6 +72,8 @@ type Server struct {
 	// serving yet; system files still use sysFiles.
 	drive    provider.Store
 	driveErr error
+	// engine serves /drive/{identity} over drive (E20-T5); nil without it.
+	engine *engine.Engine
 	// sysLocks makes owner API preconditions atomic with writes and deletes.
 	sysLocks *deviceLocks
 
@@ -162,8 +165,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 	if err != nil {
 		s.startupFailures = append(s.startupFailures, "drive_storage_open_failed")
 		s.driveErr = err
-	} else {
+	} else if driveStore != nil {
 		s.drive = driveStore
+		s.engine = newDriveEngine(driveStore, s)
 	}
 	return s
 }
@@ -278,6 +282,19 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /identities/{identity}/system/{path...}", s.handleSystemFileGet)
 	mux.HandleFunc("PUT /identities/{identity}/system/{path...}", s.handleSystemFilePut)
 	mux.HandleFunc("DELETE /identities/{identity}/system/{path...}", s.handleSystemFileDelete)
+	mux.HandleFunc("GET /drive/{identity}", s.handleDriveGet)
+	mux.HandleFunc("POST /drive/{identity}/chunks/missing", s.handleDriveMissing)
+	mux.HandleFunc("PUT /drive/{identity}/chunks/{chunk}", s.handleDriveChunkPut)
+	mux.HandleFunc("POST /drive/{identity}/commit", s.handleDriveCommit)
+	mux.HandleFunc("GET /drive/{identity}/changes", s.handleDriveChanges)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
@@ -1043,17 +1060,32 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing or mismatch")
 		return false
 	}
+	_, ok := s.authenticateCaller(w, r, true)
+	return ok
+}
+
+// authenticateCaller proves who is calling: the identity in
+// X-Poweur-Identity signed a one-shot challenge with its identity key or a
+// live session key. With requireLocal, only identities hosted here may sign
+// with their identity key; otherwise a visitor from another relay may, and
+// its key is resolved like any peer's.
+func (s *Server) authenticateCaller(w http.ResponseWriter, r *http.Request, requireLocal bool) (string, bool) {
+	identity := r.Header.Get("X-Poweur-Identity")
+	if identity == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing")
+		return "", false
+	}
 	signature := r.Header.Get("X-Poweur-Signature")
 	if signature == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
-		return false
+		return "", false
 	}
 	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
 	challenge, ok := s.consumeChallenge(identity, r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge missing or expired")
-		return false
+		return "", false
 	}
 
 	var publicKey ed25519.PublicKey
@@ -1061,22 +1093,22 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		session, ok := s.sessions.Get(sessionID)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "session_expired", "session expired or not found")
-			return false
+			return "", false
 		}
 		if session.Identity != identity {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
-			return false
+			return "", false
 		}
 		publicKey = session.PublicKeyBytes
 	} else {
-		if !s.isLocalIdentity(r.Context(), identity) {
+		if requireLocal && !s.isLocalIdentity(r.Context(), identity) {
 			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
-			return false
+			return "", false
 		}
 		pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-			return false
+			return "", false
 		}
 		s.warmIdentityCache(identity, pub)
 		publicKey = pub
@@ -1084,10 +1116,10 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 
 	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
-		return false
+		return "", false
 	}
 	verifiedActor(r, identity)
-	return true
+	return identity, true
 }
 
 func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
