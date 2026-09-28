@@ -291,6 +291,31 @@ These formats are pinned by `drive-names.json`, `drive-seals.json`, `drive-chunk
 `drive-records.json` and `drive-manifests.json`. Do not infer a network API
 implementation from the primitive package.
 
+## Implemented drive engine
+
+`apps/api/internal/drive/engine` implements the journal described above with these
+current choices:
+
+- **One operation per segment.** Each accepted commit (manifest, append batch of up to
+  1024 records, trim or GC) is its own segment `journal/<seq>.json`, published with a
+  create-only write after its pages and version manifests are stored. Group commit is
+  not implemented yet.
+- **Snapshots** are written every 64 segments. Cold start takes the newest snapshot whose
+  sequence and segment hash match the journal, then replays; a gap fails closed.
+- **Several processes, one store.** Before validating a commit or collecting, the engine
+  replays any segments another process published (one missing-object read when nothing
+  changed). A lost publish race returns `ErrStale` and the caller retries. Reads are
+  served from the cache and may lag another process until its next write or event.
+- **Idempotency.** A request ID (16 bytes hex) returns the prior result for the same
+  content and is refused for different content, across restarts.
+- **GC** drops superseded versions after the retention period through a journalled `gc`
+  operation, deletes chunks no retained version or record references, and deletes
+  uncommitted uploads older than the upload TTL. Clients that pause longer than the TTL
+  between upload and commit must re-run `chunks/missing`. Run GC in one process per
+  drive until E20-T17 leases exist.
+- **Trim** releases the chunks of trimmed records; the segments that hold them stay until
+  journal compaction.
+
 ## HTTP surface (planned)
 
 All drive endpoints are under `/drive/{identity}` and use existing owner sessions

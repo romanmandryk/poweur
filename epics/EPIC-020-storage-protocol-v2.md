@@ -25,7 +25,7 @@
 | E20-T2 Key tree & encryption format | **done** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks, NFC names/name hashes, signed/sealed author-chain records, and signed version manifests with 1024-ref chunk-list pages (create/replace/move/rotate/remove, drop-box name tokens); Go↔TS vectors for all |
 | E20-T3 Storage providers: filesystem & S3 | **done** | Interface, filesystem and minio-go S3. Conformance and a mismatched presigned checksum verified on local Docker MinIO. Relay config is `STORAGE_PROVIDER=fs\|s3` |
 | **Wave 2 — relay** | | |
-| E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
+| E20-T4 Drive engine | **in progress** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
 | E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
 | E20-T6 `.poweur` system files & stateless relay | **open** | settings as files the relay validates and applies; no relay state outside the drive |
 | E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
@@ -74,7 +74,13 @@ Phase 0; no drive engine/provider existed at that checkpoint.
 - [x] Verify the S3 provider against local Docker MinIO and select `fs` or `s3`
       from relay configuration. GitHub Actions does not run MinIO. The drive
       engine that publishes through this store is Phase 4.
-- [ ] Phases 4–10: engine/API, stateless system files, node shares, clients,
+- [x] Phase 4 core engine (`apps/api/internal/drive/engine`): journal segments with
+      create-only publish, snapshots validated against the journal, catch-up replay of
+      segments published by another process, replace/append/trim commits, idempotent
+      request IDs, quota, version retention and orphan GC. Tests run on fs and, with
+      `POWEUR_TEST_S3_*`, on an existing S3 bucket (verified on MinIO). Still open in
+      E20-T4: group commit, per-member accounting, journal compaction.
+- [ ] Phases 5–10: API, stateless system files, node shares, clients,
       complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation:** Phase 0 introduced an operational owner-authenticated
@@ -450,15 +456,18 @@ wrong bytes is rejected by the store.
 
 ### E20-T4 — Drive engine
 
-- [ ] Journal (append-only segments) as the source of truth; in-memory tree and quota caches;
+- [x] Journal (append-only segments) as the source of truth; in-memory tree and quota caches;
       periodic tree snapshots; rebuild from the journal alone
-- [ ] Replace commits with `base_version` → `409`; append commits ordered per node; name-hash
+- [x] Replace commits with `base_version` → `409`; append commits ordered per node; name-hash
       uniqueness per folder
-- [ ] Uncommitted chunks expire (24 h); GC marks from live + retained versions and never
-      deletes a chunk referenced by an in-flight commit
-- [ ] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for EPIC-026
-- [ ] Append positions (total order per node) returned on commit and exposed to readers
-- [ ] Prefix trim before a snapshot position (owner/`admin` only); GC reclaims trimmed segments
+- [x] Uncommitted chunks expire (24 h); GC marks from live + retained versions and never
+      deletes a chunk referenced by an in-flight commit (one GC process per drive; see
+      E20-T17 for multi-instance)
+- [x] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for EPIC-026
+- [x] Append positions (total order per node) returned on commit and exposed to readers
+- [x] Prefix trim before a snapshot position (owner/`admin` only); trimmed record chunks are
+      released
+- [ ] GC reclaims journal segments that only hold trimmed records (journal compaction)
 - [ ] Group commit of appends into log segments with a bounded buffering window; an append is
       acknowledged only after its segment is durable in the provider
 - [ ] Per-member and per-link write accounting feeding E20-T7's caps
