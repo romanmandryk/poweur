@@ -9,6 +9,9 @@
 - **Supersedes:** EPIC-003's storage model (WebDAV, fixed roots, path grants, `relay-fs`
   whole files, E03-T7 opt-in E2EE design), EPIC-004's v1 sync protocol, EPIC-009 E09-T1's
   history layout and E09-T4's plaintext attachment bytes
+- **Gated by:** [EPIC-031](EPIC-031-reference-app-scenarios.md) — waves 2–3 are done only when
+  the headless reference apps (Markdown docs, site + contact + newsletter, forms, board, CRM,
+  whiteboard) pass on one relay and across relays
 - **Unlocks:** honest "files are end-to-end encrypted" claims, S3-compatible hosting, desktop
   sync, message-history paging (E15-T13), append-based collaboration (EPIC-024/025), hosted
   agents with explicit key grants (EPIC-027), ciphertext-only managed hosting (EPIC-028)
@@ -19,15 +22,15 @@
 |------|--------|-------|
 | **Wave 1 — spec & primitives** | | |
 | E20-T1 Storage v2 spec & ADR | **open** | object model, drive layout, API, what is retired; one spec replaces four docs |
-| E20-T2 Key tree & encryption format | **open** | Proton-style node keys, encrypted names + name hashes, chunk AEAD, signed manifests; Go + TS vectors |
+| E20-T2 Key tree & encryption format | **open** | Proton-style node keys, encrypted names + name hashes, chunk AEAD, sealed appends/creates, signed manifests and records; Go + TS vectors |
 | E20-T3 Storage providers: filesystem & S3 | **open** | minimal interface, conditional put, presigned URLs, one conformance suite for both |
 | **Wave 2 — relay** | | |
-| E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, GC, quota, rebuild from scratch |
-| E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads, listings, changes feed, SSE with inline appends; replaces `/dav` and `/sync` |
+| E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
+| E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
 | E20-T6 `.poweur` system files & stateless relay | **open** | settings as files the relay validates and applies; no relay state outside the drive |
-| E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; revocation + key rotation; key-in-fragment links |
+| E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
-| E20-T8 SDK drive clients (Go + TS) | **open** | encryption, uploads, commits, cursors, chunk caches |
+| E20-T8 SDK drive clients & CLI (Go + TS) | **open** | encryption, uploads, commits, cursors, chunk caches, scoped handles, event-log helper, `poweur drive` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
 | E20-T11 Message history & attachments on v2 | **open** | one append file per conversation; encrypted attachments |
@@ -37,7 +40,7 @@
 | E20-T13 rclone backend | **open** | desktop mount and local `serve webdav/sftp` for third-party tools |
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
 | E20-T15 Append performance for live apps | **open** | latency budgets and batching so EPIC-025 can build CRDT/realtime on append files |
-| E20-T16 Advanced shares & delegation | **open** | time-box presets, version-pinned snapshots, per-audience caps, resharing |
+| E20-T16 Advanced shares & delegation | **open** | time-box presets, version-pinned snapshots, resharing (caps moved to E20-T7) |
 | E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale for EPIC-028 |
 
 ## Goal
@@ -71,6 +74,8 @@ are files the owner (or the owner's agent) can edit in a synced folder.
    client ↔ bucket directly through presigned URLs where the provider allows it.
 7. **Merging is the client's job.** The relay detects conflicts (`409`); clients merge by file
    type, as Obsidian Sync does. CRDTs are an application choice layered on append files.
+8. **Apps have no servers.** An app's state lives in exactly one host drive; collaborators get a
+   share; outsiders write through links or messages; the app's code never holds a key.
 
 ## Background (current code — what is being replaced)
 
@@ -241,6 +246,89 @@ collaboration on notes, lists, tables and chat. Simultaneous typing in the same 
 the one case that needs a CRDT — that is EPIC-025, built as append files of CRDT updates plus
 snapshot files, with no protocol change here.
 
+### Append files as ordered event logs
+
+The relay assigns every append a **position** in a total order. That makes an append file a
+shared event log with a central sequencer: every client folds the same records in the same
+order through a deterministic reducer and converges, with last-writer-wins per field by
+position. This covers boards, CRMs, forms, comments, activity feeds and object-level
+whiteboards (Figma's multiplayer uses the same server-ordered, last-writer-wins-per-property
+model). Only fine-grained concurrent text editing needs a CRDT, and its updates are records in
+an append file too.
+
+- **Records** are the unit of an append: each is signed by its author and carries a per-author
+  sequence number, so the relay can order across authors but cannot drop, duplicate or reorder
+  one author's records undetected.
+- **Snapshots** are replace-mode files that say "folded up to position N". New readers load the
+  snapshot and read the log from N.
+- **Trim:** the owner (or an `admin`) may drop the prefix before a snapshot's position, which
+  bounds growth.
+- **Group commit:** the relay buffers appends for a short window (≈ 50–100 ms) and writes them
+  as one log segment, so tiny appends do not cost one provider write each (essential on S3).
+- **Reducers enforce app roles:** because records are signed and share roles are readable by
+  members, a reducer ignores operations from authors whose role does not allow them.
+
+### Sealed appends and creates: writing without reading
+
+A file's content key is symmetric, so anyone who could encrypt a normal chunk could also read
+the file. Writers who must not read — form respondents, commenters with comment-only access,
+guestbook visitors, file-request uploaders — seal each record (or each new file) to the
+node's **public** key instead. Only holders of the node's private key (the owner and readers)
+can open them; a client may later compact sealed records into normal chunks. The relay
+enforces the `append` or `create` role, caps and proof-of-work, and never reads the records.
+
+### Who hosts and who pays
+
+- **Personal apps:** the user's own drive and quota.
+- **Shared app state:** exactly one host drive — by default the creator's. Every member's
+  writes count against the host's quota (as files in Google Drive count against their owner),
+  so shares carry **per-member and per-link caps** (bytes, records, rate).
+- **Team or long-lived state:** hosted by a **group identity** (an EPIC-024 Space) whose drive
+  is billed to an organization or a sponsoring member (EPIC-026 pooled storage), so no single
+  member leaving takes it down.
+- **Ownership transfer** moves a subtree between drives (a person → a Space, or to another
+  person): ciphertext chunks are copied, the subtree root key is re-sealed, shares are
+  re-issued by the new owner. Nothing is decrypted by the relay.
+- **Public-facing inputs** (forms, contact, signups) are paid by the owner and bounded by
+  link caps, rate limits and proof-of-work.
+
+### Apps and storage access
+
+Apps run as static code on a sandboxed origin (EPIC-029); the host frame holds keys and hands
+the app a **scoped drive handle**: the folder created for the app at install plus the nodes the
+user explicitly opens with it (a picker grant, like Google Drive's `drive.file` scope). Headless
+agents and tests use the same scoped handle from the SDK. There is no reserved `/apps` root.
+
+### Build vs adopt
+
+Almost every piece exists as a library; what is new is the combination. Adopt these rather than
+writing our own, and keep the list current in the E20-T1 ADR:
+
+| Piece | Adopt | Notes |
+|-------|-------|-------|
+| Encryption primitives | `golang.org/x/crypto`, `@noble/ciphers`/`curves`/`hashes` | already the only crypto dependencies |
+| Sealing to a public key (node keys, sealed appends/creates) | **age** (`filippo.io/age`, npm `age-encryption`) or **HPKE** RFC 9180 (`cloudflare/circl/hpke`, `@hpke/core`) | E20-T2 picks one; no home-made envelope |
+| Chunk AEAD | XChaCha20-Poly1305 from the libraries above | no format library needed |
+| Link password stretching | argon2id (`x/crypto/argon2`, `@noble/hashes`) | — |
+| S3 provider | `minio-go` | browsers use presigned URLs with plain `fetch`; no S3 SDK in TS |
+| Sync daemon file watching | `fsnotify` (+ `fsnotify/fsevents` on macOS) | study Syncthing's scanner/ignores (MPL: ideas, not code) |
+| Ignore rules | a gitignore matcher (e.g. `go-git`'s) | gitignore syntax, not our own |
+| Text merge driver | diff-match-patch (`sergi/go-diff`, Google's JS) for prose; `node-diff3` for line files | the Obsidian approach |
+| Desktop mount and tool access | **rclone** backend (E20-T13) | gives mount, sync and `serve webdav/sftp` |
+| Real-time text (EPIC-025) | **Yjs** (or Automerge / Loro) | the relay never parses it |
+| Encrypted CRDT sync patterns | secsync; Ink & Switch Keyhive/Beelay research | borrow design, possibly code |
+| Large-group key agreement (later) | MLS (OpenMLS, ts-mls) | only if per-member sealing stops scaling |
+| Delegation tokens (E20-T16) | Biscuit or UCAN | — |
+| Client-side local index | bbolt or pure-Go SQLite (`modernc.org/sqlite`); IndexedDB via `idb` | "no database" applies to the relay only |
+
+**Written here:** the key-tree layout, manifests, the journal, share documents, `.poweur`
+validators and the event-log helper — each small and protocol-specific.
+
+**Not adopted:** OpenPGP (Proton's choice; heavy, and age/HPKE cover it). **Studied as prior
+art, not built on:** Peergos (cryptree key tree + sandboxed apps — read before E20-T2), Solid and
+remoteStorage (apps writing to user storage, not E2E encrypted), AT Protocol (signed user
+repositories, public-first).
+
 ## Tasks
 
 ### E20-T1 — Storage v2 spec & ADR
@@ -249,7 +337,8 @@ snapshot files, with no protocol change here.
       model, commit semantics, API, provider layout, relay-readable table and metadata
       inventory; replaces `storage-model.md`, `webdav.md`, `sync-protocol.md` and
       `e2ee-design.md` (kept as history)
-- [ ] ADR: why WebDAV, fixed roots, path grants and a relay database are all dropped; why no CDC
+- [ ] ADR: why WebDAV, fixed roots, path grants and a relay database are all dropped; why no CDC;
+      the build-vs-adopt table above with the final library choices and licences
 - [ ] Decide: manifest encoding (JSON vs CBOR), chunk-list paging for long/append files,
       version retention default, journal segment and tree snapshot formats, name-hash scheme,
       padding buckets for sizes
@@ -268,6 +357,10 @@ request, agent edits `contacts.json` locally, relay cold start.
       encryption + name hash, content keys, chunk AEAD, manifest and append signatures
 - [ ] Moves (re-seal + re-name), key rotation after revocation, identity encryption-key
       rotation (EPIC-011 E11-T5) re-sealing only drive roots
+- [ ] **Sealed appends and sealed creates:** records and new files sealed to the node public
+      key; readers open them with the node private key; compaction re-encrypts them as normal chunks
+- [ ] **Signed records:** append records carry author, per-author sequence number and a
+      signature; the vectors cover gaps, duplicates and reorders within one author
 - [ ] `@poweur/client` twin; conformance vectors for every construction, including tamper,
       truncation, reorder and cross-node substitution failures
 
@@ -295,8 +388,14 @@ wrong bytes is rejected by the store.
 - [ ] Uncommitted chunks expire (24 h); GC marks from live + retained versions and never
       deletes a chunk referenced by an in-flight commit
 - [ ] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for EPIC-026
+- [ ] Append positions (total order per node) returned on commit and exposed to readers
+- [ ] Prefix trim before a snapshot position (owner/`admin` only); GC reclaims trimmed segments
+- [ ] Group commit of appends into log segments with a bounded buffering window; an append is
+      acknowledged only after its segment is durable in the provider
+- [ ] Per-member and per-link write accounting feeding E20-T7's caps
 
 **Acceptance:** fuzzed concurrent replace/append commits never lose an acknowledged commit;
+every reader sees appends in the same positions; a trimmed log reads correctly from its snapshot;
 deleting every cache and restarting yields identical listings and quotas; GC under a concurrent
 commit fuzz never removes a live chunk.
 
@@ -307,8 +406,14 @@ commit fuzz never removes a live chunk.
       an authorized version, children listing, version history, changes feed with cursor
 - [ ] Auth: existing session and signed-challenge auth for owners and visitors; no DAV tokens,
       no app passwords
+- [ ] Read an append file from a position (`?from=N`), with the next position returned
 - [ ] SSE `drive.changed` events per node; appends ≤ 16 KiB carried inline
+- [ ] **Share members subscribe too:** a member on another relay opens an event stream on the
+      host relay for the nodes shared with them (visitor auth), filtered to what they may read;
+      revocation closes the stream
 - [ ] `/pub` and `/.well-known/poweur/` served from public nodes and `.poweur/public`
+- [ ] Public nodes CDN-cacheable (immutable chunk URLs, short-lived feed heads with `ETag`) and
+      the relay subscription proxy + batch feed heads (memory only) specified in EPIC-032 E32-T4
 
 **Acceptance:** integration suite (`apps/integration`, real relays) covers upload, resume,
 replace conflict, append ordering, listing, history and live events across two relays.
@@ -333,6 +438,14 @@ invalid edit is rejected with a readable reason and never half-applied.
 
 - [ ] Share documents on node ids; roles `read`/`write`/`append`/`create`/`admin`; enforcement
       on every read and commit; author-role verification on the reading client
+- [ ] **Inheritance and combination:** a node's effective role for a member is the highest role
+      granted by any share on the node or its ancestors, so a folder can be shared `read` while
+      one file in it is shared `append` (e.g. comments)
+- [ ] **Caps:** per-member and per-link limits on bytes, records/files and rate, plus
+      one-per-identity limits (one form response per ID); `429`/`507` with reasons
+- [ ] **Proof-of-work** (E14 primitive) required on anonymous link writes, difficulty set by the owner
+- [ ] **Ownership transfer** of a subtree between drives (person ↔ group identity), re-issuing
+      shares and keeping links working
 - [ ] Offers and accepts (E05-T3 bodies) carry sealed node keys; mounts in `.poweur/private/mounts/`
 - [ ] Revocation with immediate access removal and key rotation on the next owner write
 - [ ] Links with key-in-fragment and the split password verifier; expiry, download caps,
@@ -341,18 +454,28 @@ invalid edit is rejected with a readable reason and never half-applied.
       from E05-T6; Send (E05-T7) as links on sealed files
 - [ ] Groups as members; membership change rotates keys
 
-**Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a revoked member's cached keys do
+**Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a member with `append` on a file and
+no read cannot read it; an anonymous link writer is stopped by caps and proof-of-work; a
+board transferred from a person to a Space keeps its members and links; a revoked member's cached keys do
 not open post-revocation writes; a link opens in a clean browser and the relay's logs and
 store never contain the key or password.
 
-### E20-T8 — SDK drive clients (Go + TS)
+### E20-T8 — SDK drive clients & CLI (Go + TS)
 
 - [ ] Encrypt/decrypt, chunking, missing-chunk upload, replace/append commits with retry,
       cursors, change subscription
 - [ ] Chunk cache: a directory under the CLI home; IndexedDB in web/shell — immutable, never revalidated
 - [ ] Streaming decrypt with range reads for large files and media
+- [ ] **Scoped drive handles:** a client restricted to a folder plus picked nodes, used by the
+      EPIC-029 bridge, agents and the EPIC-031 headless apps
+- [ ] **Event-log helper:** `open(log, reducer)` → fold snapshot + tail, subscribe, append with
+      per-author sequence, write snapshots, trim; Go and TS
+- [ ] **CLI:** `poweur drive ls|put|get|mv|rm|history|append|tail --from|trim|watch`,
+      `poweur drive share add|rm|ls`, `poweur drive link create|rm`, `poweur drive transfer`,
+      all with `--json`, so every collaboration action is scriptable
 
-**Acceptance:** both SDKs pass the same scenario suite against a real relay on each provider.
+**Acceptance:** both SDKs pass the same scenario suite against a real relay on each provider,
+and every action in the EPIC-031 scenarios is reachable from the CLI.
 
 ### E20-T9 — Sync daemon & merge drivers
 
@@ -438,8 +561,7 @@ an edit syncs back.
 
 ### E20-T16 — Advanced shares & delegation
 
-- [ ] Expiry presets and `not_before`; version-pinned snapshot shares; per-audience download and
-      byte caps (generalizing link caps)
+- [ ] Expiry presets and `not_before`; version-pinned snapshot shares
 - [ ] Resharing through `admin`, or attenuated delegation tokens (evaluate UCAN / Biscuit /
       macaroons) — share documents stay the source of truth
 - [ ] Recorded non-goal: "view but don't download" is not a security control
@@ -464,6 +586,7 @@ timeout without losing an acknowledged commit.
 - Server-side merging; the relay never interprets file formats
 - Recovering files for someone who loses their seed and every device (EPIC-011 owns recovery)
 - DRM-style "view but not copy"
+- App backends: apps that need a neutral authority use EPIC-027, not the relay
 
 ## Superseded task IDs (the pre-2026-09-25 plan)
 

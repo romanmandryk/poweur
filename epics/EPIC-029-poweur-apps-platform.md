@@ -4,7 +4,10 @@
 - **Priority:** P2 (the developer-adoption engine)
 - **Depends on:** EPIC-012 (separate sandboxed origin for active content — decide both together),
   EPIC-008 (consented, path-scoped app grants), EPIC-006 (app namespaces, conventions),
-  EPIC-025 (durable documents + T7 rooms API), EPIC-017 (`@poweur/client`)
+  EPIC-025 (durable documents + T7 rooms API), EPIC-017 (`@poweur/client`), EPIC-020 (scoped
+  drive handles, event-log helper, sealed appends), EPIC-009 T7–T8 (intent types, typed
+  routing); the [EPIC-031](EPIC-031-reference-app-scenarios.md) headless apps are the proving
+  ground and become templates (E29-T9)
 - **Interacts with:** EPIC-024 (Apps slot in a Space), EPIC-010-T5 (directory/trust surface),
   EPIC-027-T7 (neutral hosted authorities), EPIC-030 (paid apps), EPIC-026 (egress entitlements)
 - **Unlocks:** third-party apps with no backend; multiplayer games; whiteboard/design/co-editing
@@ -19,8 +22,8 @@
 | E29-T1 App manifest & signed bundles | open | `app.json`: entry, permissions, conventions, publisher signature |
 | E29-T2 Publish from a home | open | `poweur app publish` → immutable versioned bundle |
 | E29-T3 App origin & sandbox | open | per-app origin on the E12 sister host; no relay cookies/tokens |
-| E29-T4 Runtime bridge (`@poweur/app`) | open | identity, files, documents, rooms, messages via `postMessage` |
-| E29-T5 Open, install, revoke | open | consent screen, scoped grant to `/apps/<app-id>/`, launcher |
+| E29-T4 Runtime bridge (`@poweur/app`) | open | identity, scoped drive, event logs, documents, rooms, typed messages via `postMessage` |
+| E29-T5 Open, install, revoke | open | consent screen, app folder + picker grants (no `/apps` root), launcher |
 | E29-T6 Sharing & open-with | open | share a document → recipient opens it in a compatible app |
 | E29-T7 Game kit | open | lobby/invites, turn-based state, realtime input, host migration |
 | E29-T8 App directory | open | opt-in index, signed ratings, abuse reporting, no pay-for-rank |
@@ -53,7 +56,15 @@ platform. This epic is that platform, built only once the editor shows the layer
 - **Signed, immutable bundles.** Manifest + content hashes signed by the publisher ID; the loader
   verifies before running, so a compromised CDN or relay cannot swap code. Users may pin versions.
 - **Bridge, not tokens-in-JS.** The app talks to the user's relay only through a small host frame
-  that enforces the manifest's permissions; the app never holds the session token.
+  that enforces the manifest's permissions; the app never holds the session token **or any
+  drive key** — the host frame encrypts and decrypts.
+- **Storage access like Google Drive's `drive.file`.** An app sees the folder created for it at
+  install plus the nodes the user explicitly opens with it; nothing else. Shared state lives in
+  one host drive (the creator's or a Space's) and collaborators reach it through shares
+  (EPIC-020 "Who hosts and who pays").
+- **Collaboration pattern.** Most apps are an append-file event log folded by a deterministic
+  reducer plus snapshots (EPIC-020 "Append files as ordered event logs"); the bridge exposes the
+  SDK's event-log helper so app authors never handle ordering, compaction or sealing.
 - **Authority for multiplayer:** default "host player is authoritative" with host migration;
   neutral authorities are an EPIC-027-T7 option, declared in the manifest with who pays.
 - **Open by default:** sideloading an app by URL always works; the directory is a convenience.
@@ -61,8 +72,9 @@ platform. This epic is that platform, built only once the editor shows the layer
 ## Tasks
 
 ### E29-T1 — Manifest & signed bundles
-- [ ] `app.json` PCP + schema: id, version, entry, permissions (paths, room bindings, message
-      types), conventions consumed/produced, optional authority, pricing hook (EPIC-030), signature.
+- [ ] `app.json` PCP + schema: id, version, entry, permissions (own folder, picker access, room
+      bindings, message types it may **send** and **receive** — EPIC-009 T7/T8), conventions
+      consumed/produced, optional authority, pricing hook (EPIC-030), signature.
 - [ ] Go/TS vectors; CLI validation.
 
 **Acceptance:** a tampered file in a published bundle fails verification before any code runs.
@@ -81,14 +93,20 @@ platform. This epic is that platform, built only once the editor shows the layer
 **Acceptance:** the hostile-app suite passes in CI.
 
 ### E29-T4 — Runtime bridge
-- [ ] `@poweur/app`: `identity()`, `files`, `docs` (EPIC-025), `rooms` (E25-T7), `send()`,
+- [ ] `@poweur/app`: `identity()`, `drive` (scoped handle: own folder + picked nodes), `log`
+      (event-log helper: fold, subscribe, append, snapshot, sealed append), `share()`,
+      `docs` (EPIC-025), `rooms` (E25-T7), `send()` / `inbox()` for declared message types,
       `purchase()` (EPIC-030); every call checked against the manifest.
+- [ ] The bridge API mirrors the SDK calls the EPIC-031 headless apps use, so a headless
+      reference app runs in the bridge unchanged.
 
 **Acceptance:** the EPIC-025 Markdown editor runs as an app purely through the bridge.
 
 ### E29-T5 — Open, install, revoke
-- [ ] Consent screen with publisher ID, permissions and conventions; grant written; launcher tile;
-      pin into a Space's Apps slot (EPIC-024).
+- [ ] Consent screen with publisher ID, permissions and conventions; the app's folder is created
+      where the user chooses (default `Apps/<app name>/`, an ordinary folder); picker grants
+      recorded per node; the record of what each app may touch lives in `.poweur/private/apps/`;
+      launcher tile; pin into a Space's Apps slot (EPIC-024).
 
 **Acceptance:** install → use → revoke is fully visible in the "what can touch my home" panel.
 
@@ -113,7 +131,9 @@ continues; a reload resumes from durable state.
 **Acceptance:** the directory lists templates and demo apps and installs work from it.
 
 ### E29-T9 — Templates & tutorial
-- [ ] `create-poweur-app` (Vite/React) with notes, multiplayer-game and file-tool templates.
+- [ ] `create-poweur-app` (Vite/React) with notes, multiplayer-game and file-tool templates, plus
+      the EPIC-031 reference apps (Markdown docs, site + contact + newsletter, forms, board,
+      CRM, whiteboard) as starting points.
 
 **Acceptance:** "zero to a deployed multiplayer app in ten minutes" tutorial runs in CI.
 
