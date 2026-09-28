@@ -22,8 +22,8 @@
 |------|--------|-------|
 | **Wave 1 — spec & primitives** | | |
 | E20-T1 Storage v2 spec & ADR | **in progress** | Target spec and ADR written; exact signed formats/vectors and final privacy/store copy remain open |
-| E20-T2 Key tree & encryption format | **in progress** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks and Go↔TS vectors implemented; names/index, signed manifests/records, moves/rotation still open |
-| E20-T3 Storage providers: filesystem & S3 | **open** | minimal interface, conditional put, presigned URLs, one conformance suite for both |
+| E20-T2 Key tree & encryption format | **in progress** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks and Go↔TS vectors implemented; NFC names/name hashes and signed/sealed author-chain records added; signed manifests and moves/rotation still open |
+| E20-T3 Storage providers: filesystem & S3 | **in progress** | Interface and fs pass shared/race conformance; minio-go S3 implemented, MinIO verification and relay configuration wiring pending |
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
 | E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
@@ -61,8 +61,13 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       frozen v1 message compatibility, reject malformed nonce lengths, add drive domains.
 - [x] Add Go/TS key wraps, canonical contexts, padded XChaCha20 chunks and hash IDs;
       deterministic drive-seals/chunks vectors cover decryption and byte-identical re-encryption.
-- [ ] Complete Phase 2: encrypted names/name index, signed manifests and author-chain
-      records, sealed creates/appends, moves/key rotation and their failure vectors.
+- [x] Add NFC encrypted names/name index and signed/sealed append records, with
+      per-author duplicate/reorder/gap/fork checks and Go↔TS conformance vectors.
+- [ ] Complete Phase 2: signed manifests/pages, sealed creates, moves/key rotation
+      and their failure vectors.
+- [x] Add provider contract and filesystem implementation with range reads, atomic
+      conditional writes, durable rename, safe paths, restart and race conformance.
+- [ ] Verify S3 provider against MinIO and wire fs/S3 configuration into the drive engine.
 - [ ] Phases 3–10: providers, engine/API, stateless system files, node shares, clients,
       complete baseline, migration and production rehearsal.
 
@@ -97,7 +102,8 @@ as the test reference; retain already ported temporary system-file tests as regr
 
 Files/sharing/attachment/durability browser suites that still invoked removed DAV APIs
 are removed during Phase 0. Files, direct-share and link UI suites return in E20-T10;
-Tasks/Guestbook return via EPIC-031; sync via E20-T9. Messaging-only browser coverage stays.
+Tasks/Guestbook return via EPIC-031; sync via E20-T9. The onboarding upload/share
+flow and keyboard folder navigation return in E20-T10. Messaging-only browser coverage stays.
 
 ## Goal
 

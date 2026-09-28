@@ -12,6 +12,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./crypto": "./dist/crypto/index.js",
+    "./drive": "./dist/drive/index.js",
     "./canonical": "./dist/canonical.js",
     "./resolve": "./dist/resolve.js",
     "./identity": "./dist/identity.js",

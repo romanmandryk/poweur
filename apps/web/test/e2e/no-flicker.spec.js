@@ -35,7 +35,7 @@ test.describe("no full-page re-render", () => {
       document.querySelector(".app-header").dataset.probe = "header";
       document.querySelector(".bottom-nav").dataset.probe = "nav";
     });
-    for (const page of ["contacts", "files", "settings", "messages"]) {
+    for (const page of ["contacts", "settings", "messages"]) {
       await reader.click(`.nav-tab[data-page="${page}"]`);
     }
     await expect(reader.locator('.app-header[data-probe="header"]')).toHaveCount(1);

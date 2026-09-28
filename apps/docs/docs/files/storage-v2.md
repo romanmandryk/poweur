@@ -128,8 +128,9 @@ introduced.
 
 Names are UTF-8 NFC, case-sensitive, nonempty, contain neither slash nor NUL, and
 are not `.` or `..`. Clients seal names to the parent public key. Name lookup uses
-HMAC-SHA256 with a name-index key derived from the parent's private key using a
-separate HKDF domain, and includes the normalized name. The root's `.poweur` name
+HMAC-SHA256 over the normalized name. Derive its 32-byte key with HKDF-SHA256,
+IKM = the 32-byte parent private key, salt = parent public key, info =
+`poweur/drive/name-index/v1`. Names are at most 255 UTF-8 bytes after normalization. The root's `.poweur` name
 is reserved. A create-only outsider cannot compute the private name index; its
 sealed create is assigned a random opaque name token until the owner accepts and
 indexes it. Do not reveal the parent's private index key to drop-box writers.
@@ -180,6 +181,41 @@ plus explicit system/relay state accounting; per-member/link accounting controls
 write caps. GC marks retained versions and pins in-flight commits under the same
 per-drive serialization boundary before sweeping. It must not race a new commit
 into referencing a chunk already selected for deletion.
+
+### Implemented append-record encoding
+
+`AppendRecord` has `format: 1`, `drive`, `node`, `author`, `generation`, `sequence`,
+`previous`, `chunks`, optional `sealed`, and `signature`. Drive/author are canonical
+lowercase identities without surrounding whitespace. Node IDs are 16 random bytes
+encoded as 32 lowercase hex characters. Generation and sequence start at 1 and are
+safe integers. Sequence 1 has an empty previous hash; subsequent records name the
+SHA-256 hash of their author's preceding record on that node.
+
+Exactly one payload form is allowed: 1–1024 encrypted chunk references `{id,size}`,
+or a sealed envelope with an empty `chunks: []`. A chunk ID is 32 bytes of lowercase
+hex; size includes nonce/padding/tag and must have the chunk format's size/alignment.
+The sealed envelope uses `ephemeral_public_key`, `nonce`, `ciphertext`, all strict
+unpadded base64url. Its encryption context uses purpose
+`record:<author>:<sequence>:<previous>` so author-chain substitution also fails AEAD.
+
+The Ed25519 signing bytes are the UTF-8 prefix `poweur/drive/record-sign/v1\n`
+followed by uint32 big-endian length-prefixed UTF-8 fields, in this exact order:
+format (`1`), drive, node, author, generation, sequence, previous, chunk count;
+then each chunk's ID and stored size in order; then sealed ephemeral key, nonce,
+ciphertext (three empty fields for a chunk record). Counters are unsigned decimal
+ASCII. The signature is not included in its own input.
+
+Record hash = SHA-256(`poweur/drive/record-hash/v1\n` || canonical signing bytes ||
+raw 64-byte signature), encoded as lowercase hex. Verify the signature with the
+resolved author's key and check its role before applying content; knowing a record
+hash alone is not verification. Keep separate `(sequence,hash)` cursors for each
+`(drive,node,author)`. A duplicate/reordered sequence, gap, or mismatched previous
+hash is an error and must not advance the cursor. Retry idempotency is the engine's
+separate operation-ID contract.
+
+These formats are pinned by `drive-names.json`, `drive-seals.json`, `drive-chunks.json`
+and `drive-records.json`. Signed version manifests and chunk-list page encodings are
+still open; do not infer a network API implementation from the primitive package.
 
 ## HTTP surface (planned)
 
