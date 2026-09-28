@@ -39,8 +39,6 @@ const sidebars: SidebarsConfig = {
         'clients/overview',
         'clients/js-sdk',
         'clients/cli-reference',
-        'conventions/app-data',
-        'conventions/poweur-sys',
       ],
     },
     {
@@ -78,12 +76,9 @@ const sidebars: SidebarsConfig = {
       label: 'Files',
       collapsed: true,
       items: [
-        'files/storage-model',
-        'files/webdav',
-        'files/sharing',
+        'files/storage-v2',
+        'files/storage-v2-adr',
         'files/group-identities',
-        'files/sync-protocol',
-        'files/e2ee-design',
       ],
     },
     {

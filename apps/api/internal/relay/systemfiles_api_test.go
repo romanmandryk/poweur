@@ -3,12 +3,14 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -220,4 +222,66 @@ func getWellKnownRaw(t *testing.T, url, host string) (*http.Response, []byte) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	return resp, raw
+}
+
+// Competing edits against the same revision must have exactly one winner.
+func TestSystemFileConcurrentIfMatch(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "sysrace.poweur.net")
+	path := sysPublicDir + "/profile.json"
+	response := sysReq(t, ts, http.MethodPut, alice, alice.name, path, []byte(`{"version":1,"display_name":"initial"}`), nil)
+	tag := response.Header.Get("ETag")
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("initial PUT: %d", response.StatusCode)
+	}
+	const writers = 24
+	headers := make([]map[string]string, writers)
+	for i := range headers {
+		headers[i] = ownerAuth(t, ts, alice)
+		headers[i]["If-Match"] = tag
+	}
+	start := make(chan struct{})
+	statuses := make(chan int, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPut, ts.URL+"/identities/"+alice.name+"/system/"+path,
+				bytes.NewBufferString(fmt.Sprintf(`{"version":1,"display_name":"writer %d"}`, i)))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			for key, value := range headers[i] {
+				req.Header.Set(key, value)
+			}
+			<-start
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			resp.Body.Close()
+			statuses <- resp.StatusCode
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(statuses)
+	wins, conflicts := 0, 0
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			wins++
+		case http.StatusPreconditionFailed:
+			conflicts++
+		default:
+			t.Errorf("unexpected status %d", status)
+		}
+	}
+	if wins != 1 || conflicts != writers-1 {
+		t.Fatalf("wins=%d conflicts=%d", wins, conflicts)
+	}
 }

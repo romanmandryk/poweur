@@ -64,6 +64,8 @@ type Server struct {
 	// sysFiles is the relay's access to identities' system documents
 	// (EPIC-020 E20-T6): files under POWEUR_DATA, or memory without it.
 	sysFiles SystemFiles
+	// sysLocks makes owner API preconditions atomic with writes and deletes.
+	sysLocks *deviceLocks
 
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
@@ -136,6 +138,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		idCache:           idpkg.NewCache(),
 		hub:               newHub(),
 		deviceLocks:       newDeviceLocks(),
+		sysLocks:          newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}

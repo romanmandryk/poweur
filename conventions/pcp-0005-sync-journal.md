@@ -1,5 +1,7 @@
 # PCP-0005 — Sync journal record & changes cursor
 
+> Withdrawn for storage v2 (EPIC-020). Historical format only; do not implement.
+
 - **Status:** experimental (shipped with EPIC-004)
 - **Owner:** poweur core
 - **Registry entries:** `sys.sync.changed` (reserved)

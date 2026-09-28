@@ -127,10 +127,10 @@ poweur blocks import --file list.json --dry-run  # any other transport works too
 - **Signed, always.** An unsigned blocklist is an invitation to add names to somebody
   else's list in transit. The importer verifies against the publisher's resolved
   identity key — the same trust chain as everything else here.
-- **`shared/`, not `poweur-sys/relay/`.** The sys zone is owner-and-relay only: the
+- **`shared/`, not `.poweur/relay/`.** The sys zone is owner-and-relay only: the
   permission layer refuses every visitor there, grant or no grant, so a list published
   into it could never be adopted. And not `public/` either — a blocklist names people,
-  and published to the world it is a denunciation list. An [EPIC-005 share](../files/sharing)
+  and published to the world it is a denunciation list. An [EPIC-005 share](../files/storage-v2)
   hands it to a chosen audience.
 - **Adoption is a copy, not a subscription.** Importing writes entries into the
   importer's own contacts, tagged `source: "blocklist:<publisher>"`, where they can be
@@ -269,4 +269,4 @@ All three at `0` turns the meter off entirely.
 - [Contacts, inbox policy & key pinning](contacts) — the consent layer this one sits behind
 - [Anonymous messaging & sender challenges](anonymous-and-challenges) — the PoW primitive and challenge protocol
 - [Rate limiting](../protocol/rate-limiting) — the per-sender and global buckets
-- [Sharing](../files/sharing) — how a blocklist reaches its audience
+- [Sharing](../files/storage-v2) — how a blocklist reaches its audience

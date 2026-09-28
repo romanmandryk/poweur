@@ -19,9 +19,8 @@ contacts…), the convention gets written down here and matures into a standard.
 See [pcp-0001-process.md](pcp-0001-process.md). Short version: propose in a PR
 (`draft`), ship an implementation (`experimental`), reach two independent
 implementations (`stable`). The normative human-readable spec for `/poweur-sys` is
-[`apps/docs/docs/conventions/poweur-sys.md`](../apps/docs/docs/conventions/poweur-sys.md);
-app-namespace rules are in
-[`apps/docs/docs/conventions/app-data.md`](../apps/docs/docs/conventions/app-data.md).
+[`apps/docs/docs/files/storage-v2.md`](../apps/docs/docs/files/storage-v2.md).
+Schema URLs retain their historical namespace during the storage transition.
 
 ## Seed PCPs
 
@@ -29,9 +28,9 @@ app-namespace rules are in
 |-----|---------|--------|
 | [pcp-0001](pcp-0001-process.md) | The convention process itself | experimental |
 | [pcp-0002](pcp-0002-identity-document.md) | Identity document (`id.json`) | experimental |
-| [pcp-0003](pcp-0003-share-grant.md) | Share grant & group documents | experimental |
+| [pcp-0003](pcp-0003-share-grant.md) | Share grant & group documents | withdrawn |
 | [pcp-0004](pcp-0004-contacts.md) | Contacts, inbox policy & `sys.contact.*` | experimental |
-| [pcp-0005](pcp-0005-sync-journal.md) | Sync journal record & changes cursor | experimental |
+| [pcp-0005](pcp-0005-sync-journal.md) | Sync journal record & changes cursor | withdrawn |
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |
-| [pcp-0007](pcp-0007-tasks.md) | Tasks & projects (`net.poweur.tasks`) | draft |
+| [pcp-0007](pcp-0007-tasks.md) | Tasks & projects (`net.poweur.tasks`) | withdrawn |
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |

@@ -46,7 +46,7 @@ func TestConventionsRegistryValid(t *testing.T) {
 	if reg.Version != 1 {
 		t.Fatalf("registry version: %d", reg.Version)
 	}
-	validStatus := map[string]bool{"reserved": true, "draft": true, "experimental": true, "stable": true}
+	validStatus := map[string]bool{"reserved": true, "draft": true, "experimental": true, "stable": true, "withdrawn": true}
 	seen := map[string]bool{}
 	for _, a := range reg.AppIDs {
 		if !strings.Contains(a.ID, ".") {

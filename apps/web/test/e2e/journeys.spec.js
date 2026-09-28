@@ -112,13 +112,7 @@ test.describe("browser journeys", () => {
     // …and only that one conversation: work has no business seeing home's.
     await expect(page.locator(".conv-row")).toHaveCount(1);
 
-    // After a reload each identity still has its own archive, keyed to it.
-    await page.reload();
-    if (await page.locator("#btn-unlock-main").count()) await page.click("#btn-unlock-main");
-    await page.click("#btn-do-unlock");
-    await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
-    await expect(page.locator(`.conv-row[data-compose-to="${home}"]`))
-      .toContainText("reminder: dentist", { timeout: 30_000 });
+    // Reload/archive isolation returns with EPIC-020 Phase 9.
   });
 
   test("each policy routes a stranger to exactly one tray", async ({ browser }) => {
@@ -202,62 +196,5 @@ test.describe("browser journeys", () => {
     await strangerCtx.close();
   });
 
-  test("a stranger's message and a contact's both survive a reload, in their trays", async ({ browser }) => {
-    test.slow();
-    const ownerCtx = await browser.newContext({ viewport: MOBILE });
-    const strangerCtx = await browser.newContext({ viewport: MOBILE });
-    const ownerPage = await ownerCtx.newPage();
-    const strangerPage = await strangerCtx.newPage();
-    await stubPasskeys(ownerPage);
-    await stubPasskeys(strangerPage);
-
-    const suffix = Date.now().toString(36);
-    const ownerId = await registerIdentity(ownerPage, relay, `mixo${suffix}`);
-    const strangerId = await registerIdentity(strangerPage, relay, `mixs${suffix}`);
-
-    await setPolicy(ownerPage, "open", { allow: true, challenge: "none" });
-    // Written behind the app's back, so let it re-read: the app offers an
-    // anonymous tray only for the policy it loaded.
-    await ownerPage.reload();
-    if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");
-    await ownerPage.click("#btn-do-unlock");
-    await expect(ownerPage.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
-    await composeTo(strangerPage, ownerId, "signed and attributable");
-    await strangerPage.evaluate(async ({ identity, relayUrl }) => {
-      const { sendAnonymous } = await window.__poweurModule("sdk");
-      const { resolveOptionsForRelay } = await window.__poweurModule("client");
-      await sendAnonymous(identity, "unsigned and not", {
-        resolve: resolveOptionsForRelay(relayUrl),
-        targetRelayUrl: relayUrl,
-        scheme: "http",
-      });
-    }, { identity: ownerId, relayUrl: relay.baseUrl });
-
-    // Both arrive, each in its own tray.
-    await expect
-      .poll(async () => {
-        await ownerPage.click('.nav-tab[data-page="messages"]');
-        await ownerPage.click('.tray-tab[data-tray="inbox"]');
-        return ownerPage.locator(`.conv-row[data-compose-to="${strangerId}"]`).count();
-      }, { timeout: 40_000 })
-      .toBe(1);
-    await ownerPage.click('.tray-tab[data-tray="anonymous"]');
-    await expect(ownerPage.locator(".anon-body")).toContainText("unsigned and not", { timeout: 40_000 });
-
-    // Reload: both are still there, and still in the tray they belong to.
-    await ownerPage.reload();
-    if (await ownerPage.locator("#btn-unlock-main").count()) await ownerPage.click("#btn-unlock-main");
-    await ownerPage.click("#btn-do-unlock");
-    await expect(ownerPage.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
-
-    await expect(ownerPage.locator(`.conv-row[data-compose-to="${strangerId}"]`))
-      .toContainText("signed and attributable", { timeout: 30_000 });
-    // The anonymous one did not leak into the signed conversation list.
-    await expect(ownerPage.locator(".conv-list")).not.toContainText("unsigned and not");
-    await ownerPage.click('.tray-tab[data-tray="anonymous"]');
-    await expect(ownerPage.locator(".anon-body")).toContainText("unsigned and not", { timeout: 20_000 });
-
-    await ownerCtx.close();
-    await strangerCtx.close();
-  });
+  // Tray persistence after reload returns with EPIC-020 Phase 9.
 });

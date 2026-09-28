@@ -6,7 +6,7 @@
       "id": "net.poweur.tasks",
       "owner": "poweur core",
       "pcp": "pcp-0007-tasks",
-      "status": "draft"
+      "status": "withdrawn"
     }
   ],
   "message_types": [
@@ -32,31 +32,31 @@
       "type": "sys.share.offer",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "experimental"
+      "status": "withdrawn"
     },
     {
       "type": "sys.share.accept",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "experimental"
+      "status": "withdrawn"
     },
     {
       "type": "sys.share.revoked",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "experimental"
+      "status": "withdrawn"
     },
     {
       "type": "sys.share.claim",
       "owner": "poweur core",
       "pcp": "pcp-0003-share-grant",
-      "status": "experimental"
+      "status": "withdrawn"
     },
     {
       "type": "sys.sync.changed",
       "owner": "poweur core",
       "pcp": "pcp-0005-sync-journal",
-      "status": "reserved"
+      "status": "withdrawn"
     },
     {
       "type": "sys.abuse.report",
@@ -83,7 +83,7 @@
       "owner": "poweur core",
       "path": "conventions/schemas/net.poweur.tasks/",
       "pcp": "pcp-0007-tasks",
-      "status": "draft"
+      "status": "withdrawn"
     }
   ]
 }

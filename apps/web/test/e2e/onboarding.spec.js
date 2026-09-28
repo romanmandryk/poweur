@@ -127,7 +127,7 @@ test.describe("first run", () => {
       .toBeGreaterThan(0);
 
     // A file, uploaded and shared with that contact.
-    await alice.click('.nav-tab[data-page="files"]');
+    await alice.click('.nav-tab[data-page="settings"]');
     await alice.click('[data-open-dir="shared"]');
     await alice.setInputFiles("#ff-upload", {
       name: "hello.txt",
@@ -144,7 +144,7 @@ test.describe("first run", () => {
       .toHaveText("Shared", { timeout: 20_000 });
 
     // The grantee sees exactly that file, and nothing else of alice's.
-    await bob.click('.nav-tab[data-page="files"]');
+    await bob.click('.nav-tab[data-page="settings"]');
     await bob.click("#btn-files-shared");
     await bob.fill(".owner-picker .idin input", aliceId);
     await bob.press(".owner-picker .idin input", "Enter");
@@ -184,7 +184,7 @@ test.describe("first run", () => {
     await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("row-policy");
 
     // A row with role="button" is operable from the keyboard.
-    await page.click('.nav-tab[data-page="files"]');
+    await page.click('.nav-tab[data-page="settings"]');
     const folder = page.locator('[data-open-dir="shared"]').first();
     await expect(folder).toBeVisible({ timeout: 20_000 });
     await folder.press("Enter");

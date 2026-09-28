@@ -6,7 +6,7 @@ title: Relay Overview
 
 # Relay Overview
 
-The Poweur ID relay (`apps/api`) is the core server component of the system. It is a Go HTTP server that implements the relay side of the protocol: accepting, verifying, routing, and delivering signed messages; ingesting delivery acks; registering identities (hosted or DNS); serving identity documents over `/.well-known/poweur/`; and hosting per-identity file trees over WebDAV when durable storage is enabled.
+The Poweur ID relay (`apps/api`) is the core server component of the system. It is a Go HTTP server that implements the relay side of the protocol: accepting, verifying, routing, and delivering signed messages; ingesting delivery acks; registering identities (hosted or DNS); serving identity documents over `/.well-known/poweur/`; and serving public/system files through a temporary storage adapter while storage v2 is built.
 
 A relay is the **home** for the identities it locally hosts. It does **not** act as a generic open relay for unrelated parties — see the at-least-one-local rule in the [API Reference](/relay/api-reference#at-least-one-local-rule).
 
@@ -27,7 +27,7 @@ A relay is the **home** for the identities it locally hosts. It does **not** act
 - **Hosted** — no DNS token; identity under `HOSTED_DOMAINS`; persist signed `identity_document` under `POWEUR_DATA`.
 - **DNS** — client-supplied provider token; relay writes `TXT` + routing records, then discards the token.
 
-**Well-known + files.** When `POWEUR_DATA` is set, serve Host-routed `/.well-known/poweur/…`, WebDAV at `/dav/<identity>/`, and optional `/pub/` file sharing. See [File storage](/files/storage-model).
+**Well-known + system files.** Serve Host-routed `/.well-known/poweur/…` and owner-authenticated system files. The drive is being rebuilt; see [Storage v2](/files/storage-v2).
 
 ## Durable vs ephemeral state
 
@@ -35,14 +35,14 @@ The relay still holds **no identity private keys**. With `POWEUR_DATA` configure
 
 | State | Purpose | Survives restart? |
 |-------|---------|:-----------------:|
-| Identity documents (`poweur-sys/public/id.json`) | Hosted identity publication | Yes |
+| Identity documents (`.poweur/public/id.json`) | Hosted identity publication | Yes |
 | File trees (`/public`, `/private`, …) | Per-identity home filesystem | Yes |
 | Inbox spool and ack queue (`spool/`) | Messages and receipts waiting for devices | Yes |
-| Shares and groups (`poweur-sys/`) | Grants, links, group membership | Yes |
+| Shares and groups (`.poweur/`) | Grants, links, group membership | Yes |
 | Pending contact requests | The requests tray | No |
 | Rate limit counters | Per-sender + global buckets | No |
 | DNS / resolve caches | Peer addresses, identity resolve TTL | No |
-| Session + DAV token caches | Short-lived credentials | No (clients sign in again) |
+| Session caches | Short-lived credentials | No (clients sign in again) |
 
 Messages, files and shares survive a restart; losing `POWEUR_DATA` does not — back it up (see [Self-hosting](/relay/self-hosting#back-up-and-upgrade)).
 
@@ -81,5 +81,5 @@ behind poweur.net (Docker Compose, Caddy, Ansible, Grafana) is in `deploy/` in t
 - [Configuration](/relay/configuration)
 - [DNS Management](/relay/dns-management)
 - [Web Identity](/protocol/web-identity)
-- [File storage](/files/storage-model)
+- [File storage](/files/storage-v2)
 - [Security Model](/security/model)

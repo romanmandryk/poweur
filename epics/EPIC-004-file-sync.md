@@ -1,6 +1,6 @@
 # EPIC-004 — File sync protocol & sync clients
 
-- **Status:** core complete (T1–T4 and T6 shipped; T5 + fsnotify daemon mode deferred, see Progress)
+- **Status:** removed — v1 implementation retired by EPIC-020; v2 restoration tracked there
 - **Priority:** P1
 - **Depends on:** EPIC-003
 - **Unlocks:** EPIC-010 (watch-folder automations), offline-capable apps

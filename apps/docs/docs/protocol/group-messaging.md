@@ -78,7 +78,7 @@ dot it is an identity, and a group identity is an identity.
 **The group's own relay is the fan-out point.** A sender resolves `crew.acme.poweur.net` the
 way it resolves any recipient (web-first `/.well-known/poweur/id.json`, then DNS TXT), finds
 the relay hosting it, and posts the batch there. That relay reads
-`poweur-sys/relay/groups/self.json` out of the group's own tree and verifies it with the
+`.poweur/relay/group.json` out of the group's own tree and verifies it with the
 group's own key.
 
 This sidesteps the deferral in
@@ -365,4 +365,4 @@ labelled by its actual sender. Replies go back to the same `thread_id`.
   messages *from* a group in v1.
 - **Cross-relay group hosting.** A group lives on one relay. Migration is identity migration.
 - **Server-side group history.** The relay spools undelivered envelopes and forgets them on
-  pickup; the archive is each member's own `poweur-sys/private/messages/` (E09-T1).
+  pickup; the archive is each member's own `.poweur/private/messages/` (E09-T1).

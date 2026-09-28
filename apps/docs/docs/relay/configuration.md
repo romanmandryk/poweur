@@ -38,7 +38,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STORAGE_PROVIDER` | `relay-fs` | File-body backend. Only `relay-fs` exists today (files under `POWEUR_DATA`) |
-| `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Storage quota per identity; `0` = unlimited. WebDAV writes over quota get `507` |
+| `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Configured quota per identity; `0` = unlimited. Drive enforcement is being restored in EPIC-020 |
 | `STORAGE_QUOTAS_FILE` | `$POWEUR_DATA/storage-quotas.json` | Per-identity quotas that override `MAX_IDENTITY_BYTES`: a JSON object from identity to bytes or a size string (`{"alice.example.com": "2GB"}`, `0` = unlimited). Re-read when it changes, so no restart; an invalid edit keeps the last good version |
 | `QUOTA_CONTACT` | — | Who to ask for more space, usually a Poweur ID. Over-quota `507` responses and `GET /files/{identity}/quota` name it (`contact`) |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Largest single uploaded file; `0` = unlimited |
@@ -75,8 +75,9 @@ policy alongside its verdict — so the app validates as the user types without 
 the rules of the relay it happens to be talking to.
 
 `GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
-File trees live under `$POWEUR_DATA/identities/<id>/` and are served at `/dav/<identity>/`
-(see [WebDAV access](/files/webdav)).
+The temporary system-file adapter stores `.poweur` documents beneath
+`$POWEUR_DATA/identities/<id>/`. The journalled drive and S3 provider are under
+construction; see [Storage v2](/files/storage-v2).
 
 ### DNS registration
 

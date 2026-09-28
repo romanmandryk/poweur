@@ -35,7 +35,7 @@ vectors in `packages/identity/testdata/vectors/signin.json`.
        │ 6. verify signature, spend nonce → user is signed in                   │
        │                                                                        │
        │ 7. (optional) POST the same approval to the user's relay for a         │
-       │    path-scoped DAV token — see "Scoped resource grants" below.         │
+       │    v1 resource grants removed; v2 scoped handles are planned.         │
 ```
 
 Step 7 is deliberately a *separate* step against a *different* server. Login costs the RP
@@ -61,7 +61,7 @@ signer fetching the RP's metadata at `audience` over TLS (step 2).
   "action": "signin",
   "statement": "Sign in to the Poweur Guestbook",
   "response_uri": "https://guestbook.poweur.net/auth/callback",
-  "scopes": ["dav:rw:apps/net.poweur.guestbook"]
+  "scopes": ["profile:read"]
 }
 ```
 
@@ -132,7 +132,7 @@ Vectors: `signin-reference.json`.
   "expires_at": "2026-01-15T09:31:00Z",
   "action": "signin",
   "statement": "Sign in to the Poweur Guestbook",
-  "scopes": ["dav:rw:apps/net.poweur.guestbook"],
+  "scopes": ["profile:read"],
   "key_id": "identity",
   "signature": "…"
 }
@@ -175,19 +175,9 @@ base64 variant, matching the rest of the protocol).
 |-------|---------|
 | `profile:read` | read the user's public profile |
 | `messages:send` | send messages as the user |
-| `dav:read:<path>` | read files under a tree path |
-| `dav:rw:<path>` | read and write files under a tree path |
 
-`dav:` paths are normalized by stripping leading and trailing slashes, so
-`dav:rw:/apps/net.example/` and `dav:rw:apps/net.example` are the same scope and produce
-the same signature. `.` and `..` segments are rejected. At most 16 scopes — a consent
-screen a user will not read is not consent.
-
-A `dav:` scope may only reach into the RP's **own** app namespace, `apps/<app id>`, where
-the app id is the reverse-DNS of the audience host: `https://guestbook.poweur.net` →
-`net.poweur.guestbook`. The namespace is *derived from the signed audience*, never
-declared by the RP, which is what makes cross-app escalation structurally impossible
-rather than policy-enforced.
+Storage path scopes and `/auth/grant` were removed with v1 storage.
+V2 resource authorization is tracked in EPIC-020. At most 16 scopes are accepted.
 
 ## Verification rules
 
@@ -200,7 +190,7 @@ misaddressed response never costs a DNS or HTTPS lookup:
    the anti-phishing check and it is not optional.
 3. **Action, statement, scopes.** Known action; statement within limits; scopes in
    canonical form (**reject**, do not silently re-sort — a re-sorted list would verify
-   against bytes the user never saw); every `dav:` scope inside `apps/<app id>`.
+   against bytes the user never saw); unsupported scopes are rejected.
 4. **Window.** RFC3339; `expires_at > issued_at`; `expires_at - issued_at ≤ 5 min`;
    `issued_at ≤ now + 2 min` (clock skew); `now ≤ expires_at`.
 5. **Nonce.** Single use. Key the cache by `audience|identity|request_id|nonce` so one
@@ -266,7 +256,7 @@ whose session has since been revoked.
   "app_id": "net.poweur.guestbook",
   "response_uris": ["https://guestbook.poweur.net/auth/callback"],
   "poll_uri": "https://guestbook.poweur.net/auth/poll",
-  "scopes": ["profile:read", "dav:rw:apps/net.poweur.guestbook"],
+  "scopes": ["profile:read"],
   "transports": ["redirect", "qr", "poll"],
   "contact_uri": "https://guestbook.poweur.net/abuse",
   "context_uri": "https://guestbook.poweur.net/auth/context"
@@ -439,7 +429,6 @@ disclosure rather than cryptography:
 
 | Component | Behaviour |
 |-----------|-----------|
-| `apps/guestbook` | binding cookie, poll secret, match code, `/auth/resume`; refuses approvals in URLs |
 | Web signer (`apps/web`) | optional code field (required in the mobile shell); follows `resume_uri`; no approval in any URL |
 | Go CLI | `poweur auth approve --code <digits>`; prints the resume link for a same-device approval |
 
@@ -449,10 +438,8 @@ for the bridge — which application it is for. Coarse location is not offered.
 
 ## Scoped resource grants
 
-The second step, specified in full in [Connected apps](./connected-apps.md): the RP
-presents the *same* user-signed approval to the **user's relay**, which mints a
-path-scoped DAV token. The relay is the resource server, the user's signature is the
-authorization grant, and revocation lives in the user's own tree.
+The v1 resource grant exchange is removed. Planned node-scoped resource access
+is tracked in EPIC-020; see [Connected apps](./connected-apps.md).
 
 ## Test vectors
 

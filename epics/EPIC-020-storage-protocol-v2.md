@@ -1,6 +1,6 @@
 # EPIC-020 — Storage v2: an end-to-end encrypted drive with a stateless relay
 
-- **Status:** proposed — rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
+- **Status:** in progress — v1 removed on master; deployment blocked until baseline + migration; rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
   service plan; old task IDs are mapped at the end)
 - **Priority:** P0 (pre-launch: changing the storage model now costs nothing in migrations)
 - **Depends on:** EPIC-011 (seed-derived identity keys; recovery is now also file recovery),
@@ -21,8 +21,8 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | **Wave 1 — spec & primitives** | | |
-| E20-T1 Storage v2 spec & ADR | **open** | object model, drive layout, API, what is retired; one spec replaces four docs |
-| E20-T2 Key tree & encryption format | **open** | Proton-style node keys, encrypted names + name hashes, chunk AEAD, sealed appends/creates, signed manifests and records; Go + TS vectors |
+| E20-T1 Storage v2 spec & ADR | **in progress** | Target spec and ADR written; exact signed formats/vectors and final privacy/store copy remain open |
+| E20-T2 Key tree & encryption format | **in progress** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks and Go↔TS vectors implemented; names/index, signed manifests/records, moves/rotation still open |
 | E20-T3 Storage providers: filesystem & S3 | **open** | minimal interface, conditional put, presigned URLs, one conformance suite for both |
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
@@ -35,13 +35,69 @@
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
 | E20-T11 Message history & attachments on v2 | **open** | one append file per conversation; encrypted attachments |
 | **Wave 4 — cutover** | | |
-| E20-T12 Migration & v1 removal | **open** | client-driven re-encryption; remove WebDAV, v1 sync, app passwords, `poweur-sys` |
+| E20-T12 Migration & v1 removal | **in progress** | v1 implementation removed; system-only operator migration and production rehearsal remain open; no deployment |
 | **Wave 5 — after launch, demand-led** | | |
 | E20-T13 rclone backend | **open** | desktop mount and local `serve webdav/sftp` for third-party tools |
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
 | E20-T15 Append performance for live apps | **open** | latency budgets and batching so EPIC-025 can build CRDT/realtime on append files |
 | E20-T16 Advanced shares & delegation | **open** | time-box presets, version-pinned snapshots, resharing (caps moved to E20-T7) |
 | E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale for EPIC-028 |
+
+## Continuation checkpoint — 2026-09-28
+
+The supplied ten-phase plan is authoritative. Do not push/deploy master until Phase 9
+and the Phase 10 migration rehearsal are complete. Work started in `99901a9` during
+Phase 0; no drive engine/provider existed at that checkpoint.
+
+- [x] Remove v1 relay, SDK, CLI and web file/share/sync surfaces and reference apps.
+- [x] Withdraw PCP-0003/0005/0007 registry entries; retain schema identifiers as historical
+      compatibility identifiers. Remove v1 storage docs and upload dashboard metric.
+- [x] Correct OAuth avatar tests to the well-known avatar path; stamp package versions.
+- [x] Serialize temporary system-file conditional writes/deletes; concurrency regression test.
+- [ ] Finish remaining historical wording and deploy references; identity-store disk paths
+      intentionally remain legacy until Phase 6 and the migrator.
+- [x] Write replacement storage target spec and ADR.
+- [x] Extract canonical message sealing into `packages/identity/seal.go`; preserve
+      frozen v1 message compatibility, reject malformed nonce lengths, add drive domains.
+- [x] Add Go/TS key wraps, canonical contexts, padded XChaCha20 chunks and hash IDs;
+      deterministic drive-seals/chunks vectors cover decryption and byte-identical re-encryption.
+- [ ] Complete Phase 2: encrypted names/name index, signed manifests and author-chain
+      records, sealed creates/appends, moves/key rotation and their failure vectors.
+- [ ] Phases 3–10: providers, engine/API, stateless system files, node shares, clients,
+      complete baseline, migration and production rehearsal.
+
+**Inherited implementation deviation:** Phase 0 introduced an operational owner-authenticated
+system-file API backed by ordinary `.poweur` files (memory without POWEUR_DATA), instead of
+the plan's unavailable placeholder. Retained to preserve the passing contacts/profile/policy
+and group tests while v2 is built. This is not E20-T6 completion: no journal, v2 quota or S3,
+identity store/spool still legacy, and connected apps still owner-written. Replace this
+adapter in Phase 6. The private API explicitly refuses history/log paths.
+
+### Phase 9 restore list (must not be silently dropped)
+
+Restore these deleted v1 scenarios against the drive, using pre-removal commit `cc06649`
+as the test reference; retain already ported temporary system-file tests as regression coverage:
+
+- [ ] Integration CONTACTS_02/04, HISTORY_01–05, TYPED_07, DEVICES_01–03,
+      PROFILE_01–02, GROUP_01, SIGNIN_01, ABUSE_03.
+- [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
+      the removed test depended directly on the retired Guestbook server.
+- [ ] SDK history journeys, Go/TS history cursors and private sign-in consent log.
+- [ ] Web durability suite: received and sent messages survive reload, unread state
+      persists, anonymous history persists, relay archive is ciphertext. Restore the
+      conversation paging-after-reload and journey per-identity archive-isolation
+      assertions and the stranger/contact tray persistence journey removed from the
+      still-active messaging browser suites.
+- [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
+      visibility on a different relay.
+- [ ] Encrypted attachment upload/open: 20 MB across relays; no plaintext bytes/name/MIME
+      in provider storage; malformed/missing/revoked attachments fail safely.
+- [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
+      analytics consent, group create/add/remove and quota display on v2.
+
+Files/sharing/attachment/durability browser suites that still invoked removed DAV APIs
+are removed during Phase 0. Files, direct-share and link UI suites return in E20-T10;
+Tasks/Guestbook return via EPIC-031; sync via E20-T9. Messaging-only browser coverage stays.
 
 ## Goal
 
@@ -307,7 +363,7 @@ writing our own, and keep the list current in the E20-T1 ADR:
 | Piece | Adopt | Notes |
 |-------|-------|-------|
 | Encryption primitives | `golang.org/x/crypto`, `@noble/ciphers`/`curves`/`hashes` | already the only crypto dependencies |
-| Sealing to a public key (node keys, sealed appends/creates) | **age** (`filippo.io/age`, npm `age-encryption`) or **HPKE** RFC 9180 (`cloudflare/circl/hpke`, `@hpke/core`) | E20-T2 picks one; no home-made envelope |
+| Sealing to a public key (node keys, sealed appends/creates) | Existing ephemeral X25519 + HKDF-SHA256 + ChaCha20-Poly1305 message construction, moved into shared identity code | Domain-separated drive seals; messages keep `poweur/msg/v1`; no age/HPKE dependency |
 | Chunk AEAD | XChaCha20-Poly1305 from the libraries above | no format library needed |
 | Link password stretching | argon2id (`x/crypto/argon2`, `@noble/hashes`) | — |
 | S3 provider | `minio-go` | browsers use presigned URLs with plain `fetch`; no S3 SDK in TS |
@@ -324,7 +380,7 @@ writing our own, and keep the list current in the E20-T1 ADR:
 **Written here:** the key-tree layout, manifests, the journal, share documents, `.poweur`
 validators and the event-log helper — each small and protocol-specific.
 
-**Not adopted:** OpenPGP (Proton's choice; heavy, and age/HPKE cover it). **Studied as prior
+**Not adopted:** OpenPGP (Proton's choice; heavy; existing message sealing supplies the needed construction). **Studied as prior
 art, not built on:** Peergos (cryptree key tree + sandboxed apps — read before E20-T2), Solid and
 remoteStorage (apps writing to user storage, not E2E encrypted), AT Protocol (signed user
 repositories, public-first).
@@ -520,17 +576,20 @@ paging works against it.
 
 ### E20-T12 — Migration & v1 removal
 
-- [ ] Client-driven migration on unlock: read v1 via DAV, write v2 encrypted, delete v1 after
-      the v2 commit is confirmed; resumable; progress in Settings. (The relay cannot migrate
-      for the user: any keys it generated would be keys it knows.)
-- [ ] `poweur-sys/*` → `.poweur/*`; fixed roots become ordinary folders; path grants become
-      node shares; links keep working (new URL with fragment)
-- [ ] Remove `/dav`, `/sync` v1, DAV tokens, app passwords, `relay-fs` whole-file code and the
-      v1 docs; port the integration suites
-- [ ] Backups: document when the last plaintext copy of a migrated identity expires
+- [ ] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
+      copy only plaintext system data (identity, profile/avatar, capabilities,
+      contacts, policy, analytics, devices, connected apps, group roster).
+- [ ] Drop old files, shares, links and history; never generate private content keys
+      on the relay. Move successfully migrated old trees to `identities.v1-backup/`.
+- [x] Remove `/dav`, v1 sync, DAV tokens, app passwords and whole-file implementation.
+- [ ] Finish residual v1 documentation/reference cleanup and restore baseline tests on v2.
+- [ ] Update OPS/BACKUP runbooks, rehearse on a copy of production, verify all baseline
+      behavior and health before deployment; document backup expiry.
 
-**Acceptance:** a seeded v1 identity with files, shares, links, history and attachments
-migrates across a kill/restart, and no plaintext outside relay-readable nodes remains on disk.
+**Acceptance:** dry run does not mutate the source; interrupted migration resumes without
+losing system documents; identity discovery, avatars, contacts/policy and group delivery
+work from v2. Production data access and deployment are still required, not implied by a
+local implementation. This replaces the earlier client-driven full-file migration decision.
 
 ### E20-T13 — rclone backend
 

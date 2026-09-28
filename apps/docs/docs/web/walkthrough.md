@@ -43,7 +43,7 @@ Then a three-step setup runs. Every step is skippable, and skipping writes nothi
    the [recommended human default](../trust/contacts.md), and can also turn on
    anonymous messages.
 2. **How people see you** — display name, bio, avatar, one link →
-   `poweur-sys/public/profile.json`.
+   `.poweur/public/profile.json`.
 3. **You're set.**
 
 The policy step exists because its default (`open`, anyone may message you) is the one
@@ -65,7 +65,7 @@ message arrives.
   their first message.
 - A message from someone you hold no entry for carries a one-tap **Add**.
 
-Every write goes to `poweur-sys/relay/contacts.json` over DAV, so contacts sync to your
+Every write goes to `.poweur/relay/contacts.json` through the owner system-file API, so contacts sync to your
 other devices and to the CLI.
 
 ## When a key changes
@@ -78,7 +78,7 @@ silently and says so. See [key pinning](../trust/contacts.md#key-pinning-the-saf
 ## Inbox policy, anonymous and proof-of-work
 
 **Settings → Who can message you** edits the mode and the anonymous block as one
-document (`poweur-sys/relay/inbox-policy.json`). Anonymous messages are off until you
+document (`.poweur/relay/inbox-policy.json`). Anonymous messages are off until you
 turn them on; the difficulty slider is labelled with what the challenge costs the
 sender's *browser*, and warns past 20 bits where a phone stops feeling like it is
 working. `verified` and `payment` appear disabled: designed policy slots relays answer
@@ -91,7 +91,7 @@ also *send* anonymously; the proof-of-work is solved in the page, with progress.
 ## Files and sharing
 
 Your tree, with the layout roots and their audiences
-([storage model](../files/storage-model.md)). Uploads switch to the resumable chunked
+([storage model](../files/storage-v2.md)). Uploads switch to the resumable chunked
 endpoint above 64 MB. The folder in view refreshes itself from the changes feed.
 
 **🔗 on a folder or file** under `/shared` or `/apps` opens the share dialog: audience
@@ -100,7 +100,7 @@ in the browser and stored in your own tree; **🔗 at the root** lists every gra
 Revoke button. Sharing also sends the recipient an encrypted **share offer**, which
 appears in their **Requests** tray; accepting it adds the folder to **Files → Shared with
 me**, where it opens in the owner's tree with only what they granted. Revoking takes effect
-at once. See [sharing](../files/sharing.md).
+at once. See [sharing](../files/storage-v2.md).
 
 ## Keys, devices and recovery
 

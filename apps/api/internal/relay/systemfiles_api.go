@@ -122,6 +122,9 @@ func (s *Server) handleSystemFilePut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_document", err.Error())
 		return
 	}
+	lock := s.sysLocks.get(identity)
+	lock.Lock()
+	defer lock.Unlock()
 	old, readErr := s.sysFiles.Read(r.Context(), identity, path)
 	if readErr != nil && !errors.Is(readErr, errSysFileNotFound) {
 		writeError(w, http.StatusInternalServerError, "storage_error", "failed to read system file")
@@ -151,6 +154,9 @@ func (s *Server) handleSystemFileDelete(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
+	lock := s.sysLocks.get(identity)
+	lock.Lock()
+	defer lock.Unlock()
 	old, readErr := s.sysFiles.Read(r.Context(), identity, path)
 	if errors.Is(readErr, errSysFileNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "no such system file")

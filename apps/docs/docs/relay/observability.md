@@ -28,13 +28,13 @@ Relay panics and HTTP 5xx are also sent to Better Stack Errors through the [Sent
 
 ## Per-identity preference
 
-The existing authenticated DAV tree stores `poweur-sys/relay/analytics.json`:
+The authenticated system-file adapter stores `.poweur/relay/analytics.json`:
 
 ```json
 {"version":1,"granted":false,"updated_at":"2026-09-10T12:00:00Z"}
 ```
 
-The document is limited to 4096 bytes and validated by the relay. Writes require the existing owner-authorized DAV session/signature flow. Missing, invalid, deleted or false preferences mean detailed analytics is off. This adds a system document, not a new authentication header or signing format.
+The document is limited to 4096 bytes and validated by the relay. Writes require the owner-authorized session/signature flow. Missing, invalid, deleted or false preferences mean detailed analytics is off. This adds a system document, not a new authentication header or signing format.
 
 Web/native Settings → Detailed relay analytics changes it for the active identity. Both Go and TS CLIs support `poweur analytics show|on|off [--use-identity=...] [--json]`. The JS SDK exposes `client.analyticsPreference()` and `client.setAnalyticsConsent(boolean)`.
 
@@ -50,7 +50,7 @@ Unauthenticated/failed-auth callers have neither actor nor IP. Forwarded/backgro
 
 Every relay HTTP route produces `kind=request`, `action=http.request`, a fixed route template, bounded method, status, outcome and duration. Unknown routes become `unmatched`. Authenticated actor tagging occurs only after verification. Expected 4xx outcomes are rejections; 5xx/panics also produce sanitized diagnostic events with static error codes and function-only stack frames.
 
-Business actions cover registration, session create/revoke, identity export/rotation/encryption key, DAV tokens, keystore and enrollment, message submit/receive/anonymous/enqueue/pickup/consume, contact queue/pickup, acknowledgments, forwarding, upload create/chunk/complete/cancel, contacts/policy/shares/groups and analytics preference writes. DAV reads, sync reads, identity availability/resolution and other routes retain HTTP events. SSE adds open/close events; startup/shutdown, spool/ack expiry and storage sampling failures have background hooks. Never derive new action names from input or paths.
+Business actions cover registration, session create/revoke, identity export/rotation/encryption key, keystore and enrollment, message submit/receive/anonymous/enqueue/pickup/consume, contact queue/pickup, acknowledgments, forwarding, contacts/policy/groups and analytics preference writes. System-file reads, identity availability/resolution and other routes retain HTTP events. SSE adds open/close events; startup/shutdown, spool/ack expiry and storage sampling failures have background hooks. Never derive new action names from input or paths.
 
 OTLP log bodies contain JSON `timestamp`, `kind`, `action`, `outcome`, optional `error_code`, `route`, `method`, `status`, `duration_ms`, `actor_id`, `identity_mode`, `client_ip` and `stack`. Resource attributes identify service, release version and environment. Loki indexes service/environment only; private Explore can parse `| json` to filter actor fields. HTTP and business events are distinct; count only successful `message.submit`/`message.anonymous` for origin submissions, not receive, forward, polls or pickup.
 
@@ -62,9 +62,9 @@ Business actions may carry a bounded `detail`, never derived from free-form inpu
 | `message.anonymous` | `anonymous` |
 | `settings.change` | `profile.display_name`, `profile.avatar`, `profile.bio`, `profile.links`, `profile.locale`, `inbox.mode`, `inbox.anonymous`, `inbox.read_receipts`, `analytics.granted` |
 
-`settings.change` is emitted once per field whose value differs from the stored document, and only when the validated DAV PUT succeeds; saving an unchanged value and unknown fields are not counted. Values themselves are never recorded. Message types come from the plaintext envelope; payloads stay encrypted and are never read.
+`settings.change` is emitted once per field whose value differs from the stored document, and only when the validated system-file PUT succeeds; saving an unchanged value and unknown fields are not counted. Values themselves are never recorded. Message types come from the plaintext envelope; payloads stay encrypted and are never read.
 
-Every five minutes the relay also samples adoption across hosted identities into `poweur_state{state="adopt_*"}`: profile fields set (display name, bio, avatar, links, locale), inbox policy mode (or `adopt_inbox_default` when never set), anonymous inbox enabled, read receipts off, detailed analytics granted and non-empty contacts. Only the public profile and relay-readable settings are consulted, never `poweur-sys/private`, and only totals are exported.
+Every five minutes the relay also samples adoption across hosted identities into `poweur_state{state="adopt_*"}`: profile fields set (display name, bio, avatar, links, locale), inbox policy mode (or `adopt_inbox_default` when never set), anonymous inbox enabled, read receipts off, detailed analytics granted and non-empty contacts. Only the public profile and relay-readable settings are consulted, never `.poweur/private`, and only totals are exported.
 
 Metrics: `poweur_http_requests_total`, HTTP duration histogram, `poweur_actions_total` (labels `action`, `detail`, `outcome`), `poweur_state` (identities/inbox/storage/adoption), `poweur_telemetry_dropped`, and heartbeat timestamp. Counters/histograms have bounded labels only, with no identities/IPs/paths. Public recording rules compute increases per source series before summing, so process resets do not become growth. Public counts are estimates with possible export gaps.
 

@@ -24,14 +24,14 @@ on the same identity, messaging, and storage primitives.
   not hold identity private keys.
 - **The same ID works across services.** Use it for end-to-end encrypted messaging, contacts,
   file sharing, app sign-in, and scoped access to your data.
-- **Your ID has a home.** Each identity can have a WebDAV-compatible, syncable filesystem with
-  public, shared, private, and application namespaces.
+- **Your ID has a home.** Storage v2 is rebuilding that home as an encrypted drive
+  with node sharing and explicit public/system files (EPIC-020).
 - **Apps can compose instead of integrating pairwise.** Apps and agents can exchange typed
   messages and work on shared files using published conventions rather than bespoke APIs.
 - **Hosting is a choice, not a boundary.** Poweur can operate a convenient hosted service while
   independent relays and self-hosted domains remain first-class participants.
 - **The working substrate exists today.** Identity resolution, hosted registration, encrypted
-  messaging, contacts and anti-spam controls, WebDAV storage, sync, sharing, sign-in, web and
+  messaging, contacts and anti-spam controls, sign-in, web and
   CLI clients, and recovery foundations are implemented. Poweur is still pre-1.0; product UX,
   integrations, active websites, agent workflows, and storage v2 remain roadmap work.
 
@@ -79,9 +79,9 @@ See [Identity model](apps/docs/docs/protocol/identity-model.md),
 ### Messaging, contacts, and trust
 
 - Signed, end-to-end encrypted relay-to-relay messaging.
-- Durable inbox spool and encrypted client-side history.
+- Durable inbox spool; encrypted multi-device history is being restored on storage v2.
 - Push notifications over SSE, delivery acknowledgements, expiry, threads, typed messages,
-  attachments, and group messaging.
+  and group messaging. Attachments are being restored on storage v2.
 - Contact requests, pinned keys, blocking, inbox policies, relay-level abuse pressure, and
   opt-in anonymous messages protected by proof of work.
 
@@ -92,18 +92,15 @@ See [Messaging](apps/docs/docs/protocol/message-format.md),
 
 ### Files, sync, and sharing
 
-- A per-identity home exposed through WebDAV and the web client.
-- Public, shared, private, relay-managed, and app-specific namespaces.
-- Change journals, manifests, selective sync, resumable uploads, and device revocation.
-- Signed path grants for people and groups, link shares, quotas, and immediate revocation.
-- A conventions process for portable application data, with a shared tasks app as the first
-  end-to-end example.
+V1 WebDAV, sync, path shares, links and the Files UI were removed on master.
+Storage v2 is in progress: encrypted nodes/chunks, filesystem and S3 providers,
+atomic replace/append commits and node shares. The temporary system-file API
+preserves public profiles and relay settings while that drive is built.
 
-The current relay filesystem is server-readable; relay-blind encrypted storage is future work.
-See [Storage model](apps/docs/docs/files/storage-model.md),
-[sharing](apps/docs/docs/files/sharing.md),
-[app-data conventions](apps/docs/docs/conventions/app-data.md), and
-[EPIC-003](epics/EPIC-003-file-storage-webdav.md).
+See the [storage v2 specification](apps/docs/docs/files/storage-v2.md) and
+[EPIC-020](epics/EPIC-020-storage-protocol-v2.md). **Do not deploy master until the
+baseline and system-only production migration have passed.** Files UI, direct
+shares, sync and the reference apps return after the baseline.
 
 ### Sign-in, clients, and recovery
 
@@ -193,12 +190,12 @@ belong in upstream projects rather than this repository.
 - **TypeScript SDK (`packages/client-ts`)** — the corresponding browser/Node implementation
   and interoperable `poweur` CLI.
 - **Web app (`apps/web`)** — React + Tailwind client for identity creation, messaging, contacts,
-  settings, files, sharing, sign-in approval, devices, and recovery.
+  settings, sign-in approval, devices, and recovery.
 - **Mobile (`apps/mobile`)** — Capacitor shell over the web client with native iOS and Android
   key-custody bridges.
 - **Integration suite (`apps/integration`)** — real in-process relays, CLI journeys, fake DNS,
   restart tests, and cross-relay coverage.
-- **Reference apps (`apps/guestbook`, `apps/tasks`)** — sign-in and portable shared-data examples.
+- **Reference apps** — Tasks and Guestbook were removed with v1 storage; v2 headless scenarios are tracked in EPIC-031.
 - **Docs and conventions (`apps/docs`, `conventions`)** — protocol documentation, schemas, and
   the Poweur Convention Proposal process.
 - **Deployment (`deploy`)** — container, Caddy, Ansible, telemetry, dashboards, and operational
@@ -281,7 +278,7 @@ permissive:
 | Part | License |
 |------|---------|
 | Relay (`apps/api`), OAuth/OIDC bridge (`apps/oauth`), web app (`apps/web`), mobile shell (`apps/mobile`), integration tests, deploy and everything else not listed below | [AGPL-3.0-only](LICENSE) |
-| Identity package (`packages/identity`), TypeScript SDK and its CLI (`packages/client-ts`), Go CLI (`apps/cli`), conventions and schemas (`conventions`), docs (`apps/docs`), the guestbook example (`apps/guestbook`) | [Apache-2.0](packages/identity/LICENSE) (a `LICENSE` file in each directory) |
+| Identity package (`packages/identity`), TypeScript SDK and its CLI (`packages/client-ts`), Go CLI (`apps/cli`), conventions and schemas (`conventions`), docs (`apps/docs`) | [Apache-2.0](packages/identity/LICENSE) (a `LICENSE` file in each directory) |
 
 A directory's own `LICENSE` file wins over the root one. If you run a modified relay, bridge or
 web app as a network service, the AGPL requires you to offer your users its source. Building an

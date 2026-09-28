@@ -6,7 +6,6 @@ require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/poweur/api v0.0.0
 	github.com/poweur/cli v0.0.0
-	github.com/poweur/guestbook v0.0.0
 	go.opentelemetry.io/proto/otlp v1.7.1
 	golang.org/x/oauth2 v0.32.0
 	google.golang.org/protobuf v1.36.8
@@ -57,7 +56,6 @@ require (
 replace (
 	github.com/poweur/api => ../api
 	github.com/poweur/cli => ../cli
-	github.com/poweur/guestbook => ../guestbook
 	github.com/poweur/identity => ../../packages/identity
 )
 

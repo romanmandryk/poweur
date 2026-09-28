@@ -371,7 +371,7 @@ register a public key they do not control.
 Also: `GET /.well-known/poweur/id.json` (Host-routed) serves the stored document.
 
 `GET /.well-known/poweur/capabilities.json` serves the identity's own
-`poweur-sys/public/capabilities.json`, with two endpoints filled in where the file does not set
+`.poweur/public/capabilities.json`, with two endpoints filled in where the file does not set
 them: `endpoints.web_signer` (`<scheme>://<identity>/app/`, when `WEB_STATIC_DIR` is set) and
 `endpoints.oauth_bridge` (when `OAUTH_BRIDGE_URL` is set). With no file, those defaults alone are
 served. When `OAUTH_BRIDGE_URL` is set, `GET /` on a hosted identity's host also carries
@@ -810,7 +810,7 @@ Writes are authenticated by the identity key; the read is authenticated by a Web
 instead. That asymmetry is deliberate: the read exists to recover an identity whose key you no
 longer hold, so requiring that key would be circular.
 
-The wrapped blobs deliberately live **outside** the DAV tree. They need a read path the identity
+The wrapped blobs deliberately live **outside** the owner system-file API. They need a read path the identity
 key cannot provide, and a blob inside the user's file tree would be one misplaced delete away
 from destroying their recovery.
 

@@ -8,7 +8,7 @@ import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
  * A tray row used to open compose, so nothing ever showed an earlier message.
  * This walks the view as a reader meets it: the newest page first, "Load more"
  * only while something older exists, a reply from the bottom of the thread,
- * a message arriving while it is open, and the same thread after a reload.
+ * a message arriving while it is open. Reload coverage returns in EPIC-020.
  */
 const MOBILE = { width: 375, height: 812 };
 
@@ -35,16 +35,7 @@ async function openConversation(page, peer) {
   await expect(page.locator(".thread-view")).toBeVisible();
 }
 
-async function reloadAndUnlock(page) {
-  await page.reload();
-  if (await page.locator("#btn-unlock-main").count()) {
-    await page.click("#btn-unlock-main");
-  }
-  const unlock = page.locator("#btn-do-unlock");
-  await expect(unlock).toBeVisible({ timeout: 30_000 });
-  await unlock.click();
-  await expect(page.locator(".dest-title")).toHaveText("Messages", { timeout: 45_000 });
-}
+
 
 test.describe("conversation view", () => {
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
@@ -100,14 +91,7 @@ test.describe("conversation view", () => {
     await sendFrom(bob, aliceId, ["arrived while open"]);
     await expect(alice.locator(".bubble-row.theirs").last()).toContainText("arrived while open", { timeout: 40_000 });
 
-    // Fourteen messages now, both sides, from the archive after a reload.
-    await reloadAndUnlock(alice);
-    await openConversation(alice, bobId);
-    await expect(bubbles).toHaveCount(10);
-    await expect(alice.locator("#btn-thread-more")).toContainText("4 earlier");
-    await alice.click("#btn-thread-more");
-    await expect(bubbles).toHaveCount(14);
-    await expect(alice.locator(".bubble-row.mine")).toHaveCount(1);
+    // Reload/archive assertions return with EPIC-020 Phase 9.
 
     await aliceCtx.close();
     await bobCtx.close();

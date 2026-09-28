@@ -108,7 +108,7 @@ func TestReleasedClaimsAndRememberedConsent(t *testing.T) {
 	if claims["poweur_id"] != alice || claims["poweur_key_fingerprint"] != fp || claims["poweur_id_url"] != "https://alice.poweur.net/" {
 		t.Fatalf("poweur claims = %v", claims)
 	}
-	if claims["name"] != "Display "+alice || claims["picture"] != "https://alice.poweur.net/pub/avatar.png" {
+	if claims["name"] != "Display "+alice || claims["picture"] != "https://alice.poweur.net/.well-known/poweur/avatar.png" {
 		t.Fatalf("profile claims = %v", claims)
 	}
 

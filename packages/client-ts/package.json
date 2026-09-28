@@ -1,6 +1,6 @@
 {
   "name": "@poweur/client",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Poweur protocol client — identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
   "license": "Apache-2.0",
   "type": "module",
@@ -57,7 +57,6 @@
     "identity",
     "ed25519",
     "e2ee",
-    "webdav",
     "messaging"
   ],
   "publishConfig": {

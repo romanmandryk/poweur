@@ -1,5 +1,7 @@
 # PCP-0007 — Tasks & projects (`net.poweur.tasks`)
 
+> Withdrawn for storage v2 (EPIC-020). Historical format only; do not implement.
+
 - **Status:** draft
 - **Owner:** poweur core
 - **Registry entries:** `net.poweur.tasks` (app-id), `net.poweur.tasks` (schema namespace)
