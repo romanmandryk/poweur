@@ -6,6 +6,7 @@
  * Run it without installing:  npx @poweur/client inbox
  */
 
+import { driveCommand } from "./commands/drive.js";
 import { UsageError } from "./args.js";
 import { defaultStreams, fail, type Streams } from "./output.js";
 import { identityCommand } from "./commands/identity.js";
@@ -53,6 +54,7 @@ export const HELP = `Usage:
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
   poweur auth <inspect|sign> <request-file-or-url> [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]
+  poweur drive <info|node|ls|changes|records> [node-id] [--drive=identity] [--cursor=...] [--json]
   poweur version
 `;
 
@@ -66,6 +68,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
 
   try {
     switch (command) {
+      case "drive": return await driveCommand(rest, streams);
       case "identity": return await identityCommand(rest, streams);
       case "key": return await keyCommand(rest, streams);
       case "send": return await send(rest, streams);

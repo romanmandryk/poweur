@@ -407,14 +407,15 @@ func (s *Server) handleDriveNode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A transferred node tells an authenticated caller where it went;
-	// nothing else about the old drive is revealed.
-	if moved, found, err := s.engine.Moved(r.Context(), driveID, r.PathValue("node")); err == nil && found {
-		writeJSON(w, http.StatusGone, map[string]any{"error": "moved", "detail": "this node moved to another drive", "moved_to": moved})
-		return
-	}
 	if err := s.engine.Authorize(r.Context(), driveID, actor, r.PathValue("node"), drive.RoleRead); err != nil {
 		s.writeDriveError(w, err)
+		return
+	}
+	// Forwarding metadata is private too. Revoked members must discover
+	// their destination through the new share, not their retired grant.
+	if moved, found, err := s.engine.Moved(r.Context(), driveID, r.PathValue("node")); err == nil && found {
+		noStore(w)
+		writeJSON(w, http.StatusGone, map[string]any{"error": "moved", "detail": "this node moved to another drive", "moved_to": moved})
 		return
 	}
 	info, err := s.engine.Node(r.Context(), driveID, r.PathValue("node"))

@@ -39,7 +39,7 @@ export class SystemFiles {
   readonly client: RelayClient;
   readonly signer: Signer;
 
-  constructor(client: RelayClient, signer: Signer) {
+  constructor(client: RelayClient, signer: Signer, readonly sessionId?: string) {
     this.client = client;
     this.signer = signer;
   }
@@ -54,6 +54,7 @@ export class SystemFiles {
       path: `/auth/challenge?identity=${encodeURIComponent(this.identity)}`,
     });
     return {
+      ...(this.sessionId ? { "X-Poweur-Session-Id": this.sessionId } : {}),
       "X-Poweur-Identity": this.identity,
       "X-Poweur-Challenge": challenge,
       "X-Poweur-Signature": await this.signer.sign(challenge, "base64std"),
@@ -155,6 +156,7 @@ export class DeviceRegistry {
       path: `/auth/challenge?identity=${encodeURIComponent(this.#files.identity)}`,
     });
     return {
+      ...(this.#files.sessionId ? { "X-Poweur-Session-Id": this.#files.sessionId } : {}),
       "X-Poweur-Identity": this.#files.identity,
       "X-Poweur-Challenge": challenge,
       "X-Poweur-Signature": await this.#files.signer.sign(challenge, "base64std"),

@@ -1,6 +1,7 @@
-/** Storage-v2 formats and primitives. Network drive clients are still in progress. */
+/** Storage-v2 formats and primitives. Authenticated transport and cryptographic primitives. */
 export * from "./crypto.js";
 export * from "./names.js";
 export * from "./records.js";
 export * from "./manifest.js";
 export * from "./share.js";
+export * from "./client.js";

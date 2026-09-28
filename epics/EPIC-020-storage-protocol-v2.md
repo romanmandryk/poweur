@@ -30,7 +30,7 @@
 | E20-T6 `.poweur` system files & stateless relay | **in progress** | settings as files the relay validates and applies; no relay state outside the drive |
 | E20-T7 Shares, roles, links & file requests | **in progress** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
-| E20-T8 SDK drive clients & CLI (Go + TS) | **open** | encryption, uploads, commits, cursors, chunk caches, scoped handles, event-log helper, `poweur drive` |
+| E20-T8 SDK drive clients & CLI (Go + TS) | **in progress** | Go/TS authenticated transports, bounded idempotent commit retries, verified ciphertext downloads and metadata/cursor CLI commands implemented; high-level encrypted file operations, subscriptions, persistent caches, scoped handles and event-log helper remain open |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
 | E20-T11 Message history & attachments on v2 | **open** | one append file per conversation; encrypted attachments |
@@ -98,24 +98,40 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       and proof-of-work; file requests (`INT_DRIVE_03`).
 - [x] Phase 7 slice 4: groups as members and Spaces; roster removals journal group
       revocations that force rotation.
-- [ ] Phase 7 remaining: ownership transfer, offers/accepts and mounts, link viewer,
-      remote groups.
+- [x] Phase 7 source retirement and link forwarding (commit `e17fddb`), with a
+      follow-up authorization fix: moved-node destinations require read access,
+      including after transfer revokes a former member. `INT_DRIVE_04` covers
+      owner access and denial to retired/unrelated identities.
+- [ ] Phase 7 remaining: client-orchestrated ownership transfer, offers/accepts
+      and mounts, link viewer, remote groups.
+- [x] Phase 8 transport foundation: Go/TS challenge authentication, ciphertext
+      upload/download verification, idempotent bounded commit retries (conflicts
+      returned for explicit merge), metadata and cursor reads. Both CLIs expose
+      `drive info|node|ls|changes|records --json`; TS also validates chunk pages.
+- [ ] Phase 8 remaining: encrypted path/file workflows and all mutation commands,
+      missing-chunk/presigned upload orchestration, subscriptions, persistent
+      directory/IndexedDB caches, scoped handles and event-log helper.
 - [ ] Phases 8–10: clients, complete baseline, migration and production rehearsal.
 
-**Inherited implementation deviation (resolved in Phase 6):** Phase 0 introduced an operational owner-authenticated
-system-file API backed by ordinary `.poweur` files (memory without POWEUR_DATA), instead of
-the plan's unavailable placeholder. Retained to preserve the passing contacts/profile/policy
-and group tests while v2 is built. This is not E20-T6 completion: no journal, v2 quota or S3,
-identity store/spool still legacy, and connected apps still owner-written. Replace this
-adapter in Phase 6. The private API explicitly refuses history/log paths.
+**Inherited implementation deviation (resolved in Phase 6):** Phase 0 kept an
+operational owner-authenticated system-file API instead of the plan's unavailable
+placeholder. Phase 6 moved its public/relay/state documents into the journalled
+drive system zone. The private API still refuses history/log paths; those need
+client-side encryption and append files. Connected apps remain owner-written
+until the Phase 9 state migration.
 
 ### Phase 9 restore list (must not be silently dropped)
 
 Restore these deleted v1 scenarios against the drive, using pre-removal commit `cc06649`
 as the test reference; retain already ported temporary system-file tests as regression coverage:
 
-- [ ] Integration CONTACTS_02/04, HISTORY_01–05, TYPED_07, DEVICES_01–03,
-      PROFILE_01–02, GROUP_01, SIGNIN_01, ABUSE_03.
+- [x] Existing v2-adapter integration CONTACTS_02/04, PROFILE_01, GROUP_01 pass.
+- [x] Restore PROFILE_02 public-avatar durability across a relay restart and
+      DEVICES_03 relay-managed registry read/write/delete enforcement against v2.
+- [x] TS system-file/device/drive APIs support explicit session-key authentication;
+      live-relay tests cover reads/writes and rejection after session revocation.
+- [ ] Integration HISTORY_01–05, TYPED_07, DEVICES_01–02, SIGNIN_01, ABUSE_03.
+      The full profile/web/cross-relay avatar acceptance remains below.
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
 - [ ] SDK history journeys, Go/TS history cursors and private sign-in consent log.

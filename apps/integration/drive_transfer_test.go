@@ -26,6 +26,11 @@ func TestINT_DRIVE_04_TransferBoardToSpace(t *testing.T) {
 		zone.SetHost(name, addr)
 		home := t.TempDir()
 		runCLI(t, home, "identity", "create", name, "--hosted", "--relay", ts.URL, "--json")
+		var info map[string]any
+		output, _ := runCLI(t, home, "drive", "info", "--json")
+		if err := json.Unmarshal([]byte(output), &info); err != nil || info["drive"] != name {
+			t.Fatalf("drive CLI info: %v %v", info, err)
+		}
 		return driveClient{t: t, relay: ts.URL, identity: name, key: loadIdentityKey(t, home, name)}
 	}
 	alice, bob, crew := client("tralice.poweur.net"), client("trbob.poweur.net"), client("trcrew.poweur.net")
@@ -119,9 +124,14 @@ func TestINT_DRIVE_04_TransferBoardToSpace(t *testing.T) {
 	if chunkResp.StatusCode != http.StatusOK || !bytes.Equal(chunk, data) {
 		t.Fatalf("bob reads the card: %d", chunkResp.StatusCode)
 	}
-	// The old copy is gone for him, and says where it went.
-	if status, out := bob.json(http.MethodGet, "/drive/"+alice.identity+"/nodes/"+aBoard, nil); status != http.StatusGone || out["moved_to"] == nil {
+	// The owner can locate the moved node; a retired grant reveals no destination.
+	if status, out := alice.json(http.MethodGet, "/drive/"+alice.identity+"/nodes/"+aBoard, nil); status != http.StatusGone || out["moved_to"] == nil {
 		t.Fatalf("old board: %d %v", status, out)
+	}
+	for _, caller := range []driveClient{bob, crew} {
+		if status, out := caller.json(http.MethodGet, "/drive/"+alice.identity+"/nodes/"+aBoard, nil); status != http.StatusForbidden || out["moved_to"] != nil {
+			t.Fatalf("unauthorized forwarding metadata: %d %v", status, out)
+		}
 	}
 	if status, _ := bob.json(http.MethodGet, "/drive/"+alice.identity+"/nodes/"+aCard, nil); status != http.StatusForbidden {
 		t.Fatalf("old card: %d", status)
