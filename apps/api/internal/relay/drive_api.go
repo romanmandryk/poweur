@@ -34,15 +34,20 @@ import (
 //	GET  /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}
 //	GET  /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}
 //
+//	GET  /drive/{identity}/shares                            shares the caller may see
+//	GET  /drive/{identity}/events                            drive.changed stream for owner and members
+//
 // Every request is authenticated like an inbox pickup (a one-shot challenge
 // signed by the identity key or a session key), and the caller may be a
-// visitor from another relay. Until node shares (E20-T7) exist only the
-// drive's owner may read or write. A chunk is only ever read through a
-// version or record that references it: knowing its hash is not enough.
+// member homed on another relay. The engine decides each request from the
+// drive's shares (E20-T7): reads need read on the node, commits the role
+// their operation needs. A chunk is only ever read through a version or
+// record that references it: knowing its hash is not enough.
 //
-// Commits notify the owner's event stream (`GET /events/{identity}`) with a
-// `drive.changed` event after they are durable; appends of up to 16 KiB ride
-// inline. Events are advisory — a client that reconnects reads `changes`.
+// Durable commits notify the owner's event stream (`GET /events/{identity}`)
+// and every drive stream whose caller may see the change; appends of up to
+// 16 KiB ride inline. Revoking a member's last share closes their stream.
+// Events are advisory — a client that reconnects reads `changes`.
 
 const (
 	maxDriveCommitBytes  = 16 << 20
@@ -63,6 +68,8 @@ type driveEvent struct {
 	Version   string                    `json:"version,omitempty"`
 	Position  uint64                    `json:"position,omitempty"`
 	Records   []engine.PositionedRecord `json:"records,omitempty"`
+	Share     string                    `json:"share,omitempty"`
+	Member    string                    `json:"member,omitempty"`
 }
 
 func newDriveEngine(store provider.Store, s *Server) *engine.Engine {
@@ -77,17 +84,20 @@ func newDriveEngine(store provider.Store, s *Server) *engine.Engine {
 }
 
 // notifyDriveChange runs under the drive's lock, so it only queues.
-func (s *Server) notifyDriveChange(driveID string, change engine.Change, records []engine.PositionedRecord) {
-	event := &driveEvent{Drive: driveID, Seq: change.Seq, Node: change.Node, Path: change.Path, Operation: change.Operation, Version: change.Version, Position: change.Position}
+func (s *Server) notifyDriveChange(driveID string, change engine.Change, records []engine.PositionedRecord, audience engine.Audience) {
+	event := &driveEvent{Drive: driveID, Seq: change.Seq, Node: change.Node, Path: change.Path, Operation: change.Operation, Version: change.Version, Position: change.Position, Share: change.Share, Member: change.Member}
 	if len(records) > 0 {
 		if raw, err := json.Marshal(records); err == nil && len(raw) <= maxInlineRecordBytes {
 			event.Records = records
 		}
 	}
-	s.hub.publish(driveID, streamEvent{Type: "drive.changed", Identity: driveID, Drive: event, Timestamp: change.At.UTC().Format(time.RFC3339)})
+	stream := streamEvent{Type: "drive.changed", Identity: driveID, Drive: event, Timestamp: change.At.UTC().Format(time.RFC3339)}
+	s.hub.publish(driveID, stream)
+	s.driveStreams.publish(driveID, stream, change, audience)
 }
 
-// driveCaller authenticates the caller and checks they may use the drive.
+// driveCaller authenticates the caller — the owner, a member homed on any
+// relay — for a drive hosted here. What they may do is decided per request.
 func (s *Server) driveCaller(w http.ResponseWriter, r *http.Request) (driveID, actor string, ok bool) {
 	if s.engine == nil {
 		writeError(w, http.StatusServiceUnavailable, "drive_unavailable", "this relay has no drive storage")
@@ -102,13 +112,58 @@ func (s *Server) driveCaller(w http.ResponseWriter, r *http.Request) (driveID, a
 	if !ok {
 		return "", "", false
 	}
-	actor = strings.ToLower(actor)
-	// Node shares (E20-T7) widen this; until then a drive is its owner's.
-	if actor != driveID {
-		writeError(w, http.StatusForbidden, "forbidden", "not permitted on this drive")
+	return driveID, strings.ToLower(actor), true
+}
+
+// driveNode authenticates the caller and checks need on the path's node.
+func (s *Server) driveNode(w http.ResponseWriter, r *http.Request, need string) (driveID, actor string, ok bool) {
+	driveID, actor, ok = s.driveCaller(w, r)
+	if !ok {
+		return "", "", false
+	}
+	if err := s.engine.Authorize(r.Context(), driveID, actor, r.PathValue("node"), need); err != nil {
+		s.writeDriveError(w, err)
 		return "", "", false
 	}
 	return driveID, actor, true
+}
+
+// driveUploader lets the owner and members who may add content upload.
+func (s *Server) driveUploader(w http.ResponseWriter, r *http.Request, driveID, actor string) bool {
+	allowed, err := s.engine.CanUpload(r.Context(), driveID, actor)
+	if err != nil {
+		s.writeDriveError(w, err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "forbidden", "no role on this drive adds content")
+		return false
+	}
+	return true
+}
+
+// handleDriveShares lists the shares the caller may see: every share for the
+// owner; for a member their own (with their sealed node keys) and those on
+// nodes they administer.
+func (s *Server) handleDriveShares(w http.ResponseWriter, r *http.Request) {
+	driveID, actor, ok := s.driveCaller(w, r)
+	if !ok {
+		return
+	}
+	shares, err := s.engine.Shares(r.Context(), driveID, actor)
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	if len(shares) == 0 && !engine.IsOwner(driveID, actor) {
+		writeError(w, http.StatusForbidden, "forbidden", "no shares on this drive")
+		return
+	}
+	if shares == nil {
+		shares = []drive.Share{}
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares})
 }
 
 // writeDriveError maps engine errors to statuses.
@@ -137,8 +192,13 @@ func (s *Server) writeDriveError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) handleDriveGet(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, actor, ok := s.driveCaller(w, r)
 	if !ok {
+		return
+	}
+	if !engine.IsOwner(driveID, actor) {
+		// Members find their way in through their shares.
+		writeError(w, http.StatusForbidden, "forbidden", "only the owner reads the drive root; members list /shares")
 		return
 	}
 	root, err := s.engine.Root(r.Context(), driveID)
@@ -167,8 +227,11 @@ type missingChunk struct {
 }
 
 func (s *Server) handleDriveMissing(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, actor, ok := s.driveCaller(w, r)
 	if !ok {
+		return
+	}
+	if !s.driveUploader(w, r, driveID, actor) {
 		return
 	}
 	var body struct {
@@ -205,8 +268,11 @@ func (s *Server) handleDriveMissing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveChunkPut(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, actor, ok := s.driveCaller(w, r)
 	if !ok {
+		return
+	}
+	if !s.driveUploader(w, r, driveID, actor) {
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, drive.MaxChunkBytes+1))
@@ -236,6 +302,8 @@ type driveCommitBody struct {
 	Pages    []drive.ChunkPage    `json:"pages,omitempty"`
 	Records  []drive.AppendRecord `json:"records,omitempty"`
 	Trim     *engine.Trim         `json:"trim,omitempty"`
+	Share    *drive.Share         `json:"share,omitempty"`
+	Unshare  *engine.Unshare      `json:"unshare,omitempty"`
 }
 
 func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +327,12 @@ func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	req := engine.Request{ID: body.ID, Manifest: body.Manifest, Pages: body.Pages, Records: body.Records, Trim: body.Trim, Author: actor}
+	if body.Share != nil && body.Share.Issuer != actor {
+		writeError(w, http.StatusForbidden, "forbidden", "the share issuer must be the caller")
+		return
+	}
+	req := engine.Request{ID: body.ID, Manifest: body.Manifest, Pages: body.Pages, Records: body.Records, Trim: body.Trim,
+		Share: body.Share, Unshare: body.Unshare, Author: actor}
 	var result engine.Result
 	var err error
 	for attempt := 0; attempt < driveCommitRetries; attempt++ {
@@ -282,7 +355,7 @@ func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveChanges(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, actor, ok := s.driveCaller(w, r)
 	if !ok {
 		return
 	}
@@ -294,7 +367,7 @@ func (s *Server) handleDriveChanges(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	changes, next, err := s.engine.Changes(r.Context(), driveID, cursor, int(limit))
+	changes, next, err := s.engine.ChangesFor(r.Context(), driveID, actor, cursor, int(limit))
 	if err != nil {
 		s.writeDriveError(w, err)
 		return
@@ -307,7 +380,7 @@ func (s *Server) handleDriveChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveNode(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -322,7 +395,7 @@ func (s *Server) handleDriveNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveChildren(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -343,7 +416,7 @@ func (s *Server) handleDriveChildren(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveHistory(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -360,7 +433,7 @@ func (s *Server) handleDriveHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveRecords(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -392,7 +465,7 @@ func (s *Server) handleDriveRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveVersion(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -406,7 +479,7 @@ func (s *Server) handleDriveVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDrivePage(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}
@@ -422,7 +495,7 @@ func (s *Server) handleDrivePage(w http.ResponseWriter, r *http.Request) {
 // handleDriveChunk serves a chunk through a version (or, without one, an
 // append record) of the node that references it.
 func (s *Server) handleDriveChunk(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveCaller(w, r)
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
 	if !ok {
 		return
 	}

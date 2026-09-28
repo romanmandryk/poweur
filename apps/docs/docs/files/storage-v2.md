@@ -344,7 +344,7 @@ Every request is authenticated like an inbox pickup: `GET /auth/challenge?identi
 then `X-Poweur-Identity`, `X-Poweur-Challenge` and `X-Poweur-Signature` (the challenge signed by
 the identity key or a session key with `X-Poweur-Session-Id`). The caller may be a visitor homed
 on another relay; its key is resolved like any peer's. Until node shares (E20-T7) only the drive's
-owner is permitted (`403` otherwise). Knowing a hash is never permission to read a chunk.
+owner is permitted (`403` otherwise) — superseded by shares below. Knowing a hash is never permission to read a chunk.
 
 | Operation | Request | Response |
 |---|---|---|
@@ -360,6 +360,8 @@ owner is permitted (`403` otherwise). Knowing a hash is never permission to read
 | Chunk through a version | `GET /nodes/{node}/versions/{version}/chunks/{hash}` | immutable bytes |
 | Chunk of an append record | `GET /nodes/{node}/chunks/{hash}` | immutable bytes |
 | Append tail | `GET /nodes/{node}/records?from=N&limit=` | `{records:[{position,record}], next}`; `410 {trimmed_before, snapshot}` |
+| Shares | `GET /shares` | `{shares}`: all for the owner; own and administered for members |
+| Event stream | `GET /events` | SSE `drive.changed`, filtered per caller; `drive.revoked` then close |
 
 `upload.url` is either the relay's own `PUT /chunks/{hash}` or, on S3 with `S3_PRESIGN=1`, a
 15-minute presigned PUT whose `x-amz-checksum-sha256` header binds the chunk hash. Commit
@@ -391,6 +393,28 @@ appropriate node key sealed to their identity key. Revocation immediately remove
 API access, then the owner rotates keys before further private writes. Previously
 downloaded bytes remain readable. Ownership transfer copies ciphertext to the new
 drive, re-seals the root key and re-issues shares under the new owner.
+
+**Implemented share format and enforcement.** A share (`drive/share.go`,
+`src/drive/share.ts`, pinned by `drive-shares.json`) names the drive, a random share ID,
+the node, exactly one member identity or link ID, the role, the node key generation, the
+node private key sealed for the member (only for `read`, `write` and `admin`; `append` and
+`create` get only `node_public`), an optional RFC3339 expiry, caps (`bytes`, `files`,
+`records`, `downloads`, `per_hour`), link-password parameters (`kdf`
+`argon2id-m65536-t3-p1`, 16-byte `salt`, `verifier_hash` = SHA-256 of the verifier half),
+a proof-of-work difficulty for anonymous link writes, the issuer and issue time, and the
+issuer's Ed25519 signature over `poweur/drive/share/v1` length-prefixed fields.
+Shares are committed through `POST /commit` (`{"share": …}` / `{"unshare": {"id": …}}`)
+and journalled; the relay verifies the issuer's signature and that the issuer owns the drive
+or holds `admin` on the node, that the generation matches the node, and that the node is
+not waiting for a rotation. Commits need: create → `create` on the folder; replace/remove →
+`write`; move → `write` on the node and `create` on the destination; rotate, trim, share and
+revoke → `admin` (a member may also revoke their own share). Reads need `read` on the node.
+Expired shares stop working at their expiry without a commit. Revoking a `read`/`write`/
+`admin` share marks every live node below the shared node `rotate_required`: new content,
+new children and new key-bearing shares there return `409` until that node's key is rotated.
+Members discover their grants and sealed keys at `GET /shares`, read `GET /changes` filtered
+to what they can read, and stream `GET /events`; a revocation that leaves them no share
+closes the stream with `drive.revoked`.
 
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the

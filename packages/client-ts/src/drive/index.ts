@@ -3,3 +3,4 @@ export * from "./crypto.js";
 export * from "./names.js";
 export * from "./records.js";
 export * from "./manifest.js";
+export * from "./share.js";

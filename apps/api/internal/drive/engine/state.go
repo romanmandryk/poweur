@@ -36,18 +36,21 @@ const stateFormat = 1
 
 // node is the engine's view of one node at its head version.
 type node struct {
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	Mode       string    `json:"mode,omitempty"`
-	Folder     string    `json:"folder,omitempty"`
-	NameHash   string    `json:"name_hash,omitempty"`
-	Head       string    `json:"head"`
-	HeadHash   string    `json:"head_hash"`
-	Generation uint64    `json:"generation"`
-	Count      uint64    `json:"count"`
-	Pages      []string  `json:"pages"`
-	Removed    bool      `json:"removed,omitempty"`
-	Updated    time.Time `json:"updated"`
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Mode       string   `json:"mode,omitempty"`
+	Folder     string   `json:"folder,omitempty"`
+	NameHash   string   `json:"name_hash,omitempty"`
+	Head       string   `json:"head"`
+	HeadHash   string   `json:"head_hash"`
+	Generation uint64   `json:"generation"`
+	Count      uint64   `json:"count"`
+	Pages      []string `json:"pages"`
+	Removed    bool     `json:"removed,omitempty"`
+	// RotateRequired is set when a share that carried this node's key is
+	// revoked; only a key rotation clears it.
+	RotateRequired bool      `json:"rotate_required,omitempty"`
+	Updated        time.Time `json:"updated"`
 	// Append files.
 	Position uint64 `json:"position,omitempty"`
 	// TrimmedBefore is the first retained position; earlier ones are gone.
@@ -94,6 +97,9 @@ type SnapshotRef struct {
 type Change struct {
 	Seq  uint64 `json:"seq"`
 	Node string `json:"node,omitempty"`
+	// Share and Member are set on share and unshare changes.
+	Share  string `json:"share,omitempty"`
+	Member string `json:"member,omitempty"`
 	// Path is set on system-zone changes.
 	Path      string    `json:"path,omitempty"`
 	Operation string    `json:"operation"`
@@ -125,6 +131,7 @@ type state struct {
 	Used        int64                       `json:"used"`
 	Ops         map[string]opResult         `json:"ops"`
 	System      map[string]*systemFile      `json:"system"`
+	Shares      map[string]*drive.Share     `json:"shares"`
 	Changes     []Change                    `json:"changes"`
 }
 
@@ -133,7 +140,7 @@ func newState(driveID string) *state {
 		Format: stateFormat, Drive: driveID,
 		Nodes: map[string]*node{}, Names: map[string]string{}, Versions: map[string]*version{},
 		Pages: map[string][]drive.ChunkRef{}, PageRefs: map[string]int{}, Chunks: map[string]*chunk{},
-		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{},
+		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{},
 	}
 }
 

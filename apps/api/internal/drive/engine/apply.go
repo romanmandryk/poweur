@@ -11,15 +11,19 @@ import (
 // the journal operation it becomes. It does not change state.
 func (e *Engine) validate(ctx context.Context, h *driveHandle, req Request) (journalOp, error) {
 	count := 0
-	for _, set := range []bool{req.Manifest != nil, len(req.Records) > 0, req.Trim != nil} {
+	for _, set := range []bool{req.Manifest != nil, len(req.Records) > 0, req.Trim != nil, req.Share != nil, req.Unshare != nil} {
 		if set {
 			count++
 		}
 	}
 	if count != 1 {
-		return journalOp{}, fmt.Errorf("%w: a commit is one manifest, one batch of records or one trim", ErrInvalid)
+		return journalOp{}, fmt.Errorf("%w: a commit is one manifest, one batch of records, one trim, one share or one revocation", ErrInvalid)
 	}
 	switch {
+	case req.Share != nil:
+		return e.validateShare(ctx, h, *req.Share, req.Author)
+	case req.Unshare != nil:
+		return e.validateUnshare(h, req.Unshare.ID, req.Author)
 	case req.Manifest != nil:
 		return e.validateManifest(ctx, h, req)
 	case len(req.Records) > 0:
@@ -33,11 +37,36 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, args...)...)
 }
 
-func (e *Engine) verifyAuthor(ctx context.Context, driveID, author, nodeID, operation string) error {
-	if err := e.opts.Authorize(ctx, driveID, author, nodeID, operation); err != nil {
-		return err
+// authorizeManifest checks the author's role for a manifest: creating needs
+// create on the folder, content changes and removal need write, a move also
+// needs create on the destination, and a key rotation needs admin. New
+// content under a key a revoked member still holds is refused until the
+// node rotates.
+func (e *Engine) authorizeManifest(st *state, m drive.Manifest) error {
+	switch m.Operation {
+	case drive.OpCreate:
+		if m.Folder == "" {
+			return e.permit(st, m.Author, "", needOwner)
+		}
+		if err := e.permit(st, m.Author, m.Folder, drive.RoleCreate); err != nil {
+			return err
+		}
+		return rotationRequired(st, m.Folder)
+	case drive.OpReplace:
+		if err := e.permit(st, m.Author, m.Node, drive.RoleWrite); err != nil {
+			return err
+		}
+		return rotationRequired(st, m.Node)
+	case drive.OpMove:
+		if err := e.permit(st, m.Author, m.Node, drive.RoleWrite); err != nil {
+			return err
+		}
+		return e.permit(st, m.Author, m.Folder, drive.RoleCreate)
+	case drive.OpRotate:
+		return e.permit(st, m.Author, m.Node, drive.RoleAdmin)
+	default:
+		return e.permit(st, m.Author, m.Node, drive.RoleWrite)
 	}
-	return nil
 }
 
 func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Request) (journalOp, error) {
@@ -48,7 +77,7 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 	if m.Drive != st.Drive {
 		return journalOp{}, invalid("manifest is for drive %s", m.Drive)
 	}
-	if err := e.verifyAuthor(ctx, st.Drive, m.Author, m.Node, m.Operation); err != nil {
+	if err := e.authorizeManifest(st, m); err != nil {
 		return journalOp{}, err
 	}
 	key, err := e.opts.Keys(ctx, m.Author)
@@ -178,6 +207,9 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 	if n.Kind != drive.KindFile || n.Mode != drive.ModeAppend {
 		return journalOp{}, invalid("node %s is not an append file", target)
 	}
+	if err := rotationRequired(st, target); err != nil {
+		return journalOp{}, err
+	}
 	cursors := map[string]authorCursor{}
 	for author, c := range n.Authors {
 		cursors[author] = c
@@ -193,7 +225,7 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 		if record.Generation != n.Generation {
 			return journalOp{}, invalid("record generation %d is not the node's %d", record.Generation, n.Generation)
 		}
-		if err := e.verifyAuthor(ctx, st.Drive, record.Author, target, "append"); err != nil {
+		if err := e.permit(st, record.Author, target, drive.RoleAppend); err != nil {
 			return journalOp{}, err
 		}
 		key, err := e.opts.Keys(ctx, record.Author)
@@ -237,7 +269,7 @@ func (e *Engine) validateTrim(ctx context.Context, h *driveHandle, req Request) 
 	if n == nil || n.Removed || n.Mode != drive.ModeAppend {
 		return journalOp{}, fmt.Errorf("%w: append file %s", ErrNotFound, t.Node)
 	}
-	if err := e.verifyAuthor(ctx, st.Drive, req.Author, t.Node, "trim"); err != nil {
+	if err := e.permit(st, req.Author, t.Node, drive.RoleAdmin); err != nil {
 		return journalOp{}, err
 	}
 	if t.Before <= max(n.TrimmedBefore, 1) || t.Before > n.Position+1 {
@@ -301,6 +333,9 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 			}
 		}
 		n.Head, n.HeadHash, n.Generation, n.Count, n.Pages, n.Updated = m.Version, op.ManifestHash, m.Generation, m.Count, append([]string(nil), m.Pages...), op.At
+		if m.Operation == drive.OpRotate {
+			n.RotateRequired = false
+		}
 		result.Head = m.Version
 		st.Changes = append(st.Changes, Change{Seq: seq, Node: m.Node, Operation: m.Operation, Version: m.Version, At: op.At})
 	case kindAppend:
@@ -359,6 +394,14 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		}
 	case kindSystem:
 		if err := applySystem(st, seq, op); err != nil {
+			return err
+		}
+	case kindShare:
+		if err := applyShare(st, seq, op); err != nil {
+			return err
+		}
+	case kindUnshare:
+		if err := applyUnshare(st, seq, op); err != nil {
 			return err
 		}
 	default:

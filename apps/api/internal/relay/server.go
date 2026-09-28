@@ -73,6 +73,8 @@ type Server struct {
 	driveErr error
 	// engine serves /drive/{identity} over drive (E20-T5); nil without it.
 	engine *engine.Engine
+	// driveStreams fans drive changes out to owner and member streams.
+	driveStreams *driveStreams
 	// sysLocks makes owner API preconditions atomic with writes and deletes.
 	sysLocks *deviceLocks
 
@@ -157,6 +159,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		client:            &http.Client{Timeout: 10 * time.Second},
 		idCache:           idpkg.NewCache(),
 		hub:               newHub(),
+		driveStreams:      newDriveStreams(),
 		deviceLocks:       newDeviceLocks(),
 		sysLocks:          newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
@@ -291,6 +294,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("PUT /drive/{identity}/chunks/{chunk}", s.handleDriveChunkPut)
 	mux.HandleFunc("POST /drive/{identity}/commit", s.handleDriveCommit)
 	mux.HandleFunc("GET /drive/{identity}/changes", s.handleDriveChanges)
+	mux.HandleFunc("GET /drive/{identity}/shares", s.handleDriveShares)
+	mux.HandleFunc("GET /drive/{identity}/events", s.handleDriveEvents)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)

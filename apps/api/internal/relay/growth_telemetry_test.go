@@ -51,7 +51,7 @@ func TestAdoptionCounts(t *testing.T) {
 	docs := map[string]string{
 		"a/.poweur/public/profile.json":     `{"version":1,"display_name":"Alice","avatar":"me.png","links":[{"label":"x","url":"https://x"}]}`,
 		"a/.poweur/relay/inbox-policy.json": `{"version":1,"mode":"contacts_and_requests","anonymous":{"challenge":"pow"},"read_receipts":{"enabled":false}}`,
-		"a/" + analyticsPath:                   `{"version":1,"granted":true,"updated_at":"2026-09-10T12:00:00Z"}`,
+		"a/" + analyticsPath:                `{"version":1,"granted":true,"updated_at":"2026-09-10T12:00:00Z"}`,
 		"a/.poweur/relay/contacts.json":     `{"version":1,"contacts":[{"identity":"b.poweur.net","state":"accepted"}]}`,
 		"b/.poweur/relay/contacts.json":     `{"version":1,"contacts":[{"identity":"spam.example","state":"blocked"}]}`,
 		"b/.poweur/public/profile.json":     `{"version":1,"display_name":"  ","bio":"hello"}`,
@@ -92,4 +92,3 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
-

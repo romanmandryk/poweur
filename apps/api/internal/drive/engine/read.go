@@ -13,23 +13,26 @@ import (
 
 // NodeInfo is a node at its head, as the relay sees it (no names or keys).
 type NodeInfo struct {
-	ID            string       `json:"id"`
-	Kind          string       `json:"kind"`
-	Mode          string       `json:"mode,omitempty"`
-	Folder        string       `json:"folder,omitempty"`
-	NameHash      string       `json:"name_hash,omitempty"`
-	Head          string       `json:"head"`
-	Generation    uint64       `json:"generation"`
-	Count         uint64       `json:"count"`
-	Removed       bool         `json:"removed,omitempty"`
-	Position      uint64       `json:"position,omitempty"`
-	TrimmedBefore uint64       `json:"trimmed_before,omitempty"`
-	TrimSnapshot  *SnapshotRef `json:"trim_snapshot,omitempty"`
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	Mode       string `json:"mode,omitempty"`
+	Folder     string `json:"folder,omitempty"`
+	NameHash   string `json:"name_hash,omitempty"`
+	Head       string `json:"head"`
+	Generation uint64 `json:"generation"`
+	Count      uint64 `json:"count"`
+	Removed    bool   `json:"removed,omitempty"`
+	// RotateRequired: a revoked member held this node's key; the next
+	// content write must be preceded by a key rotation.
+	RotateRequired bool         `json:"rotate_required,omitempty"`
+	Position       uint64       `json:"position,omitempty"`
+	TrimmedBefore  uint64       `json:"trimmed_before,omitempty"`
+	TrimSnapshot   *SnapshotRef `json:"trim_snapshot,omitempty"`
 }
 
 func infoOf(n *node) NodeInfo {
 	return NodeInfo{ID: n.ID, Kind: n.Kind, Mode: n.Mode, Folder: n.Folder, NameHash: n.NameHash, Head: n.Head,
-		Generation: n.Generation, Count: n.Count, Removed: n.Removed, Position: n.Position,
+		Generation: n.Generation, Count: n.Count, Removed: n.Removed, RotateRequired: n.RotateRequired, Position: n.Position,
 		TrimmedBefore: n.TrimmedBefore, TrimSnapshot: n.TrimSnapshot}
 }
 

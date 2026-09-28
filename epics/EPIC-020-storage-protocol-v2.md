@@ -28,7 +28,7 @@
 | E20-T4 Drive engine | **in progress** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
 | E20-T5 Drive HTTP API & change stream | **in progress** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
 | E20-T6 `.poweur` system files & stateless relay | **in progress** | settings as files the relay validates and applies; no relay state outside the drive |
-| E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
+| E20-T7 Shares, roles, links & file requests | **in progress** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **open** | encryption, uploads, commits, cursors, chunk caches, scoped handles, event-log helper, `poweur drive` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
@@ -89,8 +89,13 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       acks and keystore live on the provider under `relay/`; the relay writes nothing else
       (an S3 relay needs no `POWEUR_DATA`). Replaces the Phase 0 file-backed adapter.
       Open: connected apps as relay state (Phase 9), sync-daemon rejection codes.
-- [ ] Phases 7–10: node shares, clients, complete baseline, migration and production
-      rehearsal.
+- [x] Phase 7 slice 1: signed shares (Go/TS/vectors), roles with inheritance enforced on
+      every read and commit, cross-relay members, filtered changes/events with revocation
+      closing streams, revocation → `rotate_required` (`INT_DRIVE_02`).
+- [ ] Phase 7 remaining: links (fragment key, password verifier, expiry, download caps,
+      viewer), caps, anonymous writes with PoW, file requests, groups as members, offers/
+      accepts and mounts, ownership transfer.
+- [ ] Phases 8–10: clients, complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 introduced an operational owner-authenticated
 system-file API backed by ordinary `.poweur` files (memory without POWEUR_DATA), instead of
@@ -495,7 +500,7 @@ commit fuzz never removes a live chunk.
       no app passwords
 - [x] Read an append file from a position (`?from=N`), with the next position returned
 - [x] SSE `drive.changed` events per node; appends ≤ 16 KiB carried inline
-- [ ] **Share members subscribe too:** a member on another relay opens an event stream on the
+- [x] **Share members subscribe too:** a member on another relay opens an event stream on the
       host relay for the nodes shared with them (visitor auth), filtered to what they may read;
       revocation closes the stream
 - [ ] `/pub` and `/.well-known/poweur/` served from public nodes and `.poweur/public`
@@ -530,9 +535,9 @@ invalid edit is rejected with a readable reason and never half-applied.
 
 ### E20-T7 — Shares, roles, links & file requests
 
-- [ ] Share documents on node ids; roles `read`/`write`/`append`/`create`/`admin`; enforcement
-      on every read and commit; author-role verification on the reading client
-- [ ] **Inheritance and combination:** a node's effective role for a member is the highest role
+- [x] Share documents on node ids; roles `read`/`write`/`append`/`create`/`admin`; enforcement
+      on every read and commit (relay); author-role verification on the reading client (Phase 8)
+- [x] **Inheritance and combination:** a node's effective role for a member is the highest role
       granted by any share on the node or its ancestors, so a folder can be shared `read` while
       one file in it is shared `append` (e.g. comments)
 - [ ] **Caps:** per-member and per-link limits on bytes, records/files and rate, plus
@@ -541,7 +546,8 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [ ] **Ownership transfer** of a subtree between drives (person ↔ group identity), re-issuing
       shares and keeping links working
 - [ ] Offers and accepts (E05-T3 bodies) carry sealed node keys; mounts in `.poweur/private/mounts/`
-- [ ] Revocation with immediate access removal and key rotation on the next owner write
+- [x] Revocation with immediate access removal and key rotation on the next owner write
+      (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
 - [ ] Links with key-in-fragment and the split password verifier; expiry, download caps,
       rate limits; static decrypting viewer with strict CSP and `no-referrer`
 - [ ] File requests on `create` + folder public key; guest isolation, quotas and claim flow

@@ -9,9 +9,9 @@
  */
 import { sha256 } from "@noble/hashes/sha2.js";
 import { signBytes, verifyBytes } from "../crypto/index.js";
-import { concatBytes, fromBase64, toBase64url, utf8 } from "../encoding.js";
-import { validateIdentityName } from "../names.js";
-import { MAX_CHUNK_BYTES, PADDING_BUCKET, driveContext } from "./crypto.js";
+import { concatBytes, toBase64url, utf8 } from "../encoding.js";
+import { driveContext } from "./crypto.js";
+import { MAX_COUNTER, hex, lengthPrefixed, sealedFields, strictBase64, validChunk, validHex, validIdentity, validatePayload } from "./internal.js";
 import type { ChunkRef, DriveSealedPayload } from "./records.js";
 
 export const PAGE_SIZE = 1024;
@@ -53,47 +53,6 @@ export interface Manifest {
   count: number;
   pages: string[];
   signature: string;
-}
-
-const MAX_COUNTER = Number.MAX_SAFE_INTEGER;
-
-function validHex(value: string, bytes: number): boolean {
-  return typeof value === "string" && value.length === bytes * 2 && /^[0-9a-f]+$/.test(value);
-}
-function validIdentity(value: string): void {
-  if (value !== value.trim().toLowerCase()) throw new Error("invalid drive or author");
-  validateIdentityName(value);
-}
-function validChunk(chunk: ChunkRef): boolean {
-  return validHex(chunk.id, 32) && Number.isSafeInteger(chunk.size) && chunk.size >= 40 + PADDING_BUCKET &&
-    chunk.size <= MAX_CHUNK_BYTES && (chunk.size - 40) % PADDING_BUCKET === 0;
-}
-function strictBase64(value: string): Uint8Array {
-  const bytes = fromBase64(value);
-  if (toBase64url(bytes) !== value) throw new Error("invalid sealed field encoding");
-  return bytes;
-}
-function validatePayload(p: DriveSealedPayload): void {
-  for (const [value, size] of [[p.ephemeral_public_key, 32], [p.nonce, 12], [p.ciphertext, 0]] as const) {
-    if (typeof value !== "string" || value.length > Math.ceil(MAX_CHUNK_BYTES * 4 / 3)) throw new Error("sealed field too large");
-    const raw = strictBase64(value);
-    if (size ? raw.length !== size : raw.length < 16 || raw.length > MAX_CHUNK_BYTES) throw new Error("invalid sealed field length");
-  }
-}
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-function lengthPrefixed(prefix: string, fields: string[]): Uint8Array {
-  const out: Uint8Array[] = [utf8(prefix)];
-  for (const field of fields) {
-    const bytes = utf8(field), size = new Uint8Array(4);
-    new DataView(size.buffer).setUint32(0, bytes.length);
-    out.push(size, bytes);
-  }
-  return concatBytes(...out);
-}
-function sealedFields(p: DriveSealedPayload | null | undefined): string[] {
-  return p ? [p.ephemeral_public_key, p.nonce, p.ciphertext] : ["", "", ""];
 }
 
 export function validateChunkPage(page: ChunkPage): void {

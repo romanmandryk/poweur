@@ -47,6 +47,8 @@ type journalOp struct {
 	Trim         *trimOp           `json:"trim,omitempty"`
 	GC           *gcOp             `json:"gc,omitempty"`
 	System       *systemOp         `json:"system,omitempty"`
+	Share        *drive.Share      `json:"share,omitempty"`
+	Unshare      *unshareOp        `json:"unshare,omitempty"`
 }
 
 type trimOp struct {

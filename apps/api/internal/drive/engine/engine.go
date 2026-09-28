@@ -19,16 +19,10 @@ import (
 // KeyResolver returns an identity's Ed25519 signing key.
 type KeyResolver func(ctx context.Context, identity string) (ed25519.PublicKey, error)
 
-// Authorizer decides whether author may perform operation on a drive's node.
-// operation is a manifest operation, "append" or "trim". The default allows
-// only the drive's owner; shares (E20-T7) replace it.
-type Authorizer func(ctx context.Context, driveID, author, nodeID, operation string) error
-
 // Options configure an Engine.
 type Options struct {
-	Store     provider.Store
-	Keys      KeyResolver
-	Authorize Authorizer
+	Store provider.Store
+	Keys  KeyResolver
 	// Quota returns a drive's byte quota; 0 is unlimited.
 	Quota func(driveID string) int64
 	// Retention keeps superseded versions this long (default 30 days).
@@ -41,7 +35,8 @@ type Options struct {
 	// OnCommit is told about each change after it is durable, while the
 	// drive is still locked (it must not call back into the engine). For an
 	// append, records are the appended records with their positions.
-	OnCommit func(driveID string, change Change, records []PositionedRecord)
+	// audience answers who may see the change, against the state it made.
+	OnCommit func(driveID string, change Change, records []PositionedRecord, audience Audience)
 	Now      func() time.Time
 }
 
@@ -76,21 +71,10 @@ func New(opts Options) *Engine {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	if opts.Authorize == nil {
-		opts.Authorize = OwnerOnly
-	}
 	if opts.Quota == nil {
 		opts.Quota = func(string) int64 { return 0 }
 	}
 	return &Engine{opts: opts, drives: map[string]*driveHandle{}}
-}
-
-// OwnerOnly allows an operation only when the author owns the drive.
-func OwnerOnly(_ context.Context, driveID, author, _, _ string) error {
-	if !strings.EqualFold(driveID, author) {
-		return ErrForbidden
-	}
-	return nil
 }
 
 func (e *Engine) now() time.Time { return e.opts.Now().UTC() }
@@ -316,7 +300,10 @@ type Request struct {
 	Pages    []drive.ChunkPage
 	Records  []drive.AppendRecord
 	Trim     *Trim
-	// Author signs a trim (manifests and records name their own author).
+	Share    *drive.Share
+	Unshare  *Unshare
+	// Author is the authenticated committer. It authorizes trims and
+	// revocations; manifests, records and shares name their own signer.
 	Author string
 }
 
@@ -407,7 +394,7 @@ func (e *Engine) publish(ctx context.Context, h *driveHandle, op journalOp) erro
 					records = append(records, PositionedRecord{Position: first + uint64(i), Record: r.Record})
 				}
 			}
-			e.opts.OnCommit(st.Drive, change, records)
+			e.opts.OnCommit(st.Drive, change, records, e.audience(st, change))
 		}
 	}
 	return nil
@@ -466,8 +453,10 @@ func hashRequest(req Request) (string, error) {
 		P []drive.ChunkPage    `json:"p"`
 		R []drive.AppendRecord `json:"r"`
 		T *Trim                `json:"t"`
+		S *drive.Share         `json:"s,omitempty"`
+		U *Unshare             `json:"u,omitempty"`
 		A string               `json:"a"`
-	}{req.Manifest, req.Pages, req.Records, req.Trim, req.Author})
+	}{req.Manifest, req.Pages, req.Records, req.Trim, req.Share, req.Unshare, req.Author})
 	if err != nil {
 		return "", err
 	}

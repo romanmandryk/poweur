@@ -114,8 +114,14 @@ func (c driveClient) events() <-chan map[string]any {
 
 func (c driveClient) commit(body map[string]any) (int, map[string]any) {
 	c.t.Helper()
+	return c.commitTo(c.identity, body)
+}
+
+// commitTo commits to another identity's drive, as a member.
+func (c driveClient) commitTo(driveID string, body map[string]any) (int, map[string]any) {
+	c.t.Helper()
 	body["id"] = randomHex(16)
-	return c.json(http.MethodPost, "/drive/"+c.identity+"/commit", body)
+	return c.json(http.MethodPost, "/drive/"+driveID+"/commit", body)
 }
 
 func (c driveClient) signed(m drive.Manifest) drive.Manifest {

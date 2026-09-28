@@ -105,7 +105,7 @@ func (f *fixture) newEngine() *Engine {
 		},
 		Quota: func(string) int64 { return f.quota },
 		Now:   func() time.Time { return f.clock },
-		OnCommit: func(_ string, c Change, _ []PositionedRecord) {
+		OnCommit: func(_ string, c Change, _ []PositionedRecord, _ Audience) {
 			f.mu.Lock()
 			f.changes = append(f.changes, c)
 			f.mu.Unlock()
@@ -203,6 +203,29 @@ func (f *fixture) replace(node, base string, refs ...drive.ChunkRef) (Result, er
 	}
 	return f.commit(drive.Manifest{Format: 1, Drive: owner, Node: node, Version: hexID(16), Parent: base, Operation: drive.OpReplace,
 		Author: owner, Generation: 1, Kind: drive.KindFile, Mode: drive.ModeReplace, Count: uint64(len(refs)), Pages: hashes}, pages)
+}
+
+// grant commits a share of node to member with role, signed by the owner.
+func (f *fixture) grant(node, member, role string) drive.Share {
+	f.t.Helper()
+	n, err := f.eng.Node(context.Background(), owner, node)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	id, _ := drive.NewShareID()
+	s := drive.Share{Format: 1, Drive: owner, ID: id, Node: node, Member: member, Role: role, Generation: n.Generation,
+		NodePublic: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32)),
+		Issuer:     owner, Issued: f.clock.UTC().Truncate(time.Second).Format(time.RFC3339)}
+	if drive.KeyBearing(role) {
+		s.NodeKey = payload(9)
+	}
+	if err := s.Sign(f.keys[owner]); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.eng.Commit(context.Background(), owner, Request{ID: hexID(16), Share: &s, Author: owner}); err != nil {
+		f.t.Fatal(err)
+	}
+	return s
 }
 
 func nameHash(tag byte) string { return strings.Repeat(fmt.Sprintf("%02x", tag), 32) }
@@ -610,23 +633,10 @@ func TestCommitNotifiesAfterDurability(t *testing.T) {
 func TestConcurrentAppendsKeepPositions(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	appendAny := func(_ context.Context, _, _, _, op string) error {
-		if op == "append" {
-			return nil
-		}
-		return ErrForbidden
-	}
 	engines := []*Engine{f.newEngine(), f.newEngine()}
-	for _, e := range engines {
-		e.opts.Authorize = func(ctx context.Context, d, a, n, op string) error {
-			if OwnerOnly(ctx, d, a, n, op) == nil {
-				return nil
-			}
-			return appendAny(ctx, d, a, n, op)
-		}
-	}
 	root := f.root()
 	log, _ := f.file(root, nameHash(1), drive.ModeAppend)
+	f.grant(log, "bob.poweur.net", drive.RoleAppend)
 	const perAuthor = 12
 	authors := []string{owner, "bob.poweur.net"}
 	type ack struct {

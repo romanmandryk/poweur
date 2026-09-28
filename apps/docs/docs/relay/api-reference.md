@@ -49,7 +49,7 @@ The relay exposes two distinct surfaces and authenticates them differently:
 | `POST /identities/:identity/enroll/:rendezvous/reveal` | bearer | the offer's claim token |
 | `GET`/`DELETE /identities/:identity/enroll/:rendezvous` | bearer | the offer's claim token; releases only ciphertext |
 | `GET`/`PUT`/`DELETE /identities/:identity/system/:path` | owner-only | challenge-signed; `.poweur/{public,relay}` documents, validated on write |
-| `/drive/:identity/…` | owner (shares later) | challenge-signed; see [Drive API](#drive-api) |
+| `/drive/:identity/…` | owner or member | challenge-signed; see [Drive API](#drive-api) |
 
 ## At-least-one-local rule {#at-least-one-local-rule}
 
@@ -1022,8 +1022,8 @@ Abandon an offer (bearer `claim_token`), freeing its slot.
 
 Each identity's end-to-end encrypted drive. Every request carries the challenge headers
 (`X-Poweur-Identity`, `X-Poweur-Challenge`, `X-Poweur-Signature`, optionally
-`X-Poweur-Session-Id`); callers from other relays authenticate the same way. Until node
-shares ship only the owner is permitted. The endpoints, bodies and the `drive.changed`
+`X-Poweur-Session-Id`); callers from other relays authenticate the same way. The owner
+may do anything; members may do what their shares' roles allow on the shared nodes. The endpoints, bodies and the `drive.changed`
 event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surface).
 
 | Endpoint | Purpose |
@@ -1036,6 +1036,8 @@ event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surf
 | `GET /drive/:identity/nodes/:node[/children\|/history\|/records]` | Node head, children, retained versions, append tail |
 | `GET /drive/:identity/nodes/:node/versions/:version[/pages/:page\|/chunks/:hash]` | Signed manifest, chunk-list page, chunk |
 | `GET /drive/:identity/nodes/:node/chunks/:hash` | Chunk of an append record |
+| `GET /drive/:identity/shares` | Shares the caller may see (members: their own, with sealed keys) |
+| `GET /drive/:identity/events` | `drive.changed` SSE filtered to the caller; closes on revocation |
 
 ## Error Format
 

@@ -84,7 +84,7 @@ func registerTestIdentity(t *testing.T, server *Server, ts *httptest.Server, nam
 func setSysFile(t *testing.T, server *Server, identity, path, body string) {
 	t.Helper()
 	if _, ok := server.sysFiles.(noSystemFiles); ok {
-		}
+	}
 	if err := server.sysFiles.Write(t.Context(), identity, path, []byte(body)); err != nil {
 		t.Fatalf("set %s %s: %v", identity, path, err)
 	}

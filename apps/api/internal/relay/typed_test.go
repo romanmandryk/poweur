@@ -393,4 +393,3 @@ func TestPolicyQueuesBoundedShareOffersByGrant(t *testing.T) {
 	})
 	mustStatus(t, resp, http.StatusForbidden, "non-expiring share offer")
 }
-
