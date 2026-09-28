@@ -83,11 +83,14 @@ Clients discover all of this from
 policy alongside its verdict — so the app validates as the user types without hardcoding
 the rules of the relay it happens to be talking to.
 
-`GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
-The temporary system-file adapter stores `.poweur` documents beneath
-`$POWEUR_DATA/identities/<id>/`. The drive object store selected above is opened
-at startup; the journalled engine that publishes into it is still under
-construction. See [Storage v2](/files/storage-v2).
+`GET /health` includes a `storage` object when a durable store is configured (`writable`, and
+`free_bytes` for the filesystem provider).
+
+Everything durable lives in the object store selected above — `$POWEUR_DATA` for `fs`, the
+bucket prefix for `s3`: each identity's drive under `drives/<id>/` (journal, snapshots,
+versions, chunks and the `.poweur` system files), and the relay's own registries under
+`relay/` (`identities/`, `spool/messages/`, `spool/acks/`, `keystore/`). Back up that one
+location. An S3 relay needs no `POWEUR_DATA` at all. See [Storage v2](/files/storage-v2).
 
 ### DNS registration
 

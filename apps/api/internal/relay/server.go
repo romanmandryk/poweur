@@ -68,8 +68,7 @@ type Server struct {
 	// (EPIC-020 E20-T6): files under POWEUR_DATA, or memory without it.
 	sysFiles SystemFiles
 	// drive is the object store selected by STORAGE_PROVIDER. Nil when the
-	// relay has no POWEUR_DATA and is not using S3. The drive engine is not
-	// serving yet; system files still use sysFiles.
+	// relay has no POWEUR_DATA and is not using S3.
 	drive    provider.Store
 	driveErr error
 	// engine serves /drive/{identity} over drive (E20-T5); nil without it.
@@ -100,25 +99,36 @@ type cachedRelay struct {
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
 	var startupFailures []string
-	store, err := storage.OpenIdentityStore(cfg.DataDir)
+	// Everything durable lives in the drive provider (EPIC-020 E20-T6):
+	// drives under drives/, the relay's own registries under relay/. Without
+	// one (no POWEUR_DATA, fs provider) the relay keeps memory only.
+	driveStore, driveErr := drive.Open(cfg)
+	if driveErr != nil {
+		startupFailures = append(startupFailures, "drive_storage_open_failed")
+	}
+	var objects storage.Objects
+	if driveStore != nil {
+		objects = driveStore
+	}
+	store, err := storage.OpenIdentityStore(objects)
 	if err != nil {
 		// Fall back to memory-only rather than crashing constructors used in tests.
 		store = storage.NewIdentityStore()
 		startupFailures = append(startupFailures, "identity_storage_open_failed")
 	}
-	keystore, err := storage.OpenKeystoreStore(cfg.DataDir)
+	keystore, err := storage.OpenKeystoreStore(objects)
 	if err != nil {
 		keystore = storage.NewKeystoreStore()
 		startupFailures = append(startupFailures, "keystore_open_failed")
 	}
 	// Undelivered mail survives a restart (EPIC-009 E09-T1); a relay with no
-	// data dir keeps the old memory-only behaviour rather than refusing to run.
-	inbox, err := storage.OpenInboxStore(cfg.DataDir)
+	// durable store keeps the old memory-only behaviour rather than refusing to run.
+	inbox, err := storage.OpenInboxStore(objects)
 	if err != nil {
 		inbox = storage.NewInboxStore()
 		startupFailures = append(startupFailures, "inbox_storage_open_failed")
 	}
-	acks, err := storage.OpenAckStore(cfg.DataDir)
+	acks, err := storage.OpenAckStore(objects)
 	if err != nil {
 		acks = storage.NewAckStore()
 		startupFailures = append(startupFailures, "ack_storage_open_failed")
@@ -152,22 +162,16 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}
-	if cfg.DataDir != "" {
-		s.sysFiles = newFileSystemFiles(store.IdentityHomeDir)
-	} else {
-		s.sysFiles = newMemSystemFiles()
-	}
 	s.quotas = newQuotaOverrides(cfg.StorageQuotasFile, func(err error) {
 		s.event(context.Background(), "storage.quotas", "invalid")
 		logQuotaFileError(err)
 	})
-	driveStore, err := drive.Open(cfg)
-	if err != nil {
-		s.startupFailures = append(s.startupFailures, "drive_storage_open_failed")
-		s.driveErr = err
-	} else if driveStore != nil {
+	s.driveErr = driveErr
+	s.sysFiles = newMemSystemFiles()
+	if driveStore != nil {
 		s.drive = driveStore
 		s.engine = newDriveEngine(driveStore, s)
+		s.sysFiles = driveSystemFiles{engine: s.engine}
 	}
 	return s
 }
@@ -576,7 +580,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		doc.UpdatedAt = req.IssuedAt
 		// Cannot sign without private key on relay — leave unsigned only in memory.
 		// For durable/hosted, require client-supplied signed document.
-		if hosted || s.cfg.DataDir != "" {
+		if hosted || s.identities.Durable() {
 			writeError(w, http.StatusBadRequest, "identity_document_required", "signed identity_document is required")
 			return
 		}
@@ -604,7 +608,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		DocumentJSON:        docJSON,
 		CreatedAt:           time.Now().UTC(),
 	}
-	if s.cfg.DataDir != "" {
+	if s.identities.Durable() {
 		if err := s.identities.Put(identity); err != nil {
 			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
 			return
@@ -613,6 +617,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
 		return
 	}
+	s.mirrorIdentityDocument(r.Context(), identity)
 
 	resp := IdentityResponse{
 		Identity:            identity.Identity,

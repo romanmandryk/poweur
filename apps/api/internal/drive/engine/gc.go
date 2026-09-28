@@ -60,27 +60,39 @@ func (e *Engine) Collect(ctx context.Context, driveID string) (CollectResult, er
 			_ = e.opts.Store.Delete(ctx, h.prefix+"versions/"+nodeID+"/"+id+".json")
 		}
 	}
-	// Uploads no version or record references, past their grace period.
+	// Uploads no version or record references, and system documents no
+	// path refers to, past their grace period.
 	uploadCutoff := e.now().Add(-e.opts.UploadTTL)
-	dir := h.prefix + "chunks/"
-	cursor := ""
-	for {
-		page, err := e.opts.Store.List(ctx, dir, cursor, 1000)
-		if err != nil {
-			return result, err
-		}
-		for _, obj := range page.Objects {
-			id := strings.TrimPrefix(obj.Key, dir)
-			if h.st.Chunks[id] == nil && obj.Modified.Before(uploadCutoff) {
-				if err := e.opts.Store.Delete(ctx, obj.Key); err == nil {
-					result.Orphans++
+	liveSystem := map[string]bool{}
+	for _, f := range h.st.System {
+		liveSystem[f.Hash] = true
+	}
+	sweeps := []struct {
+		dir  string
+		live func(string) bool
+	}{
+		{h.prefix + "chunks/", func(id string) bool { return h.st.Chunks[id] != nil }},
+		{h.prefix + "system/", func(id string) bool { return liveSystem[id] }},
+	}
+	for _, sweep := range sweeps {
+		cursor := ""
+		for {
+			page, err := e.opts.Store.List(ctx, sweep.dir, cursor, 1000)
+			if err != nil {
+				return result, err
+			}
+			for _, obj := range page.Objects {
+				if !sweep.live(strings.TrimPrefix(obj.Key, sweep.dir)) && obj.Modified.Before(uploadCutoff) {
+					if err := e.opts.Store.Delete(ctx, obj.Key); err == nil {
+						result.Orphans++
+					}
 				}
 			}
+			if page.Next == "" {
+				break
+			}
+			cursor = page.Next
 		}
-		if page.Next == "" {
-			break
-		}
-		cursor = page.Next
 	}
 	return result, nil
 }

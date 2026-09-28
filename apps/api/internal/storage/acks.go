@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -31,17 +29,13 @@ type AckStore struct {
 
 // NewAckStore returns a memory-only queue (tests, relays without POWEUR_DATA).
 func NewAckStore() *AckStore {
-	s, _ := newSpool[StoredAck]("")
+	s, _ := newSpool[StoredAck](nil, "acks")
 	return &AckStore{spool: s}
 }
 
-// OpenAckStore spools under dataDir/spool/acks.
-func OpenAckStore(dataDir string) (*AckStore, error) {
-	dir := ""
-	if strings.TrimSpace(dataDir) != "" {
-		dir = filepath.Join(dataDir, "spool", "acks")
-	}
-	s, err := newSpool[StoredAck](dir)
+// OpenAckStore spools under relay/spool/acks.
+func OpenAckStore(objects Objects) (*AckStore, error) {
+	s, err := newSpool[StoredAck](objects, "acks")
 	if err != nil {
 		return nil, err
 	}

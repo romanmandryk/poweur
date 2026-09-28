@@ -83,7 +83,7 @@ func TestTelemetryReportsStorageFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close(context.Background())
-	if !strings.Contains(logs.String(), "identity_storage_open_failed") || strings.Contains(logs.String(), path) {
+	if !strings.Contains(logs.String(), "drive_storage_open_failed") || strings.Contains(logs.String(), path) {
 		t.Fatal("storage fallback missing or leaked path")
 	}
 }

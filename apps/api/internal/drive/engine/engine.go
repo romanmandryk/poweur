@@ -58,6 +58,8 @@ type driveHandle struct {
 	st     *state
 	// segments caches loaded segments for record reads.
 	segments map[uint64]segment
+	// blobs caches small system documents by hash.
+	blobs map[string][]byte
 }
 
 // New returns an engine over opts.Store.
@@ -104,7 +106,7 @@ func (e *Engine) open(ctx context.Context, driveID string) (*driveHandle, error)
 	e.mu.Lock()
 	h := e.drives[driveID]
 	if h == nil {
-		h = &driveHandle{prefix: prefix, segments: map[uint64]segment{}}
+		h = &driveHandle{prefix: prefix, segments: map[uint64]segment{}, blobs: map[string][]byte{}}
 		e.drives[driveID] = h
 	}
 	e.mu.Unlock()

@@ -174,7 +174,7 @@ func TestINT_CONTACTS_02_KeyPinning(t *testing.T) {
 		Version  int              `json:"version"`
 		Contacts []map[string]any `json:"contacts"`
 	}
-	if err := json.Unmarshal(readRelaySysFile(t, dataDir, "pinalice.poweur.net", ".poweur/relay/contacts.json"), &contacts); err != nil {
+	if err := json.Unmarshal(readRelaySysFile(t, relayURL, aliceHome, "pinalice.poweur.net", ".poweur/relay/contacts.json"), &contacts); err != nil {
 		t.Fatal(err)
 	}
 	if len(contacts.Contacts) != 1 {
@@ -183,7 +183,7 @@ func TestINT_CONTACTS_02_KeyPinning(t *testing.T) {
 	// A valid ed25519 key that is not bob's (all-zeros is length-valid).
 	contacts.Contacts[0]["pinned_key"] = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	raw, _ := json.Marshal(contacts)
-	writeRelaySysFile(t, dataDir, "pinalice.poweur.net", ".poweur/relay/contacts.json", raw)
+	writeRelaySysFile(t, relayURL, aliceHome, "pinalice.poweur.net", ".poweur/relay/contacts.json", raw)
 
 	// Send must now refuse: pin mismatch, no rotation statement.
 	if code := runCLICode(t, aliceHome, "send", "pinbob.poweur.net", "should not go"); code == 0 {

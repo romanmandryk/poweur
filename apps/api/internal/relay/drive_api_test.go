@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/dns"
 	drivepkg "github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
 	"github.com/poweur/identity/drive"
 )
@@ -198,8 +200,8 @@ func TestDriveAPIOwnerFlow(t *testing.T) {
 	if versions, _ := out["versions"].([]any); status != http.StatusOK || len(versions) != 2 {
 		t.Fatalf("history: %d %v", status, out)
 	}
-	status, out, _ = driveReq(t, ts, http.MethodGet, alice, base+"/changes?cursor=1", nil)
-	if changes, _ := out["changes"].([]any); status != http.StatusOK || len(changes) != 2 || out["cursor"] != "3" {
+	status, out, _ = driveReq(t, ts, http.MethodGet, alice, base+"/changes?cursor=2", nil)
+	if changes, _ := out["changes"].([]any); status != http.StatusOK || len(changes) != 2 || out["cursor"] != "4" {
 		t.Fatalf("changes: %d %v", status, out)
 	}
 
@@ -325,5 +327,56 @@ func TestDriveAPIPresignedUpload(t *testing.T) {
 	_ = m.Sign(alice.priv)
 	if status, out, _ := driveReq(t, ts, http.MethodPost, alice, base+"/commit", map[string]any{"id": randHex(16), "manifest": m, "pages": pages}); status != http.StatusOK {
 		t.Fatalf("commit: %d %v", status, out)
+	}
+}
+
+// An S3-only relay (no POWEUR_DATA) keeps its identities, system files and
+// spool in the bucket: a new process over the same prefix serves them.
+func TestRelayRestartsFromBucketOnly(t *testing.T) {
+	endpoint, bucket := os.Getenv("POWEUR_TEST_S3_ENDPOINT"), os.Getenv("POWEUR_TEST_S3_BUCKET")
+	if endpoint == "" || bucket == "" {
+		t.Skip("set POWEUR_TEST_S3_ENDPOINT and POWEUR_TEST_S3_BUCKET")
+	}
+	region := os.Getenv("POWEUR_TEST_S3_REGION")
+	if region == "" {
+		region = "us-east-1"
+	}
+	cfg := config.Config{
+		ListenAddr: ":0", RelayAddress: "relay.test", RelayScheme: "http", DNSTTL: time.Minute, ChallengeTTL: time.Minute,
+		Version: "test", HostedDomains: []string{"poweur.net"}, ResolverAllowPrivate: true,
+		RateLimits:      config.RateLimits{PerMinute: 100000, PerHour: 100000, PerDay: 100000},
+		StorageProvider: config.StorageS3, S3Endpoint: endpoint, S3Bucket: bucket, S3Region: region,
+		S3Prefix: "relay-restart/" + randHex(8), S3AccessKey: os.Getenv("POWEUR_TEST_S3_ACCESS_KEY"),
+		S3SecretKey: os.Getenv("POWEUR_TEST_S3_SECRET_KEY"), S3Secure: os.Getenv("POWEUR_TEST_S3_SECURE") != "0",
+		S3Presign: os.Getenv("POWEUR_TEST_S3_PRESIGN") != "0",
+	}
+	start := func() (*Server, *httptest.Server) {
+		server := NewServer(cfg, dns.NewNetResolver(), dns.NewProviderFactory(cfg))
+		if server.DriveError() != nil {
+			t.Fatal(server.DriveError())
+		}
+		ts := httptest.NewServer(server.Router())
+		t.Cleanup(ts.Close)
+		server.cfg.RelayAddress = strings.TrimPrefix(ts.URL, "http://")
+		return server, ts
+	}
+	server, ts := start()
+	alice := registerTestIdentity(t, server, ts, "bucketalice.poweur.net")
+	resp := sysReq(t, ts, http.MethodPut, alice, alice.name, inboxPolicyPath, []byte(`{"version":1,"mode":"contacts_only"}`), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("policy: %d %s", resp.StatusCode, readAll(t, resp))
+	}
+	resp.Body.Close()
+	server.inbox.Add(alice.name, storage.StoredMessage{ID: "m1", Sender: "someone.poweur.net", Recipient: alice.name, Payload: "x"}, 0)
+
+	restarted, _ := start()
+	if !restarted.identities.Exists(alice.name) {
+		t.Fatal("identity index lost")
+	}
+	if p, _ := restarted.recipientPolicy(t.Context(), alice.name); p.Mode != idpkg.InboxContactsOnly {
+		t.Fatalf("policy lost: %+v", p)
+	}
+	if pending, _ := restarted.inbox.Since(alice.name, ""); len(pending) != 1 {
+		t.Fatalf("spool lost: %+v", pending)
 	}
 }

@@ -57,7 +57,8 @@ const (
 type driveEvent struct {
 	Drive     string                    `json:"drive"`
 	Seq       uint64                    `json:"seq"`
-	Node      string                    `json:"node"`
+	Node      string                    `json:"node,omitempty"`
+	Path      string                    `json:"path,omitempty"`
 	Operation string                    `json:"operation"`
 	Version   string                    `json:"version,omitempty"`
 	Position  uint64                    `json:"position,omitempty"`
@@ -77,7 +78,7 @@ func newDriveEngine(store provider.Store, s *Server) *engine.Engine {
 
 // notifyDriveChange runs under the drive's lock, so it only queues.
 func (s *Server) notifyDriveChange(driveID string, change engine.Change, records []engine.PositionedRecord) {
-	event := &driveEvent{Drive: driveID, Seq: change.Seq, Node: change.Node, Operation: change.Operation, Version: change.Version, Position: change.Position}
+	event := &driveEvent{Drive: driveID, Seq: change.Seq, Node: change.Node, Path: change.Path, Operation: change.Operation, Version: change.Version, Position: change.Position}
 	if len(records) > 0 {
 		if raw, err := json.Marshal(records); err == nil && len(raw) <= maxInlineRecordBytes {
 			event.Records = records

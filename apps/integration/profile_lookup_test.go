@@ -42,9 +42,9 @@ func TestINT_PROFILE_01_LookupShowsProfileAndCapabilities(t *testing.T) {
 		t.Fatalf("a 404 must not be reported as a failure: %s", stderr)
 	}
 
-	// Alice's public self-description in her .poweur/public/ (written on the
-	// relay's disk here; clients use the owner system-file API).
-	putPublicDoc(t, dataDir, "pralice.poweur.net", "profile.json", map[string]any{
+	// Alice's public self-description in her .poweur/public/ (written through
+	// the owner system-file API, as clients do).
+	putPublicDoc(t, relayURL, aliceHome, "pralice.poweur.net", "profile.json", map[string]any{
 		"version":      1,
 		"display_name": "Alice Example",
 		"bio":          "builds things",
@@ -52,7 +52,7 @@ func TestINT_PROFILE_01_LookupShowsProfileAndCapabilities(t *testing.T) {
 		"avatar":       "avatar.png",
 		"links":        []map[string]string{{"label": "site", "url": "https://example.test"}},
 	})
-	putPublicDoc(t, dataDir, "pralice.poweur.net", "capabilities.json", map[string]any{
+	putPublicDoc(t, relayURL, aliceHome, "pralice.poweur.net", "capabilities.json", map[string]any{
 		"version":   1,
 		"features":  map[string]string{"messaging": "v1", "files": "drive"},
 		"endpoints": map[string]string{"web_signer": "https://pralice.poweur.net/app/"},
@@ -99,11 +99,11 @@ func TestINT_PROFILE_01_LookupShowsProfileAndCapabilities(t *testing.T) {
 }
 
 // putPublicDoc stores a JSON document in identity's .poweur/public/.
-func putPublicDoc(t *testing.T, dataDir, identity, name string, doc any) {
+func putPublicDoc(t *testing.T, relayURL, home, identity, name string, doc any) {
 	t.Helper()
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeRelaySysFile(t, dataDir, identity, ".poweur/public/"+name, raw)
+	writeRelaySysFile(t, relayURL, home, identity, ".poweur/public/"+name, raw)
 }

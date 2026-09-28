@@ -27,24 +27,24 @@ A relay is the **home** for the identities it locally hosts. It does **not** act
 - **Hosted** — no DNS token; identity under `HOSTED_DOMAINS`; persist signed `identity_document` under `POWEUR_DATA`.
 - **DNS** — client-supplied provider token; relay writes `TXT` + routing records, then discards the token.
 
-**Well-known + system files.** Serve Host-routed `/.well-known/poweur/…` and owner-authenticated system files. The drive is being rebuilt; see [Storage v2](/files/storage-v2).
+**Drives, well-known + system files.** Serve each identity's end-to-end encrypted drive (`/drive/…`), Host-routed `/.well-known/poweur/…` and owner-authenticated system files; see [Storage v2](/files/storage-v2).
 
 ## Durable vs ephemeral state
 
-The relay still holds **no identity private keys**. With `POWEUR_DATA` configured it *does* keep durable per-identity data on disk:
+The relay still holds **no identity private keys**. With a durable store (`POWEUR_DATA` or an S3 bucket) it keeps everything durable in that store and nowhere else:
 
 | State | Purpose | Survives restart? |
 |-------|---------|:-----------------:|
-| Identity documents (`.poweur/public/id.json`) | Hosted identity publication | Yes |
-| File trees (`/public`, `/private`, …) | Per-identity home filesystem | Yes |
-| Inbox spool and ack queue (`spool/`) | Messages and receipts waiting for devices | Yes |
-| Shares and groups (`.poweur/`) | Grants, links, group membership | Yes |
+| Identity index (`relay/identities/`, mirrored to `.poweur/public/id.json`) | Hosted identity publication | Yes |
+| Drives (`drives/<id>/`) | Encrypted files, append logs and `.poweur` system files (profile, contacts, policy, devices, group rosters) | Yes |
+| Inbox spool and ack queue (`relay/spool/`) | Messages and receipts waiting for devices | Yes |
+| Key backups (`relay/keystore/`) | Wrapped enrollment keys | Yes |
 | Pending contact requests | The requests tray | No |
 | Rate limit counters | Per-sender + global buckets | No |
 | DNS / resolve caches | Peer addresses, identity resolve TTL | No |
 | Session caches | Short-lived credentials | No (clients sign in again) |
 
-Messages, files and shares survive a restart; losing `POWEUR_DATA` does not — back it up (see [Self-hosting](/relay/self-hosting#back-up-and-upgrade)).
+Messages, files and settings survive a restart; losing the store does not — back it up (see [Self-hosting](/relay/self-hosting#back-up-and-upgrade)).
 
 ## Discovery and DNS
 

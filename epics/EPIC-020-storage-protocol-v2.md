@@ -27,7 +27,7 @@
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **in progress** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
 | E20-T5 Drive HTTP API & change stream | **in progress** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
-| E20-T6 `.poweur` system files & stateless relay | **open** | settings as files the relay validates and applies; no relay state outside the drive |
+| E20-T6 `.poweur` system files & stateless relay | **in progress** | settings as files the relay validates and applies; no relay state outside the drive |
 | E20-T7 Shares, roles, links & file requests | **open** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **open** | encryption, uploads, commits, cursors, chunk caches, scoped handles, event-log helper, `poweur drive` |
@@ -85,10 +85,14 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       integration `INT_DRIVE_01` covers resume, conflict, appends, live events, a
       cross-relay visitor, restart over the same data and a plaintext scan. Member
       streams, public serving and presigned downloads wait on E20-T6/T7.
-- [ ] Phases 6–10: stateless system files, node shares, clients,
-      complete baseline, migration and production rehearsal.
+- [x] Phase 6: system files are the drive's journalled system zone; identity index, spool,
+      acks and keystore live on the provider under `relay/`; the relay writes nothing else
+      (an S3 relay needs no `POWEUR_DATA`). Replaces the Phase 0 file-backed adapter.
+      Open: connected apps as relay state (Phase 9), sync-daemon rejection codes.
+- [ ] Phases 7–10: node shares, clients, complete baseline, migration and production
+      rehearsal.
 
-**Inherited implementation deviation:** Phase 0 introduced an operational owner-authenticated
+**Inherited implementation deviation (resolved in Phase 6):** Phase 0 introduced an operational owner-authenticated
 system-file API backed by ordinary `.poweur` files (memory without POWEUR_DATA), instead of
 the plan's unavailable placeholder. Retained to preserve the passing contacts/profile/policy
 and group tests while v2 is built. This is not E20-T6 completion: no journal, v2 quota or S3,
@@ -504,14 +508,20 @@ replace conflict, append ordering, listing, history and live events across two r
 
 ### E20-T6 — `.poweur` system files & stateless relay
 
-- [ ] Layout and schemas for `.poweur/{public,relay,state,private}` (EPIC-006 schemas carried
-      over from `poweur-sys`); one-writer rule enforced by the relay
-- [ ] Commit-time validation and synchronous cache apply for every relay-read file; signed
-      documents verified
-- [ ] Move relay side state into drives: inbound spool (append file in `.poweur/state/`),
-      device registry, link counters; drop app passwords with WebDAV
-- [ ] Statelessness test: stop the relay, delete everything except the provider, start it —
-      policy, contacts, shares, devices, pending inbox and quotas behave identically
+- [x] Layout and schemas for `.poweur/{public,relay,state,private}` (EPIC-006 schemas carried
+      over from `poweur-sys`); one-writer rule enforced by the relay — public/relay/state are
+      the drive's journalled plaintext **system zone**, `private` an encrypted folder
+- [x] Commit-time validation and synchronous cache apply for every relay-read file; signed
+      documents verified (validators run before the journalled write; reads are served from
+      the drive state the write just updated)
+- [x] Move relay side state into the provider: identity index, inbound spool and ack queue,
+      keystore (`relay/…`), device registry (`.poweur/state/devices.json`); app passwords
+      dropped with WebDAV. The spool is one object per entry, not an append file
+- [ ] Connected apps relay-written in `.poweur/state/` (moves with sign-in, Phase 9)
+- [x] Statelessness test: stop the relay, delete everything except the provider, start it —
+      policy, contacts, devices, pending inbox, identities and quotas behave identically
+      (`INT_STATELESS_01` on disk; `TestRelayRestartsFromBucketOnly` on S3). Shares arrive
+      with E20-T7; pending contact requests remain memory-only
 - [ ] Rejection feedback contract for clients (reason codes the sync daemon surfaces)
 
 **Acceptance:** an agent edits `~/Poweur/.poweur/relay/contacts.json` and `inbox-policy.json`
@@ -607,6 +617,11 @@ paging works against it.
 - [ ] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
       copy only plaintext system data (identity, profile/avatar, capabilities,
       contacts, policy, analytics, devices, connected apps, group roster).
+- [ ] Also move the relay registries Phase 6 relocated: `identities/<id>/poweur-sys/public/id.json`
+      → `relay/identities/<id>.json` (+ drive mirror), `spool/{messages,acks}/<id>/*.json` →
+      `relay/spool/{messages,acks}/<id>/`, `keystore/<id>.json` → `relay/keystore/<id>.json`
+      (WebAuthn key backups — losing them locks users out of recovery). Undelivered mail and
+      key backups must survive the cutover.
 - [ ] Drop old files, shares, links and history; never generate private content keys
       on the relay. Move successfully migrated old trees to `identities.v1-backup/`.
 - [x] Remove `/dav`, v1 sync, DAV tokens, app passwords and whole-file implementation.

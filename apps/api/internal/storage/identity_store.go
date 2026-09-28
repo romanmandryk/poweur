@@ -4,12 +4,11 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/poweur/api/internal/drive/provider"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -29,8 +28,12 @@ type Identity struct {
 type IdentityStore struct {
 	mu         sync.RWMutex
 	identities map[string]Identity
-	dataDir    string // empty = memory-only
+	objects    Objects // nil = memory-only
 }
+
+// identityPrefix holds one signed id.json per hosted identity: the relay's
+// index of who it hosts, read whole at start-up.
+const identityPrefix = "relay/identities/"
 
 // NewIdentityStore returns an in-memory identity store (no durability).
 func NewIdentityStore() *IdentityStore {
@@ -39,18 +42,15 @@ func NewIdentityStore() *IdentityStore {
 	}
 }
 
-// OpenIdentityStore opens a durable store under dataDir/identities/.
-// If dataDir is empty, behaves like NewIdentityStore.
-func OpenIdentityStore(dataDir string) (*IdentityStore, error) {
+// OpenIdentityStore loads the hosted identities kept in objects. A nil
+// objects behaves like NewIdentityStore.
+func OpenIdentityStore(objects Objects) (*IdentityStore, error) {
 	s := &IdentityStore{
 		identities: make(map[string]Identity),
-		dataDir:    strings.TrimSpace(dataDir),
+		objects:    objects,
 	}
-	if s.dataDir == "" {
+	if objects == nil {
 		return s, nil
-	}
-	if err := os.MkdirAll(s.identitiesRoot(), 0o700); err != nil {
-		return nil, err
 	}
 	if err := s.loadAll(); err != nil {
 		return nil, err
@@ -58,46 +58,34 @@ func OpenIdentityStore(dataDir string) (*IdentityStore, error) {
 	return s, nil
 }
 
-func (s *IdentityStore) identitiesRoot() string {
-	return filepath.Join(s.dataDir, "identities")
-}
-
-func (s *IdentityStore) identityDocPath(identity string) (string, error) {
-	dirName, err := idpkg.SanitizeIdentityDirName(identity)
+func identityDocKey(identity string) (string, error) {
+	segment, err := identityKey(identity)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(s.identitiesRoot(), dirName, "poweur-sys", "public", "id.json"), nil
+	return identityPrefix + segment + ".json", nil
 }
 
 func (s *IdentityStore) loadAll() error {
-	entries, err := os.ReadDir(s.identitiesRoot())
-	if err != nil {
-		if os.IsNotExist(err) {
+	return listAll(s.objects, identityPrefix, func(info provider.Info) error {
+		if !strings.HasSuffix(info.Key, ".json") {
 			return nil
 		}
-		return err
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		docPath := filepath.Join(s.identitiesRoot(), e.Name(), "poweur-sys", "public", "id.json")
-		raw, err := os.ReadFile(docPath)
+		raw, err := getObject(s.objects, info.Key)
 		if err != nil {
-			continue
+			return fmt.Errorf("load %s: %w", info.Key, err)
 		}
 		doc, err := idpkg.ParseDocument(raw, true)
 		if err != nil {
-			return fmt.Errorf("load %s: %w", docPath, err)
+			return fmt.Errorf("load %s: %w", info.Key, err)
 		}
 		ident, err := identityFromDocument(doc, raw)
 		if err != nil {
 			return err
 		}
 		s.identities[strings.ToLower(ident.Identity)] = ident
-	}
-	return nil
+		return nil
+	})
 }
 
 func identityFromDocument(doc idpkg.IdentityDocument, raw []byte) (Identity, error) {
@@ -126,7 +114,7 @@ func identityFromDocument(doc idpkg.IdentityDocument, raw []byte) (Identity, err
 }
 
 // Add inserts an identity if it does not already exist. When a data directory
-// is configured, the signed document is written atomically to disk.
+// is configured, the signed document is written to it first.
 func (s *IdentityStore) Add(identity Identity) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,7 +122,7 @@ func (s *IdentityStore) Add(identity Identity) bool {
 	if _, exists := s.identities[key]; exists {
 		return false
 	}
-	if s.dataDir != "" {
+	if s.objects != nil {
 		if len(identity.DocumentJSON) == 0 {
 			return false
 		}
@@ -152,7 +140,7 @@ func (s *IdentityStore) Put(identity Identity) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := strings.ToLower(identity.Identity)
-	if s.dataDir != "" {
+	if s.objects != nil {
 		if len(identity.DocumentJSON) == 0 {
 			return fmt.Errorf("document required for durable store")
 		}
@@ -165,18 +153,11 @@ func (s *IdentityStore) Put(identity Identity) error {
 }
 
 func (s *IdentityStore) writeDocumentLocked(identity Identity) error {
-	path, err := s.identityDocPath(identity.Identity)
+	key, err := identityDocKey(identity.Identity)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, identity.DocumentJSON, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return putObject(s.objects, key, identity.DocumentJSON)
 }
 
 func (s *IdentityStore) Get(name string) (Identity, bool) {
@@ -193,23 +174,8 @@ func (s *IdentityStore) Exists(name string) bool {
 	return ok
 }
 
-// DataDir returns the configured POWEUR_DATA root (may be empty).
-func (s *IdentityStore) DataDir() string {
-	return s.dataDir
-}
-
-// IdentityHomeDir returns the on-disk directory for an identity, or "" if
-// the store is memory-only.
-func (s *IdentityStore) IdentityHomeDir(identity string) (string, error) {
-	if s.dataDir == "" {
-		return "", nil
-	}
-	dirName, err := idpkg.SanitizeIdentityDirName(identity)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(s.identitiesRoot(), dirName), nil
-}
+// Durable reports whether identities persist beyond this process.
+func (s *IdentityStore) Durable() bool { return s.objects != nil }
 
 // DocumentJSON returns the raw signed id.json for an identity, if present.
 func (s *IdentityStore) DocumentJSON(name string) ([]byte, bool) {
@@ -248,7 +214,7 @@ func (s *IdentityStore) UpdateEncryptionKey(name, encKey string, documentJSON []
 	ident.EncryptionPublicKey = encKey
 	if len(documentJSON) > 0 {
 		ident.DocumentJSON = documentJSON
-		if s.dataDir != "" {
+		if s.objects != nil {
 			if err := s.writeDocumentLocked(ident); err != nil {
 				return false
 			}

@@ -92,8 +92,10 @@ type SnapshotRef struct {
 
 // Change is one entry of a drive's changes feed.
 type Change struct {
-	Seq       uint64    `json:"seq"`
-	Node      string    `json:"node"`
+	Seq  uint64 `json:"seq"`
+	Node string `json:"node,omitempty"`
+	// Path is set on system-zone changes.
+	Path      string    `json:"path,omitempty"`
 	Operation string    `json:"operation"`
 	Version   string    `json:"version,omitempty"`
 	Position  uint64    `json:"position,omitempty"`
@@ -122,6 +124,7 @@ type state struct {
 	Chunks      map[string]*chunk           `json:"chunks"`
 	Used        int64                       `json:"used"`
 	Ops         map[string]opResult         `json:"ops"`
+	System      map[string]*systemFile      `json:"system"`
 	Changes     []Change                    `json:"changes"`
 }
 
@@ -130,7 +133,7 @@ func newState(driveID string) *state {
 		Format: stateFormat, Drive: driveID,
 		Nodes: map[string]*node{}, Names: map[string]string{}, Versions: map[string]*version{},
 		Pages: map[string][]drive.ChunkRef{}, PageRefs: map[string]int{}, Chunks: map[string]*chunk{},
-		Ops: map[string]opResult{}, Changes: []Change{},
+		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{},
 	}
 }
 

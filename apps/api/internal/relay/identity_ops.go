@@ -4,20 +4,27 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"io"
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
 )
 
 func (s *Server) storageHealth() *StorageHealth {
+	if s.cfg.StorageProvider == config.StorageS3 {
+		// The provider was probed with a real conditional write at start-up.
+		h := &StorageHealth{Configured: true, Path: "s3://" + s.cfg.S3Bucket, Writable: s.driveErr == nil}
+		if s.driveErr != nil {
+			h.Error = "object store unavailable"
+		}
+		return h
+	}
 	path := strings.TrimSpace(s.cfg.DataDir)
 	if path == "" {
 		return &StorageHealth{Configured: false}
@@ -40,6 +47,11 @@ func (s *Server) storageHealth() *StorageHealth {
 		h.FreeBytes = free
 	}
 	return h
+}
+
+type exportFile struct {
+	path string
+	data []byte
 }
 
 func (s *Server) handleIdentityExport(w http.ResponseWriter, r *http.Request) {
@@ -68,63 +80,45 @@ func (s *Server) handleIdentityExport(w http.ResponseWriter, r *http.Request) {
 	}
 	verifiedActor(r, identity)
 
-	home, err := s.identities.IdentityHomeDir(identity)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
-		return
-	}
+	// The archive holds the signed identity document and every system file
+	// the relay keeps for the identity (EPIC-020 E20-T6). Private drive
+	// content is end-to-end encrypted; clients export it themselves.
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	if home == "" {
-		// Memory-only: export just the document.
-		raw := ident.DocumentJSON
-		if len(raw) == 0 {
-			writeError(w, http.StatusNotFound, "not_found", "no durable document to export")
+	files := []exportFile{}
+	if len(ident.DocumentJSON) > 0 {
+		files = append(files, exportFile{".poweur/public/id.json", ident.DocumentJSON})
+	}
+	if s.engine != nil {
+		list, err := s.engine.SystemList(r.Context(), identity, ".poweur/")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
 			return
 		}
-		hdr := &tar.Header{Name: "poweur-sys/public/id.json", Mode: 0o600, Size: int64(len(raw)), ModTime: time.Now()}
+		for _, info := range list {
+			if info.Path == ".poweur/public/id.json" {
+				continue
+			}
+			raw, err := s.sysFiles.Read(r.Context(), identity, info.Path)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
+				return
+			}
+			files = append(files, exportFile{info.Path, raw})
+		}
+	}
+	if len(files) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "no durable document to export")
+		return
+	}
+	for _, file := range files {
+		hdr := &tar.Header{Name: file.path, Mode: 0o600, Size: int64(len(file.data)), ModTime: time.Now()}
 		if err := tw.WriteHeader(hdr); err != nil {
 			writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
 			return
 		}
-		if _, err := tw.Write(raw); err != nil {
-			writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
-			return
-		}
-	} else {
-		err := filepath.WalkDir(home, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			rel, err := filepath.Rel(home, path)
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			hdr, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				return err
-			}
-			hdr.Name = filepath.ToSlash(rel)
-			if err := tw.WriteHeader(hdr); err != nil {
-				return err
-			}
-			_, err = io.Copy(tw, f)
-			return err
-		})
-		if err != nil {
+		if _, err := tw.Write(file.data); err != nil {
 			writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
 			return
 		}
@@ -226,6 +220,7 @@ func (s *Server) handleIdentityRotate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "persist_failed", err.Error())
 		return
 	}
+	s.mirrorIdentityDocument(r.Context(), updated)
 	s.idCache.Invalidate(identity)
 
 	writeJSON(w, http.StatusOK, IdentityResponse{

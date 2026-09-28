@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -390,18 +388,7 @@ func TestPolicyEnforcedOnForwardedCrossRelay(t *testing.T) {
 		Identity: "bob.poweur.net", PublicKey: base64.RawURLEncoding.EncodeToString(bobPub),
 		PublicKeyBytes: bobPub, CreatedAt: time.Now().UTC(),
 	})
-	bobHome, err := serverB.identities.IdentityHomeDir("bob.poweur.net")
-	if err != nil || bobHome == "" {
-		t.Fatalf("bob home dir: %q %v", bobHome, err)
-	}
-	policyDir := filepath.Join(bobHome, "poweur-sys", "relay")
-	if err := os.MkdirAll(policyDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(policyDir, "inbox-policy.json"),
-		[]byte(`{"version":1,"mode":"contacts_only"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	setSysFile(t, serverB, "bob.poweur.net", inboxPolicyPath, `{"version":1,"mode":"contacts_only"}`)
 	tsB := httptest.NewServer(serverB.Router())
 	defer tsB.Close()
 	uB, _ := url.Parse(tsB.URL)

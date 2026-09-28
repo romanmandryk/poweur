@@ -679,3 +679,85 @@ func TestConcurrentAppendsKeepPositions(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemZone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	const policy = ".poweur/relay/inbox-policy.json"
+	for _, bad := range []string{"poweur/relay/x.json", ".poweur/private/x.json", ".poweur/relay/../x", ".poweur/relay/.x", ".poweur/relay/a/b"} {
+		if _, err := f.eng.SystemWrite(ctx, owner, bad, []byte("{}"), WriterOwner, nil); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%s: %v", bad, err)
+		}
+	}
+	absent := ""
+	h1, err := f.eng.SystemWrite(ctx, owner, policy, []byte(`{"mode":"open"}`), WriterOwner, &absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.eng.SystemWrite(ctx, owner, policy, []byte(`{"mode":"x"}`), WriterOwner, &absent); !errors.Is(err, ErrExists) {
+		t.Fatalf("create over existing: %v", err)
+	}
+	stale := strings.Repeat("0", 64)
+	if _, err := f.eng.SystemWrite(ctx, owner, policy, []byte(`{"mode":"x"}`), WriterOwner, &stale); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale base: %v", err)
+	}
+	h2, err := f.eng.SystemWrite(ctx, owner, policy, []byte(`{"mode":"contacts_only"}`), WriterOwner, &h1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.eng.SystemWrite(ctx, owner, ".poweur/state/devices.json", []byte(`{"devices":[]}`), WriterRelay, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The replaced document's bytes are gone; the current ones read back.
+	prefix, _ := drivePrefix(owner)
+	if _, err := f.store.Get(ctx, prefix+"system/"+h1, nil); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("replaced blob kept: %v", err)
+	}
+	used, _ := f.eng.Usage(ctx, owner)
+	if used != int64(len(`{"mode":"contacts_only"}`)+len(`{"devices":[]}`)) {
+		t.Fatalf("usage %d", used)
+	}
+	check := func(label string) {
+		t.Helper()
+		raw, hash, err := f.eng.SystemRead(ctx, owner, policy)
+		if err != nil || string(raw) != `{"mode":"contacts_only"}` || hash != h2 {
+			t.Fatalf("%s read: %q %v", label, raw, err)
+		}
+		list, _ := f.eng.SystemList(ctx, owner, ".poweur/")
+		if len(list) != 2 || list[0].Path != policy || list[1].Writer != WriterRelay {
+			t.Fatalf("%s list: %+v", label, list)
+		}
+	}
+	check("warm")
+	f.eng.Forget()
+	check("cold")
+	changes, _, _ := f.eng.Changes(ctx, owner, 0, 0)
+	if len(changes) != 3 || changes[2].Path != ".poweur/state/devices.json" || changes[0].Operation != "system.put" {
+		t.Fatalf("changes: %+v", changes)
+	}
+	// A tampered blob is refused rather than served.
+	if _, err := f.store.Put(ctx, prefix+"system/"+h2, []byte(`{"mode":"open"}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.eng.Forget()
+	if _, _, err := f.eng.SystemRead(ctx, owner, policy); err == nil {
+		t.Fatal("tampered system file served")
+	}
+	if err := f.eng.SystemDelete(ctx, owner, policy, WriterOwner, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.eng.SystemRead(ctx, owner, policy); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted: %v", err)
+	}
+	if err := f.eng.SystemDelete(ctx, owner, policy, WriterOwner, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete absent: %v", err)
+	}
+	// Owner writes count against quota; the relay's own records do not.
+	f.quota = 1
+	if _, err := f.eng.SystemWrite(ctx, owner, ".poweur/public/profile.json", []byte(`{"name":"x"}`), WriterOwner, nil); !errors.Is(err, ErrQuota) {
+		t.Fatalf("owner over quota: %v", err)
+	}
+	if _, err := f.eng.SystemWrite(ctx, owner, ".poweur/state/devices.json", []byte(`{"devices":[1]}`), WriterRelay, nil); err != nil {
+		t.Fatalf("relay record over quota: %v", err)
+	}
+}

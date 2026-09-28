@@ -128,7 +128,7 @@ func TestINT_CONTACTS_04_MismatchShowsSafetyNumbers(t *testing.T) {
 	// Swap the pin for a valid-but-wrong key, as an impersonating relay would.
 	const wrongKey = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	raw := []byte(`{"version":1,"contacts":[{"identity":"fpmbob.poweur.net","state":"accepted","pinned_key":"` + wrongKey + `"}]}`)
-	writeRelaySysFile(t, dataDir, "fpmalice.poweur.net", ".poweur/relay/contacts.json", raw)
+	writeRelaySysFile(t, relayURL, aliceHome, "fpmalice.poweur.net", ".poweur/relay/contacts.json", raw)
 
 	code, _, stderr := runCLIOutput(t, aliceHome, "send", "fpmbob.poweur.net", "should not go")
 	if code == 0 {

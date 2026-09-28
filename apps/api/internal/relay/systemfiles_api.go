@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/poweur/api/internal/drive/engine"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -135,6 +136,10 @@ func (s *Server) handleSystemFilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.sysFiles.Write(r.Context(), identity, path, body); err != nil {
+		if errors.Is(err, engine.ErrQuota) {
+			s.writeQuotaExceeded(w)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "storage_error", "failed to write system file")
 		return
 	}

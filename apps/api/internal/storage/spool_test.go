@@ -12,7 +12,7 @@ func message(id, sender string) StoredMessage {
 // The bug this exists for: undelivered mail lived in a map and died with the
 // process (EPIC-009 E09-T1).
 func TestInboxSurvivesRestart(t *testing.T) {
-	dir := t.TempDir()
+	dir := objectsAt(t)
 
 	first, err := OpenInboxStore(dir)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestInboxSurvivesRestart(t *testing.T) {
 // Reading must not forget. A drain-on-read inbox loses a message to a dropped
 // connection exactly as a restart used to.
 func TestSinceDoesNotConsume(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("bob.poweur.net", message("m1", "alice.poweur.net"), 0)
 
 	first, cursor := store.Since("bob.poweur.net", "")
@@ -68,7 +68,7 @@ func TestSinceDoesNotConsume(t *testing.T) {
 }
 
 func TestConsumeOnlyThroughTheCursorGiven(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("bob.poweur.net", message("m1", "alice.poweur.net"), 0)
 	_, cursor := store.Since("bob.poweur.net", "")
 	store.Add("bob.poweur.net", message("m2", "alice.poweur.net"), 0)
@@ -84,7 +84,7 @@ func TestConsumeOnlyThroughTheCursorGiven(t *testing.T) {
 }
 
 func TestDrainStillWorksForClientsWithoutCursors(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("bob.poweur.net", message("m1", "alice.poweur.net"), 0)
 	if got := store.Drain("bob.poweur.net"); len(got) != 1 {
 		t.Fatalf("drain returned %d", len(got))
@@ -95,7 +95,7 @@ func TestDrainStillWorksForClientsWithoutCursors(t *testing.T) {
 }
 
 func TestInboxCapRefusesRatherThanDropping(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("bob.poweur.net", message("m1", "alice.poweur.net"), 1)
 	// A full inbox refuses the new message so the sender can retry; silently
 	// dropping either end of the queue would lose mail nobody knows is gone.
@@ -110,7 +110,7 @@ func TestInboxCapRefusesRatherThanDropping(t *testing.T) {
 
 // Acks are the opposite: a recent receipt is worth more than an old one.
 func TestAckCapDropsOldest(t *testing.T) {
-	store, _ := OpenAckStore(t.TempDir())
+	store, _ := OpenAckStore(objectsAt(t))
 	store.Add("alice.poweur.net", StoredAck{ID: "a1", MessageID: "m1"}, 1)
 	store.Add("alice.poweur.net", StoredAck{ID: "a2", MessageID: "m2"}, 1)
 	acks, _ := store.Since("alice.poweur.net", "")
@@ -120,7 +120,7 @@ func TestAckCapDropsOldest(t *testing.T) {
 }
 
 func TestExpireReportsWhatItDropped(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("bob.poweur.net", message("old", "alice.poweur.net"), 0)
 
 	// Nothing is expired yet.
@@ -149,11 +149,11 @@ func TestMemoryOnlyInboxStillWorks(t *testing.T) {
 // Spool paths come from the identity, so a name that tried to climb out of the
 // directory must be refused rather than sanitized into something surprising.
 func TestSpoolRefusesPathTraversalIdentities(t *testing.T) {
-	store, _ := OpenInboxStore(t.TempDir())
+	store, _ := OpenInboxStore(objectsAt(t))
 	store.Add("../../etc/passwd", message("m1", "alice.poweur.net"), 0)
 	// It stays in memory for this process but is never written to disk under a
 	// traversed path; the next process therefore does not see it.
-	if _, err := OpenInboxStore(t.TempDir()); err != nil {
+	if _, err := OpenInboxStore(objectsAt(t)); err != nil {
 		t.Fatal(err)
 	}
 }

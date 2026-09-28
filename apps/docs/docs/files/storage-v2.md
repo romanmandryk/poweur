@@ -54,6 +54,23 @@ interpreted by the relay. The transition currently stores connected apps in the
 owner-written relay zone; moving this to relay-written state is part of Phase 6,
 not a completed property of the temporary API.
 
+**Implemented system zone.** The relay cannot find a file in the encrypted tree (names are
+sealed and name hashes are keyed by the parent's private key), so `.poweur/public`,
+`.poweur/relay` and `.poweur/state` are not encrypted tree nodes. They are the drive's
+**system zone**: plaintext documents stored once per content at `system/<sha256>` and
+changed by journalled `system` operations (`system.put` / `system.delete` in the changes feed
+and `drive.changed` events, with `path` instead of `node`). They share the drive's journal,
+snapshots, quota and restart path; clients present them at the same `.poweur/…` paths in a
+synced drive. `.poweur/private` is an ordinary encrypted folder the relay never interprets.
+The relay records the writer (`owner` or `relay` by zone); owner writes count against quota
+and are refused over it (`507`), the relay's own records are counted but never refused.
+Documents are verified against their journalled hash on read. `id.json` is written by
+registration and rotation, served from the relay's identity index and mirrored into the
+zone. Remaining Phase 6 gaps: `connected-apps.json` is still owner-written in
+`.poweur/relay/` until sign-in moves to the relay (Phase 9); the spool is one object per
+entry under `relay/spool/` rather than an append file; pending contact requests and sessions
+stay in memory.
+
 Known settings are validated before durable commit. A successful commit updates
 the policy cache before its response: adding a contact and then receiving a
 message must observe the new policy. Unknown relay-enforced documents cannot
@@ -81,7 +98,11 @@ drives/<identity>/journal/<20-digit-sequence>.json
 drives/<identity>/snapshots/<20-digit-sequence>.json
 drives/<identity>/versions/<node>/<version>.json
 drives/<identity>/chunks/<sha256>
-relay/<service-state-key>
+drives/<identity>/system/<sha256>
+drives/<identity>/pages/<sha256>.json
+relay/identities/<identity>.json
+relay/spool/{messages,acks}/<identity>/<20-digit-sequence>.json
+relay/keystore/<identity>.json
 ```
 
 Journal segments are immutable JSON envelopes containing a format version, first

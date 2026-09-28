@@ -3,11 +3,11 @@ package relay
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/poweur/api/internal/drive/engine"
+	"github.com/poweur/api/internal/storage"
 )
 
 // System files (EPIC-020 E20-T6) are the small documents in an identity's
@@ -16,10 +16,9 @@ import (
 // `.poweur/` and nowhere else; everything outside `.poweur/` is end-to-end
 // encrypted and never read by the relay.
 //
-// Storage v2 will back SystemFiles with the drive. Until then a relay with
-// POWEUR_DATA keeps them as plain files under each identity's home
-// (fileSystemFiles), at the same `.poweur/...` paths, so moving them into
-// the drive is a copy. A relay without persistence keeps them in memory.
+// A relay with a drive store keeps them in each identity's drive, in the
+// journalled system zone (driveSystemFiles). A relay without persistence
+// keeps them in memory.
 const (
 	// sysPublicDir is world-readable: identity documents, profile,
 	// capabilities and the avatar, served under /.well-known/poweur/.
@@ -106,6 +105,17 @@ func (m *memSystemFiles) Write(_ context.Context, identity, path string, data []
 	return nil
 }
 
+// mirrorIdentityDocument keeps the signed id.json in the identity's drive at
+// `.poweur/public/id.json`, beside the rest of its public files, so a synced
+// drive holds it. The relay's identity index (relay/identities/) stays the
+// source it serves from; a failed mirror is repaired by the next write.
+func (s *Server) mirrorIdentityDocument(ctx context.Context, identity storage.Identity) {
+	if s.engine == nil || len(identity.DocumentJSON) == 0 {
+		return
+	}
+	_ = s.sysFiles.Write(ctx, identity.Identity, sysPublicDir+"/id.json", identity.DocumentJSON)
+}
+
 // readSysJSON reads a system document for identity, capped at
 // maxSysDocBytes. It returns nil when the document is absent, unreadable or
 // oversized — absence must fail open to the document's defaults.
@@ -149,78 +159,6 @@ func validSysPath(path string) bool {
 	return false
 }
 
-// fileSystemFiles keeps system documents as files under each identity's
-// home directory, written atomically.
-type fileSystemFiles struct {
-	home func(identity string) (string, error)
-}
-
-func newFileSystemFiles(home func(identity string) (string, error)) *fileSystemFiles {
-	return &fileSystemFiles{home: home}
-}
-
-func (f *fileSystemFiles) file(identity, path string) (string, error) {
-	if !validSysPath(path) {
-		return "", fmt.Errorf("invalid system file path %q", path)
-	}
-	home, err := f.home(strings.ToLower(strings.TrimSpace(identity)))
-	if err != nil {
-		return "", err
-	}
-	if home == "" {
-		return "", errSystemFilesUnavailable
-	}
-	return filepath.Join(home, filepath.FromSlash(path)), nil
-}
-
-func (f *fileSystemFiles) Read(_ context.Context, identity, path string) ([]byte, error) {
-	name, err := f.file(identity, path)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(name)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, errSysFileNotFound
-	}
-	return raw, err
-}
-
-func (f *fileSystemFiles) Write(_ context.Context, identity, path string, data []byte) error {
-	name, err := f.file(identity, path)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(name), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), name)
-}
-
-// Delete removes a document; removing an absent one is errSysFileNotFound.
-func (f *fileSystemFiles) Delete(_ context.Context, identity, path string) error {
-	name, err := f.file(identity, path)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(name); errors.Is(err, os.ErrNotExist) {
-		return errSysFileNotFound
-	} else {
-		return err
-	}
-}
-
 // Delete removes a document from memory.
 func (m *memSystemFiles) Delete(_ context.Context, identity, path string) error {
 	m.mu.Lock()
@@ -234,3 +172,39 @@ func (m *memSystemFiles) Delete(_ context.Context, identity, path string) error 
 }
 
 func (noSystemFiles) Delete(context.Context, string, string) error { return errSysFileNotFound }
+
+// driveSystemFiles keeps system documents in each identity's drive (the
+// journalled system zone), so they live wherever the drive lives — disk or
+// S3 — and survive the relay losing everything else. The writer follows the
+// zone: `.poweur/state/` is the relay's, everything else the owner's.
+type driveSystemFiles struct {
+	engine *engine.Engine
+}
+
+func sysWriter(path string) string {
+	if strings.HasPrefix(path, sysStateDir+"/") {
+		return engine.WriterRelay
+	}
+	return engine.WriterOwner
+}
+
+func sysFileError(err error) error {
+	if errors.Is(err, engine.ErrNotFound) {
+		return errSysFileNotFound
+	}
+	return err
+}
+
+func (d driveSystemFiles) Read(ctx context.Context, identity, path string) ([]byte, error) {
+	raw, _, err := d.engine.SystemRead(ctx, identity, path)
+	return raw, sysFileError(err)
+}
+
+func (d driveSystemFiles) Write(ctx context.Context, identity, path string, data []byte) error {
+	_, err := d.engine.SystemWrite(ctx, identity, path, data, sysWriter(path), nil)
+	return err
+}
+
+func (d driveSystemFiles) Delete(ctx context.Context, identity, path string) error {
+	return sysFileError(d.engine.SystemDelete(ctx, identity, path, sysWriter(path), nil))
+}

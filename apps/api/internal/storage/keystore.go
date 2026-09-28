@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	idpkg "github.com/poweur/identity"
+	"github.com/poweur/api/internal/drive/provider"
 )
 
 // Keystore holds wrapped master-seed copies, one per enrolled authenticator
@@ -59,86 +57,66 @@ type KeystoreEntry struct {
 type KeystoreStore struct {
 	mu      sync.RWMutex
 	byID    map[string][]KeystoreEntry
-	dataDir string // empty = memory-only
+	objects Objects // nil = memory-only
 }
+
+const keystorePrefix = "relay/keystore/"
 
 // NewKeystoreStore returns an in-memory keystore (no durability).
 func NewKeystoreStore() *KeystoreStore {
 	return &KeystoreStore{byID: make(map[string][]KeystoreEntry)}
 }
 
-// OpenKeystoreStore opens a durable keystore under dataDir/keystore/.
-func OpenKeystoreStore(dataDir string) (*KeystoreStore, error) {
+// OpenKeystoreStore loads the keystore kept in objects under relay/keystore/.
+func OpenKeystoreStore(objects Objects) (*KeystoreStore, error) {
 	s := &KeystoreStore{
 		byID:    make(map[string][]KeystoreEntry),
-		dataDir: strings.TrimSpace(dataDir),
+		objects: objects,
 	}
-	if s.dataDir == "" {
+	if objects == nil {
 		return s, nil
-	}
-	if err := os.MkdirAll(s.root(), 0o700); err != nil {
-		return nil, err
 	}
 	return s, s.loadAll()
 }
 
-func (s *KeystoreStore) root() string { return filepath.Join(s.dataDir, "keystore") }
-
-func (s *KeystoreStore) path(identity string) (string, error) {
-	dirName, err := idpkg.SanitizeIdentityDirName(identity)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(s.root(), dirName+".json"), nil
-}
-
 func (s *KeystoreStore) loadAll() error {
-	entries, err := os.ReadDir(s.root())
-	if err != nil {
-		if os.IsNotExist(err) {
+	return listAll(s.objects, keystorePrefix, func(info provider.Info) error {
+		name := strings.TrimPrefix(info.Key, keystorePrefix)
+		if strings.Contains(name, "/") || !strings.HasSuffix(name, ".json") {
 			return nil
 		}
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(s.root(), e.Name()))
+		raw, err := getObject(s.objects, info.Key)
 		if err != nil {
 			return err
 		}
 		var stored []KeystoreEntry
 		if err := json.Unmarshal(raw, &stored); err != nil {
-			return fmt.Errorf("keystore %s: %w", e.Name(), err)
+			return fmt.Errorf("keystore %s: %w", name, err)
 		}
-		// Directory names replace dots with "__" (SanitizeIdentityDirName).
-		identity := strings.ReplaceAll(strings.TrimSuffix(e.Name(), ".json"), "__", ".")
-		s.byID[identity] = stored
-	}
-	return nil
+		s.byID[identityFromKey(strings.TrimSuffix(name, ".json"))] = stored
+		return nil
+	})
 }
 
 func (s *KeystoreStore) persistLocked(identity string) error {
-	if s.dataDir == "" {
+	if s.objects == nil {
 		return nil
 	}
-	path, err := s.path(identity)
+	segment, err := identityKey(identity)
 	if err != nil {
 		return err
+	}
+	key := keystorePrefix + segment + ".json"
+	if len(s.byID[identity]) == 0 {
+		return deleteObject(s.objects, key)
 	}
 	raw, err := json.MarshalIndent(s.byID[identity], "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return putObject(s.objects, key, raw)
 }
 
-// Put inserts or replaces an enrollment, keyed by EnrollmentID.
 func (s *KeystoreStore) Put(identity string, entry KeystoreEntry) error {
 	identity = strings.ToLower(identity)
 	s.mu.Lock()

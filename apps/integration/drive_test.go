@@ -60,6 +60,10 @@ func (c driveClient) do(method, path string, body []byte) (*http.Response, []byt
 	return resp, raw
 }
 
+func (c driveClient) sign(challenge string) string {
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(c.key, []byte(challenge)))
+}
+
 func (c driveClient) json(method, path string, body any) (int, map[string]any) {
 	c.t.Helper()
 	var raw []byte

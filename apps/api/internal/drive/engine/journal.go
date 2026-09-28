@@ -46,6 +46,7 @@ type journalOp struct {
 	Records      []positioned      `json:"records,omitempty"`
 	Trim         *trimOp           `json:"trim,omitempty"`
 	GC           *gcOp             `json:"gc,omitempty"`
+	System       *systemOp         `json:"system,omitempty"`
 }
 
 type trimOp struct {

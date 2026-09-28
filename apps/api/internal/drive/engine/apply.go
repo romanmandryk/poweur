@@ -357,6 +357,10 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 			}
 			delete(st.Versions, id)
 		}
+	case kindSystem:
+		if err := applySystem(st, seq, op); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown journal operation %q", op.Kind)
 	}
