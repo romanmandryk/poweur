@@ -13,19 +13,21 @@ import (
 // the journal operation it becomes. It does not change state.
 func (e *Engine) validate(ctx context.Context, h *driveHandle, req Request) (journalOp, error) {
 	count := 0
-	for _, set := range []bool{req.Manifest != nil, len(req.Records) > 0, req.Trim != nil, req.Share != nil, req.Unshare != nil} {
+	for _, set := range []bool{req.Manifest != nil, len(req.Records) > 0, req.Trim != nil, req.Share != nil, req.Unshare != nil, req.Transfer != nil} {
 		if set {
 			count++
 		}
 	}
 	if count != 1 {
-		return journalOp{}, fmt.Errorf("%w: a commit is one manifest, one batch of records, one trim, one share or one revocation", ErrInvalid)
+		return journalOp{}, fmt.Errorf("%w: a commit is one manifest, one batch of records, one trim, one share, one revocation or one transfer", ErrInvalid)
 	}
 	switch {
 	case req.Share != nil:
 		return e.validateShare(ctx, h, *req.Share, req.Author)
 	case req.Unshare != nil:
 		return e.validateUnshare(h, req.Unshare.ID, req.Author)
+	case req.Transfer != nil:
+		return e.validateTransfer(h, *req.Transfer, req.Author)
 	case req.Manifest != nil:
 		return e.validateManifest(ctx, h, req)
 	case len(req.Records) > 0:
@@ -382,6 +384,8 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 			if n.NameHash != "" {
 				delete(st.Names, nameKey(n.Folder, n.NameHash))
 			}
+			// A removed append file's records go with it.
+			releaseRecords(st, n)
 		}
 		n.Head, n.HeadHash, n.Generation, n.Count, n.Pages, n.Updated = m.Version, op.ManifestHash, m.Generation, m.Count, append([]string(nil), m.Pages...), op.At
 		if m.Operation == drive.OpRotate {
@@ -453,6 +457,10 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		}
 	case kindLinkUse:
 		if err := applyLinkUse(st, op); err != nil {
+			return err
+		}
+	case kindTransfer:
+		if err := applyTransfer(st, seq, op); err != nil {
 			return err
 		}
 	case kindGroupRevoke:

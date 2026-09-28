@@ -315,6 +315,7 @@ type driveCommitBody struct {
 	Trim     *engine.Trim         `json:"trim,omitempty"`
 	Share    *drive.Share         `json:"share,omitempty"`
 	Unshare  *engine.Unshare      `json:"unshare,omitempty"`
+	Transfer *engine.Transfer     `json:"transfer,omitempty"`
 }
 
 func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +355,7 @@ func (s *Server) handleDriveCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req := engine.Request{ID: body.ID, Manifest: body.Manifest, Pages: body.Pages, Records: body.Records, Trim: body.Trim,
-		Share: body.Share, Unshare: body.Unshare, Author: actor}
+		Share: body.Share, Unshare: body.Unshare, Transfer: body.Transfer, Author: actor}
 	var result engine.Result
 	var err error
 	for attempt := 0; attempt < driveCommitRetries; attempt++ {
@@ -402,8 +403,18 @@ func (s *Server) handleDriveChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDriveNode(w http.ResponseWriter, r *http.Request) {
-	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
+	driveID, actor, ok := s.driveCaller(w, r)
 	if !ok {
+		return
+	}
+	// A transferred node tells an authenticated caller where it went;
+	// nothing else about the old drive is revealed.
+	if moved, found, err := s.engine.Moved(r.Context(), driveID, r.PathValue("node")); err == nil && found {
+		writeJSON(w, http.StatusGone, map[string]any{"error": "moved", "detail": "this node moved to another drive", "moved_to": moved})
+		return
+	}
+	if err := s.engine.Authorize(r.Context(), driveID, actor, r.PathValue("node"), drive.RoleRead); err != nil {
+		s.writeDriveError(w, err)
 		return
 	}
 	info, err := s.engine.Node(r.Context(), driveID, r.PathValue("node"))

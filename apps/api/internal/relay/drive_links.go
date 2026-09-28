@@ -135,14 +135,28 @@ func (s *Server) handleDriveLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such link")
 		return
 	}
-	info, err := s.engine.Link(r.Context(), driveID, r.PathValue("link"))
+	linkID := r.PathValue("link")
+	info, err := s.engine.Link(r.Context(), driveID, linkID)
 	if err != nil {
+		// A link whose subtree moved to another drive follows it.
+		if fwd, moved, ferr := s.engine.Forwarded(r.Context(), driveID, linkID); ferr == nil && moved {
+			target := "/drive/" + fwd.Drive + "/links/" + linkID
+			if !s.identities.Exists(fwd.Drive) {
+				target = s.cfg.RelayScheme + "://" + fwd.Drive + target
+			}
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found", "no such link")
 		return
 	}
 	noStore(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	writeJSON(w, http.StatusOK, info)
+	writeJSON(w, http.StatusOK, struct {
+		Drive string `json:"drive"`
+		engine.LinkInfo
+	}{driveID, info})
 }
 
 // linkPowPurpose binds a proof-of-work to one link of one drive.

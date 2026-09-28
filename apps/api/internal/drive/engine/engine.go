@@ -312,6 +312,7 @@ type Request struct {
 	Trim     *Trim
 	Share    *drive.Share
 	Unshare  *Unshare
+	Transfer *Transfer
 	// Author is the authenticated committer. It authorizes trims and
 	// revocations; manifests, records and shares name their own signer.
 	Author string
@@ -465,8 +466,9 @@ func hashRequest(req Request) (string, error) {
 		T *Trim                `json:"t"`
 		S *drive.Share         `json:"s,omitempty"`
 		U *Unshare             `json:"u,omitempty"`
+		X *Transfer            `json:"x,omitempty"`
 		A string               `json:"a"`
-	}{req.Manifest, req.Pages, req.Records, req.Trim, req.Share, req.Unshare, req.Author})
+	}{req.Manifest, req.Pages, req.Records, req.Trim, req.Share, req.Unshare, req.Transfer, req.Author})
 	if err != nil {
 		return "", err
 	}

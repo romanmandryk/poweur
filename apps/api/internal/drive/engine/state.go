@@ -101,7 +101,9 @@ type Change struct {
 	Share  string `json:"share,omitempty"`
 	Member string `json:"member,omitempty"`
 	// Path is set on system-zone changes.
-	Path      string    `json:"path,omitempty"`
+	Path string `json:"path,omitempty"`
+	// To is set on a transfer: the drive the node moved to.
+	To        string    `json:"to,omitempty"`
 	Operation string    `json:"operation"`
 	Version   string    `json:"version,omitempty"`
 	Position  uint64    `json:"position,omitempty"`
@@ -136,6 +138,8 @@ type state struct {
 	Shares   map[string]*drive.Share `json:"shares"`
 	ShareUse map[string]*capUse      `json:"share_use"`
 	LinkUses map[string]uint64       `json:"link_uses"`
+	Forwards map[string]Forward      `json:"forwards"`
+	Moved    map[string]Forward      `json:"moved"`
 	Changes  []Change                `json:"changes"`
 }
 
@@ -144,7 +148,7 @@ func newState(driveID string) *state {
 		Format: stateFormat, Drive: driveID,
 		Nodes: map[string]*node{}, Names: map[string]string{}, Versions: map[string]*version{},
 		Pages: map[string][]drive.ChunkRef{}, PageRefs: map[string]int{}, Chunks: map[string]*chunk{},
-		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{}, ShareUse: map[string]*capUse{}, LinkUses: map[string]uint64{},
+		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{}, ShareUse: map[string]*capUse{}, LinkUses: map[string]uint64{}, Forwards: map[string]Forward{}, Moved: map[string]Forward{},
 	}
 }
 

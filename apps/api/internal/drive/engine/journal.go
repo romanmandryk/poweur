@@ -51,6 +51,7 @@ type journalOp struct {
 	Unshare      *unshareOp        `json:"unshare,omitempty"`
 	LinkUse      *linkUseOp        `json:"link_use,omitempty"`
 	GroupRevoke  *groupRevokeOp    `json:"group_revoke,omitempty"`
+	Transfer     *transferOp       `json:"transfer,omitempty"`
 	// Charge is what the commit spent against its share's caps.
 	Charge *charge `json:"charge,omitempty"`
 }
