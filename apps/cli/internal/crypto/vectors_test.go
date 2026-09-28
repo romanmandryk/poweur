@@ -1,8 +1,10 @@
 package crypto
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	idpkg "github.com/poweur/identity"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,7 +63,9 @@ func TestVectors_Encryption(t *testing.T) {
 		{"unicode", "héllo — 世界 🔒"},
 		{"long", string(make([]byte, 4096))},
 	} {
-		sealed, err := Encrypt(pub, []byte(entry.plaintext))
+		// A fixed stream per vector keeps the fixture byte-identical across runs.
+		random := bytes.NewReader(bytes.Repeat([]byte{byte(len(vectors) + 1)}, 64))
+		sealed, err := idpkg.SealWithReader(pub, []byte(entry.plaintext), idpkg.MessageSealDomain, nil, random)
 		if err != nil {
 			t.Fatalf("encrypt %s: %v", entry.name, err)
 		}

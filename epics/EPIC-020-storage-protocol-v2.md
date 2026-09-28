@@ -22,7 +22,7 @@
 |------|--------|-------|
 | **Wave 1 — spec & primitives** | | |
 | E20-T1 Storage v2 spec & ADR | **in progress** | Target spec and ADR written; exact signed formats/vectors and final privacy/store copy remain open |
-| E20-T2 Key tree & encryption format | **in progress** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks and Go↔TS vectors implemented; NFC names/name hashes and signed/sealed author-chain records added; signed manifests and moves/rotation still open |
+| E20-T2 Key tree & encryption format | **done** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks, NFC names/name hashes, signed/sealed author-chain records, and signed version manifests with 1024-ref chunk-list pages (create/replace/move/rotate/remove, drop-box name tokens); Go↔TS vectors for all |
 | E20-T3 Storage providers: filesystem & S3 | **done** | Interface, filesystem and minio-go S3. Conformance and a mismatched presigned checksum verified on local Docker MinIO. Relay config is `STORAGE_PROVIDER=fs\|s3` |
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
@@ -63,8 +63,12 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       deterministic drive-seals/chunks vectors cover decryption and byte-identical re-encryption.
 - [x] Add NFC encrypted names/name index and signed/sealed append records, with
       per-author duplicate/reorder/gap/fork checks and Go↔TS conformance vectors.
-- [ ] Complete Phase 2: signed manifests/pages, sealed creates, moves/key rotation
-      and their failure vectors.
+- [x] Complete Phase 2: signed manifests/pages, sealed creates, moves/key rotation
+      and their failure vectors (`drive/manifest.go`, `src/drive/manifest.ts`,
+      `drive-manifests.json`).
+- [x] S3 on Hetzner (Ceph): bare `If-Match`, idempotent conditional writes on every
+      provider, and a startup probe that refuses `S3_PRESIGN=1` where presigned
+      checksums are not enforced.
 - [x] Add provider contract and filesystem implementation with range reads, atomic
       conditional writes, durable rename, safe paths, restart and race conformance.
 - [x] Verify the S3 provider against local Docker MinIO and select `fs` or `s3`

@@ -187,8 +187,8 @@ wrapped keys, chunk references, and signature. Each reference includes hash and
 stored byte length. Large lists use immutable pages of at most 1024 references;
 the signed manifest binds ordered page hashes and total count. An append adds
 pages and may replace only the last partial page, not the preceding history.
-Manifest canonicalization and exact vectors must land together in E20-T2 before
-any HTTP implementation accepts them.
+Manifest canonicalization and its vectors are specified below and pinned in
+`drive-manifests.json`.
 
 Replace commits compare `base_version` to the current head and return `409` with
 the head on mismatch. Creating a node requires a nonexistent ID and an unused
@@ -247,9 +247,49 @@ hash alone is not verification. Keep separate `(sequence,hash)` cursors for each
 hash is an error and must not advance the cursor. Retry idempotency is the engine's
 separate operation-ID contract.
 
-These formats are pinned by `drive-names.json`, `drive-seals.json`, `drive-chunks.json`
-and `drive-records.json`. Signed version manifests and chunk-list page encodings are
-still open; do not infer a network API implementation from the primitive package.
+### Implemented manifest and page encoding
+
+A `ChunkPage` is `{format: 1, drive, node, chunks}` with 1–1024 chunk references. Its
+hash (its content address, lowercase hex) is SHA-256 of `poweur/drive/page/v1\n`
+followed by length-prefixed fields: format, drive, node, reference count, then each
+chunk's ID and stored size. A page names its drive and node, so it cannot be spliced
+into another node's content.
+
+A `Manifest` is one signed version of a node: `format: 1`, `drive`, `node`, `version`
+(16 random bytes, hex), `parent` (the base version; empty only on create), `operation`,
+`author`, `generation`, `kind` (`file` or `folder`), `mode` (`replace` or `append` for
+files, empty for folders), `folder` (the containing folder's node ID), `name` and
+`name_hash`, `node_key`, `content_key`, `count` and ordered `pages`, and `signature`.
+Every version carries the node's complete content: every page but the last is full,
+and `count` must fit the page list exactly. Operations constrain the fields:
+
+| Operation | Carries |
+|---|---|
+| `create` | no parent; node key; folder and name (both absent only for the drive root); a file's content key |
+| `replace` | parent; a file's new content only |
+| `move` | parent; new folder, new name and hash, node key re-sealed to the new folder; content unchanged |
+| `rotate` | parent; new node key (and a file's new content key) at a higher generation; content re-encrypted |
+| `remove` | parent; nothing else, count 0 |
+
+Envelopes are bound with `Context(drive, node, purpose, generation)` using purposes
+`name` (sealed to the containing folder's public key), `node-key` (to the containing
+folder, or the identity key for the root) and `content-key` (to the node's own public
+key). A create by a writer who holds only the folder's public key (a drop box) seals
+its name and node key to the folder and uses a random 32-byte `name_hash` token; the
+owner, who can open both, re-indexes it with a move.
+
+Signing bytes are `poweur/drive/manifest-sign/v1\n` followed by length-prefixed fields:
+format, drive, node, version, parent, operation, author, generation, kind, mode,
+folder, name (ephemeral key, nonce, ciphertext), name hash, node key (three fields),
+content key (three fields), count, page count, then each page hash. An absent envelope
+is three empty fields. Manifest hash = SHA-256(`poweur/drive/manifest-hash/v1\n` ||
+signing bytes || raw signature). Readers verify the signature with the author's
+resolved key, the author's role, and that the fetched pages hash to the signed list in
+order and total `count`.
+
+These formats are pinned by `drive-names.json`, `drive-seals.json`, `drive-chunks.json`,
+`drive-records.json` and `drive-manifests.json`. Do not infer a network API
+implementation from the primitive package.
 
 ## HTTP surface (planned)
 

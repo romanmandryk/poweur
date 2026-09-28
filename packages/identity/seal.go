@@ -43,6 +43,13 @@ func Seal(recipientPublicKey, plaintext []byte, domain string, context []byte) (
 	return sealWithRandom(recipientPublicKey, plaintext, domain, context, rand.Reader)
 }
 
+// SealWithReader is Seal with an explicit source of the ephemeral key and
+// nonce. It exists so conformance vectors are reproducible; production code
+// uses Seal.
+func SealWithReader(recipientPublicKey, plaintext []byte, domain string, context []byte, random io.Reader) (SealedPayload, error) {
+	return sealWithRandom(recipientPublicKey, plaintext, domain, context, random)
+}
+
 func sealWithRandom(recipientPublicKey, plaintext []byte, domain string, context []byte, random io.Reader) (SealedPayload, error) {
 	if err := validateSealDomain(domain, context); err != nil {
 		return SealedPayload{}, err

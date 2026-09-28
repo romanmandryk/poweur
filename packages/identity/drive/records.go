@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -194,6 +195,11 @@ func (r AppendRecord) sealContext() ([]byte, error) {
 // SealContent creates a write-only contribution encrypted to the node public
 // key. Sign the record after sealing. The author does not need a read key.
 func (r *AppendRecord) SealContent(nodePublic, plaintext []byte) error {
+	return r.sealContent(nodePublic, plaintext, nil)
+}
+
+// sealContent seals with random, or crypto/rand when random is nil.
+func (r *AppendRecord) sealContent(nodePublic, plaintext []byte, random io.Reader) error {
 	if len(plaintext) > MaxPlaintext {
 		return errors.New("sealed record exceeds 4 MiB")
 	}
@@ -201,7 +207,12 @@ func (r *AppendRecord) SealContent(nodePublic, plaintext []byte) error {
 	if err != nil {
 		return err
 	}
-	payload, err := identity.Seal(nodePublic, plaintext, identity.DriveRecordDomain, context)
+	var payload identity.SealedPayload
+	if random == nil {
+		payload, err = identity.Seal(nodePublic, plaintext, identity.DriveRecordDomain, context)
+	} else {
+		payload, err = identity.SealWithReader(nodePublic, plaintext, identity.DriveRecordDomain, context, random)
+	}
 	if err != nil {
 		return err
 	}

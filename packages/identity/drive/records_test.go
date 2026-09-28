@@ -138,7 +138,8 @@ func TestVectors_DriveRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := record.SealContent(nodePublic, []byte("sealed contribution")); err != nil {
+	// A fixed stream keeps the vector byte-identical across runs.
+	if err := record.sealContent(nodePublic, []byte("sealed contribution"), bytes.NewReader(bytes.Repeat([]byte{11}, 64))); err != nil {
 		t.Fatal(err)
 	}
 	if err := record.Sign(priv); err != nil {
