@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -194,6 +195,17 @@ func HistoryFileName(timestamp, id string) string {
 	}
 	return key + "-" + safeIDSegment(id) + ".json"
 }
+
+// HistoryPeerHash names a conversation without revealing the peer. Group
+// conversations use the group identity as the peer. Anonymous mail shares
+// AnonymousPeer.
+func HistoryPeerHash(peer string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(peer))))
+	return hex.EncodeToString(sum[:])
+}
+
+// HistoryLogName is the append file for one conversation.
+func HistoryLogName(peer string) string { return HistoryPeerHash(peer) + ".jsonl" }
 
 // HistoryPath is the full tree path for one record.
 func HistoryPath(timestamp, id string) string {

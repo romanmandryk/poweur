@@ -34,6 +34,11 @@ export interface Signer {
   /** "ed25519:<base64url>" */
   readonly publicKey: string;
   sign(canonical: string, encoding?: SignatureEncoding): Promise<string>;
+  /**
+   * Sign raw bytes. Drive manifests are length-prefixed binary, so the UTF-8
+   * `sign` path cannot cover them. Absent on signers that only hold a string API.
+   */
+  signBytes?(data: Uint8Array): Promise<Uint8Array>;
 }
 
 /** Decrypts inbound payloads with an identity's X25519 key. */
@@ -79,6 +84,10 @@ export class LocalSigner implements Signer {
   async sign(canonical: string, encoding: SignatureEncoding = "base64url"): Promise<string> {
     const signature = signBytes(this.#privateKey, utf8(canonical));
     return encoding === "base64std" ? toBase64Std(signature) : toBase64url(signature);
+  }
+
+  async signBytes(data: Uint8Array): Promise<Uint8Array> {
+    return signBytes(this.#privateKey, data);
   }
 
   /** Raw key access, for the session manager that must persist it. */

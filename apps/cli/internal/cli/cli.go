@@ -2032,7 +2032,7 @@ func printHelp(w io.Writer) {
   poweur outbox [list|retry]
   poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
   poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
-  poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
+  poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
   poweur session refresh [--use-identity=...] [--json]
   poweur session revoke [--use-identity=...] [--json]

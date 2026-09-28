@@ -90,3 +90,14 @@ it("folds an append log and refuses nodes outside a scoped folder", async () => 
   const note = await scope.create(await scope.resolve("/"), "note", "file", text.encode("hi"));
   expect((await scope.resolve("/note")).manifest.node).toBe(note.manifest.node);
 });
+
+it("archives a conversation as a sealed append log and dedupes by id", async () => {
+  const history = await alice.client.history();
+  const record = { id: "m1", sender: alice.identity, recipient: "bob.poweur.net", timestamp: "2026-09-28T12:00:00Z", queue: "sent" as const, body: "sealed-history-body" };
+  await history.append(record);
+  await history.append(record);
+  expect((await history.tail("bob.poweur.net")).map(row => row.body)).toEqual(["sealed-history-body"]);
+  expect(await history.before("bob.poweur.net", 1)).toEqual([]);
+  await history.putReadState({ conversations: { "bob.poweur.net": { timestamp: record.timestamp, id: "m1" } } });
+  expect((await history.readState()).conversations["bob.poweur.net"]?.id).toBe("m1");
+});

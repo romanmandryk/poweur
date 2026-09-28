@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 	"crypto/ed25519"
-	"errors"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
+	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
 )
@@ -27,18 +28,20 @@ import (
 // The format lives in packages/identity (`history.go`) because the TypeScript
 // client and the web app write the same files.
 
-// historyStore is one identity's archive. Storage v1 kept it as one sealed
-// file per message over WebDAV; storage v2 keeps it as one append file per
-// conversation (EPIC-020 E20-T11). Until that lands the store seals and
-// opens records but has nowhere to keep them.
+// historyStore is one identity's archive: one encrypted append file per
+// conversation under `.poweur/private/messages/`, plus a replace file of
+// read marks (EPIC-020 E20-T11).
 type historyStore struct {
 	relayURL string
 	identity string
 	priv     ed25519.PrivateKey
 	// encPriv is the identity's X25519 private key: history is sealed to the
 	// owner's own encryption key, so this both seals and opens.
-	encPriv []byte
-	encPub  []byte
+	encPriv  []byte
+	encPub   []byte
+	files    *driveclient.Files
+	private  *driveclient.File
+	messages *driveclient.File
 }
 
 // openHistoryStore prepares the archive for an identity, or reports why it
@@ -100,14 +103,10 @@ func (h *historyStore) open(raw []byte, into any) error {
 	return json.Unmarshal(plaintext, into)
 }
 
-// Append writes one record.
+// Append writes one record. A record already stored under its id is skipped,
+// so two devices picking up the same message do not duplicate it.
 func (h *historyStore) Append(ctx context.Context, record idpkg.HistoryRecord) error {
-	record.Version = idpkg.HistoryVersion
-	if err := record.Validate(); err != nil {
-		return err
-	}
-	_, _ = ctx, h.priv
-	return errStorageUnavailable
+	return h.appendRecord(ctx, record)
 }
 
 // AppendAll archives a batch, reporting the first failure but attempting all
@@ -124,21 +123,17 @@ func (h *historyStore) AppendAll(ctx context.Context, records []idpkg.HistoryRec
 
 // Load reads the whole archive, oldest first.
 func (h *historyStore) Load(ctx context.Context) ([]idpkg.HistoryRecord, error) {
-	return nil, errStorageUnavailable
+	return h.allRecords(ctx)
 }
 
 // ReadState loads the read marks (empty when absent).
 func (h *historyStore) ReadState(ctx context.Context) (idpkg.ReadState, error) {
-	return idpkg.ReadState{Version: idpkg.HistoryVersion, Conversations: map[string]idpkg.ReadMark{}}, nil
+	return h.readMarks(ctx)
 }
 
 // PutReadState stores the read marks.
 func (h *historyStore) PutReadState(ctx context.Context, state idpkg.ReadState) error {
-	state.Version = idpkg.HistoryVersion
-	if err := state.Validate(); err != nil {
-		return err
-	}
-	return errStorageUnavailable
+	return h.writeMarks(ctx, state)
 }
 
 // archiveRecords is the fire-and-forget hook the messaging commands call.
@@ -168,7 +163,14 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity")
 	jsonOut := fs.Bool("json", false, "output json")
 	keepUnread := fs.Bool("keep-unread", false, "do not mark the shown conversations as read")
+	limit := fs.Int("limit", 0, "maximum records, from the newest")
+	before := fs.Uint64("before", 0, "only records before this position in one conversation")
+	threadID := fs.String("thread", "", "only records in this thread")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--keep-unread": true})); err != nil {
+		return 1
+	}
+	if *limit < 0 {
+		fmt.Fprintln(stderr, "limit must be zero or positive")
 		return 1
 	}
 
@@ -178,10 +180,43 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	ctx := context.Background()
-	records, err := store.Load(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	peer := strings.ToLower(fs.Arg(0))
+	var positions map[string]uint64
+	var records []idpkg.HistoryRecord
+	if *before > 0 {
+		if peer == "" {
+			fmt.Fprintln(stderr, "history --before needs a conversation")
+			return 1
+		}
+		rows, err := store.conversationRecords(ctx, peer)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		positions = map[string]uint64{}
+		for _, row := range rows {
+			if row.Position < *before {
+				records = append(records, row.Record)
+				positions[row.Record.ID] = row.Position
+			}
+		}
+	} else if peer != "" {
+		rows, err := store.conversationRecords(ctx, peer)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		positions = map[string]uint64{}
+		for _, row := range rows {
+			records = append(records, row.Record)
+			positions[row.Record.ID] = row.Position
+		}
+	} else {
+		records, err = store.Load(ctx)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	state, err := store.ReadState(ctx)
 	if err != nil {
@@ -189,24 +224,32 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	peer := strings.ToLower(fs.Arg(0))
-	if peer != "" {
-		filtered := records[:0:0]
+	if *threadID != "" {
+		filtered := records[:0]
 		for _, r := range records {
-			if r.Peer(store.identity) == peer {
+			if r.ThreadID == *threadID {
 				filtered = append(filtered, r)
 			}
 		}
 		records = filtered
 	}
+	if *limit > 0 && len(records) > *limit {
+		records = records[len(records)-*limit:]
+	}
 
 	unread := state.Unread(store.identity, records)
 	if *jsonOut {
-		return writeOutput(stdout, true, map[string]any{
-			"identity": store.identity,
-			"messages": records,
-			"unread":   unread,
-		}, "")
+		var cursor uint64
+		for _, record := range records {
+			if positions[record.ID] > cursor {
+				cursor = positions[record.ID]
+			}
+		}
+		payload := map[string]any{"identity": store.identity, "messages": records, "unread": unread}
+		if cursor > 0 {
+			payload["cursor"] = cursor
+		}
+		return writeOutput(stdout, true, payload, "")
 	}
 
 	if len(records) == 0 {

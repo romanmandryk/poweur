@@ -7,6 +7,7 @@
  */
 
 import { driveCommand } from "./commands/drive.js";
+import { historyCommand } from "./commands/history.js";
 import { UsageError } from "./args.js";
 import { defaultStreams, fail, type Streams } from "./output.js";
 import { identityCommand } from "./commands/identity.js";
@@ -44,6 +45,7 @@ export const HELP = `Usage:
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur inbox [--use-identity=...] [--json]
+  poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json]
   poweur messages status [--id=<message-id>] [--use-identity=...] [--json]
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
@@ -73,6 +75,7 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "key": return await keyCommand(rest, streams);
       case "send": return await send(rest, streams);
       case "inbox": return await inbox(rest, streams);
+      case "history": return await historyCommand(rest, streams);
       case "listen": return await listen(rest, streams);
       case "messages":
         if (rest[0] !== "status") throw new UsageError("unknown messages subcommand (want status)");

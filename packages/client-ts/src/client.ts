@@ -30,6 +30,8 @@ import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
 import type { ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
+import { DriveClient } from "./drive/client.js";
+import { DriveFiles } from "./drive/files.js";
 import { DeviceRegistry, SystemFiles } from "./systemfiles.js";
 import {
   CONTACT_ACCEPTED,
@@ -139,7 +141,12 @@ export class PoweurClient {
     if (!this.decryptor) {
       throw new PoweurError("invalid_argument", "message history needs a decryptor to seal to");
     }
-    return new MessageHistory(this.signer.identity, this.decryptor);
+    const encryptionPrivateKey = await this.decryptor.privateKeyBytes();
+    const signBytes = this.signer.signBytes?.bind(this.signer);
+    const files = signBytes
+      ? new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey })
+      : undefined;
+    return new MessageHistory(this.signer.identity, this.decryptor, files);
   }
 
   /**

@@ -11,9 +11,8 @@
  * The archive lives in the owner-only, end-to-end encrypted zone
  * `.poweur/private/`. Storage v1 kept it as one sealed file per message in
  * month shards over WebDAV; storage v2 keeps one append file per
- * conversation (EPIC-020 E20-T11). Until that lands, `MessageHistory` seals
- * and opens records but has nowhere to keep them: loads are empty and writes
- * report `unsupported`, which callers already treat as "not archived".
+ * conversation (EPIC-020 E20-T11), named by a hash of the peer. Records stay
+ * sealed to the owner's key inside that encrypted log.
  *
  * Sealed to the owner's *own* X25519 key — the same envelope messages already
  * use, with the owner as their own recipient. That needs no new key custody
@@ -27,8 +26,9 @@
 
 import { open, seal, sha256Bytes } from "./crypto/index.js";
 import type { Decryptor } from "./crypto/keys.js";
+import type { DriveFiles, OpenFile } from "./drive/files.js";
 import { fromUtf8, toBase64url, utf8 } from "./encoding.js";
-import { PoweurError } from "./errors.js";
+import { PoweurError, RelayError } from "./errors.js";
 import { ENCRYPTION_ALG } from "./types.js";
 
 export const HISTORY_DIR = ".poweur/private/messages";
@@ -100,6 +100,16 @@ export interface SealedDocument {
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 /** The month directory a timestamp belongs to; "unknown" when unparseable. */
+/** SHA-256 of the normalised peer, so a directory listing does not name correspondents. */
+export function historyPeerHash(peer: string): string {
+  return Array.from(sha256Bytes(utf8(peer.trim().toLowerCase())), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** Append-file name for one conversation. */
+export function historyLogName(peer: string): string {
+  return `${historyPeerHash(peer)}.jsonl`;
+}
+
 export function historyShard(timestamp: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "unknown";
@@ -296,10 +306,14 @@ export function parseSealedDocument(raw: string): SealedDocument {
 export class MessageHistory {
   readonly owner: string;
   readonly #decryptor: Decryptor;
+  readonly #files?: DriveFiles;
+  #private?: OpenFile;
+  #messages?: OpenFile;
 
-  constructor(owner: string, decryptor: Decryptor) {
+  constructor(owner: string, decryptor: Decryptor, files?: DriveFiles) {
     this.owner = owner;
     this.#decryptor = decryptor;
+    this.#files = files;
   }
 
   /** Seal a document to the owner's own encryption key. */
@@ -326,10 +340,15 @@ export class MessageHistory {
     return JSON.parse(fromUtf8(plaintext)) as T;
   }
 
-  /** Write one record. Needs storage v2; throws `unsupported` until then. */
+  /** Write one record. A record already stored under its id is skipped. */
   async append(record: HistoryRecord): Promise<void> {
     validateHistoryRecord({ ...record, version: HISTORY_VERSION });
-    throw new PoweurError("unsupported", "message history needs the new storage (EPIC-020), which is not available yet");
+    const files = this.#requireFiles();
+    const file = await this.#log(historyPeer(record, this.owner));
+    const existing = await this.#readLog(file);
+    if (existing.some((row) => row.record.id === record.id)) return;
+    const sealed = utf8(await this.seal({ ...record, version: HISTORY_VERSION }));
+    await files.append(file, sealed);
   }
 
   /**
@@ -354,22 +373,104 @@ export class MessageHistory {
 
   /** Every archived record, oldest first. */
   async load(): Promise<HistoryRecord[]> {
-    return [];
+    if (!this.#files) return [];
+    const dir = await this.#messagesDir();
+    const records: HistoryRecord[] = [];
+    for (const child of await this.#files.list(dir)) {
+      if (child.manifest.mode !== "append") continue;
+      for (const row of await this.#readLog(child)) records.push(row.record);
+    }
+    return records.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
+  }
+
+  /** The newest records of one conversation. `limit` 0 returns the whole log. */
+  async tail(peer: string, options: { limit?: number } = {}): Promise<HistoryRecord[]> {
+    const rows = await this.#conversation(peer);
+    const limit = options.limit ?? 0;
+    const slice = limit > 0 ? rows.slice(-limit) : rows;
+    return slice.map((row) => row.record);
+  }
+
+  /** Records strictly before a relay position, newest `limit` of them. */
+  async before(peer: string, cursor: number, options: { limit?: number } = {}): Promise<HistoryRecord[]> {
+    const rows = (await this.#conversation(peer)).filter((row) => row.position < cursor);
+    const limit = options.limit ?? 0;
+    return (limit > 0 ? rows.slice(-limit) : rows).map((row) => row.record);
   }
 
   /** Records in one conversation, oldest first. */
   async conversation(peer: string): Promise<HistoryRecord[]> {
-    const wanted = peer.trim().toLowerCase();
-    return (await this.load()).filter((r) => historyPeer(r, this.owner) === wanted);
+    if (!this.#files) {
+      const wanted = peer.trim().toLowerCase();
+      return (await this.load()).filter((r) => historyPeer(r, this.owner) === wanted);
+    }
+    return (await this.#conversation(peer)).map((row) => row.record);
   }
 
   async readState(): Promise<ReadState> {
-    return { version: HISTORY_VERSION, conversations: {} };
+    const empty = { version: HISTORY_VERSION, conversations: {} };
+    if (!this.#files) return empty;
+    await this.#messagesDir();
+    const marks = (await this.#files.list(this.#private!)).find((child) => child.name === "read-state.json");
+    if (!marks) return empty;
+    const bytes = await collect(this.#files.read(marks));
+    if (!bytes.length) return empty;
+    return parseReadState(JSON.stringify(await this.open<ReadState>(new TextDecoder().decode(bytes))));
   }
 
-  /** Store the read marks. Not persisted until storage v2. */
+  /** Store the read marks. */
   async putReadState(state: ReadState): Promise<void> {
-    void state;
+    if (!this.#files) return;
+    const sealed = utf8(await this.seal({ ...state, version: HISTORY_VERSION }));
+    await this.#messagesDir();
+    const marks = (await this.#files.list(this.#private!)).find((child) => child.name === "read-state.json");
+    if (marks) await this.#files.replace(marks, sealed);
+    else await this.#files.create(this.#private, "read-state.json", "file", sealed);
+  }
+
+  #requireFiles(): DriveFiles {
+    if (!this.#files) throw new PoweurError("unsupported", "message history needs the drive (EPIC-020), which this client cannot sign");
+    return this.#files;
+  }
+  async #folder(parent: OpenFile, name: string): Promise<OpenFile> {
+    const files = this.#requireFiles();
+    const found = (await files.list(parent)).find((child) => child.name === name && child.manifest.kind === "folder");
+    if (found) return found;
+    try { return await files.create(parent, name, "folder"); }
+    catch (error) {
+      if (!(error instanceof RelayError) || error.status !== 409) throw error;
+      const again = (await files.list(parent)).find((child) => child.name === name);
+      if (!again) throw error;
+      return again;
+    }
+  }
+  async #messagesDir(): Promise<OpenFile> {
+    if (this.#messages) return this.#messages;
+    const files = this.#requireFiles();
+    const poweur = await this.#folder(await files.root(), ".poweur");
+    this.#private = await this.#folder(poweur, "private");
+    this.#messages = await this.#folder(this.#private, "messages");
+    return this.#messages;
+  }
+  async #log(peer: string): Promise<OpenFile> {
+    const files = this.#requireFiles();
+    const dir = await this.#messagesDir();
+    const name = historyLogName(peer);
+    return (await files.list(dir)).find((child) => child.name === name) ?? await files.create(dir, name, "file", new Uint8Array(), "append");
+  }
+  async #readLog(file: OpenFile): Promise<{ position: number; record: HistoryRecord }[]> {
+    const rows = await this.#requireFiles().tail(file, 1);
+    const out = [];
+    for (const row of rows) {
+      out.push({ position: row.position, record: await this.open<HistoryRecord>(new TextDecoder().decode(row.plain)) });
+    }
+    return out;
+  }
+  async #conversation(peer: string): Promise<{ position: number; record: HistoryRecord }[]> {
+    const dir = await this.#messagesDir();
+    const name = historyLogName(peer);
+    const file = (await this.#requireFiles().list(dir)).find((child) => child.name === name);
+    return file ? this.#readLog(file) : [];
   }
 
   /** Advance one conversation's mark to the newest record given. */
@@ -390,4 +491,13 @@ export class MessageHistory {
     const [records, state] = await Promise.all([this.load(), this.readState()]);
     return unreadCounts(state, this.owner, records);
   }
+}
+
+async function collect(chunks: AsyncGenerator<Uint8Array>): Promise<Uint8Array> {
+  const parts: Uint8Array[] = [];
+  for await (const chunk of chunks) parts.push(chunk);
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) { out.set(part, offset); offset += part.length; }
+  return out;
 }

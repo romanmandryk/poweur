@@ -9,8 +9,8 @@
  * - `.poweur/state/`   written by the relay, read by the owner: the device
  *   registry;
  * - `.poweur/private/` end-to-end encrypted records (message history, the
- *   sign-in log) — these need storage v2's drive and are not available here
- *   yet.
+ *   sign-in log). Those are drive files, not this plaintext API: history is
+ *   one append log per conversation (E20-T11).
  *
  * Reads and writes go through the relay's owner API,
  * `/identities/{identity}/system/{path}`, authenticated with a one-shot

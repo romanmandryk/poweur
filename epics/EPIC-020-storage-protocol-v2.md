@@ -33,7 +33,7 @@
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
-| E20-T11 Message history & attachments on v2 | **open** | one append file per conversation; encrypted attachments |
+| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history (Go/TS/CLI/web) with peer-hash names, tail/before and id dedupe; attachments still open |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 implementation removed; system-only operator migration and production rehearsal remain open; no deployment |
 | **Wave 5 — after launch, demand-led** | | |
@@ -131,7 +131,9 @@ as the test reference; retain already ported temporary system-file tests as regr
       DEVICES_03 relay-managed registry read/write/delete enforcement against v2.
 - [x] TS system-file/device/drive APIs support explicit session-key authentication;
       live-relay tests cover reads/writes and rejection after session revocation.
-- [ ] Integration HISTORY_01–05, TYPED_07, DEVICES_01–02, SIGNIN_01, ABUSE_03.
+- [x] Integration HISTORY_01: an inbox drain and a sent copy land in per-peer append
+      logs, a second pickup does not duplicate them, and the provider holds no plaintext.
+      HISTORY_02–05, TYPED_07, DEVICES_01–02, SIGNIN_01 and ABUSE_03 remain open.
       The full profile/web/cross-relay avatar acceptance remains below.
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
@@ -630,15 +632,15 @@ password link in a clean browser; thumbnails render for encrypted images.
 
 Replaces E09-T1's layout and closes E09-T4's plaintext-bytes gap.
 
-- [ ] History: `.poweur/private/messages/<peer-hash>.jsonl`, one append file per conversation
+- [x] History: `.poweur/private/messages/<peer-hash>.jsonl`, one append file per conversation
       (peer hash keyed so paths do not reveal the social graph); groups keyed by group identity;
       multi-device dedupe by message id
-- [ ] SDK: `tail(peer, {limit})`, `before(peer, cursor, {limit})`, `append(records)`; tray loads
+- [x] SDK: `tail(peer, {limit})`, `before(peer, cursor, {limit})`, `append(records)`; tray loads
       read one tail chunk per conversation
 - [ ] Attachments: sealed file + per-file share with the recipient; content key, filename and
       MIME inside the encrypted payload; plaintext metadata keeps only node id, ciphertext size
       and hash
-- [ ] CLI `poweur history [peer] --limit --before --thread --json`
+- [x] CLI `poweur history [peer] --limit --before --thread --json`
 
 **Acceptance:** with 20 conversations and 10k messages the tray fetches ≤ 20 tail chunks;
 a 20 MB attachment crosses two relays and the sender's store holds only ciphertext; E15-T13
