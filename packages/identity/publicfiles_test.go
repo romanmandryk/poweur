@@ -148,12 +148,14 @@ func TestAvatarURL(t *testing.T) {
 	cases := []struct {
 		name, path, scheme, want string
 	}{
-		{"public path", "public/avatar.png", "https", "https://alice.poweur.net/pub/avatar.png"},
-		{"nested", "public/img/a.png", "http", "http://alice.poweur.net/pub/img/a.png"},
-		{"default scheme", "public/a.png", "", "https://alice.poweur.net/pub/a.png"},
+		{"file name", "avatar.png", "https", "https://alice.poweur.net/.well-known/poweur/avatar.png"},
+		{"http", "avatar.webp", "http", "http://alice.poweur.net/.well-known/poweur/avatar.webp"},
+		{"default scheme", "me.jpg", "", "https://alice.poweur.net/.well-known/poweur/me.jpg"},
 		{"external url refused", "https://evil.example/a.png", "https", ""},
-		{"private tree refused", "private/a.png", "https", ""},
-		{"traversal refused", "public/../private/a.png", "https", ""},
+		{"path refused", "public/avatar.png", "https", ""},
+		{"traversal refused", "../a.png", "https", ""},
+		{"not an image", "profile.json", "https", ""},
+		{"uppercase refused", "Avatar.png", "https", ""},
 		{"empty", "", "https", ""},
 	}
 	for _, tc := range cases {

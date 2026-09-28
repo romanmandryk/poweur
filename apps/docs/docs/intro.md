@@ -32,7 +32,7 @@ identity or a unique human. Those can be added later as attestations without cha
 | **Use my own domain** as my ID, on any relay | [Web identity](/protocol/web-identity) and [DNS records](/protocol/dns-records) |
 | **Add "Sign in with Poweur"** to my app | [Add sign-in to an app](/auth/add-sign-in), or the [OAuth/OIDC bridge](/auth/oauth-oidc-bridge) for any app that already speaks OpenID Connect |
 | **Work from the terminal, or give an AI agent an ID** | [CLI](/clients/overview#cli) |
-| **Build an app or an agent** | [JavaScript/TypeScript SDK](/clients/js-sdk), [CLI reference](/clients/cli-reference), [app-data conventions](/conventions/app-data) |
+| **Build an app or an agent** | [JavaScript/TypeScript SDK](/clients/js-sdk), [CLI reference](/clients/cli-reference), [app-data conventions](/files/storage-v2) |
 | **Understand the protocol** | [Protocol overview](/protocol/overview), [identity model](/protocol/identity-model), [message format](/protocol/message-format) |
 | **Review the security** | [Security model](/security/model), [key management](/security/key-management) |
 
@@ -44,14 +44,13 @@ Poweur is pre-1.0, and the core works end to end today:
   from `https://<id>/.well-known/poweur/id.json`, with DNS `TXT` as a fallback, and fail closed
   when the two disagree. Key rotation, export and moving between relays.
 - **Messaging.** Signed, end-to-end encrypted messages between IDs on any relay. A durable
-  inbox, real-time push (SSE), delivery and read receipts, threads, attachments, groups,
+  inbox, real-time push (SSE), delivery and read receipts, threads, groups,
   expiring messages, and typed messages that apps and agents understand.
 - **Contacts and spam control.** Contact requests, pinned keys, blocking, per-identity inbox
   policy, relay-level abuse limits, and opt-in anonymous messages protected by proof of work.
-- **Files and sharing.** A WebDAV home per ID with public, shared, private and per-app areas;
-  sync with change journals; signed read/write grants to people and groups; share links;
-  instant revocation; quotas.
-- **Sign-in.** "Sign in with Poweur" for apps, scoped grants to an app's own folder, a
+- **Files and sharing.** V1 has been removed on master. The encrypted drive,
+  attachments and multi-device history are being restored in EPIC-020.
+- **Sign-in.** "Sign in with Poweur" for apps, a
   `did:web` projection, and an OAuth 2.0 / OpenID Connect / IndieAuth bridge.
 - **Devices and recovery.** Passkey-protected keys, several devices per ID, adding a device
   by code or QR, removing a lost one, and recovery kits.
@@ -77,7 +76,7 @@ All in [one repository](https://github.com/romanmandryk/poweur):
 
 | Component | Path | What it is |
 |-----------|------|------------|
-| Relay | `apps/api` | Go server: identity hosting, message verification and routing, durable inbox, file homes over WebDAV, sharing. Serves the web app at `/app/`. |
+| Relay | `apps/api` | Go server: identity hosting, message verification and routing, durable inbox, public/system files during the storage-v2 transition. Serves the web app at `/app/`. |
 | Web app | `apps/web` | React client for creating an ID, messaging, contacts, files, sharing, sign-in approval, devices and recovery. |
 | Mobile apps | `apps/mobile` | The web app in a Capacitor shell for iOS and Android, with native key storage. |
 | Go CLI | `apps/cli` | Your ID in the terminal: sync and share project folders, message from scripts, and let AI coding agents use Poweur. Also for CI, bots and operators. |

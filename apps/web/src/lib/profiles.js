@@ -2,7 +2,7 @@
  * Resolving *who someone is*, not just what their keys are.
  *
  * EPIC-006 serves an identity's public presentation from
- * `poweur-sys/public/`, reachable at `/.well-known/poweur/<file>` on the
+ * `.poweur/public/`, reachable at `/.well-known/poweur/<file>` on the
  * identity's own host. Cached here so ProfileCard, IdentityInput and the
  * audience picker can all ask about the same person without re-fetching.
  *
@@ -57,12 +57,12 @@ async function fetchJson(url, { timeoutMs = 5000 } = {}) {
   }
 }
 
-/** `public/avatar.png` on alice's tree → the URL that actually serves it. */
-export function avatarUrl(identity, avatarPath, { scheme = "https" } = {}) {
-  if (!avatarPath || typeof avatarPath !== "string") return null;
-  if (!avatarPath.startsWith("public/")) return null; // schema says tree path, never a URL
-  const rest = avatarPath.slice("public/".length).split("/").map(encodeURIComponent).join("/");
-  return `${scheme}://${identity}/pub/${rest}`;
+/** `avatar.png` in alice's .poweur/public → the URL that actually serves it. */
+export function avatarUrl(identity, avatar, { scheme = "https" } = {}) {
+  if (!avatar || typeof avatar !== "string") return null;
+  // The schema allows a flat image file name, never a URL or a path.
+  if (!/^[a-z0-9_-]+\.(png|jpe?g|webp|gif)$/.test(avatar)) return null;
+  return `${scheme}://${identity}/.well-known/poweur/${avatar}`;
 }
 
 /**

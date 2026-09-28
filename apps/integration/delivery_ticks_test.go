@@ -101,6 +101,10 @@ func TestINT_DLV_02_Tick2AfterRecipientPolls(t *testing.T) {
 		"--parent-domain", "example.org", "--relay", "http://"+relayB,
 		"--dns-provider", "mock", "--dns-token", "integration")
 
+	// Bob opts out of read receipts, so his pickup stops at tick 2 instead
+	// of going on to "read" (tick 3, covered by READ_RECEIPT_01).
+	runCLI(t, bobHome, "policy", "set", "open", "--read-receipts=false")
+
 	runCLI(t, aliceHome, "send", "bob.example.org", "two-tick test")
 	id := extractFirstMessageID(t, aliceHome, "alice.poweur.net")
 

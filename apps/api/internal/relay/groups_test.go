@@ -26,41 +26,39 @@ import (
 type groupFixture struct {
 	server *Server
 	ts     *httptest.Server
-	group  davTestIdentity
-	alice  davTestIdentity
-	bob    davTestIdentity
-	carol  davTestIdentity
+	group  hostedID
+	alice  hostedID
+	bob    hostedID
+	carol  hostedID
 	// dana administers the group without being in it: `admins` is an
 	// authority list, `members` is the access list, and they are
 	// independent.
-	dana      davTestIdentity
-	stranger  davTestIdentity
-	groupTok  string
+	dana      hostedID
+	stranger  hostedID
 	groupName string
 }
 
 func newGroupFixture(t *testing.T) *groupFixture {
 	t.Helper()
-	server, ts := newDAVTestServer(t, 0, 0)
+	server, ts := newTestRelay(t)
 	fx := &groupFixture{
 		server:    server,
 		ts:        ts,
-		group:     registerDAVIdentity(t, server, ts, "crew.poweur.net"),
-		alice:     registerDAVIdentity(t, server, ts, "galice.poweur.net"),
-		bob:       registerDAVIdentity(t, server, ts, "gbob.poweur.net"),
-		carol:     registerDAVIdentity(t, server, ts, "gcarol.poweur.net"),
-		dana:      registerDAVIdentity(t, server, ts, "gdana.poweur.net"),
-		stranger:  registerDAVIdentity(t, server, ts, "gzed.poweur.net"),
+		group:     registerTestIdentity(t, server, ts, "crew.poweur.net"),
+		alice:     registerTestIdentity(t, server, ts, "galice.poweur.net"),
+		bob:       registerTestIdentity(t, server, ts, "gbob.poweur.net"),
+		carol:     registerTestIdentity(t, server, ts, "gcarol.poweur.net"),
+		dana:      registerTestIdentity(t, server, ts, "gdana.poweur.net"),
+		stranger:  registerTestIdentity(t, server, ts, "gzed.poweur.net"),
 		groupName: "crew.poweur.net",
 	}
-	fx.groupTok = mintDAVToken(t, ts, fx.group, "", "")
 	fx.setMembership(t, 1,
 		[]string{fx.dana.name},
 		[]string{fx.alice.name, fx.bob.name, fx.carol.name})
 	return fx
 }
 
-// setMembership writes the group's own self.json, signed by the group key.
+// setMembership writes the group's own roster, signed by the group key.
 func (fx *groupFixture) setMembership(t *testing.T, epoch int, admins, members []string) {
 	t.Helper()
 	gr := idpkg.ShareGroup{
@@ -75,16 +73,11 @@ func (fx *groupFixture) setMembership(t *testing.T, epoch int, admins, members [
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(gr)
-	resp := davReq(t, fx.ts, http.MethodPut,
-		"/dav/"+fx.groupName+"/"+idpkg.GroupSelfDoc, fx.groupTok, raw, nil)
-	resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		t.Fatalf("put membership: %d", resp.StatusCode)
-	}
+	setSysFile(t, fx.server, fx.groupName, groupRosterPath, string(raw))
 }
 
 // challengeFor fetches and signs a one-shot challenge for id.
-func challengeFor(t *testing.T, ts *httptest.Server, id davTestIdentity) (string, string) {
+func challengeFor(t *testing.T, ts *httptest.Server, id hostedID) (string, string) {
 	t.Helper()
 	resp, err := http.Get(ts.URL + "/auth/challenge?identity=" + id.name)
 	if err != nil {
@@ -100,7 +93,7 @@ func challengeFor(t *testing.T, ts *httptest.Server, id davTestIdentity) (string
 }
 
 // readRoster performs GET /groups/{group} as id.
-func (fx *groupFixture) readRoster(t *testing.T, id davTestIdentity) (*http.Response, idpkg.ShareGroup) {
+func (fx *groupFixture) readRoster(t *testing.T, id hostedID) (*http.Response, idpkg.ShareGroup) {
 	t.Helper()
 	challenge, sig := challengeFor(t, fx.ts, id)
 	req, _ := http.NewRequest(http.MethodGet, fx.ts.URL+"/groups/"+fx.groupName, nil)
@@ -119,7 +112,7 @@ func (fx *groupFixture) readRoster(t *testing.T, id davTestIdentity) (*http.Resp
 }
 
 // groupEnvelope builds one signed member envelope for a fan-out.
-func groupEnvelope(t *testing.T, sender davTestIdentity, recipient, group string, epoch int, threadID, timestamp, body string) Message {
+func groupEnvelope(t *testing.T, sender hostedID, recipient, group string, epoch int, threadID, timestamp, body string) Message {
 	t.Helper()
 	msg := Message{
 		ID:        "msg_" + recipient + "_" + strings.ReplaceAll(timestamp, ":", ""),
@@ -148,7 +141,7 @@ func groupEnvelope(t *testing.T, sender davTestIdentity, recipient, group string
 }
 
 // fanout builds a full batch from sender to every other member.
-func (fx *groupFixture) fanout(t *testing.T, sender davTestIdentity, epoch int, threadID, body string, recipients []string) GroupFanoutRequest {
+func (fx *groupFixture) fanout(t *testing.T, sender hostedID, epoch int, threadID, body string, recipients []string) GroupFanoutRequest {
 	t.Helper()
 	ts := time.Now().UTC().Format(time.RFC3339)
 	req := GroupFanoutRequest{Group: fx.groupName, Epoch: epoch}
@@ -171,7 +164,7 @@ func (fx *groupFixture) post(t *testing.T, req GroupFanoutRequest) (*http.Respon
 }
 
 // inboxOf drains an identity's spool through the relay's own store.
-func (fx *groupFixture) inboxOf(t *testing.T, id davTestIdentity) []string {
+func (fx *groupFixture) inboxOf(t *testing.T, id hostedID) []string {
 	t.Helper()
 	var out []string
 	for _, m := range fx.server.inbox.Drain(id.name) {
@@ -200,7 +193,7 @@ func TestGroupFanoutDeliversToEveryMember(t *testing.T) {
 	if out.Epoch != 1 {
 		t.Fatalf("epoch = %d", out.Epoch)
 	}
-	for _, member := range []davTestIdentity{fx.bob, fx.carol} {
+	for _, member := range []hostedID{fx.bob, fx.carol} {
 		got := fx.inboxOf(t, member)
 		if len(got) != 1 {
 			t.Fatalf("%s inbox = %v", member.name, got)
@@ -350,7 +343,7 @@ func TestGroupFanoutRejections(t *testing.T) {
 			// A refused batch delivers nothing at all: half a fan-out is
 			// worse than none, because the members who got it would reply
 			// into a conversation the others never saw.
-			for _, m := range []davTestIdentity{fx.bob, fx.carol, fx.stranger} {
+			for _, m := range []hostedID{fx.bob, fx.carol, fx.stranger} {
 				if got := fx.inboxOf(t, m); len(got) != 0 {
 					t.Fatalf("%s received %v from a refused batch", m.name, got)
 				}
@@ -611,15 +604,13 @@ func TestGroupWithForgedMembershipIsNotResolvable(t *testing.T) {
 		Epoch:     1,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	// Signed by the stranger, written with the group's own token (the
-	// relay stores what a token authorizes; the signature is the gate).
+	// Signed by the stranger and stored in the group's own drive (the
+	// relay stores what the owner commits; the signature is the gate).
 	if err := forged.Sign(fx.stranger.priv); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(forged)
-	resp := davReq(t, fx.ts, http.MethodPut,
-		"/dav/"+fx.groupName+"/"+idpkg.GroupSelfDoc, fx.groupTok, raw, nil)
-	resp.Body.Close()
+	setSysFile(t, fx.server, fx.groupName, groupRosterPath, string(raw))
 
 	rosterResp, _ := fx.readRoster(t, fx.stranger)
 	rosterResp.Body.Close()

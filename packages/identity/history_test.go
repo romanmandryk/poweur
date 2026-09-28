@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestHistoryPeerHashHidesTheName(t *testing.T) {
+	if HistoryPeerHash("Bob.Poweur.net") != HistoryPeerHash("  bob.poweur.net ") {
+		t.Fatal("peer hash is not case-insensitive")
+	}
+	got := HistoryLogName("alice.poweur.net")
+	if strings.Contains(got, "alice") || len(got) != 64+len(".jsonl") {
+		t.Fatalf("log name %s", got)
+	}
+	if HistoryPeerHash("alice.poweur.net") == HistoryPeerHash("bob.poweur.net") {
+		t.Fatal("distinct peers hashed equal")
+	}
+}
+
 func TestHistoryPathIsSortableAndSharded(t *testing.T) {
 	early := HistoryPath("2026-09-09T08:15:00Z", "msg_1_aaa")
 	later := HistoryPath("2026-09-09T09:15:00Z", "msg_2_bbb")

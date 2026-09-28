@@ -1,19 +1,18 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	cryptoe2e "github.com/poweur/cli/internal/crypto"
+	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
 )
@@ -29,22 +28,27 @@ import (
 // The format lives in packages/identity (`history.go`) because the TypeScript
 // client and the web app write the same files.
 
-// historyStore is one identity's archive, over DAV.
+// historyStore is one identity's archive: one encrypted append file per
+// conversation under `.poweur/private/messages/`, plus a replace file of
+// read marks (EPIC-020 E20-T11).
 type historyStore struct {
 	relayURL string
 	identity string
-	token    string
+	priv     ed25519.PrivateKey
 	// encPriv is the identity's X25519 private key: history is sealed to the
 	// owner's own encryption key, so this both seals and opens.
-	encPriv []byte
-	encPub  []byte
+	encPriv  []byte
+	encPub   []byte
+	files    *driveclient.Files
+	private  *driveclient.File
+	messages *driveclient.File
 }
 
 // openHistoryStore prepares the archive for an identity, or reports why it
 // cannot. A missing encryption key is not fatal to anything else the CLI
 // does, so callers treat the error as "skip archiving" rather than "fail".
 func openHistoryStore(useIdentity string) (*historyStore, error) {
-	cfg, identityValue, priv, ok := loadIdentityForDAV(useIdentity, io.Discard)
+	cfg, identityValue, priv, ok := loadIdentityKey(useIdentity, io.Discard)
 	if !ok {
 		return nil, fmt.Errorf("identity not configured")
 	}
@@ -56,12 +60,8 @@ func openHistoryStore(useIdentity string) (*historyStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	tok, err := MintDAVToken(context.Background(), cfg.RelayURL, identityValue, "", "dav:full", priv)
-	if err != nil {
-		return nil, err
-	}
 	return &historyStore{
-		relayURL: cfg.RelayURL, identity: identityValue, token: tok.Token,
+		relayURL: cfg.RelayURL, identity: identityValue, priv: priv,
 		encPriv: encPriv, encPub: encPub,
 	}, nil
 }
@@ -103,53 +103,10 @@ func (h *historyStore) open(raw []byte, into any) error {
 	return json.Unmarshal(plaintext, into)
 }
 
-// Append writes one record. Writes are idempotent by construction — the path
-// is a function of (timestamp, id) — so re-archiving a message a second
-// device already stored costs a PUT and changes nothing.
+// Append writes one record. A record already stored under its id is skipped,
+// so two devices picking up the same message do not duplicate it.
 func (h *historyStore) Append(ctx context.Context, record idpkg.HistoryRecord) error {
-	record.Version = idpkg.HistoryVersion
-	if err := record.Validate(); err != nil {
-		return err
-	}
-	body, err := h.seal(record)
-	if err != nil {
-		return err
-	}
-	path := idpkg.HistoryPath(record.Timestamp, record.ID)
-	if err := davPutBytes(ctx, h.relayURL, h.identity, h.token, path, body); err != nil {
-		// WebDAV PUT does not create parent collections, and the month shard
-		// is new on the first message of every month. Making it and retrying
-		// keeps the common path a single request instead of an MKCOL before
-		// every write.
-		if mkErr := h.ensureShard(ctx, record.Timestamp); mkErr != nil {
-			return err
-		}
-		return davPutBytes(ctx, h.relayURL, h.identity, h.token, path, body)
-	}
-	return nil
-}
-
-// ensureShard MKCOLs the archive directory and this record's month, ignoring
-// "already exists".
-func (h *historyStore) ensureShard(ctx context.Context, timestamp string) error {
-	for _, dir := range []string{idpkg.HistoryDir, idpkg.HistoryDir + "/" + idpkg.HistoryShard(timestamp)} {
-		req, err := http.NewRequestWithContext(ctx, "MKCOL", davFileURL(h.relayURL, h.identity, dir), nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+h.token)
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-		if err != nil {
-			return err
-		}
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		resp.Body.Close()
-		if resp.StatusCode >= 300 && resp.StatusCode != http.StatusMethodNotAllowed &&
-			resp.StatusCode != http.StatusConflict {
-			return fmt.Errorf("create %s: HTTP %d", dir, resp.StatusCode)
-		}
-	}
-	return nil
+	return h.appendRecord(ctx, record)
 }
 
 // AppendAll archives a batch, reporting the first failure but attempting all
@@ -164,120 +121,19 @@ func (h *historyStore) AppendAll(ctx context.Context, records []idpkg.HistoryRec
 	return firstErr
 }
 
-// manifestPaths lists the archive's files through the relay's sync manifest,
-// filtered to the history subtree. PROPFIND would work equally well; the
-// manifest is one authenticated GET that already returns a sorted list.
-func (h *historyStore) manifestPaths(ctx context.Context) ([]string, error) {
-	u := strings.TrimSuffix(h.relayURL, "/") + "/sync/" + url.PathEscape(h.identity) +
-		"/manifest?paths=" + url.QueryEscape(idpkg.HistoryDir)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+h.token)
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("history manifest: HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(raw))
-	}
-	var paths []string
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	first := true
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		if first { // header line
-			first = false
-			continue
-		}
-		var entry struct {
-			Path string `json:"path"`
-			Dir  bool   `json:"dir"`
-		}
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Dir || !strings.HasSuffix(entry.Path, ".json") {
-			continue
-		}
-		if entry.Path == idpkg.HistoryReadStatePath {
-			continue
-		}
-		paths = append(paths, entry.Path)
-	}
-	return paths, scanner.Err()
-}
-
-// Load reads the whole archive, oldest first. A record that cannot be opened
-// is skipped rather than fatal: one corrupt file must not hide the rest of
-// someone's history.
+// Load reads the whole archive, oldest first.
 func (h *historyStore) Load(ctx context.Context) ([]idpkg.HistoryRecord, error) {
-	paths, err := h.manifestPaths(ctx)
-	if err != nil {
-		return nil, err
-	}
-	records := make([]idpkg.HistoryRecord, 0, len(paths))
-	for _, path := range paths {
-		raw, status, err := davGetBytes(ctx, h.relayURL, h.identity, h.token, path)
-		if err != nil || status != http.StatusOK {
-			continue
-		}
-		var record idpkg.HistoryRecord
-		if err := h.open(raw, &record); err != nil {
-			continue
-		}
-		records = append(records, record)
-	}
-	idpkg.SortHistory(records)
-	return records, nil
+	return h.allRecords(ctx)
 }
 
 // ReadState loads the read marks (empty when absent).
 func (h *historyStore) ReadState(ctx context.Context) (idpkg.ReadState, error) {
-	raw, status, err := davGetBytes(ctx, h.relayURL, h.identity, h.token, idpkg.HistoryReadStatePath)
-	if err != nil {
-		return idpkg.ReadState{}, err
-	}
-	if status == http.StatusNotFound {
-		return idpkg.ReadState{Version: idpkg.HistoryVersion, Conversations: map[string]idpkg.ReadMark{}}, nil
-	}
-	if status != http.StatusOK {
-		return idpkg.ReadState{}, fmt.Errorf("read-state: HTTP %d", status)
-	}
-	var state idpkg.ReadState
-	if err := h.open(raw, &state); err != nil {
-		return idpkg.ReadState{}, err
-	}
-	if state.Conversations == nil {
-		state.Conversations = map[string]idpkg.ReadMark{}
-	}
-	return state, nil
+	return h.readMarks(ctx)
 }
 
 // PutReadState stores the read marks.
 func (h *historyStore) PutReadState(ctx context.Context, state idpkg.ReadState) error {
-	state.Version = idpkg.HistoryVersion
-	if err := state.Validate(); err != nil {
-		return err
-	}
-	body, err := h.seal(state)
-	if err != nil {
-		return err
-	}
-	if err := davPutBytes(ctx, h.relayURL, h.identity, h.token, idpkg.HistoryReadStatePath, body); err != nil {
-		if mkErr := h.ensureShard(ctx, ""); mkErr != nil {
-			return err
-		}
-		return davPutBytes(ctx, h.relayURL, h.identity, h.token, idpkg.HistoryReadStatePath, body)
-	}
-	return nil
+	return h.writeMarks(ctx, state)
 }
 
 // archiveRecords is the fire-and-forget hook the messaging commands call.
@@ -293,7 +149,7 @@ func archiveRecords(useIdentity string, records []idpkg.HistoryRecord, stderr io
 		fmt.Fprintf(stderr, "note: message history not saved (%v)\n", err)
 		return
 	}
-	if err := store.AppendAll(context.Background(), records); err != nil {
+	if err := store.AppendAll(context.Background(), records); err != nil && !errors.Is(err, errStorageUnavailable) {
 		fmt.Fprintf(stderr, "note: message history not saved (%v)\n", err)
 	}
 }
@@ -307,7 +163,14 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity")
 	jsonOut := fs.Bool("json", false, "output json")
 	keepUnread := fs.Bool("keep-unread", false, "do not mark the shown conversations as read")
+	limit := fs.Int("limit", 0, "maximum records, from the newest")
+	before := fs.Uint64("before", 0, "only records before this position in one conversation")
+	threadID := fs.String("thread", "", "only records in this thread")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--keep-unread": true})); err != nil {
+		return 1
+	}
+	if *limit < 0 {
+		fmt.Fprintln(stderr, "limit must be zero or positive")
 		return 1
 	}
 
@@ -317,10 +180,43 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	ctx := context.Background()
-	records, err := store.Load(ctx)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	peer := strings.ToLower(fs.Arg(0))
+	var positions map[string]uint64
+	var records []idpkg.HistoryRecord
+	if *before > 0 {
+		if peer == "" {
+			fmt.Fprintln(stderr, "history --before needs a conversation")
+			return 1
+		}
+		rows, err := store.conversationRecords(ctx, peer)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		positions = map[string]uint64{}
+		for _, row := range rows {
+			if row.Position < *before {
+				records = append(records, row.Record)
+				positions[row.Record.ID] = row.Position
+			}
+		}
+	} else if peer != "" {
+		rows, err := store.conversationRecords(ctx, peer)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		positions = map[string]uint64{}
+		for _, row := range rows {
+			records = append(records, row.Record)
+			positions[row.Record.ID] = row.Position
+		}
+	} else {
+		records, err = store.Load(ctx)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	state, err := store.ReadState(ctx)
 	if err != nil {
@@ -328,24 +224,32 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	peer := strings.ToLower(fs.Arg(0))
-	if peer != "" {
-		filtered := records[:0:0]
+	if *threadID != "" {
+		filtered := records[:0]
 		for _, r := range records {
-			if r.Peer(store.identity) == peer {
+			if r.ThreadID == *threadID {
 				filtered = append(filtered, r)
 			}
 		}
 		records = filtered
 	}
+	if *limit > 0 && len(records) > *limit {
+		records = records[len(records)-*limit:]
+	}
 
 	unread := state.Unread(store.identity, records)
 	if *jsonOut {
-		return writeOutput(stdout, true, map[string]any{
-			"identity": store.identity,
-			"messages": records,
-			"unread":   unread,
-		}, "")
+		var cursor uint64
+		for _, record := range records {
+			if positions[record.ID] > cursor {
+				cursor = positions[record.ID]
+			}
+		}
+		payload := map[string]any{"identity": store.identity, "messages": records, "unread": unread}
+		if cursor > 0 {
+			payload["cursor"] = cursor
+		}
+		return writeOutput(stdout, true, payload, "")
 	}
 
 	if len(records) == 0 {

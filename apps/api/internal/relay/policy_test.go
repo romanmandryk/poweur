@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -25,7 +23,7 @@ import (
 
 var policyMsgSeq int
 
-func postTypedMessage(t *testing.T, ts *httptest.Server, from davTestIdentity, to, msgType, payload string) (*http.Response, string) {
+func postTypedMessage(t *testing.T, ts *httptest.Server, from hostedID, to, msgType, payload string) (*http.Response, string) {
 	t.Helper()
 	policyMsgSeq++
 	msg := Message{
@@ -65,9 +63,9 @@ func mustStatus(t *testing.T, resp *http.Response, want int, context string) map
 	return out
 }
 
-func putOwnerFile(t *testing.T, ts *httptest.Server, owner davTestIdentity, token, path, body string) {
+func putOwnerFile(t *testing.T, ts *httptest.Server, owner hostedID, token, path, body string) {
 	t.Helper()
-	resp := davReq(t, ts, http.MethodPut, "/dav/"+owner.name+path, token, []byte(body), nil)
+	resp := httpReq(t, ts, http.MethodPut, "/dav/"+owner.name+path, token, []byte(body), nil)
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		t.Fatalf("put %s: %d", path, resp.StatusCode)
@@ -75,7 +73,7 @@ func putOwnerFile(t *testing.T, ts *httptest.Server, owner davTestIdentity, toke
 }
 
 // challengeSigned performs a challenge-signed GET (inbox/requests pattern).
-func challengeSigned(t *testing.T, ts *httptest.Server, id davTestIdentity, path string) map[string]any {
+func challengeSigned(t *testing.T, ts *httptest.Server, id hostedID, path string) map[string]any {
 	t.Helper()
 	chResp, err := http.Get(ts.URL + "/auth/challenge?identity=" + id.name)
 	if err != nil {
@@ -97,17 +95,16 @@ func challengeSigned(t *testing.T, ts *httptest.Server, id davTestIdentity, path
 }
 
 func TestPolicyDefaultOpenAndBlocked(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	// No policy file → open: a stranger's message is delivered.
 	resp, _ := postTypedMessage(t, ts, bob, alice.name, "", "hello")
 	mustStatus(t, resp, http.StatusAccepted, "stranger under default open")
 
 	// A blocked sender is rejected even under open mode…
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"blocked"}]}`)
 	resp, _ = postTypedMessage(t, ts, bob, alice.name, "", "hello again")
 	out := mustStatus(t, resp, http.StatusForbidden, "blocked sender")
@@ -119,9 +116,9 @@ func TestPolicyDefaultOpenAndBlocked(t *testing.T) {
 // Contact requests ride the requests queue even under the default `open`
 // policy. Chat from anyone still lands in the inbox; the handshake does not.
 func TestPolicyOpenQueuesContactRequest(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	resp, reqID := postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "hi, it's bob")
 	out := mustStatus(t, resp, http.StatusAccepted, "request under default open")
@@ -156,12 +153,11 @@ func TestPolicyOpenQueuesContactRequest(t *testing.T) {
 // must not swallow Bob's sys.contact.request into chat — that is the only
 // envelope that lets John answer and finish Bob's handshake.
 func TestPolicyAcceptedContactRequestStillQueued(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"accepted"}]}`)
 
 	resp, reqID := postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "please add me back")
@@ -190,14 +186,13 @@ func TestPolicyAcceptedContactRequestStillQueued(t *testing.T) {
 }
 
 func TestPolicyContactsOnly(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerTestIdentity(t, server, ts, "carol.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_only"}`)
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_only"}`)
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"accepted"}]}`)
 
 	// Accepted contact delivers; stranger is rejected; a contact request is
@@ -215,12 +210,11 @@ func TestPolicyContactsOnly(t *testing.T) {
 }
 
 func TestPolicyContactsAndRequestsFlow(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
 
 	// A normal message from a stranger is rejected with a hint…
 	resp, _ := postTypedMessage(t, ts, bob, alice.name, "", "hi")
@@ -264,7 +258,7 @@ func TestPolicyContactsAndRequestsFlow(t *testing.T) {
 	}
 
 	// Alice accepts: writes bob as accepted → normal messages now deliver.
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"accepted"}]}`)
 	resp, _ = postTypedMessage(t, ts, bob, alice.name, "", "we're contacts now")
 	mustStatus(t, resp, http.StatusAccepted, "post-accept message")
@@ -275,15 +269,14 @@ func TestPolicyContactsAndRequestsFlow(t *testing.T) {
 }
 
 func TestPolicyContactAcceptRouting(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerTestIdentity(t, server, ts, "carol.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
 	// Alice sent bob a request (state=requested in her contacts).
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"requested"}]}`)
 
 	// Bob's accept rides the requests queue.
@@ -305,14 +298,13 @@ func TestPolicyContactAcceptRouting(t *testing.T) {
 // contacts stay `requested`, and their own policy then bounces every message
 // the person who accepted them sends — a stalemate neither side can see.
 func TestPolicyContactAcceptReachesContactsOnlyRequester(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerTestIdentity(t, server, ts, "carol.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_only"}`)
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_only"}`)
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"requested"}]}`)
 
 	// Bob answers the request alice sent him: queued, not rejected.
@@ -347,11 +339,10 @@ func TestPolicyContactAcceptReachesContactsOnlyRequester(t *testing.T) {
 }
 
 func TestTypedMessageSignatureBindsType(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
 
 	// Sign an untyped message, then claim it is a contact request: the
 	// signature must not verify (type is inside the canonical string).
@@ -397,18 +388,7 @@ func TestPolicyEnforcedOnForwardedCrossRelay(t *testing.T) {
 		Identity: "bob.poweur.net", PublicKey: base64.RawURLEncoding.EncodeToString(bobPub),
 		PublicKeyBytes: bobPub, CreatedAt: time.Now().UTC(),
 	})
-	bobHome, err := serverB.identities.IdentityHomeDir("bob.poweur.net")
-	if err != nil || bobHome == "" {
-		t.Fatalf("bob home dir: %q %v", bobHome, err)
-	}
-	policyDir := filepath.Join(bobHome, "poweur-sys", "relay")
-	if err := os.MkdirAll(policyDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(policyDir, "inbox-policy.json"),
-		[]byte(`{"version":1,"mode":"contacts_only"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	setSysFile(t, serverB, "bob.poweur.net", inboxPolicyPath, `{"version":1,"mode":"contacts_only"}`)
 	tsB := httptest.NewServer(serverB.Router())
 	defer tsB.Close()
 	uB, _ := url.Parse(tsB.URL)

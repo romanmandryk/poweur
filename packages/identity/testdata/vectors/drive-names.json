@@ -1,0 +1,32 @@
+[
+  {
+    "name": "café",
+    "normalized": "café",
+    "private_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "hash": "048335d146f585d8dbd931e6499164bf2d0a929319adf5bebef6dc36362e3075"
+  },
+  {
+    "name": "café",
+    "normalized": "café",
+    "private_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "hash": "048335d146f585d8dbd931e6499164bf2d0a929319adf5bebef6dc36362e3075"
+  },
+  {
+    "name": "Café",
+    "normalized": "Café",
+    "private_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "hash": "8c1be39d3b35d9c20f64d04929fba8744f5c8f5a584ff3c5bc826cdf7dee3020"
+  },
+  {
+    "name": "世界 🔒",
+    "normalized": "世界 🔒",
+    "private_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "hash": "081e734ab4f41b3b382cf035d5854a60451facaaf134e0e13d55fa4000a82f41"
+  },
+  {
+    "name": ".poweur",
+    "normalized": ".poweur",
+    "private_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "hash": "15da346e30fefc5a9854fcd79028374a4bf78f5b8a93200e9f3f996ad9c1582f"
+  }
+]

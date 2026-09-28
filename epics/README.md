@@ -34,7 +34,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-006](EPIC-006-poweur-sys-conventions.md) | `/poweur-sys` layout & application data conventions | Files / Ecosystem | **complete** (T1–T5; tasks dogfood = PCP-0007) | E03 |
 | [EPIC-007](EPIC-007-contacts-trust-antispam.md) | Contacts, trust & anti-spam | Trust / Messaging | **complete** (T1–T5; stranger PoW gate moved to E14-T3) | E03, E06 |
 | [EPIC-008](EPIC-008-sign-in.md) | Sign in with Poweur ID (third-party auth) | Identity / Ecosystem | **complete** (T1–T6; T6: short sign-in codes by reference) | E01 |
-| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | **complete** (T1–T6: spool, SSE push, typed messages, attachments, groups, receipts/outbox/expiry) | E02, E03 |
+| [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | T1–T6 **complete**; **T7–T10 open** (intent types, typed routing to apps, shared inboxes, follow feeds) | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | v1 complete (T1–T4, T8 done; T7 external review partial; T5/T6 later phases) | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Identity websites (active HTML, contact forms, hosting shape) | Files / Web | proposed (design notes) | E03, E06, E07, E09 |
@@ -56,6 +56,8 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-028](EPIC-028-managed-sovereign-hosting.md) | Managed, dedicated, customer-cloud & sovereign hosting (+ secondary inbox, backup & directory for self-hosters) | Enterprise / Infra | proposed; demand-led | E13, E20, E26 |
 | [EPIC-029](EPIC-029-poweur-apps-platform.md) | Poweur Apps: publish, open and share local-first apps (game kit included) | Ecosystem / Developers | proposed; after the E25 reference editor | E12, E08, E06, E25, E17 |
 | [EPIC-030](EPIC-030-creator-commerce.md) | Creator commerce: paid shares, subscriptions, tips, channels & paid apps | Payments / Commercial | proposed; demand-led | E16, INT-002, E05, E26 |
+| [EPIC-031](EPIC-031-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | proposed, **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
+| [EPIC-032](EPIC-032-public-web-feeds-boards-indexers.md) | Public web: feeds, following, community boards & indexers | Social / Growth | proposed | E20, E09, E14, E24, E31 |
 
 ## Integration epics (`integrations/`)
 
@@ -72,6 +74,7 @@ playbook.
 | [INT-003](integrations/INT-003-ai-agents.md) | AI tools & agent frameworks (MCP, Open WebUI, LangChain, n8n, OpenHands, …) | E04, E05, E09, E10 |
 | [INT-004](integrations/INT-004-collaboration-tools.md) | Collaboration & federation tools (Nextcloud, Matrix, Discourse, Joplin, Forgejo, …) | INT-000, E03, E05 |
 | [INT-005](integrations/INT-005-agent-control-planes.md) | Agent control planes (OpenClaw, Hermes & the gateway class) | E17, E09, E10, INT-000 |
+| [INT-006](integrations/INT-006-quick-win-apps.md) | Quick-win apps & the supported-apps list (OIDC recipes, Apprise/Shoutrrr, handles, Send/listmonk/forms/Cal.com/CRM plugins) | E22, E20, E09, INT-000 |
 
 ## Dependency graph
 
@@ -139,6 +142,17 @@ EPIC-005/006/009/011 ──► EPIC-020 (storage v2: E2EE drive, stateless relay
                    ├─ replace + append commits; message history v2 → E15-T13 paging
                    └─ append files are the substrate EPIC-025 builds realtime on
 
+EPIC-020 + EPIC-009 (T7–T10) ──► EPIC-031 (headless reference apps)
+                   ├─ Markdown docs, site + contact + newsletter, form → CSV, board, CRM, whiteboard
+                   ├─ every user action via SDK or CLI; same relay, cross relay, Go + TS actors
+                   └─ the modules become EPIC-029 templates; gaps are fixed in the protocol, not the apps
+
+EPIC-020 + EPIC-009 (T7–T10) + EPIC-024 ──► EPIC-032 (public web)
+                   ├─ one → many: feed folders, Atom/microformats, following lighter than contacts
+                   ├─ many → many in a community: boards hosted by group identities (classifieds)
+                   ├─ scale: CDN-cached public nodes + relay subscription proxy (memory only)
+                   └─ network-wide search/topics/location: replaceable indexers, never in the relay
+
 EPIC-001 + EPIC-008 + EPIC-013 ──► EPIC-022 (generic OAuth/OIDC + IndieAuth bridge)
                    ├─ one issuer can authenticate IDs hosted on any public Poweur relay
                    ├─ same-browser signer first, cross-device QR second
@@ -195,9 +209,10 @@ the hosted service, use the following sequence unless user evidence changes it:
 
 ### Now — close the viral sharing loop
 
-0. **Storage v2 first (EPIC-020 waves 1–4).** Pre-launch is the cheapest moment to change the
-   storage model, and the remaining sharing work (E05-T6 notifications, E05-T7 Send) should be
-   built once, on node shares and encrypted links, not twice.
+0. **Storage v2 first (EPIC-020 waves 1–4, with EPIC-009 T7–T10).** Pre-launch is the cheapest
+   moment to change the storage model, and the remaining sharing work (E05-T6 notifications,
+   E05-T7 Send) should be built once, on node shares and encrypted links, not twice. It is done
+   when the EPIC-031 headless reference apps pass on one relay and across relays.
 
 1. Finish **E05-T3** share offer → accept → recipient mount. The primitives exist and this is the
    missing end-to-end journey.

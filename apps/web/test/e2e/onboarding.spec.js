@@ -5,7 +5,7 @@ import { openApp, stubPasskeys } from "../helpers/app-ui.mjs";
 /**
  * E15-T5 acceptance: a brand-new identity, created in the browser, comes out
  * of onboarding configured and can do the whole product without the CLI —
- * message, add a contact, set a policy, upload and share a file.
+ * message, add a contact and set a policy. Files return with EPIC-020.
  *
  * This is the one test that refuses to take a shortcut anywhere: everything
  * below is clicked, because the claim being made is about what a person can
@@ -35,7 +35,7 @@ test.describe("first run", () => {
 
   test.use({ viewport: MOBILE });
 
-  test("a new identity finishes setup and uses the whole app", async ({ browser }) => {
+  test("a new identity finishes setup and uses messaging and contacts", async ({ browser }) => {
     test.slow();
     const aliceCtx = await browser.newContext({ viewport: MOBILE });
     const bobCtx = await browser.newContext({ viewport: MOBILE });
@@ -126,31 +126,7 @@ test.describe("first run", () => {
       }, { timeout: 30_000, message: "message never arrived" })
       .toBeGreaterThan(0);
 
-    // A file, uploaded and shared with that contact.
-    await alice.click('.nav-tab[data-page="files"]');
-    await alice.click('[data-open-dir="shared"]');
-    await alice.setInputFiles("#ff-upload", {
-      name: "hello.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("written from the browser"),
-    });
-    await expect(alice.locator(".conv-list")).toContainText("hello.txt", { timeout: 30_000 });
-    await alice.click('[data-share="shared/hello.txt"]');
-    await alice.fill(".audience-picker .idin input", bobId);
-    await alice.press(".audience-picker .idin input", "Enter");
-    await expect(alice.locator(".audience-chips")).toContainText(bobId.split(".")[0], { timeout: 20_000 });
-    await alice.click("#btn-share-go");
-    await expect(alice.locator('.conv-row:has-text("hello.txt") .chip-accent'))
-      .toHaveText("Shared", { timeout: 20_000 });
-
-    // The grantee sees exactly that file, and nothing else of alice's.
-    await bob.click('.nav-tab[data-page="files"]');
-    await bob.click("#btn-files-shared");
-    await bob.fill(".owner-picker .idin input", aliceId);
-    await bob.press(".owner-picker .idin input", "Enter");
-    await expect(bob.locator(".visitor-banner")).toContainText(aliceId, { timeout: 20_000 });
-    await bob.click('[data-open-dir="shared"]');
-    await expect(bob.locator(".conv-name")).toHaveText("hello.txt", { timeout: 20_000 });
+    // File upload/sharing returns with EPIC-020 E20-T10.
 
     await aliceCtx.close();
     await bobCtx.close();
@@ -183,12 +159,10 @@ test.describe("first run", () => {
     // Polled: a dialog library may restore focus a tick after it unmounts.
     await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("row-policy");
 
-    // A row with role="button" is operable from the keyboard.
-    await page.click('.nav-tab[data-page="files"]');
-    const folder = page.locator('[data-open-dir="shared"]').first();
-    await expect(folder).toBeVisible({ timeout: 20_000 });
-    await folder.press("Enter");
-    await expect(page.locator(".breadcrumbs")).toContainText("shared", { timeout: 20_000 });
+    // A settings row remains operable from the keyboard.
+    await page.locator("#row-policy").press("Enter");
+    await expect(page.locator("#policy-save")).toBeVisible();
+
   });
 
   test("every step can be skipped, and nothing is written when they are", async ({ page }) => {

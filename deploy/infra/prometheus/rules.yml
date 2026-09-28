@@ -5,8 +5,6 @@ groups:
         expr: sum(increase(poweur_actions_total{action="registration.create",outcome="success",deployment_environment_name="production"}[1d]))
       - record: poweur_growth_submissions_24h
         expr: sum(increase(poweur_actions_total{action=~"message.submit|message.anonymous",outcome="success",deployment_environment_name="production"}[1d]))
-      - record: poweur_growth_uploads_24h
-        expr: sum(increase(poweur_actions_total{action="upload.complete",outcome="success",deployment_environment_name="production"}[1d]))
       - record: poweur_growth_registrations_7d
         expr: sum(increase(poweur_actions_total{action="registration.create",outcome="success",deployment_environment_name="production"}[7d]))
       # detail is the bounded message kind (chat, app, anonymous, registered sys.*).

@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -44,18 +42,14 @@ type InboxStore struct {
 // NewInboxStore returns a memory-only inbox — restart loses undelivered mail.
 // Used by tests and by relays configured without POWEUR_DATA.
 func NewInboxStore() *InboxStore {
-	s, _ := newSpool[StoredMessage]("")
+	s, _ := newSpool[StoredMessage](nil, "messages")
 	return &InboxStore{spool: s}
 }
 
-// OpenInboxStore spools under dataDir/spool/messages, loading whatever a
+// OpenInboxStore spools under relay/spool/messages, loading whatever a
 // previous process left behind.
-func OpenInboxStore(dataDir string) (*InboxStore, error) {
-	dir := ""
-	if strings.TrimSpace(dataDir) != "" {
-		dir = filepath.Join(dataDir, "spool", "messages")
-	}
-	s, err := newSpool[StoredMessage](dir)
+func OpenInboxStore(objects Objects) (*InboxStore, error) {
+	s, err := newSpool[StoredMessage](objects, "messages")
 	if err != nil {
 		return nil, err
 	}

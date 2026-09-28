@@ -1,6 +1,6 @@
 {
   "name": "@poweur/mobile",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "Capacitor shell over the web client (EPIC-019)",

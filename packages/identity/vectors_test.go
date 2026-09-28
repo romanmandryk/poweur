@@ -136,16 +136,7 @@ func TestVectors_Documents(t *testing.T) {
 }
 
 // Fixed link-share inputs for the grant vectors (E05-T4).
-const (
-	vectorLinkToken        = "k7m4qz2rt6vwx3ab5cdefghijn"
-	vectorLinkPasswordHash = "$argon2id$v=19$m=65536,t=1,p=4$eMqI4VYMYTc/H1SPsG5UbQ$Lg5Zrc+Mil5yDeAaWMyivDMdKiTmndk543TXv4rurPE"
-)
-
-type grantVector struct {
-	Name      string     `json:"name"`
-	Grant     ShareGrant `json:"grant"`
-	Canonical string     `json:"canonical"`
-}
+const ()
 
 type groupVector struct {
 	Name      string     `json:"name"`
@@ -153,78 +144,9 @@ type groupVector struct {
 	Canonical string     `json:"canonical"`
 }
 
-type pathVector struct {
-	Input string `json:"input"`
-	Path  string `json:"path,omitempty"`
-	Error bool   `json:"error"`
-}
-
-func TestVectors_Grants(t *testing.T) {
+func TestVectors_Groups(t *testing.T) {
 	priv := vectorKey()
 	pub := priv.Public().(ed25519.PublicKey)
-
-	grants := []grantVector{}
-	for _, entry := range []struct {
-		name  string
-		grant ShareGrant
-	}{
-		{"single-id-read", ShareGrant{
-			ShareID: "shr_0011223344556677", Owner: "Alice.Poweur.NET",
-			Path: "/shared/project-x/", Audience: []ShareAudience{{ID: "bob.example.org"}},
-			Permissions: []string{PermRead}, CreatedAt: VectorTime,
-		}},
-		{"multi-audience-rw", ShareGrant{
-			ShareID: "shr_8899aabbccddeeff", Owner: "alice.poweur.net",
-			Path: "apps/notes/shared",
-			// Deliberately unsorted and mixed-case: the canonical form sorts
-			// and lowercases, so a client that skips that step fails here.
-			Audience:    []ShareAudience{{Group: "Team"}, {ID: "Zoe.example.org"}, {ID: "bob.example.org"}},
-			Permissions: []string{PermWrite, PermRead},
-			CreatedAt:   VectorTime, ExpiresAt: "2026-06-01T00:00:00Z",
-		}},
-		{"converted-direct", ShareGrant{
-			ShareID: "shr_direct001122334", SourceShareID: "shr_request00112233",
-			Owner: "alice.poweur.net", Path: "shared/inbox",
-			Audience:    []ShareAudience{{ID: "bob.example.org"}},
-			Permissions: []string{PermRead, PermWrite}, CreatedAt: VectorTime,
-		}},
-		// Link shares (E05-T4). The token is fixed (not generated) so the
-		// fixture is stable, and the password hash is a literal PHC string
-		// for the same reason — argon2id salts are random, and a vector
-		// that changed on every run would pin nothing.
-		{"link-plain", ShareGrant{
-			ShareID: "shr_link0011223344", Owner: "alice.poweur.net",
-			Path: "/shared/project-x/", Audience: []ShareAudience{{Link: vectorLinkToken}},
-			Permissions: []string{PermRead}, CreatedAt: VectorTime,
-		}},
-		{"link-password-capped", ShareGrant{
-			ShareID: "shr_link5566778899", Owner: "alice.poweur.net",
-			Path: "shared/project-x/handout.pdf", Audience: []ShareAudience{{Link: vectorLinkToken}},
-			Permissions: []string{PermRead}, CreatedAt: VectorTime,
-			ExpiresAt: "2026-06-01T00:00:00Z",
-			Link:      &ShareLink{Password: vectorLinkPasswordHash, MaxDownloads: 25},
-		}},
-		{"file-request", ShareGrant{
-			ShareID: "shr_request00112233", Owner: "alice.poweur.net",
-			Path: "shared/inbox", Audience: []ShareAudience{{Link: vectorLinkToken}},
-			Permissions: []string{PermCreate}, CreatedAt: VectorTime,
-			ExpiresAt: "2026-06-01T00:00:00Z",
-			Link: &ShareLink{FileRequest: &ShareFileRequest{
-				MaxUploads: 10, MaxBytes: 104857600, MaxObjectBytes: 10485760,
-				AllowedTypes: []string{"text/plain", "image/*"}, Notify: true,
-			}},
-		}},
-	} {
-		grant := entry.grant
-		if err := grant.Sign(priv); err != nil {
-			t.Fatalf("sign %s: %v", entry.name, err)
-		}
-		if err := grant.VerifySignature(pub); err != nil {
-			t.Fatalf("verify %s: %v", entry.name, err)
-		}
-		grants = append(grants, grantVector{entry.name, grant, grant.Canonical()})
-	}
-	WriteVectors(t, vectorsDir, "grants", grants)
 
 	groups := []groupVector{}
 	for _, entry := range []struct {
@@ -267,15 +189,6 @@ func TestVectors_Grants(t *testing.T) {
 	}
 	WriteVectors(t, vectorsDir, "groups", groups)
 
-	paths := []pathVector{}
-	for _, input := range []string{
-		"shared/a", "/shared/a/b/", "apps/notes/x",
-		"shared", "apps", "private/secret", "poweur-sys/relay", "", "shared/../etc",
-	} {
-		normalized, err := NormalizeGrantPath(input)
-		paths = append(paths, pathVector{Input: input, Path: normalized, Error: err != nil})
-	}
-	WriteVectors(t, vectorsDir, "grant-paths", paths)
 }
 
 type powVector struct {
@@ -461,16 +374,16 @@ func TestVectors_SysDocs(t *testing.T) {
 	// (EPIC-015 E15-T5) is the first thing to write one from a browser — so
 	// the TS validator has to refuse exactly what Go refuses, especially the
 	// avatar rule, which is what keeps a profile from pointing at an
-	// off-tree URL.
+	// arbitrary URL or path.
 	profiles := []sysDocVector{}
 	for _, entry := range []struct {
 		name string
 		raw  string
 	}{
-		{"full", `{"version":1,"display_name":"Alice","avatar":"public/avatar.png","bio":"builder","links":[{"label":"site","url":"https://example.org"}],"locale":"en"}`},
+		{"full", `{"version":1,"display_name":"Alice","avatar":"avatar.png","bio":"builder","links":[{"label":"site","url":"https://example.org"}],"locale":"en"}`},
 		{"empty", `{"version":1}`},
 		{"avatar-off-tree", `{"version":1,"avatar":"https://cdn.example.org/a.png"}`},
-		{"avatar-outside-public", `{"version":1,"avatar":"private/avatar.png"}`},
+		{"avatar-path", `{"version":1,"avatar":"public/avatar.png"}`},
 		{"link-without-url", `{"version":1,"links":[{"label":"site"}]}`},
 		{"bad-version", `{"version":2}`},
 	} {
@@ -501,25 +414,6 @@ type readStateVector struct {
 }
 
 func TestVectors_History(t *testing.T) {
-	paths := []historyVector{}
-	for _, entry := range []struct{ name, ts, id string }{
-		{"ordinary", "2026-01-15T09:30:00Z", "msg_1757404500000_AbC-_9"},
-		{"month-boundary", "2026-01-31T23:59:59Z", "msg_end"},
-		{"next-month", "2026-02-01T00:00:00Z", "msg_start"},
-		{"offset-timestamp", "2026-01-15T10:30:00+01:00", "msg_offset"},
-		{"traversal-id", "2026-01-15T09:30:00Z", "../../poweur-sys/relay/contacts"},
-		{"slash-id", "2026-01-15T09:30:00Z", "a/b"},
-		{"empty-id", "2026-01-15T09:30:00Z", ""},
-		{"dotfile-id", "2026-01-15T09:30:00Z", ".poweur-web-public"},
-		{"unparseable-timestamp", "yesterday", "msg_undated"},
-	} {
-		paths = append(paths, historyVector{
-			Name: entry.name, Timestamp: entry.ts, ID: entry.id,
-			Path: HistoryPath(entry.ts, entry.id),
-		})
-	}
-	WriteVectors(t, vectorsDir, "history-paths", paths)
-
 	const owner = "alice.example.org"
 	records := []HistoryRecord{
 		{Version: 1, ID: "m1", Sender: "bob.example.org", Recipient: owner, Timestamp: "2026-01-15T09:00:00Z", Queue: HistoryQueueInbox, Body: "one"},
@@ -668,7 +562,7 @@ func TestVectors_SignIn(t *testing.T) {
 	const (
 		origin   = "https://guestbook.poweur.net"
 		who      = "alice.poweur.net"
-		appScope = "dav:rw:apps/net.poweur.guestbook"
+		appScope = "messages:send"
 	)
 
 	sign := func(resp SignInResponse, key ed25519.PrivateKey) SignInResponse {
@@ -733,15 +627,15 @@ func TestVectors_SignIn(t *testing.T) {
 	elsewhere.Nonce = "bm9uY2UtdmVjdG9yLWF1ZA"
 	elsewhere.Audience = "https://evil.example"
 
-	outOfNamespace := base()
-	outOfNamespace.RequestID = "req_vector_scope"
-	outOfNamespace.Nonce = "bm9uY2UtdmVjdG9yLXNjb3Bl"
-	outOfNamespace.Scopes = []string{"dav:rw:apps/net.poweur.mail"}
+	unknownScope := base()
+	unknownScope.RequestID = "req_vector_scope"
+	unknownScope.Nonce = "bm9uY2UtdmVjdG9yLXNjb3Bl"
+	unknownScope.Scopes = []string{"dav:rw:apps/net.poweur.mail"} // storage v1 scope, no longer valid
 
 	unsorted := base()
 	unsorted.RequestID = "req_vector_unsorted"
 	unsorted.Nonce = "bm9uY2UtdmVjdG9yLXVucw"
-	unsorted.Scopes = []string{"profile:read", appScope} // sorted order puts dav: first
+	unsorted.Scopes = []string{"profile:read", appScope} // sorted order puts messages:send first
 
 	// Signed over one statement, delivered with another: the signature must
 	// fail, which is the whole point of putting the statement in the string.
@@ -759,7 +653,7 @@ func TestVectors_SignIn(t *testing.T) {
 		{Name: "expired", Origin: origin, Response: sign(expired, priv), Valid: false, Reason: "expired"},
 		{Name: "ttl-exceeded", Origin: origin, Response: sign(longWindow, priv), Valid: false, Reason: "ttl"},
 		{Name: "wrong-audience", Origin: origin, Response: sign(elsewhere, priv), Valid: false, Reason: "audience"},
-		{Name: "scope-out-of-namespace", Origin: origin, Response: sign(outOfNamespace, priv), Valid: false, Reason: "scope"},
+		{Name: "scope-unknown", Origin: origin, Response: sign(unknownScope, priv), Valid: false, Reason: "scope"},
 		{Name: "scopes-unsorted", Origin: origin, Response: sign(unsorted, priv), Valid: false, Reason: "scope"},
 		{Name: "tampered-statement", Origin: origin, Response: tampered, Valid: false, Reason: "signature"},
 		{Name: "replayed-nonce", Origin: origin, Response: replay, Valid: false, Reason: "replay", ReplayOf: "valid-identity"},

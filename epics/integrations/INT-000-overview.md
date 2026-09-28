@@ -2,8 +2,14 @@
 
 - **Status:** proposed
 - **Theme:** adoption & ecosystem growth
-- **Depends on (Poweur side):** EPIC-022 (generic OAuth/OIDC + IndieAuth bridge), EPIC-003/004
-  (WebDAV + sync), EPIC-005 (sharing), EPIC-009 (typed messages), EPIC-010 (agent SDK, MCP)
+- **Depends on (Poweur side):** EPIC-022 (generic OAuth/OIDC + IndieAuth bridge), EPIC-020
+  (end-to-end encrypted drive, shares, sync daemon, rclone backend), EPIC-005 (sharing),
+  EPIC-009 (typed messages), EPIC-010 (agent SDK, MCP)
+
+> **Storage v2 changes the T3 tier.** EPIC-020 drops WebDAV from the relay and encrypts private
+> and shared files end to end. Apps store user data through the SDK (scoped drive handles) or,
+> for existing desktop tools, through `rclone serve webdav` on the user's device (E20-T13). A
+> server-side app that must read a user's files is granted a share as a service identity.
 
 ## Why integrations are the growth engine
 
@@ -39,7 +45,7 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 |------|------|---------------|----------------|
 | T1 | **Directory** | The project's IDs/handles are *published* in the user's Poweur identity (`payments.json`, `profile.json` links) — no upstream code change required, or a one-line docs/format addition | hours |
 | T2 | **Sign-In** | "Log in with Poweur ID" via our OIDC bridge or a native provider plugin | days |
-| T3 | **Storage** | App reads/writes user data in the Poweur home (WebDAV/scoped tokens) | days–weeks |
+| T3 | **Storage** | App reads/writes user data in the Poweur drive (SDK scoped handles; local `rclone serve` for desktop tools) | days–weeks |
 | T4 | **Sharing & messaging** | Poweur IDs as first-class share targets / notification & event channels | weeks |
 | T5 | **Native federation** | The project treats Poweur identity as a peer identity model (key verification, contact graph) | per-project |
 
@@ -66,6 +72,7 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 | INT-003 | Open-source AI tools & agent frameworks | [INT-003-ai-agents.md](INT-003-ai-agents.md) |
 | INT-004 | Collaboration, productivity & federation tools | [INT-004-collaboration-tools.md](INT-004-collaboration-tools.md) |
 | INT-005 | Agent control planes (OpenClaw, Hermes) | [INT-005-agent-control-planes.md](INT-005-agent-control-planes.md) |
+| INT-006 | Quick-win apps & the supported-apps list | [INT-006-quick-win-apps.md](INT-006-quick-win-apps.md) |
 
 ## Cross-cutting prerequisite tasks (Poweur side)
 
@@ -90,6 +97,8 @@ OIDC surface is usable and turns that generic service into upstream adoption:
 - [ ] Public integrations registry + status board (scouted → PoC → PR open → merged)
 
 ### INT-000-T3 — Reference WebDAV/storage recipes
-- [ ] Cookbook: "store your app's per-user data in the user's Poweur home" for the T3 tier —
-      token acquisition, path conventions (`/apps/<reverse-dns>/`), conflict guidance, with
-      runnable samples in Go/TS/Python
+- [ ] Cookbook: "store your app's per-user data in the user's Poweur drive" for the T3 tier —
+      scoped drive handles, the app-folder convention (EPIC-029), event logs and merge
+      guidance (EPIC-020), with runnable samples in Go/TS/Python; plus `rclone serve` recipes
+      for desktop tools
+- [ ] The public supported-apps list and its compatibility CI live in INT-006

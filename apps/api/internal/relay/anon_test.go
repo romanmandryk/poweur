@@ -70,25 +70,23 @@ func decodeChallenge(t *testing.T, resp *http.Response) challengeEnvelope {
 }
 
 func TestAnonDefaultDeny(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	server, ts := newTestRelay(t)
+	registerTestIdentity(t, server, ts, "alice.poweur.net")
 
 	resp := postAnon(t, ts, "alice.poweur.net", "hi", "", "")
 	mustStatus(t, resp, http.StatusForbidden, "anon under default policy")
 
 	// Explicit policy without the anonymous block also denies.
-	alice := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"open"}`)
+	alice := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"open"}`)
 	resp = postAnon(t, ts, "bob.poweur.net", "hi", "", "")
 	mustStatus(t, resp, http.StatusForbidden, "anon with policy but no anonymous block")
 }
 
 func TestAnonNoChallengeFlow(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_only","anonymous":{"allow":true,"challenge":"none"}}`)
 
 	resp := postAnon(t, ts, "alice.poweur.net", "anon says hi", "", "")
@@ -121,10 +119,9 @@ func TestAnonNoChallengeFlow(t *testing.T) {
 // design never holds an anonymous message — and the anon tray stays silent
 // until something unrelated makes the client look again.
 func TestAnonDeliveryNotifiesItsOwnQueue(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_only","anonymous":{"allow":true,"challenge":"none"}}`)
 
 	id, events, ok := server.hub.subscribe(alice.name, 0)
@@ -150,10 +147,9 @@ func TestAnonDeliveryNotifiesItsOwnQueue(t *testing.T) {
 }
 
 func TestAnonPowChallengeFlow(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_only","anonymous":{"allow":true,"challenge":"pow","pow_bits":8}}`)
 
 	// First post: 428 with a pow challenge envelope.
@@ -186,9 +182,8 @@ func TestAnonPowChallengeFlow(t *testing.T) {
 	}
 
 	// A token minted for another recipient must not verify (purpose-bound).
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	bobTok := mintDAVToken(t, ts, bob, "", "")
-	putOwnerFile(t, ts, bob, bobTok, "/poweur-sys/relay/inbox-policy.json",
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	setSysFile(t, server, bob.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"pow","pow_bits":8}}`)
 	resp = postAnon(t, ts, "bob.poweur.net", "cross", "", "")
 	bobEnv := decodeChallenge(t, resp)
@@ -201,10 +196,9 @@ func TestAnonPowChallengeFlow(t *testing.T) {
 }
 
 func TestAnonCaps(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"none","max_bytes":64,"max_per_day":2}}`)
 
 	// Size cap.
@@ -224,10 +218,9 @@ func TestAnonCaps(t *testing.T) {
 }
 
 func TestAnonVerifiedAndPaymentSlots(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"verified"}}`)
 
 	// The typed envelope names the unimplemented challenge.
@@ -245,19 +238,10 @@ func TestAnonVerifiedAndPaymentSlots(t *testing.T) {
 }
 
 func TestAnonRequiresEncryptionAndValidPolicy(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
 
-	// A policy with a malformed anonymous block is rejected on write.
-	resp := davReq(t, ts, http.MethodPut, "/dav/alice.poweur.net/poweur-sys/relay/inbox-policy.json", tok,
-		[]byte(`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"bribe"}}`), nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("bad anon policy write: %d want 422", resp.StatusCode)
-	}
-
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"none"}}`)
 	// Encrypt-only applies to anonymous senders too.
 	body, _ := json.Marshal(map[string]any{
@@ -364,10 +348,9 @@ func TestRegistrationPowGate(t *testing.T) {
 }
 
 func TestAnonLoadRaisesDifficultyFloor(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"open","anonymous":{"allow":true,"challenge":"pow","pow_bits":8}}`)
 
 	// Saturate the challenge-issuance window; the floor must rise.

@@ -1,21 +1,41 @@
 /**
- * `poweur-sys/public/profile.json` — the twin of `packages/identity/profile.go`.
+ * `.poweur/public/profile.json` — the twin of `packages/identity/profile.go`.
  *
  * World-readable self-description: it is what `/.well-known/poweur/profile.json`
  * serves and what every client renders when it shows a person. Owner-written and
  * relay-validated, so this validator exists to fail *before* the write, with a
  * message about the field rather than a 400 about the document.
  *
- * The avatar rule is the one worth knowing: it is a path into the identity's own
- * `/public` tree, never an external URL, so rendering someone's profile cannot be
- * turned into a request to a third-party host.
+ * The avatar rule is the one worth knowing: it names an image file in the
+ * identity's own `.poweur/public/` (served at `/.well-known/poweur/<name>`),
+ * never an external URL, so rendering someone's profile cannot be turned into a
+ * request to a third-party host.
  */
 
 import { PoweurError } from "./errors.js";
-import type { DavClient } from "./files.js";
+import type { SystemFiles } from "./systemfiles.js";
 import type { Profile } from "./types.js";
 
-export const PROFILE_PATH = "poweur-sys/public/profile.json";
+export const PROFILE_PATH = ".poweur/public/profile.json";
+
+/** Image types an avatar may have (identity.ValidAvatarName). */
+export const AVATAR_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif"] as const;
+
+/** Is name a flat image file name in `.poweur/public/` (identity.ValidAvatarName)? */
+export function validAvatarName(name: string): boolean {
+  if (!name || name.length > 64) return false;
+  const dot = name.indexOf(".");
+  if (dot <= 0 || name.indexOf(".", dot + 1) !== -1) return false;
+  if (!/^[a-z0-9_-]+$/.test(name.slice(0, dot))) return false;
+  return (AVATAR_EXTENSIONS as readonly string[]).includes(name.slice(dot));
+}
+
+/** The URL an avatar file is served at (identity.AvatarURL); "" when invalid. */
+export function avatarUrl(identity: string, avatar: string | undefined, scheme = "https"): string {
+  const name = (avatar ?? "").trim();
+  if (!validAvatarName(name)) return "";
+  return `${scheme}://${identity.trim().toLowerCase()}/.well-known/poweur/${name}`;
+}
 export const MAX_PROFILE_LINKS = 32;
 export const MAX_DISPLAY_NAME = 256;
 export const MAX_BIO = 4096;
@@ -35,10 +55,10 @@ export function validateProfile(profile: Profile): void {
   if ((profile.bio ?? "").length > MAX_BIO) {
     throw new PoweurError("invalid_document", `bio too long (max ${MAX_BIO})`);
   }
-  if (profile.avatar && !profile.avatar.startsWith("public/")) {
+  if (profile.avatar && !validAvatarName(profile.avatar)) {
     throw new PoweurError(
       "invalid_document",
-      `avatar must be a path under public/ (got "${profile.avatar}")`,
+      `avatar must be an image file name like avatar.png (got "${profile.avatar}")`,
     );
   }
   const links = profile.links ?? [];
@@ -53,8 +73,8 @@ export function validateProfile(profile: Profile): void {
 }
 
 /** Read our own profile document (an absent one is an empty profile). */
-export async function readProfile(dav: DavClient): Promise<{ profile: Profile; explicit: boolean }> {
-  const raw = await dav.readOptional(PROFILE_PATH);
+export async function readProfile(files: SystemFiles): Promise<{ profile: Profile; explicit: boolean }> {
+  const raw = await files.readOptional(PROFILE_PATH);
   if (!raw) return { profile: emptyProfile(), explicit: false };
   const profile = JSON.parse(raw) as Profile;
   validateProfile(profile);
@@ -62,7 +82,7 @@ export async function readProfile(dav: DavClient): Promise<{ profile: Profile; e
 }
 
 /** Write it, dropping empty fields so the document says only what is set. */
-export async function writeProfile(dav: DavClient, profile: Profile): Promise<Profile> {
+export async function writeProfile(files: SystemFiles, profile: Profile): Promise<Profile> {
   const document: Profile = { version: 1 };
   if (profile.display_name?.trim()) document.display_name = profile.display_name.trim();
   if (profile.avatar?.trim()) document.avatar = profile.avatar.trim();
@@ -76,6 +96,6 @@ export async function writeProfile(dav: DavClient, profile: Profile): Promise<Pr
     })) as Profile["links"];
   }
   validateProfile(document);
-  await dav.writeJson(PROFILE_PATH, document);
+  await files.writeJson(PROFILE_PATH, document);
   return document;
 }

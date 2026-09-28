@@ -34,7 +34,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "## ⚡ Poweur, built in public\nLive aggregates from the poweur.net relay, refreshed hourly. We count **identities** (one person may own several), **accepted messages** (end-to-end encrypted, so we only see the envelope type), and **settings choices** as totals. No names, no content, no per-person data."
+        "content": "## \u26a1 Poweur, built in public\nLive aggregates from the poweur.net relay, refreshed hourly. We count **identities** (one person may own several), **accepted messages** (end-to-end encrypted, so we only see the envelope type), and **settings choices** as totals. No names, no content, no per-person data."
       }
     },
     {
@@ -140,7 +140,7 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Messages · last 24h",
+      "title": "Messages \u00b7 last 24h",
       "description": "Accepted origin submissions (signed and anonymous). Not reads, not unique conversations.",
       "datasource": {
         "type": "prometheus",
@@ -360,7 +360,7 @@
     {
       "id": 7,
       "type": "piechart",
-      "title": "What travels through the relay · 7d",
+      "title": "What travels through the relay \u00b7 7d",
       "description": "Accepted messages by envelope type. chat = ordinary conversation, app = third-party app types, sys.* = platform events such as contact requests and share offers.",
       "datasource": {
         "type": "prometheus",
@@ -423,7 +423,7 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Message pulse · hourly, by type",
+      "title": "Message pulse \u00b7 hourly, by type",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -484,7 +484,7 @@
     {
       "id": 9,
       "type": "status-history",
-      "title": "Heartbeat strip · last 48h",
+      "title": "Heartbeat strip \u00b7 last 48h",
       "description": "Each cell is one hour. Brightness is relative to that type's own busiest hour in the window, so quiet types still show their rhythm.",
       "datasource": {
         "type": "prometheus",
@@ -656,7 +656,7 @@
     {
       "id": 11,
       "type": "bargauge",
-      "title": "Most-touched settings · 7d",
+      "title": "Most-touched settings \u00b7 7d",
       "description": "How often each setting actually changed. Saving without changing a value is not counted.",
       "datasource": {
         "type": "prometheus",
@@ -1024,113 +1024,6 @@
           ],
           "fields": "",
           "values": false
-        }
-      }
-    },
-    {
-      "id": 14,
-      "type": "timeseries",
-      "title": "Files",
-      "description": "Area: bytes stored. Bars: completed resumable uploads in the trailing 24 hours.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 41,
-        "w": 8,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "poweur_growth_storage_bytes",
-          "legendFormat": "stored",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "round(poweur_growth_uploads_24h)",
-          "legendFormat": "uploads / 24h",
-          "interval": "1d",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "orange"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "fillOpacity": 30,
-            "gradientMode": "opacity",
-            "showPoints": "never",
-            "axisSoftMin": 0
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "uploads / 24h"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              },
-              {
-                "id": "custom.drawStyle",
-                "value": "bars"
-              },
-              {
-                "id": "custom.fillOpacity",
-                "value": 70
-              },
-              {
-                "id": "custom.lineWidth",
-                "value": 0
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "yellow"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
         }
       }
     },

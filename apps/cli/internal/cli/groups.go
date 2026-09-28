@@ -87,23 +87,17 @@ func openGroupSession(groupID, useIdentity string, stderr io.Writer) (groupSessi
 		fmt.Fprintf(stderr, "no key for group %s on this device: %v\n", groupID, err)
 		return groupSession{}, false
 	}
-	tok, err := MintDAVToken(context.Background(), cfg.RelayURL, groupID, "", "dav:full", priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return groupSession{}, false
-	}
 	return groupSession{
 		relayURL: cfg.RelayURL,
 		groupID:  groupID,
 		priv:     priv,
-		token:    tok.Token,
 		actor:    resolveIdentity(useIdentity, cfg.Identity),
 	}, true
 }
 
 // load reads and verifies the group's current membership document.
 func (gs groupSession) load(stderr io.Writer) (idpkg.ShareGroup, bool) {
-	raw, status, err := davGetBytes(context.Background(), gs.relayURL, gs.groupID, gs.token, idpkg.GroupSelfDoc)
+	raw, status, err := readSysFile(context.Background(), gs.relayURL, gs.groupID, gs.priv, idpkg.GroupSelfDoc)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return idpkg.ShareGroup{}, false
@@ -140,7 +134,7 @@ func (gs groupSession) store(group idpkg.ShareGroup, stderr io.Writer) bool {
 		fmt.Fprintln(stderr, err)
 		return false
 	}
-	if err := davPutBytes(context.Background(), gs.relayURL, gs.groupID, gs.token, idpkg.GroupSelfDoc, raw); err != nil {
+	if err := writeSysFile(context.Background(), gs.relayURL, gs.groupID, gs.priv, idpkg.GroupSelfDoc, raw); err != nil {
 		fmt.Fprintln(stderr, err)
 		return false
 	}

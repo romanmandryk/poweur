@@ -12,9 +12,9 @@
  * it via the vectors in `test/conformance.test.ts`.
  */
 
-export const SDK_VERSION = "0.1.16";
+export const SDK_VERSION = "0.1.22";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
-export const SDK_BUILD_TIME = "2026-09-24 20:56";
+export const SDK_BUILD_TIME = "2026-09-28 21:25";
 
 export * from "./types.js";
 export * from "./errors.js";
@@ -34,17 +34,13 @@ export * from "./resolve.js";
 export * from "./identity.js";
 export * from "./session.js";
 export * from "./messages.js";
-export * from "./attachments.js";
 export * from "./groups.js";
 export * from "./events.js";
-export * from "./files.js";
-export * from "./sync.js";
-export * from "./shares.js";
 export * from "./contacts.js";
 export * from "./policy.js";
 export * from "./profile.js";
 export * from "./history.js";
-export * from "./apppass.js";
+export * from "./systemfiles.js";
 export * from "./signin.js";
 export * from "./client.js";
 

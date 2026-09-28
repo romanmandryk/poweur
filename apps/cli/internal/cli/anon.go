@@ -139,7 +139,7 @@ func runAnon(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	cfg, identityValue, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	cfg, identityValue, priv, ok := loadIdentityKey(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}

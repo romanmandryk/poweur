@@ -1,6 +1,6 @@
 # EPIC-003 — Per-identity file storage & WebDAV access
 
-- **Status:** complete, **deprecated** — replaced by [EPIC-020](EPIC-020-storage-protocol-v2.md) storage v2 (removal in E20-T12)
+- **Status:** removed — v1 implementation retired by EPIC-020; v2 restoration tracked there
 - **Priority:** P0
 - **Depends on:** EPIC-002 (durable per-identity storage)
 - **Unlocks:** EPIC-004 (sync), EPIC-005 (sharing), EPIC-006 (conventions), EPIC-009 (attachments)

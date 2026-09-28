@@ -30,7 +30,6 @@ import {
   parseAuthRequestPayload,
   canonicalSignInResponse,
   checkRequestAgainstMetadata,
-  checkSignInScopeNamespace,
   decodeSignInRequest,
   describeScope,
   encodeSignInRequest,
@@ -204,9 +203,8 @@ describe("origin normalization", () => {
 // ── Scopes ───────────────────────────────────────────────────────────────────
 
 describe("scopes", () => {
-  it("normalizes dav paths to one form", () => {
-    expect(normalizeSignInScope("dav:rw:/apps/net.example/")).toBe("dav:rw:apps/net.example");
-    expect(normalizeSignInScope(" dav:read:apps/net.example ")).toBe("dav:read:apps/net.example");
+  it("trims known scopes", () => {
+    expect(normalizeSignInScope(" messages:send ")).toBe("messages:send");
     expect(normalizeSignInScope("profile:read")).toBe("profile:read");
   });
 
@@ -215,28 +213,17 @@ describe("scopes", () => {
   }
 
   it("sorts and de-duplicates so the canonical string is order-independent", () => {
-    expect(normalizeSignInScopes(["profile:read", "dav:rw:/apps/x.y/", "dav:rw:apps/x.y"])).toEqual([
-      "dav:rw:apps/x.y",
+    expect(normalizeSignInScopes(["profile:read", "messages:send", "messages:send"])).toEqual([
+      "messages:send",
       "profile:read",
     ]);
   });
 
   it("caps the consent screen at 16 scopes", () => {
-    const many = Array.from({ length: 17 }, (_, i) => `dav:rw:apps/net.example/${i}`);
+    const many = Array.from({ length: 17 }, () => "profile:read");
     expect(() => normalizeSignInScopes(many)).toThrow();
   });
 
-  it("keeps a dav scope inside the app's own namespace", () => {
-    expect(() => checkSignInScopeNamespace("dav:rw:apps/net.example", "net.example")).not.toThrow();
-    expect(() => checkSignInScopeNamespace("dav:rw:apps/net.example/notes", "net.example")).not.toThrow();
-    // The escalation attempts: a sibling app, the parent, and a prefix twin.
-    expect(() => checkSignInScopeNamespace("dav:rw:apps/net.other", "net.example")).toThrow();
-    expect(() => checkSignInScopeNamespace("dav:rw:apps", "net.example")).toThrow();
-    expect(() => checkSignInScopeNamespace("dav:rw:apps/net.example.evil", "net.example")).toThrow();
-    expect(() => checkSignInScopeNamespace("dav:rw:poweur-sys", "net.example")).toThrow();
-    // Non-dav scopes carry no path and are unaffected.
-    expect(() => checkSignInScopeNamespace("profile:read", "net.example")).not.toThrow();
-  });
 });
 
 // ── Requests, signing, verifying ─────────────────────────────────────────────
@@ -283,7 +270,7 @@ describe("request construction", () => {
     expect(() => v.newRequest({ responseUri: "https://evil.example/collect" })).toThrow();
   });
 
-  it("refuses to ask for another app's namespace", () => {
+  it("refuses storage v1 dav scopes", () => {
     const v = verifierFor(newIdentity().document);
     expect(() => v.newRequest({ scopes: ["dav:rw:apps/net.poweur.mail"] })).toThrow();
   });
@@ -395,7 +382,7 @@ describe("signing and verifying", () => {
   const tamper: [string, (r: SignInResponse) => void][] = [
     ["statement", (r) => { r.statement = "Sign in and send all my money"; }],
     ["action", (r) => { r.action = "link"; }],
-    ["scopes", (r) => { r.scopes = ["dav:rw:apps/net.poweur.guestbook"]; }],
+    ["scopes", (r) => { r.scopes = ["messages:send"]; }],
     ["identity", (r) => { r.identity = "mallory.poweur.net"; }],
     ["request_id", (r) => { r.request_id = "req_other"; }],
     ["key_id", (r) => { r.key_id = "identity "; }],
@@ -423,9 +410,9 @@ describe("signing and verifying", () => {
   it("rejects a response whose scopes are not in canonical order", async () => {
     const id = newIdentity();
     const v = verifierFor(id.document);
-    const req = v.newRequest({ scopes: ["profile:read", "dav:rw:apps/net.poweur.guestbook"] });
+    const req = v.newRequest({ scopes: ["profile:read", "messages:send"] });
     const resp = signSignInRequest(req, { identity: WHO, privateKey: id.privateKey, nowMs: NOW });
-    resp.scopes = ["profile:read", "dav:rw:apps/net.poweur.guestbook"];
+    resp.scopes = ["profile:read", "messages:send"];
     await expect(v.verifyResponse(resp)).rejects.toThrow(/canonical form/);
   });
 
@@ -641,7 +628,7 @@ const META: RelyingPartyMetadata = {
   name: "Poweur Guestbook",
   app_id: "net.poweur.guestbook",
   response_uris: [`${RP_ORIGIN}/auth/callback`],
-  scopes: ["profile:read", "dav:rw:apps/net.poweur.guestbook"],
+  scopes: ["profile:read", "messages:send"],
 };
 
 describe("relying-party metadata", () => {
@@ -657,7 +644,7 @@ describe("relying-party metadata", () => {
     ["an off-origin logo", { logo_uri: "https://cdn.evil.example/logo.png" }],
     ["an off-origin poll_uri", { poll_uri: "https://evil.example/poll" }],
     ["an app_id that is not its own namespace", { app_id: "net.poweur.mail" }],
-    ["a scope outside its namespace", { scopes: ["dav:rw:apps/net.poweur.mail"] }],
+    ["a storage v1 dav scope", { scopes: ["dav:rw:apps/net.poweur.mail"] }],
   ];
   for (const [what, patch] of bad) {
     it(`rejects metadata with ${what}`, () => {
@@ -721,10 +708,7 @@ describe("consent rendering", () => {
   it("describes every scope as a sentence, never a raw token", () => {
     expect(describeScope("profile:read", "Guestbook")).toContain("public profile");
     expect(describeScope("messages:send", "Guestbook")).toContain("send messages");
-    expect(describeScope("dav:rw:apps/net.poweur.guestbook", "Guestbook")).toContain(
-      "read and write files in /apps/net.poweur.guestbook",
-    );
-    expect(describeScope("dav:read:apps/net.poweur.guestbook", "Guestbook")).toContain("cannot write");
+    expect(describeScope("dav:rw:apps/" + "net.poweur.guestbook", "Guestbook")).toContain("do not approve");
   });
 
   it("tells the user not to approve something it cannot explain", () => {
@@ -753,7 +737,7 @@ describe("canonical string", () => {
       expiresAt: "2026-01-15T09:31:00Z",
       action: "signin",
       statement: "Sign in",
-      scopes: ["dav:rw:apps/net.poweur.guestbook", "profile:read"],
+      scopes: ["messages:send", "profile:read"],
       keyId: "identity",
     });
     expect(canonical.split("\n")).toEqual([
@@ -767,7 +751,7 @@ describe("canonical string", () => {
       "2026-01-15T09:31:00Z",
       "signin",
       "Sign in",
-      "dav:rw:apps/net.poweur.guestbook,profile:read",
+      "messages:send,profile:read",
       "identity",
     ]);
   });

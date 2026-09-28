@@ -13,7 +13,7 @@ the challenge protocol, and the proof-of-work scheme.
 
 ## The policy block
 
-`poweur-sys/relay/inbox-policy.json` gains an `anonymous` object (absent = deny):
+`.poweur/relay/inbox-policy.json` gains an `anonymous` object (absent = deny):
 
 ```json
 {"version": 1, "mode": "contacts_and_requests",

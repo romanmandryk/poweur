@@ -23,13 +23,12 @@ beforeEach(() => {
   localStorage.clear();
   resetAvatarsForTests();
   holder.dav = {
-    mkdir: vi.fn(async () => {}),
-    write: vi.fn(async () => {}),
+    write: vi.fn(async () => '"etag"'),
     remove: vi.fn(async () => true),
-    readBytes: vi.fn(),
+    get: vi.fn(async () => null),
   };
   holder.client = {
-    dav: vi.fn(async () => holder.dav),
+    system: vi.fn(() => holder.dav),
     setProfile: vi.fn(async (doc: any) => doc),
   };
   useSession.setState({ identity: ME, unlocked: true });
@@ -47,7 +46,7 @@ describe("ProfileEditor photo", () => {
     expect($("#pe-avatar-remove")).toBeTruthy();
   });
 
-  it("uploads into a web-public avatars folder, and every circle of ours shows it", async () => {
+  it("uploads into .poweur/public, and every circle of ours shows it", async () => {
     render(
       <>
         <ProfileEditor profile={null} />
@@ -62,18 +61,16 @@ describe("ProfileEditor photo", () => {
     await waitFor(() => expect(holder.client.setProfile).toHaveBeenCalled());
 
     const avatar = holder.client.setProfile.mock.calls[0][0].avatar;
-    expect(avatar).toMatch(/^public\/avatars\/avatar-[0-9a-z]+\.png$/);
-    expect(holder.dav.mkdir).toHaveBeenCalledWith("public/avatars");
-    // /pub serves a /public folder only once it is marked.
-    expect(holder.dav.write).toHaveBeenCalledWith("public/avatars/.poweur-web-public", "");
-    expect(holder.dav.write).toHaveBeenCalledWith(avatar, expect.anything());
+    expect(avatar).toMatch(/^avatar-[0-9a-z]+\.png$/);
+    // Served publicly from .poweur/public at /.well-known/poweur/<name>.
+    expect(holder.dav.write).toHaveBeenCalledWith(`.poweur/public/${avatar}`, expect.anything());
 
     await waitFor(() => expect($("#elsewhere img")?.getAttribute("src")).toMatch(/^data:image\//));
     expect(readLocalAvatar(ME)?.path).toBe(avatar);
   });
 
-  it("removing the photo drops it from the profile, this device and /public", async () => {
-    const old = "public/avatars/avatar-0ld.jpg";
+  it("removing the photo drops it from the profile, this device and .poweur/public", async () => {
+    const old = "avatar-0ld.jpg";
     saveLocalAvatar(ME, old, "data:image/jpeg;base64,AAAA");
     useData.setState({ profile: { doc: { version: 1, avatar: old }, explicit: true, loaded: true, loading: false } });
     render(<ProfileEditor profile={{ avatar: old }} />);
@@ -85,7 +82,7 @@ describe("ProfileEditor photo", () => {
 
     await waitFor(() => expect(holder.client.setProfile).toHaveBeenCalled());
     expect(holder.client.setProfile.mock.calls[0][0].avatar).toBeUndefined();
-    await waitFor(() => expect(holder.dav.remove).toHaveBeenCalledWith(old));
+    await waitFor(() => expect(holder.dav.remove).toHaveBeenCalledWith(`.poweur/public/${old}`));
     expect(readLocalAvatar(ME)).toBeNull();
   });
 

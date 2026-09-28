@@ -127,8 +127,8 @@ Requiring the identity key for the read would be circular — that circularity i
 endpoint exists to break. The gate is instead possession of an enrolled authenticator, which
 survives cleared site data.
 
-For the same reason the wrapped blobs live **outside** the DAV tree, in relay-managed storage:
-reading `poweur-sys/` needs a DAV token signed by the identity key, and a blob inside the user's
+For the same reason the wrapped blobs live **outside** the owner system-file API, in relay-managed storage:
+reading `.poweur/` requires identity-key authentication, and a blob inside the user's
 file tree would be one misplaced delete away from destroying their recovery. Only enrollment
 *metadata* belongs in the tree.
 

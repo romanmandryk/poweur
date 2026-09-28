@@ -80,5 +80,5 @@ The FQDN stays the canonical identifier. Bridges (`did:web`, OIDC, etc.) are add
 - [Identity Model](/protocol/identity-model)
 - [DNS Records](/protocol/dns-records)
 - [Message Format](/protocol/message-format)
-- [File storage](/files/storage-model)
+- [File storage](/files/storage-v2)
 - [Routing](/protocol/routing)

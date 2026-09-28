@@ -69,7 +69,7 @@ by three Go tests, each living beside the code it pins:
 
 | Generator | Pins |
 |-----------|------|
-| `packages/identity/vectors_test.go` | identity documents, grants, groups, PoW, names, `poweur-sys` docs |
+| `packages/identity/vectors_test.go` | identity documents, groups, PoW, names, system documents |
 | `apps/api/internal/crypto/vectors_test.go` | every canonical signing string |
 | `apps/cli/internal/crypto/vectors_test.go` | message encryption (X25519 + HKDF + ChaCha20-Poly1305) |
 
@@ -116,7 +116,7 @@ Run the slice you touched **and** `apps/integration` (and `apps/web` tests if th
 | Hosted registration | No DNS token; signed `identity_document`; `HOSTED_DOMAINS` + `POWEUR_DATA` |
 | Relay trust | Relay never holds identity private keys; clients sign documents and messages |
 | Sessions | Short-lived; memory-only until EPIC-009 |
-| Storage | Durable identity docs under `POWEUR_DATA/identities/.../poweur-sys/public/id.json` |
+| Storage | EPIC-020 transition: identity store still uses the legacy layout; system-file adapter uses `.poweur`. Do not deploy until the v2 baseline and system-only migration pass. |
 | SSRF | Well-known fetch: no redirects, size/time caps, no private IPs unless test flag |
 | Two implementations | Go is canonical; `packages/client-ts` conforms via generated vectors |
 | Shared CLI state | Both CLIs read/write `~/.poweur` (`config.toml`, `keys/`, `sessions/`, `pending/`) — never fork the format |

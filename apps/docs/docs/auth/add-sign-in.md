@@ -11,9 +11,8 @@ There is no client secret, no registration, no account with Poweur, and no token
 anybody. If you are used to OAuth, the surprising part is how much is missing.
 
 The [protocol spec](./sign-in.md) is normative; this page is the shortest path to a working
-login. The complete working version of everything below is
-[`apps/guestbook`](https://github.com/romanmandryk/poweur/tree/master/apps/guestbook) — a real
-site you can run: `GUESTBOOK_ORIGIN=https://you.example go run ./cmd/guestbook`.
+login. The OAuth bridge uses the shared verifier in `packages/identity/signin`.
+The v1 Guestbook example was removed; its v2 replacement is tracked in EPIC-031.
 
 ## 0. What you are about to build
 
@@ -96,7 +95,7 @@ it, and to nobody else. Keep a short-lived transaction per request (see
   approves) and a two-digit **match code** to display;
 - let `signin.NewSecret`, `signin.NewMatchCode` and `signin.HashSecret` make and store them.
 
-The guestbook (`apps/guestbook/server.go`) is a complete, tested implementation.
+The shared verifier tests exercise the approval and delivery contract.
 
 ## 3. Verify the approval (5 minutes)
 
@@ -178,24 +177,12 @@ TLS the metadata fetch proves nothing about who you are.
 
 ## 5. Ask for more than a login (optional)
 
-Add `scopes` to the request and the same approval becomes an authorization grant you can
-present at the *user's* relay for path-scoped access to their storage:
-
-```go
-req, _ := verifier.NewRequest(signin.RequestOptions{
-    Statement: "Sign in and keep your notes in your own storage",
-    Scopes:    []string{"dav:rw:apps/example.you"},   // your own namespace, always
-})
-```
-
-A `dav:` scope may only reach `apps/<reverse-DNS of your origin host>`, derived from the
-*signed* audience rather than declared — you cannot ask for another app's directory, and
-the relay would not honour it if you did. [Connected apps](./connected-apps.md) covers the
-exchange, revocation and the threat model.
+Storage scopes and the v1 grant exchange have been removed. V2 scoped drive
+handles are tracked in EPIC-020; sign-in remains available.
 
 ## Testing your integration
 
-- The reference RP's test suite (`apps/guestbook/server_test.go`) is a checklist of what a
+- The verifier test suite (`packages/identity/signin/verifier_test.go`) is a checklist of what a
   correct RP refuses: an approval collected at another origin, a replay, a tampered
   statement, an unresolvable name, an expired window.
 - `apps/integration/signin_test.go` drives the whole thing against a real relay and real

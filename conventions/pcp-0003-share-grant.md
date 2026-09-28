@@ -1,5 +1,7 @@
 # PCP-0003 — Share grant & group documents
 
+> Withdrawn for storage v2 (EPIC-020). Historical format only; do not implement.
+
 - **Status:** experimental (shipped with EPIC-005)
 - **Owner:** poweur core
 - **Registry entries:** `sys.share.offer`, `sys.share.accept`, `sys.share.revoked`, `sys.share.claim` (experimental)

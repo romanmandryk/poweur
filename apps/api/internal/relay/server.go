@@ -20,12 +20,13 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
-	"github.com/poweur/api/internal/files"
+	"github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/drive/engine"
+	"github.com/poweur/api/internal/drive/provider"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
-	"golang.org/x/net/webdav"
 )
 
 const (
@@ -63,25 +64,29 @@ type Server struct {
 	// abuse counts verified sys.abuse.report submissions (E07-T5).
 	abuse *abuseLog
 
-	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
-	filesProvider files.StorageProvider
-	filesIndex    *files.Index
-	uploads       *files.Uploads
-	grants        *files.GrantStore
-	linkStats     *files.LinkStats
-	davTokens     *davTokenStore
-	connectedMu   sync.Mutex
-	// linkSecret authenticates password-gated link sessions (E05-T4). It is
-	// per-process on purpose: a restart ends every link session, which costs
-	// a visitor one password re-entry.
-	linkSecret []byte
+	// sysFiles is the relay's access to identities' system documents
+	// (EPIC-020 E20-T6): files under POWEUR_DATA, or memory without it.
+	sysFiles SystemFiles
+	// drive is the object store selected by STORAGE_PROVIDER. Nil when the
+	// relay has no POWEUR_DATA and is not using S3.
+	drive    provider.Store
+	driveErr error
+	// engine serves /drive/{identity} over drive (E20-T5); nil without it.
+	engine *engine.Engine
+	// driveStreams fans drive changes out to owner and member streams.
+	driveStreams *driveStreams
+	// linkUses and linkFailures rate-limit link holders (E20-T7).
+	linkUses, linkFailures *linkLimiter
+	// rosters caches group identities' rosters for group shares (E20-T7).
+	rosters         *rosterCache
+	groupShareNoted map[string]bool
+	// sysLocks makes owner API preconditions atomic with writes and deletes.
+	sysLocks *deviceLocks
 
-	locksMu  sync.Mutex
-	davLocks map[string]webdav.LockSystem
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
 	// deviceLocks serializes read-modify-write on each identity's
-	// poweur-sys/relay/devices.json (E04-T6).
+	// device registry (.poweur/state/devices.json).
 	deviceLocks *deviceLocks
 
 	cacheMu       sync.Mutex
@@ -101,25 +106,36 @@ type cachedRelay struct {
 
 func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.ProviderFactory) *Server {
 	var startupFailures []string
-	store, err := storage.OpenIdentityStore(cfg.DataDir)
+	// Everything durable lives in the drive provider (EPIC-020 E20-T6):
+	// drives under drives/, the relay's own registries under relay/. Without
+	// one (no POWEUR_DATA, fs provider) the relay keeps memory only.
+	driveStore, driveErr := drive.Open(cfg)
+	if driveErr != nil {
+		startupFailures = append(startupFailures, "drive_storage_open_failed")
+	}
+	var objects storage.Objects
+	if driveStore != nil {
+		objects = driveStore
+	}
+	store, err := storage.OpenIdentityStore(objects)
 	if err != nil {
 		// Fall back to memory-only rather than crashing constructors used in tests.
 		store = storage.NewIdentityStore()
 		startupFailures = append(startupFailures, "identity_storage_open_failed")
 	}
-	keystore, err := storage.OpenKeystoreStore(cfg.DataDir)
+	keystore, err := storage.OpenKeystoreStore(objects)
 	if err != nil {
 		keystore = storage.NewKeystoreStore()
 		startupFailures = append(startupFailures, "keystore_open_failed")
 	}
 	// Undelivered mail survives a restart (EPIC-009 E09-T1); a relay with no
-	// data dir keeps the old memory-only behaviour rather than refusing to run.
-	inbox, err := storage.OpenInboxStore(cfg.DataDir)
+	// durable store keeps the old memory-only behaviour rather than refusing to run.
+	inbox, err := storage.OpenInboxStore(objects)
 	if err != nil {
 		inbox = storage.NewInboxStore()
 		startupFailures = append(startupFailures, "inbox_storage_open_failed")
 	}
-	acks, err := storage.OpenAckStore(cfg.DataDir)
+	acks, err := storage.OpenAckStore(objects)
 	if err != nil {
 		acks = storage.NewAckStore()
 		startupFailures = append(startupFailures, "ack_storage_open_failed")
@@ -147,11 +163,13 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		regGate:           NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:            &http.Client{Timeout: 10 * time.Second},
 		idCache:           idpkg.NewCache(),
-		davTokens:         newDAVTokenStore(),
-		linkSecret:        newPowSecret(), // 32 random bytes; see linkSecret above
-		davLocks:          make(map[string]webdav.LockSystem),
 		hub:               newHub(),
+		driveStreams:      newDriveStreams(),
+		linkUses:          newLinkLimiter(),
+		rosters:           newRosterCache(),
+		linkFailures:      newLinkLimiter(),
 		deviceLocks:       newDeviceLocks(),
+		sysLocks:          newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}
@@ -159,24 +177,23 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.event(context.Background(), "storage.quotas", "invalid")
 		logQuotaFileError(err)
 	})
-	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
-	// only ever talks to the StorageProvider interface.
-	if cfg.DataDir != "" {
-		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
-		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
-		s.uploads = files.NewUploads(store.IdentityHomeDir)
-		s.linkStats = files.NewLinkStats(store.IdentityHomeDir)
-		s.grants = &files.GrantStore{
-			Provider: s.filesProvider,
-			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
-				id, ok := store.Get(owner)
-				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
-			},
-			Logf: func(string, ...any) { s.event(context.Background(), "grant.validation", "rejected") },
-		}
+	s.driveErr = driveErr
+	s.sysFiles = newMemSystemFiles()
+	if driveStore != nil {
+		s.drive = driveStore
+		s.engine = newDriveEngine(driveStore, s)
+		s.sysFiles = driveSystemFiles{engine: s.engine}
+		go s.warmRosters()
 	}
 	return s
 }
+
+// Drive is the object store selected by STORAGE_PROVIDER. It is nil when the
+// relay has no durable drive.
+func (s *Server) Drive() provider.Store { return s.drive }
+
+// DriveError is set when a durable drive was required and could not be opened.
+func (s *Server) DriveError() error { return s.driveErr }
 
 // runPruner periodically evicts expired sessions and locality cache entries.
 func (s *Server) runPruner() {
@@ -190,7 +207,6 @@ func (s *Server) runPruner() {
 		}
 		s.sampleTelemetry()
 		s.sessions.Prune()
-		s.davTokens.Prune()
 		s.anon.prune()
 		s.abuse.prune(time.Now().UTC())
 		s.pruneLocalityCache()
@@ -279,31 +295,27 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
-	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
-	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
-	mux.HandleFunc("POST /auth/grant", s.handleSignInGrantPost)
-	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /identities/{identity}/system/{path...}", s.handleSystemFileGet)
+	mux.HandleFunc("PUT /identities/{identity}/system/{path...}", s.handleSystemFilePut)
+	mux.HandleFunc("DELETE /identities/{identity}/system/{path...}", s.handleSystemFileDelete)
+	mux.HandleFunc("GET /drive/{identity}", s.handleDriveGet)
+	mux.HandleFunc("POST /drive/{identity}/chunks/missing", s.handleDriveMissing)
+	mux.HandleFunc("PUT /drive/{identity}/chunks/{chunk}", s.handleDriveChunkPut)
+	mux.HandleFunc("POST /drive/{identity}/commit", s.handleDriveCommit)
+	mux.HandleFunc("GET /drive/{identity}/changes", s.handleDriveChanges)
+	mux.HandleFunc("GET /drive/{identity}/shares", s.handleDriveShares)
+	mux.HandleFunc("GET /drive/{identity}/events", s.handleDriveEvents)
+	mux.HandleFunc("GET /drive/{identity}/links/{link}", s.handleDriveLink)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
-	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
-	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
-	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)
-	mux.HandleFunc("HEAD /sync/{identity}/upload/{id}", s.handleUploadStatus)
-	mux.HandleFunc("PATCH /sync/{identity}/upload/{id}", s.handleUploadPatch)
-	mux.HandleFunc("DELETE /sync/{identity}/upload/{id}", s.handleUploadDelete)
-	// WebDAV needs non-standard methods (PROPFIND, MKCOL, …); register each
-	// explicitly (a method-less pattern would conflict with "GET /").
-	// Covers both /dav/<identity>/… and the Host-routed /dav/… vanity form.
-	for _, m := range []string{
-		"GET", "HEAD", "OPTIONS", "PUT", "DELETE",
-		"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
-	} {
-		mux.HandleFunc(m+" /dav/", s.handleDAV)
-		mux.HandleFunc(m+" /dav", s.handleDAV)
-	}
-	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
-	mux.HandleFunc("GET /s/{path...}", s.handleShareLink)
-	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
@@ -583,7 +595,7 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		doc.UpdatedAt = req.IssuedAt
 		// Cannot sign without private key on relay — leave unsigned only in memory.
 		// For durable/hosted, require client-supplied signed document.
-		if hosted || s.cfg.DataDir != "" {
+		if hosted || s.identities.Durable() {
 			writeError(w, http.StatusBadRequest, "identity_document_required", "signed identity_document is required")
 			return
 		}
@@ -611,20 +623,16 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		DocumentJSON:        docJSON,
 		CreatedAt:           time.Now().UTC(),
 	}
-	if s.cfg.DataDir != "" {
+	if s.identities.Durable() {
 		if err := s.identities.Put(identity); err != nil {
 			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
 			return
-		}
-		// Materialize the home filesystem skeleton (five roots + poweur-sys
-		// subdirs) so DAV clients see a stable tree immediately.
-		if s.filesProvider != nil {
-			_ = s.filesProvider.EnsureTree(r.Context(), identity.Identity)
 		}
 	} else if !s.identities.Add(identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
 		return
 	}
+	s.mirrorIdentityDocument(r.Context(), identity)
 
 	resp := IdentityResponse{
 		Identity:            identity.Identity,
@@ -929,7 +937,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 					"a request with this consent scope is already pending or in cooldown")
 				return
 			}
-			s.recordShareLifecycleDelivery(r.Context(), msg)
 			// A queued request is a delivery too: without this, a contact
 			// request waits silently until the recipient happens to open the
 			// app, which is exactly the wait push exists to remove.
@@ -943,7 +950,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return
 		}
-		s.recordShareLifecycleDelivery(r.Context(), msg)
 		// Tell anyone listening that there is something to pick up (E09-T2).
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
@@ -961,32 +967,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
-}
-
-// recordShareLifecycleDelivery advances aggregate conversion counters only
-// after a signed identity message was accepted. Encrypted bodies remain
-// opaque, and claimant/recipient names are not stored with link stats.
-func (s *Server) recordShareLifecycleDelivery(ctx context.Context, msg Message) {
-	if s.grants == nil {
-		return
-	}
-	switch idpkg.NormalizeMessageType(msg.Type) {
-	case idpkg.MsgTypeShareClaim:
-		shareID := strings.TrimSpace(msg.Metadata["share_id"])
-		if s.grants.Snapshot(ctx, msg.Recipient).HasFileRequest(shareID) {
-			s.linkStats.RecordIDClaimed(msg.Recipient, shareID)
-		}
-	case idpkg.MsgTypeShareAccept:
-		directID := strings.TrimSpace(msg.Metadata["share_id"])
-		sourceID := strings.TrimSpace(msg.Metadata["source_share_id"])
-		if sourceID == "" {
-			return
-		}
-		boundSource := s.grants.Snapshot(ctx, msg.Recipient).AcceptedConversionSource(directID, msg.Sender)
-		if boundSource == sourceID {
-			s.linkStats.RecordShareAccepted(msg.Recipient, sourceID, directID)
-		}
-	}
 }
 
 // handleAcksPost is open/messaging-class. It mirrors handleMessagesPost
@@ -1100,17 +1080,32 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing or mismatch")
 		return false
 	}
+	_, ok := s.authenticateCaller(w, r, true)
+	return ok
+}
+
+// authenticateCaller proves who is calling: the identity in
+// X-Poweur-Identity signed a one-shot challenge with its identity key or a
+// live session key. With requireLocal, only identities hosted here may sign
+// with their identity key; otherwise a visitor from another relay may, and
+// its key is resolved like any peer's.
+func (s *Server) authenticateCaller(w http.ResponseWriter, r *http.Request, requireLocal bool) (string, bool) {
+	identity := r.Header.Get("X-Poweur-Identity")
+	if identity == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "identity header missing")
+		return "", false
+	}
 	signature := r.Header.Get("X-Poweur-Signature")
 	if signature == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature header missing")
-		return false
+		return "", false
 	}
 	sessionID := r.Header.Get("X-Poweur-Session-Id")
 
 	challenge, ok := s.consumeChallenge(identity, r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge missing or expired")
-		return false
+		return "", false
 	}
 
 	var publicKey ed25519.PublicKey
@@ -1118,22 +1113,22 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 		session, ok := s.sessions.Get(sessionID)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "session_expired", "session expired or not found")
-			return false
+			return "", false
 		}
 		if session.Identity != identity {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "session does not belong to identity")
-			return false
+			return "", false
 		}
 		publicKey = session.PublicKeyBytes
 	} else {
-		if !s.isLocalIdentity(r.Context(), identity) {
+		if requireLocal && !s.isLocalIdentity(r.Context(), identity) {
 			writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
-			return false
+			return "", false
 		}
 		pub, err := s.resolveIdentityPublicKey(r.Context(), identity)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-			return false
+			return "", false
 		}
 		s.warmIdentityCache(identity, pub)
 		publicKey = pub
@@ -1141,10 +1136,10 @@ func (s *Server) authorizeInboxRead(w http.ResponseWriter, r *http.Request, iden
 
 	if err := crypto.VerifySignature(publicKey, challenge.Value, signature); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "challenge signature invalid")
-		return false
+		return "", false
 	}
 	verifiedActor(r, identity)
-	return true
+	return identity, true
 }
 
 func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {

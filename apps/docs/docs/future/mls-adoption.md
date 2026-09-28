@@ -158,7 +158,7 @@ otherwise the right move is to go from v1 to MLS directly.
 
 Not a plan, but the order the pieces would have to land in.
 
-1. **KeyPackage publication.** A `poweur-sys/` document holding a pool of signed init keys per
+1. **KeyPackage publication.** A `.poweur/` document holding a pool of signed init keys per
    device, with replenishment on use. Independently useful; no group semantics yet.
 2. **A Poweur MLS credential.** Leaf credentials whose signature key is the identity key,
    validated by existing resolution and pinning. Decide rotation's interaction here.

@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** complete — T1–T6 done
+- **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-031 reference apps)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -268,3 +268,86 @@ sends, refresh relay routing, and retry with capped exponential backoff; permane
 expired entries are not retried. `expires_at` is enforced after signature verification with
 `410 message_expired`, and clients render countdowns. `TestINT_OUTBOX_01` covers a relay going
 down, returning at a new address, and receiving the queued message.
+
+## Messaging for apps (T7–T10)
+
+Working through the [EPIC-031](EPIC-031-reference-app-scenarios.md) reference apps (site
+contact + newsletter, forms, board, CRM, whiteboard) showed four gaps. Storage-side needs are
+in [EPIC-020](EPIC-020-storage-protocol-v2.md); app permissions are in
+[EPIC-029](EPIC-029-poweur-apps-platform.md).
+
+### E09-T7 — Well-known intent types
+
+Many apps need the same few gestures from people who are not (yet) contacts. Without a shared
+vocabulary, every app invents its own and inbox policy cannot reason about any of them.
+
+- [ ] PCP in `conventions/` + `conventions/registry.json` entries, with payload schemas and
+      Go/TS validators and vectors. Starting set (names final in the PCP):
+      - `sys.contact.message` — "contact me" from a site or app: a message with a subject,
+        from a signed ID or anonymous (E14), landing in Requests
+      - `sys.list.subscribe` / `sys.list.unsubscribe` — join or leave a named list
+        (newsletter, updates) with an optional email for bridge delivery (EPIC-023)
+      - `sys.app.invite` — "join me in this board/doc/game": app id, node reference, optional
+        share offer; builds on E29-T6's `opened_with`
+      - `sys.app.notify` — a short notification from a share member ("assigned to you",
+        "mentioned you"), carrying a node reference
+      - social types (`sys.social.mention`, `sys.social.reply`, optional `sys.social.follow`)
+        are added by EPIC-032 E32-T3
+- [ ] Inbox-policy hooks per type: `contact.message` and `list.subscribe` accepted from
+      strangers under rate limits / proof-of-work (never opening a chat); `app.notify` accepted
+      only from members of a share the recipient has accepted; `app.invite` follows the
+      stranger rules of `sys.share.offer`
+- [ ] Anonymous senders (E14) may send `contact.message` and `list.subscribe`: the page seals
+      to the owner's encryption key in the browser, so anonymous bodies are still E2E encrypted
+- [ ] CLI `poweur send --type <type> --payload <json>` and SDK helpers for each intent
+
+**Acceptance:** a stranger (signed and anonymous) sends `contact.message` and
+`list.subscribe` to an owner with a contacts-only inbox; both land in Requests, neither opens a
+chat, and a flood is stopped by proof-of-work and rate limits.
+
+### E09-T8 — Typed routing to apps
+
+- [ ] Inbox query by `type` / type prefix (the envelope `type` is already plaintext and signed),
+      so an app reads only its own messages and the chat tray never shows them
+- [ ] Clients route non-chat types to the installed app that declares them (EPIC-029 manifest);
+      unknown types keep the existing generic line
+- [ ] Per-type retention: app messages can be acked and dropped once the app has materialized
+      them into its files (e.g. subscribers into a list file)
+
+**Acceptance:** a board app drains `sys.app.notify` and its own `net.example.board.*` messages
+without them appearing in chat; chat drains exclude them.
+
+### E09-T9 — Shared-inbox identities
+
+A team needs one address (`sales@acme`, `support@acme`) whose conversations every member can
+read and answer — a CRM and a support desk cannot work from members' private histories.
+
+- [ ] A group identity (EPIC-005 T5) whose **encryption key** is sealed to each member and
+      rotated on membership change; senders encrypt once to the group key (unlike E09-T5
+      fan-out, which stays for group chat)
+- [ ] Conversation history lives as append files in the group identity's drive (E20-T11), so
+      members share it and it survives members leaving
+- [ ] Replies are signed by the member and marked "on behalf of" the group identity; recipients
+      see both
+- [ ] Email arriving through the bridge (EPIC-023) for the group lands in the same inbox
+
+**Acceptance:** a customer on relay A messages `sales@acme` on relay B; two members on
+different relays read the thread and one replies; a removed member cannot read later messages.
+
+### E09-T10 — Follow feeds
+
+Newsletters and updates for Poweur IDs should not need push fan-out from the owner. The post
+and feed formats, followers-only feeds, the relay subscription proxy and indexers are specified
+in [EPIC-032](EPIC-032-public-web-feeds-boards-indexers.md); this task delivers the follow
+mechanics they build on.
+
+- [ ] Convention for a feed folder (posts + `feed.json` index) published publicly or shared
+      with subscribers (paid tiers = subscriptions as renewing shares, EPIC-030)
+- [ ] Following = subscribing to that folder's change events (E20-T5) plus a local follow
+      list; the owner need not know public followers
+- [ ] `list.subscribe` (T7) remains for owners who want a subscriber list and for email
+      subscribers, who get pushed copies via EPIC-023; 1 → many push stays EPIC-030-T5
+- [ ] CLI `poweur follow|unfollow|feed`
+
+**Acceptance:** an owner publishes a post; followers on two relays receive it from the feed
+without the owner sending anything per follower.

@@ -55,10 +55,6 @@ export type SignInAction = (typeof SIGNIN_ACTIONS)[number];
 
 export const SCOPE_PROFILE_READ = "profile:read";
 export const SCOPE_MESSAGES_SEND = "messages:send";
-const SCOPE_DAV_RW = "dav:rw:";
-const SCOPE_DAV_READ = "dav:read:";
-/** Tree root a connected app may be granted space under. */
-export const APPS_ROOT = "apps";
 
 /** Where a relying party publishes its Sign-In metadata. */
 export const RP_METADATA_PATH = "/.well-known/poweur.json";
@@ -283,36 +279,14 @@ export function signInAppId(origin: string): string {
 // ── Scopes ───────────────────────────────────────────────────────────────────
 
 /**
- * Canonicalize one scope. `dav:` paths lose leading and trailing slashes, so
- * `dav:rw:/apps/x/` and `dav:rw:apps/x` are one scope with one signature.
+ * Canonicalize one scope. Storage v1's `dav:` path scopes are gone with
+ * WebDAV; app storage access returns as scoped drive handles (EPIC-020).
  */
 export function normalizeSignInScope(raw: string): string {
   const s = (raw ?? "").trim();
   if (!s) fail("empty scope");
   if (s === SCOPE_PROFILE_READ || s === SCOPE_MESSAGES_SEND) return s;
-  const prefix = s.startsWith(SCOPE_DAV_RW)
-    ? SCOPE_DAV_RW
-    : s.startsWith(SCOPE_DAV_READ)
-      ? SCOPE_DAV_READ
-      : "";
-  if (!prefix) fail(`unknown scope ${JSON.stringify(raw)}`);
-  const path = s.slice(prefix.length).replace(/^\/+/, "").replace(/\/+$/, "");
-  if (!path) fail(`${prefix} needs a path`);
-  for (const seg of path.split("/")) {
-    if (seg === "" || seg === "." || seg === "..") {
-      fail(`invalid path segment in ${JSON.stringify(raw)}`);
-    }
-  }
-  return prefix + path;
-}
-
-/** The tree path a `dav:` scope covers, or null for non-dav scopes. */
-export function signInScopePath(scope: string): { path: string; write: boolean } | null {
-  if (scope.startsWith(SCOPE_DAV_RW)) return { path: scope.slice(SCOPE_DAV_RW.length), write: true };
-  if (scope.startsWith(SCOPE_DAV_READ)) {
-    return { path: scope.slice(SCOPE_DAV_READ.length), write: false };
-  }
-  return null;
+  return fail(`unknown scope ${JSON.stringify(raw)}`);
 }
 
 /**
@@ -328,16 +302,6 @@ export function normalizeSignInScopes(scopes: string[] | undefined | null): stri
     if (!out.includes(n)) out.push(n);
   }
   return out.sort();
-}
-
-/** A `dav:` scope must stay under `apps/<appId>`. */
-export function checkSignInScopeNamespace(scope: string, appId: string): void {
-  const parsed = signInScopePath(scope);
-  if (!parsed) return;
-  const want = `${APPS_ROOT}/${appId}`;
-  if (parsed.path !== want && !parsed.path.startsWith(`${want}/`)) {
-    fail(`${JSON.stringify(scope)} is outside this app's namespace ${JSON.stringify(want)}`);
-  }
 }
 
 // ── Canonical strings ────────────────────────────────────────────────────────
@@ -471,8 +435,7 @@ export function validateSignInRequest(req: SignInRequest, nowMs = Date.now()): S
   if (n.response_uri && !sameOrigin(n.audience, n.response_uri)) {
     fail("response_uri must be same-origin with audience");
   }
-  const appId = signInAppId(n.audience);
-  for (const s of n.scopes ?? []) checkSignInScopeNamespace(s, appId);
+  signInAppId(n.audience);
   return n;
 }
 
@@ -654,19 +617,13 @@ export function signSignInRequest(
 
 /**
  * Render a scope as a sentence. Every scope a user approves must be shown this
- * way — "wants dav:rw:apps/net.example" tells a user nothing about the risk.
+ * way — "wants messages:send" tells a user nothing about the risk.
  */
 export function describeScope(scope: string, appName = ""): string {
   const who = appName || "This app";
   if (scope === SCOPE_PROFILE_READ) return `${who} can read your public profile (name, avatar).`;
   if (scope === SCOPE_MESSAGES_SEND) return `${who} can send messages from your identity.`;
-  const parsed = signInScopePath(scope);
-  if (!parsed) {
-    return `${who} requests an unrecognized permission (${scope}) — do not approve.`;
-  }
-  return parsed.write
-    ? `${who} can read and write files in /${parsed.path} in your home. Nothing outside that folder.`
-    : `${who} can read files in /${parsed.path} in your home. Nothing outside that folder, and it cannot write.`;
+  return `${who} requests an unrecognized permission (${scope}) — do not approve.`;
 }
 
 export function describeScopes(scopes: string[], appName = ""): string[] {
@@ -708,7 +665,7 @@ export function validateRelyingPartyMetadata(
   if (meta.app_id && meta.app_id !== appId) {
     fail(`app_id ${JSON.stringify(meta.app_id)} does not match the origin's namespace`);
   }
-  for (const s of meta.scopes ?? []) checkSignInScopeNamespace(normalizeSignInScope(s), appId);
+  for (const s of meta.scopes ?? []) normalizeSignInScope(s);
 }
 
 /**
@@ -1108,7 +1065,6 @@ export class SignInVerifier {
       fail("scopes are not in canonical form");
     }
     const appId = signInAppId(audience);
-    for (const s of scopes) checkSignInScopeNamespace(s, appId);
 
     validateWindow(resp.issued_at, resp.expires_at, now);
     const expiresAtMs = parseRfc3339(resp.expires_at, "expires_at");

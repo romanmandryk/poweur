@@ -30,7 +30,7 @@ func postAbuseReport(t *testing.T, ts serverURL, report idpkg.AbuseReport) *http
 // serverURL is the tiny slice of *httptest.Server these helpers need.
 type serverURL struct{ URL string }
 
-func signedReport(t *testing.T, reporter davTestIdentity, subject, reason string, ids []string, note string) idpkg.AbuseReport {
+func signedReport(t *testing.T, reporter hostedID, subject, reason string, ids []string, note string) idpkg.AbuseReport {
 	t.Helper()
 	report := idpkg.NewAbuseReport(reporter.name, subject, reason, ids, note)
 	if err := report.Sign(reporter.priv); err != nil {
@@ -40,9 +40,9 @@ func signedReport(t *testing.T, reporter davTestIdentity, subject, reason string
 }
 
 func TestAbuseReportRecordedForLocalSubject(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	spammer := registerDAVIdentity(t, server, ts, "spammer.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	spammer := registerTestIdentity(t, server, ts, "spammer.poweur.net")
 
 	report := signedReport(t, alice, spammer.name, idpkg.AbuseReasonSpam, []string{"m-1", "m-2"}, "twelve identical messages")
 	out := mustStatus(t, postAbuseReport(t, serverURL{ts.URL}, report), http.StatusAccepted, "abuse report")
@@ -63,10 +63,10 @@ func TestAbuseReportRecordedForLocalSubject(t *testing.T) {
 }
 
 func TestAbuseReportDedupPerReporterPerDay(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	spammer := registerDAVIdentity(t, server, ts, "spammer.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	spammer := registerTestIdentity(t, server, ts, "spammer.poweur.net")
 
 	first := signedReport(t, alice, spammer.name, idpkg.AbuseReasonSpam, nil, "again")
 	mustStatus(t, postAbuseReport(t, serverURL{ts.URL}, first), http.StatusAccepted, "first report")
@@ -89,10 +89,10 @@ func TestAbuseReportDedupPerReporterPerDay(t *testing.T) {
 }
 
 func TestAbuseReportRejections(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	mallory := registerDAVIdentity(t, server, ts, "mallory.poweur.net")
-	spammer := registerDAVIdentity(t, server, ts, "spammer.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	mallory := registerTestIdentity(t, server, ts, "mallory.poweur.net")
+	spammer := registerTestIdentity(t, server, ts, "spammer.poweur.net")
 
 	t.Run("unsigned", func(t *testing.T) {
 		report := idpkg.NewAbuseReport(alice.name, spammer.name, idpkg.AbuseReasonSpam, nil, "")
@@ -214,7 +214,7 @@ func TestSenderRelayKey(t *testing.T) {
 // The meter is off unless an operator turns it on, and a nil meter must never
 // be the reason a contact request fails.
 func TestMeterRequestRelayDisabledByDefault(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
+	server, ts := newTestRelay(t)
 	_ = ts
 	if server.requestRelayLimit != nil {
 		t.Fatal("no configured windows should leave the meter off")

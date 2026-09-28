@@ -1,7 +1,7 @@
 {
   "name": "@poweur/client",
-  "version": "0.1.16",
-  "description": "Poweur protocol client — identity, messaging, files, sync, shares and proof-of-work for browser, Node, Bun and Deno.",
+  "version": "0.1.22",
+  "description": "Poweur protocol client — identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -12,13 +12,11 @@
   "exports": {
     ".": "./dist/index.js",
     "./crypto": "./dist/crypto/index.js",
+    "./drive": "./dist/drive/index.js",
     "./canonical": "./dist/canonical.js",
     "./resolve": "./dist/resolve.js",
     "./identity": "./dist/identity.js",
     "./messages": "./dist/messages.js",
-    "./files": "./dist/files.js",
-    "./sync": "./dist/sync.js",
-    "./shares": "./dist/shares.js",
     "./contacts": "./dist/contacts.js",
     "./policy": "./dist/policy.js",
     "./keystore": "./dist/keystore.js",
@@ -60,7 +58,6 @@
     "identity",
     "ed25519",
     "e2ee",
-    "webdav",
     "messaging"
   ],
   "publishConfig": {

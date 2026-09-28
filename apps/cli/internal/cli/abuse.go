@@ -47,7 +47,7 @@ func runReport(args []string, stdout, stderr io.Writer) int {
 	}
 	subject := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 
-	cfg, identityValue, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	cfg, identityValue, priv, ok := loadIdentityKey(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -136,18 +136,13 @@ func runBlocksExport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, identityValue, priv, okID := loadIdentityForDAV(*useIdentity, stderr)
+	cfg, identityValue, priv, okID := loadIdentityKey(*useIdentity, stderr)
 	if !okID {
 		return 1
 	}
 	ctx := context.Background()
 	relayURL := cfg.RelayURL
-	tok, err := MintDAVToken(ctx, relayURL, identityValue, "", "dav:full", priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	token := tok.Token
+	token := priv
 	contacts, err := fetchContacts(ctx, relayURL, identityValue, token)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -165,7 +160,7 @@ func runBlocksExport(args []string, stdout, stderr io.Writer) int {
 	}
 	published := ""
 	if !*noPublish {
-		if err := davPutBytes(ctx, relayURL, identityValue, token, idpkg.BlocklistTreePath, raw); err != nil {
+		if err := writeSysFile(ctx, relayURL, identityValue, token, idpkg.BlocklistTreePath, raw); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -206,18 +201,13 @@ func runBlocksImport(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cfg, identityValue, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	cfg, identityValue, priv, ok := loadIdentityKey(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
 	ctx := context.Background()
 	relayURL := cfg.RelayURL
-	selfTok, err := MintDAVToken(ctx, relayURL, identityValue, "", "dav:full", priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	token := selfTok.Token
+	token := priv
 
 	raw, code := readBlocklistSource(ctx, fs, *file, *path, cfg, identityValue, priv, stderr)
 	if code != 0 {
@@ -312,12 +302,7 @@ func readBlocklistSource(ctx context.Context, fs *flag.FlagSet, file, path strin
 	if resolved, err := resolveRecipientRelayURL(ctx, publisher, cfg); err == nil && resolved != "" {
 		relayURL = resolved
 	}
-	tok, err := MintDAVToken(ctx, relayURL, identityValue, publisher, "dav:read", priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return nil, 1
-	}
-	raw, status, err := davGetBytes(ctx, relayURL, publisher, tok.Token, path)
+	raw, status, err := readSysFile(ctx, relayURL, publisher, priv, path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return nil, 1

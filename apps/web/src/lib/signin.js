@@ -6,8 +6,8 @@ import {
   validateSignInRequest,
 } from "@poweur/client";
 
-export const AUTH_LOG_PATH = "poweur-sys/private/logs/auth.log";
-export const CONNECTED_APPS_PATH = "poweur-sys/relay/connected-apps.json";
+export const AUTH_LOG_PATH = ".poweur/private/logs/auth.log";
+export const CONNECTED_APPS_PATH = ".poweur/relay/connected-apps.json";
 const AUTH_LOG_MAX_BYTES = 256 * 1024;
 
 export function decodeAuthInput(input) {
@@ -79,7 +79,7 @@ export async function signBrowserApproval(request, identity, signer) {
   return { response, encoded: encodeSignInResponse(response) };
 }
 
-export async function appendBrowserConsent(dav, response, metadata) {
+export async function appendBrowserConsent(files, response, metadata) {
   const appId = metadata.app_id || new URL(response.audience).hostname.split(".").reverse().join(".");
   const record = {
     at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
@@ -94,14 +94,21 @@ export async function appendBrowserConsent(dav, response, metadata) {
     signer: "web",
     ...(response.statement ? { statement: response.statement } : {}),
   };
-  const existing = await dav.readOptional(AUTH_LOG_PATH) ?? "";
+  let existing;
+  try {
+    existing = await files.readOptional(AUTH_LOG_PATH) ?? "";
+  } catch (error) {
+    // The log is end-to-end encrypted and waits for the new storage (EPIC-020);
+    // the approval itself does not depend on it.
+    if (error?.code === "unsupported") return record;
+    throw error;
+  }
   let lines = existing.trimEnd() ? existing.trimEnd().split("\n") : [];
   lines.push(JSON.stringify(record));
   while (new TextEncoder().encode(lines.join("\n") + "\n").length > AUTH_LOG_MAX_BYTES && lines.length > 1) {
     lines.shift();
   }
-  try { await dav.mkdir("poweur-sys/private/logs"); } catch { /* already exists */ }
-  await dav.write(AUTH_LOG_PATH, lines.join("\n") + "\n");
+  await files.write(AUTH_LOG_PATH, lines.join("\n") + "\n");
   return record;
 }
 
@@ -143,16 +150,22 @@ export async function deliverBrowserApproval(request, encoded, fetchImpl = globa
   return { delivered: true, resumeUri };
 }
 
-export async function readConnectedApps(dav) {
-  const raw = await dav.readOptional(CONNECTED_APPS_PATH);
+export async function readConnectedApps(files) {
+  const raw = await files.readOptional(CONNECTED_APPS_PATH);
   if (!raw) return { version: 1, apps: [] };
   const doc = JSON.parse(raw);
   if (doc.version !== 1 || !Array.isArray(doc.apps)) throw new Error("connected-apps.json has an unsupported shape");
   return doc;
 }
 
-export async function readConsentLog(dav) {
-  const raw = await dav.readOptional(AUTH_LOG_PATH);
+export async function readConsentLog(files) {
+  let raw;
+  try {
+    raw = await files.readOptional(AUTH_LOG_PATH);
+  } catch (error) {
+    if (error?.code === "unsupported") return [];
+    throw error;
+  }
   if (!raw) return [];
   const records = [];
   for (const line of raw.split("\n")) {
@@ -163,11 +176,11 @@ export async function readConsentLog(dav) {
   return records;
 }
 
-export async function revokeConnectedApp(dav, appId, now = new Date()) {
-  const doc = await readConnectedApps(dav);
+export async function revokeConnectedApp(files, appId, now = new Date()) {
+  const doc = await readConnectedApps(files);
   const app = doc.apps.find(entry => entry.app_id === appId);
   if (!app) return false;
   app.revoked_at = now.toISOString().replace(/\.\d{3}Z$/, "Z");
-  await dav.writeJson(CONNECTED_APPS_PATH, doc);
+  await files.writeJson(CONNECTED_APPS_PATH, doc);
   return true;
 }

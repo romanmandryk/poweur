@@ -5,7 +5,6 @@ package integration_test
 
 import (
 	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -63,66 +62,6 @@ func TestINT_CONTACTS_01_RequestAcceptChat(t *testing.T) {
 	stdout, _ = runCLI(t, aliceHome, "inbox")
 	if !strings.Contains(stdout, "we are contacts now") {
 		t.Fatalf("alice inbox: %s", stdout)
-	}
-}
-
-// TestINT_CONTACTS_02: key pinning — a contact whose resolved key no longer
-// matches the pin is refused at send time; --accept-new-key re-pins.
-func TestINT_CONTACTS_02_KeyPinning(t *testing.T) {
-	zone := newZone(t)
-	ts, addr := newHostedRelay(t, zone, t.TempDir())
-	defer ts.Close()
-	relayURL := ts.URL
-	zone.SetHost("pinalice.poweur.net", addr)
-	zone.SetHost("pinbob.poweur.net", addr)
-
-	clipkg.ConfigureIdentityResolver("http", true, addr)
-	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
-
-	aliceHome := t.TempDir()
-	bobHome := t.TempDir()
-	runCLI(t, aliceHome, "identity", "create", "pinalice.poweur.net", "--hosted", "--relay", relayURL, "--json")
-	runCLI(t, bobHome, "identity", "create", "pinbob.poweur.net", "--hosted", "--relay", relayURL, "--json")
-
-	// Alice adds bob — pinning his current key — and messaging works.
-	runCLI(t, aliceHome, "contacts", "add", "pinbob.poweur.net")
-	runCLI(t, aliceHome, "send", "pinbob.poweur.net", "pinned and fine")
-
-	// Simulate impersonation: overwrite the pin with a wrong key (as a
-	// malicious relay swapping bob's published key would appear).
-	tok := mintTokenViaCLI(t, aliceHome, "--use-identity", "pinalice.poweur.net")
-	contactsURL := relayURL + "/dav/pinalice.poweur.net/poweur-sys/relay/contacts.json"
-	resp := davDo(t, http.MethodGet, contactsURL, tok, nil, nil)
-	var contacts struct {
-		Version  int `json:"version"`
-		Contacts []map[string]any `json:"contacts"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&contacts); err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if len(contacts.Contacts) != 1 {
-		t.Fatalf("contacts: %+v", contacts)
-	}
-	// A valid ed25519 key that is not bob's (all-zeros is length-valid).
-	contacts.Contacts[0]["pinned_key"] = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	raw, _ := json.Marshal(contacts)
-	resp = davDo(t, http.MethodPut, contactsURL, tok, raw, nil)
-	resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		t.Fatalf("tamper put: %d", resp.StatusCode)
-	}
-
-	// Send must now refuse: pin mismatch, no rotation statement.
-	if code := runCLICode(t, aliceHome, "send", "pinbob.poweur.net", "should not go"); code == 0 {
-		t.Fatal("send must refuse on pinned-key mismatch")
-	}
-
-	// Explicit override re-pins and sends.
-	runCLI(t, aliceHome, "send", "pinbob.poweur.net", "trusted again", "--accept-new-key")
-	stdout, _ := runCLI(t, aliceHome, "contacts", "ls", "--json")
-	if strings.Contains(stdout, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
-		t.Fatalf("pin must have been replaced by bob's real key: %s", stdout)
 	}
 }
 
@@ -203,5 +142,58 @@ func TestINT_CONTACTS_06_NoAutoRequestWithoutConsent(t *testing.T) {
 	stdout, _ = runCLI(t, aliceHome, "requests")
 	if strings.Contains(stdout, "nrbob.poweur.net") {
 		t.Fatalf("no request should have been filed: %s", stdout)
+	}
+}
+
+// TestINT_CONTACTS_02: key pinning — a contact whose resolved key no longer
+// matches the pin is refused at send time; --accept-new-key re-pins.
+func TestINT_CONTACTS_02_KeyPinning(t *testing.T) {
+	zone := newZone(t)
+	dataDir := t.TempDir()
+	ts, addr := newHostedRelay(t, zone, dataDir)
+	defer ts.Close()
+	relayURL := ts.URL
+	zone.SetHost("pinalice.poweur.net", addr)
+	zone.SetHost("pinbob.poweur.net", addr)
+
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	runCLI(t, aliceHome, "identity", "create", "pinalice.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, bobHome, "identity", "create", "pinbob.poweur.net", "--hosted", "--relay", relayURL, "--json")
+
+	// Alice adds bob — pinning his current key — and messaging works.
+	runCLI(t, aliceHome, "contacts", "add", "pinbob.poweur.net")
+	runCLI(t, aliceHome, "send", "pinbob.poweur.net", "pinned and fine")
+
+	// Simulate impersonation: overwrite the pin with a wrong key on the
+	// relay's disk, as a malicious relay swapping bob's key would appear.
+	var contacts struct {
+		Version  int              `json:"version"`
+		Contacts []map[string]any `json:"contacts"`
+	}
+	if err := json.Unmarshal(readRelaySysFile(t, relayURL, aliceHome, "pinalice.poweur.net", ".poweur/relay/contacts.json"), &contacts); err != nil {
+		t.Fatal(err)
+	}
+	if len(contacts.Contacts) != 1 {
+		t.Fatalf("contacts: %+v", contacts)
+	}
+	// A valid ed25519 key that is not bob's (all-zeros is length-valid).
+	contacts.Contacts[0]["pinned_key"] = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	raw, _ := json.Marshal(contacts)
+	writeRelaySysFile(t, relayURL, aliceHome, "pinalice.poweur.net", ".poweur/relay/contacts.json", raw)
+
+	// Send must now refuse: pin mismatch, no rotation statement.
+	if code := runCLICode(t, aliceHome, "send", "pinbob.poweur.net", "should not go"); code == 0 {
+		t.Fatal("send must refuse on pinned-key mismatch")
+	}
+
+	// Explicit override re-pins and sends.
+	runCLI(t, aliceHome, "send", "pinbob.poweur.net", "trusted again", "--accept-new-key")
+	stdout, _ := runCLI(t, aliceHome, "contacts", "ls", "--json")
+	if strings.Contains(stdout, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") {
+		t.Fatalf("pin must have been replaced by bob's real key: %s", stdout)
 	}
 }

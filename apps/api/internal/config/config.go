@@ -51,7 +51,11 @@ const (
 	// EPIC-003 storage defaults: 5 GiB per identity, 2 GiB max single file.
 	DefaultMaxIdentityBytes = int64(5) << 30
 	DefaultMaxFileBytes     = int64(2) << 30
-	DefaultStorageProvider  = "relay-fs"
+	// StorageFS keeps drive objects on the POWEUR_DATA disk. StorageS3 keeps
+	// them in an S3-compatible bucket. relay-fs was the removed v1 backend.
+	StorageFS              = "fs"
+	StorageS3              = "s3"
+	DefaultStorageProvider = StorageFS
 )
 
 // RateLimits configures per-sender token-bucket caps. Each window resets on
@@ -158,13 +162,52 @@ type Config struct {
 	QuotaContact string
 	// MaxFileBytes caps a single uploaded file (0 = unlimited).
 	MaxFileBytes int64
-	// StorageProvider selects the file-body backend (E03-T8). v1: "relay-fs".
+	// StorageProvider selects the drive object store: "fs" or "s3".
+	// Filesystem objects live under POWEUR_DATA. An empty data directory with
+	// "fs" is the memory-only relay and has no durable drive.
 	StorageProvider string
+	// S3Endpoint is host:port, or an http(s) URL whose scheme sets S3Secure.
+	S3Endpoint string
+	S3Bucket   string
+	// S3Prefix is prepended to every object key. Empty stores drives/ at the
+	// bucket root.
+	S3Prefix       string
+	S3Region       string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3SessionToken string
+	// S3Secure uses TLS. A URL scheme in S3Endpoint overrides this.
+	S3Secure bool
+	// S3Presign lets clients upload and download chunks directly. Off means
+	// those bytes go through the relay; conditional writes are still required.
+	S3Presign bool
 	// OAuthBridgeURL is the issuer of the OAuth/OIDC bridge this operator
 	// runs or recommends (EPIC-022), e.g. https://oauth.poweur.org. Optional
 	// and secret-free: hosted identities advertise it for IndieAuth discovery
 	// and in their capabilities; the relay never talks to it.
 	OAuthBridgeURL string
+}
+
+func (c Config) validateStorage() error {
+	switch strings.ToLower(strings.TrimSpace(c.StorageProvider)) {
+	case "", StorageFS:
+		if c.S3Endpoint != "" || c.S3Bucket != "" || c.S3Prefix != "" || c.S3AccessKey != "" || c.S3SecretKey != "" || c.S3SessionToken != "" {
+			return fmt.Errorf("S3_ENDPOINT, S3_BUCKET, S3_PREFIX and S3 credentials require STORAGE_PROVIDER=s3")
+		}
+		return nil
+	case "relay-fs":
+		return fmt.Errorf("invalid STORAGE_PROVIDER: relay-fs was removed; use fs or s3")
+	case StorageS3:
+		if strings.TrimSpace(c.S3Endpoint) == "" || strings.TrimSpace(c.S3Bucket) == "" {
+			return fmt.Errorf("STORAGE_PROVIDER=s3 requires S3_ENDPOINT and S3_BUCKET")
+		}
+		if (strings.TrimSpace(c.S3AccessKey) == "") != (strings.TrimSpace(c.S3SecretKey) == "") {
+			return fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY must be set together")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid STORAGE_PROVIDER: %s (use fs|s3)", c.StorageProvider)
+	}
 }
 
 func (c Config) Validate() error {
@@ -193,10 +236,8 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid REGISTRATION_GATE: %s (use open|invite|pow)", c.RegistrationGate)
 	}
-	switch strings.ToLower(strings.TrimSpace(c.StorageProvider)) {
-	case "", "relay-fs":
-	default:
-		return fmt.Errorf("invalid STORAGE_PROVIDER: %s (v1 supports relay-fs)", c.StorageProvider)
+	if err := c.validateStorage(); err != nil {
+		return err
 	}
 	switch c.NamePolicy.BlockMode {
 	case "", idpkg.BlockModeSubstring, idpkg.BlockModeExact:
@@ -276,6 +317,15 @@ func FromEnv() Config {
 		StorageQuotasFile:       storageQuotasFileFromEnv(),
 		QuotaContact:            strings.ToLower(strings.TrimSpace(os.Getenv("QUOTA_CONTACT"))),
 		StorageProvider:         strings.ToLower(getenv("STORAGE_PROVIDER", DefaultStorageProvider)),
+		S3Endpoint:              strings.TrimSpace(os.Getenv("S3_ENDPOINT")),
+		S3Bucket:                strings.TrimSpace(os.Getenv("S3_BUCKET")),
+		S3Prefix:                strings.Trim(strings.TrimSpace(os.Getenv("S3_PREFIX")), "/"),
+		S3Region:                getenv("S3_REGION", "us-east-1"),
+		S3AccessKey:             os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:             os.Getenv("S3_SECRET_KEY"),
+		S3SessionToken:          os.Getenv("S3_SESSION_TOKEN"),
+		S3Secure:                getenvBoolDefault("S3_SECURE", true),
+		S3Presign:               getenvBoolDefault("S3_PRESIGN", true),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),

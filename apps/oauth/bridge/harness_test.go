@@ -147,7 +147,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 			return identity.Capabilities{Endpoints: map[string]string{"web_signer": "https://" + id + "/app/"}}, nil
 		},
 		FetchProfile: func(_ context.Context, id string) (identity.Profile, error) {
-			return identity.Profile{Version: 1, DisplayName: "Display " + id, Avatar: "public/avatar.png"}, nil
+			return identity.Profile{Version: 1, DisplayName: "Display " + id, Avatar: "avatar.png"}, nil
 		},
 		FetchClientMetadata: func(_ context.Context, id string) ([]byte, error) {
 			doc, ok := h.metadata[id]

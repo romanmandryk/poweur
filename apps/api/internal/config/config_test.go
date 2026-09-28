@@ -119,3 +119,59 @@ func TestStorageQuotaSettingsFromEnv(t *testing.T) {
 		t.Fatalf("no data dir, no file: %q", got)
 	}
 }
+
+func TestStorageProviderConfig(t *testing.T) {
+	base := Config{ListenAddr: ":8080", RelayAddress: "r.test"}
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	rejected := base
+	rejected.StorageProvider = "relay-fs"
+	if err := rejected.Validate(); err == nil {
+		t.Fatal("relay-fs accepted")
+	}
+	partial := base
+	partial.StorageProvider = StorageS3
+	partial.S3Endpoint = "127.0.0.1:9000"
+	if err := partial.Validate(); err == nil {
+		t.Fatal("s3 without bucket accepted")
+	}
+	partial.S3Bucket = "bucket"
+	partial.S3AccessKey = "only-one"
+	if err := partial.Validate(); err == nil {
+		t.Fatal("partial credentials accepted")
+	}
+	withBucket := partial
+	withBucket.S3AccessKey = ""
+	if err := withBucket.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	fsWithS3 := base
+	fsWithS3.StorageProvider = StorageFS
+	fsWithS3.S3Bucket = "bucket"
+	if err := fsWithS3.Validate(); err == nil {
+		t.Fatal("s3 settings on fs accepted")
+	}
+
+	t.Setenv("RELAY_ADDRESS", "relay.test")
+	t.Setenv("LISTEN_ADDR", ":8080")
+	t.Setenv("STORAGE_PROVIDER", "s3")
+	t.Setenv("S3_ENDPOINT", "http://127.0.0.1:9000")
+	t.Setenv("S3_BUCKET", "poweur")
+	t.Setenv("S3_PREFIX", "/tenant/")
+	t.Setenv("S3_ACCESS_KEY", "access")
+	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("S3_SECURE", "0")
+	t.Setenv("S3_PRESIGN", "off")
+	t.Setenv("S3_REGION", "auto")
+	cfg := FromEnv()
+	if cfg.StorageProvider != "s3" || cfg.S3Endpoint != "http://127.0.0.1:9000" || cfg.S3Bucket != "poweur" || cfg.S3Prefix != "tenant" {
+		t.Fatalf("s3 config: %+v", cfg)
+	}
+	if cfg.S3Secure || cfg.S3Presign || cfg.S3Region != "auto" || cfg.S3AccessKey != "access" {
+		t.Fatalf("s3 flags: %+v", cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -2,17 +2,20 @@ package storage_test
 
 import (
 	"crypto/ed25519"
-	"path/filepath"
 	"testing"
 	"time"
 
 	idpkg "github.com/poweur/identity"
 
+	"github.com/poweur/api/internal/drive/provider/fs"
 	"github.com/poweur/api/internal/storage"
 )
 
 func TestIdentityStoreDurableRestart(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := fs.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -54,9 +57,8 @@ func TestIdentityStoreDurableRestart(t *testing.T) {
 	if got.PublicKey != ident.PublicKey {
 		t.Fatalf("key %s vs %s", got.PublicKey, ident.PublicKey)
 	}
-	path := filepath.Join(dir, "identities", "alice__poweur__net", "poweur-sys", "public", "id.json")
-	if _, err := filepath.Glob(path); err != nil {
-		t.Fatal(err)
+	if _, err := dir.Get(t.Context(), "relay/identities/alice__poweur__net.json", nil); err != nil {
+		t.Fatalf("identity index object: %v", err)
 	}
 }
 

@@ -60,7 +60,6 @@ const wrapKeysNative = wrapKeysNativeJs as (
 const wrapKeysWithPRF = wrapKeysWithPRFJs as (prfOutput: unknown, signingJWK: unknown, encJWK: unknown, seed?: Seed) => Promise<unknown>;
 import { generateSeedIdentityJwks, keyBytesFromJwks, publicKeyFromJwk, toBase64url } from "../lib/vault.js";
 import { identityAppUrl, type CustodyChoice } from "../lib/claim";
-import { pendingShareClaim } from "../lib/share-claim";
 import { useData } from "../state/data";
 import { useRoute, type SubPageId } from "../state/route";
 import { afterUnlock, lockIdentity, refreshSession, switchIdentity, useSession } from "../state/session";
@@ -334,8 +333,7 @@ export async function handOffToIdentityOrigin(identity: string): Promise<boolean
   const info = await resolveMode();
   if (info.mode !== "launcher") return false;
 
-  const shareClaim = pendingShareClaim();
-  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record, ...(shareClaim ? { share_claim: shareClaim } : {}) })));
+  const payload = toBase64url(new TextEncoder().encode(JSON.stringify({ identity, record })));
   // The record travels in the fragment. Leaving it on this origin made the
   // next visit to the public launcher offer to open that identity.
   removeIdentity(identity);

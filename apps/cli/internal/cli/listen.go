@@ -447,10 +447,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			rendered = describeAuthPrompt(msg.Sender, display)
 		}
 		if decrypted && idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeChatAttachment {
-			if ref, err := idpkg.ParseAttachmentMetadata(msg.Metadata); err == nil {
-				rendered = fmt.Sprintf("attachment %s (%s, %d bytes) — poweur attachment get %s %s --sha256 %s",
-					ref.Name, ref.MIME, ref.Size, ref.Owner, ref.Path, ref.SHA256)
-			}
+			rendered = fmt.Sprintf("attachment: %s (attachments return with the new storage)", display)
 		}
 		fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
 			rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
@@ -490,11 +487,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 
 func loadInboxPolicyForReceipts(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey) (idpkg.InboxPolicy, bool) {
 	policy := idpkg.InboxPolicy{Version: 1, Mode: idpkg.DefaultInboxMode}
-	token, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, identityValue, "dav:read", priv)
-	if err != nil {
-		return policy, false
-	}
-	raw, status, err := davGetBytes(ctx, cfg.RelayURL, identityValue, token.Token, inboxPolicyTreePath)
+	raw, status, err := readSysFile(ctx, cfg.RelayURL, identityValue, priv, inboxPolicyTreePath)
 	if err != nil {
 		return policy, false
 	}

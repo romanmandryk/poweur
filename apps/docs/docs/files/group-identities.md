@@ -11,7 +11,7 @@ ordinary hosted identity with its own key pair, registered like any other — an
 document in its own tree makes it a group:
 
 ```
-poweur-sys/relay/groups/self.json
+.poweur/relay/group.json
 ```
 
 That is the whole idea. Because the group *is* an identity, it can be named anywhere an
@@ -19,14 +19,14 @@ identity can: as a share audience today (EPIC-005 E05-T5), and as a message reci
 EPIC-009 lands group messaging on top of the membership and addressing model on this page.
 
 This complements the **owner-local** groups described in
-[Sharing & grants](sharing.md#groups), which are a naming convenience inside one owner's
+[Sharing & grants](storage-v2.md#shares-links-and-worked-flows), which are a naming convenience inside one owner's
 grants. The two are the same document format; they differ in where the document lives, who
 signs it, and who can name it.
 
 |  | Owner-local group | Group identity |
 |---|---|---|
 | Name | a bare word, `team` | a Poweur ID, `crew.acme.poweur.net` |
-| Document | `poweur-sys/relay/groups/<name>.json` in the **owner's** tree | `poweur-sys/relay/groups/self.json` in the **group's** tree |
+| Document | `.poweur/relay/groups/<name>.json` in the **owner's** tree | `.poweur/relay/group.json` in the **group's** tree |
 | Signed by | the owner's identity key | the **group's own** identity key |
 | Meaningful to | that owner's grants only | anyone — it is an address |
 | Extra fields | — | `admins`, `epoch` |
@@ -153,7 +153,7 @@ follow-up, not a v1 shortcut.
 ## Authority: who may change a group
 
 In v1 the enforceable authority is **possession of the group's identity key**. The document
-lives in the group's own tree, so writing it needs a DAV token only that key can mint, and
+lives in the group's own tree, so writing it needs owner authentication with that key, and
 it is signed with that key so the relay verifies it exactly as it verifies any other
 identity's document. No new relay-side authorization rule was introduced — a group is
 administered the way an identity administers itself.
@@ -222,7 +222,7 @@ Owner-local groups keep their own verbs — `poweur share group set|ls|remove` �
 - 1000 members and 1000 admins per group; 100 audience entries per grant; 64 KB per
   document (shared with grants).
 - Group membership is visible to the **relay hosting the group** — it must be, to enforce —
-  and to anyone holding a DAV token for the group's own tree. It is not exposed to other
+  and to anyone holding owner credentials for the group. It is not exposed to other
   users, and there is no endpoint that answers "is X in this group?"; that omission is
   deliberate and is the same reason cross-relay resolution is deferred.
 - A grant naming a group leaks the group's *name* to whoever can read the grant, which in

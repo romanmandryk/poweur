@@ -68,7 +68,7 @@ func TestKeystoreStore_PutReplacesByEnrollmentID(t *testing.T) {
 // Enrollments must outlive a relay restart, or "clear site data" recovery is
 // only as durable as the process.
 func TestKeystoreStore_SurvivesReopen(t *testing.T) {
-	dir := t.TempDir()
+	dir := objectsAt(t)
 	s, err := OpenKeystoreStore(dir)
 	if err != nil {
 		t.Fatal(err)

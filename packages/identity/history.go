@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -17,15 +18,15 @@ import (
 // expects a messaging app to remember therefore has to be written down by the
 // client, and this file is the format it is written in.
 //
-// It lives in the owner-only zone:
+// It lives in the owner-only, end-to-end encrypted zone `.poweur/private/`.
+// The record format below is kept; the storage v1 layout (one file per
+// message in month shards, HistoryPath) is replaced by one append file per
+// conversation in storage v2 (EPIC-020 E20-T11).
 //
-//	poweur-sys/private/messages/<YYYY-MM>/<sortkey>-<id>.json  sealed records
-//	poweur-sys/private/messages/read-state.json                sealed read marks
+// Three properties the format was chosen for:
 //
-// Three properties the layout is chosen for:
-//
-//  1. **Sealed.** `poweur-sys/private` is already "the relay stores but must
-//     not read" by contract; sealing the bytes to the owner's own X25519 key
+//  1. **Sealed.** `.poweur/private` is "the relay stores but cannot read";
+//     sealing the bytes to the owner's own X25519 key
 //     makes that a fact rather than a promise. Every identity has that key —
 //     it is the one messages are already encrypted to — so history needs no
 //     new key custody, and any enrolled device can read it.
@@ -38,11 +39,8 @@ import (
 //  3. **Sharded by month.** A flat directory is a PROPFIND that grows without
 //     bound; the shard keeps a listing proportional to recent traffic.
 const (
-	HistoryDir           = SysPrivateDir + "/messages"
-	HistoryReadStatePath = HistoryDir + "/read-state.json"
-
-	// SysPrivateDir is the owner-only zone (mirrors the relay's files.SysPrivate).
-	SysPrivateDir = "poweur-sys/private"
+	HistoryDir           = ".poweur/private/messages"
+	HistoryReadStatePath = ".poweur/private/read-state.json"
 
 	// HistoryVersion is the schema version of both documents below.
 	HistoryVersion = 1
@@ -197,6 +195,17 @@ func HistoryFileName(timestamp, id string) string {
 	}
 	return key + "-" + safeIDSegment(id) + ".json"
 }
+
+// HistoryPeerHash names a conversation without revealing the peer. Group
+// conversations use the group identity as the peer. Anonymous mail shares
+// AnonymousPeer.
+func HistoryPeerHash(peer string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(peer))))
+	return hex.EncodeToString(sum[:])
+}
+
+// HistoryLogName is the append file for one conversation.
+func HistoryLogName(peer string) string { return HistoryPeerHash(peer) + ".jsonl" }
 
 // HistoryPath is the full tree path for one record.
 func HistoryPath(timestamp, id string) string {

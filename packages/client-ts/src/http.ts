@@ -48,6 +48,8 @@ export interface RequestOptions {
   allowStatus?: number[];
   /** Caller's abort signal, honoured alongside the client's own timeout. */
   signal?: AbortSignal;
+  /** `error` refuses redirects (presigned uploads must not follow one). */
+  redirect?: RequestRedirect;
   /**
    * A long-lived response (the push stream) opts out of the request timeout —
    * a stream that is *supposed* to stay open all day must not be killed after
@@ -95,10 +97,12 @@ export class RelayClient {
       }
     }
     try {
-      return await this.#fetch(this.relayUrl + options.path, {
+      const url = /^https?:\/\//.test(options.path) ? options.path : this.relayUrl + options.path;
+      return await this.#fetch(url, {
         method: options.method,
         headers,
         ...(body !== undefined ? { body } : {}),
+        redirect: options.redirect,
         signal: controller.signal,
       });
     } finally {

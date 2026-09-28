@@ -136,7 +136,7 @@ function ConnectedApps() {
     let live = true;
     void (async () => {
       try {
-        const dav = await requireClient()?.dav();
+        const dav = requireClient()?.system();
         const [doc, log] = await Promise.all([readConnectedApps(dav), readConsentLog(dav)]);
         if (!live || activeIdentity() !== identity) return;
         const apps = [...(doc.apps ?? [])].sort((a: any, b: any) => String(a.app_id).localeCompare(String(b.app_id)));
@@ -281,7 +281,7 @@ export async function openKeysAndDevicesPanel() {
   // the registry is who is using it. Losing it costs the section, not the panel.
   let registry: any[] | null;
   try {
-    registry = (await (await client.dav()).devices()).devices ?? [];
+    registry = (await client.devices().list()).devices ?? [];
   } catch {
     registry = null;
   }
@@ -332,19 +332,15 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
   const revokeDevice = async (deviceId: string) => {
     const confirmed = await askConfirm({
       title: "Revoke device",
-      message: "Revoke this device? Its sessions, tokens and app passwords stop working.",
+      message: "Revoke this device? Its sessions stop working.",
       confirmLabel: "Revoke",
     });
     if (confirmed) {
       setLoading(true, "Revoking device…");
       try {
-        const result = await (await activeClient().dav()).revokeDevice(deviceId);
+        const result = await activeClient().devices().revoke(deviceId);
         setLoading(false);
-        toast(
-          `Revoked: ${result.sessions_revoked} session(s), ${result.dav_tokens_revoked} token(s), ${result.app_passwords_revoked} app password(s)`,
-          "success",
-          5000,
-        );
+        toast(`Revoked: ${result.sessions_revoked} session(s)`, "success", 5000);
       } catch (error) {
         setLoading(false);
         toast(errorMessage(error), "error", 8000);

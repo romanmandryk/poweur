@@ -32,6 +32,11 @@ import {
  * implementations verifying each other.
  */
 export const MSG_TYPE_CHAT_TEXT = "chat.text";
+/**
+ * A message that references a file (identity.MsgTypeChatAttachment). Storage
+ * v2 carries a sealed reference in the encrypted payload (EPIC-020 E20-T11).
+ */
+export const MSG_TYPE_CHAT_ATTACHMENT = "chat.attachment";
 
 /** The reserved platform namespace. */
 export const SYS_PREFIX = "sys.";

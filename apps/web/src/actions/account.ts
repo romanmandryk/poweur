@@ -3,6 +3,7 @@
  * Loaded once per identity, forced after a save (from app.js).
  */
 import { clientFor } from "../lib/client.js";
+import { validAvatarName } from "@poweur/client";
 import { blobToDataUrl, contentTag, extensionFor } from "../lib/avatar-image";
 import { primeProfile } from "../lib/profiles.js";
 import { relayUrlFor } from "../lib/storage.js";
@@ -70,12 +71,10 @@ export interface ProfileDraft {
 }
 
 /**
- * Uploaded avatars live in their own folder under the identity's /public. `/pub/`
- * serves a /public folder only once it carries a web-public marker, so this one
- * is marked — and nothing else in /public becomes web-visible because of it.
+ * Uploaded avatars are image files in the identity's `.poweur/public/`, served
+ * at `/.well-known/poweur/<name>`; the profile names the file.
  */
-export const AVATAR_DIR = "public/avatars";
-const WEB_PUBLIC_MARKER = ".poweur-web-public";
+export const AVATAR_DIR = ".poweur/public";
 
 /** Upload the photo (if one was picked) and write the profile. */
 export async function saveProfile(draft: ProfileDraft, onStatus: (text: string) => void = () => {}) {
@@ -88,13 +87,10 @@ export async function saveProfile(draft: ProfileDraft, onStatus: (text: string) 
   let avatarDataUrl: string | null = null;
   if (draft.avatarFile) {
     onStatus("Uploading photo…");
-    const dav = await client.dav();
     // A content-named file: a new photo is a new URL, never a stale cached one.
-    const path = `${AVATAR_DIR}/avatar-${await contentTag(draft.avatarFile)}.${extensionFor(draft.avatarFile.type)}`;
-    await dav.mkdir(AVATAR_DIR).catch(() => {}); // already there
-    await dav.write(`${AVATAR_DIR}/${WEB_PUBLIC_MARKER}`, "");
-    await dav.write(path, draft.avatarFile);
-    avatarPath = path;
+    const name = `avatar-${await contentTag(draft.avatarFile)}.${extensionFor(draft.avatarFile.type)}`;
+    await client.system().write(`${AVATAR_DIR}/${name}`, new Uint8Array(await draft.avatarFile.arrayBuffer()));
+    avatarPath = name;
     avatarDataUrl = await blobToDataUrl(draft.avatarFile).catch(() => null);
   }
   onStatus("Saving…");
@@ -109,11 +105,11 @@ export async function saveProfile(draft: ProfileDraft, onStatus: (text: string) 
   // Every circle of ours shows the new photo at once, on every screen.
   if (saved.avatar && avatarDataUrl) saveLocalAvatar(identity, saved.avatar, avatarDataUrl);
   else if (!saved.avatar) forgetAvatar(identity);
-  // A replaced or removed upload is not left behind in /public.
-  if (previous && previous !== saved.avatar && previous.startsWith(`${AVATAR_DIR}/`)) {
+  // A replaced or removed upload is not left behind in .poweur/public.
+  if (previous && previous !== saved.avatar && validAvatarName(previous)) {
     void client
-      .dav()
-      .then((dav: any) => dav.remove(previous))
+      .system()
+      .remove(`${AVATAR_DIR}/${previous}`)
       .catch(() => {});
   }
   // Every card that shows us should show the new name immediately.

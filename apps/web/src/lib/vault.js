@@ -176,10 +176,13 @@ export class WebCryptoSigner {
   }
 
   async sign(canonical, encoding = "base64url") {
-    const signature = new Uint8Array(
-      await crypto.subtle.sign({ name: "Ed25519" }, await this.#cryptoKey(), enc.encode(canonical)),
-    );
+    const signature = await this.signBytes(enc.encode(canonical));
     return encoding === "base64std" ? toBase64Std(signature) : toBase64url(signature);
+  }
+
+  /** Drive manifests are binary, so they cannot go through the UTF-8 string signer. */
+  async signBytes(data) {
+    return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, await this.#cryptoKey(), data));
   }
 }
 

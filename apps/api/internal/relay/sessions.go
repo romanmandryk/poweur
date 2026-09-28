@@ -100,6 +100,12 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if fp := strings.TrimSpace(req.DeviceFingerprint); fp != "" {
 		obs.Fingerprint = fp
 	}
+	// A revoked device may not quietly re-arm itself under the same
+	// fingerprint; it has to re-enrol as a new device the owner can see.
+	if s.deviceRevoked(r.Context(), req.Identity, obs.Fingerprint) {
+		writeError(w, http.StatusForbidden, "device_revoked", "this device has been revoked by the owner")
+		return
+	}
 
 	session := storage.Session{
 		ID:                sessionID,

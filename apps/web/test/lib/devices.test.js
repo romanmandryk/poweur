@@ -57,17 +57,15 @@ describe("deviceIcon", () => {
 });
 
 describe("describeDevice", () => {
-  it("summarises kind, last seen, staleness and credentials", () => {
+  it("summarises kind, last seen and staleness", () => {
     const line = describeDevice({
       id: "dev_aaaaaaaaaaaaaaaa",
       kind: "phone",
       last_seen: ago(HOUR),
       synced_at: ago(3 * DAY),
-      app_passwords: ["phone-dav"],
     }, NOW);
     expect(line).toContain("phone");
     expect(line).toContain("synced 3 days ago");
-    expect(line).toContain("1 app password");
   });
 
   it("says so plainly when the relay has seen nothing", () => {
@@ -75,13 +73,4 @@ describe("describeDevice", () => {
       .toBe("unknown · never seen · never synced");
   });
 
-  it("pluralises app passwords", () => {
-    expect(describeDevice({ app_passwords: ["a", "b"] }, NOW)).toContain("2 app passwords");
-  });
-
-  // A revoked row names no credentials — the revocation deleted them — so it
-  // must not claim otherwise.
-  it("omits the credential clause when there are none", () => {
-    expect(describeDevice({ revoked: true, app_passwords: [] }, NOW)).not.toContain("app password");
-  });
 });

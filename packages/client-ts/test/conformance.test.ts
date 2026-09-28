@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalAck,
-  canonicalDavToken,
   canonicalEncryptionKeyUpdate,
   canonicalIdentityExport,
   canonicalIdentityRegistration,
@@ -22,9 +21,7 @@ import {
   canonicalMessage,
   canonicalSessionRegistration,
   canonicalSessionRevocation,
-  canonicalShareGrant,
   canonicalShareGroup,
-  normalizeGrantPath,
 } from "../src/canonical.js";
 import { validateContactsFile } from "../src/contacts.js";
 import {
@@ -49,7 +46,6 @@ import {
 import { validateInboxPolicy } from "../src/policy.js";
 import {
   historyFileName,
-  historyPath,
   markRead,
   parseReadState,
   unreadCounts,
@@ -57,14 +53,13 @@ import {
 } from "../src/history.js";
 import { validateProfile } from "../src/profile.js";
 import { checkPow, clampPowBits } from "../src/pow.js";
-import { verifyGrantSignature, verifyGroupSignature } from "../src/shares.js";
+import { verifyGroupSignature } from "../src/groups.js";
 import type {
   ContactsFile,
   EncryptionMeta,
   IdentityDocument,
   InboxPolicy,
   Profile,
-  ShareGrant,
   ShareGroup,
 } from "../src/types.js";
 import { loadVectors } from "./vectors.js";
@@ -139,11 +134,6 @@ describe("canonical signing strings match Go", () => {
       case "identity-encryption-key":
         return canonicalEncryptionKeyUpdate(
           string(i, "identity"), string(i, "encryption_public_key"),
-          string(i, "issued_at"), string(i, "nonce"),
-        );
-      case "dav-token":
-        return canonicalDavToken(
-          string(i, "identity"), string(i, "audience"), string(i, "scope"),
           string(i, "issued_at"), string(i, "nonce"),
         );
       case "keystore-enroll":
@@ -229,19 +219,10 @@ describe("identity documents match Go", () => {
   });
 });
 
-describe("share grants and groups match Go", () => {
-  interface GrantVector { name: string; grant: ShareGrant; canonical: string }
+describe("groups match Go", () => {
   interface GroupVector { name: string; group: ShareGroup; canonical: string }
-  interface PathVector { input: string; path?: string; error: boolean }
 
   const publicKey = loadVectors<CanonicalFile>("canonical").public_key_base64url;
-
-  for (const vector of loadVectors<GrantVector[]>("grants")) {
-    it(`canonicalizes grant ${vector.name}`, () => {
-      expect(canonicalShareGrant(vector.grant)).toBe(vector.canonical);
-      expect(verifyGrantSignature(vector.grant, publicKey)).toBe(true);
-    });
-  }
 
   for (const vector of loadVectors<GroupVector[]>("groups")) {
     it(`canonicalizes group ${vector.name}`, () => {
@@ -249,16 +230,6 @@ describe("share grants and groups match Go", () => {
       expect(verifyGroupSignature(vector.group, publicKey)).toBe(true);
     });
   }
-
-  it("normalizes grant paths the same way", () => {
-    for (const vector of loadVectors<PathVector[]>("grant-paths")) {
-      if (vector.error) {
-        expect(() => normalizeGrantPath(vector.input), vector.input).toThrow();
-      } else {
-        expect(normalizeGrantPath(vector.input), vector.input).toBe(vector.path);
-      }
-    }
-  });
 });
 
 describe("proof-of-work matches Go", () => {
@@ -425,28 +396,12 @@ describe("message encryption interoperates with Go", () => {
 });
 
 describe("message history (Go vectors)", () => {
-  interface HistoryPathVector {
-    name: string;
-    timestamp: string;
-    id: string;
-    path: string;
-  }
-
   interface ReadStateVector {
     name: string;
     raw: unknown;
     valid: boolean;
     unread?: Record<string, number>;
     marks?: Record<string, { timestamp: string; id?: string }>;
-  }
-
-  // The archive path is the one thing two implementations absolutely must
-  // agree on: disagree, and the same message is filed twice — once by the web
-  // app and once by the CLI — and neither knows the other's copy exists.
-  for (const vector of loadVectors<HistoryPathVector[]>("history-paths")) {
-    it(`files "${vector.name}" at the same path as Go`, () => {
-      expect(historyPath(vector.timestamp, vector.id)).toBe(vector.path);
-    });
   }
 
   // The owner's own tree is the target, so a sender-chosen id that escapes

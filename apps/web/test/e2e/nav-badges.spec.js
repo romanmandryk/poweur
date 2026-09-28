@@ -55,11 +55,11 @@ test.describe("nav badges", () => {
     const contactsBadge = alice.locator('.nav-tab[data-page="contacts"] .nav-badge');
 
     // Nothing waiting, nothing shown.
-    await alice.click('.nav-tab[data-page="files"]');
+    await alice.click('.nav-tab[data-page="settings"]');
     await expect(messagesBadge).toHaveCount(0);
     await expect(contactsBadge).toHaveCount(0);
 
-    // Alice stays on Files from here and does not touch anything.
+    // Alice stays on Settings from here and does not touch anything.
     await sendFrom(bob, aliceId, ["one", "two"]);
     await expect(messagesBadge).toHaveText("2", { timeout: 40_000 });
     await expect(alice.locator('.nav-tab[data-page="messages"]')).toHaveAttribute("aria-label", "Messages, 2 new");

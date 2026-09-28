@@ -6,6 +6,8 @@
  * Run it without installing:  npx @poweur/client inbox
  */
 
+import { driveCommand } from "./commands/drive.js";
+import { historyCommand } from "./commands/history.js";
 import { UsageError } from "./args.js";
 import { defaultStreams, fail, type Streams } from "./output.js";
 import { identityCommand } from "./commands/identity.js";
@@ -19,7 +21,6 @@ import {
   send,
   sessionCommand,
 } from "./commands/messaging.js";
-import { davCommand, shareCommand, syncCommand } from "./commands/files.js";
 import {
   analyticsCommand,
   authCommand,
@@ -44,24 +45,18 @@ export const HELP = `Usage:
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
   poweur inbox [--use-identity=...] [--json]
+  poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json]
   poweur messages status [--id=<message-id>] [--use-identity=...] [--json]
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur session <status|refresh|revoke> [--use-identity=...] [--json]
   poweur relay <status|set <url>> [--json]
-  poweur dav token [--audience=...] [--scope=dav:full|dav:read|dav:rw:<path>] [--relay=...] [--use-identity=...] [--json]
-  poweur dav mount [--use-identity=...]
-  poweur dav password <add|list|remove> --name=<name> [--scope=...] [--use-identity=...] [--json]
-  poweur sync <pull|push|run|status> <local-dir> [--path=<prefix> ...] [--audience=...] [--relay=...] [--use-identity=...]
-  poweur share add <path> --with=<id> [--with-group=<name>] [--perm=read|rw] [--expires=<rfc3339>] [--json]
-  poweur share ls [--json]
-  poweur share revoke <share-id>
-  poweur share group <set <name> --members=<id,id,...>|ls|remove <name>> [--json]
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...] [--json]
   poweur requests [--use-identity=...] [--json]
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
   poweur auth <inspect|sign> <request-file-or-url> [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]
+  poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
   poweur version
 `;
 
@@ -75,10 +70,12 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
 
   try {
     switch (command) {
+      case "drive": return await driveCommand(rest, streams);
       case "identity": return await identityCommand(rest, streams);
       case "key": return await keyCommand(rest, streams);
       case "send": return await send(rest, streams);
       case "inbox": return await inbox(rest, streams);
+      case "history": return await historyCommand(rest, streams);
       case "listen": return await listen(rest, streams);
       case "messages":
         if (rest[0] !== "status") throw new UsageError("unknown messages subcommand (want status)");
@@ -86,9 +83,6 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "anon": return await anon(rest, streams);
       case "session": return await sessionCommand(rest, streams);
       case "relay": return await relayCommand(rest, streams);
-      case "dav": return await davCommand(rest, streams);
-      case "sync": return await syncCommand(rest, streams);
-      case "share": return await shareCommand(rest, streams);
       case "contacts": return await contactsCommand(rest, streams);
       case "requests": return await requestsCommand(rest, streams);
       case "policy": return await policyCommand(rest, streams);

@@ -27,6 +27,10 @@ func run() int {
 		return 1
 	}
 	server := relay.NewServer(cfg, dns.NewNetResolver(), dns.NewProviderFactory(cfg))
+	if err := server.DriveError(); err != nil {
+		logger.Error("drive storage unavailable", "error", err.Error())
+		return 1
+	}
 	if err := server.StartTelemetry(context.Background(), os.Stdout); err != nil {
 		logger.Error("telemetry initialization failed")
 		return 1

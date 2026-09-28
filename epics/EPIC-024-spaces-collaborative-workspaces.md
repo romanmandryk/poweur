@@ -53,7 +53,7 @@ Suggested shape (T1 makes this normative):
   "identity": "project.example.org",
   "name": "Project Atlas",
   "group_epoch": 7,
-  "root": "/shared/space-spc_.../",
+  "root": "node:…",
   "default_thread": "thr_...",
   "apps": [],
   "created_at": "...",
@@ -61,7 +61,9 @@ Suggested shape (T1 makes this normative):
 }
 ```
 
-`space_id` is stable across display-name, host and path changes. Every referenced resource is
+`root` is a folder node in the **group identity's own drive** (EPIC-020): the Space hosts its
+files, logs and app state, and its storage is billed to the organization or member sponsoring
+the group (EPIC-026). `space_id` is stable across display-name, host and path changes. Every referenced resource is
 resolved and authorized independently; possession of a manifest grants no access.
 
 ### Roles map to existing capabilities

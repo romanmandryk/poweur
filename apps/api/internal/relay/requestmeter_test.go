@@ -56,24 +56,23 @@ func newZone() *fakeResolver {
 // strangerOn mints an identity hosted somewhere else and publishes it in the
 // fake zone: a DNS-resolvable key so the signature verifies, and a relay host
 // so the meter has something to bucket on.
-func strangerOn(t *testing.T, zone *fakeResolver, name, relayHost string) davTestIdentity {
+func strangerOn(t *testing.T, zone *fakeResolver, name, relayHost string) hostedID {
 	t.Helper()
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	zone.txt["_poweur."+name] = []string{"poweur-pubkey=ed25519:" + base64.RawURLEncoding.EncodeToString(pub)}
 	zone.hosts[name] = []string{relayHost}
-	return davTestIdentity{name: name, pub: pub, priv: priv}
+	return hostedID{name: name, pub: pub, priv: priv}
 }
 
 func TestRequestsQueueMeteredPerSenderRelay(t *testing.T) {
 	zone := newZone()
 	server, ts := newMeteredRelay(t, config.RateLimits{PerMinute: 2}, zone)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	putOwnerFile(t, ts, alice, mintDAVToken(t, ts, alice, "", ""),
-		"/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
 
 	// Three fresh identities, one relay. Each is a stranger to alice, each
 	// sends exactly one request, and none of them exceeds a per-identity cap.
-	flood := []davTestIdentity{
+	flood := []hostedID{
 		strangerOn(t, zone, "s1.cheap.test", "peer.cheap.test"),
 		strangerOn(t, zone, "s2.cheap.test", "peer.cheap.test"),
 		strangerOn(t, zone, "s3.cheap.test", "peer.cheap.test"),
@@ -135,15 +134,13 @@ func TestRequestsQueueMeteredPerSenderRelay(t *testing.T) {
 func TestRequestMeterSparesLocalSendersAndConversation(t *testing.T) {
 	zone := newZone()
 	server, ts := newMeteredRelay(t, config.RateLimits{PerMinute: 1}, zone)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, aliceTok,
-		"/poweur-sys/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json", `{"version":1,"mode":"contacts_and_requests"}`)
 
 	// friend is on the same cheap relay as the flood, and alice already chose
 	// them. That choice must outrank anything the relay's neighbours do.
 	friend := strangerOn(t, zone, "friend.cheap.test", "peer.cheap.test")
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"friend.cheap.test","state":"accepted"}]}`)
 
 	// Burn the peer relay's whole minute budget.
@@ -156,7 +153,7 @@ func TestRequestMeterSparesLocalSendersAndConversation(t *testing.T) {
 
 	// A local stranger still gets their one request slot: this relay knows
 	// exactly who they are and has its own levers over them.
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 	resp, _ = postTypedMessage(t, ts, bob, alice.name, "sys.contact.request", "it's bob")
 	out := mustStatus(t, resp, http.StatusAccepted, "local sender request")
 	if out["status"] != "request_queued" {

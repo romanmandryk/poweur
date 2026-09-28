@@ -13,7 +13,7 @@ import (
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		// Every header the protocol sends must be listed, or the browser's
 		// preflight fails and the request never happens. X-Poweur-Challenge was
 		// missing, which nothing same-origin ever noticed — the web app is
@@ -21,8 +21,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 		// shell on capacitor://localhost, or any third-party site using the
 		// SDK, had every authenticated call blocked before it left the browser.
 		w.Header().Set("Access-Control-Allow-Headers",
-			"Content-Type, Authorization, Depth, Destination, Overwrite, If, Lock-Token, "+
-				"X-Poweur-Identity, X-Poweur-Challenge, X-Poweur-Signature, X-Poweur-Session-Id")
+			"Content-Type, Authorization, If-Match, "+
+				"X-Poweur-Identity, X-Poweur-Challenge, X-Poweur-Signature, X-Poweur-Session-Id, "+
+				"X-Poweur-Link, X-Poweur-Link-Verifier, X-Poweur-PoW-Token, X-Poweur-PoW-Solution")
+		// ETag is how a system-file read tells the writer what to put in
+		// If-Match; without exposing it a browser client cannot see it.
+		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

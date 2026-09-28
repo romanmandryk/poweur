@@ -5,12 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 
-	"github.com/poweur/api/internal/files"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -79,40 +76,69 @@ func (s *Server) handleDIDWeb(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// serveSysPublicFile serves poweur-sys/public/<sub> for a hosted identity.
+// maxPublicFileBytes caps a public system file (profile, capabilities,
+// avatar). Avatars are the largest; clients downscale before upload.
+const maxPublicFileBytes = 2 << 20
+
+// publicFileTypes is the closed set of public file types the relay serves,
+// by extension. Anything else is refused rather than served as an unknown
+// type from the identity's origin.
+var publicFileTypes = map[string]string{
+	".json": "application/json",
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".webp": "image/webp",
+	".gif":  "image/gif",
+}
+
+// publicFileName accepts one flat file name under .poweur/public: lowercase
+// letters, digits, '-', '_' and a single extension from publicFileTypes.
+func publicFileName(sub string) (name, contentType string, ok bool) {
+	if sub == "" || len(sub) > 64 || strings.HasPrefix(sub, ".") {
+		return "", "", false
+	}
+	for _, c := range sub {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return "", "", false
+		}
+	}
+	dot := strings.LastIndexByte(sub, '.')
+	if dot <= 0 || strings.Count(sub, ".") != 1 {
+		return "", "", false
+	}
+	contentType, ok = publicFileTypes[sub[dot:]]
+	return sub, contentType, ok
+}
+
+// serveSysPublicFile serves .poweur/public/<name> for a hosted identity.
 func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, identity, sub string) {
-	if !s.davEnabled() || !s.identities.Exists(identity) {
+	name, contentType, ok := publicFileName(sub)
+	if !ok || !s.identities.Exists(identity) {
 		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
 		return
 	}
-	clean, err := files.CleanPath(sub)
-	if err != nil || clean == "" || strings.Contains(clean, "..") {
-		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
-		return
-	}
-	if clean == "capabilities.json" {
+	if name == "capabilities.json" {
 		s.serveCapabilities(w, r, identity)
 		return
 	}
-	f, err := s.filesProvider.OpenFile(r.Context(), identity, files.SysPublic+"/"+clean, os.O_RDONLY, 0)
-	if err != nil {
+	raw, err := s.sysFiles.Read(r.Context(), identity, sysPublicDir+"/"+name)
+	if err != nil || len(raw) > maxPublicFileBytes {
 		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
 		return
 	}
-	defer f.Close()
-	if fi, err := f.Stat(); err != nil || fi.IsDir() {
-		writeError(w, http.StatusNotFound, "not_found", "unknown well-known path")
+	sum := sha256.Sum256(raw)
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if strings.HasSuffix(clean, ".json") {
-		w.Header().Set("Content-Type", "application/json")
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, f)
+	_, _ = w.Write(raw)
 }
 
 func (s *Server) serveIdentityDocument(w http.ResponseWriter, r *http.Request, identity string) {
@@ -198,10 +224,8 @@ func encodePubB64(pub []byte) string {
 // still answers with those defaults.
 func (s *Server) serveCapabilities(w http.ResponseWriter, r *http.Request, identity string) {
 	var caps map[string]any
-	if f, err := s.filesProvider.OpenFile(r.Context(), identity, files.SysPublic+"/capabilities.json", os.O_RDONLY, 0); err == nil {
-		raw, rerr := io.ReadAll(io.LimitReader(f, idpkg.MaxDocumentBytes+1))
-		f.Close()
-		if rerr != nil || len(raw) > idpkg.MaxDocumentBytes || json.Unmarshal(raw, &caps) != nil {
+	if raw, err := s.sysFiles.Read(r.Context(), identity, capabilitiesPath); err == nil {
+		if len(raw) > idpkg.MaxDocumentBytes || json.Unmarshal(raw, &caps) != nil {
 			writeError(w, http.StatusInternalServerError, "invalid_capabilities", "stored capabilities.json is unreadable")
 			return
 		}

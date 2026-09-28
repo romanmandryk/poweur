@@ -21,7 +21,7 @@ When `HOSTED_DOMAINS` includes the parent (e.g. `poweur.net`) and the client omi
 
 1. Validate name policy, identity signature, and signed `identity_document`.
 2. Enforce registration gate / rate limits (see [Configuration](/relay/configuration)).
-3. Persist `id.json` under `$POWEUR_DATA/identities/<id>/poweur-sys/public/`.
+3. Persist `id.json` in the relay's identity index (`relay/identities/`) and the identity's drive (`.poweur/public/id.json`).
 4. Return `201 Created` — **no** Cloudflare/Hetzner API calls.
 
 Routing uses a single operator-managed wildcard, for example:

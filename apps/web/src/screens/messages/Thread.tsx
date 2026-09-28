@@ -65,7 +65,6 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
   const atBottom = useRef(true);
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const marking = useRef(false);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const all = threadMessages(messages, identity, peer, threadId);
   const { visible, hidden, hasMore } = latestWindow(all, shown);
@@ -96,10 +95,10 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
     });
   }, [unread, peer]);
 
-  const send = async (attachment: File | null = null) => {
+  const send = async () => {
     if (sending) return;
     const text = draft.trim();
-    if (!text && !attachment) return;
+    if (!text) return;
     const client = activeClient();
     if (!client) {
       toast("Unlock your identity first", "warning");
@@ -110,7 +109,6 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
       const outcome = await sendSigned(client, {
         to: peer,
         body: text,
-        attachment,
         thread: threadId,
         group,
         setStatus: (message, tone = "") => setStatus({ text: message, tone }),
@@ -256,30 +254,6 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
       )}
 
       <div className="thread-composer flex shrink-0 items-end gap-2 border-t border-sep bg-bg px-3 pt-2 pb-[calc(8px+env(safe-area-inset-bottom,0px))]">
-        {!group && (
-          <>
-            <label
-              htmlFor="thread-file"
-              title="Attach a file (up to 20 MB)"
-              aria-label="Attach a file"
-              className="thread-attach flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted active:bg-surface-2"
-            >
-              <Paperclip className="size-5" aria-hidden="true" />
-            </label>
-            <input
-              ref={fileInput}
-              id="thread-file"
-              type="file"
-              hidden
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                // Picking a file sends it, with whatever is typed as its caption.
-                if (file) void send(file);
-                if (fileInput.current) fileInput.current.value = "";
-              }}
-            />
-          </>
-        )}
         <textarea
           id="thread-input"
           rows={1}

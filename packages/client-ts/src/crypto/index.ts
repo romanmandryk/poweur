@@ -29,7 +29,17 @@ export { ENCRYPTION_ALG };
 
 /** HKDF info and AAD prefix — must match Go byte for byte. */
 const KDF_INFO = "poweur/msg/v1";
-const AAD_PREFIX = "poweur/msg/v1\n";
+export type SealDomain = "poweur/msg/v1" | "poweur/drive/seal/v1" | "poweur/drive/name/v1" | "poweur/drive/record/v1";
+
+function validateSealDomain(domain: SealDomain, context: Uint8Array): void {
+  if (domain === "poweur/msg/v1") {
+    if (context.length !== 0) throw new PoweurError("invalid_argument", "message seals do not accept extra context");
+  } else if (["poweur/drive/seal/v1", "poweur/drive/name/v1", "poweur/drive/record/v1"].includes(domain)) {
+    if (context.length === 0) throw new PoweurError("invalid_argument", "drive seals require context");
+  } else {
+    throw new PoweurError("invalid_argument", "unsupported seal domain");
+  }
+}
 
 // ── Ed25519 ──────────────────────────────────────────────────────────────────
 
@@ -146,13 +156,13 @@ export interface SealedPayload {
   nonce: string;
 }
 
-function deriveKey(shared: Uint8Array, ephemeralPub: Uint8Array, recipientPub: Uint8Array) {
+function deriveKey(shared: Uint8Array, ephemeralPub: Uint8Array, recipientPub: Uint8Array, domain: SealDomain) {
   const salt = concatBytes(ephemeralPub, recipientPub);
-  return hkdf(sha256, shared, salt, utf8(KDF_INFO), 32);
+  return hkdf(sha256, shared, salt, utf8(domain), 32);
 }
 
-function buildAad(ephemeralPub: Uint8Array, recipientPub: Uint8Array) {
-  return concatBytes(utf8(AAD_PREFIX), ephemeralPub, recipientPub);
+function buildAad(ephemeralPub: Uint8Array, recipientPub: Uint8Array, domain: SealDomain, context: Uint8Array) {
+  return concatBytes(utf8(domain + "\n"), ephemeralPub, recipientPub, context);
 }
 
 /**
@@ -163,6 +173,17 @@ export function seal(
   recipientPublicKey: Uint8Array | string,
   plaintext: Uint8Array | string,
 ): SealedPayload {
+  return sealWithDomain(recipientPublicKey, plaintext, KDF_INFO, new Uint8Array());
+}
+
+/** Shared construction; drive callers must supply a canonical, nonempty context. */
+export function sealWithDomain(
+  recipientPublicKey: Uint8Array | string,
+  plaintext: Uint8Array | string,
+  domain: SealDomain,
+  context: Uint8Array,
+): SealedPayload {
+  validateSealDomain(domain, context);
   const recipientPub =
     typeof recipientPublicKey === "string"
       ? parseX25519PublicKey(recipientPublicKey)
@@ -173,9 +194,9 @@ export function seal(
   const ephemeralPriv = randomBytes(32);
   const ephemeralPub = x25519.getPublicKey(ephemeralPriv);
   const shared = x25519.getSharedSecret(ephemeralPriv, recipientPub);
-  const key = deriveKey(shared, ephemeralPub, recipientPub);
+  const key = deriveKey(shared, ephemeralPub, recipientPub, domain);
   const nonce = randomBytes(12);
-  const aead = chacha20poly1305(key, nonce, buildAad(ephemeralPub, recipientPub));
+  const aead = chacha20poly1305(key, nonce, buildAad(ephemeralPub, recipientPub, domain, context));
   const message = typeof plaintext === "string" ? utf8(plaintext) : plaintext;
   return {
     ciphertext: toBase64url(aead.encrypt(message)),
@@ -186,6 +207,11 @@ export function seal(
 
 /** Open a payload sealed by `seal`, returning raw bytes. */
 export function open(recipientPrivateKey: Uint8Array, payload: SealedPayload): Uint8Array {
+  return openWithDomain(recipientPrivateKey, payload, KDF_INFO, new Uint8Array());
+}
+
+export function openWithDomain(recipientPrivateKey: Uint8Array, payload: SealedPayload, domain: SealDomain, context: Uint8Array): Uint8Array {
+  validateSealDomain(domain, context);
   if (recipientPrivateKey.length !== 32) {
     throw new PoweurError("invalid_argument", "recipient private key must be 32 bytes");
   }
@@ -202,10 +228,11 @@ export function open(recipientPrivateKey: Uint8Array, payload: SealedPayload): U
   if (ephemeralPub.length !== 32) {
     throw new PoweurError("decrypt_failed", "ephemeral public key must be 32 bytes");
   }
+  if (nonce.length !== 12) throw new PoweurError("decrypt_failed", "nonce must be 12 bytes");
   const recipientPub = x25519.getPublicKey(recipientPrivateKey);
   const shared = x25519.getSharedSecret(recipientPrivateKey, ephemeralPub);
-  const key = deriveKey(shared, ephemeralPub, recipientPub);
-  const aead = chacha20poly1305(key, nonce, buildAad(ephemeralPub, recipientPub));
+  const key = deriveKey(shared, ephemeralPub, recipientPub, domain);
+  const aead = chacha20poly1305(key, nonce, buildAad(ephemeralPub, recipientPub, domain, context));
   try {
     return aead.decrypt(ciphertext);
   } catch (cause) {

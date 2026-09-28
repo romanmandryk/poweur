@@ -131,7 +131,7 @@ command renders this view with WhatsApp-style tick glyphs (`·` queued,
 `✓` tick 1, `✓✓` tick 2, `✓✓✓` read, `✗` failed). See
 [CLI Reference](/clients/cli-reference) for usage.
 
-Read receipts default on for compatibility. `poweur-sys/relay/inbox-policy.json`
+Read receipts default on for compatibility. `.poweur/relay/inbox-policy.json`
 may set `read_receipts.enabled` false globally or list identities under
 `read_receipts.disabled_for`; inability to load policy fails closed and emits no read receipt.
 

@@ -54,9 +54,6 @@ export function describeDevice(device, now = Date.now()) {
     device?.last_seen ? `last seen ${formatWhen(device.last_seen)}` : "never seen",
     describeDeviceSync(device, now),
   ];
-  if (device?.app_passwords?.length) {
-    parts.push(`${device.app_passwords.length} app password${device.app_passwords.length === 1 ? "" : "s"}`);
-  }
   return parts.join(" · ");
 }
 

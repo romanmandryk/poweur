@@ -32,7 +32,7 @@ type envelopeOpts struct {
 	tamper    func(*Message)
 }
 
-func postEnvelope(t *testing.T, ts *httptest.Server, from davTestIdentity, to string, opts envelopeOpts) (*http.Response, Message) {
+func postEnvelope(t *testing.T, ts *httptest.Server, from hostedID, to string, opts envelopeOpts) (*http.Response, Message) {
 	t.Helper()
 	typedMsgSeq++
 	payload := opts.payload
@@ -80,9 +80,9 @@ func postEnvelope(t *testing.T, ts *httptest.Server, from davTestIdentity, to st
 // verify the signature, so a relay that dropped `thread_id` on the floor
 // would turn every threaded message into a signature failure downstream.
 func TestTypedEnvelopeRoundTrip(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	metadata := map[string]string{"mime": "image/png", "bytes": "20480"}
 	resp, sent := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
@@ -122,9 +122,9 @@ func TestTypedEnvelopeRoundTrip(t *testing.T) {
 // whole point of extending the canonical string rather than leaving these
 // fields as unsigned hints a relay could rewrite.
 func TestTypedEnvelopeSignatureBinding(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	tampers := map[string]func(*Message){
 		"thread added after signing":   func(m *Message) { m.ThreadID = "thr_injected" },
@@ -167,9 +167,9 @@ func TestTypedEnvelopeSignatureBinding(t *testing.T) {
 // An application that could mint one would borrow the relay's own routing
 // authority — every client treats `sys.contact.request` as a consent gesture.
 func TestSysNamespaceIsReserved(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{msgType: "sys.made.up"})
 	out := mustStatus(t, resp, http.StatusBadRequest, "unregistered sys type")
@@ -203,9 +203,9 @@ func TestSysNamespaceIsReserved(t *testing.T) {
 // unchanged, whether or not the relay has ever heard of it. That is what lets
 // applications ship a message type without a relay release.
 func TestUnknownTypesAreOpaque(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	for _, msgType := range []string{"", "chat.text", "chat.attachment", "net.example.widget.poked"} {
 		resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{msgType: msgType})
@@ -232,9 +232,9 @@ func TestUnknownTypesAreOpaque(t *testing.T) {
 // TestEnvelopeExtensionValidation: malformed extensions are refused at
 // ingress with a 400 that names the field, before any signature work.
 func TestEnvelopeExtensionValidation(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	cases := map[string]envelopeOpts{
 		"unnamespaced type":     {msgType: "widget"},
@@ -266,9 +266,9 @@ func TestEnvelopeExtensionValidation(t *testing.T) {
 }
 
 func TestExpiredEnvelopeIsGone(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
 
 	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
 		expiresAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
@@ -288,15 +288,14 @@ func TestExpiredEnvelopeIsGone(t *testing.T) {
 // consults. A registered system type with no hook of its own gets the safe
 // default — rejected — while the contact types keep their own behaviour.
 func TestClosedInboxTypeHooks(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	carol := registerTestIdentity(t, server, ts, "carol.poweur.net")
 
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_and_requests"}`)
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bob.poweur.net","state":"accepted"}]}`)
 
 	// An accepted contact reaches the inbox with any type — the hooks only
@@ -365,11 +364,10 @@ func TestHookForFallsBackAndNormalizes(t *testing.T) {
 }
 
 func TestPolicyQueuesBoundedShareOffersByGrant(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json",
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bob := registerTestIdentity(t, server, ts, "bob.poweur.net")
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_and_requests"}`)
 
 	expires := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
@@ -394,64 +392,4 @@ func TestPolicyQueuesBoundedShareOffersByGrant(t *testing.T) {
 		metadata: map[string]string{"share_id": "shr_no_expiry"},
 	})
 	mustStatus(t, resp, http.StatusForbidden, "non-expiring share offer")
-}
-
-func TestShareAcceptReachesClosedInboxWhenGrantMatches(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bob := registerDAVIdentity(t, server, ts, "bob.poweur.net")
-	carol := registerDAVIdentity(t, server, ts, "carol.poweur.net")
-	aliceTok := mintDAVToken(t, ts, alice, "", "")
-	putOwnerFile(t, ts, alice, aliceTok, "/poweur-sys/relay/inbox-policy.json",
-		`{"version":1,"mode":"contacts_and_requests"}`)
-	putShareGrant(t, ts, alice, aliceTok, idpkg.ShareGrant{
-		ShareID: "shr_direct", SourceShareID: "shr_public", Path: "shared/inbox",
-		Audience: []idpkg.ShareAudience{{ID: bob.name}}, Permissions: []string{idpkg.PermRead, idpkg.PermWrite},
-	})
-
-	resp, _ := postEnvelope(t, ts, bob, alice.name, envelopeOpts{
-		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
-			"share_id": "shr_direct", "source_share_id": "shr_public",
-		},
-	})
-	out := mustStatus(t, resp, http.StatusAccepted, "granted accept")
-	if out["status"] == "request_queued" {
-		t.Fatal("acceptance must reach the inbox, not the requests queue")
-	}
-	inbox := challengeSigned(t, ts, alice, "/messages/"+alice.name)
-	messages, _ := inbox["messages"].([]any)
-	if len(messages) != 1 {
-		t.Fatalf("inbox = %v", inbox)
-	}
-	if got := server.linkStats.Get(alice.name, "shr_public").ShareAccepted; got != 1 {
-		t.Fatalf("share accepted counter = %d want 1", got)
-	}
-	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
-		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
-			"share_id": "shr_direct", "source_share_id": "shr_public",
-		},
-	})
-	mustStatus(t, resp, http.StatusAccepted, "duplicate granted accept")
-	if got := server.linkStats.Get(alice.name, "shr_public").ShareAccepted; got != 1 {
-		t.Fatalf("duplicate changed accepted counter to %d", got)
-	}
-	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
-		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{
-			"share_id": "shr_direct", "source_share_id": "shr_forged_source",
-		},
-	})
-	mustStatus(t, resp, http.StatusAccepted, "accept with mismatched accounting source")
-	if got := server.linkStats.Get(alice.name, "shr_forged_source").ShareAccepted; got != 0 {
-		t.Fatalf("mismatched source changed accepted counter to %d", got)
-	}
-
-	resp, _ = postEnvelope(t, ts, carol, alice.name, envelopeOpts{
-		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{"share_id": "shr_direct"},
-	})
-	mustStatus(t, resp, http.StatusForbidden, "accept from someone outside the grant")
-
-	resp, _ = postEnvelope(t, ts, bob, alice.name, envelopeOpts{
-		msgType: idpkg.MsgTypeShareAccept, metadata: map[string]string{"share_id": "shr_other"},
-	})
-	mustStatus(t, resp, http.StatusForbidden, "accept for a grant the owner did not sign")
 }

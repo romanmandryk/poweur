@@ -113,6 +113,13 @@ with zero new authority introduced.
 For this whole group the WebDAV decision in EPIC-003 pays off: several integrate with **zero
 upstream code** — the task is a tested recipe, a settings preset PR, and a tutorial.
 
+> **Changed by EPIC-020.** The relay no longer serves WebDAV and private/shared files are end-to-end
+> encrypted. The zero-code path is now `rclone serve webdav` on the user's device (E20-T13), which
+> decrypts locally; recipes move to INT-006 section D. Mobile-only WebDAV use has no path until
+> native file providers (E20-T14). **INT-004-T8 (WOPI host on the relay) conflicts with E2EE:** an
+> office document server must read plaintext, so it either runs on the user's side or is granted
+> a share as a service identity — redesign before building.
+
 ### Joplin — `laurent22/joplin`
 Popular open notes app with *native WebDAV sync*. Pointing it at the Poweur home works on day
 one; the upstream PR is a "Poweur" preset in the sync-target list plus token-based auth flow.

@@ -3,15 +3,12 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	idpkg "github.com/poweur/identity"
+	"github.com/poweur/api/internal/drive/provider"
 )
 
 // The durable spool behind the inbox and the ack queue (EPIC-009 E09-T1).
@@ -21,17 +18,13 @@ import (
 // as one file per entry, ordered by a per-identity sequence number that also
 // serves as the pickup cursor.
 //
-// It sits at `<POWEUR_DATA>/spool/<identity>/…`, *outside* the identity's DAV
-// tree rather than inside it as first sketched. The tree's roots are a
-// documented, permission-checked layout (EPIC-003/006) and undelivered mail is
-// not one of them; keeping the spool out of it means no new root, no new
-// permission rule, and no way to reach the spool over DAV at all.
+// Each entry is one object at `relay/spool/<queue>/<identity>/<seq>.json` in
+// the relay's provider (disk or bucket), outside every drive: undelivered
+// mail belongs to the relay until the recipient takes it.
 //
 // Entries stay until the recipient says they have them. That is the whole
 // point of the change: a drain-on-read inbox loses a message to a dropped
 // connection just as surely as to a restart.
-
-const spoolFilePerm = 0o600
 
 type spoolEntry[T any] struct {
 	Seq  uint64    `json:"seq"`
@@ -41,38 +34,27 @@ type spoolEntry[T any] struct {
 
 type spool[T any] struct {
 	mu      sync.Mutex
-	dir     string // empty = memory only, as before
+	objects Objects // nil = memory only
+	prefix  string  // "relay/spool/<queue>/"
 	entries map[string][]spoolEntry[T]
 	nextSeq map[string]uint64
 }
 
-func newSpool[T any](dir string) (*spool[T], error) {
+func newSpool[T any](objects Objects, queue string) (*spool[T], error) {
 	s := &spool[T]{
-		dir:     strings.TrimSpace(dir),
+		objects: objects,
+		prefix:  "relay/spool/" + queue + "/",
 		entries: make(map[string][]spoolEntry[T]),
 		nextSeq: make(map[string]uint64),
 	}
-	if s.dir == "" {
+	if objects == nil {
 		return s, nil
-	}
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return nil, err
 	}
 	return s, s.load()
 }
 
-// identityDir maps an identity to its spool directory. It reuses the same
-// sanitizer the file trees use, so a name can never climb out of the spool.
-func (s *spool[T]) identityDir(identity string) (string, error) {
-	name, err := idpkg.SanitizeIdentityDirName(identity)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(s.dir, name), nil
-}
-
 // cursorOf renders a sequence number as the opaque cursor clients echo back.
-// Zero-padded so the filenames sort in sequence order.
+// Zero-padded so the keys sort in sequence order.
 func cursorOf(seq uint64) string { return fmt.Sprintf("%020d", seq) }
 
 func parseCursor(cursor string) uint64 {
@@ -84,55 +66,38 @@ func parseCursor(cursor string) uint64 {
 }
 
 func (s *spool[T]) load() error {
-	dirs, err := os.ReadDir(s.dir)
-	if err != nil {
-		if os.IsNotExist(err) {
+	return listAll(s.objects, s.prefix, func(info provider.Info) error {
+		rest := strings.TrimPrefix(info.Key, s.prefix)
+		dir, file, ok := strings.Cut(rest, "/")
+		if !ok || !strings.HasSuffix(file, ".json") {
 			return nil
 		}
-		return err
-	}
-	for _, dir := range dirs {
-		if !dir.IsDir() {
-			continue
-		}
-		identity := strings.ReplaceAll(dir.Name(), "__", ".")
-		files, err := os.ReadDir(filepath.Join(s.dir, dir.Name()))
+		raw, err := getObject(s.objects, info.Key)
 		if err != nil {
-			continue
+			return nil
 		}
-		var loaded []spoolEntry[T]
-		for _, file := range files {
-			if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
-				continue
-			}
-			raw, err := os.ReadFile(filepath.Join(s.dir, dir.Name(), file.Name()))
-			if err != nil {
-				continue
-			}
-			var entry spoolEntry[T]
-			if err := json.Unmarshal(raw, &entry); err != nil {
-				// A corrupt entry must not stop the relay from serving the
-				// rest of someone's mail.
-				continue
-			}
-			loaded = append(loaded, entry)
+		var entry spoolEntry[T]
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			// A corrupt entry must not stop the relay from serving the
+			// rest of someone's mail.
+			return nil
 		}
-		if len(loaded) == 0 {
-			continue
+		identity := identityFromKey(dir)
+		// Keys list in sequence order within an identity.
+		s.entries[identity] = append(s.entries[identity], entry)
+		if entry.Seq >= s.nextSeq[identity] {
+			s.nextSeq[identity] = entry.Seq + 1
 		}
-		sort.Slice(loaded, func(i, j int) bool { return loaded[i].Seq < loaded[j].Seq })
-		s.entries[identity] = loaded
-		s.nextSeq[identity] = loaded[len(loaded)-1].Seq + 1
-	}
-	return nil
+		return nil
+	})
 }
 
-func (s *spool[T]) entryPath(identity string, seq uint64) (string, error) {
-	dir, err := s.identityDir(identity)
+func (s *spool[T]) entryKey(identity string, seq uint64) (string, error) {
+	dir, err := identityKey(identity)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, cursorOf(seq)+".json"), nil
+	return s.prefix + dir + "/" + cursorOf(seq) + ".json", nil
 }
 
 // add appends an item. `max` caps the queue (0 = unbounded); `dropOldest`
@@ -164,33 +129,26 @@ func (s *spool[T]) add(identity string, item T, max int, dropOldest bool) bool {
 }
 
 func (s *spool[T]) writeFile(identity string, entry spoolEntry[T]) {
-	if s.dir == "" {
+	if s.objects == nil {
 		return
 	}
-	path, err := s.entryPath(identity, entry.Seq)
+	key, err := s.entryKey(identity, entry.Seq)
 	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return
 	}
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, spoolFilePerm); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = putObject(s.objects, key, raw)
 }
 
 func (s *spool[T]) removeFile(identity string, seq uint64) {
-	if s.dir == "" {
+	if s.objects == nil {
 		return
 	}
-	if path, err := s.entryPath(identity, seq); err == nil {
-		_ = os.Remove(path)
+	if key, err := s.entryKey(identity, seq); err == nil {
+		_ = deleteObject(s.objects, key)
 	}
 }
 

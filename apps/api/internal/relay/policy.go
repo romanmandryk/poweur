@@ -3,14 +3,11 @@ package relay
 import (
 	"context"
 	"crypto/ed25519"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/poweur/api/internal/crypto"
-	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
@@ -44,35 +41,17 @@ const (
 	policyQueueRequest
 )
 
-// readSysJSON reads a relay-readable system document for identity (nil when
-// absent or unreadable — absence must fail open per document defaults).
-func (s *Server) readSysJSON(ctx context.Context, identity, treePath string) []byte {
-	if s.filesProvider == nil {
-		return nil
-	}
-	f, err := s.filesProvider.OpenFile(ctx, identity, treePath, os.O_RDONLY, 0)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, maxSysDocBytes))
-	if err != nil {
-		return nil
-	}
-	return raw
-}
-
 // recipientPolicy loads the recipient's inbox policy (default open) and
 // contacts (default empty).
 func (s *Server) recipientPolicy(ctx context.Context, recipient string) (idpkg.InboxPolicy, idpkg.ContactsFile) {
 	policy := idpkg.InboxPolicy{Mode: idpkg.DefaultInboxMode}
-	if raw := s.readSysJSON(ctx, recipient, files.SysRelay+"/inbox-policy.json"); raw != nil {
+	if raw := s.readSysJSON(ctx, recipient, inboxPolicyPath); raw != nil {
 		if p, err := idpkg.ParseInboxPolicy(raw); err == nil {
 			policy = p
 		}
 	}
 	var contacts idpkg.ContactsFile
-	if raw := s.readSysJSON(ctx, recipient, files.SysRelay+"/contacts.json"); raw != nil {
+	if raw := s.readSysJSON(ctx, recipient, contactsPath); raw != nil {
 		if c, err := idpkg.ParseContactsFile(raw); err == nil {
 			contacts = c
 		}
@@ -131,12 +110,6 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 	case idpkg.InboxOpen:
 		return policyAllow, ""
 	case idpkg.InboxContactsOnly, idpkg.InboxContactsAndRequests:
-		// The owner already signed a direct grant for this sender. The
-		// acceptance notice belongs in the inbox; it is not a stranger's
-		// request for a new relationship.
-		if s.shareAcceptAdmitted(ctx, msg) {
-			return policyAllow, ""
-		}
 		// A closed inbox is where the message *type* starts to matter, so
 		// the decision moves to the per-type hooks in typed.go. Everything
 		// without a hook is rejected — the default a closed inbox means.
@@ -160,23 +133,6 @@ func authPromptShapeOK(msg Message, now time.Time) bool {
 	}
 	exp, err := time.Parse(time.RFC3339, msg.ExpiresAt)
 	return err == nil && exp.After(now) && exp.Sub(now) <= maxAuthPromptLifetime
-}
-
-// shareAcceptAdmitted lets a granted identity tell the owner the mount
-// exists. The check uses the owner's own grant file: share id, live direct
-// audience, and a bounded payload. It does not open the inbox to anyone else.
-func (s *Server) shareAcceptAdmitted(ctx context.Context, msg Message) bool {
-	if idpkg.NormalizeMessageType(msg.Type) != idpkg.MsgTypeShareAccept || s.grants == nil {
-		return false
-	}
-	if len(msg.Payload) > maxShareOfferPayload {
-		return false
-	}
-	shareID := strings.TrimSpace(msg.Metadata["share_id"])
-	if shareID == "" || strings.ContainsAny(shareID, "/\\") || shareID == "." || shareID == ".." {
-		return false
-	}
-	return s.grants.Snapshot(ctx, msg.Recipient).AuthorizesAccept(shareID, msg.Sender)
 }
 
 func shareOfferShapeOK(msg Message, now time.Time) bool {

@@ -76,14 +76,14 @@ func TestInboxPolicyValidation(t *testing.T) {
 }
 
 func TestProfileValidation(t *testing.T) {
-	good := Profile{Version: 1, DisplayName: "Alice", Avatar: "public/avatar.png",
+	good := Profile{Version: 1, DisplayName: "Alice", Avatar: "avatar.png",
 		Bio: "hello", Links: []ProfileLink{{Label: "web", URL: "https://alice.example"}}}
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	bad := []Profile{
-		{Avatar: "https://evil.example/x.png"},    // avatar must be a tree path
-		{Avatar: "private/secret.png"},            // and under public/
+		{Avatar: "https://evil.example/x.png"},    // avatar must be a file name
+		{Avatar: "public/avatar.png"},             // not a path
 		{Bio: strings.Repeat("x", 5000)},          // too long
 		{Links: []ProfileLink{{Label: "no url"}}}, // empty url
 		{DisplayName: strings.Repeat("n", 300)},   // too long

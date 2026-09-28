@@ -6,7 +6,7 @@ title: CLI Reference
 
 # CLI Reference
 
-The Poweur ID CLI (`poweur`) puts your ID in the terminal: identity and keys, messages, contacts, files, sync, sharing and relay diagnostics. Use it on your desktop to sync and share project folders and message people without switching apps; give it to an AI coding agent (Claude Code, Codex, Cursor…), which can drive every command and read `--json` output; or run it in CI, cron jobs and bots. See [Clients overview](/clients/overview#cli) for examples.
+The Poweur ID CLI (`poweur`) puts your ID in the terminal: identity and keys, messages, contacts and relay diagnostics. Use it on your desktop to message people without switching apps; give it to an AI coding agent (Claude Code, Codex, Cursor…), which can drive every command and read `--json` output; or run it in CI, cron jobs and bots. See [Clients overview](/clients/overview#cli) for examples.
 
 ## Installation
 
@@ -171,7 +171,7 @@ for hosted identities that have no per-user TXT records.
 It also reads the identity's public self-description from the same well-known
 route — `profile.json` (display name, bio, locale, avatar, links) and
 `capabilities.json` (features and endpoint hints), both served world-readable
-out of `poweur-sys/public/`. Both are optional: an identity that publishes
+out of `.poweur/public/`. Both are optional: an identity that publishes
 neither still looks up fine, and only an unreachable host (as opposed to a 404)
 prints a note on stderr. When there is no `capabilities.json`, the identity
 document's own `capabilities` list is shown instead — the same fallback the web
@@ -348,40 +348,8 @@ poweur session revoke
 
 ---
 
-### `poweur dav token`
 
-Mint a WebDAV bearer token signed with the long-lived identity key. Use for rclone,
-custom clients, or visitors reading another identity's `/public` tree
-(see [WebDAV access](/files/webdav)).
 
-```bash
-poweur dav token
-poweur dav token --audience=bob.poweur.net --scope=dav:read
-poweur dav token --json
-```
-
-### `poweur dav mount`
-
-Print a ready-to-paste mount command for the current OS (macOS `mount_webdav`,
-Linux `davfs2`/`rclone`, etc.), including a freshly minted token or a reminder to
-create an app password for Finder.
-
-```bash
-poweur dav mount
-```
-
-### `poweur dav password add|list|remove`
-
-Manage named app passwords for Basic-auth WebDAV clients. Hashes are stored at
-`poweur-sys/relay/app-passwords.json` on the relay (owner + relay readable).
-
-```bash
-poweur dav password add --name=finder
-poweur dav password list
-poweur dav password remove --name=finder
-```
-
----
 
 ### `poweur relay status`
 
@@ -600,7 +568,7 @@ recover from the seed or another enrolled device.
 
 ### `poweur contacts <ls|add|request|accept|block|rm> [<identity>]`
 
-Manage the contact list in `poweur-sys/relay/contacts.json`. See
+Manage the contact list in `.poweur/relay/contacts.json`. See
 [Contacts & trust](/trust/contacts).
 
 ```bash
@@ -691,12 +659,11 @@ only accepts reports about identities it hosts.
 
 Blocklists are block decisions made portable: a signed document a community can pool.
 Export publishes `shared/blocks.json` in your own tree, where a
-[share](../files/sharing) hands it to a chosen audience. Import verifies the
+[share](../files/storage-v2) hands it to a chosen audience. Import verifies the
 publisher's signature and merges into your own contacts, where you can see and undo it.
 
 ```bash
 poweur blocks export --name "my list"
-poweur share add /shared/blocks.json --with bob.example.org --perm read
 poweur blocks import alice.example.org --dry-run
 poweur blocks import --file list.json
 ```
@@ -732,29 +699,6 @@ proof-of-work challenge if their policy demands one.
 
 ---
 
-### `poweur share add <path> --with <id>`
-
-Grant another identity access to a path in your tree, as a signed grant under
-`poweur-sys/relay/shares/`. See [Sharing & ACLs](/files/sharing).
-
-```bash
-poweur share add /private/reports --with bob.poweur.net --perm rw --expires 2026-12-31T00:00:00Z
-```
-
-| Flag | Description |
-|------|-------------|
-| `--with <id>` | Recipient Poweur ID (repeatable) |
-| `--with-group <name>` | Recipient group: an owner-local name (`team`) or a group identity's Poweur ID (`crew.acme.poweur.net`); repeatable |
-| `--perm <read\|rw>` | Permission level (default `read`) |
-| `--expires <rfc3339>` | Expiry; empty means never |
-| `--use-identity <subdomain>` | Identity to share from |
-| `--json` | Machine-readable output |
-
-Related: `poweur share ls`, `poweur share revoke <share-id>`, and the owner-local group
-commands `poweur share group set <name> --members=<id,id,...>`, `group ls`,
-`group remove <name>`.
-
----
 
 ### `poweur group <create|show|add|remove> <group-id>`
 
@@ -766,7 +710,6 @@ poweur group create crew.acme.poweur.net --member bob.example.org
 poweur group show   crew.acme.poweur.net --json
 poweur group add    crew.acme.poweur.net --member carol.poweur.net
 poweur group remove crew.acme.poweur.net --member bob.example.org
-poweur share add /shared/crew-docs --with-group crew.acme.poweur.net --perm read
 ```
 
 | Flag | Description |
@@ -780,34 +723,10 @@ poweur share add /shared/crew-docs --with-group crew.acme.poweur.net --perm read
 `create` registers the group as a hosted identity, signs its membership document with the
 group's own key, and restores the active identity. Membership updates bump the group's
 `epoch` only when something actually changed, and the last admin cannot be removed. The
-group name must be a full Poweur ID; for an owner-local group use `poweur share group set`.
+group name must be a full Poweur ID.
 
 ---
 
-### `poweur sync <pull|push|run|status> <local-dir>`
-
-Synchronise a local directory with your relay-hosted tree over WebDAV plus the changes feed.
-See [File sync](/files/sync-protocol).
-
-```bash
-poweur sync run ~/poweur --path private --path public
-```
-
-| Subcommand | Effect |
-|------------|--------|
-| `pull` | Fetch remote changes into the local directory |
-| `push` | Upload local changes |
-| `run` | Continuous two-way sync |
-| `status` | Show pending changes without transferring |
-
-| Flag | Description |
-|------|-------------|
-| `--path <prefix>` | Tree prefix to sync (repeatable; default: `public`, `shared`, `private`, `apps`) |
-| `--audience <id>` | Tree owner to sync against — used for trees shared *with* you |
-| `--relay <url>` | Relay override |
-| `--use-identity <subdomain>` | Identity to authenticate as |
-
----
 
 ### `poweur auth <inspect|sign> <request-file-or-url>`
 

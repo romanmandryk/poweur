@@ -11,7 +11,7 @@ import (
 
 // Fetching an identity's world-readable self-description (EPIC-006 E06-T2).
 //
-// `poweur-sys/public/` is served at `/.well-known/poweur/<file>` on the
+// `.poweur/public/` is served at `/.well-known/poweur/<file>` on the
 // identity's own host — the same route and the same host that already serve
 // `id.json`, which is why this needs no new relay endpoint. `id.json` says
 // which keys an identity has; `profile.json` says who they are and
@@ -29,7 +29,9 @@ import (
 // shape the resolver was hardened against.
 
 const (
-	// WellKnownProfilePath is the world route to poweur-sys/public/profile.json.
+	// WellKnownPrefix is the world route to an identity's .poweur/public/.
+	WellKnownPrefix = "/.well-known/poweur"
+	// WellKnownProfilePath is the world route to .poweur/public/profile.json.
 	WellKnownProfilePath = "/.well-known/poweur/profile.json"
 	// WellKnownCapabilitiesPath is the world route to capabilities.json.
 	WellKnownCapabilitiesPath = "/.well-known/poweur/capabilities.json"
@@ -138,21 +140,18 @@ func CapabilitiesFromDocument(doc IdentityDocument) Capabilities {
 	return Capabilities{Version: 1, Features: features}
 }
 
-// AvatarURL turns a profile's tree path ("public/avatar.png") into the URL
-// that serves it. Returns "" for an absent or non-conforming path: the schema
-// says a tree path under public/, never an arbitrary URL, so rendering
-// somebody's profile can never become a request to a host they chose.
-func AvatarURL(identity, avatarPath, scheme string) string {
-	avatarPath = strings.TrimSpace(avatarPath)
-	if !strings.HasPrefix(avatarPath, "public/") {
-		return ""
-	}
-	rest := strings.TrimPrefix(avatarPath, "public/")
-	if rest == "" || strings.Contains(rest, "..") {
+// AvatarURL turns a profile's avatar file name ("avatar.png") into the URL
+// that serves it from .poweur/public/. Returns "" for an absent or
+// non-conforming name: the schema allows a file name, never an arbitrary URL,
+// so rendering somebody's profile can never become a request to a host they
+// chose.
+func AvatarURL(identity, avatar, scheme string) string {
+	avatar = strings.TrimSpace(avatar)
+	if !ValidAvatarName(avatar) {
 		return ""
 	}
 	if scheme == "" {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/pub/%s", scheme, strings.ToLower(strings.TrimSpace(identity)), rest)
+	return fmt.Sprintf("%s://%s%s/%s", scheme, strings.ToLower(strings.TrimSpace(identity)), WellKnownPrefix, avatar)
 }

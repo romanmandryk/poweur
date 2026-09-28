@@ -1,0 +1,10 @@
+{
+  "name": "ascii",
+  "recipient_private_key": "IB8eHRwbGhkYFxYVFBMSERAPDg0MCwoJCAcGBQQDAgE",
+  "recipient_public_key": "DXmWAPb_ruLhIea496Bdxmh0tR2zEC0NcfeZoJy0xGE",
+  "plaintext": "aGVsbG8gZnJvbSB0aGUgR28gQ0xJ",
+  "alg": "x25519-chacha20-poly1305",
+  "ciphertext": "9pCHC1BX5KiF6wgub6cjGFwbD5oSInFbydyFzYi7hBoWKsKJGA",
+  "ephemeral_public_key": "ljdAXN-xYhAybn_DpzO60CSKFHsThUmoQW66w0wXin8",
+  "nonce": "VNAlGLUDL2GOyJM-"
+}

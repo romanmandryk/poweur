@@ -18,7 +18,7 @@ import (
 const (
 	testOrigin   = "https://guestbook.poweur.net"
 	testIdentity = "alice.poweur.net"
-	testAppScope = "dav:rw:apps/net.poweur.guestbook"
+	testAppScope = "messages:send"
 )
 
 var testNow = mustTime("2026-01-15T09:30:00Z")
@@ -294,7 +294,7 @@ func TestVerifyFailureModes(t *testing.T) {
 			want: identity.ErrSignInMalformed,
 		},
 		{
-			name: "scope outside the app namespace",
+			name: "storage v1 dav scope",
 			build: func() identity.SignInResponse {
 				r := baseResponse()
 				r.Scopes = []string{"dav:rw:apps/net.poweur.mail"}
@@ -645,7 +645,7 @@ func TestNewRequestProducesAValidatableRequest(t *testing.T) {
 	req, err := v.NewRequest(RequestOptions{
 		Statement:   "Sign in to the Poweur Guestbook",
 		ResponseURI: testOrigin + "/auth/callback",
-		Scopes:      []string{"dav:rw:/apps/net.poweur.guestbook/"},
+		Scopes:      []string{"messages:send"},
 	})
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -679,7 +679,7 @@ func TestNewRequestRejectsBadOptions(t *testing.T) {
 		opts RequestOptions
 	}{
 		{"response_uri off origin", RequestOptions{ResponseURI: "https://evil.example/cb"}},
-		{"scope in another app's namespace", RequestOptions{Scopes: []string{"dav:rw:apps/net.poweur.mail"}}},
+		{"a storage v1 dav scope", RequestOptions{Scopes: []string{"dav:rw:apps/net.poweur.mail"}}},
 		{"unknown scope", RequestOptions{Scopes: []string{"root:everything"}}},
 		{"unknown action", RequestOptions{Action: "authorize"}},
 		{"statement too long", RequestOptions{Statement: strings.Repeat("x", identity.SignInMaxStatementLen+1)}},

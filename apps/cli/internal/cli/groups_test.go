@@ -321,10 +321,7 @@ func TestNormalizeAndRemoveIDs(t *testing.T) {
 // The membership document is written and read at exactly one path, and
 // both implementations have to agree on it.
 func TestGroupSelfDocPath(t *testing.T) {
-	if idpkg.GroupSelfDoc != "poweur-sys/relay/groups/self.json" {
+	if idpkg.GroupSelfDoc != ".poweur/relay/group.json" {
 		t.Fatalf("GroupSelfDoc = %q", idpkg.GroupSelfDoc)
-	}
-	if !strings.HasPrefix(idpkg.GroupSelfDoc, groupsTreeDir+"/") {
-		t.Fatalf("%q should live under the groups dir %q", idpkg.GroupSelfDoc, groupsTreeDir)
 	}
 }

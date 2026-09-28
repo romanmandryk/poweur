@@ -75,7 +75,8 @@ beforeEach(() => {
       granted = value;
     }),
   });
-  holder.client.dav = vi.fn(async () => ({ devices: async () => ({ devices: [{ id: "d1", name: "CLI on server", kind: "agent" }] }), write: vi.fn() }));
+  holder.client.devices = vi.fn(() => ({ list: async () => ({ devices: [{ id: "d1", name: "CLI on server", kind: "agent" }] }), revoke: vi.fn() }));
+  holder.client.system = vi.fn(() => ({ readOptional: vi.fn(async () => null), write: vi.fn(), writeJson: vi.fn() }));
   holder.enroll = {
     begin: vi.fn(async (_signer: unknown, _identity: string, input: string) => ({
       code: "K7QM4XP2", mode: input.includes("#pair=") ? "scan" : "compare", approverNonce: "n", commitment: "c", label: "New phone",

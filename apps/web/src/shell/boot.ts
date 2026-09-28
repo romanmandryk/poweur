@@ -18,7 +18,6 @@ import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
-import { storePendingShareClaim, takeShareClaimLink } from "../lib/share-claim";
 
 interface CapacitorAppPlugin {
   addListener(
@@ -57,7 +56,6 @@ export function adoptHandOff(): boolean {
     const decoded = JSON.parse(new TextDecoder().decode(fromBase64url(hash.slice("#claim=".length))));
     if (!decoded?.identity || !decoded?.record) return false;
     saveIdentityRecord(decoded.identity, decoded.record);
-    if (decoded.share_claim) storePendingShareClaim(decoded.share_claim);
     setActiveIdentity(decoded.identity);
     return true;
   } catch {
@@ -193,7 +191,6 @@ export function boot(): Promise<void> {
 function startBoot(launchUrl: string): Promise<void> {
   // The shell's launch URL is a pairing link or a sign-in link; a browser's
   // page load carries either in its own address.
-  takeShareClaimLink();
   const launchPair = pairLinkFromAppUrl(launchUrl);
   const fromLaunch = launchPair ? "" : (signInCodeFromAppUrl(launchUrl) ?? "");
   const authInput = fromLaunch || locationAuthInput();

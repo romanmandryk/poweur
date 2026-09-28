@@ -80,7 +80,7 @@ export function ProfileEditor({
       return;
     }
     const blob = await squareAvatar(file);
-    // Kept as picked only when other browsers can show it from our /pub folder.
+    // Kept as picked only when other browsers can show it from our public URL.
     if (blob === file && !isWebImageType(file.type)) {
       setStatus({ text: "Use a JPEG, PNG, WebP or GIF photo", tone: "warn" });
       return;

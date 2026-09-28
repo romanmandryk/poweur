@@ -48,6 +48,8 @@ The relay exposes two distinct surfaces and authenticates them differently:
 | `POST /identities/:identity/enroll/:rendezvous/deliver` | owner-only | identity-signed |
 | `POST /identities/:identity/enroll/:rendezvous/reveal` | bearer | the offer's claim token |
 | `GET`/`DELETE /identities/:identity/enroll/:rendezvous` | bearer | the offer's claim token; releases only ciphertext |
+| `GET`/`PUT`/`DELETE /identities/:identity/system/:path` | owner-only | challenge-signed; `.poweur/{public,relay}` documents, validated on write |
+| `/drive/:identity/…` | owner or member | challenge-signed; see [Drive API](#drive-api) |
 
 ## At-least-one-local rule {#at-least-one-local-rule}
 
@@ -371,7 +373,7 @@ register a public key they do not control.
 Also: `GET /.well-known/poweur/id.json` (Host-routed) serves the stored document.
 
 `GET /.well-known/poweur/capabilities.json` serves the identity's own
-`poweur-sys/public/capabilities.json`, with two endpoints filled in where the file does not set
+`.poweur/public/capabilities.json`, with two endpoints filled in where the file does not set
 them: `endpoints.web_signer` (`<scheme>://<identity>/app/`, when `WEB_STATIC_DIR` is set) and
 `endpoints.oauth_bridge` (when `OAUTH_BRIDGE_URL` is set). With no file, those defaults alone are
 served. When `OAUTH_BRIDGE_URL` is set, `GET /` on a hosted identity's host also carries
@@ -733,7 +735,9 @@ the claimed `identity`, the relay rejects with `401 unauthorized`.
 
 ## POST /identities/:identity/export
 
-Owner-signed export of the identity home directory as `application/gzip` (tar.gz).
+Owner-signed export of the identity document and its `.poweur` system files as
+`application/gzip` (tar.gz), with paths such as `.poweur/public/id.json`. Encrypted drive
+content is exported by clients, which hold the keys.
 Canonical string: `identity-export\n<identity>\n<issued_at>\n<nonce>`.
 
 ## POST /identities/:identity/rotate
@@ -810,7 +814,7 @@ Writes are authenticated by the identity key; the read is authenticated by a Web
 instead. That asymmetry is deliberate: the read exists to recover an identity whose key you no
 longer hold, so requiring that key would be circular.
 
-The wrapped blobs deliberately live **outside** the DAV tree. They need a read path the identity
+The wrapped blobs deliberately live **outside** the owner system-file API. They need a read path the identity
 key cannot provide, and a blob inside the user's file tree would be one misplaced delete away
 from destroying their recovery.
 
@@ -1013,6 +1017,30 @@ The new device's poll, bearer `claim_token`: `{state, approver_nonce, mode}`, th
 Abandon an offer (bearer `claim_token`), freeing its slot.
 
 ---
+
+## Drive API {#drive-api}
+
+Each identity's end-to-end encrypted drive. Every request carries the challenge headers
+(`X-Poweur-Identity`, `X-Poweur-Challenge`, `X-Poweur-Signature`, optionally
+`X-Poweur-Session-Id`); callers from other relays authenticate the same way. The owner
+may do anything; members may do what their shares' roles allow on the shared nodes. The endpoints, bodies and the `drive.changed`
+event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surface).
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /drive/:identity` | Root node, bytes used, quota |
+| `POST /drive/:identity/chunks/missing` | Which chunks to upload, and where (relay or presigned S3 URL) |
+| `PUT /drive/:identity/chunks/:hash` | Upload one encrypted chunk through the relay |
+| `POST /drive/:identity/commit` | Signed manifest, append records or a trim; `409` with `head` on a stale base |
+| `GET /drive/:identity/changes?cursor=N` | Changes after sequence `N` |
+| `GET /drive/:identity/nodes/:node[/children\|/history\|/records]` | Node head, children, retained versions, append tail |
+| `GET /drive/:identity/nodes/:node/versions/:version[/pages/:page\|/chunks/:hash]` | Signed manifest, chunk-list page, chunk |
+| `GET /drive/:identity/nodes/:node/chunks/:hash` | Chunk of an append record |
+| `GET /drive/:identity/shares` | Shares the caller may see (members: their own, with sealed keys) |
+| `GET /drive/:identity/events` | `drive.changed` SSE filtered to the caller; closes on revocation |
+| `GET /drive/:identity/links/:link` | Public: how to open a link (salt, KDF, PoW, opens left) |
+
+Link holders send `X-Poweur-Link` (and `X-Poweur-Link-Verifier` for a password) instead of the challenge headers.
 
 ## Error Format
 

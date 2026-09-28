@@ -36,7 +36,7 @@ describe("shell decision tree (E21-T4)", () => {
     saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     signedIn(false);
     const { container } = render(<App />);
-    expect(container.querySelectorAll(".nav-tab")).toHaveLength(5);
+    expect(container.querySelectorAll(".nav-tab")).toHaveLength(4);
     expect(container.querySelector("#btn-unlock-main")!.textContent).toContain("Unlock with passkey");
     expect(container.querySelector(".unlock-name")!.textContent).toBe("alice");
 
@@ -69,7 +69,7 @@ describe("shell decision tree (E21-T4)", () => {
     const nav = container.querySelector(".bottom-nav");
     const settingsTab = tab(container, "settings");
 
-    for (const [page, title] of [["contacts", "Contacts"], ["files", "Files"], ["launcher", "Apps"], ["settings", "Settings"], ["messages", "Messages"]]) {
+    for (const [page, title] of [["contacts", "Contacts"], ["launcher", "Apps"], ["settings", "Settings"], ["messages", "Messages"]]) {
       fireEvent.click(tab(container, page));
       expect(container.querySelector(".dest-title")!.textContent).toBe(title);
       expect(tab(container, page).getAttribute("aria-selected")).toBe("true");

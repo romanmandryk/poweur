@@ -3,9 +3,7 @@ go 1.25.0
 use (
 	./apps/api
 	./apps/cli
-	./apps/guestbook
 	./apps/integration
 	./apps/oauth
-	./apps/tasks
 	./packages/identity
 )

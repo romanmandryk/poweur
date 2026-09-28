@@ -13,7 +13,7 @@ contact model (EPIC-007), the enforcement flow, and the key-pinning trust model.
 
 ## The two policy files
 
-Both live in the relay-readable zone (`poweur-sys/relay/`), are owner-written over DAV
+Both live in the relay-readable zone (`.poweur/relay/`), are owner-written through the owner system-file API
 (so they sync across devices like any file), schema-validated on write, and are **never
 visible to other users**.
 

@@ -24,7 +24,6 @@ import {
 import { FileKeyStore } from "../src/node/keystore.js";
 import { FileSessionStore } from "../src/node/sessionstore.js";
 import { parseToml, stringifyToml } from "../src/node/toml.js";
-import { Ignore } from "../src/node/syncengine.js";
 
 let home: string;
 const originalHome = process.env["POWEUR_HOME"];
@@ -212,24 +211,5 @@ describe("delivery journal", () => {
     expect(tickGlyph(STATE_DELIVERED_RECIPIENT_RELAY)).toBe(" ✓ ");
     expect(tickGlyph(STATE_DELIVERED_CLIENT)).toBe(" ✓✓");
     expect(tickGlyph(STATE_FAILED)).toBe(" ✗ ");
-  });
-});
-
-describe("ignore patterns", () => {
-  it("always skips the sync bookkeeping files", () => {
-    const ignore = new Ignore();
-    expect(ignore.match("private/.poweur-sync.json")).toBe(true);
-    expect(ignore.match(".poweurignore")).toBe(true);
-    expect(ignore.match("private/notes.txt")).toBe(false);
-  });
-
-  it("matches basenames anywhere and anchored paths exactly", () => {
-    const ignore = new Ignore(["*.tmp", "private/scratch/", "node_modules"]);
-    expect(ignore.match("public/a.tmp")).toBe(true);
-    expect(ignore.match("private/scratch/deep/file.txt")).toBe(true);
-    expect(ignore.match("apps/node_modules/pkg/index.js")).toBe(true);
-    expect(ignore.match("public/a.txt")).toBe(false);
-    // Anchored patterns must not match the same name under another parent.
-    expect(ignore.match("public/scratch/file.txt")).toBe(false);
   });
 });
