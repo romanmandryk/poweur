@@ -30,7 +30,7 @@
 | E20-T6 `.poweur` system files & stateless relay | **in progress** | settings as files the relay validates and applies; no relay state outside the drive |
 | E20-T7 Shares, roles, links & file requests | **in progress** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
-| E20-T8 SDK drive clients & CLI (Go + TS) | **in progress** | Go/TS authenticated transports, bounded idempotent commit retries, verified ciphertext downloads and metadata/cursor CLI commands implemented; high-level encrypted file operations, subscriptions, persistent caches, scoped handles and event-log helper remain open |
+| E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
 | E20-T11 Message history & attachments on v2 | **open** | one append file per conversation; encrypted attachments |
@@ -104,14 +104,15 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       owner access and denial to retired/unrelated identities.
 - [ ] Phase 7 remaining: client-orchestrated ownership transfer, offers/accepts
       and mounts, link viewer, remote groups.
-- [x] Phase 8 transport foundation: Go/TS challenge authentication, ciphertext
-      upload/download verification, idempotent bounded commit retries (conflicts
-      returned for explicit merge), metadata and cursor reads. Both CLIs expose
-      `drive info|node|ls|changes|records --json`; TS also validates chunk pages.
-- [ ] Phase 8 remaining: encrypted path/file workflows and all mutation commands,
-      missing-chunk/presigned upload orchestration, subscriptions, persistent
-      directory/IndexedDB caches, scoped handles and event-log helper.
-- [ ] Phases 8–10: clients, complete baseline, migration and production rehearsal.
+- [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
+      missing-chunk and presigned uploads, verified downloads, idempotent commit
+      retries, cursors, and `drive.changed` subscriptions. Encrypted
+      mkdir/put/get/mv/rm/list, append/tail/history/trim, share and link
+      commands, and transfer (re-encrypt into a drive whose keys are local, or
+      retire with `--to-node`). Chunk caches (CLI directory and IndexedDB),
+      range reads, scoped handles, and the event-log helper. Share re-issue
+      during transfer stays with the caller (Phase 7).
+- [ ] Phases 9–10: sync daemon, web and mobile Files, complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 kept an
 operational owner-authenticated system-file API instead of the plan's unavailable
@@ -587,15 +588,15 @@ store never contain the key or password.
 
 ### E20-T8 — SDK drive clients & CLI (Go + TS)
 
-- [ ] Encrypt/decrypt, chunking, missing-chunk upload, replace/append commits with retry,
+- [x] Encrypt/decrypt, chunking, missing-chunk upload, replace/append commits with retry,
       cursors, change subscription
-- [ ] Chunk cache: a directory under the CLI home; IndexedDB in web/shell — immutable, never revalidated
-- [ ] Streaming decrypt with range reads for large files and media
-- [ ] **Scoped drive handles:** a client restricted to a folder plus picked nodes, used by the
+- [x] Chunk cache: a directory under the CLI home; IndexedDB in web/shell — immutable, never revalidated
+- [x] Streaming decrypt with range reads for large files and media
+- [x] **Scoped drive handles:** a client restricted to a folder plus picked nodes, used by the
       EPIC-029 bridge, agents and the EPIC-031 headless apps
-- [ ] **Event-log helper:** `open(log, reducer)` → fold snapshot + tail, subscribe, append with
+- [x] **Event-log helper:** `open(log, reducer)` → fold snapshot + tail, subscribe, append with
       per-author sequence, write snapshots, trim; Go and TS
-- [ ] **CLI:** `poweur drive ls|put|get|mv|rm|history|append|tail --from|trim|watch`,
+- [x] **CLI:** `poweur drive ls|put|get|mv|rm|history|append|tail --from|trim|watch`,
       `poweur drive share add|rm|ls`, `poweur drive link create|rm`, `poweur drive transfer`,
       all with `--json`, so every collaboration action is scriptable
 

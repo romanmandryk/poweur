@@ -13,14 +13,23 @@ export interface DriveCommit {
   manifest?: Manifest;
   pages?: ChunkPage[];
   records?: AppendRecord[];
+  trim?: { node: string; before: number; snapshot: { node: string; version: string } };
   share?: Share;
   unshare?: { id: string };
   transfer?: { node: string; to: string; to_node: string };
+}
+export interface DriveStreamEvent {
+  type: string;
+  identity: string;
+  timestamp: string;
+  drive?: { drive: string; seq: number; node?: string; operation: string; version?: string; position?: number };
 }
 export interface CommitResult { seq: number; head: string; positions: number[] | null }
 export interface DriveNode {
   id: string; head: string; generation: number; kind: "file" | "folder";
   mode?: "replace" | "append"; folder?: string; removed?: boolean; position?: number;
+  trimmed_before?: number;
+  trim_snapshot?: { node: string; version: string };
 }
 export interface DriveChange { seq: number; node?: string; operation: string; version?: string; position?: number }
 export interface ChunkCache {
@@ -79,11 +88,68 @@ export class DriveClient {
       }
     }
   }
+  /** Upload only chunks the relay does not already have. Presigned URLs go
+   * straight to the object store, with the provider's headers and no Poweur credential. */
+  async store(chunks: Uint8Array[]): Promise<ChunkRef[]> {
+    const refs = chunks.map(bytes => ({ id: chunkID(bytes), size: bytes.length }));
+    const byID = new Map(refs.map((ref, index) => [ref.id, chunks[index]!]));
+    for (let start = 0; start < refs.length; start += 1024) {
+      const batch = refs.slice(start, start + 1024);
+      const body = await this.request<{ missing: { id: string; size: number; upload: { method?: string; url: string; headers?: Record<string, string> } }[] }>("POST", "/chunks/missing", { chunks: batch });
+      for (const item of body.missing) {
+        const bytes = byID.get(item.id);
+        if (!bytes || bytes.length !== item.size) throw new Error("missing chunk is not in this upload");
+        await this.putChunk(item.upload, bytes);
+      }
+    }
+    for (const [id, bytes] of byID) await this.cache?.put(id, bytes).catch(() => {});
+    return refs;
+  }
+  private async putChunk(upload: { method?: string; url: string; headers?: Record<string, string> }, bytes: Uint8Array): Promise<void> {
+    const absolute = /^https?:\/\//.test(upload.url);
+    const headers = { ...(upload.headers ?? {}), ...(absolute ? {} : await this.auth()) };
+    const response = await this.relay.raw({ method: upload.method || "PUT", path: upload.url, body: bytes, headers, redirect: "error" });
+    if (!response.ok) {
+      const text = await response.text();
+      throw toRelayError(response.status, text, undefined);
+    }
+  }
   async upload(bytes: Uint8Array): Promise<ChunkRef> {
-    const ref = { id: chunkID(bytes), size: bytes.length };
-    await this.request("PUT", `/chunks/${ref.id}`, bytes);
-    await this.cache?.put(ref.id, bytes).catch(() => {});
+    const [ref] = await this.store([bytes]);
+    if (!ref) throw new Error("upload produced no chunk");
     return ref;
+  }
+  history(node: string): Promise<{ versions: string[] }> {
+    return this.request("GET", `/nodes/${segment(node)}/history`);
+  }
+  shares(): Promise<{ shares: Share[] }> { return this.request("GET", "/shares"); }
+  unshare(id: string): Promise<CommitResult> { return this.commit({ unshare: { id } }); }
+  /** Advisory `drive.changed` stream. A missed event is recovered from `changes`. */
+  async subscribe(onEvent: (event: DriveStreamEvent) => void | Promise<void>, signal?: AbortSignal): Promise<void> {
+    const headers = { ...(await this.auth()), Accept: "text/event-stream" };
+    const response = await this.relay.raw({ method: "GET", path: this.path("/events"), headers, stream: true, ...(signal ? { signal } : {}) });
+    if (!response.ok || !response.body) throw new Error(`drive stream refused (${response.status})`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        let split = buffer.indexOf("\n\n");
+        while (split >= 0) {
+          const data = buffer.slice(0, split).split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("\n");
+          buffer = buffer.slice(split + 2);
+          if (data) {
+            try { await onEvent(JSON.parse(data) as DriveStreamEvent); } catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+          }
+          split = buffer.indexOf("\n\n");
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
   }
   /** Download ciphertext through its authorized node/version reference and
    * verify its address even when a local cache supplied the bytes. */

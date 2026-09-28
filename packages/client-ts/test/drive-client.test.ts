@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { linkSecret } from "../src/drive/files.js";
+import { IndexedDBChunkCache } from "../src/browser/drive-cache.js";
 import { DriveClient } from "../src/drive/client.js";
 import { RelayClient, type FetchLike } from "../src/http.js";
 import { chunkID } from "../src/drive/crypto.js";
@@ -13,6 +15,21 @@ function fixture(handler: (path: string, init: RequestInit) => Response | Promis
   };
   return { client: new DriveClient(new RelayClient("https://relay.example", { fetch }), signer), challenges: () => challenges };
 }
+
+describe("drive helpers", () => {
+  it("mixes a link fragment with a password half and does not reuse the buffer", () => {
+    const fragment = new Uint8Array(32).fill(1);
+    const mixed = linkSecret(fragment, new Uint8Array(32).fill(2));
+    expect(mixed[0]).toBe(3);
+    expect(fragment[0]).toBe(1);
+    expect(linkSecret(fragment)).toEqual(fragment);
+  });
+  it("rejects chunk ids before touching IndexedDB", async () => {
+    const cache = new IndexedDBChunkCache();
+    await expect(cache.get("nope")).rejects.toThrow("invalid chunk");
+    await expect(cache.put("ab", new Uint8Array())).rejects.toThrow("invalid cached chunk");
+  });
+});
 
 describe("drive transport", () => {
   it("retries an ambiguous commit with identical bytes and fresh authentication", async () => {
@@ -58,18 +75,49 @@ describe("drive transport", () => {
   });
   it("uploads content-addressed bytes and reads paginated APIs", async () => {
     const data = new Uint8Array([1]);
+    let puts = 0;
     const { client } = fixture((path, init) => {
-      if (init.method === "PUT") { expect(path).toContain(chunkID(data)); expect(init.body).toEqual(data); return Response.json({}); }
+      if (path.endsWith("/chunks/missing")) return Response.json({ missing: [{ id: chunkID(data), size: 1, upload: { method: "PUT", url: `/drive/${signer.identity}/chunks/${chunkID(data)}` } }] });
+      if (init.method === "PUT") { puts++; expect(path).toContain(chunkID(data)); expect(init.body).toEqual(data); return Response.json({}); }
       if (path.endsWith("children")) return Response.json({ children: [], cursor: "" });
       if (path.endsWith("changes")) return Response.json({ changes: [], cursor: "8" });
       if (path.endsWith("records")) return Response.json({ records: [], next: 9 });
       return Response.json({ drive: signer.identity, root: "", used: 0, quota: 1024 });
     });
     expect(await client.upload(data)).toEqual({ id: chunkID(data), size: 1 });
+    expect(puts).toBe(1);
     expect((await client.info()).quota).toBe(1024);
     expect((await client.children("node")).children).toEqual([]);
     expect((await client.changes("7")).cursor).toBe("8");
     expect((await client.records("node", 8)).next).toBe(9);
+  });
+  it("does not upload a chunk the relay already stored", async () => {
+    const data = new Uint8Array([1]);
+    const { client } = fixture((_path, init) => {
+      if (init.method === "PUT") throw new Error("uploaded a present chunk");
+      return Response.json({ missing: [] });
+    });
+    expect(await client.store([data])).toEqual([{ id: chunkID(data), size: 1 }]);
+  });
+  it("sends a presigned upload without Poweur credentials", async () => {
+    const data = new Uint8Array([7]);
+    const { client } = fixture(async (path, init) => {
+      if (path.endsWith("/chunks/missing")) {
+        return Response.json({ missing: [{ id: chunkID(data), size: 1, upload: { method: "PUT", url: "https://bucket.example/object", headers: { "x-amz-checksum": "abc" } } }] });
+      }
+      const headers = new Headers(init.headers);
+      expect(headers.get("X-Poweur-Identity")).toBeNull();
+      expect(headers.get("x-amz-checksum")).toBe("abc");
+      expect(path).toBe("/object");
+      return new Response(null, { status: 200 });
+    });
+    expect((await client.upload(data)).id).toBe(chunkID(data));
+  });
+  it("reads drive events and ignores keepalive frames", async () => {
+    const { client } = fixture(() => new Response(": padding\n\ndata: {\"type\":\"ready\",\"identity\":\"alice.poweur.net\",\"timestamp\":\"t\"}\n\ndata: {\"type\":\"drive.changed\",\"identity\":\"alice.poweur.net\",\"timestamp\":\"t\",\"drive\":{\"operation\":\"append\"}}\n\n"));
+    const types: string[] = [];
+    await client.subscribe(event => { types.push(event.type); });
+    expect(types).toEqual(["ready", "drive.changed"]);
   });
   it("rejects a page belonging to another node", async () => {
     const { client } = fixture(() => Response.json({ drive: signer.identity, node: "wrong" }));

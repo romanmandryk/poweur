@@ -1,11 +1,13 @@
 package drive
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,22 +104,30 @@ func TestChunkIntegrity(t *testing.T) {
 }
 func TestUploadAndGet(t *testing.T) {
 	data := []byte("ciphertext")
+	puts := 0
 	c, _ := fixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Poweur-Session-Id") != "session" {
 			t.Error("missing session ID")
 		}
+		if r.URL.Path == "/drive/alice.poweur.net/chunks/missing" {
+			_, _ = w.Write([]byte(`{"missing":[{"id":"` + protocol.ChunkID(data) + `","size":` + strconv.Itoa(len(data)) + `,"upload":{"method":"PUT","url":"/drive/alice.poweur.net/chunks/` + protocol.ChunkID(data) + `"}}]}`))
+			return
+		}
 		if r.Method == "PUT" {
 			body, _ := io.ReadAll(r.Body)
+			puts++
 			if string(body) != string(data) || r.URL.Path != "/drive/alice.poweur.net/chunks/"+protocol.ChunkID(data) {
 				t.Error("invalid upload")
 			}
+			_, _ = w.Write([]byte(`{}`))
+			return
 		}
 		_, _ = w.Write([]byte(`{"quota":123}`))
 	})
 	c.SessionID = "session"
 	ref, err := c.Upload(context.Background(), data)
-	if err != nil || ref.ID != protocol.ChunkID(data) {
-		t.Fatalf("%+v %v", ref, err)
+	if err != nil || ref.ID != protocol.ChunkID(data) || puts != 1 {
+		t.Fatalf("%+v puts=%d %v", ref, puts, err)
 	}
 	var info struct{ Quota int }
 	if err := c.Get(context.Background(), "", &info); err != nil || info.Quota != 123 {
@@ -126,5 +136,71 @@ func TestUploadAndGet(t *testing.T) {
 	c.Key = nil
 	if err := c.Get(context.Background(), "", &info); err == nil {
 		t.Fatal("accepted invalid signing key")
+	}
+}
+func TestStoreSkipsPresentChunks(t *testing.T) {
+	data := []byte("already")
+	c, _ := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			t.Error("uploaded a chunk the relay already has")
+		}
+		_, _ = w.Write([]byte(`{"missing":[]}`))
+	})
+	refs, err := c.Store(context.Background(), [][]byte{data})
+	if err != nil || len(refs) != 1 || refs[0].ID != protocol.ChunkID(data) {
+		t.Fatalf("%+v %v", refs, err)
+	}
+}
+func TestPresignedUploadOmitsCredentials(t *testing.T) {
+	data := []byte("direct")
+	var sawAuth bool
+	bucket := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("X-Poweur-Identity") != "" || r.Header.Get("X-Poweur-Signature") != ""
+		if r.Header.Get("X-Amz-Checksum") != "abc" {
+			t.Error("missing provider header")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != string(data) {
+			t.Error("wrong body")
+		}
+		w.WriteHeader(200)
+	}))
+	defer bucket.Close()
+	c, _ := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"missing":[{"id":"%s","size":%d,"upload":{"method":"PUT","url":"%s","headers":{"X-Amz-Checksum":"abc"}}}]}`, protocol.ChunkID(data), len(data), bucket.URL)
+	})
+	if _, err := c.Upload(context.Background(), data); err != nil || sawAuth {
+		t.Fatalf("presigned upload: %v auth=%v", err, sawAuth)
+	}
+}
+func TestSubscribe(t *testing.T) {
+	c, _ := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(": padding\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"ready\",\"identity\":\"alice.poweur.net\",\"timestamp\":\"2026-09-28T00:00:00Z\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"drive.changed\",\"identity\":\"alice.poweur.net\",\"timestamp\":\"2026-09-28T00:00:01Z\",\"drive\":{\"operation\":\"append\",\"node\":\"abc\"}}\n\n"))
+	})
+	var types []string
+	err := c.Subscribe(context.Background(), func(event Event) error {
+		types = append(types, event.Type)
+		if event.Type == "drive.changed" {
+			return errors.New("stop")
+		}
+		return nil
+	})
+	if err == nil || err.Error() != "stop" || len(types) != 2 || types[1] != "drive.changed" {
+		t.Fatalf("%v %v", types, err)
+	}
+}
+func TestLinkSecret(t *testing.T) {
+	fragment := bytes.Repeat([]byte{1}, 32)
+	half := bytes.Repeat([]byte{2}, 32)
+	got, err := LinkSecret(fragment, half)
+	if err != nil || got[0] != 3 || bytes.Equal(got, fragment) {
+		t.Fatalf("%v %v", got, err)
+	}
+	plain, err := LinkSecret(fragment, nil)
+	if err != nil || !bytes.Equal(plain, fragment) || &plain[0] == &fragment[0] {
+		t.Fatalf("fragment reused: %v", err)
 	}
 }

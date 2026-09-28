@@ -42,3 +42,4 @@ export function dohTxtResolver(options: DohOptions = {}): TxtResolver {
 
 /** A KeyStore over `localStorage`, for demos and low-stakes browser apps. */
 export { LocalStorageKeyStore } from "./localstorage-keystore.js";
+export { IndexedDBChunkCache } from "./drive-cache.js";

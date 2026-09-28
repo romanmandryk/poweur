@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
+	idpkg "github.com/poweur/identity"
 	protocol "github.com/poweur/identity/drive"
 )
 
@@ -19,6 +21,8 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
 	jsonOut := fs.Bool("json", false, "JSON output")
+	offset := fs.Int64("offset", 0, "plaintext byte offset for get")
+	length := fs.Int64("length", -1, "plaintext byte count for get; default is the rest of the file")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
 		return 1
 	}
@@ -30,21 +34,10 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur drive mkdir|rm|list <remote-path>; put <local-file> <remote-path>; get <remote-path> <local-file>; mv <remote-path> <remote-path> [--json]")
 		return 1
 	}
-	cfg, name, key, ok := loadIdentityKey(*use, stderr)
+	files, ok := openDriveFiles(*use, stderr)
 	if !ok {
 		return 1
 	}
-	encryption, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, name))
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	files := driveclient.Files{Client: &driveclient.Client{Relay: cfg.RelayURL, Identity: name, Key: key, Cache: driveclient.FileCache{Dir: filepath.Join(home, ".poweur", "cache", "drive-chunks")}}, EncryptionKey: encryption}
 	ctx := context.Background()
 	parent := func(remote string) (*driveclient.File, string, error) {
 		remote = strings.TrimPrefix(remote, "/")
@@ -61,6 +54,7 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		return folder, base, e
 	}
 	var result any
+	var err error
 	run := func() error {
 		switch args[0] {
 		case "list":
@@ -128,7 +122,12 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 			}
 			defer os.Remove(output.Name())
 			defer output.Close()
-			if e = files.Read(ctx, file, output); e != nil {
+			if *offset != 0 || *length >= 0 {
+				e = files.ReadRange(ctx, file, *offset, *length, output)
+			} else {
+				e = files.Read(ctx, file, output)
+			}
+			if e != nil {
 				return e
 			}
 			if e = output.Sync(); e != nil {
@@ -171,4 +170,30 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return writeOutput(stdout, *jsonOut, result, fmt.Sprint(result))
+}
+
+func openDriveFiles(use string, stderr io.Writer) (*driveclient.Files, bool) {
+	cfg, name, key, ok := loadIdentityKey(use, stderr)
+	if !ok {
+		return nil, false
+	}
+	encryption, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, name))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return nil, false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return nil, false
+	}
+	files := &driveclient.Files{Client: &driveclient.Client{Relay: cfg.RelayURL, Identity: name, Key: key, Cache: driveclient.FileCache{Dir: filepath.Join(home, ".poweur", "cache", "drive-chunks")}}, EncryptionKey: encryption}
+	files.Authors = func(author string) (ed25519.PublicKey, error) {
+		res, err := identity.ResolveIdentity(context.Background(), author)
+		if err != nil {
+			return nil, err
+		}
+		return idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
+	}
+	return files, true
 }

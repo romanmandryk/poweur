@@ -1,4 +1,6 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
+import { DriveLog } from "../src/drive/log.js";
+import { DriveScope } from "../src/drive/scope.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
 import { sessionSigner } from "../src/session.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -67,3 +69,24 @@ it("encrypts multi-chunk files, replaces, moves and reopens their key tree", asy
   expect((await read(await files.open(empty.manifest.node))).length).toBe(0);
   await expect(files.create(folder, "../escape", "file")).rejects.toThrow();
 }, 60_000);
+
+it("folds an append log and refuses nodes outside a scoped folder", async () => {
+  const files = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const root = await files.root();
+  const logFile = await files.create(root, "board.log", "file", new Uint8Array(), "append");
+  const text = new TextEncoder();
+  await files.append(logFile, text.encode("one"));
+  await files.append(logFile, text.encode("two"));
+  const tail = await files.tail(await files.open(logFile.manifest.node), 1);
+  expect(tail.map(record => new TextDecoder().decode(record.plain))).toEqual(["one", "two"]);
+  const log = await DriveLog.open(files, logFile, (state, entry) => [...(Array.isArray(state) ? state : []), new TextDecoder().decode(entry.plaintext)], []);
+  expect(log.value).toEqual(["one", "two"]);
+  const snap = await log.snapshot(root, "board.snap");
+  expect(snap.manifest.version).toMatch(/^[0-9a-f]{32}$/);
+  expect(log.position).toBe(2);
+  const app = await files.create(root, "app-folder", "folder");
+  const scope = new DriveScope(files, app.manifest.node);
+  await expect(scope.open(logFile.manifest.node)).rejects.toThrow("outside");
+  const note = await scope.create(await scope.resolve("/"), "note", "file", text.encode("hi"));
+  expect((await scope.resolve("/note")).manifest.node).toBe(note.manifest.node);
+});

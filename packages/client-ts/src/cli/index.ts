@@ -54,7 +54,7 @@ export const HELP = `Usage:
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
   poweur auth <inspect|sign> <request-file-or-url> [--use-identity=...] [--json]
   poweur analytics <show|on|off> [--use-identity=...] [--json]
-  poweur drive <info|node|ls|changes|records> [node-id] [--drive=identity] [--cursor=...] [--json]
+  poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
   poweur version
 `;
 

@@ -13,7 +13,7 @@ import (
 )
 
 func runDrive(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: poweur drive <info|node|ls|changes|records> [node-id] [--cursor=...] [--limit=100] [--drive=identity] [--use-identity=...] [--json]"
+	const usage = "usage: poweur drive <info|node|ls|changes|records|put|get|mkdir|mv|rm|history|append|tail|trim|watch|share|link|transfer> [--json]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 1
@@ -21,6 +21,8 @@ func runDrive(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "put", "get", "mkdir", "mv", "rm", "list":
 		return runDriveFiles(args, stdout, stderr)
+	case "history", "append", "tail", "trim", "watch", "share", "link", "transfer":
+		return runDriveOps(args, stdout, stderr)
 	case "info", "node", "ls", "changes", "records":
 	default:
 		fmt.Fprintln(stderr, usage)
