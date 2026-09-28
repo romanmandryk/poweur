@@ -103,6 +103,7 @@ drives/<identity>/pages/<sha256>.json
 relay/identities/<identity>.json
 relay/spool/{messages,acks}/<identity>/<20-digit-sequence>.json
 relay/keystore/<identity>.json
+relay/group-shares/<group>/<drive>
 ```
 
 Journal segments are immutable JSON envelopes containing a format version, first
@@ -440,6 +441,17 @@ commit carries `X-Poweur-PoW-Token` / `X-Poweur-PoW-Solution` for a single-use c
 `GET /auth/pow?purpose=drive-link&identity=…&link=…` (at most 30 bits). A create-only
 submitter seals the new node's key to the folder's `node_public`, uses a random name token,
 and can neither list the folder nor read any submission — including their own.
+
+**Implemented groups as members.** A share may name a group identity hosted on the same
+relay; its signed, verified roster (`.poweur/relay/group.json`) decides who the share
+reaches — members and admins alike. On a group identity's own drive (a Space), roster admins
+act with `admin` everywhere and a share may name the group itself to reach every member. The
+engine reads rosters from a relay cache that never touches a drive (warmed at start-up and on
+first use, replaced when the relay accepts a new roster). A roster update that drops anyone
+journals a `grouprevoke` on the group's drive and every drive indexed as sharing with it
+(`relay/group-shares/<group>/<drive>`): their access ends at once, their streams close, and
+the subtrees of key-bearing shares to the group become `rotate_required`. Groups hosted on
+other relays cannot be members yet: the host relay has no way to read a remote roster.
 
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the

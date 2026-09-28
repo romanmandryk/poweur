@@ -76,7 +76,7 @@ func (d *driveStreams) unsubscribe(driveID string, id int) {
 func (d *driveStreams) publish(driveID string, event streamEvent, change engine.Change, audience engine.Audience) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	revocation := change.Operation == "unshare"
+	revocation := change.Operation == "unshare" || change.Operation == "group.revoke"
 	for _, sub := range d.byDrive[driveID] {
 		if sub.closed {
 			continue

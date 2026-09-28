@@ -38,6 +38,8 @@ type Options struct {
 	// audience answers who may see the change, against the state it made.
 	OnCommit func(driveID string, change Change, records []PositionedRecord, audience Audience)
 	Now      func() time.Time
+	// Groups resolves local group identities for shares naming a group.
+	Groups Groups
 }
 
 // Engine serves many drives; each drive is serialized by its own lock.
@@ -79,6 +81,13 @@ func New(opts Options) *Engine {
 
 func (e *Engine) now() time.Time { return e.opts.Now().UTC() }
 
+func (e *Engine) groups(group string) (members, admins []string, ok bool) {
+	if e.opts.Groups == nil {
+		return nil, nil, false
+	}
+	return e.opts.Groups(group)
+}
+
 // open returns a drive's handle, loading it on first use. The caller holds
 // the handle's lock while touching its state.
 func (e *Engine) open(ctx context.Context, driveID string) (*driveHandle, error) {
@@ -103,6 +112,7 @@ func (e *Engine) open(ctx context.Context, driveID string) (*driveHandle, error)
 		}
 		h.st = st
 	}
+	h.st.groups = e.opts.Groups
 	return h, nil
 }
 

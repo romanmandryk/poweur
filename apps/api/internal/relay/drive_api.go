@@ -80,6 +80,7 @@ func newDriveEngine(store provider.Store, s *Server) *engine.Engine {
 		},
 		Quota:    s.storageQuota,
 		OnCommit: s.notifyDriveChange,
+		Groups:   s.resolveGroup,
 	})
 }
 
@@ -90,6 +91,9 @@ func (s *Server) notifyDriveChange(driveID string, change engine.Change, records
 		if raw, err := json.Marshal(records); err == nil && len(raw) <= maxInlineRecordBytes {
 			event.Records = records
 		}
+	}
+	if change.Operation == "share" {
+		s.noteGroupShare(change.Member, driveID)
 	}
 	stream := streamEvent{Type: "drive.changed", Identity: driveID, Drive: event, Timestamp: change.At.UTC().Format(time.RFC3339)}
 	s.hub.publish(driveID, stream)

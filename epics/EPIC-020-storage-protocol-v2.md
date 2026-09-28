@@ -96,8 +96,10 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       durable download caps, hourly caps) and share caps charged durably per share.
 - [x] Phase 7 slice 3: anonymous writes through links with self-certifying guest authors
       and proof-of-work; file requests (`INT_DRIVE_03`).
-- [ ] Phase 7 remaining: groups as members, ownership transfer, offers/accepts and mounts,
-      link viewer.
+- [x] Phase 7 slice 4: groups as members and Spaces; roster removals journal group
+      revocations that force rotation.
+- [ ] Phase 7 remaining: ownership transfer, offers/accepts and mounts, link viewer,
+      remote groups.
 - [ ] Phases 8–10: clients, complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 introduced an operational owner-authenticated
@@ -557,7 +559,9 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [x] File requests on `create` + folder public key; guest isolation and quotas (guest
       authors, `INT_DRIVE_03`)
 - [ ] Claim flow from E05-T6 and Send (E05-T7) as links on sealed files (clients)
-- [ ] Groups as members; membership change rotates keys
+- [x] Groups as members; membership change rotates keys (groups hosted on the same relay;
+      Space admins administer the group's drive)
+- [ ] Remote groups as members (needs relay-to-relay roster reads)
 
 **Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a member with `append` on a file and
 no read cannot read it; an anonymous link writer is stopped by caps and proof-of-work; a

@@ -484,3 +484,58 @@ func TestDriveLinks(t *testing.T) {
 		}
 	}
 }
+
+// A share naming a group identity reaches its members; a roster update that
+// drops a member ends their access and marks the shared keys for rotation.
+func TestDriveGroupShares(t *testing.T) {
+	fx := newGroupFixture(t)
+	server, ts := fx.server, fx.ts
+	owner := registerTestIdentity(t, server, ts, "groupowner.poweur.net")
+	base := "/drive/" + owner.name
+	commit := func(body map[string]any) {
+		t.Helper()
+		body["id"] = randHex(16)
+		if status, out, _ := driveReq(t, ts, http.MethodPost, owner, base+"/commit", body); status != http.StatusOK {
+			t.Fatalf("commit: %d %v", status, out)
+		}
+	}
+	sign := func(m drive.Manifest) drive.Manifest { _ = m.Sign(owner.priv); return m }
+	root, docs := randHex(16), randHex(16)
+	commit(map[string]any{"manifest": sign(drive.Manifest{Format: 1, Drive: owner.name, Node: root, Version: randHex(16), Operation: drive.OpCreate,
+		Author: owner.name, Generation: 1, Kind: drive.KindFolder, NodeKey: testSealed(1), Pages: []string{}})})
+	commit(map[string]any{"manifest": sign(drive.Manifest{Format: 1, Drive: owner.name, Node: docs, Version: randHex(16), Operation: drive.OpCreate,
+		Author: owner.name, Generation: 1, Kind: drive.KindFolder, Folder: root, Name: testSealed(2), NameHash: strings.Repeat("ab", 32), NodeKey: testSealed(3), Pages: []string{}})})
+	s := drive.Share{Format: 1, Drive: owner.name, ID: randHex(16), Node: docs, Member: fx.groupName, Role: drive.RoleRead, Generation: 1, NodeKey: testSealed(4),
+		NodePublic: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Issuer: owner.name, Issued: time.Now().UTC().Format(time.RFC3339)}
+	_ = s.Sign(owner.priv)
+	commit(map[string]any{"share": s})
+	server.resolveGroupSync(fx.groupName)
+
+	for _, who := range []hostedID{fx.bob, fx.dana} {
+		if status, _, _ := driveReq(t, ts, http.MethodGet, who, base+"/nodes/"+docs, nil); status != http.StatusOK {
+			t.Fatalf("%s through the group: %d", who.name, status)
+		}
+	}
+	if status, _, _ := driveReq(t, ts, http.MethodGet, fx.stranger, base+"/nodes/"+docs, nil); status != http.StatusForbidden {
+		t.Fatalf("non-member: %d", status)
+	}
+	// The group drops bob through the owner API, as a client would.
+	gr := idpkg.ShareGroup{Group: fx.groupName, Owner: fx.groupName, Members: []string{fx.alice.name, fx.carol.name},
+		Admins: []string{fx.dana.name}, Epoch: 2, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	_ = gr.Sign(fx.group.priv)
+	raw, _ := json.Marshal(gr)
+	resp := sysReq(t, ts, http.MethodPut, fx.group, fx.groupName, groupRosterPath, raw, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("roster update: %d %s", resp.StatusCode, readAll(t, resp))
+	}
+	resp.Body.Close()
+	if status, _, _ := driveReq(t, ts, http.MethodGet, fx.bob, base+"/nodes/"+docs, nil); status != http.StatusForbidden {
+		t.Fatalf("removed member: %d", status)
+	}
+	if status, out, _ := driveReq(t, ts, http.MethodGet, owner, base+"/nodes/"+docs, nil); status != http.StatusOK || out["rotate_required"] != true {
+		t.Fatalf("shared folder after a member left: %d %v", status, out)
+	}
+	if status, _, _ := driveReq(t, ts, http.MethodGet, fx.carol, base+"/nodes/"+docs, nil); status != http.StatusOK {
+		t.Fatalf("remaining member: %d", status)
+	}
+}

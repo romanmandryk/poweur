@@ -77,6 +77,9 @@ type Server struct {
 	driveStreams *driveStreams
 	// linkUses and linkFailures rate-limit link holders (E20-T7).
 	linkUses, linkFailures *linkLimiter
+	// rosters caches group identities' rosters for group shares (E20-T7).
+	rosters         *rosterCache
+	groupShareNoted map[string]bool
 	// sysLocks makes owner API preconditions atomic with writes and deletes.
 	sysLocks *deviceLocks
 
@@ -163,6 +166,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		hub:               newHub(),
 		driveStreams:      newDriveStreams(),
 		linkUses:          newLinkLimiter(),
+		rosters:           newRosterCache(),
 		linkFailures:      newLinkLimiter(),
 		deviceLocks:       newDeviceLocks(),
 		sysLocks:          newDeviceLocks(),
@@ -179,6 +183,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.drive = driveStore
 		s.engine = newDriveEngine(driveStore, s)
 		s.sysFiles = driveSystemFiles{engine: s.engine}
+		go s.warmRosters()
 	}
 	return s
 }

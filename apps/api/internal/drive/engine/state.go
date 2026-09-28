@@ -131,10 +131,12 @@ type state struct {
 	Used        int64                       `json:"used"`
 	Ops         map[string]opResult         `json:"ops"`
 	System      map[string]*systemFile      `json:"system"`
-	Shares      map[string]*drive.Share     `json:"shares"`
-	ShareUse    map[string]*capUse          `json:"share_use"`
-	LinkUses    map[string]uint64           `json:"link_uses"`
-	Changes     []Change                    `json:"changes"`
+	// groups resolves group members; set on load, never serialized.
+	groups   Groups
+	Shares   map[string]*drive.Share `json:"shares"`
+	ShareUse map[string]*capUse      `json:"share_use"`
+	LinkUses map[string]uint64       `json:"link_uses"`
+	Changes  []Change                `json:"changes"`
 }
 
 func newState(driveID string) *state {

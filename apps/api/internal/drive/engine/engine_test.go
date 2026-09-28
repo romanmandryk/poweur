@@ -33,6 +33,8 @@ type fixture struct {
 	changes []Change
 	mu      sync.Mutex
 	quota   int64
+	// rosters stand in for the relay's group cache: group → members, admins.
+	rosters map[string][2][]string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -105,6 +107,12 @@ func (f *fixture) newEngine() *Engine {
 		},
 		Quota: func(string) int64 { return f.quota },
 		Now:   func() time.Time { return f.clock },
+		Groups: func(group string) ([]string, []string, bool) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			r, ok := f.rosters[group]
+			return r[0], r[1], ok
+		},
 		OnCommit: func(_ string, c Change, _ []PositionedRecord, _ Audience) {
 			f.mu.Lock()
 			f.changes = append(f.changes, c)

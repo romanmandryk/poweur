@@ -39,16 +39,50 @@ type Unshare struct {
 	ID string `json:"id"`
 }
 
+// Groups resolves a group identity hosted on this relay to its verified
+// roster. It must not block on a drive: the relay answers from a cache.
+// Unknown or non-group names report false.
+type Groups func(group string) (members, admins []string, ok bool)
+
+// matches reports whether share s applies to actor: a link share to its link
+// holder; an identity share to that identity, or to every member (and
+// admin) of the group identity it names.
+func (st *state) matches(s *drive.Share, actor string) bool {
+	if linkID, isLink := strings.CutPrefix(actor, linkActorPrefix); isLink {
+		return s.Link != "" && s.Link == linkID
+	}
+	if s.Member == "" {
+		return false
+	}
+	if s.Member == actor {
+		return true
+	}
+	if st.groups == nil {
+		return false
+	}
+	members, admins, ok := st.groups(s.Member)
+	return ok && (contains(members, actor) || contains(admins, actor))
+}
+
+// groupAdmin reports whether actor administers the drive's own group
+// identity: on a Space's drive, its admins act with admin everywhere.
+func (st *state) groupAdmin(actor string) bool {
+	if st.groups == nil {
+		return false
+	}
+	_, admins, ok := st.groups(st.Drive)
+	return ok && contains(admins, actor)
+}
+
 // roleSet is the roles an actor holds on a node.
 func (st *state) roleSet(actor, nodeID string, now nowFunc) []string {
 	var roles []string
-	linkID, isLink := strings.CutPrefix(actor, linkActorPrefix)
 	for seen, id := 0, nodeID; id != "" && seen <= len(st.Nodes); seen++ {
 		for _, s := range st.Shares {
 			if s.Node != id || s.ExpiredAt(now()) {
 				continue
 			}
-			if isLink && s.Link == linkID || !isLink && s.Member == actor {
+			if st.matches(s, actor) {
 				roles = append(roles, s.Role)
 			}
 		}
@@ -69,6 +103,9 @@ func (st *state) allowed(actor, nodeID, need string, now nowFunc) bool {
 	if need == needOwner {
 		return false
 	}
+	if st.groupAdmin(actor) {
+		return true
+	}
 	for _, role := range st.roleSet(actor, nodeID, now) {
 		if drive.RoleGrants(role, need) {
 			return true
@@ -82,15 +119,14 @@ const needOwner = "owner"
 
 // hasAccess reports whether actor holds any live share on the drive.
 func (st *state) hasAccess(actor string, now nowFunc) bool {
-	if strings.EqualFold(actor, st.Drive) {
+	if strings.EqualFold(actor, st.Drive) || st.groupAdmin(actor) {
 		return true
 	}
-	linkID, isLink := strings.CutPrefix(actor, linkActorPrefix)
 	for _, s := range st.Shares {
 		if s.ExpiredAt(now()) {
 			continue
 		}
-		if isLink && s.Link == linkID || !isLink && s.Member == actor {
+		if st.matches(s, actor) {
 			return true
 		}
 	}
@@ -99,15 +135,14 @@ func (st *state) hasAccess(actor string, now nowFunc) bool {
 
 // canWriteSomewhere reports whether actor may add bytes anywhere.
 func (st *state) canWriteSomewhere(actor string, now nowFunc) bool {
-	if strings.EqualFold(actor, st.Drive) {
+	if strings.EqualFold(actor, st.Drive) || st.groupAdmin(actor) {
 		return true
 	}
-	linkID, isLink := strings.CutPrefix(actor, linkActorPrefix)
 	for _, s := range st.Shares {
 		if s.ExpiredAt(now()) || s.Role == drive.RoleRead {
 			continue
 		}
-		if isLink && s.Link == linkID || !isLink && s.Member == actor {
+		if st.matches(s, actor) {
 			return true
 		}
 	}
@@ -174,11 +209,9 @@ func (e *Engine) Shares(ctx context.Context, driveID, actor string) ([]drive.Sha
 		return nil, err
 	}
 	defer h.mu.Unlock()
-	linkID, isLink := strings.CutPrefix(actor, linkActorPrefix)
 	var out []drive.Share
 	for _, s := range h.st.Shares {
-		mine := isLink && s.Link == linkID || !isLink && s.Member == actor
-		if mine || h.st.allowed(actor, s.Node, drive.RoleAdmin, e.now) {
+		if h.st.matches(s, actor) || h.st.allowed(actor, s.Node, drive.RoleAdmin, e.now) {
 			out = append(out, *s)
 		}
 	}
@@ -209,7 +242,11 @@ func (e *Engine) validateShare(ctx context.Context, h *driveHandle, s drive.Shar
 		return journalOp{}, invalid("a share is issued by its committer for this drive")
 	}
 	if strings.EqualFold(s.Member, st.Drive) {
-		return journalOp{}, invalid("the owner needs no share")
+		// A group identity's drive may share with the group itself: every
+		// member of the Space. Any other owner needs no share.
+		if _, _, group := e.groups(st.Drive); !group {
+			return journalOp{}, invalid("the owner needs no share")
+		}
 	}
 	n := st.Nodes[s.Node]
 	if n == nil || n.Removed {
@@ -324,9 +361,9 @@ func visible(st *state, change Change, actor string, now nowFunc) bool {
 		return true
 	case change.Node == "":
 		return false
-	case change.Member != "" && change.Member == actor:
+	case change.Member != "" && (change.Member == actor || st.inGroup(change.Member, actor)):
 		return true
-	case change.Operation == "share" || change.Operation == "unshare":
+	case change.Operation == "share" || change.Operation == "unshare" || change.Operation == "group.revoke":
 		return st.allowed(actor, change.Node, drive.RoleAdmin, now)
 	}
 	return st.allowed(actor, change.Node, drive.RoleRead, now)
@@ -364,6 +401,73 @@ func (e *Engine) ChangesFor(ctx context.Context, driveID, actor string, after ui
 func rotationRequired(st *state, nodeID string) error {
 	if n := st.Nodes[nodeID]; n != nil && n.RotateRequired {
 		return fmt.Errorf("%w: node %s must rotate its key after a revocation", ErrConflict, nodeID)
+	}
+	return nil
+}
+
+const kindGroupRevoke = "grouprevoke"
+
+type groupRevokeOp struct {
+	Group   string   `json:"group"`
+	Removed []string `json:"removed"`
+}
+
+// inGroup reports whether actor is in the group identity group's roster.
+func (st *state) inGroup(group, actor string) bool {
+	if st.groups == nil {
+		return false
+	}
+	members, admins, ok := st.groups(group)
+	return ok && (contains(members, actor) || contains(admins, actor))
+}
+
+// RevokeGroupMembers records that members left a group identity's roster.
+// Every node below a key-bearing share to that group becomes
+// rotate-required, as if each departed member's own share were revoked. It
+// journals nothing when the drive holds no such share. The caller updates
+// its roster cache first, so streams of departed members close.
+func (e *Engine) RevokeGroupMembers(ctx context.Context, driveID, group string, removed []string) error {
+	if len(removed) == 0 {
+		return nil
+	}
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return err
+	}
+	defer h.mu.Unlock()
+	if err := e.catchUp(ctx, h); err != nil {
+		return err
+	}
+	affected := false
+	for _, s := range h.st.Shares {
+		if s.Member == group && drive.KeyBearing(s.Role) {
+			affected = true
+			break
+		}
+	}
+	if !affected {
+		return nil
+	}
+	sorted := append([]string(nil), removed...)
+	sort.Strings(sorted)
+	return e.publish(ctx, h, journalOp{Kind: kindGroupRevoke, At: e.now(), GroupRevoke: &groupRevokeOp{Group: group, Removed: sorted}})
+}
+
+func applyGroupRevoke(st *state, seq uint64, op journalOp) error {
+	g := op.GroupRevoke
+	if g == nil {
+		return fmt.Errorf("invalid group revocation")
+	}
+	for _, s := range st.Shares {
+		if s.Member != g.Group || !drive.KeyBearing(s.Role) {
+			continue
+		}
+		for _, n := range st.Nodes {
+			if !n.Removed && st.isAncestor(s.Node, n.ID) {
+				n.RotateRequired = true
+			}
+		}
+		st.Changes = append(st.Changes, Change{Seq: seq, Node: s.Node, Operation: "group.revoke", Share: s.ID, Member: g.Group, At: op.At})
 	}
 	return nil
 }

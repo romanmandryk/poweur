@@ -146,6 +146,9 @@ func (s *Server) handleSystemFilePut(w http.ResponseWriter, r *http.Request) {
 	if fields := settingsChanges(path, old, body); len(fields) > 0 {
 		settingsChanged(r, fields)
 	}
+	if path == groupRosterPath {
+		s.groupRosterChanged(r.Context(), identity)
+	}
 	w.Header().Set("ETag", sysFileETag(body))
 	writeJSON(w, http.StatusOK, map[string]string{"path": path, "etag": sysFileETag(body)})
 }
@@ -178,6 +181,9 @@ func (s *Server) handleSystemFileDelete(w http.ResponseWriter, r *http.Request) 
 	if err := s.sysFiles.Delete(r.Context(), identity, path); err != nil && !errors.Is(err, errSysFileNotFound) {
 		writeError(w, http.StatusInternalServerError, "storage_error", "failed to delete system file")
 		return
+	}
+	if path == groupRosterPath {
+		s.groupRosterChanged(r.Context(), identity)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

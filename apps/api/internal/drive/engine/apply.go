@@ -455,6 +455,10 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		if err := applyLinkUse(st, op); err != nil {
 			return err
 		}
+	case kindGroupRevoke:
+		if err := applyGroupRevoke(st, seq, op); err != nil {
+			return err
+		}
 	case kindUnshare:
 		if err := applyUnshare(st, seq, op); err != nil {
 			return err

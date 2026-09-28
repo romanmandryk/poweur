@@ -48,14 +48,13 @@ func (st *state) governing(actor, nodeID, need string, now nowFunc) *drive.Share
 	if strings.EqualFold(actor, st.Drive) {
 		return nil
 	}
-	linkID, isLink := strings.CutPrefix(actor, linkActorPrefix)
 	for seen, id := 0, nodeID; id != "" && seen <= len(st.Nodes); seen++ {
 		var best *drive.Share
 		for _, s := range st.Shares {
 			if s.Node != id || s.ExpiredAt(now()) || !drive.RoleGrants(s.Role, need) {
 				continue
 			}
-			if isLink && s.Link == linkID || !isLink && s.Member == actor {
+			if st.matches(s, actor) {
 				// Several shares on one node: take the ID order, so replay
 				// charges the same one.
 				if best == nil || s.ID < best.ID {
