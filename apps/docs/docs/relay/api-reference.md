@@ -1038,6 +1038,9 @@ event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surf
 | `GET /drive/:identity/nodes/:node/chunks/:hash` | Chunk of an append record |
 | `GET /drive/:identity/shares` | Shares the caller may see (members: their own, with sealed keys) |
 | `GET /drive/:identity/events` | `drive.changed` SSE filtered to the caller; closes on revocation |
+| `GET /drive/:identity/links/:link` | Public: how to open a link (salt, KDF, PoW, opens left) |
+
+Link holders send `X-Poweur-Link` (and `X-Poweur-Link-Verifier` for a password) instead of the challenge headers.
 
 ## Error Format
 

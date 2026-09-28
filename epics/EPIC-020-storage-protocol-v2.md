@@ -92,9 +92,10 @@ Phase 0; no drive engine/provider existed at that checkpoint.
 - [x] Phase 7 slice 1: signed shares (Go/TS/vectors), roles with inheritance enforced on
       every read and commit, cross-relay members, filtered changes/events with revocation
       closing streams, revocation → `rotate_required` (`INT_DRIVE_02`).
-- [ ] Phase 7 remaining: links (fragment key, password verifier, expiry, download caps,
-      viewer), caps, anonymous writes with PoW, file requests, groups as members, offers/
-      accepts and mounts, ownership transfer.
+- [x] Phase 7 slice 2: links (link-ID auth, password verifier with throttling, expiry,
+      durable download caps, hourly caps) and share caps charged durably per share.
+- [ ] Phase 7 remaining: anonymous writes with PoW, file requests, groups as members,
+      offers/accepts and mounts, ownership transfer, link viewer.
 - [ ] Phases 8–10: clients, complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 introduced an operational owner-authenticated
@@ -540,7 +541,7 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [x] **Inheritance and combination:** a node's effective role for a member is the highest role
       granted by any share on the node or its ancestors, so a folder can be shared `read` while
       one file in it is shared `append` (e.g. comments)
-- [ ] **Caps:** per-member and per-link limits on bytes, records/files and rate, plus
+- [x] **Caps:** per-member and per-link limits on bytes, records/files and rate, plus
       one-per-identity limits (one form response per ID); `429`/`507` with reasons
 - [ ] **Proof-of-work** (E14 primitive) required on anonymous link writes, difficulty set by the owner
 - [ ] **Ownership transfer** of a subtree between drives (person ↔ group identity), re-issuing
@@ -548,8 +549,9 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [ ] Offers and accepts (E05-T3 bodies) carry sealed node keys; mounts in `.poweur/private/mounts/`
 - [x] Revocation with immediate access removal and key rotation on the next owner write
       (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
-- [ ] Links with key-in-fragment and the split password verifier; expiry, download caps,
-      rate limits; static decrypting viewer with strict CSP and `no-referrer`
+- [x] Links with key-in-fragment and the split password verifier; expiry, download caps,
+      rate limits (relay side)
+- [ ] Static decrypting viewer at `/s/<token>` with strict CSP and `no-referrer` (web)
 - [ ] File requests on `create` + folder public key; guest isolation, quotas and claim flow
       from E05-T6; Send (E05-T7) as links on sealed files
 - [ ] Groups as members; membership change rotates keys

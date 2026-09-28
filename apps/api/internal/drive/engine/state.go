@@ -132,6 +132,8 @@ type state struct {
 	Ops         map[string]opResult         `json:"ops"`
 	System      map[string]*systemFile      `json:"system"`
 	Shares      map[string]*drive.Share     `json:"shares"`
+	ShareUse    map[string]*capUse          `json:"share_use"`
+	LinkUses    map[string]uint64           `json:"link_uses"`
 	Changes     []Change                    `json:"changes"`
 }
 
@@ -140,7 +142,7 @@ func newState(driveID string) *state {
 		Format: stateFormat, Drive: driveID,
 		Nodes: map[string]*node{}, Names: map[string]string{}, Versions: map[string]*version{},
 		Pages: map[string][]drive.ChunkRef{}, PageRefs: map[string]int{}, Chunks: map[string]*chunk{},
-		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{},
+		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{}, ShareUse: map[string]*capUse{}, LinkUses: map[string]uint64{},
 	}
 }
 

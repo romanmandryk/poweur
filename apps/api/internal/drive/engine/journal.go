@@ -49,6 +49,9 @@ type journalOp struct {
 	System       *systemOp         `json:"system,omitempty"`
 	Share        *drive.Share      `json:"share,omitempty"`
 	Unshare      *unshareOp        `json:"unshare,omitempty"`
+	LinkUse      *linkUseOp        `json:"link_use,omitempty"`
+	// Charge is what the commit spent against its share's caps.
+	Charge *charge `json:"charge,omitempty"`
 }
 
 type trimOp struct {

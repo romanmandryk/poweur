@@ -380,3 +380,107 @@ func TestRelayRestartsFromBucketOnly(t *testing.T) {
 		t.Fatalf("spool lost: %+v", pending)
 	}
 }
+
+func TestDriveLinks(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "linkalice.poweur.net")
+	base := "/drive/" + alice.name
+	sign := func(m drive.Manifest) drive.Manifest { _ = m.Sign(alice.priv); return m }
+	commit := func(body map[string]any) {
+		t.Helper()
+		body["id"] = randHex(16)
+		if status, out, _ := driveReq(t, ts, http.MethodPost, alice, base+"/commit", body); status != http.StatusOK {
+			t.Fatalf("commit: %d %v", status, out)
+		}
+	}
+	root, docs, file := randHex(16), randHex(16), randHex(16)
+	commit(map[string]any{"manifest": sign(drive.Manifest{Format: 1, Drive: alice.name, Node: root, Version: randHex(16), Operation: drive.OpCreate,
+		Author: alice.name, Generation: 1, Kind: drive.KindFolder, NodeKey: testSealed(1), Pages: []string{}})})
+	commit(map[string]any{"manifest": sign(drive.Manifest{Format: 1, Drive: alice.name, Node: docs, Version: randHex(16), Operation: drive.OpCreate,
+		Author: alice.name, Generation: 1, Kind: drive.KindFolder, Folder: root, Name: testSealed(2), NameHash: strings.Repeat("ab", 32), NodeKey: testSealed(3), Pages: []string{}})})
+	data := testChunk(t, alice.name, "shared by link")
+	ref := drive.ChunkRef{ID: drive.ChunkID(data), Size: uint64(len(data))}
+	driveReq(t, ts, http.MethodPut, alice, base+"/chunks/"+ref.ID, data)
+	pages, hashes, _ := drive.SplitPages(alice.name, file, []drive.ChunkRef{ref})
+	v1 := randHex(16)
+	commit(map[string]any{"pages": pages, "manifest": sign(drive.Manifest{Format: 1, Drive: alice.name, Node: file, Version: v1, Operation: drive.OpCreate,
+		Author: alice.name, Generation: 1, Kind: drive.KindFile, Mode: drive.ModeReplace, Folder: docs, Name: testSealed(4), NameHash: strings.Repeat("cd", 32),
+		NodeKey: testSealed(5), ContentKey: testSealed(6), Count: 1, Pages: hashes})})
+
+	link := func(verifier string, caps drive.Caps) string {
+		id, _ := drive.NewShareID()
+		s := drive.Share{Format: 1, Drive: alice.name, ID: randHex(16), Node: docs, Link: id, Role: drive.RoleRead, Generation: 1, NodeKey: testSealed(7),
+			NodePublic: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Caps: caps, Issuer: alice.name, Issued: time.Now().UTC().Format(time.RFC3339)}
+		if verifier != "" {
+			s.KDF, s.Salt, s.VerifierHash = drive.ShareKDF, base64.RawURLEncoding.EncodeToString(make([]byte, 16)), drive.VerifierHash([]byte(verifier))
+		}
+		_ = s.Sign(alice.priv)
+		commit(map[string]any{"share": s})
+		return id
+	}
+	asLink := func(id, verifier, method, path string) (int, map[string]any) {
+		hdr := map[string]string{"X-Poweur-Link": id}
+		if verifier != "" {
+			hdr["X-Poweur-Link-Verifier"] = base64.RawURLEncoding.EncodeToString([]byte(verifier))
+		}
+		resp := httpReq(t, ts, method, path, "", nil, hdr)
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	protected := link("correct horse", drive.Caps{Downloads: 5})
+
+	// Anyone with the ID learns how to open it, and nothing else.
+	status, out := asLink("", "", http.MethodGet, base+"/links/"+protected)
+	if status != http.StatusOK || out["password"] != true || out["salt"] == nil || out["remaining_opens"] != float64(5) {
+		t.Fatalf("link info: %d %v", status, out)
+	}
+	if status, _ := asLink("", "", http.MethodGet, base+"/links/"+randHex(16)); status != http.StatusNotFound {
+		t.Fatalf("unknown link info: %d", status)
+	}
+	if status, _ := asLink(protected, "", http.MethodGet, base+"/shares"); status != http.StatusUnauthorized {
+		t.Fatalf("no password: %d", status)
+	}
+	status, out = asLink(protected, "correct horse", http.MethodGet, base+"/shares")
+	if shares, _ := out["shares"].([]any); status != http.StatusOK || len(shares) != 1 {
+		t.Fatalf("open: %d %v", status, out)
+	}
+	for _, path := range []string{"/nodes/" + file, "/nodes/" + docs + "/children", "/nodes/" + file + "/versions/" + v1 + "/chunks/" + ref.ID} {
+		if status, _ := asLink(protected, "correct horse", http.MethodGet, base+path); status != http.StatusOK {
+			t.Fatalf("link read %s: %d", path, status)
+		}
+	}
+	// The changes feed shows only what the link can read.
+	if status, out := asLink(protected, "correct horse", http.MethodGet, base+"/changes"); status != http.StatusOK {
+		t.Fatalf("link changes: %d", status)
+	} else {
+		for _, c := range out["changes"].([]any) {
+			if node := c.(map[string]any)["node"]; node != docs && node != file {
+				t.Fatalf("link sees a change outside the share: %v", c)
+			}
+		}
+	}
+	for _, path := range []string{"/nodes/" + root, ""} {
+		if status, _ := asLink(protected, "correct horse", http.MethodGet, base+path); status < 400 {
+			t.Fatalf("link read outside the share %q: %d", path, status)
+		}
+	}
+	if status, _ := asLink(protected, "correct horse", http.MethodGet, base+"/links/"+protected); status != http.StatusOK {
+		t.Fatalf("info after one open: %d", status)
+	}
+	// Guessing the password is throttled per link.
+	for i := 0; i < maxLinkPasswordFailures; i++ {
+		asLink(protected, "guess", http.MethodGet, base+"/shares")
+	}
+	if status, _ := asLink(protected, "correct horse", http.MethodGet, base+"/shares"); status != http.StatusTooManyRequests {
+		t.Fatalf("after many wrong passwords: %d", status)
+	}
+	// A link's own hourly cap.
+	busy := link("", drive.Caps{PerHour: 2})
+	for i, want := range []int{http.StatusOK, http.StatusOK, http.StatusTooManyRequests} {
+		if status, _ := asLink(busy, "", http.MethodGet, base+"/nodes/"+file); status != want {
+			t.Fatalf("request %d: %d want %d", i, status, want)
+		}
+	}
+}

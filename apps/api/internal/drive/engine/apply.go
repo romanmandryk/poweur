@@ -187,11 +187,22 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 	if quota := e.opts.Quota(st.Drive); quota > 0 && added > 0 && st.Used+added > quota {
 		return journalOp{}, ErrQuota
 	}
+	target, need, files := m.Node, drive.RoleWrite, uint64(0)
+	switch m.Operation {
+	case drive.OpCreate:
+		target, need, files = m.Folder, drive.RoleCreate, 1
+	case drive.OpRotate:
+		need = drive.RoleAdmin
+	}
+	spent, err := st.chargeFor(m.Author, target, need, charge{Bytes: uint64(added), Files: files}, e.now)
+	if err != nil {
+		return journalOp{}, err
+	}
 	hash, err := m.Hash()
 	if err != nil {
 		return journalOp{}, invalid("%v", err)
 	}
-	return journalOp{Kind: kindManifest, Manifest: &m, ManifestHash: hash, NewPages: newPages}, nil
+	return journalOp{Kind: kindManifest, Manifest: &m, ManifestHash: hash, NewPages: newPages, Charge: spent}, nil
 }
 
 func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []drive.AppendRecord) (journalOp, error) {
@@ -260,7 +271,12 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 	if quota := e.opts.Quota(st.Drive); quota > 0 && added > 0 && st.Used+added > quota {
 		return journalOp{}, ErrQuota
 	}
-	return journalOp{Kind: kindAppend, Records: out}, nil
+	// One commit's records share an author (the relay requires it).
+	spent, err := st.chargeFor(records[0].Author, target, drive.RoleAppend, charge{Bytes: uint64(added), Records: uint64(len(records))}, e.now)
+	if err != nil {
+		return journalOp{}, err
+	}
+	return journalOp{Kind: kindAppend, Records: out, Charge: spent}, nil
 }
 
 func (e *Engine) validateTrim(ctx context.Context, h *driveHandle, req Request) (journalOp, error) {
@@ -400,6 +416,10 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		if err := applyShare(st, seq, op); err != nil {
 			return err
 		}
+	case kindLinkUse:
+		if err := applyLinkUse(st, op); err != nil {
+			return err
+		}
 	case kindUnshare:
 		if err := applyUnshare(st, seq, op); err != nil {
 			return err
@@ -407,6 +427,7 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 	default:
 		return fmt.Errorf("unknown journal operation %q", op.Kind)
 	}
+	applyCharge(st, op.Charge)
 	if op.ID != "" {
 		st.Ops[op.ID] = result
 	}

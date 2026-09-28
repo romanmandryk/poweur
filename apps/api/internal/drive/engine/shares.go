@@ -279,6 +279,7 @@ func applyUnshare(st *state, seq uint64, op journalOp) error {
 	}
 	s := st.Shares[u.ID]
 	delete(st.Shares, u.ID)
+	delete(st.ShareUse, u.ID)
 	if drive.KeyBearing(s.Role) {
 		// Everything the member could decrypt is below the shared node.
 		for _, n := range st.Nodes {

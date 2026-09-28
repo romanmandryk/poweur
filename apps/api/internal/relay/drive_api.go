@@ -108,6 +108,11 @@ func (s *Server) driveCaller(w http.ResponseWriter, r *http.Request) (driveID, a
 		writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
 		return "", "", false
 	}
+	if r.Header.Get(linkHeader) != "" {
+		// Opening a link is listing its share; other requests only use it.
+		actor, ok = s.linkCaller(w, r, driveID, r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/shares"))
+		return driveID, actor, ok
+	}
 	actor, ok = s.authenticateCaller(w, r, false)
 	if !ok {
 		return "", "", false
@@ -181,6 +186,8 @@ func (s *Server) writeDriveError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_commit", err.Error())
 	case errors.Is(err, engine.ErrQuota):
 		s.writeQuotaExceeded(w)
+	case errors.Is(err, engine.ErrCap):
+		writeError(w, http.StatusTooManyRequests, "share_limit", err.Error())
 	case errors.Is(err, engine.ErrResync):
 		writeError(w, http.StatusGone, "resync", err.Error())
 	case errors.Is(err, engine.ErrStale):

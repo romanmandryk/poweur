@@ -362,6 +362,7 @@ owner is permitted (`403` otherwise) — superseded by shares below. Knowing a h
 | Append tail | `GET /nodes/{node}/records?from=N&limit=` | `{records:[{position,record}], next}`; `410 {trimmed_before, snapshot}` |
 | Shares | `GET /shares` | `{shares}`: all for the owner; own and administered for members |
 | Event stream | `GET /events` | SSE `drive.changed`, filtered per caller; `drive.revoked` then close |
+| Link parameters | `GET /links/{link}` (no auth) | `{role, expires, kdf, salt, pow, password, remaining_opens}` |
 
 `upload.url` is either the relay's own `PUT /chunks/{hash}` or, on S3 with `S3_PRESIGN=1`, a
 15-minute presigned PUT whose `x-amz-checksum-sha256` header binds the chunk hash. Commit
@@ -415,6 +416,19 @@ new children and new key-bearing shares there return `409` until that node's key
 Members discover their grants and sealed keys at `GET /shares`, read `GET /changes` filtered
 to what they can read, and stream `GET /events`; a revocation that leaves them no share
 closes the stream with `drive.revoked`.
+
+**Implemented links and caps.** A link holder sends the link ID in `X-Poweur-Link` (and,
+for a password-protected link, the verifier half of the argon2id output, base64url, in
+`X-Poweur-Link-Verifier`) instead of a signed challenge, and acts as `link:<id>` with the
+link share's role. `GET /drive/{identity}/links/{link}` is unauthenticated and returns only
+what opening needs: role, expiry, `kdf`, `salt`, `pow`, whether a password is set and the
+opens left; unknown, expired and exhausted links are all `404`. Listing `GET /shares` with the
+link opens it and is journalled against `caps.downloads`. Each link is limited to
+`caps.per_hour` requests and 20 wrong passwords per hour (`429`); a wrong or missing
+password is `401 link_password`. Share caps are charged, durably, to the closest share that
+allowed the write: `caps.files` counts creates, `caps.records` appended records (both
+`429 share_limit`), `caps.bytes` new chunk bytes (`507`). The owner is never capped. The
+decrypting viewer at `/s/<token>#<secret>` is web work (Phase 8/9).
 
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the

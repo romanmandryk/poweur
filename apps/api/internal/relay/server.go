@@ -75,6 +75,8 @@ type Server struct {
 	engine *engine.Engine
 	// driveStreams fans drive changes out to owner and member streams.
 	driveStreams *driveStreams
+	// linkUses and linkFailures rate-limit link holders (E20-T7).
+	linkUses, linkFailures *linkLimiter
 	// sysLocks makes owner API preconditions atomic with writes and deletes.
 	sysLocks *deviceLocks
 
@@ -160,6 +162,8 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		idCache:           idpkg.NewCache(),
 		hub:               newHub(),
 		driveStreams:      newDriveStreams(),
+		linkUses:          newLinkLimiter(),
+		linkFailures:      newLinkLimiter(),
 		deviceLocks:       newDeviceLocks(),
 		sysLocks:          newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
@@ -296,6 +300,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /drive/{identity}/changes", s.handleDriveChanges)
 	mux.HandleFunc("GET /drive/{identity}/shares", s.handleDriveShares)
 	mux.HandleFunc("GET /drive/{identity}/events", s.handleDriveEvents)
+	mux.HandleFunc("GET /drive/{identity}/links/{link}", s.handleDriveLink)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
