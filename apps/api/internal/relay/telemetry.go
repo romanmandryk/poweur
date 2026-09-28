@@ -68,7 +68,12 @@ func (s *Server) StartTelemetry(ctx context.Context, output io.Writer) error {
 	return nil
 }
 func (s *Server) Close(ctx context.Context) error {
-	s.closeOnce.Do(func() { close(s.stop) })
+	s.closeOnce.Do(func() {
+		close(s.stop)
+		if c, ok := s.drive.(io.Closer); ok {
+			_ = c.Close()
+		}
+	})
 	s.event(context.Background(), "shutdown", "success")
 	return s.telemetry.Shutdown(ctx)
 }

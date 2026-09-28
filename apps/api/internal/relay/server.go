@@ -20,6 +20,8 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/drive/provider"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	"github.com/poweur/api/internal/telemetry"
@@ -64,6 +66,11 @@ type Server struct {
 	// sysFiles is the relay's access to identities' system documents
 	// (EPIC-020 E20-T6): files under POWEUR_DATA, or memory without it.
 	sysFiles SystemFiles
+	// drive is the object store selected by STORAGE_PROVIDER. Nil when the
+	// relay has no POWEUR_DATA and is not using S3. The drive engine is not
+	// serving yet; system files still use sysFiles.
+	drive    provider.Store
+	driveErr error
 	// sysLocks makes owner API preconditions atomic with writes and deletes.
 	sysLocks *deviceLocks
 
@@ -151,8 +158,22 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		s.event(context.Background(), "storage.quotas", "invalid")
 		logQuotaFileError(err)
 	})
+	driveStore, err := drive.Open(cfg)
+	if err != nil {
+		s.startupFailures = append(s.startupFailures, "drive_storage_open_failed")
+		s.driveErr = err
+	} else {
+		s.drive = driveStore
+	}
 	return s
 }
+
+// Drive is the object store selected by STORAGE_PROVIDER. It is nil when the
+// relay has no durable drive.
+func (s *Server) Drive() provider.Store { return s.drive }
+
+// DriveError is set when a durable drive was required and could not be opened.
+func (s *Server) DriveError() error { return s.driveErr }
 
 // runPruner periodically evicts expired sessions and locality cache entries.
 func (s *Server) runPruner() {

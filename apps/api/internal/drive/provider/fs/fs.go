@@ -37,7 +37,14 @@ func Open(dir string) (*Store, error) {
 	}
 	return &Store{root: root}, nil
 }
-func (s *Store) Close() error { s.mu.Lock(); defer s.mu.Unlock(); return s.root.Close() }
+func (s *Store) Close() error {
+	if s == nil || s.root == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.root.Close()
+}
 
 func etag(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
 func storageError(err error) error {
@@ -220,6 +227,15 @@ func (s *Store) List(ctx context.Context, prefix, cursor string, limit int) (pro
 			}
 			return nil
 		}
+		// POWEUR_DATA also holds identity and spool trees. A listing of
+		// drives/ must not fail on, or walk, those siblings.
+		match, descend := listScope(key, prefix)
+		if !match {
+			if entry.IsDir() && !descend {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() {
 			return nil
 		}
@@ -258,6 +274,19 @@ func (s *Store) List(ctx context.Context, prefix, cursor string, limit int) (pro
 	}
 	return page, nil
 }
+
+// listScope reports whether key is inside prefix, and whether a directory
+// that is not inside it is an ancestor the walk still has to enter.
+func listScope(key, prefix string) (match, descend bool) {
+	if prefix == "" || strings.HasPrefix(key, prefix) {
+		return true, true
+	}
+	if strings.HasPrefix(prefix, key+"/") {
+		return false, true
+	}
+	return false, false
+}
+
 func (*Store) PresignGet(context.Context, string, time.Duration) (provider.SignedURL, error) {
 	return provider.SignedURL{}, provider.ErrUnsupported
 }

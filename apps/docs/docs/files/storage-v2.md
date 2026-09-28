@@ -101,10 +101,36 @@ replay; a corrupt or missing committed journal segment fails closed. Never start
 an empty writable drive after an I/O or integrity error.
 
 Filesystem writes sync the temporary file before atomic rename and sync the
-containing directory before acknowledgement. S3 must support conditional writes;
-unsupported stores fail configuration or use the documented relay proxy path for
-chunk transfer. Presigned PUTs bind the expected SHA-256 checksum. A missing-chunk
-probe does not prove durability: commit verifies the referenced bytes and sizes.
+containing directory before acknowledgement. Presigned PUTs bind the expected
+SHA-256 checksum. A missing-chunk probe does not prove durability: commit
+verifies the referenced bytes and sizes.
+
+### S3-compatible stores
+
+Conditional publication uses `PutObject` with `If-None-Match: *` (create) and
+`If-Match` (replace). Startup writes a probe object and requires the second
+create to fail. A bucket that overwrites instead is refused. The bucket must
+already exist.
+
+Direct upload (`S3_PRESIGN=1`, the default) signs `x-amz-checksum-sha256` into
+the PUT. The store must reject a body that does not match that full-object
+digest.
+
+| Store | Conditional `PutObject` | Full-object SHA-256 on a presigned PUT | Configuration |
+|---|---|---|---|
+| AWS S3 | Yes | Yes | `STORAGE_PROVIDER=s3`, presign on |
+| MinIO (current) | Yes | Yes. The conformance suite, including a mismatched checksum, passes against local MinIO when `POWEUR_TEST_S3_ENDPOINT` is set | `STORAGE_PROVIDER=s3`, presign on |
+| Cloudflare R2 | Yes (`If-Match` and `If-None-Match` on `PutObject`) | SHA-256 is documented as a composite checksum only, not a full-object checksum | `STORAGE_PROVIDER=s3` and `S3_PRESIGN=0` until a full-object checksum is available |
+
+Any other S3-compatible service stays unsupported until that same suite passes
+against it. Set `POWEUR_TEST_S3_ENDPOINT`, `POWEUR_TEST_S3_ACCESS_KEY` and
+`POWEUR_TEST_S3_SECRET_KEY`, then run `go test ./internal/drive/...` from
+`apps/api`.
+
+`S3_PRESIGN=0`, and the filesystem provider, do not give clients an upload URL.
+Chunk bytes then go through the relay, which still writes with a conditional
+put. That is the fallback when a store can sequence writes and cannot enforce
+the checksum. Conditional writes stay mandatory on every store.
 
 ## Key tree and encryption
 

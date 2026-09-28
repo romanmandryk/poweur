@@ -147,6 +147,24 @@ func TestPresignedChecksumAndPrefix(t *testing.T) {
 	}
 }
 
+func TestEndpointURL(t *testing.T) {
+	if _, err := stores3.New(stores3.Config{Endpoint: "ftp://localhost:9000", Bucket: "bucket", AccessKey: "access", SecretKey: "secret"}); err == nil {
+		t.Fatal("unsupported scheme accepted")
+	}
+	s, err := stores3.New(stores3.Config{Endpoint: "http://127.0.0.1:9000", Bucket: "bucket", Region: "us-east-1", AccessKey: "access", SecretKey: "secret", Secure: true, Presign: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := s.PresignGet(t.Context(), "chunks/object", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(signed.URL)
+	if err != nil || u.Scheme != "http" || u.Host != "127.0.0.1:9000" {
+		t.Fatalf("http endpoint signed as %s", signed.URL)
+	}
+}
+
 func TestConfigAndPresignValidation(t *testing.T) {
 	for _, cfg := range []stores3.Config{{}, {Endpoint: "localhost:9000"}, {Endpoint: "localhost:9000", Bucket: "bucket", Prefix: "../escape"}, {Endpoint: "localhost:9000", Bucket: "bucket", AccessKey: "partial"}} {
 		if _, err := stores3.New(cfg); err == nil {

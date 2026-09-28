@@ -23,7 +23,7 @@
 | **Wave 1 — spec & primitives** | | |
 | E20-T1 Storage v2 spec & ADR | **in progress** | Target spec and ADR written; exact signed formats/vectors and final privacy/store copy remain open |
 | E20-T2 Key tree & encryption format | **in progress** | Shared domain-separated seals, key wrapping, padded context-bound XChaCha20 chunks and Go↔TS vectors implemented; NFC names/name hashes and signed/sealed author-chain records added; signed manifests and moves/rotation still open |
-| E20-T3 Storage providers: filesystem & S3 | **in progress** | Interface and fs pass shared/race conformance; minio-go S3 implemented, MinIO verification and relay configuration wiring pending |
+| E20-T3 Storage providers: filesystem & S3 | **done** | Interface, filesystem and minio-go S3. Conformance and a mismatched presigned checksum verified on local Docker MinIO. Relay config is `STORAGE_PROVIDER=fs\|s3` |
 | **Wave 2 — relay** | | |
 | E20-T4 Drive engine | **open** | journal as the database, tree cache, replace/append commits, append positions, prefix trim, group commit, GC, quota, rebuild from scratch |
 | E20-T5 Drive HTTP API & change stream | **open** | chunks, commits, reads from a position, listings, changes feed, SSE with inline appends for owners and share members across relays; replaces `/dav` and `/sync` |
@@ -67,8 +67,10 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       and their failure vectors.
 - [x] Add provider contract and filesystem implementation with range reads, atomic
       conditional writes, durable rename, safe paths, restart and race conformance.
-- [ ] Verify S3 provider against MinIO and wire fs/S3 configuration into the drive engine.
-- [ ] Phases 3–10: providers, engine/API, stateless system files, node shares, clients,
+- [x] Verify the S3 provider against local Docker MinIO and select `fs` or `s3`
+      from relay configuration. GitHub Actions does not run MinIO. The drive
+      engine that publishes through this store is Phase 4.
+- [ ] Phases 4–10: engine/API, stateless system files, node shares, clients,
       complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation:** Phase 0 introduced an operational owner-authenticated
@@ -431,12 +433,13 @@ with a distinct error.
 
 ### E20-T3 — Storage providers: filesystem & S3
 
-- [ ] Provider interface above; filesystem implementation (atomic writes, `put_if` via
-      rename + lock); S3 implementation (AWS SDK or minimal signer — record the dependency
-      decision), presigned PUT/GET with checksum
-- [ ] Conformance suite run against both, with MinIO in CI; document which S3-compatible
-      stores support conditional writes and checksums, and the proxy fallback for those that don't
-- [ ] Config: `STORAGE_PROVIDER=fs|s3`, bucket, prefix, credentials, presign on/off
+- [x] Provider interface above; filesystem implementation (atomic writes, `put_if` via
+      rename + lock); S3 implementation via minio-go (Apache-2.0), presigned PUT/GET
+      with a SHA-256 checksum
+- [x] Conformance suite passes on the filesystem and on local Docker MinIO
+      (`POWEUR_TEST_S3_ENDPOINT`; not a GitHub Actions service). Compatible stores
+      and the presign-off proxy fallback are in `storage-v2.md`
+- [x] Config: `STORAGE_PROVIDER=fs|s3`, bucket, prefix, credentials, presign on/off
 
 **Acceptance:** the same suite passes on the filesystem and on MinIO; a presigned upload with
 wrong bytes is rejected by the store.

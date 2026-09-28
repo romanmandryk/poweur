@@ -19,7 +19,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `LISTEN_ADDR` | `:8080` | Address the relay binds to. The relay speaks HTTP only; terminate TLS in a reverse proxy (see [TLS](/security/tls)) |
 | `RELAY_ADDRESS` | *(required)* | This relay's public host name (e.g. `relay.poweur.net`), without a port. Written into identity documents as their home relay |
 | `RELAY_SCHEME` | `https` | Scheme for relay-to-relay calls (`http` only for local tests) |
-| `POWEUR_DATA` | *(empty)* | Root of all durable state: identity documents, inbox spool, files, shares. Without it the relay cannot host identities or files |
+| `POWEUR_DATA` | *(empty)* | Root of durable state: identity documents, inbox spool, and the filesystem drive store. Without it the relay cannot host identities. An S3 drive does not require it |
 | `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net` → `alice.poweur.net`) |
 | `WEB_STATIC_DIR` | *(empty; `/web` in the Docker image)* | Directory of the built web app (`apps/web/dist`), served at `/app/` |
 | `LAUNCHER_HOST` | `id.<first hosted domain>` | The host that serves the "create an ID" flow |
@@ -37,11 +37,20 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STORAGE_PROVIDER` | `relay-fs` | File-body backend. Only `relay-fs` exists today (files under `POWEUR_DATA`) |
+| `STORAGE_PROVIDER` | `fs` | Drive object store: `fs` (under `POWEUR_DATA`) or `s3`. `relay-fs` was removed |
 | `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Configured quota per identity; `0` = unlimited. Drive enforcement is being restored in EPIC-020 |
 | `STORAGE_QUOTAS_FILE` | `$POWEUR_DATA/storage-quotas.json` | Per-identity quotas that override `MAX_IDENTITY_BYTES`: a JSON object from identity to bytes or a size string (`{"alice.example.com": "2GB"}`, `0` = unlimited). Re-read when it changes, so no restart; an invalid edit keeps the last good version |
 | `QUOTA_CONTACT` | — | Who to ask for more space, usually a Poweur ID. Over-quota `507` responses and `GET /files/{identity}/quota` name it (`contact`) |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Largest single uploaded file; `0` = unlimited |
+| `S3_ENDPOINT` | *(required for `s3`)* | `host:port`, or an `http`/`https` URL. The URL scheme overrides `S3_SECURE` |
+| `S3_BUCKET` | *(required for `s3`)* | Bucket that already exists. The relay does not create it |
+| `S3_PREFIX` | *(empty)* | Key prefix inside the bucket. Object layout is `<prefix>/drives/…` |
+| `S3_REGION` | `us-east-1` | Region passed to the S3 client. Cloudflare R2 accepts `auto` |
+| `S3_ACCESS_KEY` | *(empty)* | Access key. Empty uses `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Set together with `S3_SECRET_KEY` |
+| `S3_SECRET_KEY` | *(empty)* | Secret key |
+| `S3_SESSION_TOKEN` | *(empty)* | Optional session token for temporary credentials |
+| `S3_SECURE` | `true` | Use TLS when `S3_ENDPOINT` has no scheme |
+| `S3_PRESIGN` | `true` | `true` returns presigned chunk URLs. `false` sends chunk bytes through the relay. Conditional writes are required either way |
 | `MAX_INBOX_PER_IDENTITY` | `50` | Undelivered messages that may wait for one identity; further mail is refused until they collect it |
 | `MAX_ACKS_PER_IDENTITY` | `50` | Pending delivery receipts per identity |
 | `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
@@ -76,8 +85,9 @@ the rules of the relay it happens to be talking to.
 
 `GET /health` includes a `storage` object when `POWEUR_DATA` is set (`writable`, `free_bytes`).
 The temporary system-file adapter stores `.poweur` documents beneath
-`$POWEUR_DATA/identities/<id>/`. The journalled drive and S3 provider are under
-construction; see [Storage v2](/files/storage-v2).
+`$POWEUR_DATA/identities/<id>/`. The drive object store selected above is opened
+at startup; the journalled engine that publishes into it is still under
+construction. See [Storage v2](/files/storage-v2).
 
 ### DNS registration
 

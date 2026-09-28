@@ -6,9 +6,11 @@ package s3
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,8 +41,12 @@ type Store struct {
 }
 
 func New(cfg Config) (*Store, error) {
-	if cfg.Bucket == "" || cfg.Endpoint == "" {
+	if cfg.Bucket == "" || strings.TrimSpace(cfg.Endpoint) == "" {
 		return nil, errors.New("S3 endpoint and bucket required")
+	}
+	endpoint, secure, err := normalizeEndpoint(cfg.Endpoint, cfg.Secure)
+	if err != nil {
+		return nil, err
 	}
 	prefix := strings.TrimSuffix(cfg.Prefix, "/")
 	if prefix != "" {
@@ -58,11 +64,47 @@ func New(cfg Config) (*Store, error) {
 	} else {
 		creds = credentials.NewEnvAWS()
 	}
-	client, err := minio.New(cfg.Endpoint, &minio.Options{Creds: creds, Secure: cfg.Secure, Region: cfg.Region})
+	client, err := minio.New(endpoint, &minio.Options{Creds: creds, Secure: secure, Region: cfg.Region})
 	if err != nil {
 		return nil, err
 	}
 	return &Store{client: client, bucket: cfg.Bucket, prefix: prefix, presign: cfg.Presign}, nil
+}
+
+// A scheme in the endpoint wins over Config.Secure so http://127.0.0.1:9000
+// reaches a local MinIO and https:// is not accidentally sent in cleartext.
+func normalizeEndpoint(endpoint string, secure bool) (string, bool, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if !strings.Contains(endpoint, "://") {
+		if endpoint == "" || strings.Contains(endpoint, "/") {
+			return "", false, errors.New("invalid S3 endpoint")
+		}
+		return endpoint, secure, nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", false, errors.New("invalid S3 endpoint")
+	}
+	return u.Host, u.Scheme == "https", nil
+}
+
+// Probe checks that the bucket rejects a second conditional create. Stores
+// that overwrite instead are refused; this provider does not emulate
+// conditional writes with a read/write pair.
+func (s *Store) Probe(ctx context.Context) error {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	key := "relay/startup-probe/" + hex.EncodeToString(raw)
+	if _, err := s.PutIf(ctx, key, []byte("probe"), ""); err != nil {
+		return fmt.Errorf("S3 conditional create: %w", err)
+	}
+	defer func() { _ = s.Delete(context.WithoutCancel(ctx), key) }()
+	if _, err := s.PutIf(ctx, key, []byte("conflict"), ""); !errors.Is(err, provider.ErrPrecondition) {
+		return fmt.Errorf("S3 conditional writes are not supported (%v)", err)
+	}
+	return nil
 }
 
 func convertError(err error) error {
@@ -152,7 +194,13 @@ func (s *Store) put(ctx context.Context, key string, data []byte, match *string)
 	}
 	result, err := s.client.PutObject(ctx, s.bucket, full, bytes.NewReader(data), int64(len(data)), opts)
 	if err != nil {
-		return "", convertError(err)
+		err = convertError(err)
+		// If-Match against a missing key is 404 on S3. Callers treat that as
+		// a failed precondition, the same as the filesystem store.
+		if match != nil && *match != "" && errors.Is(err, provider.ErrNotFound) {
+			return "", provider.ErrPrecondition
+		}
+		return "", err
 	}
 	return result.ETag, nil
 }

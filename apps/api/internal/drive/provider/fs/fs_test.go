@@ -67,6 +67,32 @@ func TestRestartAndSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestListSkipsSiblingTree(t *testing.T) {
+	dir := t.TempDir()
+	s, err := storefs.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sibling := filepath.Join(dir, "identities")
+	if err := os.MkdirAll(sibling, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "bad name"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sibling, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(t.Context(), "drives/a", []byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.List(t.Context(), "drives/", "", 10)
+	if err != nil || len(page.Objects) != 1 || page.Objects[0].Key != "drives/a" {
+		t.Fatalf("sibling leaked into listing: %+v %v", page, err)
+	}
+}
+
 func TestListHidesInterruptedWrites(t *testing.T) {
 	dir := t.TempDir()
 	s, err := storefs.Open(dir)
