@@ -41,7 +41,10 @@ type SignedURL struct {
 
 // Store provides strongly consistent single-object operations. PutIf with an
 // empty match creates only if absent; otherwise match must equal the current
-// opaque ETag. A caller must not interpret an ETag as a content hash. Lists
+// opaque ETag. A conditional write whose precondition fails but which finds
+// exactly its own bytes already stored reports success: object stores retry
+// writes whose first attempt may have landed, and a content-addressed journal
+// treats identical bytes as the same outcome. A caller must not interpret an ETag as a content hash. Lists
 // are lexicographic, bounded, and exclusive of the preceding page's cursor.
 // Cross-object transactions and crash recovery belong to the drive journal.
 type Store interface {

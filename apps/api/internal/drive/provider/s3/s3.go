@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -38,6 +40,13 @@ type Store struct {
 	client         *minio.Client
 	bucket, prefix string
 	presign        bool
+	// bare is set when the bucket rejects a quoted If-Match and accepts the
+	// bare MD5. AWS and MinIO require the quoted form. Hetzner Object Storage
+	// (Ceph) rejects it.
+	bare atomic.Bool
+	// http sends the requests minio-go cannot shape (bare If-Match, the
+	// presign probe).
+	http *http.Client
 }
 
 func New(cfg Config) (*Store, error) {
@@ -68,7 +77,8 @@ func New(cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{client: client, bucket: cfg.Bucket, prefix: prefix, presign: cfg.Presign}, nil
+	return &Store{client: client, bucket: cfg.Bucket, prefix: prefix, presign: cfg.Presign,
+		http: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
 // A scheme in the endpoint wins over Config.Secure so http://127.0.0.1:9000
@@ -88,24 +98,76 @@ func normalizeEndpoint(endpoint string, secure bool) (string, bool, error) {
 	return u.Host, u.Scheme == "https", nil
 }
 
-// Probe checks that the bucket rejects a second conditional create. Stores
-// that overwrite instead are refused; this provider does not emulate
-// conditional writes with a read/write pair.
+// Probe checks conditional create and an ETag replace. A bucket that
+// overwrites instead is refused. Ceph-based stores that reject a quoted
+// If-Match are retried with the bare ETag and remembered for later writes.
 func (s *Store) Probe(ctx context.Context) error {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return err
 	}
 	key := "relay/startup-probe/" + hex.EncodeToString(raw)
-	if _, err := s.PutIf(ctx, key, []byte("probe"), ""); err != nil {
+	tag, err := s.PutIf(ctx, key, []byte("probe"), "")
+	if err != nil {
 		return fmt.Errorf("S3 conditional create: %w", err)
 	}
 	defer func() { _ = s.Delete(context.WithoutCancel(ctx), key) }()
 	if _, err := s.PutIf(ctx, key, []byte("conflict"), ""); !errors.Is(err, provider.ErrPrecondition) {
-		return fmt.Errorf("S3 conditional writes are not supported (%v)", err)
+		return fmt.Errorf("S3 conditional create is not enforced (%v)", err)
+	}
+	if _, err := s.PutIf(ctx, key, []byte("replaced"), tag); err != nil {
+		if !errors.Is(err, provider.ErrPrecondition) {
+			return fmt.Errorf("S3 conditional replace: %w", err)
+		}
+		s.bare.Store(true)
+		if _, err := s.PutIf(ctx, key, []byte("replaced"), tag); err != nil {
+			return fmt.Errorf("S3 conditional replace by ETag is not supported (%v)", err)
+		}
+	}
+	got, err := s.Get(ctx, key, nil)
+	if err != nil || string(got.Data) != "replaced" {
+		return fmt.Errorf("S3 conditional replace did not store the new bytes (%v)", err)
+	}
+	if s.presign {
+		if err := s.probePresignChecksum(ctx, key+"-presign"); err != nil {
+			return err
+		}
 	}
 	return nil
 }
+
+// probePresignChecksum uploads the wrong bytes to a URL presigned for a
+// SHA-256. A store that stores them anyway does not verify client uploads,
+// so presigned uploads would let a client publish bytes the relay never
+// checked: refuse to start rather than run that way.
+func (s *Store) probePresignChecksum(ctx context.Context, key string) error {
+	want := sha256.Sum256([]byte("expected"))
+	signed, err := s.PresignPut(ctx, key, hex.EncodeToString(want[:]), int64(len("expected")), time.Minute)
+	if err != nil {
+		return fmt.Errorf("S3 presign probe: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, signed.URL, strings.NewReader("tampered"))
+	if err != nil {
+		return err
+	}
+	for k, v := range signed.Headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("S3 presign probe: %w", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode < 400 {
+		_ = s.Delete(context.WithoutCancel(ctx), key)
+		return errors.New("S3 presigned uploads do not verify x-amz-checksum-sha256 on this store; set S3_PRESIGN=0 so chunk bytes go through the relay")
+	}
+	return nil
+}
+
+// UseBareETag reports whether Put If-Match values are sent without quotes.
+func (s *Store) UseBareETag() bool { return s.bare.Load() }
 
 func convertError(err error) error {
 	if err == nil {
@@ -168,7 +230,7 @@ func (s *Store) Get(ctx context.Context, key string, r *provider.Range) (provide
 	if int64(len(raw)) != want {
 		return provider.Object{}, io.ErrUnexpectedEOF
 	}
-	return provider.Object{Data: raw, ETag: stat.ETag, Size: stat.Size}, nil
+	return provider.Object{Data: raw, ETag: normalizeETag(stat.ETag), Size: stat.Size}, nil
 }
 func (s *Store) Put(ctx context.Context, key string, data []byte) (string, error) {
 	return s.put(ctx, key, data, nil)
@@ -184,7 +246,13 @@ func (s *Store) put(ctx context.Context, key string, data []byte, match *string)
 	if err != nil {
 		return "", err
 	}
-	opts := minio.PutObjectOptions{ContentType: "application/octet-stream", DisableMultipart: true, AutoChecksum: minio.ChecksumSHA256}
+	// No SDK checksum header here. Presigned client uploads carry
+	// x-amz-checksum-sha256. A checksum on this PUT makes some Ceph
+	// deployments reject a matching If-Match.
+	if match != nil && *match != "" && s.bare.Load() {
+		return s.putBareMatch(ctx, full, data, *match)
+	}
+	opts := minio.PutObjectOptions{ContentType: "application/octet-stream", DisableMultipart: true}
 	if match != nil {
 		if *match == "" {
 			opts.SetMatchETagExcept("*")
@@ -198,11 +266,82 @@ func (s *Store) put(ctx context.Context, key string, data []byte, match *string)
 		// If-Match against a missing key is 404 on S3. Callers treat that as
 		// a failed precondition, the same as the filesystem store.
 		if match != nil && *match != "" && errors.Is(err, provider.ErrNotFound) {
-			return "", provider.ErrPrecondition
+			err = provider.ErrPrecondition
+		}
+		if errors.Is(err, provider.ErrPrecondition) {
+			return s.resolvePrecondition(ctx, key, data)
 		}
 		return "", err
 	}
-	return result.ETag, nil
+	return normalizeETag(result.ETag), nil
+}
+
+// resolvePrecondition decides a conditional write that came back as a failed
+// precondition. The SDK retries 5xx answers, and Ceph-based stores answer 500
+// to some racing conditional writes, so a 412 can be the reply to a *retry*
+// of a write that already succeeded. If the object now holds exactly these
+// bytes the write is in place and reported as success; otherwise it lost.
+// Identical bytes from a different writer mean the same outcome, which is
+// what a content-addressed journal needs.
+func (s *Store) resolvePrecondition(ctx context.Context, key string, data []byte) (string, error) {
+	current, err := s.Get(ctx, key, nil)
+	if err == nil && bytes.Equal(current.Data, data) {
+		return current.ETag, nil
+	}
+	return "", provider.ErrPrecondition
+}
+
+// putBareMatch signs If-Match as the bare ETag. minio-go's PutObject always
+// quotes that header, and Hetzner rejects the quoted form.
+func (s *Store) putBareMatch(ctx context.Context, full string, data []byte, match string) (string, error) {
+	match = strings.Trim(match, `"`)
+	headers := http.Header{"If-Match": []string{match}}
+	signed, err := s.client.PresignHeader(ctx, http.MethodPut, s.bucket, full, time.Minute, nil, headers)
+	if err != nil {
+		return "", err
+	}
+	send := func() (int, string, []byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, signed.String(), bytes.NewReader(data))
+		if err != nil {
+			return 0, "", nil, err
+		}
+		req.Header.Set("If-Match", match)
+		req.ContentLength = int64(len(data))
+		resp, err := s.http.Do(req)
+		if err != nil {
+			return 0, "", nil, err
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, resp.Header.Get("ETag"), raw, nil
+	}
+	status, etag, raw, err := send()
+	if err != nil {
+		return "", err
+	}
+	// Ceph on Hetzner sometimes answers 500 to a racing If-Match. The write
+	// may or may not have landed; one retry settles it, and a 412 on that
+	// retry is checked against the stored bytes rather than trusted.
+	if status == http.StatusInternalServerError {
+		if status, etag, raw, err = send(); err != nil {
+			return "", err
+		}
+	}
+	key := strings.TrimPrefix(full, s.prefix)
+	switch status {
+	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
+		return normalizeETag(etag), nil
+	case http.StatusPreconditionFailed, http.StatusNotFound:
+		return s.resolvePrecondition(ctx, key, data)
+	default:
+		return "", fmt.Errorf("S3 conditional replace: HTTP %d %s", status, bytes.TrimSpace(raw))
+	}
+}
+
+// S3 ETags are quoted. minio-go wraps the value we pass to If-Match in
+// another pair of quotes, so a quoted tag would never match.
+func normalizeETag(tag string) string {
+	return strings.Trim(tag, `"`)
 }
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {

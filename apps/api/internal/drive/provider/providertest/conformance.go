@@ -64,6 +64,10 @@ func Run(t *testing.T, newStore func(*testing.T) provider.Store) {
 		if _, err := s.PutIf(ctx, "object", []byte("two"), ""); !errors.Is(err, provider.ErrPrecondition) {
 			t.Fatalf("create existing: %v", err)
 		}
+		// A repeated create of identical bytes is the same outcome, not a conflict.
+		if again, err := s.PutIf(ctx, "object", []byte("one"), ""); err != nil || again != tag {
+			t.Fatalf("idempotent create: %s %v", again, err)
+		}
 		if _, err := s.PutIf(ctx, "missing", []byte("two"), tag); !errors.Is(err, provider.ErrPrecondition) {
 			t.Fatalf("replace missing: %v", err)
 		}

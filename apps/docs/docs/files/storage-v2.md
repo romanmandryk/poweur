@@ -108,19 +108,27 @@ verifies the referenced bytes and sizes.
 ### S3-compatible stores
 
 Conditional publication uses `PutObject` with `If-None-Match: *` (create) and
-`If-Match` (replace). Startup writes a probe object and requires the second
-create to fail. A bucket that overwrites instead is refused. The bucket must
-already exist.
+`If-Match` (replace). Startup writes a probe object, requires the second create
+to fail and an ETag replace to succeed. A bucket that overwrites instead is
+refused. The bucket must already exist.
+
+A conditional write whose precondition fails but finds exactly its own bytes
+stored reports success, on every provider. SDKs retry writes that may have
+landed (and Ceph answers some racing writes with HTTP 500), so a 412 can answer
+the retry of a write that won; identical bytes are the same outcome for the
+journal.
 
 Direct upload (`S3_PRESIGN=1`, the default) signs `x-amz-checksum-sha256` into
 the PUT. The store must reject a body that does not match that full-object
-digest.
+digest; the startup probe checks this and refuses to run with presign on
+otherwise.
 
 | Store | Conditional `PutObject` | Full-object SHA-256 on a presigned PUT | Configuration |
 |---|---|---|---|
 | AWS S3 | Yes | Yes | `STORAGE_PROVIDER=s3`, presign on |
 | MinIO (current) | Yes | Yes. The conformance suite, including a mismatched checksum, passes against local MinIO when `POWEUR_TEST_S3_ENDPOINT` is set | `STORAGE_PROVIDER=s3`, presign on |
 | Cloudflare R2 | Yes (`If-Match` and `If-None-Match` on `PutObject`) | SHA-256 is documented as a composite checksum only, not a full-object checksum | `STORAGE_PROVIDER=s3` and `S3_PRESIGN=0` until a full-object checksum is available |
+| Hetzner Object Storage (hel1, Ceph) | `If-None-Match: *` works. A specific `If-Match` succeeds only when the ETag is sent without quotes; the provider detects that and signs the bare value. A burst of racing replaces can return HTTP 500, which is retried once | A presigned `x-amz-checksum-sha256` is ignored. A body that does not match is stored | `STORAGE_PROVIDER=s3` and `S3_PRESIGN=0`, so chunk bytes go through the relay. The startup probe uploads mismatched bytes to a presigned URL and refuses to start with presign on when the store accepts them |
 
 Any other S3-compatible service stays unsupported until that same suite passes
 against it. Set `POWEUR_TEST_S3_ENDPOINT`, `POWEUR_TEST_S3_ACCESS_KEY` and

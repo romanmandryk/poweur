@@ -3,6 +3,7 @@
 package fs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -106,6 +107,10 @@ func (s *Store) put(ctx context.Context, key string, data []byte, match *string)
 			return "", err
 		}
 		if *match == "" && err == nil || *match != "" && (err != nil || etag(current) != *match) {
+			// Exactly these bytes already stored: the write is in place.
+			if err == nil && bytes.Equal(current, data) {
+				return etag(current), nil
+			}
 			return "", provider.ErrPrecondition
 		}
 	}
