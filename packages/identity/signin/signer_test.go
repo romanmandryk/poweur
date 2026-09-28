@@ -21,7 +21,7 @@ func signerRequest() identity.SignInRequest {
 		Action:      identity.SignInActionSignin,
 		Statement:   "Sign in to the Poweur Guestbook",
 		ResponseURI: testOrigin + "/auth/callback",
-		Scopes:      []string{"dav:rw:/apps/net.poweur.guestbook/"},
+		Scopes:      []string{"messages:send"},
 	}
 }
 
@@ -148,8 +148,7 @@ func TestDescribeScope(t *testing.T) {
 	}{
 		{identity.ScopeProfileRead, []string{"public profile"}},
 		{identity.ScopeMessagesSend, []string{"send messages"}},
-		{"dav:rw:apps/net.poweur.guestbook", []string{"read and write", "/apps/net.poweur.guestbook", "Nothing outside"}},
-		{"dav:read:apps/net.poweur.guestbook", []string{"cannot write", "/apps/net.poweur.guestbook"}},
+		{"dav:read:apps/net.poweur.guestbook", []string{"unrecognized", "do not approve"}},
 		{"root:everything", []string{"unrecognized", "do not approve"}},
 	}
 	for _, tc := range tests {

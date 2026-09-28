@@ -20,12 +20,10 @@ import (
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/crypto"
 	"github.com/poweur/api/internal/dns"
-	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/ratelimit"
 	"github.com/poweur/api/internal/storage"
 	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
-	"golang.org/x/net/webdav"
 )
 
 const (
@@ -63,25 +61,14 @@ type Server struct {
 	// abuse counts verified sys.abuse.report submissions (E07-T5).
 	abuse *abuseLog
 
-	// File layer (EPIC-003/004/005). Nil when POWEUR_DATA is not configured.
-	filesProvider files.StorageProvider
-	filesIndex    *files.Index
-	uploads       *files.Uploads
-	grants        *files.GrantStore
-	linkStats     *files.LinkStats
-	davTokens     *davTokenStore
-	connectedMu   sync.Mutex
-	// linkSecret authenticates password-gated link sessions (E05-T4). It is
-	// per-process on purpose: a restart ends every link session, which costs
-	// a visitor one password re-entry.
-	linkSecret []byte
+	// sysFiles is the relay's access to identities' system documents
+	// (EPIC-020 E20-T6): files under POWEUR_DATA, or memory without it.
+	sysFiles SystemFiles
 
-	locksMu  sync.Mutex
-	davLocks map[string]webdav.LockSystem
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
 	// deviceLocks serializes read-modify-write on each identity's
-	// poweur-sys/relay/devices.json (E04-T6).
+	// device registry (.poweur/state/devices.json).
 	deviceLocks *deviceLocks
 
 	cacheMu       sync.Mutex
@@ -147,34 +134,20 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		regGate:           NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
 		client:            &http.Client{Timeout: 10 * time.Second},
 		idCache:           idpkg.NewCache(),
-		davTokens:         newDAVTokenStore(),
-		linkSecret:        newPowSecret(), // 32 random bytes; see linkSecret above
-		davLocks:          make(map[string]webdav.LockSystem),
 		hub:               newHub(),
 		deviceLocks:       newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}
+	if cfg.DataDir != "" {
+		s.sysFiles = newFileSystemFiles(store.IdentityHomeDir)
+	} else {
+		s.sysFiles = newMemSystemFiles()
+	}
 	s.quotas = newQuotaOverrides(cfg.StorageQuotasFile, func(err error) {
 		s.event(context.Background(), "storage.quotas", "invalid")
 		logQuotaFileError(err)
 	})
-	// Storage provider selection (E03-T8): v1 ships relay-fs; the DAV layer
-	// only ever talks to the StorageProvider interface.
-	if cfg.DataDir != "" {
-		s.filesProvider = files.NewFSProvider(cfg.DataDir, store.IdentityHomeDir)
-		s.filesIndex = files.NewIndex(store.IdentityHomeDir)
-		s.uploads = files.NewUploads(store.IdentityHomeDir)
-		s.linkStats = files.NewLinkStats(store.IdentityHomeDir)
-		s.grants = &files.GrantStore{
-			Provider: s.filesProvider,
-			OwnerKey: func(owner string) (ed25519.PublicKey, bool) {
-				id, ok := store.Get(owner)
-				return id.PublicKeyBytes, ok && len(id.PublicKeyBytes) == ed25519.PublicKeySize
-			},
-			Logf: func(string, ...any) { s.event(context.Background(), "grant.validation", "rejected") },
-		}
-	}
 	return s
 }
 
@@ -190,7 +163,6 @@ func (s *Server) runPruner() {
 		}
 		s.sampleTelemetry()
 		s.sessions.Prune()
-		s.davTokens.Prune()
 		s.anon.prune()
 		s.abuse.prune(time.Now().UTC())
 		s.pruneLocalityCache()
@@ -279,31 +251,11 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
 	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
-	mux.HandleFunc("POST /auth/dav-token", s.handleDAVTokenPost)
-	mux.HandleFunc("DELETE /auth/dav-token/{token}", s.handleDAVTokenDelete)
-	mux.HandleFunc("POST /auth/grant", s.handleSignInGrantPost)
-	mux.HandleFunc("GET /files/{identity}/quota", s.handleFilesQuota)
+	mux.HandleFunc("GET /identities/{identity}/system/{path...}", s.handleSystemFileGet)
+	mux.HandleFunc("PUT /identities/{identity}/system/{path...}", s.handleSystemFilePut)
+	mux.HandleFunc("DELETE /identities/{identity}/system/{path...}", s.handleSystemFileDelete)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
-	mux.HandleFunc("GET /sync/{identity}/changes", s.handleSyncChanges)
-	mux.HandleFunc("GET /sync/{identity}/manifest", s.handleSyncManifest)
-	mux.HandleFunc("POST /sync/{identity}/upload", s.handleUploadCreate)
-	mux.HandleFunc("HEAD /sync/{identity}/upload/{id}", s.handleUploadStatus)
-	mux.HandleFunc("PATCH /sync/{identity}/upload/{id}", s.handleUploadPatch)
-	mux.HandleFunc("DELETE /sync/{identity}/upload/{id}", s.handleUploadDelete)
-	// WebDAV needs non-standard methods (PROPFIND, MKCOL, …); register each
-	// explicitly (a method-less pattern would conflict with "GET /").
-	// Covers both /dav/<identity>/… and the Host-routed /dav/… vanity form.
-	for _, m := range []string{
-		"GET", "HEAD", "OPTIONS", "PUT", "DELETE",
-		"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
-	} {
-		mux.HandleFunc(m+" /dav/", s.handleDAV)
-		mux.HandleFunc(m+" /dav", s.handleDAV)
-	}
-	mux.HandleFunc("GET /pub/{path...}", s.handlePub)
-	mux.HandleFunc("GET /s/{path...}", s.handleShareLink)
-	mux.HandleFunc("POST /s/{path...}", s.handleShareLink)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
@@ -616,11 +568,6 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "storage_error", err.Error())
 			return
 		}
-		// Materialize the home filesystem skeleton (five roots + poweur-sys
-		// subdirs) so DAV clients see a stable tree immediately.
-		if s.filesProvider != nil {
-			_ = s.filesProvider.EnsureTree(r.Context(), identity.Identity)
-		}
 	} else if !s.identities.Add(identity) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
 		return
@@ -929,7 +876,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 					"a request with this consent scope is already pending or in cooldown")
 				return
 			}
-			s.recordShareLifecycleDelivery(r.Context(), msg)
 			// A queued request is a delivery too: without this, a contact
 			// request waits silently until the recipient happens to open the
 			// app, which is exactly the wait push exists to remove.
@@ -943,7 +889,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return
 		}
-		s.recordShareLifecycleDelivery(r.Context(), msg)
 		// Tell anyone listening that there is something to pick up (E09-T2).
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
@@ -961,32 +906,6 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
-}
-
-// recordShareLifecycleDelivery advances aggregate conversion counters only
-// after a signed identity message was accepted. Encrypted bodies remain
-// opaque, and claimant/recipient names are not stored with link stats.
-func (s *Server) recordShareLifecycleDelivery(ctx context.Context, msg Message) {
-	if s.grants == nil {
-		return
-	}
-	switch idpkg.NormalizeMessageType(msg.Type) {
-	case idpkg.MsgTypeShareClaim:
-		shareID := strings.TrimSpace(msg.Metadata["share_id"])
-		if s.grants.Snapshot(ctx, msg.Recipient).HasFileRequest(shareID) {
-			s.linkStats.RecordIDClaimed(msg.Recipient, shareID)
-		}
-	case idpkg.MsgTypeShareAccept:
-		directID := strings.TrimSpace(msg.Metadata["share_id"])
-		sourceID := strings.TrimSpace(msg.Metadata["source_share_id"])
-		if sourceID == "" {
-			return
-		}
-		boundSource := s.grants.Snapshot(ctx, msg.Recipient).AcceptedConversionSource(directID, msg.Sender)
-		if boundSource == sourceID {
-			s.linkStats.RecordShareAccepted(msg.Recipient, sourceID, directID)
-		}
-	}
 }
 
 // handleAcksPost is open/messaging-class. It mirrors handleMessagesPost

@@ -32,27 +32,6 @@ export const freshRequests = () => ({ incoming: [] as any[], loading: false, loa
 export const freshAnon = () => ({ messages: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
 export const freshPolicy = () => ({ doc: null as any, explicit: false, loading: false, loaded: false });
 export const freshProfile = () => ({ doc: null as any, explicit: false, loaded: false, loading: false });
-export const freshFiles = () => ({
-  dav: null as any,
-  davExp: 0,
-  path: "",
-  entries: [] as any[],
-  quota: null as any,
-  loading: false,
-  loaded: false,
-  /** null = our own tree; an identity = browsing what they shared with us. */
-  owner: null as string | null,
-  /** True while choosing whose shared tree to open. */
-  picking: false,
-  grants: [] as any[],
-  grantsLoaded: false,
-  /** Credential-free pointers for offers this identity accepted. */
-  mounts: [] as any[],
-  mountsLoaded: false,
-  /** Changes-feed cursor for the auto-refresh (EPIC-004). */
-  cursor: "",
-  polling: false,
-});
 
 /** Everything that belongs to whoever is signed in. */
 function freshIdentityData() {
@@ -65,7 +44,6 @@ function freshIdentityData() {
     anon: freshAnon(),
     policy: freshPolicy(),
     profile: freshProfile(),
-    files: freshFiles(),
     /** The open conversation (E15-T13), or null. */
     thread: null as any,
   };

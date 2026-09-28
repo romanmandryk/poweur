@@ -4,7 +4,7 @@
     "raw": {
       "version": 1,
       "display_name": "Alice",
-      "avatar": "public/avatar.png",
+      "avatar": "avatar.png",
       "bio": "builder",
       "links": [
         {
@@ -32,10 +32,10 @@
     "valid": false
   },
   {
-    "name": "avatar-outside-public",
+    "name": "avatar-path",
     "raw": {
       "version": 1,
-      "avatar": "private/avatar.png"
+      "avatar": "public/avatar.png"
     },
     "valid": false
   },

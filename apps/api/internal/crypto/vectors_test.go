@@ -196,15 +196,6 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 			Canonical: CanonicalEncryptionKeyUpdate("alice.poweur.net", encStr, vectorTime, nonce),
 		},
 		{
-			Name: "dav-token",
-			Inputs: map[string]any{
-				"identity": "alice.poweur.net", "audience": "bob.example.org",
-				"scope": "dav:rw:shared/project-x", "issued_at": vectorTime, "nonce": nonce,
-			},
-			Canonical: CanonicalDAVToken("alice.poweur.net", "bob.example.org",
-				"dav:rw:shared/project-x", vectorTime, nonce),
-		},
-		{
 			Name: "keystore-enroll",
 			Inputs: map[string]any{
 				"identity": "alice.poweur.net", "enrollment_id": "enr-001",
@@ -227,7 +218,7 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 		{
 			Name: "keystore-list",
 			Inputs: map[string]any{
-				"identity": "alice.poweur.net",
+				"identity":  "alice.poweur.net",
 				"issued_at": vectorTime, "nonce": nonce,
 			},
 			Canonical: CanonicalKeystoreList("alice.poweur.net", vectorTime, nonce),

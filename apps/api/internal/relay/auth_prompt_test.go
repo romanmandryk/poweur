@@ -17,7 +17,7 @@ import (
 
 var authPromptSeq int
 
-func postAuthPrompt(t *testing.T, ts *httptest.Server, from davTestIdentity, to string, expires time.Time, payload string) *http.Response {
+func postAuthPrompt(t *testing.T, ts *httptest.Server, from hostedID, to string, expires time.Time, payload string) *http.Response {
 	t.Helper()
 	authPromptSeq++
 	msg := Message{
@@ -50,11 +50,10 @@ func postAuthPrompt(t *testing.T, ts *httptest.Server, from davTestIdentity, to 
 // EPIC-022 E22-T7: sign-in prompts come only from services the recipient
 // trusts, in every inbox mode, and trusting a service admits nothing else.
 func TestAuthPromptsOnlyFromTrustedServices(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
-	bridge := registerDAVIdentity(t, server, ts, "bridge.poweur.net")
-	mallory := registerDAVIdentity(t, server, ts, "mallory.poweur.net")
-	tok := mintDAVToken(t, ts, alice, "", "")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bridge := registerTestIdentity(t, server, ts, "bridge.poweur.net")
+	mallory := registerTestIdentity(t, server, ts, "mallory.poweur.net")
 	soon := time.Now().Add(3 * time.Minute)
 
 	// Default open inbox, nobody trusted: prompts are refused even there.
@@ -63,7 +62,7 @@ func TestAuthPromptsOnlyFromTrustedServices(t *testing.T) {
 	resp, _ := postTypedMessage(t, ts, bridge, alice.name, "", "hello")
 	mustStatus(t, resp, http.StatusAccepted, "chat under open")
 
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/inbox-policy.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/inbox-policy.json",
 		`{"version":1,"mode":"contacts_only","trusted_auth_services":["bridge.poweur.net"]}`)
 	mustStatus(t, postAuthPrompt(t, ts, bridge, alice.name, soon, "p"), http.StatusAccepted, "trusted prompt, contacts_only")
 	// Trust admits prompts, not chat or other system types.
@@ -87,11 +86,11 @@ func TestAuthPromptsOnlyFromTrustedServices(t *testing.T) {
 	mustStatus(t, postAuthPrompt(t, ts, bridge, alice.name, soon, strings.Repeat("p", maxAuthPromptPayload+1)), http.StatusForbidden, "oversized")
 
 	// A contact is not thereby a sign-in service.
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"mallory.poweur.net","state":"accepted"}]}`)
 	mustStatus(t, postAuthPrompt(t, ts, mallory, alice.name, soon, "p"), http.StatusForbidden, "prompt from a contact")
 	// Blocking a trusted service stops its prompts.
-	putOwnerFile(t, ts, alice, tok, "/poweur-sys/relay/contacts.json",
+	setSysFile(t, server, alice.name, ".poweur/relay/contacts.json",
 		`{"version":1,"contacts":[{"identity":"bridge.poweur.net","state":"blocked"}]}`)
 	mustStatus(t, postAuthPrompt(t, ts, bridge, alice.name, soon, "p"), http.StatusForbidden, "blocked trusted service")
 

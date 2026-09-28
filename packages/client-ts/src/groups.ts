@@ -1,7 +1,7 @@
 /** Addressable group messaging (EPIC-009 E09-T5). */
 
-import { canonicalMessage } from "./canonical.js";
-import { encryptMessage } from "./crypto/index.js";
+import { canonicalMessage, canonicalShareGroup } from "./canonical.js";
+import { encryptMessage, parseEd25519PublicKey, verifyCanonical } from "./crypto/index.js";
 import type { Signer } from "./crypto/keys.js";
 import { rfc3339, stripKeyPrefix } from "./encoding.js";
 import { PoweurError } from "./errors.js";
@@ -9,7 +9,6 @@ import { RelayClient } from "./http.js";
 import { newMessageId } from "./ids.js";
 import { validateEnvelopeExtensions, validateThreadId } from "./msgtypes.js";
 import { resolveIdentity, type ResolveOptions } from "./resolve.js";
-import { verifyGroupSignature } from "./shares.js";
 import type { GroupFanoutResponse, Message, ShareGroup } from "./types.js";
 
 export const MAX_GROUP_FANOUT_MEMBERS = 100;
@@ -156,4 +155,13 @@ export class GroupMessaging {
     });
     return { group: document, envelopes, response, targetRelay: relayUrl };
   }
+}
+
+/** Verify a group document's signature against its owner's key. */
+export function verifyGroupSignature(group: ShareGroup, ownerPublicKey: string): boolean {
+  return verifyCanonical(
+    parseEd25519PublicKey(ownerPublicKey),
+    canonicalShareGroup(group),
+    group.signature,
+  );
 }

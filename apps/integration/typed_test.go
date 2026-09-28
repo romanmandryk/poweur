@@ -389,38 +389,6 @@ func TestINT_TYPED_06_UnknownTypesAreOpaque(t *testing.T) {
 	}
 }
 
-// TestINT_TYPED_07_ThreadSurvivesHistory: threads have to outlive the drain.
-// The relay hands a message over exactly once, so if the archive did not keep
-// `thread_id` a reload would regroup the conversation differently from what
-// the user just saw.
-func TestINT_TYPED_07_ThreadSurvivesHistory(t *testing.T) {
-	const alice = "thralice.poweur.net"
-	const bob = "thrbob.poweur.net"
-	// The archive lives in the DAV tree, so this one needs a relay with
-	// POWEUR_DATA behind it rather than the memory-only fixture.
-	relayURL, _ := journeyRelay(t, alice, bob)
-	aliceHome, bobHome := t.TempDir(), t.TempDir()
-	createIdentity(t, aliceHome, alice, relayURL)
-	createIdentity(t, bobHome, bob, relayURL)
-
-	runCLI(t, aliceHome, "send", bob, "in the rebrand thread", "--thread", "thr_rebrand")
-	inbox, _ := runCLI(t, bobHome, "inbox")
-	if !strings.Contains(inbox, "[thread thr_rebrand]") {
-		t.Fatalf("inbox should mark the thread:\n%s", inbox)
-	}
-
-	stdout, _ := runCLI(t, bobHome, "history", "--json", "--use-identity", bob, "--keep-unread")
-	if !strings.Contains(stdout, "thr_rebrand") {
-		t.Fatalf("the archive must keep the thread so a reload regroups the same way:\n%s", stdout)
-	}
-	// And the sender's own copy is threaded too — the relay never hands a
-	// sender their message back, so the archive is the only record.
-	stdout, _ = runCLI(t, aliceHome, "history", "--json", "--use-identity", alice, "--keep-unread")
-	if !strings.Contains(stdout, "thr_rebrand") {
-		t.Fatalf("sender's archived copy lost the thread:\n%s", stdout)
-	}
-}
-
 // TestINT_TYPED_08_MalformedExtensionsRefused: shape errors are caught before
 // any signature work, and the client is told which field is wrong.
 func TestINT_TYPED_08_MalformedExtensionsRefused(t *testing.T) {

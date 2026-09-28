@@ -13,10 +13,9 @@ afterEach(() => {
 });
 
 describe("destinationBusy", () => {
-  it("counts Contacts and Files while they load", () => {
+  it("counts Contacts while it loads", () => {
     const data = useData.getState();
     expect(destinationBusy("contacts", { ...data, contacts: { ...data.contacts, loading: true } })).toBe(true);
-    expect(destinationBusy("files", { ...data, files: { ...data.files, loading: true } })).toBe(true);
     expect(destinationBusy("contacts", data)).toBe(false);
     expect(destinationBusy("settings", { ...data, contacts: { ...data.contacts, loading: true } })).toBe(false);
   });

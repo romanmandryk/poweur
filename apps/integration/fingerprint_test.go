@@ -109,7 +109,8 @@ func publicKeyLine(t *testing.T, out string) string {
 // only the base64 keys nobody can read to each other.
 func TestINT_CONTACTS_04_MismatchShowsSafetyNumbers(t *testing.T) {
 	zone := newZone(t)
-	ts, addr := newHostedRelay(t, zone, t.TempDir())
+	dataDir := t.TempDir()
+	ts, addr := newHostedRelay(t, zone, dataDir)
 	defer ts.Close()
 	relayURL := ts.URL
 	zone.SetHost("fpmalice.poweur.net", addr)
@@ -125,15 +126,9 @@ func TestINT_CONTACTS_04_MismatchShowsSafetyNumbers(t *testing.T) {
 	runCLI(t, aliceHome, "contacts", "add", "fpmbob.poweur.net")
 
 	// Swap the pin for a valid-but-wrong key, as an impersonating relay would.
-	tok := mintTokenViaCLI(t, aliceHome, "--use-identity", "fpmalice.poweur.net")
-	contactsURL := relayURL + "/dav/fpmalice.poweur.net/poweur-sys/relay/contacts.json"
 	const wrongKey = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	raw := []byte(`{"version":1,"contacts":[{"identity":"fpmbob.poweur.net","state":"accepted","pinned_key":"` + wrongKey + `"}]}`)
-	resp := davDo(t, "PUT", contactsURL, tok, raw, nil)
-	resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		t.Fatalf("tamper put: %d", resp.StatusCode)
-	}
+	writeRelaySysFile(t, dataDir, "fpmalice.poweur.net", ".poweur/relay/contacts.json", raw)
 
 	code, _, stderr := runCLIOutput(t, aliceHome, "send", "fpmbob.poweur.net", "should not go")
 	if code == 0 {

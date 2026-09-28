@@ -1,7 +1,7 @@
 /**
  * Contacts and key pinning — the twin of `poweur contacts` / `poweur requests`.
  *
- * contacts.json lives in the owner's tree at `poweur-sys/relay/contacts.json`,
+ * contacts.json lives in the owner's tree at `.poweur/relay/contacts.json`,
  * so it syncs across devices like any file and the relay can read it to
  * enforce the inbox policy. Keys are pinned at accept time (TOFU): a contact
  * whose resolved key later changes without a signed rotation is refused, the
@@ -12,7 +12,7 @@ import { decryptMessage, parseEd25519PublicKey } from "./crypto/index.js";
 import type { Decryptor, Signer } from "./crypto/keys.js";
 import { rfc3339, stripKeyPrefix, toBase64url, withEd25519Prefix } from "./encoding.js";
 import { PoweurError } from "./errors.js";
-import type { DavClient } from "./files.js";
+import type { SystemFiles } from "./systemfiles.js";
 import type { RelayClient } from "./http.js";
 import { resolveIdentity, type ResolveOptions } from "./resolve.js";
 import {
@@ -25,7 +25,7 @@ import {
   type ContactsFile,
 } from "./types.js";
 
-export const CONTACTS_PATH = "poweur-sys/relay/contacts.json";
+export const CONTACTS_PATH = ".poweur/relay/contacts.json";
 export const MAX_CONTACTS = 10_000;
 
 export function emptyContactsFile(): ContactsFile {
@@ -88,16 +88,16 @@ export interface PinCheckResult {
 }
 
 export class Contacts {
-  readonly #dav: DavClient;
+  readonly #files: SystemFiles;
   readonly #resolve: ResolveOptions;
 
-  constructor(dav: DavClient, resolveOptions: ResolveOptions = {}) {
-    this.#dav = dav;
+  constructor(files: SystemFiles, resolveOptions: ResolveOptions = {}) {
+    this.#files = files;
     this.#resolve = resolveOptions;
   }
 
   async load(): Promise<ContactsFile> {
-    const raw = await this.#dav.readOptional(CONTACTS_PATH);
+    const raw = await this.#files.readOptional(CONTACTS_PATH);
     if (!raw) return emptyContactsFile();
     const file = JSON.parse(raw) as ContactsFile;
     validateContactsFile(file);
@@ -106,7 +106,7 @@ export class Contacts {
 
   async save(file: ContactsFile): Promise<void> {
     validateContactsFile(file);
-    await this.#dav.writeJson(CONTACTS_PATH, file);
+    await this.#files.writeJson(CONTACTS_PATH, file);
   }
 
   /** The contact's current signing key, in `ed25519:` form, for pinning. */

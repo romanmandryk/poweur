@@ -69,7 +69,7 @@ describe("resolveProfile", () => {
         version: 1,
         display_name: "Alice Example",
         bio: "Builds things",
-        avatar: "public/avatar.png",
+        avatar: "avatar.png",
         links: [{ label: "site", url: "https://alice.example" }],
       },
       "/.well-known/poweur/capabilities.json": { version: 1, features: { messaging: "1", files: "2" } },
@@ -80,7 +80,7 @@ describe("resolveProfile", () => {
     expect(entry.displayName).toBe("Alice Example");
     expect(entry.bio).toBe("Builds things");
     expect(entry.links).toEqual([{ label: "site", url: "https://alice.example" }]);
-    expect(entry.avatar).toBe("https://alice.poweur.net/pub/avatar.png");
+    expect(entry.avatar).toBe("https://alice.poweur.net/.well-known/poweur/avatar.png");
     expect(entry.capabilities.features).toMatchObject({ files: "2" });
   });
 
@@ -125,16 +125,17 @@ describe("resolveProfile", () => {
 });
 
 describe("avatarUrl", () => {
-  it("maps a tree path to the identity's public web route", () => {
-    expect(avatarUrl("alice.poweur.net", "public/pics/me.png"))
-      .toBe("https://alice.poweur.net/pub/pics/me.png");
+  it("maps an avatar file name to the identity's public route", () => {
+    expect(avatarUrl("alice.poweur.net", "avatar-1a2b3c4d.png"))
+      .toBe("https://alice.poweur.net/.well-known/poweur/avatar-1a2b3c4d.png");
   });
 
-  it("refuses anything that is not a /public tree path", () => {
-    // EPIC-006 says avatar is a tree path, never an external URL — so a profile
-    // cannot point the app at an arbitrary origin.
+  it("refuses anything that is not a flat image file name", () => {
+    // The avatar is a file name, never an external URL or a path — so a
+    // profile cannot point the app at an arbitrary origin.
     expect(avatarUrl("alice.poweur.net", "https://evil.example/x.png")).toBeNull();
-    expect(avatarUrl("alice.poweur.net", "private/secret.png")).toBeNull();
+    expect(avatarUrl("alice.poweur.net", "public/avatar.png")).toBeNull();
+    expect(avatarUrl("alice.poweur.net", "profile.json")).toBeNull();
     expect(avatarUrl("alice.poweur.net", "")).toBeNull();
     expect(avatarUrl("alice.poweur.net", null)).toBeNull();
   });

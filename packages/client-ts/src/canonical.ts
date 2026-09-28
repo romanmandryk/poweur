@@ -9,7 +9,7 @@
  */
 
 import { metadataLines } from "./msgtypes.js";
-import type { EncryptionMeta, ShareAudience, ShareLink } from "./types.js";
+import type { EncryptionMeta } from "./types.js";
 
 /**
  * Message signing input (`crypto.CanonicalMessageEnvelope` in Go). Optional
@@ -138,17 +138,6 @@ export function canonicalEncryptionKeyUpdate(
   return ["identity-encryption-key", identity, encryptionPublicKey, issuedAt, nonce].join("\n");
 }
 
-/** POST /auth/dav-token (crypto.CanonicalDAVToken). */
-export function canonicalDavToken(
-  identity: string,
-  audience: string,
-  scope: string,
-  issuedAt: string,
-  nonce: string,
-): string {
-  return ["dav-token", identity, audience, scope, issuedAt, nonce].join("\n");
-}
-
 /** POST /sessions (crypto.CanonicalSessionRegistration). */
 export function canonicalSessionRegistration(
   identity: string,
@@ -175,76 +164,6 @@ export function canonicalSessionRevocation(
   nonce: string,
 ): string {
   return ["session-revocation", identity, sessionId, issuedAt, nonce].join("\n");
-}
-
-/**
- * Share-grant audience rendering (identity.canonicalAudience): each entry
- * becomes `id:<lowercased>`, `group:<lowercased>` or `link:<token>`, sorted,
- * comma-joined.
- */
-export function canonicalAudience(audience: ShareAudience[]): string {
-  const parts = audience.map((entry) => {
-    if (entry.id) return `id:${entry.id.trim().toLowerCase()}`;
-    if (entry.link) return `link:${entry.link.trim().toLowerCase()}`;
-    return `group:${(entry.group ?? "").trim().toLowerCase()}`;
-  });
-  parts.sort();
-  return parts.join(",");
-}
-
-/**
- * Share-grant signing input (ShareGrant.Canonical).
- *
- * A grant carrying link options appends its marker, password hash and
- * download cap. File requests append a second marker and their five signed
- * controls. Grants with no `link` retain the original eight-line format.
- */
-export function canonicalShareGrant(grant: {
-  share_id: string;
-  source_share_id?: string;
-  owner: string;
-  path: string;
-  audience: ShareAudience[];
-  permissions: string[];
-  created_at?: string;
-  expires_at?: string;
-  link?: ShareLink | null;
-}): string {
-  const permissions = [...grant.permissions].sort();
-  const fields = [
-    "poweur-share-grant",
-    grant.share_id.trim(),
-    grant.owner.trim().toLowerCase(),
-    normalizeGrantPath(grant.path),
-    canonicalAudience(grant.audience),
-    permissions.join(","),
-    grant.created_at ?? "",
-    grant.expires_at ?? "",
-  ];
-  if (grant.link) {
-    fields.push(
-      "poweur-share-link",
-      grant.link.password ?? "",
-      String(grant.link.max_downloads ?? 0),
-    );
-    if (grant.link.file_request) {
-      fields.push(
-        "poweur-file-request",
-        String(grant.link.file_request.max_uploads ?? 0),
-        String(grant.link.file_request.max_bytes ?? 0),
-        String(grant.link.file_request.max_object_bytes ?? 0),
-        [...(grant.link.file_request.allowed_types ?? [])]
-          .map((value) => value.trim().toLowerCase())
-          .sort()
-          .join(","),
-        String(grant.link.file_request.notify ?? false),
-      );
-    }
-  }
-  if (grant.source_share_id) {
-    fields.push("poweur-share-source", grant.source_share_id.trim());
-  }
-  return fields.join("\n");
 }
 
 /**
@@ -281,47 +200,16 @@ export function canonicalShareGroup(group: {
 }
 
 /** Where a group identity keeps its own membership (identity.GroupSelfDoc). */
-export const GROUP_SELF_DOC = "poweur-sys/relay/groups/self.json";
+export const GROUP_SELF_DOC = ".poweur/relay/group.json";
 
 /**
- * Does this grant-audience group name refer to an addressable group
- * *identity* rather than an owner-local group? The rule is the presence of
+ * Does this group name refer to an addressable group *identity* rather than
+ * an owner-local group? The rule is the presence of
  * a dot: a Poweur ID is a domain name and always has one, and owner-local
  * group names are forbidden from having one.
  */
 export function isGroupIdentityName(name: string): boolean {
   return name.trim().includes(".");
-}
-
-/** Tree roots a grant may cover (identity.ShareRoots). */
-export const SHARE_ROOTS = ["shared", "apps"] as const;
-
-/**
- * Validate and normalize a grant path (identity.NormalizeGrantPath). Throws
- * on anything outside a shareable root, or on the root itself.
- *
- * Kept here rather than in shares.ts because the canonical string depends on
- * it — signing a non-normalized path would produce a grant the relay rejects.
- */
-export function normalizeGrantPath(raw: string): string {
-  const path = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-  if (path === "") throw new Error("grant path is empty");
-  for (const segment of path.split("/")) {
-    if (segment === "" || segment === "." || segment === "..") {
-      throw new Error(`invalid grant path segment "${segment}"`);
-    }
-  }
-  const slash = path.indexOf("/");
-  const top = slash >= 0 ? path.slice(0, slash) : path;
-  for (const root of SHARE_ROOTS) {
-    if (top === root) {
-      if (path === root) {
-        throw new Error(`cannot grant the ${root} root itself; share a subfolder or file`);
-      }
-      return path;
-    }
-  }
-  throw new Error(`grants may only cover paths under /${SHARE_ROOTS.join("/ or /")}`);
 }
 
 /**

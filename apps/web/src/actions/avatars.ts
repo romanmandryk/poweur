@@ -1,6 +1,6 @@
 /**
  * Keeping the avatar store (`state/avatars`) filled: our own photo read back
- * over DAV when the profile names one this device does not hold yet, and other
+ * from our system files when the profile names one this device does not hold yet, and other
  * people's resolved from their public profile by the screens that list them.
  */
 import { useEffect } from "react";
@@ -29,7 +29,9 @@ export async function syncOwnAvatar(identity: string, avatarPath: string | null 
   const client: any = activeClient();
   if (!client) return;
   try {
-    const bytes: Uint8Array = await (await client.dav()).readBytes(avatarPath);
+    const file = await client.system().get(`.poweur/public/${avatarPath}`);
+    if (!file) return;
+    const bytes: Uint8Array = file.bytes;
     const extension = avatarPath.split(".").pop()?.toLowerCase() ?? "";
     const scaled = await squareAvatar(new Blob([bytes as BlobPart], { type: MIME[extension] ?? "image/jpeg" }));
     if (scaled.size > MAX_LOCAL_BYTES) return;

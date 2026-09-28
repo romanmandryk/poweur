@@ -1,12 +1,8 @@
 package relay
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -107,52 +103,3 @@ func TestQuotaOverridesReloadAndKeepLastGood(t *testing.T) {
 	}
 }
 
-func TestStorageQuotaOverrideAndContact(t *testing.T) {
-	server, ts := newDAVTestServer(t, 64, 0)
-	server.cfg.QuotaContact = "helpdesk.poweur.net"
-	path := filepath.Join(t.TempDir(), "storage-quotas.json")
-	server.quotas = newQuotaOverrides(path, nil)
-	alice := registerDAVIdentity(t, server, ts, "quotaover.poweur.net")
-	token := mintDAVToken(t, ts, alice, "", "")
-	base := "/dav/" + alice.name
-
-	// Over the relay default: 507, naming who to ask.
-	resp := davReq(t, ts, http.MethodPut, base+"/private/big.txt", token, bytes.Repeat([]byte("x"), 100), nil)
-	var refused ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&refused)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusInsufficientStorage || refused.Error != "quota_exceeded" {
-		t.Fatalf("over default quota: %d %+v", resp.StatusCode, refused)
-	}
-	if refused.Contact != "helpdesk.poweur.net" || !strings.Contains(refused.Detail, "message helpdesk.poweur.net") {
-		t.Fatalf("507 does not name the contact: %+v", refused)
-	}
-
-	// Support raises this one identity's limit; the same upload now fits.
-	writeQuotaFile(t, path, `{"quotaover.poweur.net": "1MB"}`, time.Now())
-	resp = davReq(t, ts, http.MethodPut, base+"/private/big.txt", token, bytes.Repeat([]byte("x"), 100), nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("under override: %d", resp.StatusCode)
-	}
-
-	// The quota report shows the identity's own limit and the contact.
-	resp = davReq(t, ts, http.MethodGet, "/files/"+alice.name+"/quota", token, nil, nil)
-	var report map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&report)
-	resp.Body.Close()
-	if report["quota_bytes"] != float64(1e6) || report["contact"] != "helpdesk.poweur.net" {
-		t.Fatalf("quota report: %v", report)
-	}
-
-	// Without a contact the 507 still says what happened.
-	server.cfg.QuotaContact = ""
-	writeQuotaFile(t, path, `{}`, time.Now().Add(time.Minute))
-	resp = davReq(t, ts, http.MethodPut, base+"/private/more.txt", token, bytes.Repeat([]byte("y"), 100), nil)
-	refused = ErrorResponse{}
-	_ = json.NewDecoder(resp.Body).Decode(&refused)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusInsufficientStorage || refused.Detail != "identity storage quota exceeded" || refused.Contact != "" {
-		t.Fatalf("no contact: %d %+v", resp.StatusCode, refused)
-	}
-}

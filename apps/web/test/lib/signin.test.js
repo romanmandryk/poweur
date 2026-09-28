@@ -13,14 +13,14 @@ function request() {
     issued_at: new Date(now - 30_000).toISOString(),
     expires_at: new Date(now + 30_000).toISOString(), action: "signin",
     response_uri: "https://tasks.example/callback",
-    scopes: ["dav:rw:apps/example.tasks"],
+    scopes: ["profile:read"],
   };
 }
 
-class FakeDav {
+/** A SystemFiles-shaped fake. */
+class FakeFiles {
   constructor(files = {}) { this.files = { ...files }; }
   async readOptional(path) { return this.files[path] ?? null; }
-  async mkdir() {}
   async write(path, value) { this.files[path] = value; }
   async writeJson(path, value) { this.files[path] = JSON.stringify(value); }
 }
@@ -53,10 +53,10 @@ describe("web Sign in with Poweur ID", () => {
   });
 
   it("appends a user-owned consent record", async () => {
-    const dav = new FakeDav();
+    const dav = new FakeFiles();
     const { response } = await signBrowserApproval(request(), "alice.poweur.net", { sign: async () => "sig" });
     await appendBrowserConsent(dav, response, { name: "Tasks", app_id: "example.tasks" });
-    const line = JSON.parse(dav.files["poweur-sys/private/logs/auth.log"].trim());
+    const line = JSON.parse(dav.files[".poweur/private/logs/auth.log"].trim());
     expect(line.app_id).toBe("example.tasks");
     expect(line.verified).toBe(true);
     expect(line.signer).toBe("web");
@@ -125,18 +125,18 @@ describe("web Sign in with Poweur ID", () => {
   });
 
   it("lists and revokes connected apps by editing the relay policy file", async () => {
-    const dav = new FakeDav({
-      "poweur-sys/relay/connected-apps.json": JSON.stringify({ version: 1, apps: [{ app_id: "example.tasks" }] }),
+    const dav = new FakeFiles({
+      ".poweur/relay/connected-apps.json": JSON.stringify({ version: 1, apps: [{ app_id: "example.tasks" }] }),
     });
     expect((await readConnectedApps(dav)).apps).toHaveLength(1);
     expect(await revokeConnectedApp(dav, "example.tasks", new Date("2026-09-10T12:00:00Z"))).toBe(true);
-    const doc = JSON.parse(dav.files["poweur-sys/relay/connected-apps.json"]);
+    const doc = JSON.parse(dav.files[".poweur/relay/connected-apps.json"]);
     expect(doc.apps[0].revoked_at).toBe("2026-09-10T12:00:00Z");
   });
 
   it("reads the JSON Lines consent audit trail", async () => {
-    const dav = new FakeDav({
-      "poweur-sys/private/logs/auth.log": '{"app_id":"example.tasks"}\n',
+    const dav = new FakeFiles({
+      ".poweur/private/logs/auth.log": '{"app_id":"example.tasks"}\n',
     });
     await expect(readConsentLog(dav)).resolves.toEqual([{ app_id: "example.tasks" }]);
   });

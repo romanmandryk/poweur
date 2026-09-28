@@ -23,10 +23,16 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
   };
   let sent = 0;
   const requests = vi.fn(async () => [] as any[]);
-  const sharesApi = {
-    list: vi.fn(async () => [] as any[]),
-    listMounts: vi.fn(async () => [] as any[]),
-    removeMount: vi.fn(async () => false),
+  const systemFiles = {
+    get: vi.fn(async () => null as any),
+    readOptional: vi.fn(async () => null as string | null),
+    write: vi.fn(async () => '"etag"'),
+    writeJson: vi.fn(async () => '"etag"'),
+    remove: vi.fn(async () => true),
+  };
+  const deviceRegistry = {
+    list: vi.fn(async () => ({ identity: "alice.poweur.net", devices: [] as any[] })),
+    revoke: vi.fn(async () => ({ device_id: "", sessions_revoked: 0 })),
   };
   return {
     identity: "alice.poweur.net",
@@ -35,6 +41,9 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     decryptor: null as any,
     store,
     contactsApi,
+    systemFiles,
+    system: vi.fn(() => systemFiles),
+    devices: vi.fn(() => deviceRegistry),
     history: vi.fn(async () => store),
     contacts: vi.fn(async () => contactsApi),
     inboxAndArchive: vi.fn(async () => ({ messages: [] as any[], acks: [] as any[], lost: 0 })),
@@ -49,13 +58,10 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
       message: { id: `sent-${++sent}`, recipient: to, timestamp: new Date(Date.now() + sent).toISOString() },
       lost: 0,
     })),
-    sendAttachment: vi.fn(),
     sendGroupAndArchive: vi.fn(),
     acceptContact: vi.fn(async () => ({ notified: true })),
     blockContact: vi.fn(async () => {}),
     requestContact: vi.fn(async () => {}),
-    downloadAttachment: vi.fn(),
-    shares: vi.fn(async () => sharesApi),
     sessions: { ensure: vi.fn(async () => ({})) },
     ...overrides,
   };

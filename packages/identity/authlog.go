@@ -26,7 +26,7 @@ import (
 // on one device must not cost the user the rest of their history.
 
 // AuthLogPath is where consent records live in the owner's tree.
-const AuthLogPath = "poweur-sys/private/logs/auth.log"
+const AuthLogPath = ".poweur/private/logs/auth.log"
 
 // MaxAuthLogBytes caps the file. Past it, the oldest records are dropped on
 // the next append: a consent log that grows without bound eventually stops

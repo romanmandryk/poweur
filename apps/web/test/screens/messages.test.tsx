@@ -18,6 +18,7 @@ import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
 import { useSession } from "../../src/state/session";
+import { useUi } from "../../src/state/ui";
 import { decodeSignInRequest, encodeSignInRequest } from "@poweur/client";
 import { fakeClient, inbound } from "../helpers/fake-client";
 import { promptMessage } from "../helpers/prompts";
@@ -38,7 +39,7 @@ beforeEach(() => {
 
 describe("Messages destination (E21-T7)", () => {
   it("unlocking pulls the inbox, requests and history, whatever the screen", async () => {
-    useRoute.setState({ page: "files" });
+    useRoute.setState({ page: "settings" });
     render(<App />);
     await waitFor(() => expect(holder.client.inboxAndArchive).toHaveBeenCalled());
     expect(holder.client.requests).toHaveBeenCalled();
@@ -200,13 +201,13 @@ describe("Conversation view (E15-T13)", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("an attachment bubble offers to open it", async () => {
+  it("an attachment bubble explains it cannot be opened until the new storage", async () => {
     openWith([inbound(BOB, "report", 1, { type: "chat.attachment", metadata: { attachment_name: "evidence.txt" } })]);
     render(<App />);
     expect($(".bubble-text")!.textContent).toBe("evidence.txt");
     expect($(".bubble-text svg")).toBeTruthy();
     fireEvent.click($(".bubble-attachment")!);
-    await waitFor(() => expect(holder.client.downloadAttachment).toHaveBeenCalledWith({ attachment_name: "evidence.txt" }));
+    await waitFor(() => expect(useUi.getState().toasts.some((t: any) => /new storage/.test(t.message))).toBe(true));
   });
 
   it("back leaves the conversation", () => {

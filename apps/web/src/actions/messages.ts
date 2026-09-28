@@ -1,7 +1,7 @@
 /**
  * Messaging (EPIC-009 web surface), ported from app.js: drain the inbox and
  * archive in one step, restore the archive on unlock, hold the push stream,
- * keep read marks, and send — signed, to a group, or with an attachment —
+ * keep read marks, and send — signed or to a group —
  * queueing offline sends for retry.
  *
  * `GET /inbox`, `/requests` and `/anon` all **drain**: the relay hands each
@@ -19,7 +19,6 @@ import { toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
-import { loadGrants, processShareRevocations } from "./files";
 import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
 
 const selfIdentity = () => useSession.getState().identity ?? "";
@@ -111,7 +110,6 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       if (lost) toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
       await verifyGroupInboxMessages(client, messages);
       mergeMessages(messages);
-      processShareRevocations(messages).catch((error) => console.warn("Share revocation processing failed:", errorMessage(error)));
       useData.setState((state) => ({ acks: mergeInto(state.acks, acks) }));
       processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
     } catch (error) {
@@ -230,10 +228,6 @@ export function startEventStream() {
       // Each queue has its own event, because each is read by a different call.
       if (event.type === "request") void loadRequests({ force: true });
       else if (event.type === "anon") void loadAnon({ force: true });
-      else if (event.type === "file_request") {
-        void loadGrants({ force: true });
-        toast("A file request received a new upload.", "success");
-      }
       else void loadInbox({ force: true });
     },
     onError: (error: Error) => console.warn("Push stream dropped, retrying:", error.message),
@@ -331,11 +325,10 @@ export async function sendSigned(
   {
     to,
     body,
-    attachment = null,
     thread = "",
     group = false,
     setStatus,
-  }: { to: string; body: string; attachment?: File | null; thread?: string; group?: boolean; setStatus: SetStatus },
+  }: { to: string; body: string; thread?: string; group?: boolean; setStatus: SetStatus },
 ): Promise<SendOutcome> {
   const self = selfIdentity();
   if (group) {
@@ -378,17 +371,10 @@ export async function sendSigned(
       return { status: "blocked" };
     }
     setStatus("Sending…");
-    const sent = attachment
-      ? await client.sendAttachment(to, new Uint8Array(await attachment.arrayBuffer()), {
-          name: attachment.name,
-          mime: attachment.type || "application/octet-stream",
-          caption: body || attachment.name,
-          ...(thread ? { threadId: thread } : {}),
-        })
-      : await client.sendAndArchive(to, body, {
-          signWith: isSessionValid(loadSessionRecord(self)) ? "session" : "identity",
-          ...(thread ? { threadId: thread } : {}),
-        });
+    const sent = await client.sendAndArchive(to, body, {
+      signWith: isSessionValid(loadSessionRecord(self)) ? "session" : "identity",
+      ...(thread ? { threadId: thread } : {}),
+    });
     setStatus("✓ Sent", "ok");
     mergeMessages([
       {
@@ -397,16 +383,15 @@ export async function sendSigned(
         recipient: sent.message.recipient,
         timestamp: sent.message.timestamp,
         queue: "sent",
-        plaintext: body || attachment?.name,
-        ...(attachment ? { type: "chat.attachment", metadata: sent.message.metadata } : {}),
+        plaintext: body,
         ...(thread ? { thread_id: thread } : {}),
       },
     ]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
-    trackAction("send", { kind: attachment ? "attachment" : "chat", outcome: "sent" });
+    trackAction("send", { kind: "chat", outcome: "sent" });
     return { status: "sent" };
   } catch (error) {
-    if (!attachment && client.decryptor && isRetryableSendError(error)) {
+    if (client.decryptor && isRetryableSendError(error)) {
       const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, body);
       queueWebMessage(self, to, sealed, { signWith: "identity", ...(thread ? { threadId: thread } : {}) }, errorMessage(error));
       setStatus("· Queued — will retry when online", "ok");
@@ -416,7 +401,7 @@ export async function sendSigned(
     }
     setStatus(`✕ ${errorMessage(error)}`, "err");
     toast(errorMessage(error), "error");
-    trackAction("send", { kind: attachment ? "attachment" : "chat", outcome: "failed" });
+    trackAction("send", { kind: "chat", outcome: "failed" });
     return { status: "failed" };
   }
 }
@@ -462,25 +447,12 @@ export async function openNewChat(identity: string): Promise<boolean> {
   return true;
 }
 
-/** Fetch, hash-verify and hand over an attachment. */
-export async function downloadAttachment(metadata: unknown) {
-  const client = activeClient();
-  if (!client) return;
-  try {
-    const { ref, bytes } = await client.downloadAttachment(metadata);
-    const url = URL.createObjectURL(new Blob([bytes], { type: ref.mime }));
-    if (String(ref.mime).startsWith("image/")) {
-      window.open(url, "_blank", "noopener");
-    } else {
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = ref.name;
-      anchor.click();
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch (error) {
-    toast(`Attachment failed: ${errorMessage(error)}`, "error");
-  }
+/**
+ * Attachments are being rebuilt on end-to-end encrypted storage (EPIC-020
+ * E20-T11); until then an attachment message can be shown but not opened.
+ */
+export async function downloadAttachment(_metadata: unknown) {
+  toast("Attachments come back with the new storage — this one can't be opened yet.", "warning", 6000);
 }
 
 /** Test seam. */

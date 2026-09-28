@@ -3,15 +3,13 @@ package relay
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"errors"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/storage"
 	idpkg "github.com/poweur/identity"
 )
@@ -22,24 +20,15 @@ func logDeviceError(owner, deviceID string, err error) {
 
 // Device registry (EPIC-004 E04-T6).
 //
-// `poweur-sys/relay/devices.json` is the relay's own record of the devices an
-// identity uses: what they are called, when each was last seen, how far each
-// has synced, and which app passwords each holds. The owner reads it (over
-// DAV, or through the endpoints below); nobody else does, and no peer-facing
-// presence API exists — EPIC-009 E09-T2's privacy decision, that presence is
-// not user-visible in v1, is honoured by keeping every last-seen fact inside
-// the owner's own `poweur-sys/relay` zone.
+// `.poweur/state/devices.json` is the relay's own record of the devices an
+// identity uses: what they are called and when each was last seen. The relay
+// writes it; the owner reads it through the endpoints below; nobody else
+// does, and no peer-facing presence API exists — EPIC-009 E09-T2's privacy
+// decision, that presence is not user-visible, is honoured by keeping every
+// last-seen fact inside the owner's own `.poweur/state` zone.
 //
-// **Writes here are deliberately not journaled.** Every session creation,
-// stream open and changes-feed read touches a device row; putting those in
-// the changes journal would wake every sync client on the identity each time
-// any of them said hello — a feedback loop where syncing causes syncing. The
-// access log in the same zone is written the same way, and for the same
-// reason. Sync clients pull devices.json on a full manifest pass; they never
-// push it.
-//
-// **What revocation actually kills.** Sessions, DAV tokens and app passwords
-// bound to the device — the derived credentials. It cannot kill the identity
+// **What revocation actually kills.** Sessions bound to the device — the
+// derived credentials. It cannot kill the identity
 // private key: a device holding that key *is* the owner, and can mint fresh
 // credentials under any fingerprint it likes. Recovering from a genuinely
 // compromised key is key rotation (EPIC-011 / E01-T5), not device
@@ -54,9 +43,6 @@ const (
 	// maxDevicesDocBytes matches the poweur-sys document cap.
 	maxDevicesDocBytes = 64 * 1024
 )
-
-// devicesDocPath is the tree path of the registry.
-var devicesDocPath = files.SysRelay + "/devices.json"
 
 // deviceObservation is one thing the relay noticed about a device. Zero
 // fields mean "unchanged" — a stream opening reports presence and nothing
@@ -106,15 +92,7 @@ func deviceFromRequest(r *http.Request) deviceObservation {
 // readDevices loads and validates the registry. A missing or unreadable file
 // is an empty registry: the document appears on first observation.
 func (s *Server) readDevices(ctx context.Context, owner string) idpkg.DevicesFile {
-	if !s.davEnabled() {
-		return idpkg.DevicesFile{Version: 1}
-	}
-	f, err := s.filesProvider.OpenFile(ctx, owner, devicesDocPath, os.O_RDONLY, 0)
-	if err != nil {
-		return idpkg.DevicesFile{Version: 1}
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxDevicesDocBytes+1))
-	_ = f.Close()
+	raw, err := s.sysFiles.Read(ctx, owner, devicesDocPath)
 	if err != nil || len(raw) > maxDevicesDocBytes {
 		return idpkg.DevicesFile{Version: 1}
 	}
@@ -140,27 +118,17 @@ func (s *Server) writeDevices(ctx context.Context, owner string, doc idpkg.Devic
 	if err != nil {
 		return err
 	}
-	_ = s.filesProvider.Mkdir(ctx, owner, files.SysRelay)
-	f, err := s.filesProvider.OpenFile(ctx, owner, devicesDocPath,
-		os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(append(raw, '\n')); err != nil {
-		_ = f.Close()
-		return err
-	}
-	return f.Close()
+	return s.sysFiles.Write(ctx, owner, devicesDocPath, append(raw, '\n'))
 }
 
 // touchDevice records an observation, returning the device id it applied to
-// ("" when the client claimed no device or storage is off).
+// ("" when the client claimed no device).
 //
 // Best-effort by construction: a registry write must never fail the request
 // that produced the observation. Sync working matters more than knowing
 // which laptop did it.
 func (s *Server) touchDevice(ctx context.Context, owner string, obs deviceObservation) string {
-	if !s.davEnabled() || obs.Fingerprint == "" {
+	if obs.Fingerprint == "" {
 		return ""
 	}
 	owner = strings.ToLower(strings.TrimSpace(owner))
@@ -227,7 +195,7 @@ func (s *Server) touchDevice(ctx context.Context, owner string, obs deviceObserv
 	}
 	device.LastSeen = stamp
 
-	if err := s.writeDevices(ctx, owner, doc.Upsert(device)); err != nil {
+	if err := s.writeDevices(ctx, owner, doc.Upsert(device)); err != nil && !errors.Is(err, errSystemFilesUnavailable) {
 		// Loud, not fatal: the caller's request still succeeds.
 		logDeviceError(owner, id, err)
 	}
@@ -260,7 +228,7 @@ func containsFold(list []string, want string) bool {
 // still holds an identity key cannot quietly re-arm itself with the same
 // name.
 func (s *Server) deviceRevoked(ctx context.Context, owner, fingerprint string) bool {
-	if !s.davEnabled() || fingerprint == "" {
+	if fingerprint == "" {
 		return false
 	}
 	id := idpkg.DeviceIDFromFingerprint(fingerprint)
@@ -274,14 +242,12 @@ func (s *Server) deviceRevoked(ctx context.Context, owner, fingerprint string) b
 // deviceRevocation is the outcome of revoking one device, reported back so
 // the owner can see what it actually cost.
 type deviceRevocation struct {
-	DeviceID     string `json:"device_id"`
-	Sessions     int    `json:"sessions_revoked"`
-	DAVTokens    int    `json:"dav_tokens_revoked"`
-	AppPasswords int    `json:"app_passwords_revoked"`
+	DeviceID string `json:"device_id"`
+	Sessions int    `json:"sessions_revoked"`
 }
 
-// revokeDevice cuts a device off: registry row marked revoked, its sessions
-// dropped, its DAV tokens invalidated, its app-password entries deleted.
+// revokeDevice cuts a device off: registry row marked revoked and its
+// sessions dropped.
 //
 // Order matters. Credentials go first and the registry row last: if the
 // process dies halfway, a device with no credentials and an un-revoked row
@@ -295,19 +261,13 @@ func (s *Server) revokeDevice(ctx context.Context, owner, deviceID string) (devi
 	defer lock.Unlock()
 
 	doc := s.readDevices(ctx, owner)
-	device, ok := doc.Find(deviceID)
-	if !ok {
+	if _, ok := doc.Find(deviceID); !ok {
 		return out, false
 	}
 
 	out.Sessions = s.sessions.DeleteMatching(owner, func(sess storage.Session) bool {
 		return idpkg.DeviceIDFromFingerprint(sess.DeviceFingerprint) == deviceID
 	})
-	out.DAVTokens = s.davTokens.RevokeMatching(func(t davToken) bool {
-		return strings.EqualFold(t.Audience, owner) && t.DeviceID == deviceID
-	})
-	out.AppPasswords = s.deleteAppPasswords(ctx, owner, deviceID, device.AppPasswords)
-
 	if doc.Revoke(deviceID, time.Now()) {
 		if err := s.writeDevices(ctx, owner, doc); err != nil {
 			logDeviceError(owner, deviceID, err)
@@ -317,117 +277,15 @@ func (s *Server) revokeDevice(ctx context.Context, owner, deviceID string) (devi
 	return out, true
 }
 
-// appPasswordsPath is where the owner keeps their DAV app passwords.
-var appPasswordsPath = files.SysRelay + "/app-passwords.json"
-
-// readAppPasswords loads app-passwords.json, or an empty file when it is
-// absent or unreadable.
-func (s *Server) readAppPasswords(ctx context.Context, owner string) idpkg.AppPasswordsFile {
-	if !s.davEnabled() {
-		return idpkg.AppPasswordsFile{}
-	}
-	f, err := s.filesProvider.OpenFile(ctx, owner, appPasswordsPath, os.O_RDONLY, 0)
-	if err != nil {
-		return idpkg.AppPasswordsFile{}
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxDevicesDocBytes+1))
-	_ = f.Close()
-	if err != nil || len(raw) > maxDevicesDocBytes {
-		return idpkg.AppPasswordsFile{}
-	}
-	parsed, err := idpkg.ParseAppPasswordsFile(raw)
-	if err != nil {
-		return idpkg.AppPasswordsFile{}
-	}
-	return parsed
-}
-
-// appPasswordsForDevice names the entries currently linked to a device.
-//
-// Read from app-passwords.json rather than mirrored into devices.json,
-// because that file is the owner's and they may edit it by hand at any
-// moment: a copy in the registry would be a second truth that goes stale
-// the first time someone removes a password with a text editor.
-func appPasswordsForDevice(file idpkg.AppPasswordsFile, deviceID string) []string {
-	var names []string
-	for _, entry := range file.Passwords {
-		if deviceID != "" && strings.EqualFold(entry.DeviceID, deviceID) {
-			names = append(names, entry.Name)
-		}
-	}
-	return names
-}
-
-// deleteAppPasswords rewrites app-passwords.json without any entry linked to
-// deviceID, and without the entries the registry row named. Re-reading the
-// file per DAV request (the existing design) is what makes this take effect
-// on the next request rather than the next restart.
-func (s *Server) deleteAppPasswords(ctx context.Context, owner, deviceID string, names []string) int {
-	if !s.davEnabled() {
-		return 0
-	}
-	path := appPasswordsPath
-	parsed := s.readAppPasswords(ctx, owner)
-	kept := make([]idpkg.AppPassword, 0, len(parsed.Passwords))
-	removed := 0
-	for _, entry := range parsed.Passwords {
-		// Either link is enough. `device_id` on the entry is what a client
-		// sets when it mints the password; the name list on the row is the
-		// relay's own record. Neither is required for the other to work.
-		if (deviceID != "" && strings.EqualFold(entry.DeviceID, deviceID)) || containsFold(names, entry.Name) {
-			removed++
-			continue
-		}
-		kept = append(kept, entry)
-	}
-	if removed == 0 {
-		return 0
-	}
-	parsed.Passwords = kept
-	out, err := json.MarshalIndent(parsed, "", "  ")
-	if err != nil {
-		return 0
-	}
-	w, err := s.filesProvider.OpenFile(ctx, owner, path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return 0
-	}
-	out = append(out, '\n')
-	if _, err := w.Write(out); err != nil {
-		_ = w.Close()
-		return 0
-	}
-	_ = w.Close()
-	// Unlike devices.json this file is the owner's, and sync clients hold
-	// copies of it — so this write does belong in the journal.
-	if s.filesIndex != nil {
-		etag, size, err := files.ETagFromReader(strings.NewReader(string(out)))
-		if err == nil {
-			s.filesIndex.RecordWrite(owner, path, etag, size, time.Now().UTC(), "relay")
-		}
-	}
-	return removed
-}
-
 // handleDevicesGet serves GET /devices/{identity} — the owner's device list.
 func (s *Server) handleDevicesGet(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.deviceOwnerAuth(w, r, files.AccessRead)
+	owner, ok := s.deviceOwnerAuth(w, r)
 	if !ok {
 		return
 	}
 	doc := s.readDevices(r.Context(), owner)
 	if doc.Devices == nil {
 		doc.Devices = []idpkg.Device{}
-	}
-	// Fill in the credentials each device currently holds at read time, from
-	// the owner's own app-passwords.json. A revoked row keeps whatever the
-	// revocation left on it — which is nothing.
-	passwords := s.readAppPasswords(r.Context(), owner)
-	for i, d := range doc.Devices {
-		if d.Revoked {
-			continue
-		}
-		doc.Devices[i].AppPasswords = appPasswordsForDevice(passwords, d.ID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"identity": owner,
@@ -442,7 +300,7 @@ type DeviceRevokeRequest struct {
 
 // handleDevicesRevoke serves POST /devices/{identity}/revoke.
 func (s *Server) handleDevicesRevoke(w http.ResponseWriter, r *http.Request) {
-	owner, ok := s.deviceOwnerAuth(w, r, files.AccessWrite)
+	owner, ok := s.deviceOwnerAuth(w, r)
 	if !ok {
 		return
 	}
@@ -463,32 +321,16 @@ func (s *Server) handleDevicesRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// deviceOwnerAuth authenticates the tree owner for the registry endpoints,
-// mirroring the quota endpoint: any owner credential the files layer
-// accepts (DAV token, app password) works, and the credential's own scope
-// still has to cover the document.
-func (s *Server) deviceOwnerAuth(w http.ResponseWriter, r *http.Request, access files.Access) (string, bool) {
-	if !s.davEnabled() {
-		writeError(w, http.StatusNotImplemented, "storage_disabled", "the device registry requires POWEUR_DATA")
-		return "", false
-	}
+// deviceOwnerAuth authenticates the owner for the registry endpoints with
+// the same proof an inbox pickup needs: a one-shot challenge signed by the
+// identity key or a live session key.
+func (s *Server) deviceOwnerAuth(w http.ResponseWriter, r *http.Request) (string, bool) {
 	owner := strings.ToLower(r.PathValue("identity"))
 	if !s.identities.Exists(owner) {
 		writeError(w, http.StatusNotFound, "not_found", "identity not hosted on this relay")
 		return "", false
 	}
-	principal, ok, reason := s.authenticateDAV(r, owner)
-	if !ok || !principal.Owner {
-		if reason == "" {
-			reason = "owner credentials required"
-		}
-		s.noteDAVAuthFailure(r, owner, principal.Identity, reason)
-		w.Header().Set("WWW-Authenticate", `Basic realm="poweur-dav", Bearer`)
-		writeError(w, http.StatusUnauthorized, "unauthorized", reason)
-		return "", false
-	}
-	if !principal.Scope.Allows(devicesDocPath, access) {
-		writeError(w, http.StatusForbidden, "forbidden", "credential scope does not cover the device registry")
+	if !s.authorizeInboxRead(w, r, owner) {
 		return "", false
 	}
 	return owner, true

@@ -9,7 +9,7 @@
  */
 
 import { PoweurError } from "./errors.js";
-import type { DavClient } from "./files.js";
+import type { SystemFiles } from "./systemfiles.js";
 import { validateIdentityName } from "./names.js";
 import {
   ANON_CHALLENGE_NONE,
@@ -25,7 +25,7 @@ import {
   type InboxPolicy,
 } from "./types.js";
 
-export const INBOX_POLICY_PATH = "poweur-sys/relay/inbox-policy.json";
+export const INBOX_POLICY_PATH = ".poweur/relay/inbox-policy.json";
 
 export const ANON_DEFAULT_MAX_BYTES = 4096;
 export const ANON_DEFAULT_MAX_PER_DAY = 20;
@@ -143,9 +143,9 @@ export function sendsReadReceiptsTo(policy: InboxPolicy, peer: string): boolean 
 
 /** Read the policy, or the relay default when no file exists. */
 export async function readInboxPolicy(
-  dav: DavClient,
+  files: SystemFiles,
 ): Promise<{ policy: InboxPolicy; explicit: boolean }> {
-  const raw = await dav.readOptional(INBOX_POLICY_PATH);
+  const raw = await files.readOptional(INBOX_POLICY_PATH);
   if (!raw) {
     return { policy: { version: 1, mode: DEFAULT_INBOX_MODE }, explicit: false };
   }
@@ -155,7 +155,7 @@ export async function readInboxPolicy(
 }
 
 export async function writeInboxPolicy(
-  dav: DavClient,
+  files: SystemFiles,
   mode: InboxMode,
   anonymous?: AnonymousPolicy,
   readReceipts?: InboxPolicy["read_receipts"],
@@ -168,6 +168,6 @@ export async function writeInboxPolicy(
     policy.trusted_auth_services = trustedAuthServices.map((s) => s.trim().toLowerCase());
   }
   validateInboxPolicy(policy);
-  await dav.writeJson(INBOX_POLICY_PATH, policy);
+  await files.writeJson(INBOX_POLICY_PATH, policy);
   return policy;
 }

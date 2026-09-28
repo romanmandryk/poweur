@@ -27,8 +27,8 @@ import (
 // policy from the same zone. Keys are pinned at add/accept time (TOFU).
 
 const (
-	contactsTreePath    = "poweur-sys/relay/contacts.json"
-	inboxPolicyTreePath = "poweur-sys/relay/inbox-policy.json"
+	contactsTreePath    = ".poweur/relay/contacts.json"
+	inboxPolicyTreePath = ".poweur/relay/inbox-policy.json"
 )
 
 func runContacts(args []string, stdout, stderr io.Writer) int {
@@ -56,8 +56,8 @@ func runContacts(args []string, stdout, stderr io.Writer) int {
 }
 
 // fetchContacts loads the identity's contacts.json (empty file when absent).
-func fetchContacts(ctx context.Context, relayURL, identityValue, token string) (idpkg.ContactsFile, error) {
-	raw, status, err := davGetBytes(ctx, relayURL, identityValue, token, contactsTreePath)
+func fetchContacts(ctx context.Context, relayURL, identityValue string, priv ed25519.PrivateKey) (idpkg.ContactsFile, error) {
+	raw, status, err := readSysFile(ctx, relayURL, identityValue, priv, contactsTreePath)
 	if err != nil {
 		return idpkg.ContactsFile{}, err
 	}
@@ -70,12 +70,12 @@ func fetchContacts(ctx context.Context, relayURL, identityValue, token string) (
 	return idpkg.ParseContactsFile(raw)
 }
 
-func putContacts(ctx context.Context, relayURL, identityValue, token string, file idpkg.ContactsFile) error {
+func putContacts(ctx context.Context, relayURL, identityValue string, priv ed25519.PrivateKey, file idpkg.ContactsFile) error {
 	raw, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err
 	}
-	return davPutBytes(ctx, relayURL, identityValue, token, contactsTreePath, raw)
+	return writeSysFile(ctx, relayURL, identityValue, priv, contactsTreePath, raw)
 }
 
 // resolvePin resolves the current signing key of a contact for pinning.
@@ -107,7 +107,7 @@ func runContactsSet(args []string, stdout, stderr io.Writer, state, verb string)
 		return 1
 	}
 	target := strings.ToLower(fs.Arg(0))
-	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	relayURL, identityValue, token, ok := loadSysSession(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -171,7 +171,7 @@ func runContactsRequest(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 1 {
 		intro = fs.Arg(1)
 	}
-	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	relayURL, identityValue, token, ok := loadSysSession(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -240,7 +240,7 @@ func runContactsRm(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur contacts rm <identity>")
 		return 1
 	}
-	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	relayURL, identityValue, token, ok := loadSysSession(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -270,7 +270,7 @@ func runContactsLs(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	relayURL, identityValue, token, ok := loadSysSession(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -313,7 +313,7 @@ func runRequests(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	cfg, identityValue, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	cfg, identityValue, priv, ok := loadIdentityKey(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
@@ -411,37 +411,14 @@ func decryptRequestIntros(requests []requestEntry, encPriv []byte) {
 	}
 }
 
-// pendingShareInstruction formats one drained share offer or claim. Reading
-// the queue deletes it, so a valid body is written to disk and the printed
-// command names that file. Other request types return ok=false.
+// pendingShareInstruction formats one drained share offer or claim. Shares
+// return with storage v2 (EPIC-020 E20-T7); until then an offer or claim is
+// reported and cannot be acted on. Other request types return ok=false.
 func pendingShareInstruction(req requestEntry, keysDir string) (string, bool) {
 	switch req.Type {
-	case idpkg.MsgTypeShareOffer:
-		var offer idpkg.ShareOffer
-		if err := json.Unmarshal([]byte(req.Plaintext), &offer); err != nil ||
-			!strings.EqualFold(offer.Grant.Owner, req.Sender) || offer.Grant.ShareID != req.Metadata["share_id"] {
-			return fmt.Sprintf("%s\t%s\t%s\t(invalid offer)\n", req.Sender, req.Type, req.Timestamp), true
-		}
-		path, err := saveRequestDocument(keysDir, req.ID, []byte(req.Plaintext))
-		if err != nil {
-			return fmt.Sprintf("%s\t%s\t%s\t/%s\t(could not save offer: %v)\n%s\n",
-				req.Sender, req.Type, req.Timestamp, offer.Grant.Path, err, req.Plaintext), true
-		}
-		return fmt.Sprintf("%s\t%s\t%s\t/%s\t(accept with `poweur share accept --offer-file %s`)\n",
-			req.Sender, req.Type, req.Timestamp, offer.Grant.Path, path), true
-	case idpkg.MsgTypeShareClaim:
-		claim, err := idpkg.ParseShareClaim([]byte(req.Plaintext))
-		if err != nil || !strings.EqualFold(claim.Claimant, req.Sender) ||
-			!strings.EqualFold(claim.Owner, req.Recipient) || claim.ShareID != req.Metadata["share_id"] {
-			return fmt.Sprintf("%s\t%s\t%s\t(invalid claim)\n", req.Sender, req.Type, req.Timestamp), true
-		}
-		path, err := saveRequestDocument(keysDir, req.ID, []byte(req.Plaintext))
-		if err != nil {
-			return fmt.Sprintf("%s\t%s\t%s\t%s\t(could not save claim: %v)\n%s\n",
-				req.Sender, req.Type, req.Timestamp, claim.Action, err, req.Plaintext), true
-		}
-		return fmt.Sprintf("%s\t%s\t%s\t%s\t(approve with `poweur share claim approve --claim-file %s`)\n",
-			req.Sender, req.Type, req.Timestamp, claim.Action, path), true
+	case idpkg.MsgTypeShareOffer, idpkg.MsgTypeShareClaim:
+		return fmt.Sprintf("%s\t%s\t%s\t(shares are not available until the new storage lands)\n",
+			req.Sender, req.Type, req.Timestamp), true
 	default:
 		return "", false
 	}
@@ -559,14 +536,14 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--anon-allow": true})); err != nil {
 		return 1
 	}
-	relayURL, identityValue, token, ok := loadShareSession(*useIdentity, stderr)
+	relayURL, identityValue, token, ok := loadSysSession(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}
 	ctx := context.Background()
 	switch sub {
 	case "show":
-		raw, status, err := davGetBytes(ctx, relayURL, identityValue, token, inboxPolicyTreePath)
+		raw, status, err := readSysFile(ctx, relayURL, identityValue, token, inboxPolicyTreePath)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -624,7 +601,7 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 					policy.TrustedAuthServices = append(policy.TrustedAuthServices, strings.ToLower(strings.TrimSpace(s)))
 				}
 			}
-		} else if raw, status, err := davGetBytes(ctx, relayURL, identityValue, token, inboxPolicyTreePath); err == nil && status == http.StatusOK {
+		} else if raw, status, err := readSysFile(ctx, relayURL, identityValue, token, inboxPolicyTreePath); err == nil && status == http.StatusOK {
 			if prev, err := idpkg.ParseInboxPolicy(raw); err == nil {
 				policy.TrustedAuthServices = prev.TrustedAuthServices
 			}
@@ -643,7 +620,7 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		raw, _ := json.MarshalIndent(policy, "", "  ")
-		if err := davPutBytes(ctx, relayURL, identityValue, token, inboxPolicyTreePath, raw); err != nil {
+		if err := writeSysFile(ctx, relayURL, identityValue, token, inboxPolicyTreePath, raw); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -672,11 +649,7 @@ func checkPinnedKey(cfg config.Config, identityValue string, priv ed25519.Privat
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	tok, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, "", "dav:read", priv)
-	if err != nil {
-		return 0 // contacts unavailable → fail open (pinning is client defense-in-depth)
-	}
-	contacts, err := fetchContacts(ctx, cfg.RelayURL, identityValue, tok.Token)
+	contacts, err := fetchContacts(ctx, cfg.RelayURL, identityValue, priv)
 	if err != nil {
 		return 0
 	}
@@ -736,11 +709,7 @@ func repinContact(ctx context.Context, cfg config.Config, identityValue string, 
 	}
 	contact.PinnedKey = idpkg.FormatEd25519PublicKey(pub)
 	contacts = contacts.Upsert(contact)
-	tok, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, "", "dav:full", priv)
-	if err != nil {
-		return
-	}
-	if err := putContacts(ctx, cfg.RelayURL, identityValue, tok.Token, contacts); err != nil {
+	if err := putContacts(ctx, cfg.RelayURL, identityValue, priv, contacts); err != nil {
 		fmt.Fprintf(stderr, "note: failed to persist the new pin: %v\n", err)
 	}
 }
@@ -763,7 +732,7 @@ func promoteAcceptedContacts(ctx context.Context, useIdentity string, senders []
 	if len(senders) == 0 {
 		return
 	}
-	relayURL, identityValue, token, ok := loadShareSession(useIdentity, io.Discard)
+	relayURL, identityValue, token, ok := loadSysSession(useIdentity, io.Discard)
 	if !ok {
 		return
 	}
@@ -800,4 +769,15 @@ func promoteAcceptedContacts(ctx context.Context, useIdentity string, senders []
 	if err := putContacts(ctx, relayURL, identityValue, token, contacts); err != nil {
 		fmt.Fprintln(stderr, "note: could not record the acceptance:", err)
 	}
+}
+
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error {
+	if v = strings.TrimSpace(v); v != "" {
+		*s = append(*s, v)
+	}
+	return nil
 }

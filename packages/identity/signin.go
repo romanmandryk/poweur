@@ -66,16 +66,13 @@ const (
 	SignInActionLink   = "link"
 )
 
-// Scope vocabulary (EPIC-008 E08-T4). `dav:` scopes carry a tree path.
+// Scope vocabulary (EPIC-008 E08-T4). Storage v1's `dav:` path scopes are
+// gone with WebDAV; app storage access returns as scoped drive handles
+// (EPIC-020, EPIC-029).
 const (
 	ScopeProfileRead  = "profile:read"
 	ScopeMessagesSend = "messages:send"
-	ScopeDAVReadPfx   = "dav:read:"
-	ScopeDAVRWPfx     = "dav:rw:"
 )
-
-// AppsRoot is the tree root a connected app may be granted space under.
-const AppsRoot = "apps"
 
 var (
 	ErrSignInMalformed  = errors.New("sign-in: malformed object")
@@ -231,9 +228,7 @@ func SignInAppID(origin string) (string, error) {
 	return strings.Join(labels, "."), nil
 }
 
-// NormalizeSignInScope canonicalizes one scope string. `dav:` scopes have
-// their path stripped of leading and trailing slashes so `dav:rw:/apps/x/`
-// and `dav:rw:apps/x` are the same scope and produce the same signature.
+// NormalizeSignInScope canonicalizes one scope string.
 func NormalizeSignInScope(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
 	switch s {
@@ -242,37 +237,7 @@ func NormalizeSignInScope(raw string) (string, error) {
 	case ScopeProfileRead, ScopeMessagesSend:
 		return s, nil
 	}
-	var prefix string
-	switch {
-	case strings.HasPrefix(s, ScopeDAVRWPfx):
-		prefix = ScopeDAVRWPfx
-	case strings.HasPrefix(s, ScopeDAVReadPfx):
-		prefix = ScopeDAVReadPfx
-	default:
-		return "", fmt.Errorf("%w: unknown scope %q", ErrSignInScope, raw)
-	}
-	path := strings.Trim(strings.TrimPrefix(s, prefix), "/")
-	if path == "" {
-		return "", fmt.Errorf("%w: %s needs a path", ErrSignInScope, prefix)
-	}
-	for _, seg := range strings.Split(path, "/") {
-		if seg == "" || seg == "." || seg == ".." {
-			return "", fmt.Errorf("%w: invalid path segment in %q", ErrSignInScope, raw)
-		}
-	}
-	return prefix + path, nil
-}
-
-// SignInScopePath returns the tree path a `dav:` scope covers plus whether
-// it is writable. ok is false for non-dav scopes.
-func SignInScopePath(scope string) (path string, write, ok bool) {
-	switch {
-	case strings.HasPrefix(scope, ScopeDAVRWPfx):
-		return strings.TrimPrefix(scope, ScopeDAVRWPfx), true, true
-	case strings.HasPrefix(scope, ScopeDAVReadPfx):
-		return strings.TrimPrefix(scope, ScopeDAVReadPfx), false, true
-	}
-	return "", false, false
+	return "", fmt.Errorf("%w: unknown scope %q", ErrSignInScope, raw)
 }
 
 // NormalizeSignInScopes normalizes, de-duplicates and sorts a scope list.
@@ -462,31 +427,9 @@ func (r SignInRequest) Validate(now time.Time) error {
 	if n.ResponseURI != "" && !SameOrigin(n.Audience, n.ResponseURI) {
 		return fmt.Errorf("%w: response_uri must be same-origin with audience", ErrSignInAudience)
 	}
-	// A dav: scope may only reach into this RP's own app namespace, and the
-	// namespace is derived from the audience rather than declared.
-	appID, err := SignInAppID(n.Audience)
-	if err != nil {
+	// The audience must name an app the signer can show.
+	if _, err := SignInAppID(n.Audience); err != nil {
 		return err
-	}
-	for _, s := range n.Scopes {
-		if err := CheckSignInScopeNamespace(s, appID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// CheckSignInScopeNamespace enforces that a dav: scope stays under
-// apps/<appID>. The relay calls it with the app id derived from the *signed*
-// audience, which is what caps an RP to its own namespace.
-func CheckSignInScopeNamespace(scope, appID string) error {
-	path, _, ok := SignInScopePath(scope)
-	if !ok {
-		return nil
-	}
-	want := AppsRoot + "/" + appID
-	if path != want && !strings.HasPrefix(path, want+"/") {
-		return fmt.Errorf("%w: %q is outside this app's namespace %q", ErrSignInScope, scope, want)
 	}
 	return nil
 }

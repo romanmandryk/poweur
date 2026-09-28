@@ -6,7 +6,6 @@ import { Claim } from "./Claim";
 import { Contacts } from "./contacts/Contacts";
 import { IdentityDoor } from "./doors/IdentityDoor";
 import { Landing } from "./doors/Landing";
-import { Files } from "./files/Files";
 import { Welcome } from "./gates";
 import { Launcher } from "./Launcher";
 import { Messages } from "./messages/Messages";
@@ -22,8 +21,6 @@ export function DestinationScreen({ page }: { page: Destination }) {
   switch (page) {
     case "contacts":
       return <Contacts />;
-    case "files":
-      return <Files />;
     case "launcher":
       return <Launcher />;
     case "settings":

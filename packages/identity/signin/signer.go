@@ -68,7 +68,7 @@ func Sign(req identity.SignInRequest, opts SignOptions) (identity.SignInResponse
 
 // DescribeScope renders a scope for a consent screen. The signer UX spec
 // (E08-T3) requires that every scope a user approves is shown as a sentence,
-// never as a raw token — "app.example wants dav:rw:apps/net.example" tells a
+// never as a raw token — "app.example wants messages:send" tells a
 // user nothing about what is at risk.
 func DescribeScope(scope, appName string) string {
 	if appName == "" {
@@ -80,14 +80,7 @@ func DescribeScope(scope, appName string) string {
 	case identity.ScopeMessagesSend:
 		return appName + " can send messages from your identity."
 	}
-	path, write, ok := identity.SignInScopePath(scope)
-	if !ok {
-		return appName + " requests an unrecognized permission (" + scope + ") — do not approve."
-	}
-	if write {
-		return appName + " can read and write files in /" + path + " in your home. Nothing outside that folder."
-	}
-	return appName + " can read files in /" + path + " in your home. Nothing outside that folder, and it cannot write."
+	return appName + " requests an unrecognized permission (" + scope + ") — do not approve."
 }
 
 // DescribeScopes renders every scope in order.

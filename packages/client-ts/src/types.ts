@@ -469,7 +469,7 @@ export interface QuotaResponse {
 }
 
 /**
- * One row of `poweur-sys/relay/devices.json` (EPIC-004 E04-T6): a machine
+ * One row of `.poweur/state/devices.json` (EPIC-004 E04-T6): a machine
  * using this identity, as the relay observed it. Written by the relay and
  * read by the owner; a client never pushes this document.
  */
@@ -485,8 +485,6 @@ export interface DeviceEntry {
   /** The last changes cursor the device acknowledged. */
   sync_cursor?: string;
   synced_at?: string;
-  /** Names of app-passwords.json entries this device holds. */
-  app_passwords?: string[];
   revoked?: boolean;
   revoked_at?: string;
 }
@@ -501,8 +499,6 @@ export interface DeviceListResponse {
 export interface DeviceRevokeResponse {
   device_id: string;
   sessions_revoked: number;
-  dav_tokens_revoked: number;
-  app_passwords_revoked: number;
 }
 
 /** One line of the sync manifest / changes feed. */

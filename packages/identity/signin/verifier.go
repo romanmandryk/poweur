@@ -288,11 +288,6 @@ func (v *Verifier) VerifyResponse(ctx context.Context, resp identity.SignInRespo
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range scopes {
-		if err := identity.CheckSignInScopeNamespace(s, appID); err != nil {
-			return nil, err
-		}
-	}
 
 	expiresAt, err := time.Parse(time.RFC3339, resp.ExpiresAt)
 	if err != nil {

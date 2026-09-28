@@ -8,10 +8,12 @@
  * once and loses it on the next reload, with nothing left to re-fetch. This
  * module is where a client writes it down instead.
  *
- * The archive lives in the owner-only zone of the owner's own tree:
- *
- *   poweur-sys/private/messages/<YYYY-MM>/<sortkey>-<id>.json   sealed records
- *   poweur-sys/private/messages/read-state.json                 sealed marks
+ * The archive lives in the owner-only, end-to-end encrypted zone
+ * `.poweur/private/`. Storage v1 kept it as one sealed file per message in
+ * month shards over WebDAV; storage v2 keeps one append file per
+ * conversation (EPIC-020 E20-T11). Until that lands, `MessageHistory` seals
+ * and opens records but has nowhere to keep them: loads are empty and writes
+ * report `unsupported`, which callers already treat as "not archived".
  *
  * Sealed to the owner's *own* X25519 key — the same envelope messages already
  * use, with the owner as their own recipient. That needs no new key custody
@@ -26,12 +28,11 @@
 import { open, seal, sha256Bytes } from "./crypto/index.js";
 import type { Decryptor } from "./crypto/keys.js";
 import { fromUtf8, toBase64url, utf8 } from "./encoding.js";
-import { PoweurError, RelayError } from "./errors.js";
-import type { DavClient } from "./files.js";
+import { PoweurError } from "./errors.js";
 import { ENCRYPTION_ALG } from "./types.js";
 
-export const HISTORY_DIR = "poweur-sys/private/messages";
-export const HISTORY_READ_STATE_PATH = `${HISTORY_DIR}/read-state.json`;
+export const HISTORY_DIR = ".poweur/private/messages";
+export const HISTORY_READ_STATE_PATH = ".poweur/private/read-state.json";
 export const HISTORY_VERSION = 1;
 
 /** 512 KB, matching the relay's message cap. */
@@ -289,23 +290,20 @@ export function parseSealedDocument(raw: string): SealedDocument {
 // ── The store ────────────────────────────────────────────────────────────────
 
 /**
- * One identity's archive, over DAV. Construct it through
- * `PoweurClient.history()`, which supplies the DAV client and decryptor.
+ * One identity's archive. Construct it through `PoweurClient.history()`,
+ * which supplies the decryptor.
  */
 export class MessageHistory {
-  readonly dav: DavClient;
   readonly owner: string;
   readonly #decryptor: Decryptor;
-  /** Month shards this instance has already ensured exist. */
-  readonly #shards = new Set<string>();
 
-  constructor(dav: DavClient, owner: string, decryptor: Decryptor) {
-    this.dav = dav;
+  constructor(owner: string, decryptor: Decryptor) {
     this.owner = owner;
     this.#decryptor = decryptor;
   }
 
-  async #seal(doc: unknown): Promise<string> {
+  /** Seal a document to the owner's own encryption key. */
+  async seal(doc: unknown): Promise<string> {
     const sealed = seal(this.#decryptor.encryptionPublicKey, JSON.stringify(doc));
     const envelope: SealedDocument = {
       version: HISTORY_VERSION,
@@ -317,7 +315,8 @@ export class MessageHistory {
     return JSON.stringify(envelope, null, 2);
   }
 
-  async #open<T>(raw: string): Promise<T> {
+  /** Open a document sealed with `seal`. */
+  async open<T>(raw: string): Promise<T> {
     const doc = parseSealedDocument(raw);
     const plaintext = open(await this.#decryptor.privateKeyBytes(), {
       ciphertext: doc.ciphertext,
@@ -327,38 +326,10 @@ export class MessageHistory {
     return JSON.parse(fromUtf8(plaintext)) as T;
   }
 
-  /**
-   * WebDAV PUT does not create parent collections, and the month shard is new
-   * on the first message of every month. Creating it lazily keeps the common
-   * path one request rather than an MKCOL before every write.
-   */
-  async #ensureShard(shard: string): Promise<void> {
-    if (this.#shards.has(shard)) return;
-    for (const dir of [HISTORY_DIR, `${HISTORY_DIR}/${shard}`]) {
-      try {
-        await this.dav.mkdir(dir);
-      } catch (error) {
-        // 405/409 mean it is already there, which is the happy case.
-        if (!(error instanceof RelayError) || (error.status !== 405 && error.status !== 409)) {
-          throw error;
-        }
-      }
-    }
-    this.#shards.add(shard);
-  }
-
-  /** Write one record. Idempotent: the path is a function of the message. */
+  /** Write one record. Needs storage v2; throws `unsupported` until then. */
   async append(record: HistoryRecord): Promise<void> {
-    const full: HistoryRecord = { ...record, version: HISTORY_VERSION };
-    validateHistoryRecord(full);
-    const body = await this.#seal(full);
-    const path = historyPath(full.timestamp, full.id);
-    try {
-      await this.dav.write(path, body);
-    } catch {
-      await this.#ensureShard(historyShard(full.timestamp));
-      await this.dav.write(path, body);
-    }
+    validateHistoryRecord({ ...record, version: HISTORY_VERSION });
+    throw new PoweurError("unsupported", "message history needs the new storage (EPIC-020), which is not available yet");
   }
 
   /**
@@ -372,44 +343,18 @@ export class MessageHistory {
       try {
         await this.append(record);
         written += 1;
-      } catch {
+      } catch (error) {
+        // "No storage yet" is not a failure to report on every pickup.
+        if (error instanceof PoweurError && error.code === "unsupported") continue;
         failed += 1;
       }
     }
     return { written, failed };
   }
 
-  /** Every archived record, oldest first. Unreadable files are skipped. */
+  /** Every archived record, oldest first. */
   async load(): Promise<HistoryRecord[]> {
-    const records: HistoryRecord[] = [];
-    let shards: string[];
-    try {
-      shards = (await this.dav.list(HISTORY_DIR))
-        .filter((entry) => entry.dir && !entry.path.endsWith(HISTORY_DIR))
-        .map((entry) => entry.path);
-    } catch (error) {
-      // No archive yet is an empty archive, not an error.
-      if (error instanceof RelayError && error.status === 404) return records;
-      throw error;
-    }
-    for (const shard of shards) {
-      let entries;
-      try {
-        entries = await this.dav.list(shard);
-      } catch {
-        continue;
-      }
-      for (const entry of entries) {
-        if (entry.dir || !entry.path.endsWith(".json")) continue;
-        if (entry.path.endsWith("read-state.json")) continue;
-        try {
-          records.push(await this.#open<HistoryRecord>(await this.dav.readText(entry.path)));
-        } catch {
-          // One corrupt file must not hide the rest of someone's history.
-        }
-      }
-    }
-    return sortHistory(records);
+    return [];
   }
 
   /** Records in one conversation, oldest first. */
@@ -419,24 +364,12 @@ export class MessageHistory {
   }
 
   async readState(): Promise<ReadState> {
-    const raw = await this.dav.readOptional(HISTORY_READ_STATE_PATH);
-    if (raw === null) return { version: HISTORY_VERSION, conversations: {} };
-    try {
-      const state = await this.#open<ReadState>(raw);
-      return { version: HISTORY_VERSION, conversations: state.conversations ?? {} };
-    } catch {
-      return { version: HISTORY_VERSION, conversations: {} };
-    }
+    return { version: HISTORY_VERSION, conversations: {} };
   }
 
+  /** Store the read marks. Not persisted until storage v2. */
   async putReadState(state: ReadState): Promise<void> {
-    const body = await this.#seal({ version: HISTORY_VERSION, conversations: state.conversations });
-    try {
-      await this.dav.write(HISTORY_READ_STATE_PATH, body);
-    } catch {
-      await this.#ensureShard("unknown");
-      await this.dav.write(HISTORY_READ_STATE_PATH, body);
-    }
+    void state;
   }
 
   /** Advance one conversation's mark to the newest record given. */

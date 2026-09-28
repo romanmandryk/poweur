@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/poweur/guestbook"
-	"github.com/poweur/identity"
 )
 
 func main() {
@@ -32,16 +31,6 @@ func main() {
 	cfg := guestbook.Config{
 		Origin: origin,
 		Name:   env("GUESTBOOK_NAME", "Poweur Guestbook"),
-	}
-	// Ask for storage in the user's own home unless told not to. Without it
-	// the site still works — it just keeps the entries itself, which is the
-	// arrangement this demo exists to argue against.
-	if os.Getenv("GUESTBOOK_LOGIN_ONLY") == "" {
-		appID, err := identity.SignInAppID(origin)
-		if err != nil {
-			log.Fatalf("guestbook: %v", err)
-		}
-		cfg.Scopes = []string{"dav:rw:apps/" + appID}
 	}
 	if os.Getenv("RESOLVER_ALLOW_PRIVATE") != "" {
 		cfg.ResolveOptions.AllowPrivate = true

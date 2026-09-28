@@ -195,8 +195,7 @@ func TestNewRejectsUnusableConfig(t *testing.T) {
 		{"unknown scope", Config{Origin: rpOrigin, Scopes: []string{"root:everything"}}},
 		// The check that matters: an RP cannot ask for another app's tree,
 		// and it is refused here as well as at the signer and the relay.
-		{"scope in another app's namespace", Config{Origin: rpOrigin, Scopes: []string{"dav:rw:apps/net.poweur.mail"}}},
-		{"scope outside apps/", Config{Origin: rpOrigin, Scopes: []string{"dav:rw:poweur-sys"}}},
+		{"storage v1 dav scope", Config{Origin: rpOrigin, Scopes: []string{"dav:rw:apps/net.poweur.guestbook"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,8 +206,8 @@ func TestNewRejectsUnusableConfig(t *testing.T) {
 	}
 }
 
-func TestNewAcceptsItsOwnNamespace(t *testing.T) {
-	srv, err := New(Config{Origin: rpOrigin, Scopes: []string{"dav:rw:/apps/net.poweur.guestbook/", "profile:read"}})
+func TestNewNormalizesScopes(t *testing.T) {
+	srv, err := New(Config{Origin: rpOrigin, Scopes: []string{"profile:read", "messages:send", "profile:read"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -216,7 +215,7 @@ func TestNewAcceptsItsOwnNamespace(t *testing.T) {
 		t.Fatalf("app id = %q, want %q", got, AppID)
 	}
 	// Normalized and sorted, so the consent screen and the signature agree.
-	want := []string{"dav:rw:apps/net.poweur.guestbook", "profile:read"}
+	want := []string{"messages:send", "profile:read"}
 	if got := srv.Metadata().Scopes; strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("scopes = %v, want %v", got, want)
 	}
@@ -316,10 +315,6 @@ func TestSignInEndToEnd(t *testing.T) {
 	entries := srv.Entries()
 	if len(entries) != 1 || entries[0].Identity != who || entries[0].Message != "hello from alice" {
 		t.Fatalf("entries = %+v", entries)
-	}
-	// Login-only: nothing was written to anyone's home.
-	if entries[0].StoredAt != "" {
-		t.Fatalf("entry claims home storage without a grant: %+v", entries[0])
 	}
 
 	// The poll is one-shot: a second read must not hand the cookie out again.

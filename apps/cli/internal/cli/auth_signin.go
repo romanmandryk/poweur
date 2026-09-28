@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -247,11 +248,7 @@ func deliverSignInApproval(ctx context.Context, responseURI string, delivery sig
 }
 
 func appendConsentRecord(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey, record idpkg.AuthLogRecord) error {
-	tok, err := MintDAVToken(ctx, cfg.RelayURL, identityValue, "", "dav:full", priv)
-	if err != nil {
-		return err
-	}
-	existing, status, err := davGetBytes(ctx, cfg.RelayURL, identityValue, tok.Token, idpkg.AuthLogPath)
+	existing, status, err := readSysFile(ctx, cfg.RelayURL, identityValue, priv, idpkg.AuthLogPath)
 	if err != nil {
 		return err
 	}
@@ -264,33 +261,11 @@ func appendConsentRecord(ctx context.Context, cfg config.Config, identityValue s
 	if err != nil {
 		return err
 	}
-	if err := ensureDAVPath(ctx, cfg.RelayURL, identityValue, tok.Token, "poweur-sys/private/logs"); err != nil {
-		return err
+	err = writeSysFile(ctx, cfg.RelayURL, identityValue, priv, idpkg.AuthLogPath, next)
+	if errors.Is(err, errStorageUnavailable) {
+		// Until storage v2 lands there is nowhere to keep the log; the
+		// approval itself does not depend on it.
+		return nil
 	}
-	return davPutBytes(ctx, cfg.RelayURL, identityValue, tok.Token, idpkg.AuthLogPath, next)
-}
-
-func ensureDAVPath(ctx context.Context, relayURL, identityValue, token, treePath string) error {
-	var current string
-	for _, part := range strings.Split(strings.Trim(treePath, "/"), "/") {
-		if current == "" {
-			current = part
-		} else {
-			current += "/" + part
-		}
-		req, err := http.NewRequestWithContext(ctx, "MKCOL", davFileURL(relayURL, identityValue, current), nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-		if err != nil {
-			return err
-		}
-		resp.Body.Close()
-		if resp.StatusCode >= 300 && resp.StatusCode != http.StatusMethodNotAllowed {
-			return fmt.Errorf("create /%s: HTTP %d", current, resp.StatusCode)
-		}
-	}
-	return nil
+	return err
 }

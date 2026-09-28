@@ -53,8 +53,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runListen(args[1:], stdout, stderr)
 	case "outbox":
 		return runOutbox(args[1:], stdout, stderr)
-	case "attachment":
-		return runAttachment(args[1:], stdout, stderr)
 	case "devices":
 		return runDevices(args[1:], stdout, stderr)
 	case "history":
@@ -65,14 +63,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runRelay(args[1:], stdout, stderr)
 	case "key":
 		return runKey(args[1:], stdout, stderr)
-	case "dav":
-		return runDAV(args[1:], stdout, stderr)
-	case "sync":
-		return runSync(args[1:], stdout, stderr)
-	case "share":
-		return runShare(args[1:], stdout, stderr)
-	case "transfer":
-		return runTransfer(args[1:], stdout, stderr)
 	case "group":
 		return runGroup(args[1:], stdout, stderr)
 	case "contacts":
@@ -692,7 +682,6 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	msgType := fs.String("type", "", "envelope message type (default chat.text; sys.* reserved for the platform)")
 	threadID := fs.String("thread", "", "group this message into a conversation thread")
 	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
-	attachPath := fs.String("attach", "", "upload and attach a file (max 20 MB)")
 	meta := &metaFlag{}
 	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
 	acceptNewKey := fs.Bool("accept-new-key", false, "accept and re-pin a changed contact key (see key pinning)")
@@ -702,21 +691,9 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 1 || (fs.NArg() < 2 && *attachPath == "") {
-		fmt.Fprintln(stderr, "usage: poweur send <to> [message] [--attach file] [--sign-with=session|identity] [--via-home-relay] [--anon]")
+	if fs.NArg() < 2 {
+		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
 		return 1
-	}
-	if *attachPath != "" && *msgType != "" && *msgType != idpkg.MsgTypeChatAttachment {
-		fmt.Fprintln(stderr, "--attach sets --type=chat.attachment")
-		return 1
-	}
-	if *attachPath != "" {
-		for key := range meta.Map() {
-			if strings.HasPrefix(key, "attachment_") {
-				fmt.Fprintf(stderr, "attachment metadata key %s is generated automatically\n", key)
-				return 1
-			}
-		}
 	}
 	// Check the envelope before anything is encrypted, signed, journalled or
 	// posted: a `sys.*` typo should not become a recorded send attempt.
@@ -729,7 +706,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		// fields to a sender — any relay on the path could add, drop or
 		// rewrite them. Rather than ship routing metadata nobody can trust,
 		// the combination is refused.
-		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil || *attachPath != "" {
+		if *msgType != "" || *threadID != "" || *expiresAt != "" || meta.Map() != nil {
 			fmt.Fprintln(stderr, "--anon cannot carry --type/--thread/--expires/--meta: an unsigned envelope binds nothing")
 			return 1
 		}
@@ -769,32 +746,6 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	if code := checkPinnedKey(cfg, identityValue, identityPriv, recipient, *acceptNewKey, stderr); code != 0 {
 		return code
 	}
-	if *attachPath != "" {
-		ref, err := prepareAttachment(context.Background(), cfg, identityValue, identityPriv, recipient, *attachPath)
-		if err != nil {
-			fmt.Fprintln(stderr, "attachment:", err)
-			return 1
-		}
-		if meta.values == nil {
-			meta.values = map[string]string{}
-		}
-		for key, value := range ref.Metadata() {
-			if _, exists := meta.values[key]; exists {
-				fmt.Fprintf(stderr, "attachment metadata key %s cannot be overridden\n", key)
-				return 1
-			}
-			meta.values[key] = value
-		}
-		*msgType = idpkg.MsgTypeChatAttachment
-		if plaintext == "" {
-			plaintext = ref.Name
-		}
-		if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
 	cancel()
@@ -2073,37 +2024,16 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> [message] [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
+  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
   poweur inbox [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json] [--once]
   poweur outbox [list|retry]
-  poweur attachment get <owner> <shared-path> [--sha256=<hex>] [--output=<file>]
-  poweur attachment rm <share-id> <shared-path>
   poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
   poweur history [<peer>] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]
   poweur session refresh [--use-identity=...] [--json]
   poweur session revoke [--use-identity=...] [--json]
   poweur relay status [--json]
-  poweur dav token [--audience=...] [--scope=dav:full|dav:read|dav:rw:<path>] [--use-identity=...] [--json]
-  poweur dav mount [--use-identity=...]
-  poweur dav password add --name=<name> [--scope=...] [--use-identity=...] [--json]
-  poweur dav password list [--use-identity=...] [--json]
-  poweur dav password remove --name=<name> [--use-identity=...]
-  poweur sync <pull|push|run|status> <local-dir> [--path=<prefix> ...] [--audience=...] [--use-identity=...]
-  poweur share add <path> --with=<id> [--with-group=<name>] [--perm=read|rw] [--expires=<rfc3339>] [--json]
-  poweur share accept --offer-file=<file|-> [--name=<mount-name>] [--use-identity=...] [--json]
-  poweur share claim request <owner> --share-id=<id> (--token=<token> | --token-file=<file|->) [--action=viewed|downloaded|uploaded] [--use-identity=...] [--json]
-  poweur share claim approve --claim-file=<file|-> [--perm=read|rw] [--consume-link] [--use-identity=...] [--json]
-  poweur share ls [--json]
-  poweur share revoke <share-id>
-  poweur share group set <name> --members=<id,id,...> [--json]
-  poweur share group ls [--json]
-  poweur share group remove <name>
-  poweur share link add <path> [--password=... | --password-stdin] [--expires=<rfc3339>] [--max-downloads=N] [--json]
-  poweur share link ls [--json]      (revoke with: poweur share revoke <share-id>)
-  poweur share request add <folder> [--password=... | --password-stdin] [--expires=<rfc3339>] [--max-uploads=N] [--max-bytes=N] [--max-object-bytes=N] [--allow-type=<mime>] [--notify] [--json]
-  poweur transfer create <file> [--expires=<rfc3339>] [--password=... | --password-stdin] [--max-downloads=N] [--json]
   poweur group create <group-id> [--admin=<id> ...] [--member=<id> ...] [--json]
   poweur group show <group-id> [--json]
   poweur group add <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
@@ -2446,7 +2376,7 @@ func runKeyList(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	cfg.Identity = identityValue
-	_, _, priv, ok := loadIdentityForDAV(*useIdentity, stderr)
+	_, _, priv, ok := loadIdentityKey(*useIdentity, stderr)
 	if !ok {
 		return 1
 	}

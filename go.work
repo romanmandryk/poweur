@@ -6,6 +6,5 @@ use (
 	./apps/guestbook
 	./apps/integration
 	./apps/oauth
-	./apps/tasks
 	./packages/identity
 )

@@ -2,15 +2,16 @@ package relay
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/poweur/api/internal/crypto"
-	"github.com/poweur/api/internal/files"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -90,15 +91,9 @@ func (s *Server) groupMembership(w http.ResponseWriter, r *http.Request, name st
 		writeError(w, http.StatusBadRequest, "invalid_group", "missing group")
 		return idpkg.ShareGroup{}, false
 	}
-	if s.grants == nil {
-		// No file layer, so no group document can exist here. This is a
-		// deployment fact, not a statement about the group.
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "this relay has no file layer and cannot host groups")
-		return idpkg.ShareGroup{}, false
-	}
-	group, err := s.grants.GroupIdentity(r.Context(), name)
+	group, err := s.groupIdentity(r.Context(), name)
 	if err != nil {
-		if !errors.Is(err, files.ErrGroupNotResolvable) {
+		if !errors.Is(err, errGroupNotResolvable) {
 			writeError(w, http.StatusInternalServerError, "group_error", "failed to read group membership")
 			return idpkg.ShareGroup{}, false
 		}
@@ -483,13 +478,71 @@ func decodeGroupBatch(w http.ResponseWriter, r *http.Request, target *GroupFanou
 // a member. That split is stated in the spec.
 func (s *Server) refuseForgedLocalGroup(w http.ResponseWriter, r *http.Request, msg Message) bool {
 	group, ok := idpkg.GroupOfMessage(msg.Metadata)
-	if !ok || s.grants == nil {
+	if !ok {
 		return true
 	}
-	if _, err := s.grants.GroupIdentity(r.Context(), group); err != nil {
+	if _, err := s.groupIdentity(r.Context(), group); err != nil {
 		return true // not a group this relay can speak for
 	}
 	writeError(w, http.StatusBadRequest, "invalid_message",
 		"messages to "+group+" must be sent through POST /groups/"+group+"/messages")
 	return false
+}
+
+// errGroupNotResolvable is returned when this relay cannot produce a
+// verified membership document for a group identity — it does not host it,
+// the document is missing, malformed, unsigned by the group's own key, or is
+// an owner-local group document.
+//
+// Callers must treat every one of those the same way: deny, and say nothing
+// more specific. Distinguishing "no such group" from "not a group" from "not
+// for you" turns the endpoint into the membership oracle that cross-relay
+// group resolution was deferred to avoid.
+var errGroupNotResolvable = errors.New("group identity is not resolvable on this relay")
+
+// groupIdentity loads and verifies one group identity's roster from the
+// group's own system files (.poweur/relay/group.json).
+//
+// It is the single place that answers "who is in this group, according to
+// the group itself", with four guarantees:
+//
+//   - the document is read from the *group's* drive, never a member's, so
+//     naming a group confers no power over it;
+//   - it is verified with the *group's* key, so the relay that stores it
+//     cannot edit an admin off the list;
+//   - it must name itself, so one group's membership cannot be served for
+//     another;
+//   - it must carry an admin list, so an owner-local document cannot
+//     masquerade as a group identity.
+//
+// Only groups hosted here resolve. Cross-relay resolution needs a
+// membership-check endpoint with its own caching, rate limiting and privacy
+// story, and is deferred.
+func (s *Server) groupIdentity(ctx context.Context, name string) (idpkg.ShareGroup, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || !idpkg.IsGroupIdentityName(name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %q is not a group identity name", errGroupNotResolvable, name)
+	}
+	id, ok := s.identities.Get(name)
+	if !ok || len(id.PublicKeyBytes) != ed25519.PublicKeySize {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s is not hosted here", errGroupNotResolvable, name)
+	}
+	raw := s.readSysJSON(ctx, name, groupRosterPath)
+	if raw == nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s has no %s", errGroupNotResolvable, name, groupRosterPath)
+	}
+	gr, err := idpkg.ParseShareGroup(raw)
+	if err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", errGroupNotResolvable, name, err)
+	}
+	if !gr.IsGroupIdentity() {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %s is an owner-local group document", errGroupNotResolvable, name, groupRosterPath)
+	}
+	if !strings.EqualFold(gr.Group, name) || !strings.EqualFold(gr.Owner, name) {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: document names %q/%q", errGroupNotResolvable, name, gr.Group, gr.Owner)
+	}
+	if err := gr.VerifySignature(id.PublicKeyBytes); err != nil {
+		return idpkg.ShareGroup{}, fmt.Errorf("%w: %s: %v", errGroupNotResolvable, name, err)
+	}
+	return gr, nil
 }

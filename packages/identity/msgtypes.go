@@ -34,6 +34,11 @@ import (
 // is what keeps old and new implementations signing the same string.
 const MsgTypeChatText = "chat.text"
 
+// MsgTypeChatAttachment is a message that references a file. Storage v1
+// carried the file's location in signed metadata; storage v2 (EPIC-020
+// E20-T11) carries a sealed reference in the encrypted payload.
+const MsgTypeChatAttachment = "chat.attachment"
+
 // System message types the platform owns. `sys.*` is reserved: no application
 // may define one, and a relay rejects an unregistered `sys.*` envelope rather
 // than routing it (see SystemMessageTypes).

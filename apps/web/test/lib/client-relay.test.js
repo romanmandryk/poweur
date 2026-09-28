@@ -112,28 +112,24 @@ describe("web client ↔ real relay", () => {
       expect(plaintexts.some((p) => p?.startsWith("hello-identity-"))).toBe(true);
     });
 
-    it("mints a DAV token and runs the file browser's lifecycle", async () => {
-      const dav = await clientFor(alice.identity).dav();
+    it("writes and reads its system files through the owner API", async () => {
+      const client = clientFor(alice.identity);
+      const files = client.system();
+      expect(await files.readOptional(".poweur/relay/inbox-policy.json")).toBeNull();
 
-      const roots = (await dav.list("")).map((e) => e.name);
-      expect(roots).toEqual(expect.arrayContaining(["public", "private", "shared", "apps"]));
+      await client.setPolicy("contacts_only");
+      expect((await client.policy()).policy.mode).toBe("contacts_only");
 
-      await dav.mkdir("private/notes");
-      await dav.write("private/notes/hello.txt", "from the web client");
-      expect(await dav.readText("private/notes/hello.txt")).toBe("from the web client");
+      // A tiny PNG: an avatar is written to .poweur/public and served publicly.
+      const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+      await files.write(".poweur/public/avatar-test.png", png);
+      const got = await files.get(".poweur/public/avatar-test.png");
+      expect(got.bytes).toEqual(png);
+      expect(await files.remove(".poweur/public/avatar-test.png")).toBe(true);
 
-      const listed = await dav.list("private/notes");
-      expect(listed.map((e) => e.name)).toEqual(["hello.txt"]);
-      expect(listed[0].size).toBeGreaterThan(0);
-
-      await dav.move("private/notes/hello.txt", "private/notes/renamed.txt");
-      expect((await dav.list("private/notes")).map((e) => e.name)).toEqual(["renamed.txt"]);
-
-      const quota = await dav.quota();
-      expect(quota.used_bytes).toBeGreaterThan(0);
-
-      await dav.remove("private/notes/renamed.txt");
-      expect(await dav.list("private/notes")).toEqual([]);
+      // The relay's own zone is read-only to the owner.
+      await expect(files.write(".poweur/state/devices.json", "{}")).rejects.toThrow();
+      expect((await client.devices().list()).devices).toEqual(expect.any(Array));
     });
 
     it("revokes a session", async () => {

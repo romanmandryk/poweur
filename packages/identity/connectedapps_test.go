@@ -10,7 +10,7 @@ func TestConnectedAppsParseUpsertAndRevoke(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	app := ConnectedApp{
 		AppID: "example.tasks", Audience: "https://tasks.example/",
-		Scopes:    []string{"profile:read", "dav:rw:/apps/example.tasks/"},
+		Scopes:    []string{"profile:read", "messages:send"},
 		GrantedAt: now.Format(time.RFC3339), ExpiresAt: now.Add(time.Hour).Format(time.RFC3339),
 	}
 	doc := (ConnectedApps{}).Upsert(app)
@@ -20,7 +20,7 @@ func TestConnectedAppsParseUpsertAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, ok := parsed.Active("EXAMPLE.TASKS", now)
-	if !ok || active.Audience != "https://tasks.example" || active.Scopes[0] != "dav:rw:apps/example.tasks" {
+	if !ok || active.Audience != "https://tasks.example" || active.Scopes[0] != "messages:send" {
 		t.Fatalf("active = %#v, %v", active, ok)
 	}
 	active.RevokedAt = now.Add(time.Minute).Format(time.RFC3339)

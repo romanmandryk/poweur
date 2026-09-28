@@ -109,15 +109,7 @@ func (m Metadata) Validate(servedFrom string) error {
 		}
 	}
 	for _, s := range m.Scopes {
-		n, err := identity.NormalizeSignInScope(s)
-		if err != nil {
-			return err
-		}
-		appID, err := identity.SignInAppID(origin)
-		if err != nil {
-			return err
-		}
-		if err := identity.CheckSignInScopeNamespace(n, appID); err != nil {
+		if _, err := identity.NormalizeSignInScope(s); err != nil {
 			return err
 		}
 	}

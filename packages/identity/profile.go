@@ -7,7 +7,7 @@ import (
 )
 
 // Public self-description files (EPIC-006 E06-T2), served world-readable
-// from poweur-sys/public/ (they back /.well-known/poweur/):
+// from .poweur/public/ (they back /.well-known/poweur/):
 //
 //	profile.json       human-facing "who am I"
 //	capabilities.json  machine-facing "what do I speak"
@@ -23,12 +23,14 @@ type ProfileLink struct {
 	URL   string `json:"url"`
 }
 
-// Profile is the schema of poweur-sys/public/profile.json.
+// Profile is the schema of .poweur/public/profile.json.
 type Profile struct {
 	Version     int           `json:"version"`
 	DisplayName string        `json:"display_name,omitempty"`
-	// Avatar is a tree path into the identity's /public root
-	// (e.g. "public/avatar.png"), not an arbitrary URL.
+	// Avatar names an image file in the identity's .poweur/public/ (e.g.
+	// "avatar.png"), served at /.well-known/poweur/<name> — never a URL, so
+	// rendering somebody's profile cannot become a request to a host they
+	// chose.
 	Avatar string        `json:"avatar,omitempty"`
 	Bio    string        `json:"bio,omitempty"`
 	Links  []ProfileLink `json:"links,omitempty"`
@@ -46,8 +48,8 @@ func (p Profile) Validate() error {
 	if len(p.Bio) > 4096 {
 		return fmt.Errorf("bio too long (max 4096)")
 	}
-	if p.Avatar != "" && !strings.HasPrefix(p.Avatar, "public/") {
-		return fmt.Errorf("avatar must be a path under public/ (got %q)", p.Avatar)
+	if p.Avatar != "" && !ValidAvatarName(p.Avatar) {
+		return fmt.Errorf("avatar must be an image file name like avatar.png (got %q)", p.Avatar)
 	}
 	if len(p.Links) > MaxProfileLinks {
 		return fmt.Errorf("too many links (max %d)", MaxProfileLinks)
@@ -72,7 +74,7 @@ func ParseProfile(raw []byte) (Profile, error) {
 	return p, nil
 }
 
-// Capabilities is the schema of poweur-sys/public/capabilities.json:
+// Capabilities is the schema of .poweur/public/capabilities.json:
 // supported protocol features and endpoint hints, superseding the
 // `_poweur-caps` TXT sketch for web-resolved identities.
 type Capabilities struct {
@@ -149,4 +151,32 @@ func ParseAppManifest(raw []byte) (AppManifest, error) {
 		return AppManifest{}, err
 	}
 	return m, nil
+}
+
+// avatarExtensions are the image types an avatar may have; the relay serves
+// exactly these from .poweur/public/.
+var avatarExtensions = []string{".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+// ValidAvatarName reports whether name is a flat file name in
+// .poweur/public/: lowercase letters, digits, '-' and '_', then one image
+// extension.
+func ValidAvatarName(name string) bool {
+	if len(name) == 0 || len(name) > 64 {
+		return false
+	}
+	dot := strings.IndexByte(name, '.')
+	if dot <= 0 || strings.Count(name, ".") != 1 {
+		return false
+	}
+	for _, c := range name[:dot] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	for _, ext := range avatarExtensions {
+		if name[dot:] == ext {
+			return true
+		}
+	}
+	return false
 }

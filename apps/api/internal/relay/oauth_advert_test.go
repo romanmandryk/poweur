@@ -26,8 +26,8 @@ func getWellKnown(t *testing.T, url, host string) (*http.Response, map[string]an
 // EPIC-022: hosted identities advertise the web signer beside them and the
 // operator's bridge, without the user writing either into their tree.
 func TestCapabilitiesAdvertiseSignerAndBridge(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	alice := registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
 	capsURL := ts.URL + "/.well-known/poweur/capabilities.json"
 
 	// Nothing configured, nothing written: nothing to serve.
@@ -44,13 +44,8 @@ func TestCapabilitiesAdvertiseSignerAndBridge(t *testing.T) {
 	}
 
 	// The user's own document wins where it speaks, and keeps its features.
-	tok := mintDAVToken(t, ts, alice, "", "")
-	put := davReq(t, ts, http.MethodPut, "/dav/alice.poweur.net/poweur-sys/public/capabilities.json", tok,
-		[]byte(`{"version":1,"features":{"messaging":"v1"},"endpoints":{"web_signer":"https://signer.example/app/"}}`), nil)
-	put.Body.Close()
-	if put.StatusCode >= 300 {
-		t.Fatalf("PUT capabilities = %d", put.StatusCode)
-	}
+	setSysFile(t, server, alice.name, capabilitiesPath,
+		`{"version":1,"features":{"messaging":"v1"},"endpoints":{"web_signer":"https://signer.example/app/"}}`)
 	_, caps = getWellKnown(t, capsURL, "alice.poweur.net")
 	endpoints, _ = caps["endpoints"].(map[string]any)
 	features, _ := caps["features"].(map[string]any)
@@ -65,8 +60,8 @@ func TestCapabilitiesAdvertiseSignerAndBridge(t *testing.T) {
 }
 
 func TestIdentityRootAdvertisesIndieAuthBridge(t *testing.T) {
-	server, ts := newDAVTestServer(t, 0, 0)
-	registerDAVIdentity(t, server, ts, "alice.poweur.net")
+	server, ts := newTestRelay(t)
+	registerTestIdentity(t, server, ts, "alice.poweur.net")
 
 	resp, _ := getWellKnown(t, ts.URL+"/", "alice.poweur.net")
 	if resp.Header.Get("Link") != "" {

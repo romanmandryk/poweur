@@ -417,46 +417,6 @@ func TestDefaultDeviceNameSanitizes(t *testing.T) {
 	}
 }
 
-func TestResolveAppPasswordDevice(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	self, err := loadDevice()
-	if err != nil {
-		t.Fatal(err)
-	}
-	other := idpkg.DeviceIDFromFingerprint("someone-elses-phone")
-
-	cases := []struct {
-		name    string
-		flag    string
-		want    string
-		wantErr bool
-	}{
-		{"default is this machine", "", self.DeviceID(), false},
-		{"explicit none", "none", "", false},
-		{"none is case-insensitive", "NONE", "", false},
-		{"explicit device", other, other, false},
-		{"uppercase device id", strings.ToUpper(other), other, false},
-		{"garbage", "my-laptop", "", true},
-		{"path traversal", "dev_../../etc", "", true},
-		{"session id", "sess_abcdefghijklmnop", "", true},
-	}
-	for _, tc := range cases {
-		got, err := resolveAppPasswordDevice(tc.flag)
-		if tc.wantErr {
-			if err == nil {
-				t.Fatalf("%s: want an error, got %q", tc.name, got)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if got != tc.want {
-			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestDescribeSync(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }

@@ -18,12 +18,12 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "bf8fTQedDImxJ-H1iLflLTX_oG-5IB1DKA5T7qLFlr00RW_EbrJW1bjnWtypqiLKMSQUZlbBd-R1juKSdHPzCQ"
+        "signature": "hhA_ho-NI2HKJh_yO4nIGuPXx61rNyHT16Ju8aWhOMLtyBforduZPhIannqj7jGuV7mSRWtLXsvPihsRia0eAA"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_001\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLTAwMQ\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_001\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLTAwMQ\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nidentity",
       "valid": true
     },
     {
@@ -40,7 +40,7 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "session:sess_vector",
         "session_proof": {
@@ -50,9 +50,9 @@
           "nonce": "c2Vzc2lvbi1ub25jZQ",
           "identity_signature": "dLYDl4S0-iP2-uh96NkephxCAlDvKYz3JI8WJ1xZyLsYBlakVMZZSL3fir4u3O19xtMCYR_pkrvrQ-HawB_xAQ"
         },
-        "signature": "nQfocDwCIi5o6lKy6CtDQrTJN-STW2F4yLd8kkpdR-V1bqYA7KWyG2So6tGoAM7LtD8cgve9c6P3yMEVZkCgCA"
+        "signature": "wo2zUedYLDrfAo2LapUl_nBqqqK2JNumamjWGeF_A8T2uOopKOrpJr1L-O78aBInOAejVrjZy1JqtRGowEOuAA"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_session\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXNlc3M\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nsession:sess_vector",
+      "canonical": "poweur-signin\n1\nreq_vector_session\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXNlc3M\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nsession:sess_vector",
       "valid": true
     },
     {
@@ -87,12 +87,12 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "d7DwJ-rOY7Efje8U2sSGAloXCuZmk2fQVMsJsbmIwOXdVKEIwxINRl7Rp6rNu1pQ6aJxHPja646TJJy_-8vNCQ"
+        "signature": "INdqkS-wkavXNHccb-wjWoBs7JoBbQc1tpWXaC8oBd5ZgemgyBNI4VE7Qpom6su6KWydvbb9r182kVa4xVKGCg"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_expired\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLWV4cA\n2026-01-15T09:20:00Z\n2026-01-15T09:22:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_expired\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLWV4cA\n2026-01-15T09:20:00Z\n2026-01-15T09:22:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nidentity",
       "valid": false,
       "reason": "expired"
     },
@@ -110,12 +110,12 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "6ZAl2CGi4Fnl3fDyiWL2YfF16reZ2Pvvyxj40PJ6-J3eyL8dkDRMz2FTvhlZ-i2K1MxBSKyK3I7-emmbRgLXDA"
+        "signature": "LEpvxYgAzPKBWT6vmxVwLekE08uaTYIP90w7RXw_CwRo_mD_QBRflX8P4RLMQqmFe3tB49HBK4w5ZhAY9tLxDA"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_ttl\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXR0bA\n2026-01-15T09:29:00Z\n2026-01-15T09:40:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_ttl\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXR0bA\n2026-01-15T09:29:00Z\n2026-01-15T09:40:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nidentity",
       "valid": false,
       "reason": "ttl"
     },
@@ -133,17 +133,17 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "1Drmctl58fkdtKKalk9e51VjC_lxhsyIDKUlpq4lKbtGK6DUVAZnAqMw0GGHPX_GNEi64oNxzuj9u7DDLcvYBA"
+        "signature": "KEdYCjRftegIcsdBE30yc9_T4u7VKnKdxIH1sq8s-LOmOlnElMgSDGEGitKi7Tndg3ETS4BtMVdb-QAS1BsCCw"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_audience\nalice.poweur.net\nhttps://evil.example\nbm9uY2UtdmVjdG9yLWF1ZA\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_audience\nalice.poweur.net\nhttps://evil.example\nbm9uY2UtdmVjdG9yLWF1ZA\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nidentity",
       "valid": false,
       "reason": "audience"
     },
     {
-      "name": "scope-out-of-namespace",
+      "name": "scope-unknown",
       "origin": "https://guestbook.poweur.net",
       "response": {
         "poweur_auth": "1",
@@ -180,12 +180,12 @@
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
           "profile:read",
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "vdxO68SI5AlnRIRHLG8HhqvzVp9X23fvtJ4CHLiH7X7TmtNlso9Q0e-HyZZHWYUnO5S5_-ZXDfP_dxsMY5NFBA"
+        "signature": "w251Rm4iy2tHS8KgROjn9UwbKS9yppoBvj1TQphbbV8qVk9VEfPn9SbknYLJKmTPMLu4uSa6S07e057gnOeDDw"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_unsorted\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXVucw\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nprofile:read,dav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_unsorted\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXVucw\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nprofile:read,messages:send\nidentity",
       "valid": false,
       "reason": "scope"
     },
@@ -203,12 +203,12 @@
         "action": "signin",
         "statement": "Sign in and transfer everything",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "bf8fTQedDImxJ-H1iLflLTX_oG-5IB1DKA5T7qLFlr00RW_EbrJW1bjnWtypqiLKMSQUZlbBd-R1juKSdHPzCQ"
+        "signature": "hhA_ho-NI2HKJh_yO4nIGuPXx61rNyHT16Ju8aWhOMLtyBforduZPhIannqj7jGuV7mSRWtLXsvPihsRia0eAA"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_tampered\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXRhbXA\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in and transfer everything\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_tampered\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLXRhbXA\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in and transfer everything\nmessages:send\nidentity",
       "valid": false,
       "reason": "signature"
     },
@@ -226,12 +226,12 @@
         "action": "signin",
         "statement": "Sign in to the Poweur Guestbook",
         "scopes": [
-          "dav:rw:apps/net.poweur.guestbook"
+          "messages:send"
         ],
         "key_id": "identity",
-        "signature": "bf8fTQedDImxJ-H1iLflLTX_oG-5IB1DKA5T7qLFlr00RW_EbrJW1bjnWtypqiLKMSQUZlbBd-R1juKSdHPzCQ"
+        "signature": "hhA_ho-NI2HKJh_yO4nIGuPXx61rNyHT16Ju8aWhOMLtyBforduZPhIannqj7jGuV7mSRWtLXsvPihsRia0eAA"
       },
-      "canonical": "poweur-signin\n1\nreq_vector_001\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLTAwMQ\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\ndav:rw:apps/net.poweur.guestbook\nidentity",
+      "canonical": "poweur-signin\n1\nreq_vector_001\nalice.poweur.net\nhttps://guestbook.poweur.net\nbm9uY2UtdmVjdG9yLTAwMQ\n2026-01-15T09:29:00Z\n2026-01-15T09:31:00Z\nsignin\nSign in to the Poweur Guestbook\nmessages:send\nidentity",
       "valid": false,
       "reason": "replay",
       "replay_of": "valid-identity"

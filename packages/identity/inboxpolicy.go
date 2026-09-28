@@ -148,7 +148,7 @@ func (a AnonymousPolicy) Validate() error {
 	return nil
 }
 
-// InboxPolicy is the schema of poweur-sys/relay/inbox-policy.json.
+// InboxPolicy is the schema of .poweur/relay/inbox-policy.json.
 type InboxPolicy struct {
 	Version int    `json:"version"`
 	Mode    string `json:"mode"`

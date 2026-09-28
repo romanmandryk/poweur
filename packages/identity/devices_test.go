@@ -157,7 +157,6 @@ func TestDeviceValidate(t *testing.T) {
 		{"dotdot scope", Device{ID: id, SyncScopes: []string{".."}}, "invalid sync_scopes segment"},
 		{"double slash scope", Device{ID: id, SyncScopes: []string{"public//deep"}}, "invalid sync_scopes segment"},
 		{"too many scopes", Device{ID: id, SyncScopes: make([]string, MaxDeviceSyncScopes+1)}, "at most"},
-		{"empty app password", Device{ID: id, AppPasswords: []string{" "}}, "app_passwords entry is empty"},
 	}
 	for _, tc := range cases {
 		err := tc.device.Validate()
@@ -277,7 +276,7 @@ func TestDevicesFileRevoke(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 
 	f := DevicesFile{Version: 1, Devices: []Device{
-		{ID: id, Name: "phone", AppPasswords: []string{"phone-dav"}},
+		{ID: id, Name: "phone"},
 	}}
 	if !f.Revoke(id, now) {
 		t.Fatal("revoke reported no such device")
@@ -285,11 +284,6 @@ func TestDevicesFileRevoke(t *testing.T) {
 	d, _ := f.Find(id)
 	if !d.Revoked || d.RevokedAt != now.Format(time.RFC3339) {
 		t.Fatalf("revoke did not stamp the row: %+v", d)
-	}
-	// The row stays as an audit trail, but must stop naming credentials
-	// that were just deleted.
-	if d.AppPasswords != nil {
-		t.Fatalf("revoke left app passwords named: %+v", d.AppPasswords)
 	}
 	if err := f.Validate(); err != nil {
 		t.Fatalf("revoked file no longer validates: %v", err)

@@ -14,7 +14,7 @@ const EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 
-/** A type every browser can show from someone else's `/pub` URL. */
+/** A type every browser can show from someone else's public avatar URL. */
 export const isWebImageType = (type: string): boolean => type in EXTENSIONS;
 
 export const extensionFor = (type: string): string => EXTENSIONS[type] ?? "jpg";

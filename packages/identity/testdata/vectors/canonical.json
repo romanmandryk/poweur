@@ -170,18 +170,6 @@
       "signature": "pDuE39hbfnsOVdix-H7kzCBdbJmKY3gqVQmcXCcjZktsUyHYFjNCHynsw7jdLKShK6l_5MfrmZP0DPH80CJ2Bw"
     },
     {
-      "name": "dav-token",
-      "inputs": {
-        "audience": "bob.example.org",
-        "identity": "alice.poweur.net",
-        "issued_at": "2026-01-15T09:30:00Z",
-        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ",
-        "scope": "dav:rw:shared/project-x"
-      },
-      "canonical": "dav-token\nalice.poweur.net\nbob.example.org\ndav:rw:shared/project-x\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
-      "signature": "2PTV9PzsUh5y8wpnUaIklvPt3swEbG4Rk90dEgs8cbmDZ-rmgvr2a4saGPFKJ9KlR2-L6o4CUfbWgfB00_oxCA"
-    },
-    {
       "name": "keystore-enroll",
       "inputs": {
         "credential_id": "Y3JlZC0wMDE",

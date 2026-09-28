@@ -1,7 +1,7 @@
 {
   "name": "@poweur/client",
   "version": "0.1.16",
-  "description": "Poweur protocol client — identity, messaging, files, sync, shares and proof-of-work for browser, Node, Bun and Deno.",
+  "description": "Poweur protocol client — identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -16,9 +16,6 @@
     "./resolve": "./dist/resolve.js",
     "./identity": "./dist/identity.js",
     "./messages": "./dist/messages.js",
-    "./files": "./dist/files.js",
-    "./sync": "./dist/sync.js",
-    "./shares": "./dist/shares.js",
     "./contacts": "./dist/contacts.js",
     "./policy": "./dist/policy.js",
     "./keystore": "./dist/keystore.js",

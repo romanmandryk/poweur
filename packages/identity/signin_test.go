@@ -31,7 +31,7 @@ func validSignInRequest() SignInRequest {
 		Action:      SignInActionSignin,
 		Statement:   "Sign in to the Poweur Guestbook",
 		ResponseURI: "https://guestbook.poweur.net/auth/callback",
-		Scopes:      []string{"dav:rw:/apps/net.poweur.guestbook/"},
+		Scopes:      []string{"messages:send"},
 	}
 }
 
@@ -104,9 +104,9 @@ func TestNormalizeSignInScopes(t *testing.T) {
 		want []string
 		ok   bool
 	}{
-		{"sorted and deduped", []string{"profile:read", "dav:rw:apps/x.y", "profile:read"},
-			[]string{"dav:rw:apps/x.y", "profile:read"}, true},
-		{"slashes stripped", []string{"dav:rw:/apps/x.y/"}, []string{"dav:rw:apps/x.y"}, true},
+		{"sorted and deduped", []string{"profile:read", "messages:send", "profile:read"},
+			[]string{"messages:send", "profile:read"}, true},
+		{"dav scopes are gone", []string{"dav:rw:apps/x.y"}, nil, false},
 		{"messages", []string{"messages:send"}, []string{"messages:send"}, true},
 		{"empty stays empty", nil, nil, true},
 		{"unknown scope", []string{"admin:everything"}, nil, false},
@@ -127,31 +127,6 @@ func TestNormalizeSignInScopes(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestCheckSignInScopeNamespace(t *testing.T) {
-	tests := []struct {
-		scope string
-		appID string
-		ok    bool
-	}{
-		{"dav:rw:apps/net.poweur.guestbook", "net.poweur.guestbook", true},
-		{"dav:rw:apps/net.poweur.guestbook/entries", "net.poweur.guestbook", true},
-		{"dav:rw:apps/net.poweur.other", "net.poweur.guestbook", false},
-		{"dav:read:documents", "net.poweur.guestbook", false},
-		{"dav:rw:poweur-sys/private", "net.poweur.guestbook", false},
-		// A prefix that merely starts with the namespace string is not
-		// inside it: apps/net.poweur.guestbook-evil must not pass.
-		{"dav:rw:apps/net.poweur.guestbook-evil", "net.poweur.guestbook", false},
-		{"profile:read", "net.poweur.guestbook", true},
-		{"messages:send", "net.poweur.guestbook", true},
-	}
-	for _, tc := range tests {
-		err := CheckSignInScopeNamespace(tc.scope, tc.appID)
-		if tc.ok != (err == nil) {
-			t.Fatalf("%s in %s: ok=%v err=%v", tc.scope, tc.appID, tc.ok, err)
-		}
 	}
 }
 
@@ -215,7 +190,7 @@ func TestSignInRequestNormalizeFillsDomainAndScopes(t *testing.T) {
 		Action:    "SignIn",
 		IssuedAt:  "2026-01-15T09:29:00Z",
 		ExpiresAt: "2026-01-15T09:31:00Z",
-		Scopes:    []string{"profile:read", "dav:rw:/apps/net.poweur.guestbook/"},
+		Scopes:    []string{"profile:read", "messages:send"},
 	}
 	n, err := req.Normalize()
 	if err != nil {
@@ -230,7 +205,7 @@ func TestSignInRequestNormalizeFillsDomainAndScopes(t *testing.T) {
 	if n.Action != "signin" || n.RequestID != "req_1" || n.Nonce != "n" {
 		t.Fatalf("normalize: %+v", n)
 	}
-	if strings.Join(n.Scopes, ",") != "dav:rw:apps/net.poweur.guestbook,profile:read" {
+	if strings.Join(n.Scopes, ",") != "messages:send,profile:read" {
 		t.Fatalf("scopes %v", n.Scopes)
 	}
 	if err := n.Validate(signInNow()); err != nil {
@@ -260,7 +235,7 @@ func TestCanonicalSignInResponseShape(t *testing.T) {
 		"2026-01-15T09:31:00Z",
 		"signin",
 		"Sign in to the Poweur Guestbook",
-		"dav:rw:apps/net.poweur.guestbook",
+		"messages:send",
 		"identity",
 	}, "\n")
 	if got != want {

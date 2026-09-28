@@ -8,11 +8,14 @@
 // registration, no shared secret. Everything below that is not sign-in is
 // deliberately boring — entries live in a map, the login session is a cookie.
 //
-// The whole protocol surface is these three moments:
+// The whole protocol surface is these two moments:
 //
 //	req  := srv.verifier.NewRequest(...)          // challenge
 //	res  := srv.verifier.Verify(ctx, encoded)     // approval → identity
-//	tok  := srv.exchangeGrant(ctx, res)           // optional: the user's home
+//
+// Storage v1 also let the guestbook write entries into the user's own home
+// through a path-scoped grant. That returns on storage v2 as a scoped drive
+// handle (EPIC-020, EPIC-029); until then entries live here only.
 package guestbook
 
 import (
@@ -32,9 +35,9 @@ import (
 	"github.com/poweur/identity/signin"
 )
 
-// AppID is the tree namespace this RP owns in a user's home. It is derived
-// from the origin at runtime (identity.SignInAppID) — the constant here is
-// only the production value, for documentation and the deploy manifest.
+// AppID identifies this RP. It is derived from the origin at runtime
+// (identity.SignInAppID) — the constant here is only the production value,
+// for documentation and the deploy manifest.
 const AppID = "net.poweur.guestbook"
 
 // Config configures a Server.
@@ -45,18 +48,13 @@ type Config struct {
 	// Name is what a signer shows the user. Comes back out of
 	// /.well-known/poweur.json, which is the only string the signer trusts.
 	Name string
-	// Scopes requested at sign-in. Empty means login only. The worked
-	// example (E08-T4) asks for dav:rw:apps/<app id>, which is the whole
-	// point: the guestbook keeps its entries in the *user's* home.
+	// Scopes requested at sign-in. Empty means login only.
 	Scopes []string
 	// Resolver overrides identity resolution. Tests inject a fake zone;
 	// production leaves it nil and gets the published resolver chain.
 	Resolver signin.Resolver
 	// ResolveOptions is passed to the default resolver.
 	ResolveOptions identity.ResolveOptions
-	// HTTPClient is used for the relay grant exchange. Tests inject one that
-	// reaches their in-process relay.
-	HTTPClient *http.Client
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -66,10 +64,6 @@ type Entry struct {
 	Identity string `json:"identity"`
 	Message  string `json:"message"`
 	At       string `json:"at"`
-	// StoredAt is the path in the *user's own home* this entry was written
-	// to, when the user granted storage. Empty when the guestbook is keeping
-	// the entry itself.
-	StoredAt string `json:"stored_at,omitempty"`
 }
 
 // Server is the reference relying party.
@@ -95,10 +89,6 @@ type Session struct {
 	Relay     string    `json:"relay"`
 	Scopes    []string  `json:"scopes"`
 	ExpiresAt time.Time `json:"-"`
-	// Grant is the relay-minted, path-scoped credential for the user's home,
-	// when they approved a dav: scope (E08-T4). Never leaves the server.
-	Grant    *Grant `json:"-"`
-	grantErr string
 }
 
 // pendingLogin is one sign-in in progress. Every value whose possession is
@@ -140,14 +130,8 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("guestbook: %w", err)
 	}
-	appID, err := identity.SignInAppID(origin)
-	if err != nil {
+	if _, err := identity.SignInAppID(origin); err != nil {
 		return nil, fmt.Errorf("guestbook: %w", err)
-	}
-	for _, s := range scopes {
-		if err := identity.CheckSignInScopeNamespace(s, appID); err != nil {
-			return nil, fmt.Errorf("guestbook: %w", err)
-		}
 	}
 	cfg.Scopes = scopes
 
@@ -569,18 +553,6 @@ func (s *Server) completeSignIn(ctx context.Context, encoded string) (sessionWit
 		Scopes:    result.Scopes,
 		ExpiresAt: s.now().Add(12 * time.Hour),
 	}
-	// The second step, against a different server: swap the same approval for
-	// a path-scoped token at the *user's* relay. A failure here is not a
-	// failed login — the user is signed in either way, the guestbook just
-	// keeps their entry itself.
-	if hasDAVScope(result.Scopes) {
-		if grant, gerr := s.exchangeGrant(ctx, result, encoded); gerr == nil {
-			session.Grant = grant
-		} else {
-			session.grantErr = gerr.Error()
-		}
-	}
-
 	token, err := randomToken(24)
 	if err != nil {
 		return sessionWithToken{}, err
@@ -750,12 +722,6 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"scopes":    sess.Scopes,
 		"app_id":    s.AppID(),
 	}
-	if sess.Grant != nil {
-		out["home_storage"] = sess.Grant.Path
-		out["grant_expires_at"] = sess.Grant.ExpiresAt.UTC().Format(time.RFC3339)
-	} else if sess.grantErr != "" {
-		out["home_storage_error"] = sess.grantErr
-	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -802,19 +768,6 @@ func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	}
 	entry := Entry{Identity: sess.Identity, Message: message, At: s.now().Format(time.RFC3339)}
 
-	// The data-portability demo: when the user granted storage, the entry is
-	// written into *their* home, in this app's namespace, and the guestbook's
-	// own copy is a cache. Revoke the grant and the app loses the writing,
-	// not the user.
-	if sess.Grant != nil {
-		path, err := s.writeToHome(r.Context(), sess, entry)
-		if err != nil {
-			writeError(w, http.StatusBadGateway, "could not write to your home: "+err.Error())
-			return
-		}
-		entry.StoredAt = path
-	}
-
 	s.mu.Lock()
 	s.entries = append(s.entries, entry)
 	s.mu.Unlock()
@@ -829,15 +782,6 @@ func (s *Server) Entries() []Entry {
 }
 
 // --- helpers -----------------------------------------------------------------
-
-func hasDAVScope(scopes []string) bool {
-	for _, s := range scopes {
-		if _, _, ok := identity.SignInScopePath(s); ok {
-			return true
-		}
-	}
-	return false
-}
 
 func randomToken(n int) (string, error) {
 	buf := make([]byte, n)

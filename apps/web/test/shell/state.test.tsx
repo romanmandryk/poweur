@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { incomingRequests, incomingShareClaims, incomingShareOffers, navBadges } from "../../src/state/badges";
+import { incomingRequests, navBadges } from "../../src/state/badges";
 import { useData } from "../../src/state/data";
 import { useRoute } from "../../src/state/route";
 import { onIdentityTeardown, lockIdentity, switchIdentity, useSession } from "../../src/state/session";
@@ -16,8 +16,8 @@ describe("route store", () => {
     const route = useRoute.getState();
     route.push("new-chat", { to: "bob.poweur.net" });
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: "new-chat", params: { to: "bob.poweur.net" } });
-    route.go("files");
-    expect(useRoute.getState()).toMatchObject({ page: "files", sub: null, params: {} });
+    route.go("contacts");
+    expect(useRoute.getState()).toMatchObject({ page: "contacts", sub: null, params: {} });
   });
 
   it("popping a thread forgets the open conversation", () => {
@@ -111,55 +111,6 @@ describe("badges", () => {
     expect(navBadges({ ...base(), anon }, "alice.poweur.net", true).messages).toBe(0);
   });
 
-  it("finds structurally bound share offers and hides accepted or expired ones", () => {
-    const offer = (shareId: string, expires: string) => ({
-      id: shareId,
-      type: "sys.share.offer",
-      sender: "alice.poweur.net",
-      recipient: "bob.poweur.net",
-      timestamp: "2026-09-23T12:00:00Z",
-      expires_at: expires,
-      metadata: { share_id: shareId },
-      plaintext: JSON.stringify({
-        version: 1,
-        grant: {
-          share_id: shareId,
-          owner: "alice.poweur.net",
-          path: "shared/project",
-          audience: [{ id: "bob.poweur.net" }],
-          permissions: ["read", "write"],
-        },
-      }),
-    });
-    const data = {
-      ...base(),
-      requests: {
-        ...base().requests,
-        incoming: [offer("shr_live", "2126-09-30T00:00:00Z"), offer("shr_mounted", "2126-09-30T00:00:00Z"), offer("shr_old", "2020-01-01T00:00:00Z")],
-      },
-    };
-    const offers = incomingShareOffers(data, "bob.poweur.net", ["shr_mounted"]);
-    expect(offers).toHaveLength(1);
-    expect(offers[0]).toMatchObject({ shareId: "shr_live", sender: "alice.poweur.net", path: "shared/project", writable: true });
-  });
-
-  it("finds share claims only when body, sender, owner and metadata agree", () => {
-    const body = {
-      version: 1, share_id: "shr_request", owner: "alice.poweur.net",
-      token: "aaaaaaaaaaaaaaaaaaaaaaaaaa", claimant: "bob.poweur.net",
-      action: "uploaded", claimed_at: "2026-09-24T08:00:00Z",
-    };
-    const message = {
-      id: "claim-1", type: "sys.share.claim", sender: "bob.poweur.net",
-      recipient: "alice.poweur.net", timestamp: "2026-09-24T08:00:01Z",
-      metadata: { share_id: "shr_request" }, plaintext: JSON.stringify(body),
-    };
-    const data = { ...base(), requests: { ...base().requests, incoming: [message] } };
-    expect(incomingShareClaims(data, "alice.poweur.net")).toMatchObject([
-      { sender: "bob.poweur.net", shareId: "shr_request", action: "uploaded" },
-    ]);
-    expect(incomingShareClaims({ ...data, requests: { ...data.requests, incoming: [{ ...message, sender: "mallory.poweur.net" }] } }, "alice.poweur.net")).toEqual([]);
-  });
 });
 
 describe("toasts", () => {

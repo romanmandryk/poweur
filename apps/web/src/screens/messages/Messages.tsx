@@ -5,7 +5,7 @@
  */
 import { useEffect } from "react";
 import { onActivateKeys } from "../../lib/a11y";
-import { FolderOpen, Handshake, KeyRound, Lock, MessageCircle, Paperclip, Plus, SquarePen, Users, VenetianMask } from "lucide-react";
+import { Handshake, KeyRound, Lock, MessageCircle, Paperclip, Plus, SquarePen, Users, VenetianMask } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { loadPolicy } from "../../actions/account";
 import { acceptContact, blockContact, loadContacts, loadRequests, removeContact, requestContact } from "../../actions/contacts";
@@ -21,14 +21,13 @@ import {
 } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
 import { dismissAuthPrompt, openAuthPrompt } from "../../actions/signin";
-import { acceptShareOffer, approveShareClaimMessage, loadMounts } from "../../actions/files";
 import { pendingAuthPrompts } from "../../lib/authPrompts";
 import { MessageText } from "../../components/MessageText";
 import { ProfileCard } from "../../components/ProfileCard";
 import { fmtRelative } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
 import { buildConversationRows, threadLabel } from "../../lib/threads.js";
-import { anonymousAllowed, contactFor, incomingRequests, incomingShareClaims, incomingShareOffers, unreadAnonymous } from "../../state/badges";
+import { anonymousAllowed, contactFor, incomingRequests, unreadAnonymous } from "../../state/badges";
 import { useData, type Tray } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
@@ -53,7 +52,7 @@ export function Messages() {
   const identity = useSession((state) => state.identity) ?? "";
   const counts = useData(
     useShallow((state) => ({
-      requests: incomingRequests(state, identity).length + incomingShareOffers(state, identity, state.files.mounts.map((entry: any) => entry.mount.share_id)).length + incomingShareClaims(state, identity).length,
+      requests: incomingRequests(state, identity).length,
       anonymous: unreadAnonymous(state),
     })),
   );
@@ -68,7 +67,6 @@ export function Messages() {
     void loadInbox();
     void loadRequests();
     void loadContacts();
-    void loadMounts();
     void loadPolicy().then(() => {
       if (anonymousAllowed(useData.getState().policy)) void loadAnon();
     });
@@ -280,19 +278,16 @@ function RequestsTray() {
       history: state.history,
       requests: state.requests,
       contacts: state.contacts,
-      mounts: state.files.mounts,
     })),
   );
   const incoming = incomingRequests(data, identity);
-  const offers = incomingShareOffers(data, identity, data.mounts.map((entry: any) => entry.mount.share_id));
-  const claims = incomingShareClaims(data, identity);
   const outgoing = data.contacts.list.filter((contact) => contact.state === "requested");
 
-  if (!incoming.length && !outgoing.length && !offers.length && !claims.length) {
+  if (!incoming.length && !outgoing.length) {
     return (
       <>
         <TrayError error={data.requests.error} />
-        <EmptyState icon={Handshake} title="No contact requests" body="Contact and file-sharing requests land here." />
+        <EmptyState icon={Handshake} title="No contact requests" body="Contact requests land here." />
       </>
     );
   }
@@ -300,50 +295,6 @@ function RequestsTray() {
   return (
     <>
       <TrayError error={data.requests.error} />
-      {claims.length > 0 && (
-        <>
-          <div className={sectionLabel}>People asking for ongoing access</div>
-          <div className="conv-list bg-surface">
-            {claims.map((claim) => (
-              <div key={`${claim.shareId}:${claim.sender}`} className={requestRow} data-share-claim={claim.shareId}>
-                <div className="ml-4 min-w-0 flex-1 pt-3">
-                  <div className="truncate text-sm font-semibold">{claim.sender}</div>
-                  <div className="truncate text-[13px] text-muted">used this link · {claim.action}</div>
-                </div>
-                <div className="request-actions ml-4 flex shrink-0 flex-wrap items-center gap-2 pt-3">
-                  <Button size="sm" data-approve-share-claim={claim.shareId} onClick={() => void approveShareClaimMessage(claim.message, false)}>Grant access</Button>
-                  <Button size="sm" variant="secondary" data-consume-share-claim={claim.shareId} onClick={() => void approveShareClaimMessage(claim.message, true)}>Grant + close link</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-      {offers.length > 0 && (
-        <>
-          <div className={sectionLabel}>Files shared with you</div>
-          <div className="conv-list bg-surface">
-            {offers.map((offer) => (
-              <div key={offer.shareId} className={requestRow} data-share-offer={offer.shareId}>
-                <div className="ml-4 flex min-w-0 flex-1 items-center gap-3 pt-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-                    <FolderOpen className="size-[18px]" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">/{offer.path}</div>
-                    <div className="truncate text-[13px] text-muted">from {offer.sender} · {offer.writable ? "read + write" : "read"}</div>
-                  </div>
-                </div>
-                <div className="request-actions ml-4 flex shrink-0 items-center gap-2 pt-3">
-                  <Button size="sm" data-accept-share={offer.shareId} onClick={() => void acceptShareOffer(offer.message)}>
-                    Accept
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
       {incoming.length > 0 && (
         <>
           <div className={sectionLabel}>Waiting for you</div>

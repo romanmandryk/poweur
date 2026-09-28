@@ -11,8 +11,8 @@ import (
 // in the relay-readable config zone: the relay must read them to enforce
 // message acceptance; other users never see them.
 //
-//	poweur-sys/relay/contacts.json      owner-written, relay-read
-//	poweur-sys/relay/inbox-policy.json  owner-written, relay-read
+//	.poweur/relay/contacts.json      owner-written, relay-read
+//	.poweur/relay/inbox-policy.json  owner-written, relay-read
 
 // Contact states.
 const (
@@ -37,7 +37,7 @@ type Contact struct {
 	Source    string   `json:"source,omitempty"` // how the intro happened
 }
 
-// ContactsFile is the schema of poweur-sys/relay/contacts.json.
+// ContactsFile is the schema of .poweur/relay/contacts.json.
 type ContactsFile struct {
 	Version  int       `json:"version"`
 	Contacts []Contact `json:"contacts"`

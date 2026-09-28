@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Device registry (EPIC-004 E04-T6): poweur-sys/relay/devices.json.
+// Device registry (EPIC-004 E04-T6): .poweur/state/devices.json.
 //
 // Sync made "the user's devices" first-class actors — they already existed
 // implicitly as sessions carrying a DeviceFingerprint. This document gives
@@ -17,13 +17,11 @@ import (
 // server-side sync cursor so the owner can answer "when did my phone last
 // sync?" without asking the phone.
 //
-// **The relay writes it; the owner reads it.** Unlike every other
-// poweur-sys document the owner does not PUT this one — an owner DAV write
-// is refused (relay-managed file, like public/id.json), because the facts in
-// it are the relay's own observations. Sync clients pull it and never push
-// it. The validator here still runs on write so a relay bug cannot persist a
-// document its own reader would choke on, and so the schema has one enforced
-// definition rather than two.
+// **The relay writes it; the owner reads it.** It lives in .poweur/state/,
+// the relay-written zone, because the facts in it are the relay's own
+// observations. The validator still runs on write so a relay bug cannot
+// persist a document its own reader would choke on, and so the schema has
+// one enforced definition rather than two.
 //
 // **The fingerprint is a label, not a credential.** Device fingerprints
 // arrive unsigned today (they are absent from the canonical session
@@ -148,17 +146,13 @@ type Device struct {
 	// SyncedAt is when SyncCursor was last advanced.
 	SyncedAt string `json:"synced_at,omitempty"`
 
-	// AppPasswords are the names of poweur-sys/relay/app-passwords.json
-	// entries this device holds. Revoking the device deletes them.
-	AppPasswords []string `json:"app_passwords,omitempty"`
-
 	// Revoked keeps the row as an audit trail instead of deleting it: the
 	// owner should be able to see that a lost phone was cut off, and when.
 	Revoked   bool   `json:"revoked,omitempty"`
 	RevokedAt string `json:"revoked_at,omitempty"`
 }
 
-// DevicesFile is the schema of poweur-sys/relay/devices.json.
+// DevicesFile is the schema of .poweur/state/devices.json.
 type DevicesFile struct {
 	Version int      `json:"version"`
 	Devices []Device `json:"devices"`
@@ -207,11 +201,6 @@ func (d Device) Validate() error {
 	for _, scope := range d.SyncScopes {
 		if err := validDeviceScope(scope); err != nil {
 			return fmt.Errorf("device %s: %w", d.ID, err)
-		}
-	}
-	for _, name := range d.AppPasswords {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("device %s: app_passwords entry is empty", d.ID)
 		}
 	}
 	if d.Revoked && d.RevokedAt == "" {
@@ -289,9 +278,8 @@ func (f *DevicesFile) Remove(id string) bool {
 	return false
 }
 
-// Revoke marks a device revoked at now, clearing the credentials it claimed
-// so the document does not keep naming an app password that has been
-// deleted. Reports whether the device existed and was not already revoked.
+// Revoke marks a device revoked at now. Reports whether the device existed
+// and was not already revoked.
 func (f *DevicesFile) Revoke(id string, now time.Time) bool {
 	for i, d := range f.Devices {
 		if !strings.EqualFold(d.ID, id) {
@@ -302,7 +290,6 @@ func (f *DevicesFile) Revoke(id string, now time.Time) bool {
 		}
 		f.Devices[i].Revoked = true
 		f.Devices[i].RevokedAt = now.UTC().Format(time.RFC3339)
-		f.Devices[i].AppPasswords = nil
 		return true
 	}
 	return false

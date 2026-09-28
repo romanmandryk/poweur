@@ -13,6 +13,5 @@ export * from "./sessionstore.js";
 export * from "./journal.js";
 export * from "./dns.js";
 export * from "./dialfetch.js";
-export * from "./syncengine.js";
 export * from "./toml.js";
 export * from "./session-factory.js";

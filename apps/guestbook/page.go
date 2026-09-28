@@ -57,7 +57,6 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <section id="me" hidden>
   <p>Signed in as <span class="who" id="who"></span>.
      <button id="logout">Sign out</button></p>
-  <p class="where" id="storage"></p>
   <form id="post">
     <textarea id="message" rows="3" placeholder="Say something"></textarea>
     <button type="submit">Sign the guestbook</button>
@@ -76,9 +75,6 @@ async function refresh() {
   $("auth").hidden = !!me.signed_in;
   if (me.signed_in) {
     $("who").textContent = me.identity;
-    $("storage").textContent = me.home_storage
-      ? "Entries are stored in your own home at " + me.home_storage
-      : (me.home_storage_error ? "Storage not connected: " + me.home_storage_error : "");
   }
   const { entries } = await j("/api/entries");
   $("entries").innerHTML = "";
@@ -88,7 +84,7 @@ async function refresh() {
     el.innerHTML = '<div class="who"></div><div class="body"></div><div class="at"></div>';
     el.querySelector(".who").textContent = e.identity;
     el.querySelector(".body").textContent = e.message;
-    el.querySelector(".at").textContent = e.at + (e.stored_at ? " · stored at " + e.stored_at : "");
+    el.querySelector(".at").textContent = e.at;
     $("entries").append(el);
   }
 }

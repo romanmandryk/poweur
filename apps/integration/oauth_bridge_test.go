@@ -462,11 +462,6 @@ func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
 	if m == nil {
 		t.Fatalf("inbox did not show the prompt: %s", inbox)
 	}
-	// The prompt is not archived as conversation.
-	hist, _ := runCLI(t, userHome, "history", "--json")
-	if strings.Contains(hist, idpkg.MsgTypeAuthRequest) {
-		t.Fatalf("prompt archived into history: %s", hist)
-	}
 	runCLI(t, userHome, "auth", "approve", m[1], "--sign-with", "identity", "--code", match)
 	resp, body := b.do(http.MethodGet, fx.issuer+"/t/"+txn+"/status", nil)
 	if resp.StatusCode != 200 || !strings.Contains(body, `"complete"`) {

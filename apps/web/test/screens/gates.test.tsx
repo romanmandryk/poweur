@@ -7,7 +7,7 @@ const fake = vi.hoisted(() => ({
     policy: vi.fn(() => Promise.resolve({ policy: { version: 1, mode: "contacts_and_requests" }, explicit: true })),
     setProfile: vi.fn(),
     sessions: { ensure: vi.fn(() => Promise.resolve({})) },
-    dav: vi.fn(() => Promise.resolve({})),
+    system: vi.fn(() => ({})),
     signer: {},
   },
   consent: vi.fn(),

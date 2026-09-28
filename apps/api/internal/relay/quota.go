@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -136,16 +135,6 @@ func (s *Server) storageQuota(identity string) int64 {
 		return value
 	}
 	return s.cfg.MaxIdentityBytes
-}
-
-// overQuota reports whether adding bytes would take the identity past its quota.
-func (s *Server) overQuota(ctx context.Context, identity string, adding int64) bool {
-	quota := s.storageQuota(identity)
-	if quota <= 0 {
-		return false
-	}
-	used, err := s.filesProvider.UsedBytes(ctx, identity)
-	return err == nil && used+adding > quota
 }
 
 // writeQuotaExceeded is the 507 an upload over quota gets, naming who to ask

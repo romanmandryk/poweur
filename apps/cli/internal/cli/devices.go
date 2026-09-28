@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -221,7 +222,7 @@ func runDeviceList(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
-	relayURL, identityValue, token, ok := deviceAuth(*useIdentity, *relayFlag, stderr)
+	relayURL, identityValue, priv, ok := deviceAuth(*useIdentity, *relayFlag, stderr)
 	if !ok {
 		return 1
 	}
@@ -231,7 +232,10 @@ func runDeviceList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err := setOwnerAuth(req, relayURL, identityValue, priv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -334,7 +338,7 @@ func runDeviceRevoke(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "device id must look like dev_… (see `poweur devices list`)")
 		return 1
 	}
-	relayURL, identityValue, token, ok := deviceAuth(*useIdentity, *relayFlag, stderr)
+	relayURL, identityValue, priv, ok := deviceAuth(*useIdentity, *relayFlag, stderr)
 	if !ok {
 		return 1
 	}
@@ -350,7 +354,10 @@ func runDeviceRevoke(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err := setOwnerAuth(req, relayURL, identityValue, priv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -362,10 +369,8 @@ func runDeviceRevoke(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var out struct {
-		DeviceID     string `json:"device_id"`
-		Sessions     int    `json:"sessions_revoked"`
-		DAVTokens    int    `json:"dav_tokens_revoked"`
-		AppPasswords int    `json:"app_passwords_revoked"`
+		DeviceID string `json:"device_id"`
+		Sessions int    `json:"sessions_revoked"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		fmt.Fprintln(stderr, err)
@@ -374,54 +379,32 @@ func runDeviceRevoke(args []string, stdout, stderr io.Writer) int {
 	if *jsonOut {
 		return printJSON(stdout, stderr, out)
 	}
-	fmt.Fprintf(stdout, "revoked %s: %d session(s), %d dav token(s), %d app password(s)\n",
-		out.DeviceID, out.Sessions, out.DAVTokens, out.AppPasswords)
+	fmt.Fprintf(stdout, "revoked %s: %d session(s)\n", out.DeviceID, out.Sessions)
 	return 0
 }
 
-// deviceAuth mints the owner DAV token the registry endpoints authenticate
-// with — the same credential the files layer already uses, so the device
-// endpoints need no signing scheme of their own.
-func deviceAuth(useIdentity, relayFlag string, stderr io.Writer) (relayURL, identityValue, token string, ok bool) {
-	cfg, identityValue, priv, loaded := loadIdentityForDAV(useIdentity, stderr)
+// deviceAuth loads the identity whose registry the device commands read.
+func deviceAuth(useIdentity, relayFlag string, stderr io.Writer) (relayURL, identityValue string, priv ed25519.PrivateKey, ok bool) {
+	cfg, identityValue, priv, loaded := loadIdentityKey(useIdentity, stderr)
 	if !loaded {
-		return "", "", "", false
+		return "", "", nil, false
 	}
 	relayURL = cfg.RelayURL
 	if relayFlag != "" {
 		relayURL = relayFlag
 	}
-	tok, err := MintDAVToken(context.Background(), relayURL, identityValue, identityValue, "", priv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return "", "", "", false
-	}
-	return strings.TrimSuffix(relayURL, "/"), identityValue, tok.Token, true
+	return strings.TrimSuffix(relayURL, "/"), identityValue, priv, true
 }
 
-// resolveAppPasswordDevice turns the `--device` flag into the id stamped on a
-// new app-password entry (EPIC-004 E04-T6).
-//
-//	""     this machine, so revoking it here revokes the password
-//	"none" no link at all — the password outlives every revocation
-//	dev_…  an explicit device, for minting a phone's password from a laptop
-//
-// An unreadable local device record is not fatal: the password is still
-// worth having, it just cannot be revoked by device.
-func resolveAppPasswordDevice(flagValue string) (string, error) {
-	value := strings.ToLower(strings.TrimSpace(flagValue))
-	switch {
-	case value == "none":
-		return "", nil
-	case value == "":
-		d, err := loadDevice()
-		if err != nil {
-			return "", nil
-		}
-		return d.DeviceID(), nil
-	case idpkg.ValidDeviceID(value):
-		return value, nil
-	default:
-		return "", fmt.Errorf("--device must be a dev_… device id, or 'none' (got %q)", flagValue)
+// setOwnerAuth signs a fresh challenge with the identity key and sets the
+// owner headers the relay's owner endpoints expect.
+func setOwnerAuth(req *http.Request, relayURL, identityValue string, priv ed25519.PrivateKey) error {
+	challenge, err := FetchChallenge(req.Context(), relayURL, identityValue)
+	if err != nil {
+		return err
 	}
+	req.Header.Set("X-Poweur-Identity", identityValue)
+	req.Header.Set("X-Poweur-Challenge", challenge.Challenge)
+	req.Header.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(challenge.Challenge))))
+	return nil
 }

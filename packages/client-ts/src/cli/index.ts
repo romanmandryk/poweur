@@ -19,7 +19,6 @@ import {
   send,
   sessionCommand,
 } from "./commands/messaging.js";
-import { davCommand, shareCommand, syncCommand } from "./commands/files.js";
 import {
   analyticsCommand,
   authCommand,
@@ -49,14 +48,6 @@ export const HELP = `Usage:
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur session <status|refresh|revoke> [--use-identity=...] [--json]
   poweur relay <status|set <url>> [--json]
-  poweur dav token [--audience=...] [--scope=dav:full|dav:read|dav:rw:<path>] [--relay=...] [--use-identity=...] [--json]
-  poweur dav mount [--use-identity=...]
-  poweur dav password <add|list|remove> --name=<name> [--scope=...] [--use-identity=...] [--json]
-  poweur sync <pull|push|run|status> <local-dir> [--path=<prefix> ...] [--audience=...] [--relay=...] [--use-identity=...]
-  poweur share add <path> --with=<id> [--with-group=<name>] [--perm=read|rw] [--expires=<rfc3339>] [--json]
-  poweur share ls [--json]
-  poweur share revoke <share-id>
-  poweur share group <set <name> --members=<id,id,...>|ls|remove <name>> [--json]
   poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...] [--json]
   poweur requests [--use-identity=...] [--json]
   poweur policy <show|set <open|contacts_only|contacts_and_requests>> [--anon-allow] [--anon-challenge=none|pow] [--anon-bits=N] [--json]
@@ -86,9 +77,6 @@ export async function run(argv: string[], streams: Streams = defaultStreams()): 
       case "anon": return await anon(rest, streams);
       case "session": return await sessionCommand(rest, streams);
       case "relay": return await relayCommand(rest, streams);
-      case "dav": return await davCommand(rest, streams);
-      case "sync": return await syncCommand(rest, streams);
-      case "share": return await shareCommand(rest, streams);
       case "contacts": return await contactsCommand(rest, streams);
       case "requests": return await requestsCommand(rest, streams);
       case "policy": return await policyCommand(rest, streams);

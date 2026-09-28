@@ -12,7 +12,7 @@ import { useUi } from "../state/ui";
 
 const SHOW_AFTER_MS = 250;
 
-type BusyData = Pick<DataFields, "tray" | "history" | "requests" | "anon" | "contacts" | "files">;
+type BusyData = Pick<DataFields, "tray" | "history" | "requests" | "anon" | "contacts">;
 
 /**
  * Whether the screen on show is waiting for data it does not have yet. The
@@ -29,8 +29,6 @@ export function destinationBusy(page: string, data: BusyData): boolean {
       );
     case "contacts":
       return data.contacts.loading;
-    case "files":
-      return data.files.loading;
     default:
       return false;
   }

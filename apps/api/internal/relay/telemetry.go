@@ -7,18 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"reflect"
 	"runtime"
 	"strings"
 	"time"
 
-	"github.com/poweur/api/internal/files"
 	"github.com/poweur/api/internal/telemetry"
 	idpkg "github.com/poweur/identity"
 )
-
-const analyticsPath = "poweur-sys/relay/analytics.json"
 
 type analyticsPreference struct {
 	Version   int    `json:"version"`
@@ -44,16 +40,11 @@ func parseAnalytics(b []byte) (analyticsPreference, error) {
 	return p, nil
 }
 func (s *Server) consentGranted(actor string) bool {
-	if s.filesProvider == nil || !s.identities.Exists(actor) {
+	if !s.identities.Exists(actor) {
 		return false
 	}
-	f, err := s.filesProvider.OpenFile(context.Background(), actor, analyticsPath, os.O_RDONLY, 0)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, 4097))
-	if err != nil {
+	b := s.readSysJSON(context.Background(), actor, analyticsPath)
+	if b == nil || len(b) > 4096 {
 		return false
 	}
 	p, err := parseAnalytics(b)
@@ -247,39 +238,15 @@ func (s *Server) sampleTelemetry() {
 	ids := s.identities.Names()
 	s.telemetry.Gauge(context.Background(), "hosted_identities", int64(len(ids)))
 	s.telemetry.Gauge(context.Background(), "inbox_depth", s.inbox.Depth())
-	if s.filesProvider != nil {
-		for state, n := range adoptionCounts(ids, s.readSysDoc) {
-			s.telemetry.Gauge(context.Background(), state, n)
-		}
-		var used int64
-		for _, id := range ids {
-			n, err := s.filesProvider.UsedBytes(context.Background(), id)
-			if err != nil {
-				s.event(context.Background(), "storage.sample", "failure")
-				return
-			}
-			used += n
-		}
-		s.telemetry.Gauge(context.Background(), "storage_bytes", used)
+	for state, n := range adoptionCounts(ids, s.readSysDoc) {
+		s.telemetry.Gauge(context.Background(), state, n)
 	}
 }
 
 // readSysDoc reads a relay-readable system document, or nil when it is absent,
-// unreadable or oversized. Never used for poweur-sys/private.
+// unreadable or oversized.
 func (s *Server) readSysDoc(identity, path string) []byte {
-	if s.filesProvider == nil {
-		return nil
-	}
-	f, err := s.filesProvider.OpenFile(context.Background(), identity, path, os.O_RDONLY, 0)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxSysDocBytes+1))
-	if err != nil || len(b) > maxSysDocBytes {
-		return nil
-	}
-	return b
+	return s.readSysJSON(context.Background(), identity, path)
 }
 
 // messageKind buckets an envelope type into a bounded metric value: plain
@@ -305,9 +272,9 @@ var settingsDocs = map[string]struct {
 	prefix string
 	fields []string
 }{
-	files.SysPublic + "/profile.json":     {"profile", []string{"display_name", "avatar", "bio", "links", "locale"}},
-	files.SysRelay + "/inbox-policy.json": {"inbox", []string{"mode", "anonymous", "read_receipts"}},
-	analyticsPath:                         {"analytics", []string{"granted"}},
+	profilePath:     {"profile", []string{"display_name", "avatar", "bio", "links", "locale"}},
+	inboxPolicyPath: {"inbox", []string{"mode", "anonymous", "read_receipts"}},
+	analyticsPath:   {"analytics", []string{"granted"}},
 }
 
 // settingsChanges names the known fields that differ between two versions of
@@ -381,14 +348,14 @@ func adoptionCounts(ids []string, read func(identity, path string) []byte) map[s
 		}
 	}
 	for _, id := range ids {
-		if p, err := idpkg.ParseProfile(read(id, files.SysPublic+"/profile.json")); err == nil {
+		if p, err := idpkg.ParseProfile(read(id, profilePath)); err == nil {
 			inc("adopt_profile_display_name", strings.TrimSpace(p.DisplayName) != "")
 			inc("adopt_profile_bio", strings.TrimSpace(p.Bio) != "")
 			inc("adopt_profile_avatar", p.Avatar != "")
 			inc("adopt_profile_links", len(p.Links) > 0)
 			inc("adopt_profile_locale", p.Locale != "")
 		}
-		if p, err := idpkg.ParseInboxPolicy(read(id, files.SysRelay+"/inbox-policy.json")); err == nil {
+		if p, err := idpkg.ParseInboxPolicy(read(id, inboxPolicyPath)); err == nil {
 			out[inboxModeStates[p.Mode]]++
 			inc("adopt_inbox_anonymous", p.Anonymous != nil)
 			inc("adopt_read_receipts_off", p.ReadReceipts != nil && !p.ReadReceipts.Enabled)
@@ -398,7 +365,7 @@ func adoptionCounts(ids []string, read func(identity, path string) []byte) map[s
 		if p, err := parseAnalytics(read(id, analyticsPath)); err == nil {
 			inc("adopt_analytics_granted", p.Granted)
 		}
-		if c, err := idpkg.ParseContactsFile(read(id, files.SysRelay+"/contacts.json")); err == nil {
+		if c, err := idpkg.ParseContactsFile(read(id, contactsPath)); err == nil {
 			accepted := false
 			for _, contact := range c.Contacts {
 				accepted = accepted || contact.State == idpkg.ContactAccepted
@@ -409,43 +376,19 @@ func adoptionCounts(ids []string, read func(identity, path string) []byte) map[s
 	return out
 }
 
-// systemAction recognizes only validated system documents, never filenames.
-func systemAction(clean, method string) string {
-	switch clean {
-	case analyticsPath:
-		return "analytics.preference"
-	case files.SysRelay + "/contacts.json":
-		return "contacts.update"
-	case files.SysRelay + "/inbox-policy.json":
-		return "policy.update"
-	}
-	if strings.HasPrefix(clean, files.SysRelay+"/shares/") {
-		if method == "DELETE" {
-			return "share.revoke"
-		}
-		return "share.update"
-	}
-	if strings.HasPrefix(clean, files.SysRelay+"/groups/") {
-		return "group.update"
-	}
-	return "dav.write"
-}
-
 // Fixed route inventory. Domain hooks refine writes/forwarding without counting
 // them as a second submission. HTTP request outcomes cover every other route.
 var routeActions = map[string]string{
 	"POST /identities": "registration.create",
 	"POST /sessions":   "session.create", "DELETE /sessions/{id}": "session.revoke",
-	"POST /auth/dav-token": "dav.token.create", "DELETE /auth/dav-token/{token}": "dav.token.revoke",
 	"GET /messages/{identity}": "message.pickup", "POST /messages/{identity}/consume": "message.consume",
 	"POST /acks": "ack.submit", "GET /requests/{identity}": "contact.pickup", "GET /anon/{identity}": "anonymous.pickup",
 	"POST /identities/{identity}/export": "identity.export", "POST /identities/{identity}/rotate": "identity.rotate",
-	"POST /identities/{identity}/encryption-key": "identity.encryption_key",
-	"PUT /identities/{identity}/keystore":        "keystore.put", "POST /identities/{identity}/keystore/list": "keystore.list",
+	"POST /identities/{identity}/encryption-key":  "identity.encryption_key",
+	"PUT /identities/{identity}/system/{path...}": "system.write", "DELETE /identities/{identity}/system/{path...}": "system.delete",
+	"PUT /identities/{identity}/keystore": "keystore.put", "POST /identities/{identity}/keystore/list": "keystore.list",
 	"POST /identities/{identity}/keystore/fetch": "keystore.fetch", "DELETE /identities/{identity}/keystore/{enrollment}": "keystore.delete",
 	"POST /identities/{identity}/enroll/offer": "enroll.offer", "POST /identities/{identity}/enroll/{rendezvous}/fetch": "enroll.fetch",
 	"POST /identities/{identity}/enroll/{rendezvous}/deliver": "enroll.deliver", "GET /identities/{identity}/enroll/{rendezvous}": "enroll.claim",
 	"DELETE /identities/{identity}/enroll/{rendezvous}": "enroll.cancel",
-	"POST /sync/{identity}/upload":                      "upload.create", "PATCH /sync/{identity}/upload/{id}": "upload.chunk",
-	"DELETE /sync/{identity}/upload/{id}": "upload.cancel",
 }

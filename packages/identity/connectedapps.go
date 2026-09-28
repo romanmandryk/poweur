@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-// ConnectedAppsPath is the user-editable relay policy file for third-party
-// applications authorized through Sign in with Poweur ID.
-const ConnectedAppsPath = "poweur-sys/relay/connected-apps.json"
+// ConnectedAppsPath is the owner-written system file listing third-party
+// applications authorized through Sign in with Poweur ID; the relay reads it
+// to enforce what each app may do.
+const ConnectedAppsPath = ".poweur/relay/connected-apps.json"
 
 const ConnectedAppsVersion = 1
 
@@ -62,11 +63,6 @@ func ParseConnectedApps(raw []byte) (ConnectedApps, error) {
 		a.Scopes, err = NormalizeSignInScopes(a.Scopes)
 		if err != nil {
 			return ConnectedApps{}, fmt.Errorf("connected app %d: %w", i, err)
-		}
-		for _, scope := range a.Scopes {
-			if err := CheckSignInScopeNamespace(scope, a.AppID); err != nil {
-				return ConnectedApps{}, err
-			}
 		}
 		if _, err := time.Parse(time.RFC3339, a.GrantedAt); err != nil {
 			return ConnectedApps{}, fmt.Errorf("connected app %d: granted_at must be RFC3339", i)
