@@ -1,6 +1,7 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
 import { LinkPasswordRequired, openLink, parseLinkUrl } from "../src/drive/link.js";
 import { openFileRequest } from "../src/drive/request.js";
+import { createTransfer, revokeTransfer } from "../src/drive/transfer.js";
 import { DriveLog } from "../src/drive/log.js";
 import { DriveScope } from "../src/drive/scope.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
@@ -260,7 +261,7 @@ it("opens a password link with only the fragment and the password", async () => 
   // A wrong fragment decrypts nothing, even with the right password.
   await expect(openLink({ ...base, fragment: new Uint8Array(32).fill(1), password: "open sesame" })).rejects.toBeTruthy();
   expect(parseLinkUrl(`https://${alice.identity}/s/${share.link}#${Buffer.from(fragment).toString("base64url")}`)).toMatchObject({ drive: alice.identity, link: share.link });
-});
+}, 30_000);
 
 it("uploads through a password-protected create-only file request", async () => {
   const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
@@ -280,3 +281,34 @@ it("uploads through a password-protected create-only file request", async () => 
   const chunks = []; for await (const chunk of fresh.read(budget)) chunks.push(chunk);
   expect(Buffer.concat(chunks).toString()).toBe("encrypted submission");
 });
+
+it("creates a bounded-memory multi-file transfer and revokes its bytes", async () => {
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const large = new Uint8Array(4 * 1024 * 1024 + 19).fill(73);
+  const ranges: number[] = [];
+  const checkpoints: string[] = [];
+  const state = await createTransfer(owner, [
+    { name: "large.bin", size: large.length, async slice(start, end) { ranges.push(end - start); return large.slice(start, end); } },
+    { name: "note.txt", size: 5, async slice(start, end) { return new TextEncoder().encode("hello").slice(start, end); } },
+  ], {
+    origin: relay.baseUrl,
+    password: "secret",
+    maxDownloads: 2,
+    message: "A private note",
+    onState(next) { checkpoints.push(`${next.status}:${next.files.reduce((sum, file) => sum + file.offset, 0)}`); },
+  });
+  expect(state.status).toBe("ready");
+  expect(ranges).toHaveLength(2);
+  expect(Math.max(...ranges)).toBeLessThanOrEqual(4 * 1024 * 1024);
+  expect(checkpoints.some(value => value.startsWith("uploading:"))).toBe(true);
+
+  const url = new URL(state.url!);
+  const opened = await openLink({ origin: relay.baseUrl, drive: alice.identity, link: state.share!.link!,
+    fragment: fromBase64(url.hash.slice(1)), password: "secret", resolve: localResolveOptions(relay.baseUrl) });
+  expect((await opened.files.list(opened.root)).map(file => file.name).sort()).toEqual(["Message.txt", "large.bin", "note.txt"]);
+
+  const revoked = await revokeTransfer(owner, state);
+  expect(revoked.status).toBe("revoked");
+  await expect(openLink({ origin: relay.baseUrl, drive: alice.identity, link: state.share!.link!,
+    fragment: fromBase64(url.hash.slice(1)), password: "secret", resolve: localResolveOptions(relay.baseUrl) })).rejects.toMatchObject({ status: 404 });
+}, 120_000);

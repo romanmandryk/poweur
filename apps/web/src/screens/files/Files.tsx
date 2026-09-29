@@ -1,6 +1,6 @@
 /** Storage-v2 Files destination: encrypted files, direct shares and mounts. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, Share2, Trash2, Upload } from "lucide-react";
+import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, Send, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
 import { acceptBrowserOffer, autoAcceptContactOffers, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
@@ -15,6 +15,7 @@ import { FormGroup, Input, Label } from "../../ui/Field";
 import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
 import { Tab, TabBar } from "../../ui/Tabs";
+import { openSendPanel } from "./SendPanel";
 
 type View = { files: DriveFiles; folder: OpenFile; label: string; trail: { file: OpenFile; label: string }[] };
 
@@ -206,6 +207,7 @@ export function Files() {
       <DestHeader title="Files">
         {tab === "mine" && view && (
           <>
+            <IconButton id="btn-send-files" aria-label="Send files" onClick={openSendPanel}><Send className="size-5" /></IconButton>
             <IconButton id="btn-new-folder" aria-label="New folder" onClick={() => void newFolder()}><FolderPlus className="size-5" /></IconButton>
             <IconButton id="btn-upload-file" aria-label="Upload file" onClick={() => input.current?.click()}><Upload className="size-5" /></IconButton>
             <input ref={input} id="file-upload-input" className="hidden" type="file" onChange={(event) => event.currentTarget.files?.[0] && void upload(event.currentTarget.files[0])} />

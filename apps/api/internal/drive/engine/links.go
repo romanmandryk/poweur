@@ -134,6 +134,32 @@ type LinkInfo struct {
 	Remaining uint64 `json:"remaining_opens,omitempty"`
 }
 
+// LinkStats is owner-visible transfer/link usage. Opening a link is charged
+// once per viewer visit, never once per encrypted chunk.
+type LinkStats struct {
+	Link         string `json:"link"`
+	Node         string `json:"node"`
+	Opens        uint64 `json:"opens"`
+	MaxDownloads uint64 `json:"max_downloads,omitempty"`
+	Expires      string `json:"expires,omitempty"`
+}
+
+// LinkStats returns counters for a link even after it expires, so an owner
+// can retain a receipt in transfer history until the share is revoked.
+func (e *Engine) LinkStats(ctx context.Context, driveID, linkID string) (LinkStats, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return LinkStats{}, err
+	}
+	defer h.mu.Unlock()
+	for _, s := range h.st.Shares {
+		if s.Link == linkID {
+			return LinkStats{Link: linkID, Node: s.Node, Opens: h.st.LinkUses[linkID], MaxDownloads: s.Caps.Downloads, Expires: s.Expires}, nil
+		}
+	}
+	return LinkStats{}, ErrNotFound
+}
+
 // Link describes a live link, or ErrNotFound for an unknown, expired or
 // exhausted one.
 func (e *Engine) Link(ctx context.Context, driveID, linkID string) (LinkInfo, error) {

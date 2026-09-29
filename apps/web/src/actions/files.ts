@@ -259,7 +259,7 @@ export async function acceptBrowserOffer(identity: string, offer: ShareOffer): P
 }
 
 /** Create a direct share and notify the recipient with the canonical offer. */
-export async function shareBrowserFile(identity: string, file: OpenFile, member: string, role: ShareRole): Promise<{ share: Share; notified: boolean; reason?: string }> {
+export async function shareBrowserFile(identity: string, file: OpenFile, member: string, role: ShareRole, expires = ""): Promise<{ share: Share; notified: boolean; reason?: string }> {
   const target = member.trim().toLowerCase();
   const resolved = await lookup(target, relayUrlFor(identity));
   const published = resolved.document.encryption_public_key;
@@ -268,7 +268,7 @@ export async function shareBrowserFile(identity: string, file: OpenFile, member:
   if (key.length !== 32) throw new Error(`${target} has no valid encryption key`);
 
   const { drive, files } = await openBrowserDrive(identity);
-  const share = await files.shareWith(file, target, key, role);
+  const share = await files.shareWith(file, target, key, role, expires);
   const offer: ShareOffer = {
     format: OFFER_FORMAT,
     share,
@@ -284,7 +284,7 @@ export async function shareBrowserFile(identity: string, file: OpenFile, member:
     await client.sendAndArchive(target, JSON.stringify(offer), {
       type: "sys.share.offer",
       metadata: { share_id: share.id },
-      expiresAt: stamp(new Date(Date.now() + 7 * 24 * 3600 * 1000)),
+      expiresAt: expires || stamp(new Date(Date.now() + 7 * 24 * 3600 * 1000)),
     });
     return { share, notified: true };
   } catch (error) {
