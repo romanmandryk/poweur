@@ -4,10 +4,7 @@ package drive
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
-	"net"
 	"time"
 
 	"github.com/poweur/api/internal/config"
@@ -46,26 +43,16 @@ func Open(cfg config.Config) (provider.Store, error) {
 		if err != nil {
 			return nil, err
 		}
+		// S3 is the relay's only durable store: if it cannot answer the
+		// probe promptly the relay refuses to start rather than serve a
+		// degraded service. Each probe step gets stores3.ProbeStepTimeout.
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		if err := store.Probe(ctx); err != nil {
-			// A probe that only times out says the store is slow, not that it
-			// lacks conditional writes: start degraded rather than stay down
-			// through a provider incident. A wrong answer still refuses.
-			if !timedOut(err) {
-				return nil, err
-			}
-			slog.Warn("drive storage probe timed out; starting without it", "error", err.Error())
+			return nil, err
 		}
 		return store, nil
 	default:
 		return nil, fmt.Errorf("invalid STORAGE_PROVIDER: %s (use fs|s3)", cfg.StorageProvider)
 	}
-}
-
-// timedOut reports a deadline or network timeout, as opposed to a store
-// that answered wrongly.
-func timedOut(err error) bool {
-	var netErr net.Error
-	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout()
 }
