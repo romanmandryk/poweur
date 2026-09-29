@@ -1,73 +1,69 @@
 /** Storage-v2 Files destination: encrypted files, direct shares and mounts. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, File as FileIcon, Folder, FolderPlus, Share2, Trash2, Upload } from "lucide-react";
+import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
-import { acceptBrowserOffer, loadMounts, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
+import { acceptBrowserOffer, cachedBrowserFolder, ensureBrowserFiles, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { openBrowserDrive, readFileBytes } from "../../lib/drive";
 import { errorMessage } from "../../actions/relay";
 import { useData } from "../../state/data";
 import { useSession } from "../../state/session";
-import { openPanel, setLoading, toast } from "../../state/ui";
+import { openPanel, toast } from "../../state/ui";
 import { Button, IconButton } from "../../ui/Button";
 import { EmptyState, Notice } from "../../ui/Display";
 import { FormGroup, Input, Label } from "../../ui/Field";
 import { DestHeader } from "../../ui/Layout";
+import { PullToRefresh } from "../../ui/PullToRefresh";
 
 type View = { files: DriveFiles; folder: OpenFile; label: string; trail: { file: OpenFile; label: string }[] };
 
 export function Files() {
   const identity = useSession((state) => state.identity)!;
   const messages = useData((state) => state.messages);
+  const fileCache = useData((state) => state.files);
   const offers = useMemo(() => shareOffers(messages, identity), [identity, messages]);
-  const [view, setView] = useState<View | null>(null);
-  const [entries, setEntries] = useState<OpenFile[]>([]);
-  const [mounts, setMounts] = useState<Awaited<ReturnType<typeof loadMounts>>>([]);
+  const [view, setView] = useState<View | null>(() => fileCache.own ? ({ files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] }) : null);
   const [tab, setTab] = useState<"mine" | "shared">("mine");
   const [error, setError] = useState("");
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [working, setWorking] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const entries = view ? cachedBrowserFolder(view.files, view.folder) ?? [] : [];
+  const mounts = fileCache.mounts;
 
   async function show(next: View) {
-    setLoading(true, "Opening files…");
+    setView(next);
+    if (cachedBrowserFolder(next.files, next.folder)) return;
+    setFolderLoading(true);
     try {
-      const children = await next.files.list(next.folder);
-      const visible = next.trail.length === 1 && next.files.client.drive === identity
-        ? children.filter((file) => file.name !== ".poweur")
-        : children;
-      setEntries(visible.sort((a, b) => Number(b.manifest.kind === "folder") - Number(a.manifest.kind === "folder") || a.name.localeCompare(b.name)));
-      setView(next);
+      await loadBrowserFolder(identity, next.files, next.folder);
       setError("");
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
-      setLoading(false);
+      setFolderLoading(false);
     }
   }
 
   async function openMine() {
-    try {
-      const own = await openBrowserDrive(identity);
-      const root = await own.files.root();
-      await show({ files: own.files, folder: root, label: "Files", trail: [{ file: root, label: "Files" }] });
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  }
-
-  async function refreshShared() {
-    try {
-      setMounts(await loadMounts(identity));
-      setError("");
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
+    const own = useData.getState().files.own;
+    if (own) await show({ files: own.files, folder: own.root, label: "Files", trail: [{ file: own.root, label: "Files" }] });
+    else await ensureBrowserFiles(identity);
   }
 
   useEffect(() => {
-    // Both calls may initialize the encrypted root on a brand-new drive, so
-    // serialize them instead of racing two root creates.
-    void openMine().then(refreshShared);
+    void ensureBrowserFiles(identity);
   }, [identity]);
+
+  useEffect(() => {
+    if (tab !== "mine" || view || !fileCache.own) return;
+    setView({ files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] });
+  }, [fileCache.own, tab, view]);
+
+  async function refresh() {
+    try { await refreshBrowserFiles(identity); setError(""); }
+    catch (cause) { setError(errorMessage(cause)); }
+  }
 
   async function enter(file: OpenFile) {
     if (!view) return;
@@ -84,7 +80,7 @@ export function Files() {
   }
 
   async function downloadFrom(files: DriveFiles, file: OpenFile, displayName = "") {
-    setLoading(true, `Decrypting ${file.name || "file"}…`);
+    setWorking(true);
     try {
       const bytes = await readFileBytes(files, file);
       const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer]));
@@ -96,13 +92,13 @@ export function Files() {
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
-      setLoading(false);
+      setWorking(false);
     }
   }
 
   async function upload(file: File) {
     if (!view) return;
-    setLoading(true, `Encrypting ${file.name}…`);
+    setWorking(true);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const existing = entries.find((entry) => entry.name === file.name);
@@ -112,13 +108,13 @@ export function Files() {
       } else {
         await view.files.create(view.folder, file.name, "file", bytes);
       }
-      await show(view);
+      await loadBrowserFolder(identity, view.files, view.folder, true);
       toast(existing ? "File replaced" : "File uploaded", "success");
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
       if (input.current) input.current.value = "";
-      setLoading(false);
+      setWorking(false);
     }
   }
 
@@ -126,33 +122,33 @@ export function Files() {
     if (!view) return;
     const name = await askText({ title: "New folder", label: "Folder name", confirmLabel: "Create" });
     if (!name) return;
-    setLoading(true, "Creating folder…");
+    setWorking(true);
     try {
       await view.files.create(view.folder, name, "folder");
-      await show(view);
+      await loadBrowserFolder(identity, view.files, view.folder, true);
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
-      setLoading(false);
+      setWorking(false);
     }
   }
 
   async function remove(file: OpenFile) {
     if (!view || !await askConfirm({ title: `Delete ${file.name}?`, message: "This removes it from every synced device.", confirmLabel: "Delete" })) return;
-    setLoading(true, "Deleting…");
+    setWorking(true);
     try {
       await view.files.remove(file);
-      await show(view);
+      await loadBrowserFolder(identity, view.files, view.folder, true);
       toast("Deleted", "success");
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
-      setLoading(false);
+      setWorking(false);
     }
   }
 
   async function openMount(mount: (typeof mounts)[number]) {
-    setLoading(true, "Opening shared files…");
+    setFolderLoading(true);
     try {
       const shared = await openBrowserDrive(identity, mount.drive, mount.relay);
       const root = await shared.files.open(mount.node);
@@ -166,21 +162,21 @@ export function Files() {
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
-      setLoading(false);
+      setFolderLoading(false);
     }
   }
 
   async function accept(offer: (typeof offers)[number]) {
-    setLoading(true, "Verifying share…");
+    setWorking(true);
     try {
       const mount = await acceptBrowserOffer(identity, offer);
-      await refreshShared();
+      await refreshBrowserFiles(identity);
       toast("Share added to Files", "success");
       await openMount(mount);
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
-      setLoading(false);
+      setWorking(false);
     }
   }
 
@@ -198,11 +194,14 @@ export function Files() {
       </DestHeader>
 
       <div role="tablist" aria-label="Files view" className="mx-4 mb-3 grid grid-cols-2 rounded-control bg-surface-2 p-1">
-        <button role="tab" aria-selected={tab === "mine"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "mine" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("mine"); void openMine(); }}>My files</button>
-        <button role="tab" aria-selected={tab === "shared"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "shared" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("shared"); setView(null); void refreshShared(); }}>Shared with me</button>
+        <button role="tab" aria-selected={tab === "mine"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "mine" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("mine"); setView(null); void openMine(); }}>My files</button>
+        <button role="tab" aria-selected={tab === "shared"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "shared" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("shared"); setView(null); }}>Shared with me</button>
       </div>
 
-      {error && <Notice tone="warn" className="mx-4">{error}</Notice>}
+      <PullToRefresh onRefresh={refresh}>
+      {(error || fileCache.error) && <Notice tone="warn" className="mx-4">{error || fileCache.error}</Notice>}
+
+      {(fileCache.loading || folderLoading || working) && <div role="status" className="flex items-center justify-center gap-2 px-4 py-3 text-sm text-muted"><RefreshCw className="size-4 animate-spin text-accent" />{working ? "Updating files…" : "Loading files…"}</div>}
 
       {view && view.trail.length > 1 && (
         <nav aria-label="Folder path" className="flex gap-1 overflow-x-auto px-4 pb-2 text-sm text-muted">
@@ -210,11 +209,11 @@ export function Files() {
         </nav>
       )}
 
-      {tab === "shared" && !view && (
+      {tab === "shared" && !view && !fileCache.loading && (
         <SharedList offers={offers.filter((offer) => !mounts.some((mount) => mount.share_id === offer.share.id))} mounts={mounts} onAccept={accept} onOpen={openMount} />
       )}
 
-      {view && entries.length === 0 && (
+      {view && entries.length === 0 && !folderLoading && !working && (
         <EmptyState icon={atOwnRoot ? Upload : Folder} title={atOwnRoot ? "Your drive is empty" : "This folder is empty"} body={atOwnRoot ? "Upload a file or create a folder. Names and contents are encrypted before they leave this device." : undefined} action={atOwnRoot ? <Button className="w-auto px-6" onClick={() => input.current?.click()}>Upload a file</Button> : undefined} />
       )}
 
@@ -223,6 +222,7 @@ export function Files() {
           {entries.map((file) => <FileRow key={file.manifest.node} file={file} own={tab === "mine"} onOpen={() => void enter(file)} onShare={() => openShareDialog(identity, file)} onDelete={() => void remove(file)} />)}
         </div>
       )}
+      </PullToRefresh>
     </>
   );
 }
@@ -256,12 +256,21 @@ function ShareForm({ identity, file, close }: { identity: string; file: OpenFile
   const [role, setRole] = useState<ShareRole>("read");
   const [busy, setBusy] = useState(false);
   const [shares, setShares] = useState<Share[]>([]);
+  const [password, setPassword] = useState("");
+  const [linkDays, setLinkDays] = useState("7");
+  const [linkUrl, setLinkUrl] = useState("");
   useEffect(() => { void sharesForFile(identity, file).then(setShares, () => {}); }, [identity, file]);
   return <form onSubmit={(event) => { event.preventDefault(); const member = field.current?.value.trim(); if (!member) return; setBusy(true); void shareBrowserFile(identity, file, member, role).then(({ notified }) => { toast(notified ? `Shared with ${member}` : `Access granted, but ${member} could not be notified`, notified ? "success" : "warning", 7000); close(); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>
     <FormGroup><Label htmlFor="share-member">Poweur ID</Label><Input ref={field} id="share-member" autoComplete="off" placeholder="alex.example.com" /></FormGroup>
     <FormGroup><Label htmlFor="share-role">Access</Label><select id="share-role" value={role} onChange={(event) => setRole(event.currentTarget.value as ShareRole)} className="input w-full rounded-control border-[1.5px] border-sep bg-surface px-4 py-[13px]"><option value="read">Can view</option><option value="write">Can edit</option><option value="admin">Can manage</option></select></FormGroup>
     <Notice>The recipient gets a signed offer. The relay never receives this file's decryption key in plaintext.</Notice>
-    {shares.length > 0 && <div className="mb-4"><Label>People with access</Label><div className="overflow-hidden rounded-control bg-surface-2">{shares.map((share) => <div key={share.id} className="flex items-center gap-2 border-b border-sep px-3 py-2 last:border-0"><span className="min-w-0 flex-1 truncate text-sm">{share.member} · {share.role}</span><Button variant="danger" size="sm" data-revoke-share={share.id} onClick={() => { setBusy(true); void revokeBrowserShare(identity, share).then(() => { setShares((current) => current.filter((entry) => entry.id !== share.id)); toast("Access revoked", "success"); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>Revoke</Button></div>)}</div></div>}
+    <div className="my-5 border-t border-sep pt-4">
+      <Label htmlFor="link-password">Share a link</Label>
+      <p className="mb-3 text-sm text-muted">Anyone with the complete link can view this {file.manifest.kind}. Add a password for another layer of protection.</p>
+      <div className="grid grid-cols-[1fr_auto] gap-2"><Input id="link-password" type="password" autoComplete="new-password" placeholder="Password (optional)" value={password} onChange={(event) => setPassword(event.currentTarget.value)} /><select aria-label="Link expiry" value={linkDays} onChange={(event) => setLinkDays(event.currentTarget.value)} className="input rounded-control border-[1.5px] border-sep bg-surface px-3"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option><option value="">Never</option></select><Button type="button" variant="secondary" className="col-span-2" disabled={busy} onClick={() => { const expires = linkDays ? new Date(Date.now() + Number(linkDays) * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z") : ""; setBusy(true); void linkBrowserFile(identity, file, password, expires).then(({ share, url }) => { setShares((current) => [...current, share]); setLinkUrl(url); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}><Link2 className="size-4" />Create link</Button></div>
+      {linkUrl && <div className="mt-2 flex gap-2"><Input aria-label="Share link" readOnly value={linkUrl} /><IconButton type="button" aria-label="Copy share link" onClick={() => { if (!navigator.clipboard) { toast("Copy is not available in this browser", "error"); return; } void navigator.clipboard.writeText(linkUrl).then(() => toast("Link copied", "success"), (cause) => toast(errorMessage(cause), "error")); }}><Copy className="size-4" /></IconButton></div>}
+    </div>
+    {shares.length > 0 && <div className="mb-4"><Label>Access</Label><div className="overflow-hidden rounded-control bg-surface-2">{shares.map((share) => <div key={share.id} className="flex items-center gap-2 border-b border-sep px-3 py-2 last:border-0"><span className="min-w-0 flex-1 truncate text-sm">{share.member || "Anyone with the link"} · {share.role}</span><Button type="button" variant="danger" size="sm" data-revoke-share={share.id} onClick={() => { setBusy(true); void revokeBrowserShare(identity, share).then(() => { setShares((current) => current.filter((entry) => entry.id !== share.id)); if (share.link) setLinkUrl(""); toast("Access revoked", "success"); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>Revoke</Button></div>)}</div></div>}
     <div className="flex gap-2"><Button variant="secondary" className="min-h-11 flex-1" onClick={close}>Cancel</Button><Button type="submit" className="min-h-11 flex-1 p-3 text-[15px]" disabled={busy}>{busy ? "Sharing…" : "Share"}</Button></div>
   </form>;
 }

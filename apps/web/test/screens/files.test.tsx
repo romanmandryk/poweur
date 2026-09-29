@@ -26,6 +26,10 @@ const mocks = vi.hoisted(() => {
     shareBrowserFile: vi.fn(),
     sharesForFile: vi.fn(async () => []),
     revokeBrowserShare: vi.fn(),
+    linkBrowserFile: vi.fn(),
+    ensureBrowserFiles: vi.fn(),
+    loadBrowserFolder: vi.fn(),
+    refreshBrowserFiles: vi.fn(),
   };
 });
 
@@ -36,6 +40,11 @@ vi.mock("../../src/actions/files", () => ({
   shareBrowserFile: mocks.shareBrowserFile,
   sharesForFile: mocks.sharesForFile,
   revokeBrowserShare: mocks.revokeBrowserShare,
+  linkBrowserFile: mocks.linkBrowserFile,
+  ensureBrowserFiles: mocks.ensureBrowserFiles,
+  loadBrowserFolder: mocks.loadBrowserFolder,
+  refreshBrowserFiles: mocks.refreshBrowserFiles,
+  cachedBrowserFolder: (files: any, folder: any) => useData.getState().files.folders[`${files.client.drive}:${folder.manifest.node}`]?.entries,
   shareOffers: (messages: any[]) => messages.filter((message) => message.type === "sys.share.offer").map((message) => JSON.parse(message.plaintext)),
 }));
 
@@ -45,6 +54,20 @@ beforeEach(() => {
   mocks.files.list.mockResolvedValue([mocks.note]);
   mocks.loadMounts.mockResolvedValue([]);
   useSession.setState({ identity: "alice.poweur.net", unlocked: true });
+  mocks.ensureBrowserFiles.mockImplementation(async () => {
+    useData.setState((state) => ({ files: {
+      ...state.files,
+      own: { files: mocks.files as any, root: mocks.root },
+      folders: { [`alice.poweur.net:${mocks.root.manifest.node}`]: { folder: mocks.root, entries: [mocks.note] } },
+      loaded: true,
+    } }));
+  });
+  mocks.loadBrowserFolder.mockImplementation(async (_identity: string, files: any, folder: any) => {
+    const entries = await files.list(folder);
+    useData.setState((state) => ({ files: { ...state.files, folders: { ...state.files.folders, [`${files.client.drive}:${folder.manifest.node}`]: { folder, entries } } } }));
+    return entries;
+  });
+  mocks.refreshBrowserFiles.mockResolvedValue(undefined);
 });
 
 describe("Files destination (E20-T10)", () => {
@@ -53,8 +76,7 @@ describe("Files destination (E20-T10)", () => {
     await screen.findByText("note.txt");
     expect(container.querySelector("#btn-upload-file")).toBeTruthy();
     expect(container.querySelector("#btn-new-folder")).toBeTruthy();
-    expect(mocks.files.root).toHaveBeenCalled();
-    expect(mocks.files.list).toHaveBeenCalledWith(mocks.root);
+    expect(mocks.ensureBrowserFiles).toHaveBeenCalledWith("alice.poweur.net");
   });
 
   it("shows pending offers and accepts one into Shared with me", async () => {

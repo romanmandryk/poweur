@@ -1,5 +1,5 @@
 /** User actions behind the storage-v2 Files destination (E20-T10). */
-import { fromBase64 } from "@poweur/client";
+import { fromBase64, toBase64url } from "@poweur/client";
 import {
   OFFER_FORMAT,
   acceptOffer,
@@ -17,6 +17,7 @@ import {
 import { clientFor, lookup } from "../lib/client.js";
 import { openBrowserDrive, readFileBytes } from "../lib/drive";
 import { relayUrlFor } from "../lib/storage.js";
+import { useData } from "../state/data.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -39,9 +40,98 @@ async function mountsDocument(files: DriveFiles): Promise<{ mounts: Mounts; fold
   return { mounts: { format: 1, mounts: Array.isArray(parsed.mounts) ? parsed.mounts : [] }, folder, file };
 }
 
-export async function loadMounts(identity: string): Promise<Mount[]> {
-  const { files } = await openBrowserDrive(identity);
+export async function loadMounts(identity: string, opened?: DriveFiles): Promise<Mount[]> {
+  const files = opened ?? (await openBrowserDrive(identity)).files;
   return (await mountsDocument(files)).mounts.mounts;
+}
+
+const folderKey = (files: DriveFiles, folder: OpenFile) => `${files.client.drive}:${folder.manifest.node}`;
+let loadingFiles: { identity: string; promise: Promise<void> } | null = null;
+
+function visibleEntries(files: DriveFiles, folder: OpenFile, entries: OpenFile[]): OpenFile[] {
+  const visible = folder.folder === "" && files.client.drive === files.client.signer.identity
+    ? entries.filter((entry) => entry.name !== ".poweur")
+    : entries;
+  return [...visible].sort((a, b) => Number(b.manifest.kind === "folder") - Number(a.manifest.kind === "folder") || a.name.localeCompare(b.name));
+}
+
+/** Open the active identity's drive once and retain its decrypted listings across navigation. */
+export async function ensureBrowserFiles(identity: string, force = false): Promise<void> {
+  const cached = useData.getState().files;
+  if (cached.loaded && !force) return;
+  if (loadingFiles?.identity === identity) return loadingFiles.promise;
+  const promise = (async () => {
+    useData.setState((state) => ({ files: { ...state.files, identity, loading: true, error: null } }));
+    try {
+      const opened = cached.own ? { files: cached.own.files } : await openBrowserDrive(identity);
+      const root = cached.own?.root ?? await opened.files.root();
+      const entries = visibleEntries(opened.files, root, await opened.files.list(root));
+      const mounts = await loadMounts(identity, opened.files);
+      if (useData.getState().files.identity !== identity) return;
+      const key = folderKey(opened.files, root);
+      useData.setState((state) => ({ files: {
+        ...state.files,
+        own: { files: opened.files, root },
+        folders: { ...state.files.folders, [key]: { folder: root, entries } },
+        mounts,
+        loading: false,
+        loaded: true,
+        error: null,
+      } }));
+    } catch (cause) {
+      if (useData.getState().files.identity !== identity) return;
+      const message = cause instanceof Error ? cause.message : String(cause);
+      useData.setState((state) => ({ files: { ...state.files, loading: false, loaded: true, error: message } }));
+    }
+  })();
+  loadingFiles = { identity, promise };
+  try { await promise; } finally { if (loadingFiles?.promise === promise) loadingFiles = null; }
+}
+
+/** Read one folder, using the decrypted in-memory listing unless explicitly refreshed. */
+export async function loadBrowserFolder(identity: string, files: DriveFiles, folder: OpenFile, force = false): Promise<OpenFile[]> {
+  const key = folderKey(files, folder);
+  const cached = useData.getState().files.folders[key];
+  if (cached && !force) return cached.entries;
+  const entries = visibleEntries(files, folder, await files.list(folder));
+  // Ignore a late read belonging to an identity that has since been switched out.
+  if (files.client.signer.identity === identity && useData.getState().files.identity === identity) {
+    useData.setState((state) => ({ files: { ...state.files, folders: { ...state.files.folders, [key]: { folder, entries } }, error: null } }));
+  }
+  return entries;
+}
+
+/** Re-read mounts and every folder visited this session after pull-to-refresh or drive SSE. */
+export async function refreshBrowserFiles(identity: string): Promise<void> {
+  await ensureBrowserFiles(identity);
+  const snapshot = useData.getState().files;
+  if (!snapshot.own) return;
+  const known = Object.values(snapshot.folders).filter(({ folder }) => folder.manifest.drive === identity);
+  try {
+    const results = await Promise.all(known.map(async ({ folder }) => ({
+      key: folderKey(snapshot.own!.files, folder),
+      folder,
+      entries: visibleEntries(snapshot.own!.files, folder, await snapshot.own!.files.list(folder)),
+    })));
+    const mounts = await loadMounts(identity, snapshot.own.files);
+    if (useData.getState().files.identity !== identity) return;
+    useData.setState((state) => ({ files: {
+      ...state.files,
+      folders: { ...state.files.folders, ...Object.fromEntries(results.map((result) => [result.key, { folder: result.folder, entries: result.entries }])) },
+      mounts,
+      loaded: true,
+      error: null,
+    } }));
+  } catch (cause) {
+    if (useData.getState().files.identity !== identity) return;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    useData.setState((state) => ({ files: { ...state.files, error: message } }));
+    throw cause;
+  }
+}
+
+export function cachedBrowserFolder(files: DriveFiles, folder: OpenFile): OpenFile[] | undefined {
+  return useData.getState().files.folders[folderKey(files, folder)]?.entries;
 }
 
 export function shareOffers(messages: any[], identity: string): ShareOffer[] {
@@ -121,7 +211,16 @@ export async function shareBrowserFile(identity: string, file: OpenFile, member:
 
 export async function sharesForFile(identity: string, file: OpenFile): Promise<Share[]> {
   const { drive } = await openBrowserDrive(identity);
-  return (await drive.shares()).shares.filter((share) => share.node === file.manifest.node && Boolean(share.member));
+  return (await drive.shares()).shares.filter((share) => share.node === file.manifest.node);
+}
+
+/** Create a key-in-fragment browser link; the fragment is never sent to the relay. */
+export async function linkBrowserFile(identity: string, file: OpenFile, password = "", expires = ""): Promise<{ share: Share; url: string }> {
+  const { files } = await openBrowserDrive(identity);
+  const { share, fragment } = await files.link(file, "read", expires, password);
+  const relay = new URL(relayUrlFor(identity));
+  const origin = `${relay.protocol}//${share.drive}${relay.port ? `:${relay.port}` : ""}`;
+  return { share, url: `${origin}/s/${share.link}#${toBase64url(fragment)}` };
 }
 
 export async function revokeBrowserShare(identity: string, share: Share): Promise<void> {

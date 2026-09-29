@@ -32,7 +32,7 @@
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
-| E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, direct person shares/revocation, offers and encrypted mounts are in; links, requests, public folders, previews, thumbnails and search remain |
+| E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, cached listings with SSE/pull refresh, direct shares/revocation, offers, encrypted mounts and password links are in; requests, public folders, previews, thumbnails and search remain |
 | E20-T11 Message history & attachments on v2 | **in progress** | Append-log history and CLI attachments (share + sealed payload) are in; web download, the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
@@ -649,8 +649,12 @@ both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` conv
       Shared with me verifies offers against the source relay and persists accepted mounts in
       encrypted `.poweur/private/mounts.json`; direct person shares support read/write/admin and
       immediate revocation. Component coverage plus a real-relay browser journey cover
-      upload → share → accept/open → revoke. Cross-relay browser coverage remains.
-- [ ] Complete the share dialog with links and file requests; public folder toggle with a
+      upload → share → accept/open → revoke. Listings stay in the identity-scoped cache across
+      navigation and refresh from drive SSE, app foregrounding or the Messages-style pull gesture.
+      Cross-relay browser coverage remains.
+- [x] Key-in-fragment read links in the share dialog, including an optional password, copy and
+      immediate revocation; the real-browser journey opens a password link in a clean context
+- [ ] Complete the share dialog with create-only file requests; public folder toggle with a
       plaintext warning; mobile-specific interaction coverage
 - [ ] Thumbnails and previews generated on the client at upload and stored as encrypted
       sidecars; name search as a client-side index

@@ -5,6 +5,7 @@
  * and the reset that switching identity performs.
  */
 import { create } from "zustand";
+import type { DriveFiles, Mount, OpenFile } from "@poweur/client/drive";
 
 export type Tray = "inbox" | "requests" | "anonymous";
 
@@ -32,6 +33,15 @@ export const freshRequests = () => ({ incoming: [] as any[], loading: false, loa
 export const freshAnon = () => ({ messages: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
 export const freshPolicy = () => ({ doc: null as any, explicit: false, loading: false, loaded: false });
 export const freshProfile = () => ({ doc: null as any, explicit: false, loaded: false, loading: false });
+export const freshFiles = () => ({
+  identity: null as string | null,
+  own: null as { files: DriveFiles; root: OpenFile } | null,
+  folders: {} as Record<string, { folder: OpenFile; entries: OpenFile[] }>,
+  mounts: [] as Mount[],
+  loading: false,
+  loaded: false,
+  error: null as string | null,
+});
 
 /** Everything that belongs to whoever is signed in. */
 function freshIdentityData() {
@@ -44,6 +54,7 @@ function freshIdentityData() {
     anon: freshAnon(),
     policy: freshPolicy(),
     profile: freshProfile(),
+    files: freshFiles(),
     /** The open conversation (E15-T13), or null. */
     thread: null as any,
   };

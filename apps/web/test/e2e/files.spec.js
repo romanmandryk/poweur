@@ -30,6 +30,29 @@ test.describe("storage-v2 Files", () => {
 
     await alicePage.locator('nav[aria-label="Folder path"] button').first().click();
     await alicePage.getByRole("button", { name: "Share Plans" }).click();
+    await alicePage.fill("#link-password", "blue-sky");
+    await alicePage.getByRole("button", { name: "Create link" }).click();
+    const createdLink = await alicePage.getByRole("textbox", { name: "Share link" }).inputValue();
+    const linkContext = await browser.newContext();
+    // Keep the identity URL (the viewer parses its drive from the hostname),
+    // while routing this test-only hosted name to the ephemeral relay.
+    await linkContext.route("**/*", async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.hostname !== alice) return route.continue();
+      const target = new URL(`${requestUrl.pathname}${requestUrl.search}`, relay.baseUrl);
+      const response = await route.fetch({ url: target.href, headers: { ...route.request().headers(), host: alice } });
+      await route.fulfill({ response });
+    });
+    const linkPage = await linkContext.newPage();
+    await linkPage.goto(createdLink);
+    await expect(linkPage.getByLabel("This link needs a password")).toBeVisible({ timeout: 20_000 });
+    await linkPage.fill("#password-input", "blue-sky");
+    await linkPage.getByRole("button", { name: "Open" }).click();
+    await expect(linkPage.getByText("roadmap.txt", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await linkContext.close();
+    await alicePage.getByRole("button", { name: "Cancel" }).click();
+
+    await alicePage.getByRole("button", { name: "Share Plans" }).click();
     await alicePage.fill("#share-member", bob);
     await alicePage.getByRole("button", { name: "Share", exact: true }).click();
     await expect(alicePage.locator(`[data-toast-key="success:Shared with ${bob}"]`)).toBeVisible({ timeout: 20_000 });
@@ -46,8 +69,9 @@ test.describe("storage-v2 Files", () => {
     await expect(bobPage.getByText("roadmap.txt", { exact: true })).toBeVisible({ timeout: 20_000 });
 
     await alicePage.getByRole("button", { name: "Share Plans" }).click();
-    await expect(alicePage.getByText(`${bob} · read`)).toBeVisible();
-    await alicePage.getByRole("button", { name: "Revoke" }).click();
+    const bobAccess = alicePage.getByText(`${bob} · read`);
+    await expect(bobAccess).toBeVisible();
+    await bobAccess.locator("..").getByRole("button", { name: "Revoke" }).click();
     await expect(alicePage.locator('[data-toast-key="success:Access revoked"]')).toBeVisible();
 
     await bobPage.getByRole("tab", { name: "My files" }).click();

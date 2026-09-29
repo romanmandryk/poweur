@@ -15,6 +15,7 @@ import { Header } from "./Header";
 import { LoadingOverlay, PanelHost, Toaster } from "./Overlays";
 import { useBackNavigation } from "./useBackNavigation";
 import { useMessaging } from "./useMessaging";
+import { useFilesSync } from "./useFilesSync";
 
 export function App() {
   const identity = useSession((state) => state.identity);
@@ -24,6 +25,7 @@ export function App() {
   const sub = useRoute((state) => state.sub);
   useBackNavigation();
   useMessaging();
+  useFilesSync();
 
   useLayoutEffect(() => {
     document.getElementById("page-content")?.scrollTo?.({ top: 0 });
