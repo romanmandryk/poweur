@@ -35,7 +35,7 @@
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
 | E20-T11 Message history & attachments on v2 | **in progress** | Append-log history and CLI attachments (share + sealed payload) are in; web download, the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
 | **Wave 4 — cutover** | | |
-| E20-T12 Migration & v1 removal | **in progress** | v1 implementation removed; system-only operator migration and production rehearsal remain open; no deployment |
+| E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
 | **Wave 5 — after launch, demand-led** | | |
 | E20-T13 rclone backend | **open** | desktop mount and local `serve webdav/sftp` for third-party tools |
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
@@ -46,7 +46,7 @@
 ## Continuation checkpoint — 2026-09-28
 
 The supplied ten-phase plan is authoritative. Do not push/deploy master until Phase 9
-and the Phase 10 migration rehearsal are complete. Work started in `99901a9` during
+and the Phase 10 migration rehearsal are complete (done: deployed 2026-09-29). Work started in `99901a9` during
 Phase 0; no drive engine/provider existed at that checkpoint.
 
 - [x] Remove v1 relay, SDK, CLI and web file/share/sync surfaces and reference apps.
@@ -124,7 +124,13 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       and transfer copies into a destination as its owner or as a member with a
       share there — no test or command uses another identity's private keys
       (`INT_DRIVE_06`, TS live-relay member test).
-- [ ] Phases 9–10: sync daemon, web and mobile Files, complete baseline, migration and production rehearsal.
+- [x] Phase 10: `migrate-v1` rehearsed on a copy of production, then production migrated
+      on 2026-09-29 (7 identities, 3 avatars, 6 key backups, 7 undelivered messages; v1
+      trees kept as `*.v1-backup`, full archive in `/root/backups/`) and the v2 relay
+      deployed; verified identities, profiles, avatars, an encrypted drive round trip and
+      no plaintext on disk.
+- [ ] Remaining: Phase 9 restore list below; sync daemon (E20-T9); web and mobile Files
+      (E20-T10).
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 kept an
 operational owner-authenticated system-file API instead of the plan's unavailable
@@ -667,20 +673,22 @@ paging works against it.
 
 ### E20-T12 — Migration & v1 removal
 
-- [ ] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
+- [x] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
       copy only plaintext system data (identity, profile/avatar, capabilities,
       contacts, policy, analytics, devices, connected apps, group roster).
-- [ ] Also move the relay registries Phase 6 relocated: `identities/<id>/poweur-sys/public/id.json`
+- [x] Also move the relay registries Phase 6 relocated: `identities/<id>/poweur-sys/public/id.json`
       → `relay/identities/<id>.json` (+ drive mirror), `spool/{messages,acks}/<id>/*.json` →
       `relay/spool/{messages,acks}/<id>/`, `keystore/<id>.json` → `relay/keystore/<id>.json`
       (WebAuthn key backups — losing them locks users out of recovery). Undelivered mail and
       key backups must survive the cutover.
-- [ ] Drop old files, shares, links and history; never generate private content keys
+- [x] Drop old files, shares, links and history; never generate private content keys
       on the relay. Move successfully migrated old trees to `identities.v1-backup/`.
 - [x] Remove `/dav`, v1 sync, DAV tokens, app passwords and whole-file implementation.
 - [ ] Finish residual v1 documentation/reference cleanup and restore baseline tests on v2.
-- [ ] Update OPS/BACKUP runbooks, rehearse on a copy of production, verify all baseline
-      behavior and health before deployment; document backup expiry.
+- [x] Update OPS/BACKUP runbooks, rehearse on a copy of production, verify health before
+      deployment (done 2026-09-29).
+- [ ] Delete `*.v1-backup` on the production volume and `/root/backups/poweur_data-pre-v2-*`
+      once v2 has run cleanly for two weeks (after 2026-10-13).
 
 **Acceptance:** dry run does not mutate the source; interrupted migration resumes without
 losing system documents; identity discovery, avatars, contacts/policy and group delivery
