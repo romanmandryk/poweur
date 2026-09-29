@@ -9,3 +9,4 @@ export * from "./client.js";
 export * from "./files.js";
 export * from "./scope.js";
 export * from "./log.js";
+export * from "./offer.js";

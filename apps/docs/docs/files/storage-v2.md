@@ -463,6 +463,15 @@ until a member presents the new one, so a removed member's copy stops working at
 verified roster is kept at `relay/group-rosters/<group>.json`; a newer one is diffed against it
 and departed members are revoked as for local groups.
 
+**Implemented offers and mounts (PCP-0008).** Sharing with a member sends them an end-to-end
+encrypted `sys.share.offer` carrying the signed share, the drive's relay and the shared node's
+name and kind (a member cannot decrypt a shared root's own name). Accepting requires the offered
+share to be exactly the one the relay holds for the member (same signed hash) and to open the
+node; the client then records a mount in the member's own encrypted drive at
+`.poweur/private/mounts.json` and answers `sys.share.accept`. Revoking sends `sys.share.revoked`.
+None of these messages grants access. CLI: `poweur drive share add` (offers by default),
+`drive accept <offer.json>`, `drive mounts`, and `--drive <owner> /<node>/…` to work inside a mount.
+
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the
 other chunk IDs in a new manifest. Two replacements against one base produce one

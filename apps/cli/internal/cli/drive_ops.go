@@ -9,14 +9,16 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
+	idpkg "github.com/poweur/identity"
 	protocol "github.com/poweur/identity/drive"
 )
 
 func runDriveOps(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
+	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member> [--no-offer]|rm <id>|ls; accept <offer.json|->; mounts; link create <path>|rm <id>; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
 	fs := flag.NewFlagSet("drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
@@ -29,6 +31,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 	into := fs.String("into", "", "destination folder on --to: /<shared-node-id>[/path] as a member, or a path when --to is your own drive")
 	password := fs.String("password", "", "link password")
 	expires := fs.String("expires", "", "RFC3339 expiry")
+	noOffer := fs.Bool("no-offer", false, "share or revoke without messaging the member")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
 		return 1
 	}
@@ -82,8 +85,22 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, usage)
 				return 1
 			}
+			var revoked *protocol.Share
+			if shares, err := files.Client.Shares(ctx); err == nil {
+				for i := range shares {
+					if shares[i].ID == fs.Arg(1) {
+						revoked = &shares[i]
+					}
+				}
+			}
 			if err := files.Client.Unshare(ctx, fs.Arg(1)); err != nil {
 				return fail(err)
+			}
+			if revoked != nil && revoked.Member != "" && !*noOffer {
+				notice := protocol.ShareRevoked{Format: protocol.OfferFormat, Drive: revoked.Drive, ShareID: revoked.ID, RevokedAt: time.Now().UTC().Format(time.RFC3339)}
+				if err := sendDriveMessage(*use, revoked.Member, idpkg.MsgTypeShareRevoked, revoked.ID, notice, stderr); err != nil {
+					fmt.Fprintln(stderr, "revoked, but the member was not told:", err)
+				}
 			}
 			return writeOutput(stdout, *jsonOut, map[string]string{"removed": fs.Arg(1)}, fs.Arg(1)+"\n")
 		case "add":
@@ -105,6 +122,11 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			share, err := files.ShareWith(ctx, file, fs.Arg(2), memberKey, *role, *expires)
 			if err != nil {
 				return fail(err)
+			}
+			if !*noOffer {
+				if err := offerShare(*use, files, file, share, stderr); err != nil {
+					fmt.Fprintln(stderr, "shared, but the offer was not sent:", err)
+				}
 			}
 			result := map[string]string{"id": share.ID, "node": share.Node, "member": share.Member, "role": share.Role}
 			return writeOutput(stdout, *jsonOut, result, share.ID+"\n")

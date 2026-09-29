@@ -104,8 +104,9 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       owner access and denial to retired/unrelated identities.
 - [x] Phase 7 remote groups: presented rosters verified against the group relay's
       epoch, cached and rechecked every minute, diffed to revoke departed members.
-- [ ] Phase 7 remaining: client-orchestrated ownership transfer, offers/accepts
-      and mounts, link viewer.
+- [x] Phase 7 offers/accepts/mounts (PCP-0008) and client-orchestrated transfer as a
+      member of the destination (Phase 8 rework).
+- [ ] Phase 7 remaining: link viewer (web), TS CLI offers.
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
@@ -580,7 +581,9 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [x] **Proof-of-work** (E14 primitive) required on anonymous link writes, difficulty set by the owner
 - [ ] **Ownership transfer** of a subtree between drives (person ↔ group identity), re-issuing
       shares and keeping links working
-- [ ] Offers and accepts (E05-T3 bodies) carry sealed node keys; mounts in `.poweur/private/mounts/`
+- [x] Offers and accepts (PCP-0008, `format: 2`) carry the signed share; mounts in
+      `.poweur/private/mounts.json` (Go/TS formats, Go CLI `share add`/`accept`/`mounts`,
+      `INT_DRIVE_07`; TS CLI and web UI still to come)
 - [x] Revocation with immediate access removal and key rotation on the next owner write
       (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
 - [x] Links with key-in-fragment and the split password verifier; expiry, download caps,

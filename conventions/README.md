@@ -33,4 +33,5 @@ Schema URLs retain their historical namespace during the storage transition.
 | [pcp-0005](pcp-0005-sync-journal.md) | Sync journal record & changes cursor | withdrawn |
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |
 | [pcp-0007](pcp-0007-tasks.md) | Tasks & projects (`net.poweur.tasks`) | withdrawn |
+| [pcp-0008](pcp-0008-drive-share-offers.md) | Drive share offers, accepts and mounts | experimental |
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |

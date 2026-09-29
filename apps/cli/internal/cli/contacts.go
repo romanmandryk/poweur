@@ -417,7 +417,7 @@ func decryptRequestIntros(requests []requestEntry, encPriv []byte) {
 func pendingShareInstruction(req requestEntry, keysDir string) (string, bool) {
 	switch req.Type {
 	case idpkg.MsgTypeShareOffer, idpkg.MsgTypeShareClaim:
-		return fmt.Sprintf("%s\t%s\t%s\t(shares are not available until the new storage lands)\n",
+		return fmt.Sprintf("%s\t%s\t%s\t(save the offer body and run: poweur drive accept <file>)\n",
 			req.Sender, req.Type, req.Timestamp), true
 	default:
 		return "", false
