@@ -196,7 +196,7 @@ func (b *oauthBrowser) finish(start string) *url.URL {
 		case resp.StatusCode == http.StatusOK && strings.Contains(body, `"page":"consent"`):
 			txn := pageTxnRe.FindStringSubmatch(body)[1]
 			resp, _ := b.do(http.MethodPost, b.origin+"/t/"+txn+"/consent", url.Values{
-				"decision": {"allow"}, "release_poweur_id": {"on"},
+				"decision": {"allow"}, "release_poweur_id": {"on"}, "release_profile": {"on"},
 			})
 			u, _ := url.Parse(resp.Header.Get("Location"))
 			return u
@@ -344,6 +344,17 @@ func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 	if _, err := cfg.Exchange(ctx, back.Query().Get("code"), oauth2.VerifierOption(pkce)); err != nil {
 		t.Fatalf("exchange after cross-device approval: %v", err)
 	}
+	// INT_SIGNIN_01 (Phase 9 restore): the approval is in the user's own
+	// consent log, encrypted on their drive, and another device reads it.
+	for _, h := range []string{home, freshDevice(t, home)} {
+		raw, _ := runCLI(t, h, "auth", "log", "--json")
+		var log struct {
+			Records []idpkg.AuthLogRecord `json:"records"`
+		}
+		if err := json.Unmarshal([]byte(raw), &log); err != nil || len(log.Records) != 1 || log.Records[0].Action != "signin" || log.Records[0].Signer != "cli" || log.Records[0].Audience == "" {
+			t.Fatalf("consent log: %s %v", raw, err)
+		}
+	}
 
 	// Forwarded: the attacker's browser starts, the victim's browser resumes.
 	attacker, victim := newOAuthBrowser(t, fx.issuer), newOAuthBrowser(t, fx.issuer)
@@ -470,5 +481,72 @@ func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
 	// Trust admits prompts only: the bridge cannot chat.
 	if code, _, _ := runCLIFull(t, bridgeHome, "send", user, "hello", "--use-identity", bridgeID); code == 0 {
 		t.Fatal("a trusted sign-in service could send chat into a contacts-only inbox")
+	}
+}
+
+// INT_PROFILE_03 (Phase 9 restore): a profile and photo published on v2 are
+// what a relying party sees: the bridge's `name` and `picture` claims come
+// from .poweur/public, and the picture URL serves the photo from the identity
+// host to anyone.
+func TestINT_PROFILE_03_PictureClaimServesTheAvatar(t *testing.T) {
+	zone := newZone(t)
+	relay, addr := newHostedRelay(t, zone, t.TempDir())
+	defer relay.Close()
+	home := t.TempDir()
+	alice := "picalice.poweur.net"
+	zone.SetHost(alice, addr)
+	runCLI(t, home, "identity", "create", alice, "--hosted", "--relay", "http://"+addr, "--json")
+	photo := []byte("\x89PNG\r\n\x1a\n-not-really-a-png-but-served-as-one")
+	writeRelaySysFile(t, relay.URL, home, alice, ".poweur/public/avatar-cafe.png", photo)
+	writeRelaySysFile(t, relay.URL, home, alice, ".poweur/public/profile.json", []byte(`{"version":1,"display_name":"Alice Picture","avatar":"avatar-cafe.png"}`))
+
+	const redirect = "https://rp.example/cb"
+	fx := newOAuthBridge(t, zone, map[string]string{"poweur.net": addr}, []bridge.Client{{
+		ID: "rp", Name: "RP", RedirectURIs: []string{redirect}, Secret: "rp-secret-0123456789",
+	}})
+	ctx := context.Background()
+	provider, err := oidc.NewProvider(ctx, fx.issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := oauth2.Config{ClientID: "rp", ClientSecret: "rp-secret-0123456789", Endpoint: provider.Endpoint(), RedirectURL: redirect,
+		Scopes: []string{oidc.ScopeOpenID, "profile"}}
+	b := newOAuthBrowser(t, fx.issuer)
+	pkce := oauth2.GenerateVerifier()
+	_, request := b.startAndIdentify(cfg.AuthCodeURL("s", oauth2.S256ChallengeOption(pkce), oidc.Nonce("n")), alice)
+	out, _ := runCLI(t, home, "auth", "approve", request, "--sign-with", "identity", "--json")
+	var approved struct {
+		ResumeURI string `json:"resume_uri"`
+	}
+	if err := json.Unmarshal([]byte(out), &approved); err != nil || approved.ResumeURI == "" {
+		t.Fatalf("approve: %v %s", err, out)
+	}
+	back := b.finish(approved.ResumeURI)
+	tok, err := cfg.Exchange(ctx, back.Query().Get("code"), oauth2.VerifierOption(pkce))
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	info, err := provider.UserInfo(ctx, oauth2.StaticTokenSource(tok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		Name    string `json:"name"`
+		Picture string `json:"picture"`
+	}
+	if err := info.Claims(&claims); err != nil || claims.Name != "Alice Picture" || claims.Picture != "http://"+alice+"/.well-known/poweur/avatar-cafe.png" {
+		t.Fatalf("profile claims: %+v %v", claims, err)
+	}
+	// Anyone fetching the picture gets the photo from the identity host.
+	req, _ := http.NewRequest(http.MethodGet, relay.URL+"/.well-known/poweur/avatar-cafe.png", nil)
+	req.Host = alice
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(got, photo) || resp.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("picture: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }

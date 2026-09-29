@@ -13,7 +13,7 @@ import (
 	idpkg "github.com/poweur/identity"
 )
 
-func TestINT_HISTORY_02_AttachmentIsCiphertext(t *testing.T) {
+func TestINT_ATTACH_01_AttachmentIsCiphertext(t *testing.T) {
 	zone := newZone(t)
 	data := t.TempDir()
 	ts, addr := newHostedRelay(t, zone, data)
@@ -72,10 +72,10 @@ func TestINT_HISTORY_02_AttachmentIsCiphertext(t *testing.T) {
 	}
 }
 
-// INT_HISTORY_03 (E20-T11 acceptance): a 20 MB attachment crosses two relays.
+// INT_ATTACH_02 (E20-T11 acceptance): a 20 MB attachment crosses two relays.
 // Alice's relay holds only ciphertext; Bob, homed on relay B, saves the exact
 // bytes through his read share on Alice's drive.
-func TestINT_HISTORY_03_TwentyMegabytesAcrossRelays(t *testing.T) {
+func TestINT_ATTACH_02_TwentyMegabytesAcrossRelays(t *testing.T) {
 	zone := newZone(t)
 	dataA := t.TempDir()
 	_, addrA := newHostedRelay(t, zone, dataA)

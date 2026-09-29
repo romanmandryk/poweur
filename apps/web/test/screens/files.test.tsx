@@ -40,6 +40,7 @@ vi.mock("../../src/actions/files", () => ({
   loadMounts: mocks.loadMounts,
   acceptBrowserOffer: mocks.acceptBrowserOffer,
   autoAcceptContactOffers: vi.fn(async () => 0),
+  formatBytes: (n: number) => `${n} B`,
   shareBrowserFile: mocks.shareBrowserFile,
   sharesForFile: mocks.sharesForFile,
   revokeBrowserShare: mocks.revokeBrowserShare,
@@ -75,6 +76,30 @@ beforeEach(() => {
 });
 
 describe("Files destination (E20-T10)", () => {
+  it("says nothing about storage until it is nearly full, then says what to do", async () => {
+    const { container, rerender } = render(<Files />);
+    await screen.findByText("note.txt");
+    useData.setState((state) => ({ files: { ...state.files, usage: { used: 80, quota: 100 } } }));
+    rerender(<Files />);
+    expect(container.querySelector(".storage-nearly-full")).toBeNull();
+    useData.setState((state) => ({ files: { ...state.files, usage: { used: 95, quota: 100 } } }));
+    rerender(<Files />);
+    expect(container.querySelector(".storage-nearly-full")?.textContent).toMatch(/95 B of 100 B used.*operator/);
+    // No limit, no warning.
+    useData.setState((state) => ({ files: { ...state.files, usage: { used: 10 ** 9, quota: 0 } } }));
+    rerender(<Files />);
+    expect(container.querySelector(".storage-nearly-full")).toBeNull();
+  });
+
+  it("an upload over the limit says the storage is full and what to do", async () => {
+    mocks.files.create.mockRejectedValueOnce(Object.assign(new Error("storage quota exceeded"), { status: 507 }));
+    const { container } = render(<Files />);
+    await screen.findByText("note.txt");
+    useData.setState((state) => ({ files: { ...state.files, usage: { used: 100, quota: 100 } } }));
+    fireEvent.change(container.querySelector("#file-upload-input")!, { target: { files: [new File(["x"], "big.bin")] } });
+    await waitFor(() => expect(useUi.getState().toasts.some((t: any) => /storage is full \(100 B of 100 B\).*operator/.test(t.message))).toBe(true));
+  });
+
   it("lists encrypted drive entries and exposes upload and folder actions", async () => {
     const { container } = render(<Files />);
     await screen.findByText("note.txt");

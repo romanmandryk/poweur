@@ -43,6 +43,8 @@ export const freshFiles = () => ({
   preview: null as FilesPreviewEntry[] | null,
   /** The drive's changes cursor as of the last full refresh. */
   cursor: null as string | null,
+  /** Bytes used and the quota (0: no limit), as of the last drive read. */
+  usage: null as { used: number; quota: number } | null,
   loading: false,
   loaded: false,
   error: null as string | null,

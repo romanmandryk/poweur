@@ -8,7 +8,6 @@ import {
 
 export const AUTH_LOG_PATH = ".poweur/private/logs/auth.log";
 export const CONNECTED_APPS_PATH = ".poweur/relay/connected-apps.json";
-const AUTH_LOG_MAX_BYTES = 256 * 1024;
 
 export function decodeAuthInput(input) {
   const value = String(input ?? "").trim();
@@ -79,7 +78,7 @@ export async function signBrowserApproval(request, identity, signer) {
   return { response, encoded: encodeSignInResponse(response) };
 }
 
-export async function appendBrowserConsent(files, response, metadata) {
+export async function appendBrowserConsent(log, response, metadata) {
   const appId = metadata.app_id || new URL(response.audience).hostname.split(".").reverse().join(".");
   const record = {
     at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
@@ -94,21 +93,8 @@ export async function appendBrowserConsent(files, response, metadata) {
     signer: "web",
     ...(response.statement ? { statement: response.statement } : {}),
   };
-  let existing;
-  try {
-    existing = await files.readOptional(AUTH_LOG_PATH) ?? "";
-  } catch (error) {
-    // The log is end-to-end encrypted and waits for the new storage (EPIC-020);
-    // the approval itself does not depend on it.
-    if (error?.code === "unsupported") return record;
-    throw error;
-  }
-  let lines = existing.trimEnd() ? existing.trimEnd().split("\n") : [];
-  lines.push(JSON.stringify(record));
-  while (new TextEncoder().encode(lines.join("\n") + "\n").length > AUTH_LOG_MAX_BYTES && lines.length > 1) {
-    lines.shift();
-  }
-  await files.write(AUTH_LOG_PATH, lines.join("\n") + "\n");
+  // `log` is the client's encrypted consent log on the drive (EPIC-020).
+  await log.append(record);
   return record;
 }
 
@@ -158,22 +144,9 @@ export async function readConnectedApps(files) {
   return doc;
 }
 
-export async function readConsentLog(files) {
-  let raw;
-  try {
-    raw = await files.readOptional(AUTH_LOG_PATH);
-  } catch (error) {
-    if (error?.code === "unsupported") return [];
-    throw error;
-  }
-  if (!raw) return [];
-  const records = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    const record = JSON.parse(line);
-    if (record && typeof record === "object") records.push(record);
-  }
-  return records;
+/** The newest consent records, oldest first, from the encrypted log. */
+export async function readConsentLog(log, limit = 50) {
+  return (await log.recent(limit)).filter((record) => record && typeof record === "object");
 }
 
 export async function revokeConnectedApp(files, appId, now = new Date()) {

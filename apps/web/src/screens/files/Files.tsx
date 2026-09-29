@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, File as FileIcon, Folder, FolderPlus, Globe, Link2, Send, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
-import { acceptBrowserOffer, autoAcceptContactOffers, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
+import { acceptBrowserOffer, autoAcceptContactOffers, formatBytes, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { openBrowserDrive, readFileBytes } from "../../lib/drive";
 import { relayUrlFor } from "../../lib/storage.js";
@@ -135,7 +135,7 @@ export function Files() {
       await loadBrowserFolder(identity, view.files, view.folder, true);
       toast(existing ? "File replaced" : "File uploaded", "success");
     } catch (cause) {
-      toast(errorMessage(cause), "error", 7000);
+      toast(storageFull(cause, useData.getState().files.usage) ?? errorMessage(cause), "error", 9000);
     } finally {
       if (input.current) input.current.value = "";
       setWorking(false);
@@ -230,6 +230,10 @@ export function Files() {
         <Tab data-files-tab="shared" active={tab === "shared"} onClick={() => selectTab("shared")}>Shared with me</Tab>
       </TabBar>
       {(error || fileCache.error) && <Notice tone="warn" className="mx-4 mt-3">{error || fileCache.error}</Notice>}
+      {/* Quiet until it matters: nothing about the limit below 90%. */}
+      {tab === "mine" && fileCache.usage && fileCache.usage.quota > 0 && fileCache.usage.used / fileCache.usage.quota >= 0.9 && (
+        <Notice tone="warn" className="storage-nearly-full mx-4 mt-3">Your storage is nearly full: {formatBytes(fileCache.usage.used)} of {formatBytes(fileCache.usage.quota)} used. Delete files you no longer need, or ask your relay's operator for more space.</Notice>
+      )}
 
       {view && (tab === "shared" || view.trail.length > 1) && (
         <nav aria-label="Folder path" className="flex gap-1 overflow-x-auto px-4 pt-3 pb-2 text-sm text-muted">
@@ -286,6 +290,13 @@ function SharedList({ offers, mounts, onAccept, onOpen }: { offers: ShareOfferLi
 }
 
 type ShareOfferLike = ReturnType<typeof shareOffers>[number];
+
+/** The message for an upload refused because the drive is full (HTTP 507). */
+function storageFull(cause: unknown, usage: { used: number; quota: number } | null): string | null {
+  if ((cause as { status?: number })?.status !== 507) return null;
+  const amount = usage && usage.quota > 0 ? ` (${formatBytes(usage.used)} of ${formatBytes(usage.quota)})` : "";
+  return `Your storage is full${amount}. Delete files you no longer need, or ask your relay's operator for more space.`;
+}
 
 /** Where a public item lives on the web: https://<identity>/pub/<path>. */
 export function publicUrl(identity: string, segments: string[], folder = false): string {

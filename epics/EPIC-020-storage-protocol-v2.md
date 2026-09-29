@@ -33,7 +33,7 @@
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, cached listings with SSE/pull refresh, direct shares/revocation, offers, encrypted mounts and password links are in; requests, public folders, previews, thumbnails and search remain |
-| E20-T11 Message history & attachments on v2 | **done** | Append-log history read newest-first per conversation with one request per older page, appends from the relay's author cursor (no log re-read), inline padded records; CLI and web attachments incl. 20 MB across two relays (`INT_HISTORY_03`); web durability and archive paging after reload |
+| E20-T11 Message history & attachments on v2 | **done** | Append-log history read newest-first per conversation with one request per older page, appends from the relay's author cursor (no log re-read), inline padded records; CLI and web attachments incl. 20 MB across two relays (`INT_ATTACH_02`); web durability and archive paging after reload |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
 | **Wave 5 — after launch, demand-led** | | |
@@ -169,9 +169,9 @@ as the test reference; retain already ported temporary system-file tests as regr
 - [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
       visibility on a different relay.
 - [x] Encrypted attachment upload/open: CLI send/save keeps name, MIME and bytes out of
-      the provider (`INT_HISTORY_02`); the web sends and opens them (`attachments.spec.js`,
+      the provider (`INT_ATTACH_01`); the web sends and opens them (`attachments.spec.js`,
       SDK live test incl. a snoop and a tampered hash); 20 MB across two relays
-      (`INT_HISTORY_03`). TS↔Go cross-client coverage stays open (same format by construction).
+      (`INT_ATTACH_02`). TS↔Go cross-client coverage stays open (same format by construction).
 - [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
       analytics consent, group create/add/remove and quota display on v2.
 
@@ -722,7 +722,7 @@ Replaces E09-T1's layout and closes E09-T4's plaintext-bytes gap.
 **Acceptance:** with 20 conversations and 10k messages the tray fetches ≤ 20 tail chunks;
 a 20 MB attachment crosses two relays and the sender's store holds only ciphertext; E15-T13
 paging works against it. **Met:** one records request per conversation for the tray
-(SDK live test), `INT_HISTORY_03` (20 MB, two relays, ciphertext-only store), web paging e2e.
+(SDK live test), `INT_ATTACH_02` (20 MB, two relays, ciphertext-only store), web paging e2e.
 
 ### E20-T12 — Migration & v1 removal
 

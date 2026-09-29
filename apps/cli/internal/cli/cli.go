@@ -1601,8 +1601,10 @@ func runAuth(args []string, stdout, stderr io.Writer) int {
 		return runAuthInspect(args[1:], stdout, stderr)
 	case "sign":
 		return runAuthSign(args[1:], stdout, stderr)
+	case "log":
+		return runAuthLog(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "unknown auth subcommand (want approve, inspect, sign)")
+		fmt.Fprintln(stderr, "unknown auth subcommand (want approve, inspect, sign, log)")
 		return 1
 	}
 }

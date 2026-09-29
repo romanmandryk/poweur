@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,8 +15,10 @@ import (
 	"time"
 
 	"github.com/poweur/cli/internal/config"
+	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
+	protocol "github.com/poweur/identity/drive"
 )
 
 // Abuse reports and shareable blocklists (EPIC-007 E07-T5).
@@ -160,11 +163,11 @@ func runBlocksExport(args []string, stdout, stderr io.Writer) int {
 	}
 	published := ""
 	if !*noPublish {
-		if err := writeSysFile(ctx, relayURL, identityValue, token, idpkg.BlocklistTreePath, raw); err != nil {
+		if err := publishBlocklist(ctx, *useIdentity, raw, stderr); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		published = idpkg.BlocklistTreePath
+		published = "/" + idpkg.BlocklistTreePath
 	}
 	if *out != "" {
 		if err := os.WriteFile(*out, raw, 0o600); err != nil {
@@ -174,7 +177,7 @@ func runBlocksExport(args []string, stdout, stderr io.Writer) int {
 	}
 	human := fmt.Sprintf("exported %d block(s) signed by %s\n", len(list.Entries), identityValue)
 	if published != "" {
-		human += fmt.Sprintf("published to %s — share that path (`poweur share add`) with whoever should be able to adopt it\n", published)
+		human += fmt.Sprintf("published to %s on your encrypted drive — share it (`poweur drive share add %s <id>`) with whoever should be able to adopt it\n", published, published)
 	}
 	if *out != "" {
 		human += fmt.Sprintf("wrote %s\n", *out)
@@ -297,24 +300,64 @@ func readBlocklistSource(ctx context.Context, fs *flag.FlagSet, file, path strin
 		}
 		return raw, 0
 	}
+	// On the publisher's encrypted drive, through the share they gave us. A
+	// shared file's name is sealed to its folder, so the list is the shared
+	// file that parses as a blocklist signed (checked later) by the publisher.
 	publisher := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
-	relayURL := cfg.RelayURL
-	if resolved, err := resolveRecipientRelayURL(ctx, publisher, cfg); err == nil && resolved != "" {
-		relayURL = resolved
+	files, ok := openDriveFiles("", publisher, stderr)
+	if !ok {
+		return nil, 1
 	}
-	raw, status, err := readSysFile(ctx, relayURL, publisher, priv, path)
+	shared, err := files.Shared(ctx)
+	var status *driveclient.Error
+	if errors.As(err, &status) && (status.Status == http.StatusForbidden || status.Status == http.StatusNotFound) {
+		shared, err = nil, nil // nothing of theirs is shared with us
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return nil, 1
 	}
-	if status == http.StatusForbidden || status == http.StatusUnauthorized {
-		fmt.Fprintf(stderr, "%s has not shared %s with you (ask them to `poweur share add %s --with=%s`)\n",
-			publisher, path, path, identityValue)
-		return nil, 1
+	for _, node := range shared {
+		if node.Manifest.Kind != protocol.KindFile || node.Manifest.Mode != protocol.ModeReplace {
+			continue
+		}
+		var buf bytes.Buffer
+		if err := files.Read(ctx, node, &buf); err != nil {
+			continue
+		}
+		if list, err := idpkg.ParseBlocklist(buf.Bytes()); err == nil && strings.EqualFold(list.Publisher, publisher) {
+			return buf.Bytes(), 0
+		}
 	}
-	if status != http.StatusOK {
-		fmt.Fprintf(stderr, "cannot read %s from %s: HTTP %d\n", path, publisher, status)
-		return nil, 1
+	fmt.Fprintf(stderr, "%s has not shared a blocklist with you (ask them to `poweur drive share add /%s %s`)\n", publisher, path, identityValue)
+	return nil, 1
+}
+
+// publishBlocklist writes the signed list to /shared/blocks.json on the
+// owner's encrypted drive, replacing an earlier export.
+func publishBlocklist(ctx context.Context, use string, raw []byte, stderr io.Writer) error {
+	files, ok := openDriveFiles(use, "", stderr)
+	if !ok {
+		return fmt.Errorf("cannot open your drive")
 	}
-	return raw, 0
+	root, err := files.Root(ctx)
+	if err != nil {
+		return err
+	}
+	dir, name, _ := strings.Cut(idpkg.BlocklistTreePath, "/")
+	folder, err := mkdirDrive(ctx, files, root, dir)
+	if err != nil {
+		return err
+	}
+	children, err := files.List(ctx, folder)
+	if err != nil {
+		return err
+	}
+	for _, child := range children {
+		if child.Name == name {
+			return files.Replace(ctx, child, bytes.NewReader(raw))
+		}
+	}
+	_, err = files.Create(ctx, folder, name, protocol.KindFile, bytes.NewReader(raw))
+	return err
 }

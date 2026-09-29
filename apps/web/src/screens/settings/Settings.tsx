@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  HardDrive,
   IdCard,
   KeyRound,
   Laptop,
@@ -39,6 +40,7 @@ import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { domainOf, handleOf } from "../../lib/identity";
 import { defaultRelayUrl, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor } from "../../lib/storage.js";
 import { useData } from "../../state/data";
+import { formatBytes, loadStorageUsage } from "../../actions/files";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { Avatar } from "../../ui/Avatar";
@@ -75,10 +77,12 @@ export function Settings() {
   const summary = policySummary(policy);
   const custody = CUSTODY_COPY[custodyOf(record)];
 
+  const usage = useData((state) => state.files.usage);
   useEffect(() => {
     if (!unlocked) return;
     void loadPolicy();
     void loadProfile();
+    if (identity) void loadStorageUsage(identity);
   }, [unlocked, identity]);
 
   const confirmRemove = async () => {
@@ -139,6 +143,13 @@ export function Settings() {
                 onClick={openProfilePanel}
               />
               <SettingsRow id="row-identity-keys" icon={IdCard} label="Identity keys" onClick={openIdentityKeysPanel} />
+              <SettingsRow
+                id="row-storage"
+                icon={HardDrive}
+                label="Storage"
+                value={usage ? (usage.quota > 0 ? `${formatBytes(usage.used)} of ${formatBytes(usage.quota)}` : `${formatBytes(usage.used)} used`) : "…"}
+                onClick={() => useRoute.getState().go("files")}
+              />
             </SettingsGroup>
 
             <SettingsGroup label="Security">

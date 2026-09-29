@@ -43,6 +43,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     contactsApi,
     systemFiles,
     system: vi.fn(() => systemFiles),
+    consentLog: vi.fn(async () => ({ append: vi.fn(async () => {}), recent: vi.fn(async () => []) })),
     devices: vi.fn(() => deviceRegistry),
     history: vi.fn(async () => store),
     contacts: vi.fn(async () => contactsApi),

@@ -62,7 +62,7 @@ export async function approveSignIn(match = "") {
   patchAuth({ loading: true, error: "" });
   try {
     const signed: any = await signBrowserApproval(request, identity, client.signer);
-    await appendBrowserConsent(client.system(), signed.response, metadata);
+    await appendBrowserConsent(await client.consentLog(), signed.response, metadata);
     const { delivered, resumeUri } = await deliverBrowserApproval(request, signed.encoded, undefined, match);
     patchAuth({ loading: false, result: { ...signed, delivered, resumeUri, crossDevice: !!match } });
     // Same device: finish in this browser straight away. The resume link works

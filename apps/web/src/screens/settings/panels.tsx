@@ -136,8 +136,9 @@ function ConnectedApps() {
     let live = true;
     void (async () => {
       try {
-        const dav = requireClient()?.system();
-        const [doc, log] = await Promise.all([readConnectedApps(dav), readConsentLog(dav)]);
+        const client = requireClient();
+        const dav = client?.system();
+        const [doc, log] = await Promise.all([readConnectedApps(dav), client ? client.consentLog().then((entries: any) => readConsentLog(entries)) : []]);
         if (!live || activeIdentity() !== identity) return;
         const apps = [...(doc.apps ?? [])].sort((a: any, b: any) => String(a.app_id).localeCompare(String(b.app_id)));
         setState({ apps, recent: log.slice(-10).reverse(), dav });

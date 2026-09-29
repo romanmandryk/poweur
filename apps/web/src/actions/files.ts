@@ -97,6 +97,7 @@ export async function ensureBrowserFiles(identity: string, force = false): Promi
         mounts,
         preview: null,
         cursor: info.seq ?? null,
+        usage: { used: info.used ?? 0, quota: info.quota ?? 0 },
         loading: false,
         loaded: true,
         error: null,
@@ -110,6 +111,27 @@ export async function ensureBrowserFiles(identity: string, force = false): Promi
   })();
   loadingFiles = { identity, promise };
   try { await promise; } finally { if (loadingFiles?.promise === promise) loadingFiles = null; }
+}
+
+/** Human storage size: 1.2 MB, 980 KB. */
+export function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes, unit = 0;
+  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/** Read the drive's usage now (Settings shows it without opening Files). */
+export async function loadStorageUsage(identity: string): Promise<{ used: number; quota: number } | null> {
+  try {
+    const { drive } = await openBrowserDrive(identity);
+    const { used, quota } = await drive.info();
+    const usage = { used: used ?? 0, quota: quota ?? 0 };
+    useData.setState((state) => ({ files: { ...state.files, usage } }));
+    return usage;
+  } catch {
+    return null;
+  }
 }
 
 /** Read one folder, using the decrypted in-memory listing unless explicitly refreshed. */
@@ -151,13 +173,14 @@ export async function refreshBrowserFiles(identity: string): Promise<void> {
       folder,
       entries: visibleEntries(snapshot.own!.files, folder, await snapshot.own!.files.list(folder)),
     })));
-    const [mounts, { seq }] = await Promise.all([loadMounts(identity, snapshot.own.files), head]);
+    const [mounts, { seq, used, quota }] = await Promise.all([loadMounts(identity, snapshot.own.files), head]);
     if (useData.getState().files.identity !== identity) return;
     useData.setState((state) => ({ files: {
       ...state.files,
       folders: { ...state.files.folders, ...Object.fromEntries(results.map((result) => [result.key, { folder: result.folder, entries: result.entries }])) },
       mounts,
       cursor: seq ?? null,
+      usage: { used: used ?? 0, quota: quota ?? 0 },
       loaded: true,
       error: null,
     } }));
