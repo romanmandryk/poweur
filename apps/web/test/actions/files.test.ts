@@ -75,7 +75,7 @@ describe("Files actions", () => {
     mocks.clientFor.mockReturnValue({ sendAndArchive });
 
     await expect(shareBrowserFile("alice.example.com", file, "BOB.example.com", "read")).resolves.toEqual({ share, notified: true });
-    expect(shareWith).toHaveBeenCalledWith(file, "bob.example.com", expect.any(Uint8Array), "read");
+    expect(shareWith).toHaveBeenCalledWith(file, "bob.example.com", expect.any(Uint8Array), "read", "");
     expect(sendAndArchive).toHaveBeenCalledWith("bob.example.com", expect.any(String), expect.objectContaining({ type: "sys.share.offer" }));
   });
 

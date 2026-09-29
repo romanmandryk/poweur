@@ -109,4 +109,36 @@ test.describe("storage-v2 Files", () => {
     await bobContext.close();
     expect(alice).not.toBe(bob);
   });
+  test("sends files as an expiring link that opens in a clean browser", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await stubPasskeys(page);
+    const alice = await registerIdentity(page, relay, `send${Date.now().toString(36)}`);
+    await page.click('.nav-tab[data-page="files"]');
+    await page.click("#btn-send-files");
+    await page.locator("#send-files").setInputFiles([
+      { name: "brief.txt", mimeType: "text/plain", buffer: Buffer.from("the brief") },
+      { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("the notes") },
+    ]);
+    await page.fill("#send-message", "Two files for you");
+    await page.click("#btn-create-transfer");
+    const link = await page.locator("#transfer-link").inputValue({ timeout: 30_000 });
+    expect(link).toContain(`/s/`);
+    // Transfers are kept out of the owner's browsable files.
+    await page.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByText("shared", { exact: true })).toHaveCount(0);
+
+    const viewer = await browser.newContext();
+    await viewer.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.hostname !== alice) return route.continue();
+      const target = new URL(`${url.pathname}${url.search}`, relay.baseUrl);
+      await route.fulfill({ response: await route.fetch({ url: target.href, headers: { ...route.request().headers(), host: alice } }) });
+    });
+    const recipient = await viewer.newPage();
+    await recipient.goto(link);
+    for (const name of ["brief.txt", "notes.txt", "Message.txt"]) await expect(recipient.getByText(name, { exact: true })).toBeVisible({ timeout: 20_000 });
+    await viewer.close();
+    await context.close();
+  });
 });

@@ -1,7 +1,7 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
 import { LinkPasswordRequired, openLink, parseLinkUrl } from "../src/drive/link.js";
 import { openFileRequest } from "../src/drive/request.js";
-import { createTransfer, revokeTransfer } from "../src/drive/transfer.js";
+import { createTransfer, expiredTransfers, revokeTransfer } from "../src/drive/transfer.js";
 import { DriveLog } from "../src/drive/log.js";
 import { DriveScope } from "../src/drive/scope.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
@@ -312,3 +312,19 @@ it("creates a bounded-memory multi-file transfer and revokes its bytes", async (
   await expect(openLink({ origin: relay.baseUrl, drive: alice.identity, link: state.share!.link!,
     fragment: fromBase64(url.hash.slice(1)), password: "secret", resolve: localResolveOptions(relay.baseUrl) })).rejects.toMatchObject({ status: 404 });
 }, 120_000);
+
+it("releases an expired transfer's files and link", async () => {
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const soon = new Date(Date.now() + 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const state = await createTransfer(owner, [{ name: "a.txt", size: 1, async slice() { return new Uint8Array([65]); } }], { origin: relay.baseUrl, expiresAt: soon });
+  // Kept out of the owner's browsable tree.
+  expect((await owner.list(await owner.root())).map(file => file.name)).not.toContain("shared");
+  expect(expiredTransfers([state])).toEqual([]);
+  const due = expiredTransfers([state], Date.parse(soon) + 1);
+  expect(due).toHaveLength(1);
+  const released = await revokeTransfer(owner, due[0]!, "expired");
+  expect(released.status).toBe("expired");
+  await expect(owner.open(state.folder!)).rejects.toBeTruthy();
+  // Releasing again is a no-op.
+  expect(await revokeTransfer(owner, released, "expired")).toBe(released);
+});

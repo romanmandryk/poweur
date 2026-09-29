@@ -1,5 +1,5 @@
 /** Browser composition for E05-T7's encrypted Send flow. */
-import { createTransfer, revokeTransfer, type TransferSource, type TransferState } from "@poweur/client/drive";
+import { createTransfer, expiredTransfers, revokeTransfer, type TransferSource, type TransferState } from "@poweur/client/drive";
 import { openBrowserDrive } from "../lib/drive";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { relayUrlFor } from "../lib/storage";
@@ -65,6 +65,27 @@ export async function revokeBrowserTransfer(identity: string, state: TransferSta
   const revoked = await revokeTransfer(files, state);
   await storeTransfer(identity, revoked);
   return revoked;
+}
+
+/**
+ * Release transfers whose links have expired: their files are deleted and
+ * leave the owner's usage. Runs when Files opens; the relay cannot delete an
+ * owner's encrypted nodes itself. Returns how many were released.
+ */
+export async function expireBrowserTransfers(identity: string): Promise<number> {
+  const due = expiredTransfers(await loadBrowserTransfers(identity));
+  if (!due.length) return 0;
+  const { files } = await openBrowserDrive(identity);
+  let released = 0;
+  for (const state of due) {
+    try {
+      await storeTransfer(identity, await revokeTransfer(files, state, "expired"));
+      released++;
+    } catch {
+      // Tried again next time Files opens.
+    }
+  }
+  return released;
 }
 
 export async function browserTransferStats(identity: string, state: TransferState) {

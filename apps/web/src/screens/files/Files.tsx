@@ -16,6 +16,7 @@ import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
 import { Tab, TabBar } from "../../ui/Tabs";
 import { openSendPanel } from "./SendPanel";
+import { expireBrowserTransfers } from "../../actions/transfers";
 
 type View = { files: DriveFiles; folder: OpenFile; label: string; trail: { file: OpenFile; label: string }[] };
 
@@ -73,6 +74,8 @@ export function Files() {
 
   useEffect(() => {
     void ensureBrowserFiles(identity);
+    // Expired Send transfers leave the drive (and the owner's usage).
+    void expireBrowserTransfers(identity).then((released) => { if (released) void refreshBrowserFiles(identity).catch(() => {}); }, () => {});
   }, [identity]);
 
   useEffect(() => {

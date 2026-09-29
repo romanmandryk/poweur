@@ -1,5 +1,6 @@
 /** Expiring encrypted multi-file transfers (EPIC-005 E05-T7). */
 import { randomBytes, toBase64url } from "../encoding.js";
+import { RelayError } from "../errors.js";
 import type { DriveFileSource, DriveFiles, OpenFile } from "./files.js";
 import type { Share } from "./share.js";
 
@@ -114,9 +115,11 @@ export async function createTransfer(files: DriveFiles, sources: TransferSource[
   let folder: OpenFile;
   if (state.folder) folder = await files.open(state.folder);
   else {
+    // Under .poweur, which file listings hide: a transfer is not a folder the
+    // owner browses, it is reached through Send's history.
     const root = await files.root();
-    const shared = await childFolder(files, root, "shared");
-    const transfers = await childFolder(files, shared, ".transfers");
+    const system = await childFolder(files, root, ".poweur");
+    const transfers = await childFolder(files, system, "transfers");
     folder = await files.create(transfers, `tr_${state.id}`, "folder");
     state.folder = folder.manifest.node;
     await emit(state, options.onState);
@@ -153,12 +156,23 @@ async function removeTree(files: DriveFiles, node: OpenFile): Promise<void> {
   await files.remove(node);
 }
 
-/** Revoke the public capability and release every file in its subtree. */
-export async function revokeTransfer(files: DriveFiles, state: TransferState): Promise<TransferState> {
+/** Revoke the public capability and release every file in its subtree.
+ * `status` records why: the owner revoked it, or it expired. */
+export async function revokeTransfer(files: DriveFiles, state: TransferState, status: "revoked" | "expired" = "revoked"): Promise<TransferState> {
   if (state.drive !== files.client.drive) throw new Error(`transfer belongs to ${state.drive}`);
-  if (state.status === "revoked") return state;
-  if (state.folder) await removeTree(files, await files.open(state.folder));
-  if (state.share) await files.client.unshare(state.share.id);
-  const next = { ...state, status: "revoked" as const, updated_at: stamp() };
-  return next;
+  if (state.status === "revoked" || state.status === "expired") return state;
+  if (state.folder) {
+    try { await removeTree(files, await files.open(state.folder)); }
+    catch (error) { if (!(error instanceof RelayError && error.status === 404)) throw error; }
+  }
+  if (state.share) {
+    try { await files.client.unshare(state.share.id); }
+    catch (error) { if (!(error instanceof RelayError && error.status === 404)) throw error; }
+  }
+  return { ...state, status, updated_at: stamp() };
+}
+
+/** Transfers past their expiry, which `revokeTransfer(…, "expired")` releases. */
+export function expiredTransfers(states: TransferState[], now = Date.now()): TransferState[] {
+  return states.filter((state) => (state.status === "ready" || state.status === "uploading") && Date.parse(state.expires_at) <= now);
 }
