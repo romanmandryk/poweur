@@ -41,6 +41,23 @@
     },
     "locale": {
       "type": "string"
+    },
+    "identity_page": {
+      "type": "object",
+      "description": "Public presentation settings for the relay-rendered identity page; omitted booleans use enabled/indexable true and anonymous advertisement false",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "indexable": {
+          "type": "boolean"
+        },
+        "advertise_anonymous_messages": {
+          "type": "boolean",
+          "description": "Public UI signal only; inbox-policy.json remains authoritative"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <meta name="description" content="{{.Description}}">
+  {{if not .Indexable}}<meta name="robots" content="noindex,nofollow">{{end}}
+  <link rel="canonical" href="{{.CanonicalURL}}">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/identity-page/assets/page.css?v=1">
+  <script defer src="/identity-page/assets/page.js?v=1"></script>
+</head>
+<body>
+  <main class="page-shell">
+    <article class="identity-card" aria-labelledby="identity-name">
+      <div class="avatar" aria-hidden="true">
+        {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}<span>{{.Initial}}</span>{{end}}
+      </div>
+      {{if .DisplayName}}<h1 id="identity-name">{{.DisplayName}}</h1>{{else}}<h1 id="identity-name">Poweur identity</h1>{{end}}
+      <p class="identity-id" id="poweur-id">{{.Identity}}</p>
+      <p class="eyebrow">Poweur ID</p>
+      {{if .Bio}}<p class="bio">{{.Bio}}</p>{{else}}<p class="bio muted">This is the public identity page for {{.Identity}}.</p>{{end}}
+
+      {{if .Links}}
+      <nav class="profile-links" aria-label="Profile links">
+        {{range .Links}}<a href="{{.URL}}" rel="ugc noopener noreferrer">{{.Label}}</a>{{end}}
+      </nav>
+      {{end}}
+
+      <div class="actions">
+        <button class="primary" type="button" data-copy-id="{{.Identity}}">Copy ID</button>
+        {{if .AdvertiseAnonymous}}<a class="secondary" href="/app/?anonymous=1">Write anonymously</a>{{end}}
+      </div>
+      <p class="copy-status" role="status" aria-live="polite"></p>
+      <p class="hint">Use this ID to find and message them in your Poweur app or web client.</p>
+    </article>
+    <footer><a href="https://poweur.net" rel="noopener noreferrer">Powered by Poweur</a></footer>
+  </main>
+</body>
+</html>

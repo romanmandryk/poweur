@@ -382,6 +382,10 @@ func TestVectors_SysDocs(t *testing.T) {
 	}{
 		{"full", `{"version":1,"display_name":"Alice","avatar":"avatar.png","bio":"builder","links":[{"label":"site","url":"https://example.org"}],"locale":"en"}`},
 		{"empty", `{"version":1}`},
+		{"identity-page-defaults", `{"version":1,"identity_page":{}}`},
+		{"identity-page-opt-outs", `{"version":1,"identity_page":{"enabled":false,"indexable":false,"advertise_anonymous_messages":true}}`},
+		{"identity-page-bad-boolean", `{"version":1,"identity_page":{"enabled":"no"}}`},
+		{"identity-page-null", `{"version":1,"identity_page":null}`},
 		{"avatar-off-tree", `{"version":1,"avatar":"https://cdn.example.org/a.png"}`},
 		{"avatar-path", `{"version":1,"avatar":"public/avatar.png"}`},
 		{"link-without-url", `{"version":1,"links":[{"label":"site"}]}`},

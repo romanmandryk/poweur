@@ -396,6 +396,16 @@ export interface ProfileLink {
   url: string;
 }
 
+/** Public presentation settings for the relay-rendered identity page. */
+export interface IdentityPageSettings {
+  /** Defaults to true when absent. */
+  enabled?: boolean;
+  /** Defaults to true when absent. */
+  indexable?: boolean;
+  /** Public UI signal only; inbox policy remains authoritative. Defaults false. */
+  advertise_anonymous_messages?: boolean;
+}
+
 /** `poweur-sys/public/profile.json` (identity.Profile). */
 export interface Profile {
   version: number;
@@ -405,6 +415,7 @@ export interface Profile {
   bio?: string;
   links?: ProfileLink[];
   locale?: string;
+  identity_page?: IdentityPageSettings;
 }
 
 export interface InboxPolicy {

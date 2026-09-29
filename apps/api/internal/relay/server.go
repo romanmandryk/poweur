@@ -328,6 +328,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
+	mux.HandleFunc("GET /identity-page/assets/{file}", serveIdentityPageAsset)
 	mux.HandleFunc("GET /s/{link}", s.handleLinkViewer)
 	mux.HandleFunc("GET /pub", s.handlePublic)
 	mux.HandleFunc("GET /pub/{path...}", s.handlePublic)
@@ -338,23 +339,30 @@ func (s *Server) Router() http.Handler {
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Vary", "Accept")
+	host := requestHost(r)
+	s.advertiseIndieAuth(w, r)
+	// Only the exact identity root is the generated page. GET / is also the
+	// catch-all for unknown paths, and those stay the relay JSON document.
+	if r.URL.Path == "/" && wantsHTML(r) && s.identities.Exists(host) {
+		s.serveIdentityPage(w, r, host)
+		return
+	}
 	// Someone with no identity yet who lands on the launcher host wants the
 	// app, not a service banner — but this path is also the relay's root
 	// document, which every client reads to learn the relay's address and which
 	// hosts are launchers. Redirecting that turned the document into an HTML
 	// page and left the app unable to tell which front door it was standing in.
-	// So the redirect is for readers who did not ask for the document.
+	// So the redirect is for readers who did not ask for the document. An
+	// identity page still requires an explicit HTML accept; this redirect
+	// keeps the older launcher rule (E15-T7), including clients that send no
+	// Accept header.
 	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" && !wantsJSON(r) {
-		host := r.Host
-		if h, _, err := splitHostPort(host); err == nil {
-			host = h
-		}
 		if s.cfg.IsLauncherHost(host) {
 			http.Redirect(w, r, "/app/", http.StatusFound)
 			return
 		}
 	}
-	s.advertiseIndieAuth(w, r)
 	version, buildTime, versionHash := s.releaseInfo()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":       "poweur-relay",
@@ -410,13 +418,6 @@ func (s *Server) releaseInfo() (version, buildTime, versionHash string) {
 		versionHash = buildinfo.Hash
 	}
 	return
-}
-
-// wantsJSON reports whether the caller asked for the root document itself.
-// Every `@poweur/client` JSON request says so; a browser navigating says
-// `text/html`, and curl says `*/*`.
-func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

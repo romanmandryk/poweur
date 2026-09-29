@@ -37,9 +37,9 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-009](EPIC-009-messaging-upgrades.md) | Messaging upgrades: persistence, push, attachments, groups | Messaging | T1–T6 **complete**; **T7–T10 open** (intent types, typed routing to apps, shared inboxes, follow feeds) | E02, E03 |
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | v1 complete (T1–T4, T8 done; T7 external review partial; T5/T6 later phases) | E01, E02 |
-| [EPIC-012](EPIC-012-identity-websites.md) | Generated identity pages (trusted HTML, profile, contact actions) | Identity / Web | specified; ready to implement | E01, E06, E14, E15 |
+| [EPIC-012](EPIC-012-identity-websites.md) | Generated identity pages (trusted HTML, profile, contact actions) | Identity / Web | **done** (T1–T5) | E01, E06, E14, E15 |
 | [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (OTLP, logs/events, consent modes, Grafana, public growth) | Infra / Ops | implemented; rollout steps in deploy/OPS.md, T5 deferred | E02 |
-| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web app shipped with E15-T3; public identity-page action → E12; stranger gate remains in E14-T3) | E06, E07 |
+| [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web app shipped with E15-T3; public identity-page action shipped in E12; stranger gate remains in E14-T3) | E06, E07 |
 | [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | in progress (T1–T6 done; T7–T12 open — host-aware front doors, desktop/tablet layout; T14 partial — logo & icons shipped, palette remap open) | E03, E04, E05, E06, E07, E14, E18 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
 | [EPIC-017](EPIC-017-typescript-client-sdk.md) | `@poweur/client` TypeScript client SDK (web app + every JS integration) | Clients / Ecosystem | in progress (T1–T6 + T8 done; docs shipped; npm publish/release workflow open in T7) | E01, E03, E04, E05, E14 |
@@ -327,7 +327,7 @@ proprietary.
   currently need to know who shared with them. File-request and guest-conversion flows are E05-T6.
 - Desktop continuous sync, native Files/Storage integration, mobile push/background sync and store
   releases are unfinished. The web file browser does poll the changes feed while open.
-- Generated identity pages/contact actions, the email bridge, general agent/automation
+- The email bridge, general agent/automation
   runtime, Spaces, real-time collaborative documents, subscriptions, managed hosting, the apps
   platform and creator commerce are not implemented.
 - The relay's default inbox policy remains open when no policy document exists for compatibility;

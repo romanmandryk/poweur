@@ -48,6 +48,10 @@ Signature input is compact JSON with:
 Requests are Host-routed: `Host: alice.poweur.net` selects Alice's document
 on a wildcard-hosted relay.
 
+For human-facing browser navigation, the same host serves a generated public
+[identity page](/files/identity-pages) at `/`. The well-known identity document
+remains the canonical machine-discovery endpoint.
+
 ## Resolver chain
 
 1. Fetch `https://<identity>/.well-known/poweur/id.json` (or `http` in local/test)

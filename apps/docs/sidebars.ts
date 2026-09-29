@@ -79,6 +79,7 @@ const sidebars: SidebarsConfig = {
         'files/storage-v2',
         'files/storage-v2-adr',
         'files/group-identities',
+        'files/identity-pages',
       ],
     },
     {

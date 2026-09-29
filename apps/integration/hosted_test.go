@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	clipkg "github.com/poweur/cli/pkg/cli"
 	relaypkg "github.com/poweur/api/pkg/relay"
+	clipkg "github.com/poweur/cli/pkg/cli"
 	"github.com/poweur/integration/fakedns"
 )
 
@@ -162,6 +162,11 @@ func rewriteRelayURL(t *testing.T, home, relayURL string) {
 
 func newHostedRelay(t *testing.T, zone *fakedns.Zone, dataDir string) (*httptest.Server, string) {
 	t.Helper()
+	return newHostedRelayWithWeb(t, zone, dataDir, "")
+}
+
+func newHostedRelayWithWeb(t *testing.T, zone *fakedns.Zone, dataDir, webStaticDir string) (*httptest.Server, string) {
+	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	addr := ts.Listener.Addr().String()
 	cfg := relaypkg.Config{
@@ -174,6 +179,7 @@ func newHostedRelay(t *testing.T, zone *fakedns.Zone, dataDir string) (*httptest
 		DataDir:              dataDir,
 		HostedDomains:        []string{"poweur.net"},
 		ResolverAllowPrivate: true,
+		WebStaticDir:         webStaticDir,
 		RateLimits: relaypkg.RateLimits{
 			PerMinute: 1000,
 			PerHour:   10000,

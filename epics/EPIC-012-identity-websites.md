@@ -1,6 +1,6 @@
 # EPIC-012 — Generated identity pages
 
-- **Status:** specified — ready to implement
+- **Status:** done (T1–T5)
 - **Priority:** P2
 - **Depends on:** EPIC-001 (`/.well-known` identity discovery), EPIC-006 (`profile.json`),
   EPIC-014 (anonymous messaging, if advertised), EPIC-015 (web-app visual language)
@@ -11,11 +11,11 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E12-T1 Page settings + response contract | **open** | Defaults locked: page on, indexing on |
-| E12-T2 Server-rendered identity page | **open** | Relay-owned template; no user HTML |
-| E12-T3 HTTP caching, SEO + security headers | **open** | No unbounded in-process page cache |
-| E12-T4 Contact actions | **open** | Copy ID; public opt-in anonymous composer |
-| E12-T5 Tests + docs | **open** | Host routing, opt-outs, escaping, cache validators |
+| E12-T1 Page settings + response contract | **done** | Optional public `identity_page`; defaults page on, indexing on, anonymous ads off. Schema, Go, TypeScript, Settings toggles |
+| E12-T2 Server-rendered identity page | **done** | Relay-owned `html/template`; no user HTML. Copy ID; IndieAuth `Link` kept on `/` |
+| E12-T3 HTTP caching, SEO + security headers | **done** | Exact `GET /` only. ETag/`304`, `Vary: Accept`, no in-process page cache |
+| E12-T4 Contact actions | **done** | Copy ID. **Write anonymously** only when advertised, via signed-out `/app/?anonymous=1`. A stale advertisement fails without showing inbox policy |
+| E12-T5 Tests + docs | **done** | [`apps/docs/docs/files/identity-pages.md`](../apps/docs/docs/files/identity-pages.md). Relay, identity, client, web, and `TestINT_IDENTITY_PAGE_01` |
 
 ## Goal
 
@@ -179,11 +179,11 @@ proxying/TLS/configuration for that topology is later work.
 
 ### E12-T1 — Page settings and response contract
 
-- [ ] Extend Go + TypeScript `Profile` and the JSON Schema with the optional
+- [x] Extend Go + TypeScript `Profile` and the JSON Schema with the optional
       `identity_page` block and defaults above; regenerate conformance vectors.
-- [ ] Specify HTML-vs-JSON content negotiation, disabled-page behavior and reserved routes in
+- [x] Specify HTML-vs-JSON content negotiation, disabled-page behavior and reserved routes in
       `apps/docs/docs/files/identity-pages.md`.
-- [ ] Add Settings controls for **Show identity page** and **Allow search indexing**, both on
+- [x] Add Settings controls for **Show identity page** and **Allow search indexing**, both on
       by default; anonymous-message advertising is explicit and off by default.
 
 **Acceptance:** an old profile gets an enabled/indexable page without migration; each setting
@@ -191,25 +191,25 @@ round-trips through Go and TypeScript and cannot change inbox enforcement.
 
 ### E12-T2 — Server-rendered identity page
 
-- [ ] Build one Go `html/template` page using the web app's spacing, colour and typography
+- [x] Build one Go `html/template` page using the web app's spacing, colour and typography
       tokens without importing or booting React.
-- [ ] Render identity, optional validated profile fields, avatar and safe links; provide useful
+- [x] Render identity, optional validated profile fields, avatar and safe links; provide useful
       empty-profile and missing-avatar states.
-- [ ] Add Copy ID and the instruction to use it in the visitor's existing Poweur client; do
+- [x] Add Copy ID and the instruction to use it in the visitor's existing Poweur client; do
       not invent a recipient-origin sign-in flow or generic compose handoff.
-- [ ] Keep the identity root's IndieAuth `Link` metadata on HTML and JSON responses.
+- [x] Keep the identity root's IndieAuth `Link` metadata on HTML and JSON responses.
 
 **Acceptance:** a browser navigation to a claimed hosted ID produces a responsive, accessible
 identity page; hostile profile strings remain text and cannot alter the DOM or load resources.
 
 ### E12-T3 — Routing, caching, indexing and headers
 
-- [ ] Implement the locked root response matrix with `Vary: Accept` and reserved paths taking
+- [x] Implement the locked root response matrix with `Vary: Accept` and reserved paths taking
       precedence.
-- [ ] Add ETag/conditional GET and the HTTP cache policy above; no identity-keyed HTML cache.
-- [ ] Emit canonical URL and ordinary indexable markup by default; emit header + markup
+- [x] Add ETag/conditional GET and the HTTP cache policy above; no identity-keyed HTML cache.
+- [x] Emit canonical URL and ordinary indexable markup by default; emit header + markup
       `noindex` when disabled.
-- [ ] Apply the security baseline and shared static-asset caching.
+- [x] Apply the security baseline and shared static-asset caching.
 
 **Acceptance:** integration tests cover two Hosts with different profiles, JSON vs HTML,
 enabled/disabled/indexable combinations, `304`, Host-aware cache keys and unchanged well-known
@@ -218,8 +218,8 @@ for each one.
 
 ### E12-T4 — Contact actions
 
-- [ ] Make the ID copy/select action work without exposing inbox policy.
-- [ ] When `advertise_anonymous_messages` is true, link to a dedicated signed-out `/app/`
+- [x] Make the ID copy/select action work without exposing inbox policy.
+- [x] When `advertise_anonymous_messages` is true, link to a dedicated signed-out `/app/`
       anonymous composer that reuses EPIC-014 unchanged, never offers stored credentials and
       handles policy rejection as a normal stale-setting case.
 
@@ -229,10 +229,10 @@ advertisement fails safely; no private policy field appears in HTML or page data
 
 ### E12-T5 — Tests and documentation
 
-- [ ] Unit tests for profile defaults/validation, URL sanitisation, escaping, disabled/indexing
+- [x] Unit tests for profile defaults/validation, URL sanitisation, escaping, disabled/indexing
       behavior, ETag inputs and content negotiation.
-- [ ] Relay and browser integration tests for the T2/T3 acceptance matrix.
-- [ ] User docs for the two settings and operator docs explaining the trusted fixed template,
+- [x] Relay and browser integration tests for the T2/T3 acceptance matrix.
+- [x] User docs for the two settings and operator docs explaining the trusted fixed template,
       cache behavior and self-hosted options.
 
 **Acceptance:** relay, identity, TypeScript client, web and integration slices pass; the epic

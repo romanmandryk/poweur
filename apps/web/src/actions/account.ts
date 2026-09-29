@@ -68,6 +68,11 @@ export interface ProfileDraft {
   avatarPath: string | null;
   linkLabel: string;
   linkUrl: string;
+  identityPage: {
+    enabled: boolean;
+    indexable: boolean;
+    advertise_anonymous_messages: boolean;
+  };
 }
 
 /**
@@ -100,6 +105,7 @@ export async function saveProfile(draft: ProfileDraft, onStatus: (text: string) 
     bio: draft.bio,
     ...(avatarPath ? { avatar: avatarPath } : {}),
     links: [{ label: draft.linkLabel, url: draft.linkUrl }],
+    identity_page: draft.identityPage,
   });
   useData.setState({ profile: { doc: saved, explicit: true, loaded: true, loading: false } });
   // Every circle of ours shows the new photo at once, on every screen.

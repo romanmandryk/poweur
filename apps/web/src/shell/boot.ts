@@ -17,6 +17,7 @@ import { beginSignInApproval } from "../actions/signin";
 import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
+import { isPublicAnonymousRoute } from "../screens/PublicAnonymous";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
 
 interface CapacitorAppPlugin {
@@ -199,6 +200,7 @@ function startBoot(launchUrl: string): Promise<void> {
   refreshSession();
   const identity = getActiveIdentity();
   const route = useRoute.getState();
+  const publicAnonymous = isPublicAnonymousRoute();
 
   if (pairLink) {
     presentPairLink(pairLink);
@@ -206,6 +208,9 @@ function startBoot(launchUrl: string): Promise<void> {
     // A QR open is always another device's screen. A `?auth=` page load is
     // the same browser that started the sign-in.
     presentSignInLink(authInput, Boolean(fromLaunch));
+  } else if (publicAnonymous) {
+    // Signed-out composer on the recipient host. Do not open or unlock an
+    // identity left in this origin's storage.
   } else if (!protectAuthRoute && handedOver) {
     // Locked on arrival: the passkey that opens the keys is scoped to the
     // domain both hosts share (E18-T4).
@@ -225,7 +230,7 @@ function startBoot(launchUrl: string): Promise<void> {
   return resolveMode().then((info: ModeInfo) => {
     setDocumentIdentity(info);
     useSession.setState({ mode: info });
-    if (authInput || protectAuthRoute || handedOver) return;
+    if (authInput || protectAuthRoute || handedOver || publicAnonymous) return;
     if (info.mode === "launcher") {
       settleLauncherDoor();
       return;

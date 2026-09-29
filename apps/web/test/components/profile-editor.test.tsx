@@ -93,3 +93,25 @@ describe("ProfileEditor photo", () => {
     expect($(".pe-avatar-preview img")).toBeNull();
   });
 });
+
+describe("ProfileEditor identity page settings", () => {
+  it("defaults the page and indexing on while anonymous messaging stays off", async () => {
+    render(<ProfileEditor profile={null} />);
+
+    expect($("#pe-page-enabled")).toBeChecked();
+    expect($("#pe-page-indexable")).toBeChecked();
+    expect($("#pe-page-anonymous")).not.toBeChecked();
+
+    fireEvent.click($("#pe-page-enabled")!);
+    fireEvent.click($("#pe-page-indexable")!);
+    fireEvent.click($("#pe-page-anonymous")!);
+    fireEvent.click($("#pe-save")!);
+
+    await waitFor(() => expect(holder.client.setProfile).toHaveBeenCalled());
+    expect(holder.client.setProfile.mock.calls[0][0].identity_page).toEqual({
+      enabled: false,
+      indexable: false,
+      advertise_anonymous_messages: true,
+    });
+  });
+});

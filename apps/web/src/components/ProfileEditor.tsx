@@ -16,13 +16,18 @@ import { useSession } from "../state/session";
 import { toast } from "../state/ui";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
-import { FormGroup, Input, Label, Textarea } from "../ui/Field";
+import { CheckRow, FormGroup, Input, Label, Textarea } from "../ui/Field";
 
 export interface ProfileDocument {
   display_name?: string;
   bio?: string;
   avatar?: string;
   links?: { label?: string; url?: string }[];
+  identity_page?: {
+    enabled?: boolean;
+    indexable?: boolean;
+    advertise_anonymous_messages?: boolean;
+  };
 }
 
 export interface ProfileEditorHandle {
@@ -61,6 +66,9 @@ export function ProfileEditor({
   const [removed, setRemoved] = useState(false);
   const pickedUrl = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pageEnabled, setPageEnabled] = useState(doc.identity_page?.enabled !== false);
+  const [pageIndexable, setPageIndexable] = useState(doc.identity_page?.indexable !== false);
+  const [advertiseAnonymous, setAdvertiseAnonymous] = useState(doc.identity_page?.advertise_anonymous_messages === true);
   const [status, setStatus] = useState<{ text: string; tone: "" | "ok" | "warn" }>({ text: "", tone: "" });
   const value = (id: string) => form.current?.querySelector<HTMLInputElement>(`#${id}`)?.value ?? "";
 
@@ -116,6 +124,11 @@ export function ProfileEditor({
           avatarPath: removed ? null : (doc.avatar ?? null),
           linkLabel: value("pe-link-label"),
           linkUrl: value("pe-link-url"),
+          identityPage: {
+            enabled: pageEnabled,
+            indexable: pageIndexable,
+            advertise_anonymous_messages: advertiseAnonymous,
+          },
         },
         (text) => setStatus({ text, tone: "" }),
       );
@@ -176,6 +189,34 @@ export function ProfileEditor({
               : "Public: anyone who looks you up sees it. Stored in your own /public folder."}
         </p>
       </FormGroup>
+      {showSave && (
+        <FormGroup className="mb-3.5" id="pe-identity-page-settings">
+          <Label>Identity page</Label>
+          <div className="divide-y divide-sep rounded-card bg-surface px-4 shadow-card">
+            <CheckRow
+              id="pe-page-enabled"
+              checked={pageEnabled}
+              onCheckedChange={setPageEnabled}
+              label="Show identity page"
+              detail="Display your public profile at your Poweur ID address."
+            />
+            <CheckRow
+              id="pe-page-indexable"
+              checked={pageIndexable}
+              onCheckedChange={setPageIndexable}
+              label="Allow search indexing"
+              detail="Let search engines include your identity page."
+            />
+            <CheckRow
+              id="pe-page-anonymous"
+              checked={advertiseAnonymous}
+              onCheckedChange={setAdvertiseAnonymous}
+              label="Show anonymous message link"
+              detail="This only advertises the option. Your inbox policy still decides whether a message is accepted."
+            />
+          </div>
+        </FormGroup>
+      )}
       <FormGroup className="mb-3.5">
         <Label htmlFor="pe-name">Display name</Label>
         <Input id="pe-name" type="text" maxLength={256} defaultValue={doc.display_name ?? ""} placeholder={handleOf(identity)} />
