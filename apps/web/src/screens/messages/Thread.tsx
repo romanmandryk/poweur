@@ -8,7 +8,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, Paperclip, Users, type LucideIcon } from "lucide-react";
-import { downloadAttachment, markConversationRead, sendAttachment, sendSigned, unreadFor } from "../../actions/messages";
+import { downloadAttachment, historyHasOlder, loadOlderHistory, markConversationRead, sendAttachment, sendSigned, unreadFor } from "../../actions/messages";
 import { activeClient } from "../../actions/relay";
 import { MessageText } from "../../components/MessageText";
 import { usePeerAvatars } from "../../actions/avatars";
@@ -68,6 +68,10 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
 
   const all = threadMessages(messages, identity, peer, threadId);
   const { visible, hidden, hasMore } = latestWindow(all, shown);
+  // Older messages still only in the archive: fetched a page at a time.
+  const [archived, setArchived] = useState(false);
+  const [paging, setPaging] = useState(false);
+  useEffect(() => { void historyHasOlder(peer).then(setArchived); }, [peer, history.loaded]);
   const unread = unreadFor({ messages, history }, identity, peer);
   const title = group ? handleOf(peer) : contactFor(contacts, peer)?.petname || handleOf(peer);
   const self = identity.toLowerCase();
@@ -184,19 +188,32 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
         }}
         className="thread-body flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-2"
       >
-        {hasMore && (
+        {(hasMore || archived) && (
           <div className="thread-more flex justify-center pt-1 pb-3">
             <Button
               id="btn-thread-more"
               size="sm"
               variant="secondary"
-              onClick={() => {
+              disabled={paging}
+              onClick={async () => {
                 const element = body.current;
                 if (element) anchor.current = { height: element.scrollHeight, top: element.scrollTop };
+                // Running out of loaded messages: read the previous page first.
+                if (hidden < THREAD_PAGE_SIZE && archived) {
+                  setPaging(true);
+                  try {
+                    await loadOlderHistory(peer);
+                    setArchived(await historyHasOlder(peer));
+                  } catch (error) {
+                    toast(`Could not load earlier messages: ${(error as Error)?.message ?? error}`, "error");
+                  } finally {
+                    setPaging(false);
+                  }
+                }
                 setShown((current) => current + THREAD_PAGE_SIZE);
               }}
             >
-              Load more ({hidden} earlier)
+              {paging ? "Loading…" : hidden > 0 ? `Load more (${hidden} earlier)` : "Load earlier messages"}
             </Button>
           </div>
         )}

@@ -98,6 +98,11 @@ export class DriveClient {
   changes(cursor = "0", limit = 100): Promise<{ changes: DriveChange[]; cursor: string }> {
     return this.request("GET", `/changes?cursor=${segment(cursor)}&limit=${limit}`);
   }
+  /** The caller's chain position in an append file: `previous` is the hash
+   * of their last record ("" before the first). */
+  authorCursor(node: string): Promise<{ sequence: number; previous: string }> {
+    return this.request("GET", `/nodes/${segment(node)}/author-cursor`);
+  }
   records(node: string, from = 0, limit = 100): Promise<{ records: { position: number; record: AppendRecord }[]; next: number }> {
     return this.request("GET", `/nodes/${segment(node)}/records?from=${from}&limit=${limit}`);
   }

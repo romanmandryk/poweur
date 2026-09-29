@@ -370,6 +370,7 @@ owner is permitted (`403` otherwise) — superseded by shares below. Knowing a h
 | Signed manifest / page | `GET /nodes/{node}/versions/{version}`, `…/pages/{page}` | immutable JSON |
 | Chunk through a version | `GET /nodes/{node}/versions/{version}/chunks/{hash}` | immutable bytes |
 | Chunk of an append record | `GET /nodes/{node}/chunks/{hash}` | immutable bytes |
+| Author cursor | `GET /nodes/{node}/author-cursor` (append role) | `{sequence, previous}`: the caller's chain position, so appending never re-reads the log |
 | Append tail | `GET /nodes/{node}/records?from=N&limit=` | `{records:[{position,record}], next}`; `410 {trimmed_before, snapshot}` |
 | Shares | `GET /shares` | `{shares}`: all for the owner; own and administered for members |
 | Event stream | `GET /events` | SSE `drive.changed`, filtered per caller; `drive.revoked` then close |

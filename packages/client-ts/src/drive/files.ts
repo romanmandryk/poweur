@@ -187,9 +187,9 @@ export class DriveFiles {
   private async fromListed(entry: ListedNode, parent?: OpenFile): Promise<OpenFile> {
     const cached = this.opened.get(entry.id);
     if (cached && cached.manifest.version === entry.head && !entry.removed) {
-      // Appends move the position without a new version.
-      if (entry.position !== undefined) cached.position = entry.position;
-      if (entry.trimmed_before !== undefined) cached.trimmedBefore = entry.trimmed_before;
+      // Appends move the position without a new version. The relay omits
+      // zeros, so an append file's missing fields mean 0.
+      if (entry.mode === "append") { cached.position = entry.position ?? 0; cached.trimmedBefore = entry.trimmed_before ?? 0; }
       return cached;
     }
     if (entry.removed) throw new Error("node is removed");
@@ -262,7 +262,7 @@ export class DriveFiles {
     // private keyed name index. Their random token is replaced on rename.
     if (nameVersion && parentKey && !guestKey(nameVersion.author) && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
     const result: OpenFile = { manifest: head, name, folder: info.folder ?? "", nodeKey,
-      ...(info.position !== undefined ? { position: info.position } : {}), ...(info.trimmed_before !== undefined ? { trimmedBefore: info.trimmed_before } : {}) };
+      ...(info.mode === "append" ? { position: info.position ?? 0, trimmedBefore: info.trimmed_before ?? 0 } : {}) };
     if (contentVersion) result.contentKey = openKey(nodeKey, payload(contentVersion.content_key!), this.context(contentVersion, "content-key"));
     this.opened.set(node, result);
     return result;
@@ -510,47 +510,29 @@ export class DriveFiles {
       if (from < to) yield plain.subarray(from, to);
     }
   }
-  private async recordsFrom(node: string, from: number): Promise<{ position: number; record: AppendRecord }[]> {
+  /** Records from `from`, at most `limit` of them (0: to the end). */
+  private async recordsFrom(node: string, from: number, limit = 0): Promise<{ position: number; record: AppendRecord }[]> {
     const out: { position: number; record: AppendRecord }[] = [];
     const seen = new Set<number>();
     for (;;) {
       if (seen.has(from)) throw new Error("repeated record cursor");
       seen.add(from);
-      const page = await this.client.records(node, from, 1000);
+      const want = limit ? Math.min(1000, limit - out.length) : 1000;
+      const page = await this.client.records(node, from, want);
       out.push(...page.records);
       // A short page is the last one: no empty request to confirm it.
-      if (page.records.length < 1000 || page.next === from) return out;
+      if (page.records.length < want || page.next === from || (limit && out.length >= limit)) return out;
       from = page.next;
     }
   }
+  /** The caller's own chain position in an append file, from the relay: one
+   * request instead of reading the whole log. The relay enforces the chain on
+   * commit, so a wrong answer only makes the append fail. */
   async authorCursor(file: OpenFile): Promise<{ sequence: number; previous: string }> {
-    const info = await this.client.node(file.manifest.node);
-    let sequence = 0, previous = "";
-    const snap = await this.snapshotCursor(file.manifest.node, info);
-    if (snap) ({ sequence, previous } = snap);
-    const from = info.trimmed_before && info.trimmed_before > 1 ? info.trimmed_before : 1;
-    const key = fromBase64(this.client.signer.publicKey.replace(/^ed25519:/, ""));
-    for (const item of await this.recordsFrom(file.manifest.node, from)) {
-      if (item.record.author !== this.client.signer.identity) continue;
-      if (sequence === 0 && item.record.sequence !== 1) verifyAppendRecord(item.record, key);
-      else verifyNextRecord(item.record, key, sequence, previous);
-      sequence = item.record.sequence;
-      previous = appendRecordHash(item.record);
-    }
-    return { sequence, previous };
+    const cursor = await this.client.authorCursor(file.manifest.node);
+    if (!Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0 || (cursor.sequence === 0) !== (cursor.previous === "")) throw new Error("invalid author cursor");
+    return cursor;
   }
-  private async snapshotCursor(log: string, info: { trim_snapshot?: { node: string; version: string } }): Promise<{ sequence: number; previous: string } | undefined> {
-    if (!info.trim_snapshot) return;
-    const file = await this.open(info.trim_snapshot.node);
-    const bytes = await readAll(this.read(file));
-    const doc = JSON.parse(new TextDecoder().decode(bytes)) as { format?: number; log?: string; cursors?: Record<string, { sequence: number; previous: string }> };
-    if (doc.format !== 1 || doc.log !== log) return;
-    return doc.cursors?.[this.client.signer.identity];
-  }
-  /** Append one signed record. `inline` seals a small record into the record
-   * itself, so readers get it with the record list instead of one chunk
-   * request per record; the caller pads it, since inline content is not.
-   * `cursor` (the caller's own chain state) saves re-reading the log. */
   async append(file: OpenFile, plaintext: Uint8Array, options: { inline?: boolean; cursor?: { sequence: number; previous: string } } = {}): Promise<number> {
     if (file.manifest.mode !== "append" || !file.contentKey) throw new Error("not an append file");
     if (!plaintext.length) throw new Error("empty append");
@@ -576,13 +558,13 @@ export class DriveFiles {
   }
   /** Records from `from` on, each checked against its author's chain. Pass
    * the cursors an earlier read filled in to continue those chains. */
-  async tail(file: OpenFile, from = 0, cursors: AuthorCursors = new Map()): Promise<{ position: number; author: string; sequence: number; plain: Uint8Array }[]> {
+  async tail(file: OpenFile, from = 0, cursors: AuthorCursors = new Map(), limit = 0): Promise<{ position: number; author: string; sequence: number; plain: Uint8Array }[]> {
     if (file.manifest.mode !== "append" || !file.contentKey) throw new Error("not an append file");
     const trimmedBefore = file.trimmedBefore ?? (await this.client.node(file.manifest.node)).trimmed_before ?? 0;
     if (!from) from = 1;
     if (trimmedBefore > from) throw new Error("record prefix was trimmed; load the snapshot");
     const out = [];
-    for (const item of await this.recordsFrom(file.manifest.node, from)) {
+    for (const item of await this.recordsFrom(file.manifest.node, from, limit)) {
       const key = await this.authorKeyOf(item.record.author);
       if (!await this.allowed(file.manifest.node, item.record.author, "append")) throw new Error("record author may not append to this file");
       const cur = cursors.get(item.record.author) ?? { sequence: 0, previous: "" };

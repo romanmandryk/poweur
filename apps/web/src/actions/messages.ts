@@ -167,7 +167,8 @@ export function loadHistory({ force = false } = {}): Promise<void> {
         if (snapshot && !useData.getState().history.loaded) show(snapshot.records, snapshot.readState);
       }
       const store = await client.history();
-      const [records, readState] = await Promise.all([store.load(), store.readState()]);
+      // The newest page of each conversation; a thread pages back on demand.
+      const [records, readState] = await Promise.all([store.load({ perConversation: HISTORY_TRAY_PAGE }), store.readState()]);
       show(records, readState);
       setHistory({ loaded: true, error: null });
       void saveSnapshot(identity, "history", { records, readState });
@@ -180,6 +181,27 @@ export function loadHistory({ force = false } = {}): Promise<void> {
     }
   })();
   return historyInFlight;
+}
+
+/** Messages per conversation read from the archive when the app opens. */
+const HISTORY_TRAY_PAGE = 20;
+
+/** Whether a conversation has archived messages older than those loaded. */
+export async function historyHasOlder(peer: string): Promise<boolean> {
+  const client = activeClient();
+  if (!client?.decryptor) return false;
+  try { return await (await client.history()).hasOlder(peer); } catch { return false; }
+}
+
+/** Read the previous page of a conversation from the archive (one request)
+ * and add it to the thread. Returns how many messages arrived. */
+export async function loadOlderHistory(peer: string, limit = 50): Promise<number> {
+  const client = activeClient();
+  if (!client?.decryptor) return 0;
+  const records = await (await client.history()).older(peer, limit);
+  const signed = records.filter((record: any) => record.queue !== "anonymous");
+  mergeMessages(signed.map(recordToMessage));
+  return records.length;
 }
 
 const ANON_DRAIN_INTERVAL_MS = 2000;

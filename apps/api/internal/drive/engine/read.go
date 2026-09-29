@@ -53,6 +53,24 @@ func (e *Engine) Root(ctx context.Context, driveID string) (string, error) {
 	return h.st.Root, nil
 }
 
+// AuthorCursor returns an author's latest sequence and record hash in an
+// append file (zero and "" before their first record): what their next
+// record must continue. The relay enforces the chain on commit anyway, so a
+// writer asking here instead of re-reading the whole log loses nothing.
+func (e *Engine) AuthorCursor(ctx context.Context, driveID, nodeID, author string) (uint64, string, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return 0, "", err
+	}
+	defer h.mu.Unlock()
+	n := h.st.Nodes[nodeID]
+	if n == nil || n.Removed || n.Mode != drive.ModeAppend {
+		return 0, "", ErrNotFound
+	}
+	c := n.Authors[author]
+	return c.Sequence, c.Hash, nil
+}
+
 // Seq returns the drive's latest journal sequence: the changes cursor now.
 func (e *Engine) Seq(ctx context.Context, driveID string) (uint64, error) {
 	h, err := e.open(ctx, driveID)

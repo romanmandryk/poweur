@@ -817,9 +817,10 @@ filtering a conversation still means opening everything.
       on chunked storage, `tail` / `before` APIs in both SDKs, CLI `--limit/--before`). The
       conversation screen above can ship first on today's full load; the two items below wait
       for E20-T11
-- [ ] Web: unlock loads one tail chunk per conversation for the tray; the thread view fetches
-      older chunks on scroll-to-top with the scroll position preserved; chunks cached in
-      IndexedDB (immutable, never revalidated)
+- [x] Web: unlock loads the newest 20 per conversation (one request each) for the tray; the
+      thread's "Load more" reads the previous page from the archive (one request) with the
+      scroll position preserved; the last-seen history is kept in the encrypted on-device
+      snapshot (EPIC-020 E20-T11, `durability.spec.js`)
 - [ ] Desktop (with E15-T11): the thread renders into the detail pane of the two-pane layout
 
 **Shipped so far (2026-09-14, web 0.1.12):**

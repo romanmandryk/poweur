@@ -535,6 +535,22 @@ func (s *Server) handleDriveRecords(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"records": records, "next": next})
 }
 
+// handleDriveAuthorCursor returns the caller's own chain position in an
+// append file, so appending never needs the whole log.
+func (s *Server) handleDriveAuthorCursor(w http.ResponseWriter, r *http.Request) {
+	driveID, actor, ok := s.driveNode(w, r, drive.RoleAppend)
+	if !ok {
+		return
+	}
+	seq, hash, err := s.engine.AuthorCursor(r.Context(), driveID, r.PathValue("node"), actor)
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, map[string]any{"sequence": seq, "previous": hash})
+}
+
 // handleDriveListing returns a folder and a page of its children with the
 // signed versions a reader needs to open each, and the share evidence for
 // them: one request instead of several per child.

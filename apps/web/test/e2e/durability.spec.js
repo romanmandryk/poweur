@@ -90,4 +90,41 @@ test.describe("message durability", () => {
       }
     }
   });
+  test("a long conversation pages back from the archive after a reload", async ({ browser }) => {
+    test.slow();
+    const alice = await (await browser.newContext({ viewport: MOBILE })).newPage();
+    const bob = await (await browser.newContext({ viewport: MOBILE })).newPage();
+    await stubPasskeys(alice);
+    await stubPasskeys(bob);
+    const suffix = Date.now().toString(36);
+    const aliceId = await registerIdentity(alice, relay, `pga${suffix}`);
+    const bobId = await registerIdentity(bob, relay, `pgb${suffix}`);
+    await sendFrom(bob, aliceId, Array.from({ length: 45 }, (_, i) => `page ${i + 1}`));
+    // Alice's app drains the spool into her archive.
+    await expect.poll(() => alice.evaluate(async () => {
+      const { loadInbox } = await window.__poweurModule("messages");
+      await loadInbox({ force: true });
+      const { clientFor } = await window.__poweurModule("client");
+      const { getActiveIdentity } = await window.__poweurModule("storage");
+      return (await (await clientFor(getActiveIdentity()).history()).load()).length;
+    }), { timeout: 40_000 }).toBe(45);
+
+    await alice.evaluate(() => new Promise((resolve) => { const r = indexedDB.deleteDatabase("poweur-snapshots"); r.onsuccess = r.onerror = r.onblocked = () => resolve(null); }));
+    await alice.reload();
+    await alice.click("#btn-unlock-main");
+    await alice.locator("#btn-do-unlock").click({ timeout: 30_000 });
+    const row = alice.locator(`.conv-row[data-compose-to="${bobId}"]`);
+    await expect(row).toHaveCount(1, { timeout: 30_000 });
+    await row.click();
+    const bubbles = alice.locator(".bubble-row");
+    await expect(bubbles).toHaveCount(10);
+    // The newest 20 came with the tray; the rest are read from the archive.
+    for (let i = 0; i < 10 && await alice.locator("#btn-thread-more").count(); i++) {
+      const before = await bubbles.count();
+      await alice.click("#btn-thread-more");
+      await expect.poll(() => bubbles.count(), { timeout: 20_000 }).toBeGreaterThan(before);
+    }
+    await expect(bubbles).toHaveCount(45);
+    await expect(alice.locator(".thread-body")).toContainText("page 1");
+  });
 });

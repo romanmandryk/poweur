@@ -352,3 +352,44 @@ it("sends an attachment only its recipient can open", async () => {
   await expect(openAttachment(asBob, attachment, { ...metadata, hash: "0".repeat(64) }, authorKey)).rejects.toThrow("does not match");
   expect(() => parseAttachment(JSON.stringify({ ...attachment, name: "../x" }))).toThrow();
 }, 60_000);
+
+it("pages a large archive: newest per conversation first, then one request per older page", async () => {
+  const dana = await createTestIdentity(relay.baseUrl, "archive");
+  const decryptor = (dana.client as unknown as { decryptor: Decryptor }).decryptor;
+  const keys = fileKeys(dana.keys.signingPrivateKey, dana.keys.encryptionPrivateKey!);
+  const seeder = new MessageHistory(dana.identity, decryptor, new DriveFiles(new DriveClient(dana.client.relay, dana.client.signer), keys));
+  const peers = ["erin.poweur.net", "fred.poweur.net"];
+  const at = (i: number) => new Date(Date.UTC(2026, 8, 1) + i * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  for (const peer of peers) {
+    for (let i = 0; i < 150; i++) await seeder.append({ id: `${peer}-${i}`, sender: dana.identity, recipient: peer, timestamp: at(i), queue: "sent", body: `${peer} ${i}` });
+  }
+
+  const requests: string[] = [];
+  const counting = new RelayClient(relay.baseUrl, { fetch: async (url, init) => { requests.push(new URL(String(url)).pathname.split("/").slice(-1)[0]!); return fetch(url, init); } });
+  const phone = new MessageHistory(dana.identity, decryptor, new DriveFiles(new DriveClient(counting, dana.client.signer), keys));
+  const tray = await phone.load({ perConversation: 20 });
+  expect(tray).toHaveLength(40);
+  // One records request per conversation for the tray.
+  expect(requests.filter(r => r === "records")).toHaveLength(2);
+  expect(await phone.hasOlder(peers[0]!)).toBe(true);
+
+  requests.length = 0;
+  const page = await phone.older(peers[0]!, 50);
+  expect(page.map(r => r.id)).toEqual(Array.from({ length: 50 }, (_, i) => `${peers[0]}-${80 + i}`));
+  expect(requests).toEqual(["records"]);
+
+  const older = await phone.before(peers[0]!, 81, { limit: 10 });
+  expect(older.map(r => r.id)).toEqual(Array.from({ length: 10 }, (_, i) => `${peers[0]}-${70 + i}`));
+  const whole = await phone.conversation(peers[0]!);
+  expect(whole.map(r => r.id)).toEqual(Array.from({ length: 150 }, (_, i) => `${peers[0]}-${i}`));
+  expect(await phone.hasOlder(peers[0]!)).toBe(false);
+
+  // Appending never reads the log back: the relay has our chain position.
+  requests.length = 0;
+  await phone.append({ id: "new", sender: dana.identity, recipient: peers[1]!, timestamp: at(500), queue: "sent", body: "latest" });
+  expect(requests.filter(r => r === "records")).toHaveLength(0);
+  expect(requests).toContain("author-cursor");
+  expect((await phone.tail(peers[1]!, { limit: 1 })).map(r => r.id)).toEqual(["new"]);
+  // And the seeding device still reads it, continuing its own chain.
+  expect((await seeder.load()).filter(r => r.recipient === peers[1]).at(-1)?.id).toBe("new");
+}, 180_000);

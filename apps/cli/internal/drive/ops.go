@@ -155,41 +155,21 @@ func (f *Files) recordsFrom(ctx context.Context, node string, from uint64) ([]po
 		from = page.Next
 	}
 }
+// authorCursor is the caller's chain position in an append file, from the
+// relay: one request instead of reading the whole log. The relay enforces
+// the chain on commit, so a wrong answer only makes the append fail.
 func (f *Files) authorCursor(ctx context.Context, file *File) (uint64, string, error) {
-	info, err := f.nodeInfo(ctx, file.Manifest.Node)
-	if err != nil {
+	var cursor struct {
+		Sequence uint64 `json:"sequence"`
+		Previous string `json:"previous"`
+	}
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(file.Manifest.Node)+"/author-cursor", &cursor); err != nil {
 		return 0, "", err
 	}
-	key, err := f.authorKey(f.Client.Identity)
-	if err != nil {
-		return 0, "", err
+	if (cursor.Sequence == 0) != (cursor.Previous == "") {
+		return 0, "", errors.New("invalid author cursor")
 	}
-	seq, prev, _ := f.snapshotCursor(ctx, file.Manifest.Node, info.TrimSnapshot)
-	from := uint64(1)
-	if info.TrimmedBefore > 1 {
-		from = info.TrimmedBefore
-	}
-	records, err := f.recordsFrom(ctx, file.Manifest.Node, from)
-	if err != nil {
-		return 0, "", err
-	}
-	for _, item := range records {
-		if item.Record.Author != f.Client.Identity {
-			continue
-		}
-		if seq == 0 && item.Record.Sequence != 1 {
-			if err = item.Record.Verify(key); err != nil {
-				return 0, "", err
-			}
-		} else if err = item.Record.VerifyNext(key, seq, prev); err != nil {
-			return 0, "", err
-		}
-		seq = item.Record.Sequence
-		if prev, err = item.Record.Hash(); err != nil {
-			return 0, "", err
-		}
-	}
-	return seq, prev, nil
+	return cursor.Sequence, cursor.Previous, nil
 }
 func (f *Files) openRecord(ctx context.Context, file *File, record protocol.AppendRecord) ([]byte, error) {
 	if record.Sealed != nil {

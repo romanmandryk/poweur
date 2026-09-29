@@ -418,6 +418,18 @@ func TestAppendPositionsAndAuthorChains(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
+	// The author's cursor is what their next record must continue.
+	if seq, prev, err := f.eng.AuthorCursor(ctx, owner, log, owner); err != nil || seq != 2 {
+		t.Fatalf("author cursor: %d %q %v", seq, prev, err)
+	} else if h2, _ := r2.Hash(); prev != h2 {
+		t.Fatalf("author cursor hash %q, want %q", prev, h2)
+	}
+	if seq, prev, err := f.eng.AuthorCursor(ctx, owner, log, "nobody.poweur.net"); err != nil || seq != 0 || prev != "" {
+		t.Fatalf("new author cursor: %d %q %v", seq, prev, err)
+	}
+	if _, _, err := f.eng.AuthorCursor(ctx, owner, root, owner); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cursor of a folder: %v", err)
+	}
 	got, next, err := f.eng.Records(ctx, owner, log, 2, 10)
 	if err != nil || len(got) != 1 || got[0].Position != 2 || got[0].Record.Sequence != 2 || next != 3 {
 		t.Fatalf("records: %+v %d %v", got, next, err)
