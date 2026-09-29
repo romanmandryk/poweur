@@ -552,7 +552,14 @@ commit fuzz never removes a live chunk.
 - [x] **Share members subscribe too:** a member on another relay opens an event stream on the
       host relay for the nodes shared with them (visitor auth), filtered to what they may read;
       revocation closes the stream
-- [ ] `/pub` and `/.well-known/poweur/` served from public nodes and `.poweur/public`
+- [x] `/pub` served from public nodes (`https://<identity>/pub/<folder>/<path>`: files decrypted
+      with the key their manifests publish, JSON or HTML folder listings, `ETag`, one-minute public
+      caching, sandboxed CSP; nothing private resolves) and `/.well-known/poweur/` from
+      `.poweur/public`. Public manifests (`public`, `plain_name`, `plain_key`, public name hash;
+      no sealed envelopes; never rotated) are appended to the canonical form only when public, so
+      private vectors are unchanged; Go↔TS vectors; engine keeps public trees public and rooted at
+      the top. SDK/CLI `createPublic`/`mkdir --public`, web "New public folder" and public
+      address dialog (`TestPublicFolders`, `INT_DRIVE_09`, SDK live test, `files.spec.js`)
 - [ ] Public nodes CDN-cacheable (immutable chunk URLs, short-lived feed heads with `ETag`) and
       the relay subscription proxy + batch feed heads (memory only) specified in EPIC-032 E32-T4
 - [ ] Presigned chunk downloads (reads go through the relay for now)
@@ -680,8 +687,9 @@ both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` conv
       requests) below an "or"; offers from accepted contacts mount without Accept, strangers'
       wait under "Waiting for you"; an undelivered offer says why (e.g. the recipient's inbox
       refused it)
-- [ ] Complete the share dialog with create-only file requests; public folder toggle with a
-      plaintext warning; mobile-specific interaction coverage
+- [x] Share dialog with create-only file requests; public folders with a plaintext warning and
+      a public address dialog (E20-T5)
+- [ ] Mobile-specific interaction coverage
 - [ ] Thumbnails and previews generated on the client at upload and stored as encrypted
       sidecars; name search as a client-side index
 - [ ] Link viewer page decrypting in the browser, streaming large downloads

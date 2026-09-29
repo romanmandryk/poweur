@@ -49,6 +49,7 @@ func (c *Client) httpClient() *http.Client {
 	}
 	return &http.Client{Timeout: 30 * time.Second}
 }
+
 // auth sets a request's credentials: a link holder names its link; anyone
 // else signs the request itself (method, path and query, time, nonce and
 // the body's SHA-256), so the relay needs no challenge round trip.

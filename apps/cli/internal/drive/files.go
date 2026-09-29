@@ -43,6 +43,9 @@ type File struct {
 	Name                string
 	Folder              string
 	NodeKey, ContentKey []byte
+	// Public: published with a plaintext name and content key (E20-T5); a
+	// public node has no node key.
+	Public bool
 }
 type Node struct {
 	ID            string `json:"id"`
@@ -57,6 +60,7 @@ type Node struct {
 	// RotateRequired is set after a key-bearing share was revoked: writes
 	// wait for a rotation.
 	RotateRequired bool `json:"rotate_required"`
+	Public         bool `json:"public"`
 	// The versions carrying the key, name and content-key envelopes.
 	KeyVersion     string    `json:"key_version"`
 	NameVersion    string    `json:"name_version"`
@@ -320,6 +324,9 @@ func (f *Files) fromListed(ctx context.Context, entry listedNode, parent *File) 
 	}
 	if entry.Removed {
 		return nil, errors.New("node is removed")
+	}
+	if entry.Public {
+		return f.fromPublic(entry)
 	}
 	byVersion := map[string]*protocol.Manifest{}
 	for i := range entry.Versions {
@@ -675,6 +682,10 @@ func (f *Files) create(ctx context.Context, parent *File, name, kind, mode strin
 	if mode == protocol.ModeAppend && reader != nil {
 		return nil, errors.New("an append file starts empty")
 	}
+	// Everything inside a public folder is public.
+	if parent != nil && parent.Public {
+		return f.createPublic(ctx, parent, name, kind, mode, reader)
+	}
 	node, err := protocol.NewNodeID()
 	if err != nil {
 		return nil, err
@@ -799,6 +810,8 @@ func (f *Files) next(file *File, operation string) (protocol.Manifest, error) {
 	m.NameHash = ""
 	m.NodeKey = nil
 	m.ContentKey = nil
+	m.PlainName = ""
+	m.PlainKey = ""
 	m.Signature = ""
 	return m, nil
 }
@@ -932,11 +945,28 @@ func (f *Files) Move(ctx context.Context, file, parent *File, name string) error
 	if err != nil {
 		return err
 	}
+	if file.Public != parent.Public && !(file.Public && parent.Folder == "") {
+		if file.Public {
+			return errors.New("a public item moves only within public folders or to the top")
+		}
+		return errors.New("publishing needs a copy: a private item cannot move into a public folder")
+	}
 	m, err := f.next(file, protocol.OpMove)
 	if err != nil {
 		return err
 	}
 	m.Folder = parent.Manifest.Node
+	if file.Public {
+		m.PlainName, m.NameHash = name, protocol.PublicNameHash(parent.Manifest.Node, name)
+		if err = m.Sign(f.Client.Key); err != nil {
+			return err
+		}
+		if _, err = f.Client.Commit(ctx, Commit{Manifest: &m}); err != nil {
+			return err
+		}
+		file.Manifest, file.Name, file.Folder = m, name, parent.Manifest.Node
+		return nil
+	}
 	pub, err := public(parent.NodeKey)
 	if err != nil {
 		return err
@@ -981,4 +1011,102 @@ func (f *Files) Remove(ctx context.Context, file *File) error {
 	}
 	file.Manifest = m
 	return nil
+}
+
+// CreatePublic publishes a folder or file (E20-T5): its name and content key
+// go into the signed manifest in the clear, so anyone reads it at
+// https://<identity>/pub/…. A public tree starts directly under the root.
+func (f *Files) CreatePublic(ctx context.Context, parent *File, name, kind string, reader io.Reader) (*File, error) {
+	mode := ""
+	if kind == protocol.KindFile {
+		mode = protocol.ModeReplace
+	}
+	return f.createPublic(ctx, parent, name, kind, mode, reader)
+}
+
+func (f *Files) createPublic(ctx context.Context, parent *File, name, kind, mode string, reader io.Reader) (*File, error) {
+	if parent == nil || parent.Manifest.Kind != protocol.KindFolder {
+		return nil, errors.New("not a folder")
+	}
+	if !parent.Public && parent.Folder != "" {
+		return nil, errors.New("a public folder is created at the top of the drive")
+	}
+	name, err := protocol.NormalizeName(name)
+	if err != nil {
+		return nil, err
+	}
+	node, err := protocol.NewNodeID()
+	if err != nil {
+		return nil, err
+	}
+	version, err := protocol.NewVersionID()
+	if err != nil {
+		return nil, err
+	}
+	m := protocol.Manifest{Format: 1, Drive: f.driveID(), Node: node, Version: version, Operation: protocol.OpCreate, Author: f.Client.Identity,
+		Generation: 1, Kind: kind, Mode: mode, Folder: parent.Manifest.Node, Pages: []string{},
+		Public: true, PlainName: name, NameHash: protocol.PublicNameHash(parent.Manifest.Node, name)}
+	result := &File{Name: name, Folder: parent.Manifest.Node, Public: true}
+	var pages []protocol.ChunkPage
+	if kind == protocol.KindFile {
+		result.ContentKey = make([]byte, 32)
+		if _, err = rand.Read(result.ContentKey); err != nil {
+			return nil, err
+		}
+		m.PlainKey = base64.RawURLEncoding.EncodeToString(result.ContentKey)
+		if mode != protocol.ModeAppend {
+			if pages, err = f.upload(ctx, &m, result.ContentKey, reader); err != nil {
+				return nil, err
+			}
+		}
+	} else if reader != nil {
+		return nil, errors.New("folder has no content")
+	}
+	if err = m.Sign(f.Client.Key); err != nil {
+		return nil, err
+	}
+	if _, err = f.Client.Commit(ctx, Commit{Manifest: &m, Pages: pages}); err != nil {
+		return nil, err
+	}
+	result.Manifest = m
+	return result, nil
+}
+
+// fromPublic opens a public node from its listing entry.
+func (f *Files) fromPublic(entry listedNode) (*File, error) {
+	var head, nameVersion, contentVersion *protocol.Manifest
+	for i := range entry.Versions {
+		m := &entry.Versions[i]
+		if m.Node != entry.ID || !m.Public {
+			return nil, errors.New("manifest reference mismatch")
+		}
+		if err := f.verify(*m); err != nil {
+			return nil, err
+		}
+		if m.Version == entry.Head {
+			head = m
+		}
+		if m.Version == entry.NameVersion {
+			nameVersion = m
+		}
+		if m.Version == entry.ContentVersion {
+			contentVersion = m
+		}
+	}
+	if head == nil || nameVersion == nil || nameVersion.PlainName == "" || (entry.Kind == protocol.KindFile && (contentVersion == nil || contentVersion.PlainKey == "")) {
+		return nil, errors.New("public node metadata mismatch")
+	}
+	result := &File{Manifest: *head, Name: nameVersion.PlainName, Folder: entry.Folder, Public: true}
+	if contentVersion != nil {
+		key, err := base64.RawURLEncoding.DecodeString(contentVersion.PlainKey)
+		if err != nil || len(key) != 32 {
+			return nil, errors.New("invalid public content key")
+		}
+		result.ContentKey = key
+	}
+	if f.opened == nil {
+		f.opened = map[string]*File{}
+	}
+	f.opened[entry.ID] = result
+	return result, nil
 }

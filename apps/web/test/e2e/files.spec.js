@@ -141,4 +141,35 @@ test.describe("storage-v2 Files", () => {
     await viewer.close();
     await context.close();
   });
+  test("publishes a public folder readable by anyone at its address", async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await stubPasskeys(page);
+    const alice = await registerIdentity(page, relay, `pub${Date.now().toString(36)}`);
+    await page.click('.nav-tab[data-page="files"]');
+    await page.click("#btn-new-public-folder");
+    await expect(page.locator(".dialog-message")).toContainText("readable by anyone");
+    await page.fill("#dialog-text", "site");
+    await page.click("#dialog-ok");
+    await page.getByText("site", { exact: true }).click();
+    await page.locator("#file-upload-input").setInputFiles({ name: "hello.txt", mimeType: "text/plain", buffer: Buffer.from("hello, web") });
+    await expect(page.getByText("hello.txt", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Share hello.txt" }).click();
+    const address = await page.locator("#public-url").inputValue();
+    expect(address).toMatch(new RegExp(`^http://${alice.replace(/\./g, "\\.")}(:\\d+)?/pub/site/hello\\.txt$`));
+
+    const visitor = await browser.newContext();
+    await visitor.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.hostname !== alice) return route.continue();
+      const target = new URL(`${url.pathname}${url.search}`, relay.baseUrl);
+      await route.fulfill({ response: await route.fetch({ url: target.href, headers: { ...route.request().headers(), host: alice } }) });
+    });
+    const reader = await visitor.newPage();
+    const response = await reader.goto(address);
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toBe("hello, web");
+    await visitor.close();
+    await context.close();
+  });
 });

@@ -1,10 +1,11 @@
 /** Storage-v2 Files destination: encrypted files, direct shares and mounts. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, Send, Share2, Trash2, Upload } from "lucide-react";
+import { Copy, Download, File as FileIcon, Folder, FolderPlus, Globe, Link2, Send, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
 import { acceptBrowserOffer, autoAcceptContactOffers, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { openBrowserDrive, readFileBytes } from "../../lib/drive";
+import { relayUrlFor } from "../../lib/storage.js";
 import { errorMessage } from "../../actions/relay";
 import { useData } from "../../state/data";
 import { useSession } from "../../state/session";
@@ -141,13 +142,17 @@ export function Files() {
     }
   }
 
-  async function newFolder() {
+  async function newFolder(publish = false) {
     if (!view) return;
-    const name = await askText({ title: "New folder", label: "Folder name", confirmLabel: "Create" });
+    const name = publish
+      ? await askText({ title: "New public folder", label: "Folder name", confirmLabel: "Publish",
+        message: "Anything you put in it is readable by anyone at its web address, unencrypted. Only use it for things you mean to publish." })
+      : await askText({ title: "New folder", label: "Folder name", confirmLabel: "Create" });
     if (!name) return;
     setWorking(true);
     try {
-      await view.files.create(view.folder, name, "folder");
+      if (publish) await view.files.createPublic(view.folder, name, "folder");
+      else await view.files.create(view.folder, name, "folder");
       await loadBrowserFolder(identity, view.files, view.folder, true);
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
@@ -212,6 +217,8 @@ export function Files() {
           <>
             <IconButton id="btn-send-files" aria-label="Send files" onClick={openSendPanel}><Send className="size-5" /></IconButton>
             <IconButton id="btn-new-folder" aria-label="New folder" onClick={() => void newFolder()}><FolderPlus className="size-5" /></IconButton>
+            {/* Public folders start at the top of the drive (EPIC-020 E20-T5). */}
+            {view.trail.length === 1 && <IconButton id="btn-new-public-folder" aria-label="New public folder" onClick={() => void newFolder(true)}><Globe className="size-5" /></IconButton>}
             <IconButton id="btn-upload-file" aria-label="Upload file" onClick={() => input.current?.click()}><Upload className="size-5" /></IconButton>
             <input ref={input} id="file-upload-input" className="hidden" type="file" onChange={(event) => event.currentTarget.files?.[0] && void upload(event.currentTarget.files[0])} />
           </>
@@ -252,7 +259,7 @@ export function Files() {
 
       {view && entries.length > 0 && (
         <div className="conv-list file-list bg-surface">
-          {entries.map((file) => <FileRow key={file.manifest.node} file={file} own={tab === "mine"} onOpen={() => void enter(file)} onShare={() => openShareDialog(identity, file)} onDelete={() => void remove(file)} />)}
+          {entries.map((file) => <FileRow key={file.manifest.node} file={file} own={tab === "mine"} onOpen={() => void enter(file)} onShare={() => file.public ? openPublicDialog(identity, [...view.trail.slice(1).map((part) => part.label), file.name], file.manifest.kind) : openShareDialog(identity, file)} onDelete={() => void remove(file)} />)}
         </div>
       )}
       </PullToRefresh>
@@ -263,7 +270,7 @@ export function Files() {
 function FileRow({ file, own, onOpen, onShare, onDelete }: { file: OpenFile; own: boolean; onOpen: () => void; onShare: () => void; onDelete: () => void }) {
   const Icon = file.manifest.kind === "folder" ? Folder : FileIcon;
   return <div className="file-row flex min-h-13 items-center gap-2 border-b border-sep px-4 transition-colors last:border-b-0 [@media(hover:hover)]:hover:bg-surface-2">
-    <button className="flex min-w-0 flex-1 items-center gap-3 py-3 text-left" onClick={onOpen}><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Icon className="size-[18px]" aria-hidden="true" /></span><span className="truncate text-[15px] font-semibold">{file.name || "Shared item"}</span></button>
+    <button className="flex min-w-0 flex-1 items-center gap-3 py-3 text-left" onClick={onOpen}><span className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Icon className="size-[18px]" aria-hidden="true" />{file.public && <Globe className="absolute -right-0.5 -bottom-0.5 size-3.5 rounded-full bg-surface text-accent" aria-label="Public" />}</span><span className="truncate text-[15px] font-semibold">{file.name || "Shared item"}</span></button>
     {file.manifest.kind === "file" && <IconButton aria-label={`Download ${file.name}`} onClick={onOpen}><Download className="size-4" /></IconButton>}
     {own && <IconButton aria-label={`Share ${file.name}`} onClick={onShare}><Share2 className="size-4" /></IconButton>}
     {own && <IconButton aria-label={`Delete ${file.name}`} className="text-danger" onClick={onDelete}><Trash2 className="size-4" /></IconButton>}
@@ -279,6 +286,22 @@ function SharedList({ offers, mounts, onAccept, onOpen }: { offers: ShareOfferLi
 }
 
 type ShareOfferLike = ReturnType<typeof shareOffers>[number];
+
+/** Where a public item lives on the web: https://<identity>/pub/<path>. */
+export function publicUrl(identity: string, segments: string[], folder = false): string {
+  const relay = new URL(relayUrlFor(identity));
+  const path = segments.map(encodeURIComponent).join("/");
+  return `${relay.protocol}//${identity}${relay.port ? `:${relay.port}` : ""}/pub/${path}${folder ? "/" : ""}`;
+}
+
+function openPublicDialog(identity: string, segments: string[], kind: "file" | "folder") {
+  const url = publicUrl(identity, segments, kind === "folder");
+  openPanel(`Public: ${segments.at(-1)}`, (close) => <div>
+    <Notice>This {kind} is public: anyone with the address can read it, unencrypted. To stop publishing it, delete it.</Notice>
+    <div className="mt-4 flex gap-2"><Input id="public-url" aria-label="Public address" readOnly value={url} /><IconButton aria-label="Copy public address" onClick={() => { void navigator.clipboard?.writeText(url).then(() => toast("Address copied", "success")); }}><Copy className="size-4" /></IconButton></div>
+    <div className="mt-6 flex gap-2"><a className="btn flex min-h-11 flex-1 items-center justify-center rounded-control bg-surface-2 font-semibold" href={url} target="_blank" rel="noreferrer">Open</a><Button className="min-h-11 flex-1" onClick={close}>Done</Button></div>
+  </div>);
+}
 
 function openShareDialog(identity: string, file: OpenFile) {
   openPanel(`Share ${file.name}`, (close) => <ShareForm identity={identity} file={file} close={close} />);

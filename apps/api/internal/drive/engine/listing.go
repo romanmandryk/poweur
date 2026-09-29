@@ -32,10 +32,12 @@ type Listing struct {
 // head, for nodes loaded from a snapshot written before they were tracked.
 // The caller holds h.mu.
 func (e *Engine) fillEnvelopes(ctx context.Context, h *driveHandle, n *node) {
-	if n.KeyVersion != "" && n.NameVersion != "" && (n.Kind == drive.KindFolder || n.ContentVersion != "") {
+	// A public node has no key envelope; it has a plaintext name and key.
+	hasKey := func() bool { return n.KeyVersion != "" || n.Public }
+	if hasKey() && n.NameVersion != "" && (n.Kind == drive.KindFolder || n.ContentVersion != "") {
 		return
 	}
-	if n.Folder == "" && n.KeyVersion != "" && n.Kind == drive.KindFolder {
+	if n.Folder == "" && hasKey() && n.Kind == drive.KindFolder {
 		return // the root has no name
 	}
 	id := n.Head
@@ -50,13 +52,13 @@ func (e *Engine) fillEnvelopes(ctx context.Context, h *driveHandle, n *node) {
 		if n.KeyVersion == "" && m.NodeKey != nil {
 			n.KeyVersion = m.Version
 		}
-		if n.NameVersion == "" && m.Name != nil {
+		if n.NameVersion == "" && (m.Name != nil || m.PlainName != "") {
 			n.NameVersion = m.Version
 		}
-		if n.ContentVersion == "" && m.ContentKey != nil {
+		if n.ContentVersion == "" && (m.ContentKey != nil || m.PlainKey != "") {
 			n.ContentVersion = m.Version
 		}
-		if n.KeyVersion != "" && (n.NameVersion != "" || n.Folder == "") && (n.Kind == drive.KindFolder || n.ContentVersion != "") {
+		if hasKey() && (n.NameVersion != "" || n.Folder == "") && (n.Kind == drive.KindFolder || n.ContentVersion != "") {
 			return
 		}
 		id = m.Parent

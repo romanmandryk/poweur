@@ -4,7 +4,7 @@ import { signBytes, x25519PublicKey, type SealedPayload } from "../crypto/index.
 import { fromBase64, randomBytes, toBase64url, utf8 } from "../encoding.js";
 import { DriveClient, type DriveListing, type DriveNode, type ListedNode } from "./client.js";
 import { driveContext, encryptChunk, decryptChunk, sealKey, openKey, MAX_PLAINTEXT } from "./crypto.js";
-import { canonicalManifest, verifyManifest, verifyManifestPages, splitPages, type Manifest, type FileMode } from "./manifest.js";
+import { canonicalManifest, publicNameHash, verifyManifest, verifyManifestPages, splitPages, type Manifest, type FileMode } from "./manifest.js";
 import { nameHash, sealName, openName, normalizeName } from "./names.js";
 import { appendRecordHash, canonicalAppendRecord, openRecordContent, sealRecordContent, verifyAppendRecord, verifyNextRecord, type AppendRecord, type ChunkRef, type DriveSealedPayload } from "./records.js";
 import { canonicalShare, guestKey, keyBearing, roleGrants, SHARE_KDF, verifierHash, verifyShare, type Share, type ShareCaps, type ShareRole } from "./share.js";
@@ -43,6 +43,9 @@ export interface OpenFile {
    * record position and the first retained one. */
   position?: number;
   trimmedBefore?: number;
+  /** Published: plaintext name and content key, served at /pub (E20-T5).
+   * A public node has no node key (`nodeKey` is empty). */
+  public?: boolean;
 }
 /** Random-access plaintext source used for bounded-memory uploads. Browser
  * `File` and Node file handles can implement this without loading the whole
@@ -193,6 +196,7 @@ export class DriveFiles {
       return cached;
     }
     if (entry.removed) throw new Error("node is removed");
+    if (entry.public) return this.fromPublic(entry);
     const byVersion = new Map<string, Manifest>();
     for (const m of entry.versions ?? []) {
       if (m.node !== entry.id) throw new Error("manifest reference mismatch");
@@ -207,6 +211,23 @@ export class DriveFiles {
     await Promise.all([...new Set([head, keyVersion, nameVersion, contentVersion].filter((m): m is Manifest => Boolean(m)))].map(m => this.verify(m)));
     return this.decrypt(entry, head, keyVersion, nameVersion, contentVersion,
       async () => parent && parent.manifest.node === entry.folder ? parent : entry.folder ? this.open(entry.folder) : undefined);
+  }
+  /** A public node: its name and content key are in its signed manifests. */
+  private async fromPublic(entry: ListedNode): Promise<OpenFile> {
+    const byVersion = new Map(entry.versions.map((m) => [m.version, m]));
+    const head = byVersion.get(entry.head);
+    const nameVersion = entry.name_version ? byVersion.get(entry.name_version) : undefined;
+    const contentVersion = entry.content_version ? byVersion.get(entry.content_version) : undefined;
+    if (!head || !head.public || head.node !== entry.id || !nameVersion?.plain_name || (entry.kind === "file" && !contentVersion?.plain_key)) throw new Error("public node metadata mismatch");
+    for (const m of new Set([head, nameVersion, contentVersion].filter((v): v is Manifest => Boolean(v)))) {
+      if (m.node !== entry.id || !m.public) throw new Error("manifest reference mismatch");
+      await this.verify(m);
+    }
+    const result: OpenFile = { manifest: head, name: nameVersion.plain_name, folder: entry.folder ?? "", nodeKey: new Uint8Array(0), public: true,
+      ...(contentVersion?.plain_key ? { contentKey: fromBase64(contentVersion.plain_key) } : {}),
+      ...(entry.mode === "append" ? { position: entry.position ?? 0, trimmedBefore: entry.trimmed_before ?? 0 } : {}) };
+    this.opened.set(entry.id, result);
+    return result;
   }
   /** Reconstruct inherited envelopes across replacements and renames by
    * walking a node's history (relays without envelope tracking). Every
@@ -322,6 +343,8 @@ export class DriveFiles {
   async create(parent: OpenFile | undefined, name: string, kind: "file" | "folder", bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(), mode: FileMode = "replace"): Promise<OpenFile> {
     if (parent && parent.manifest.kind !== "folder") throw new Error("not a folder");
     if (!parent && kind !== "folder") throw new Error("root must be a folder");
+    // Everything inside a public folder is public.
+    if (parent?.public) return this.createPublic(parent, name, kind, bytes, mode);
     const nodeKey = randomBytes(32), contentKey = kind === "file" ? randomBytes(32) : undefined;
     const m: Manifest = { format: 1, drive: this.client.drive, node: id(), version: id(), parent: "", operation: "create",
       author: this.client.signer.identity, generation: 1, kind, mode: kind === "file" ? mode : "", folder: parent?.manifest.node ?? "",
@@ -338,6 +361,27 @@ export class DriveFiles {
     const pages = contentKey ? await this.upload(m, contentKey, bytes) : [];
     await this.client.commit({ manifest: await this.signed(m), pages });
     return { manifest: m, name, folder: parent?.manifest.node ?? "", nodeKey, ...(contentKey ? { contentKey } : {}) };
+  }
+  /**
+   * Publish: create a public node (E20-T5). Its name and content key go into
+   * the signed manifest in the clear, so anyone can read it at
+   * https://<identity>/pub/…. A public tree starts directly under the root.
+   */
+  async createPublic(parent: OpenFile, name: string, kind: "file" | "folder", bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(), mode: FileMode = "replace"): Promise<OpenFile> {
+    if (parent.manifest.kind !== "folder") throw new Error("not a folder");
+    if (!parent.public && parent.folder !== "") throw new Error("a public folder is created at the top of the drive");
+    name = normalizeName(name);
+    const contentKey = kind === "file" ? randomBytes(32) : undefined;
+    const m: Manifest = { format: 1, drive: this.client.drive, node: id(), version: id(), parent: "", operation: "create",
+      author: this.client.signer.identity, generation: 1, kind, mode: kind === "file" ? mode : "", folder: parent.manifest.node,
+      name_hash: publicNameHash(parent.manifest.node, name), count: 0, pages: [], public: true, plain_name: name,
+      ...(contentKey ? { plain_key: toBase64url(contentKey) } : {}), signature: "" };
+    if ((kind === "folder" || mode === "append") && bytes.length) throw new Error("initial bytes require a replace file");
+    const pages = contentKey ? await this.upload(m, contentKey, bytes) : [];
+    await this.client.commit({ manifest: await this.signed(m), pages });
+    const created: OpenFile = { manifest: m, name, folder: parent.manifest.node, nodeKey: new Uint8Array(0), public: true, ...(contentKey ? { contentKey } : {}) };
+    this.opened.set(m.node, created);
+    return created;
   }
   /** Create a replace file from a random-access source one encrypted chunk at
    * a time. This is the upload path for multi-gigabyte browser transfers: its
@@ -382,7 +426,8 @@ export class DriveFiles {
   }
   private next(file: OpenFile, operation: Manifest["operation"]): Manifest {
     return { ...file.manifest, version: id(), parent: file.manifest.version, operation, author: this.client.signer.identity,
-      folder: "", name: undefined, name_hash: "", node_key: undefined, content_key: undefined, signature: "" };
+      folder: "", name: undefined, name_hash: "", node_key: undefined, content_key: undefined,
+      plain_name: undefined, plain_key: undefined, signature: "" };
   }
   async replace(file: OpenFile, bytes: Uint8Array): Promise<void> {
     if (!file.contentKey || file.manifest.mode !== "replace") throw new Error("not a replace file");
@@ -475,8 +520,18 @@ export class DriveFiles {
   async move(file: OpenFile, parent: OpenFile, name: string): Promise<void> {
     if (parent.manifest.kind !== "folder") throw new Error("not a folder");
     name = normalizeName(name);
+    if (Boolean(file.public) !== Boolean(parent.public) && !(file.public && parent.folder === "")) {
+      throw new Error(file.public ? "a public item moves only within public folders or to the top" : "publishing needs a copy: a private item cannot move into a public folder");
+    }
     const m = this.next(file, "move");
     m.folder = parent.manifest.node;
+    if (file.public) {
+      m.plain_name = name;
+      m.name_hash = publicNameHash(parent.manifest.node, name);
+      await this.client.commit({ manifest: await this.signed(m) });
+      file.manifest = m; file.name = name; file.folder = parent.manifest.node;
+      return;
+    }
     m.name = wire(sealName(x25519PublicKey(parent.nodeKey), name, this.context(m, "name")));
     m.name_hash = nameHash(parent.nodeKey, name);
     m.node_key = wire(sealKey(x25519PublicKey(parent.nodeKey), file.nodeKey, this.context(m, "node-key")));

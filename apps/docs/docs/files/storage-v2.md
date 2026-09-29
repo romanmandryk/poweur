@@ -345,6 +345,25 @@ current choices:
 - **Trim** releases the chunks of trimmed records; the segments that hold them stay until
   journal compaction.
 
+## Public folders
+
+A public node is published on purpose (E20-T5). Its manifest sets `public: true`, carries its
+name in `plain_name` and a file's content key in `plain_key`, and has no sealed envelopes; its
+name hash is `hex(SHA-256("poweur/drive/public-name/v1\n" + folder + "\n" + name))`, which anyone
+can compute. Chunks keep the normal padded encrypted format, but since the key is public the relay
+(and any cache) can serve them. The canonical signed form appends `public`, `plain_name` and
+`plain_key` only for public manifests, so private manifests encode exactly as before. Public nodes
+never rotate.
+
+The engine keeps public trees coherent: everything under a public folder is public, a public
+tree's top folder sits directly under the drive root, and no node switches between public and
+private (publishing a private item means uploading a public copy). The relay serves them at
+`https://<identity>/pub/<folder>/<path>`: files decrypted, folders as JSON (or an HTML index for
+browsers), `/pub/` lists the public folders at the top. Responses carry an `ETag` (the head
+version), `Cache-Control: public, max-age=60` and `Content-Security-Policy: sandbox …`, so a
+published page's scripts run in an opaque origin, away from the identity host's viewer and
+storage. Nothing private resolves under `/pub`.
+
 ## HTTP surface
 
 All drive endpoints are under `/drive/{identity}` (`apps/api/internal/relay/drive_api.go`).

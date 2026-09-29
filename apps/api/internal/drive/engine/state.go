@@ -41,6 +41,8 @@ type node struct {
 	Mode       string   `json:"mode,omitempty"`
 	Folder     string   `json:"folder,omitempty"`
 	NameHash   string   `json:"name_hash,omitempty"`
+	// Public: plaintext name and content key (E20-T5); served at /pub.
+	Public bool `json:"public,omitempty"`
 	Head       string   `json:"head"`
 	HeadHash   string   `json:"head_hash"`
 	Generation uint64   `json:"generation"`

@@ -15,6 +15,7 @@ import { x25519PublicKey } from "../src/crypto/index.js";
 import { createTestIdentity, localResolveOptions, type TestIdentity } from "./helpers/identities.js";
 import { resolveEncryptionKey, resolveSigningKey } from "../src/resolve.js";
 import { RelayClient } from "../src/http.js";
+import { get as httpGet } from "node:http";
 import { MessageHistory } from "../src/history.js";
 import type { Decryptor } from "../src/crypto/keys.js";
 import { fromBase64 } from "../src/encoding.js";
@@ -393,3 +394,34 @@ it("pages a large archive: newest per conversation first, then one request per o
   // And the seeding device still reads it, continuing its own chain.
   expect((await seeder.load()).filter(r => r.recipient === peers[1]).at(-1)?.id).toBe("new");
 }, 180_000);
+
+it("publishes a public folder that anyone reads at /pub", async () => {
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const root = await owner.root();
+  const site = await owner.createPublic(root, `site${Date.now().toString(36)}`, "folder");
+  const page = await owner.create(site, "index.html", "file", new TextEncoder().encode("<p>v1</p>"));
+  expect(page.public).toBe(true);
+  // The relay routes /pub by Host: ask as the identity's own host (fetch
+  // drops a custom Host header, node:http keeps it).
+  const pub = (path: string) => new Promise<{ status: number; body: string; csp: string | undefined }>((resolve, reject) => {
+    const url = new URL(`${relay.baseUrl}/pub/${path}`);
+    httpGet({ host: url.hostname, port: url.port, path: url.pathname, headers: { Host: alice.identity } }, (response) => {
+      const parts: Buffer[] = [];
+      response.on("data", (part: Buffer) => parts.push(part));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(parts).toString(), csp: response.headers["content-security-policy"] as string | undefined }));
+    }).on("error", reject);
+  });
+  expect(await pub(`${site.name}/index.html`)).toMatchObject({ status: 200, body: "<p>v1</p>" });
+  await owner.replace(page, new TextEncoder().encode("<p>v2</p>"));
+  expect((await pub(`${site.name}/index.html`)).body).toBe("<p>v2</p>");
+  // Another client of the owner sees it as public, by its plaintext name.
+  const fresh = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const listed = (await fresh.list(await fresh.root())).find(file => file.manifest.node === site.manifest.node);
+  expect(listed).toMatchObject({ name: site.name, public: true });
+  const text = []; for await (const chunk of fresh.read((await fresh.list(listed!)).find(f => f.name === "index.html")!)) text.push(chunk);
+  expect(Buffer.concat(text).toString()).toBe("<p>v2</p>");
+  // Publishing is explicit: a private file cannot slip into a public folder.
+  const secret = await owner.create(root, `secret${Date.now().toString(36)}.txt`, "file", new TextEncoder().encode("private"));
+  await expect(owner.move(secret, site, "secret.txt")).rejects.toThrow("publishing needs a copy");
+  await expect(owner.createPublic(site, "nested", "folder")).resolves.toMatchObject({ public: true });
+});

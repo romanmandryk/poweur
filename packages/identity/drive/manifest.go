@@ -89,7 +89,21 @@ type Manifest struct {
 	ContentKey *identity.SealedPayload `json:"content_key,omitempty"`
 	Count      uint64                  `json:"count"`
 	Pages      []string                `json:"pages"`
-	Signature  string                  `json:"signature"`
+	// Public nodes (EPIC-020 E20-T5) are published on purpose: the name is
+	// plaintext and a file's content key is in the clear, so the relay and any
+	// cache can serve them without a secret. They carry no sealed envelopes
+	// and never rotate. Private manifests leave these empty.
+	Public    bool   `json:"public,omitempty"`
+	PlainName string `json:"plain_name,omitempty"`
+	PlainKey  string `json:"plain_key,omitempty"`
+	Signature string `json:"signature"`
+}
+
+// PublicNameHash is a public node's lookup token: anyone can compute it, so
+// the relay resolves /pub paths and still enforces unique names per folder.
+func PublicNameHash(folder, name string) string {
+	sum := sha256.Sum256([]byte("poweur/drive/public-name/v1\n" + folder + "\n" + name))
+	return hex.EncodeToString(sum[:])
 }
 
 // NewNodeID returns a random 16-byte node ID as lowercase hex.
@@ -234,6 +248,12 @@ func (m Manifest) Validate() error {
 	if pages == 0 && m.Count != 0 || pages > 0 && (m.Count <= (pages-1)*PageSize || m.Count > pages*PageSize) {
 		return errors.New("page list does not match the chunk count")
 	}
+	if m.Public {
+		return m.validatePublic()
+	}
+	if m.PlainName != "" || m.PlainKey != "" {
+		return errors.New("a plaintext name or key belongs to a public node")
+	}
 	hasName := m.Name != nil || m.NameHash != ""
 	if (m.Name != nil) != (m.NameHash != "") || m.NameHash != "" && !validHex(m.NameHash, 32) {
 		return errors.New("name and name hash go together")
@@ -279,6 +299,61 @@ func (m Manifest) Validate() error {
 	return nil
 }
 
+// validatePublic checks a public node's version: plaintext name (with its
+// public name hash), a file's content key in the clear, no sealed envelopes,
+// generation 1, and no rotation.
+func (m Manifest) validatePublic() error {
+	if m.Name != nil || m.NodeKey != nil || m.ContentKey != nil {
+		return errors.New("a public node carries no sealed envelopes")
+	}
+	if m.Generation != 1 {
+		return errors.New("a public node never rotates")
+	}
+	hasName := m.PlainName != ""
+	if hasName {
+		if normalized, err := NormalizeName(m.PlainName); err != nil || normalized != m.PlainName {
+			return errors.New("invalid public name")
+		}
+		if m.NameHash != PublicNameHash(m.Folder, m.PlainName) {
+			return errors.New("public name hash mismatch")
+		}
+	} else if m.NameHash != "" {
+		return errors.New("a public name hash needs its name")
+	}
+	if m.PlainKey != "" {
+		raw, err := base64.RawURLEncoding.Strict().DecodeString(m.PlainKey)
+		if err != nil || len(raw) != 32 {
+			return errors.New("invalid public content key")
+		}
+	}
+	switch m.Operation {
+	case OpCreate:
+		if m.Parent != "" || m.Folder == "" || !hasName {
+			return errors.New("a public create names its folder and name (the root is never public)")
+		}
+		if (m.Kind == KindFile) != (m.PlainKey != "") {
+			return errors.New("a public file create carries its content key, a folder none")
+		}
+	case OpReplace:
+		if m.Parent == "" || m.Kind != KindFile || hasName || m.Folder != "" || m.PlainKey != "" {
+			return errors.New("a replace changes only a file's content")
+		}
+	case OpMove:
+		if m.Parent == "" || m.Folder == "" || !hasName || m.PlainKey != "" {
+			return errors.New("a public move carries the new folder and name")
+		}
+	case OpRemove:
+		if m.Parent == "" || hasName || m.Folder != "" || m.PlainKey != "" || m.Count != 0 {
+			return errors.New("a removal carries no name, key or content")
+		}
+	case OpRotate:
+		return errors.New("a public node has no keys to rotate")
+	default:
+		return errors.New("unknown manifest operation")
+	}
+	return nil
+}
+
 // Canonical encodes the manifest domain followed by length-prefixed fields:
 // format, drive, node, version, parent, operation, author, generation, kind,
 // mode, folder, name (ephemeral key, nonce, ciphertext), name hash, node key
@@ -296,6 +371,11 @@ func (m Manifest) Canonical() ([]byte, error) {
 	fields = append(fields, sealedFields(m.ContentKey)...)
 	fields = append(fields, strconv.FormatUint(m.Count, 10), strconv.Itoa(len(m.Pages)))
 	fields = append(fields, m.Pages...)
+	// Public nodes append their plaintext fields; private manifests encode
+	// exactly as before.
+	if m.Public {
+		fields = append(fields, "public", m.PlainName, m.PlainKey)
+	}
 	return lengthPrefixed("poweur/drive/manifest-sign/v1\n", fields), nil
 }
 

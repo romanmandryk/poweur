@@ -23,9 +23,10 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	use := fs.String("use-identity", "", "identity")
 	target := fs.String("drive", "", "another identity's drive, reached through your shares")
 	jsonOut := fs.Bool("json", false, "JSON output")
+	publish := fs.Bool("public", false, "mkdir: a public folder at the top of the drive, readable by anyone at https://<id>/pub/<name>/")
 	offset := fs.Int64("offset", 0, "plaintext byte offset for get")
 	length := fs.Int64("length", -1, "plaintext byte count for get; default is the rest of the file")
-	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
+	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--public": true, "--force": true})) != nil {
 		return 1
 	}
 	count := 1
@@ -92,11 +93,19 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 			if e != nil {
 				return e
 			}
-			file, e := files.Create(ctx, folder, base, protocol.KindFolder, nil)
+			create := files.Create
+			if *publish {
+				create = files.CreatePublic
+			}
+			file, e := create(ctx, folder, base, protocol.KindFolder, nil)
 			if e != nil {
 				return e
 			}
-			result = map[string]string{"node": file.Manifest.Node, "name": file.Name}
+			out := map[string]string{"node": file.Manifest.Node, "name": file.Name}
+			if file.Public {
+				out["public"] = "true"
+			}
+			result = out
 		case "put":
 			input, e := os.Open(fs.Arg(0))
 			if e != nil {

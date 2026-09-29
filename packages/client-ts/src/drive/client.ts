@@ -32,6 +32,8 @@ export interface DriveNode {
   trimmed_before?: number;
   /** Set after a key-bearing share was revoked: writes wait for a rotation. */
   rotate_required?: boolean;
+  /** Published (E20-T5): plaintext name and content key. */
+  public?: boolean;
   /** Versions carrying the key, name and content-key envelopes. */
   key_version?: string;
   name_version?: string;

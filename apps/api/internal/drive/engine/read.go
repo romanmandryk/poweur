@@ -34,13 +34,14 @@ type NodeInfo struct {
 	KeyVersion     string `json:"key_version,omitempty"`
 	NameVersion    string `json:"name_version,omitempty"`
 	ContentVersion string `json:"content_version,omitempty"`
+	Public         bool   `json:"public,omitempty"`
 }
 
 func infoOf(n *node) NodeInfo {
 	return NodeInfo{ID: n.ID, Kind: n.Kind, Mode: n.Mode, Folder: n.Folder, NameHash: n.NameHash, Head: n.Head,
 		Generation: n.Generation, Count: n.Count, Removed: n.Removed, RotateRequired: n.RotateRequired, Position: n.Position,
 		TrimmedBefore: n.TrimmedBefore, TrimSnapshot: n.TrimSnapshot,
-		KeyVersion: n.KeyVersion, NameVersion: n.NameVersion, ContentVersion: n.ContentVersion}
+		KeyVersion: n.KeyVersion, NameVersion: n.NameVersion, ContentVersion: n.ContentVersion, Public: n.Public}
 }
 
 // Root returns the drive's root node ID ("" before it is created).

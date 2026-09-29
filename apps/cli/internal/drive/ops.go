@@ -155,6 +155,7 @@ func (f *Files) recordsFrom(ctx context.Context, node string, from uint64) ([]po
 		from = page.Next
 	}
 }
+
 // authorCursor is the caller's chain position in an append file, from the
 // relay: one request instead of reading the whole log. The relay enforces
 // the chain on commit, so a wrong answer only makes the append fail.

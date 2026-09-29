@@ -329,6 +329,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	mux.HandleFunc("GET /s/{link}", s.handleLinkViewer)
+	mux.HandleFunc("GET /pub", s.handlePublic)
+	mux.HandleFunc("GET /pub/{path...}", s.handlePublic)
 	mux.HandleFunc("GET /s/assets/{file}", s.handleLinkViewerAsset)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	mountRootIcons(mux, s.cfg.WebStaticDir)
