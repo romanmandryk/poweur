@@ -12,7 +12,7 @@ package bridge
 
 // Version is the bridge's semver. Bump the patch when shipping behaviour
 // changes (AGENTS.md → Version bumps).
-const Version = "0.1.11"
+const Version = "0.2.0"
 
 // Build stamps, set by the binary from VERSION_HASH and BUILD_TIME (the image
 // bakes them in, as the relay's does). /health reports them so a deploy can
