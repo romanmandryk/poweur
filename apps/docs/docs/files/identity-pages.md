@@ -18,7 +18,11 @@ never supply HTML, CSS, JavaScript, fonts or third-party images. An identity wit
 still gets a useful page containing its Poweur ID.
 
 The page can show a display name, avatar, bio and safe `http` or `https` links. **Copy ID** lets a
-visitor take the ID to their existing Poweur app. When the owner explicitly advertises anonymous
+visitor take the ID to their existing Poweur app. **Message** links to the launcher's app with
+`?to=<identity>`; the launcher keeps that target through claiming a new ID or opening an existing
+one, and the visitor's own app opens the chat once its keys are unlocked. A closing section says
+what a Poweur ID is and offers **Get your own ID**. Without a configured launcher host, the page
+shows neither link. When the owner explicitly advertises anonymous
 messages, **Write anonymously** opens the signed-out encrypted composer at `/app/?anonymous=1`.
 That setting is only a public invitation; the private inbox policy still decides whether the
 relay accepts the message.
@@ -76,6 +80,18 @@ The renderer uses Go's context-aware HTML templates and accepts only safe profil
 It sends a restrictive Content Security Policy, denies framing, disables credential creation on
 the page, prevents MIME sniffing and sends no profile-selected response headers. The small CSS
 and copy-button script are fixed, embedded relay assets.
+
+### One-click messaging from an ID already in this browser
+
+Each hosted identity is its own origin, so Bob's page cannot read Alice's app storage. The web app
+on `alice.poweur.net` instead lists its ID in a `poweur_ids` cookie on the parent domain
+(`Domain=poweur.net; SameSite=Lax; Secure`, up to five IDs, newest first), and removes it when
+the identity is removed from the device. The page script reads that cookie and replaces
+**Message** with **Message as alice.poweur.net** (a link to `https://alice.poweur.net/app/?to=…`),
+or with **Open your inbox** on the owner's own page. The cookie contains only public IDs. The
+browser sends it to hosts under the parent domain, but the relay does not read or log it. The
+rendered HTML never depends on it, so shared caching still works. Identities on custom domains
+fall back to the launcher link.
 
 ## Self-hosting
 

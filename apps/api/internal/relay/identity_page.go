@@ -14,7 +14,7 @@ import (
 	idpkg "github.com/poweur/identity"
 )
 
-const identityPageTemplateVersion = "1"
+const identityPageTemplateVersion = "2"
 
 //go:embed identitypage_assets/*
 var identityPageAssets embed.FS
@@ -38,6 +38,15 @@ type identityPageView struct {
 	Indexable          bool
 	AdvertiseAnonymous bool
 	Links              []identityPageLink
+	// ShortName is who the Message button names.
+	ShortName string
+	// HomeURL, MessageURL and ClaimURL point at the launcher; empty when the
+	// relay has none. MessageURL carries `?to=` through a claim or an
+	// "I already have an ID" hop; page.js swaps in a one-click link when the
+	// browser already uses an ID under the same parent domain.
+	HomeURL    string
+	MessageURL string
+	ClaimURL   string
 }
 
 func requestHost(r *http.Request) string {
@@ -149,6 +158,18 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 	if displayName != "" {
 		title = displayName + " (" + identity + ")"
 	}
+	shortName := displayName
+	if first, _, ok := strings.Cut(displayName, " "); ok && first != "" {
+		shortName = first
+	}
+	if shortName == "" {
+		shortName = identity
+	}
+	var homeURL, messageURL string
+	if launcher := strings.TrimSpace(s.cfg.LauncherHost); launcher != "" {
+		homeURL = "https://" + launcher + "/app/"
+		messageURL = homeURL + "?to=" + url.QueryEscape(identity)
+	}
 	view := identityPageView{
 		Identity:           identity,
 		DisplayName:        displayName,
@@ -161,6 +182,10 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 		Indexable:          indexable,
 		AdvertiseAnonymous: profile.IdentityPage.AdvertisesAnonymousMessages(),
 		Links:              links,
+		ShortName:          shortName,
+		HomeURL:            homeURL,
+		MessageURL:         messageURL,
+		ClaimURL:           messageURL,
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = identityPageTemplate.ExecuteTemplate(w, "page.html", view)
@@ -174,6 +199,8 @@ func serveIdentityPageAsset(w http.ResponseWriter, r *http.Request) {
 		contentType = "text/css; charset=utf-8"
 	case "page.js":
 		contentType = "text/javascript; charset=utf-8"
+	case "logo.svg":
+		contentType = "image/svg+xml"
 	default:
 		http.NotFound(w, r)
 		return

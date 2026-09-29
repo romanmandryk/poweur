@@ -233,3 +233,33 @@ func TestSafeProfileLink(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentityPageCallsToAction(t *testing.T) {
+	s := newIdentityPageServer(t)
+	writePageProfile(t, s, `{"version":1,"display_name":"Alice Smith"}`)
+	// No launcher: nowhere to claim or message from, so no buttons that lead nowhere.
+	if body := pageRequest(t, s, "text/html").Body.String(); strings.Contains(body, `id="btn-message"`) || strings.Contains(body, `id="btn-claim"`) {
+		t.Fatalf("CTA without a launcher: %s", body)
+	}
+
+	s.cfg.LauncherHost = "poweur.net"
+	body := pageRequest(t, s, "text/html").Body.String()
+	for _, wanted := range []string{
+		`href="https://poweur.net/app/?to=alice.poweur.net"`,
+		"Message Alice",
+		`id="btn-claim"`,
+		"What is a Poweur ID?",
+		`src="/identity-page/assets/logo.svg"`,
+	} {
+		if !strings.Contains(body, wanted) {
+			t.Fatalf("page missing %q: %s", wanted, body)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/identity-page/assets/logo.svg", nil)
+	w := httptest.NewRecorder()
+	serveIdentityPageAsset(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/svg+xml" || !strings.Contains(w.Body.String(), "<svg") {
+		t.Fatalf("logo asset: %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}

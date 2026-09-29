@@ -7,6 +7,7 @@ import {
   getActiveIdentity,
   getUnlockedKeys,
   isShellRuntime,
+  loadIdentityRecord,
   loadSessionRecord,
   saveIdentityRecord,
   setActiveIdentity,
@@ -19,6 +20,7 @@ import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { isPublicAnonymousRoute } from "../screens/PublicAnonymous";
 import { refreshSession, useSession, type ModeInfo } from "../state/session";
+import { rememberIdHint, takeChatTarget } from "../lib/visit";
 
 interface CapacitorAppPlugin {
   addListener(
@@ -201,6 +203,7 @@ function startBoot(launchUrl: string): Promise<void> {
   const identity = getActiveIdentity();
   const route = useRoute.getState();
   const publicAnonymous = isPublicAnonymousRoute();
+  if (!publicAnonymous) takeChatTarget();
 
   if (pairLink) {
     presentPairLink(pairLink);
@@ -230,6 +233,11 @@ function startBoot(launchUrl: string): Promise<void> {
   return resolveMode().then((info: ModeInfo) => {
     setDocumentIdentity(info);
     useSession.setState({ mode: info });
+    // This browser holds this identity: identity pages on sibling hosts may
+    // offer to message from it.
+    if (info.mode === "identity" && info.subject && loadIdentityRecord(info.subject)) {
+      rememberIdHint(info.subject, info.domain);
+    }
     if (authInput || protectAuthRoute || handedOver || publicAnonymous) return;
     if (info.mode === "launcher") {
       settleLauncherDoor();

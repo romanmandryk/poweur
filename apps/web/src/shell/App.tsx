@@ -16,6 +16,7 @@ import { LoadingOverlay, PanelHost, Toaster } from "./Overlays";
 import { useBackNavigation } from "./useBackNavigation";
 import { useMessaging } from "./useMessaging";
 import { useFilesSync } from "./useFilesSync";
+import { usePendingChat } from "./usePendingChat";
 import { isPublicAnonymousRoute, PublicAnonymousComposer } from "../screens/PublicAnonymous";
 
 export function App() {
@@ -32,6 +33,7 @@ function PrivateApp() {
   useBackNavigation();
   useMessaging();
   useFilesSync();
+  usePendingChat();
 
   useLayoutEffect(() => {
     document.getElementById("page-content")?.scrollTo?.({ top: 0 });

@@ -14,7 +14,7 @@
 | E12-T1 Page settings + response contract | **done** | Optional public `identity_page`; defaults page on, indexing off (opt-in), anonymous ads off. Schema, Go, TypeScript, Settings toggles, onboarding indexing question |
 | E12-T2 Server-rendered identity page | **done** | Relay-owned `html/template`; no user HTML. Copy ID; IndieAuth `Link` kept on `/` |
 | E12-T3 HTTP caching, SEO + security headers | **done** | Exact `GET /` only. ETag/`304`, `Vary: Accept`, no in-process page cache |
-| E12-T4 Contact actions | **done** | Copy ID. **Write anonymously** only when advertised, via signed-out `/app/?anonymous=1`. A stale advertisement fails without showing inbox policy |
+| E12-T4 Contact actions | **done** | Copy ID. **Message** via launcher `?to=` (kept through claim or opening an existing ID), one click from an ID in the `poweur_ids` parent-domain cookie. "What is a Poweur ID?" + **Get your own ID**. **Write anonymously** only when advertised, via signed-out `/app/?anonymous=1`. A stale advertisement fails without showing inbox policy |
 | E12-T5 Tests + docs | **done** | [`apps/docs/docs/files/identity-pages.md`](../apps/docs/docs/files/identity-pages.md). Relay, identity, client, web, and `TestINT_IDENTITY_PAGE_01` |
 
 ## Goal
@@ -224,6 +224,12 @@ for each one.
 - [x] When `advertise_anonymous_messages` is true, link to a dedicated signed-out `/app/`
       anonymous composer that reuses EPIC-014 unchanged, never offers stored credentials and
       handles policy rejection as a normal stale-setting case.
+- [x] **Message** CTA: launcher `/app/?to=<identity>`; the launcher carries `to` through a claim
+      hand-off or "I already have an ID", and the identity's app opens the chat after unlock.
+- [x] One click from an ID already used in this browser: identity hosts list themselves in a
+      `poweur_ids` cookie on the parent domain; the page script offers **Message as …**, or
+      **Open your inbox** for the owner. Page HTML stays cacheable (personalised client-side).
+- [x] Logo header and a closing "What is a Poweur ID?" section with **Get your own ID**.
 
 **Acceptance:** a visitor can take the ID into their Poweur client without signing in on the
 recipient origin; an advertised anonymous action reaches the signed-out composer and a stale

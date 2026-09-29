@@ -19,6 +19,7 @@ import {
 import { generateEncryptionJwk } from "../lib/vault.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, touchSession, useSession } from "../state/session";
+import { forgetIdHint } from "../lib/visit";
 import { setLoading, toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { activeClient, errorMessage } from "./relay";
@@ -141,6 +142,7 @@ export async function revokeRelaySession() {
 export function removeIdentityFromDevice(identity: string) {
   removeIdentity(identity);
   removeSessionRecord(identity);
+  forgetIdHint(identity, useSession.getState().mode.domain);
   forgetNativeSecret(identity);
   forgetAvatar(identity);
   void clearSnapshots(identity);
