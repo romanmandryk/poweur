@@ -107,10 +107,10 @@ func TestOpenS3(t *testing.T) {
 
 func TestProbeTimeoutsAreNotIncompatibility(t *testing.T) {
 	wrapped := fmt.Errorf("S3 conditional create: %w", &url.Error{Op: "Put", URL: "https://s3.test/x", Err: context.DeadlineExceeded})
-	if !timedOut(wrapped) || !timedOut(fmt.Errorf("S3 conditional replace: %w", context.DeadlineExceeded)) {
+	if !drive.TimedOut(wrapped) || !drive.TimedOut(fmt.Errorf("S3 conditional replace: %w", context.DeadlineExceeded)) {
 		t.Fatal("a slow store was treated as incompatible")
 	}
-	if timedOut(errors.New("S3 conditional create is not enforced (<nil>)")) {
+	if drive.TimedOut(errors.New("S3 conditional create is not enforced (<nil>)")) {
 		t.Fatal("an incompatible store was treated as slow")
 	}
 }

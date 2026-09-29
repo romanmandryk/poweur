@@ -155,7 +155,20 @@ docker compose -p poweur --env-file .observability.env -f docker-compose.prod.ym
 
 Afterwards the relay keeps nothing on the volume; the old `drives/` and `relay/` on it can go once
 the bucket-backed relay is verified. Production moved to the Hetzner bucket `poweur` (hel1) on
-2026-09-29. New Hetzner credentials can be refused by some gateways for several minutes after
+2026-09-29, and the same day to `poweur1` (nbg1, same keys) during a HEL1 Object Storage incident.
+
+Moving between buckets: stop the relay (`docker stop poweur-relay`, and cancel any running
+Deploy), copy with rclone and compare, then change `S3_ENDPOINT`/`S3_BUCKET`/`S3_REGION` in
+`apps/api/.env.prod` and recreate the relay:
+
+```sh
+RC="docker run --rm -e RCLONE_CONFIG_OLD_TYPE=s3 -e RCLONE_CONFIG_OLD_PROVIDER=Other \
+  -e RCLONE_CONFIG_OLD_ENDPOINT=https://<old-region>.your-objectstorage.com ... (same for NEW) rclone/rclone"
+$RC copy old:<bucket> new:<bucket> --checksum --exclude 'relay/startup-probe/**'
+$RC check old:<bucket> new:<bucket> --exclude 'relay/startup-probe/**' --one-way
+```
+
+`/root/rclone-env.sh` on the server defines `RC` for the hel1 → nbg1 pair. New Hetzner credentials can be refused by some gateways for several minutes after
 creation; wait until a burst of requests all succeeds before cutting over.
 
 It moves identity documents, profiles and avatars, capabilities, contacts, policy, analytics,
