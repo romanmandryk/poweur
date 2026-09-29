@@ -44,8 +44,9 @@ services:
       NAME_MIN_LEN: "6"
       NAME_MAX_LEN: "24"
       # Free storage on poweur.net is deliberately small and unadvertised
-      # (200 MiB). Support raises one identity's limit in
-      # /data/storage-quotas.json (no restart), and QUOTA_CONTACT is the ID an
+      # (200 MiB). Support raises one identity's limit with
+      # `docker exec poweur-relay /relay quotas set <id> 2GiB` (stored in the
+      # bucket, picked up within a minute), and QUOTA_CONTACT is the ID an
       # over-quota upload is told to message.
       MAX_IDENTITY_BYTES: "209715200"
       QUOTA_CONTACT: ${QUOTA_CONTACT:-}

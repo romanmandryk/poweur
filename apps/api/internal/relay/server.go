@@ -178,6 +178,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		logQuotaFileError(err)
 	})
 	s.driveErr = driveErr
+	if driveStore != nil {
+		s.quotas.store = driveStore
+	}
 	s.sysFiles = newMemSystemFiles()
 	if driveStore != nil {
 		s.drive = driveStore

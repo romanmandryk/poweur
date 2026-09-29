@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,7 +29,57 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "copy-store" {
 		os.Exit(copyStore(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "quotas" {
+		os.Exit(quotas(os.Args[2:]))
+	}
 	os.Exit(run())
+}
+
+// quotas shows or edits the per-identity storage quota overrides the relay
+// keeps in its store (relay/storage-quotas.json); the relay picks up a change
+// within a minute, without a restart.
+//
+//	poweur-relay quotas                    list overrides
+//	poweur-relay quotas set <id> <size>    e.g. 2GiB, 500MB, 0 for unlimited
+//	poweur-relay quotas unset <id>         back to the relay default
+func quotas(args []string) int {
+	cfg := config.FromEnv()
+	store, err := drive.Open(cfg)
+	if err != nil || store == nil {
+		fmt.Fprintln(os.Stderr, "quotas: no store configured (set POWEUR_DATA or STORAGE_PROVIDER=s3 and S3_*)", err)
+		return 1
+	}
+	ctx := context.Background()
+	edit := func(fn func(map[string]json.RawMessage) error) int {
+		values, err := relay.EditQuotas(ctx, store, fn)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "quotas:", err)
+			return 1
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(values)
+		return 0
+	}
+	switch {
+	case len(args) == 0:
+		return edit(func(map[string]json.RawMessage) error { return nil })
+	case len(args) == 3 && args[0] == "set":
+		if _, err := relay.ParseQuotaSize(args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "quotas:", err)
+			return 2
+		}
+		return edit(func(doc map[string]json.RawMessage) error {
+			raw, _ := json.Marshal(args[2])
+			doc[strings.ToLower(strings.TrimSpace(args[1]))] = raw
+			return nil
+		})
+	case len(args) == 2 && args[0] == "unset":
+		return edit(func(doc map[string]json.RawMessage) error {
+			delete(doc, strings.ToLower(strings.TrimSpace(args[1])))
+			return nil
+		})
+	}
+	fmt.Fprintln(os.Stderr, "usage: poweur-relay quotas [set <identity> <size> | unset <identity>]")
+	return 2
 }
 
 // copyStore copies a relay's objects from a data directory into the store the

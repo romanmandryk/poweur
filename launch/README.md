@@ -377,13 +377,14 @@ collect filenames, contents or social graphs to get them.
       the app shows only "X used", with no total.
 - [x] At 90 % the Files screen warns; an upload over the limit says "Your storage is full.
       Message `<contact>` to ask for more space, and tell us what you need it for."
-- [x] Support raises one ID's limit by editing `/data/storage-quotas.json` on the server
-      (`{"alice.poweur.net": "2GB"}`). No restart needed, and a broken edit keeps the
-      last good version.
+- [x] Support raises one ID's limit with `docker exec poweur-relay /relay quotas set
+      alice.poweur.net 2GB` (`quotas` lists, `quotas unset` removes). The overrides live in the
+      relay's store (`relay/storage-quotas.json` in the bucket); no restart, picked up within a
+      minute, and an invalid size is refused.
 - [ ] `support.poweur.net` and `QUOTA_CONTACT`: see "P0 — operational accounts and
       contacts" in Part 1. Until it's set, a full drive just says the storage is full
 - [ ] Decide what happens to IDs already over 200 MiB. They keep their files but can't
-      upload more. Give the early users an override in `storage-quotas.json` if needed.
+      upload more. Give the early users an override with `/relay quotas set` if needed.
 
 **Later: a real upgrade path.** Once people ask for more space, replace "message support"
 with a CTA. Follow EPIC-026's invariant ("an identity is not a billing account"):
@@ -391,8 +392,8 @@ with a CTA. Follow EPIC-026's invariant ("an identity is not a billing account")
 - [ ] A merchant of record for checkout (Paddle, Lemon Squeezy or Polar), so EU VAT and
       invoices aren't your problem. Collect the Poweur ID as a checkout field. The customer's
       email stays with the payment provider, not on the relay
-- [ ] Fulfilment writes `storage-quotas.json`: a webhook to a small script, or you, by hand,
-      at first
+- [ ] Fulfilment sets the override (`/relay quotas set`): a webhook to a small script, or you,
+      by hand, at first
 - [ ] Offer, following EPIC-026's Personal tier: e.g. €3/month or €30/year for a lot more
       storage. Say publicly what is **never** charged for: the ID, recovery, E2E messaging,
       sign-in and export

@@ -125,8 +125,9 @@ under `drives/`, and the identity index, undelivered mail and key backups under 
 ### Storage v2 layout and the v1 migration
 
 `POWEUR_DATA` holds `drives/<id>/…` (journal, snapshots, versions, pages, chunks and the
-`.poweur` system files) and `relay/{identities,spool,keystore,group-shares,group-rosters}/`;
-`storage-quotas.json` stays at the top. The relay writes nothing else. With `STORAGE_PROVIDER=s3`
+`.poweur` system files) and `relay/{identities,spool,keystore,group-shares,group-rosters}/` plus
+`relay/storage-quotas.json` (quota overrides: `docker exec poweur-relay /relay quotas`, `quotas set
+<id> 2GiB`, `quotas unset <id>`; picked up within a minute). The relay writes nothing else. With `STORAGE_PROVIDER=s3`
 the same keys live in the bucket and `POWEUR_DATA` is not needed. Chunks and journal segments are
 immutable once written, so a live backup is consistent up to the last few seconds of commits.
 
@@ -152,7 +153,7 @@ docker run --rm -v poweur_poweur_data:/data --env-file apps/api/.env.prod -e STO
 docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d relay
 ```
 
-The volume stays mounted for `storage-quotas.json`; the old `drives/` and `relay/` on it can go once
+Afterwards the relay keeps nothing on the volume; the old `drives/` and `relay/` on it can go once
 the bucket-backed relay is verified. Production moved to the Hetzner bucket `poweur` (hel1) on
 2026-09-29. New Hetzner credentials can be refused by some gateways for several minutes after
 creation; wait until a burst of requests all succeeds before cutting over.

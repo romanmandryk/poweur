@@ -154,7 +154,8 @@ type Config struct {
 	// Enforced on WebDAV PUT/MKCOL with 507 Insufficient Storage.
 	MaxIdentityBytes int64
 	// StorageQuotasFile gives individual identities their own quota, overriding
-	// MaxIdentityBytes (default POWEUR_DATA/storage-quotas.json). The relay
+	// MaxIdentityBytes (default POWEUR_DATA/storage-quotas.json), used while
+	// the store holds no relay/storage-quotas.json. The relay
 	// re-reads it when it changes, so raising a limit needs no restart.
 	StorageQuotasFile string
 	// QuotaContact is who to ask for more space (a Poweur ID, usually),
