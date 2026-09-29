@@ -17,7 +17,7 @@ privacy policy's backup row to match. The rest of this page describes it.
 
 | Path in the snapshot | Source | How |
 |---|---|---|
-| `/backup/relay` | `poweur_poweur_data`: identity documents, files, inbox/ack spool, consent preferences | Read live. The relay writes whole files, so no pause |
+| `/backup/relay` | `poweur_poweur_data`: encrypted drives (`drives/`) and the relay's identity index, spool and key backups (`relay/`) | Read live. Drive chunks and journal segments are immutable, so no pause; the newest seconds of commits may be missing |
 | `/backup/staging/oauth` | `poweur_oauth_data`: the OAuth bridge's SQLite database | Copied while `poweur-oauth` is **paused** for a few seconds, so the database and its WAL agree |
 | `/backup/staging/postgres.sql.gz` | `infra-postgres` (Grafana's database) | `pg_dumpall` |
 | `/backup/caddy` | `infra_caddy_data`: TLS certificates | Read live |

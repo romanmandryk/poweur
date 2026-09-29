@@ -118,8 +118,32 @@ anyone can message them.
 Production uses Hetzner's automatic server backups (nightly, 7 days). An off-site encrypted
 restic backup to a Hetzner Storage Box is built but off until configured: see
 [BACKUP.md](BACKUP.md) (`deploy/backup/`, installed by the Ansible playbook). Loki and Prometheus data are not
-backed up. The relay volume includes identity documents, files, inbox/spool and consent
-preferences; never run `docker compose down -v` in production.
+backed up. The relay volume is the relay's whole durable state (storage v2): encrypted drives
+under `drives/`, and the identity index, undelivered mail and key backups under `relay/`. Never run
+`docker compose down -v` in production.
+
+### Storage v2 layout and the v1 migration
+
+`POWEUR_DATA` holds `drives/<id>/…` (journal, snapshots, versions, pages, chunks and the
+`.poweur` system files) and `relay/{identities,spool,keystore,group-shares,group-rosters}/`;
+`storage-quotas.json` stays at the top. The relay writes nothing else. With `STORAGE_PROVIDER=s3`
+the same keys live in the bucket and `POWEUR_DATA` is not needed. Chunks and journal segments are
+immutable once written, so a live backup is consistent up to the last few seconds of commits.
+
+A relay volume still in the v1 layout (`identities/<id>/poweur-sys/…`, `spool/`, `keystore/`) is
+converted once, with the relay stopped:
+
+```bash
+docker stop poweur-relay
+docker run --rm -v poweur_poweur_data:/data --entrypoint /relay "$RELAY_IMAGE" migrate-v1 --data /data --dry-run
+docker run --rm -v poweur_poweur_data:/data --entrypoint /relay "$RELAY_IMAGE" migrate-v1 --data /data
+docker start poweur-relay
+```
+
+It moves identity documents, profiles and avatars, capabilities, contacts, policy, analytics,
+devices, connected apps, group rosters, key backups and undelivered mail; v1 files, shares, links
+and history are not migrated. Rerunning is safe. The v1 trees are renamed `*.v1-backup`; delete them
+once the new relay has been verified. Production was migrated on 2026-09-29 (7 identities).
 
 To move observability, copy only infra volumes/configuration/secrets to the new VM, configure ingest DNS/TLS, and change the relay endpoint to HTTPS. Do not copy or mount relay `POWEUR_DATA` into the analytics stack. Keep the HMAC key on the relay stable if you want historical hashed actors to stay linkable; rotating it intentionally starts new pseudonyms. Keep the Grafana DB credentials consistent when moving its database.
 
