@@ -6,6 +6,7 @@ import { fromBase64 } from "../../encoding.js";
 import { resolveIdentity } from "../../resolve.js";
 import { nodeResolveOptions } from "../../node/session-factory.js";
 import { openDrive } from "./drive-open.js";
+import { offerShare, sendShareMessage } from "./drive-offers.js";
 import { flagBool, flagNumber, flagString, parseArgs, UsageError } from "../args.js";
 import { write, type Streams } from "../output.js";
 
@@ -13,9 +14,10 @@ const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path>
 
 export async function driveOpsCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0]!;
-  const args = parseArgs(argv.slice(1), { bool: ["json"] });
+  const args = parseArgs(argv.slice(1), { bool: ["json", "no-offer"] });
   const json = flagBool(args, "json");
-  const { keys, drive, files } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
+  const { client, keys, drive, files } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
+  const notify = !flagBool(args, "no-offer");
   if (!keys.encryptionPrivateKey && sub !== "watch") throw new Error("identity has no encryption key");
   const role = (flagString(args, "role") ?? "read") as ShareRole;
   const expires = flagString(args, "expires") ?? "";
@@ -31,7 +33,12 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
     if (action === "rm") {
       const id = args.positional[1];
       if (!id) throw new UsageError(usage);
+      const revoked = (await drive.shares()).shares.find(s => s.id === id);
       await drive.unshare(id);
+      if (revoked?.member && notify) {
+        await sendShareMessage(client, revoked.member, "sys.share.revoked", id, { format: 2, drive: revoked.drive, share_id: id, revoked_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") })
+          .catch(error => streams.stderr(`revoked, but the member was not told: ${error}\n`));
+      }
       return write(streams, json, { removed: id }, `${id}\n`);
     }
     if (action === "add" && sub === "share") {
@@ -42,7 +49,9 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       if (!published) throw new Error(`no encryption key for ${member}`);
       const memberKey = fromBase64(published.replace(/^x25519:/, ""));
       if (memberKey.length !== 32) throw new Error(`no encryption key for ${member}`);
-      const share = await files.shareWith(await files.resolve(path), member, memberKey, role, expires);
+      const target = await files.resolve(path);
+      const share = await files.shareWith(target, member, memberKey, role, expires);
+      if (notify) await offerShare(client, drive.relay.relayUrl, target, share).catch(error => streams.stderr(`shared, but the offer was not sent: ${error}\n`));
       return write(streams, json, { id: share.id, node: share.node, member: share.member, role: share.role }, `${share.id}\n`);
     }
     if (action === "create" && sub === "link") {

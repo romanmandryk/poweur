@@ -107,7 +107,8 @@ Phase 0; no drive engine/provider existed at that checkpoint.
 - [x] Phase 7 offers/accepts/mounts (PCP-0008) and client-orchestrated transfer as a
       member of the destination (Phase 8 rework).
 - [x] Phase 7 link viewer.
-- [ ] Phase 7 remaining: TS CLI offers/accept, web offers inbox and mounts UI (E20-T10).
+- [x] TS CLI offers on share add/rm, `drive accept`, `drive mounts`.
+- [ ] Phase 7 remaining: web offers inbox and mounts UI (E20-T10).
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
