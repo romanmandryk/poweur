@@ -1,6 +1,7 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
 import { LinkPasswordRequired, openLink, parseLinkUrl } from "../src/drive/link.js";
 import { openFileRequest } from "../src/drive/request.js";
+import { openAttachment, parseAttachment, prepareAttachment } from "../src/drive/attachment.js";
 import { createTransfer, expiredTransfers, revokeTransfer } from "../src/drive/transfer.js";
 import { DriveLog } from "../src/drive/log.js";
 import { DriveScope } from "../src/drive/scope.js";
@@ -328,3 +329,26 @@ it("releases an expired transfer's files and link", async () => {
   // Releasing again is a no-op.
   expect(await revokeTransfer(owner, released, "expired")).toBe(released);
 });
+
+it("sends an attachment only its recipient can open", async () => {
+  const bob = await createTestIdentity(relay.baseUrl, "attach");
+  const carol = await createTestIdentity(relay.baseUrl, "snoop");
+  const resolve = localResolveOptions(relay.baseUrl);
+  const sender = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const bytes = new Uint8Array(4 * 1024 * 1024 + 99).map((_, i) => i % 251);
+  const { body, metadata } = await prepareAttachment(sender, bob.identity, fromBase64((await resolveEncryptionKey(bob.identity, resolve))!),
+    { name: "scan.pdf", mime: "application/pdf", bytes, caption: "the scan" });
+  // The plaintext metadata names no file and carries no key.
+  expect(Object.keys(metadata).sort()).toEqual(["hash", "node", "size"]);
+  const attachment = parseAttachment(body);
+  expect(attachment).toMatchObject({ name: "scan.pdf", mime: "application/pdf", caption: "the scan" });
+  const authorKey = fromBase64((await resolveSigningKey(alice.identity, resolve))!);
+  const asBob = new DriveClient(bob.client.relay, bob.client.signer, alice.identity);
+  expect(Buffer.from(await openAttachment(asBob, attachment, metadata, authorKey)).equals(Buffer.from(bytes))).toBe(true);
+  // The sender opens their own copy too.
+  expect((await openAttachment(sender.client, attachment, metadata, authorKey)).length).toBe(bytes.length);
+  // Nobody else can read it, and a message that lies about the file fails.
+  await expect(openAttachment(new DriveClient(carol.client.relay, carol.client.signer, alice.identity), attachment, metadata, authorKey)).rejects.toBeTruthy();
+  await expect(openAttachment(asBob, attachment, { ...metadata, hash: "0".repeat(64) }, authorKey)).rejects.toThrow("does not match");
+  expect(() => parseAttachment(JSON.stringify({ ...attachment, name: "../x" }))).toThrow();
+}, 60_000);

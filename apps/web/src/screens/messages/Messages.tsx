@@ -233,7 +233,7 @@ function InboxTray() {
                   data-download-attachment={JSON.stringify(row.lastMsg.metadata)}
                   onClick={(event) => {
                     event.stopPropagation();
-                    void downloadAttachment(row.lastMsg.metadata);
+                    void downloadAttachment(row.lastMsg);
                   }}
                 >
                   <Paperclip className="size-4" aria-hidden="true" /> Open

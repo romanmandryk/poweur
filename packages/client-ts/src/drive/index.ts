@@ -13,3 +13,4 @@ export * from "./offer.js";
 export * from "./link.js";
 export * from "./request.js";
 export * from "./transfer.js";
+export * from "./attachment.js";

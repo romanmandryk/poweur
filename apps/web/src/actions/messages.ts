@@ -8,10 +8,13 @@
  * item over once and forgets it, so everything fetched is merged into the
  * store and the archive is what a reload restores from.
  */
-import { ACK_STATE_READ, crypto as poweurCrypto, isSessionValid, sendsReadReceiptsTo, streamForever } from "@poweur/client";
+import { ACK_STATE_READ, crypto as poweurCrypto, fromBase64, isSessionValid, sendsReadReceiptsTo, streamForever } from "@poweur/client";
+import { MAX_ATTACHMENT_BYTES, openAttachment, parseAttachment, prepareAttachment } from "@poweur/client/drive";
+import { lookup } from "../lib/client.js";
+import { openBrowserDrive } from "../lib/drive";
 import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/outbox.js";
 import { markCovers } from "../lib/threads.js";
-import { loadSessionRecord } from "../lib/storage.js";
+import { loadSessionRecord, relayUrlFor } from "../lib/storage.js";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { autoAcceptContactOffers } from "./files";
 import { useData, type DataFields } from "../state/data";
@@ -465,11 +468,71 @@ export async function openNewChat(identity: string): Promise<boolean> {
 }
 
 /**
- * Attachments are being rebuilt on end-to-end encrypted storage (EPIC-020
- * E20-T11); until then an attachment message can be shown but not opened.
+ * Send a file (EPIC-020 E20-T11): sealed onto our drive, shared read-only
+ * with the recipient, and announced by an encrypted `chat.attachment` whose
+ * body carries the key, name and type. Direct conversations only.
  */
-export async function downloadAttachment(_metadata: unknown) {
-  toast("Attachments come back with the new storage — this one can't be opened yet.", "warning", 6000);
+export async function sendAttachment(client: any, { to, file, thread = "", setStatus }: { to: string; file: File; thread?: string; setStatus: SetStatus }): Promise<SendOutcome> {
+  const self = selfIdentity();
+  try {
+    if (file.size > MAX_ATTACHMENT_BYTES) throw new Error(`Files up to ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB can be attached`);
+    setStatus("Checking their key…");
+    if (!(await checkPinBeforeSend(client, to))) {
+      setStatus("✕ Not sent — key not trusted", "err");
+      return { status: "blocked" };
+    }
+    const resolved = await lookup(to, relayUrlFor(self));
+    const published = resolved.document.encryption_public_key;
+    if (!published) throw new Error(`${to} has no published encryption key`);
+    setStatus("Encrypting and uploading…");
+    const { files } = await openBrowserDrive(self);
+    const { body, metadata } = await prepareAttachment(files, to, fromBase64(published.replace(/^x25519:/, "")), {
+      name: file.name || "file", mime: file.type || "application/octet-stream", bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+    setStatus("Sending…");
+    const sent = await client.sendAndArchive(to, body, {
+      type: "chat.attachment",
+      metadata,
+      signWith: isSessionValid(loadSessionRecord(self)) ? "session" : "identity",
+      ...(thread ? { threadId: thread } : {}),
+    });
+    mergeMessages([{ id: sent.message.id, sender: self, recipient: sent.message.recipient, timestamp: sent.message.timestamp,
+      queue: "sent", type: "chat.attachment", plaintext: body, metadata, ...(thread ? { thread_id: thread } : {}) }]);
+    setStatus("✓ Sent", "ok");
+    if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+    trackAction("send", { kind: "attachment", outcome: "sent" });
+    return { status: "sent" };
+  } catch (error) {
+    setStatus(`✕ ${errorMessage(error)}`, "err");
+    toast(errorMessage(error), "error", 7000);
+    trackAction("send", { kind: "attachment", outcome: "failed" });
+    return { status: "failed" };
+  }
+}
+
+/** Download and decrypt an attachment from its sender's drive, then save it. */
+export async function downloadAttachment(message: any) {
+  const self = selfIdentity();
+  try {
+    const attachment = parseAttachment(message.plaintext ?? message.body ?? "");
+    const sender = String(message.sender || "").toLowerCase();
+    if (!sender) throw new Error("this attachment names no sender");
+    const resolved = await lookup(sender, relayUrlFor(self));
+    const authorKey = fromBase64(resolved.document.public_key.replace(/^ed25519:/, ""));
+    const { drive } = sender === self ? await openBrowserDrive(self) : await openBrowserDrive(self, sender, resolved.document.relay);
+    const bytes = await openAttachment(drive, attachment, message.metadata ?? {}, authorKey);
+    const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: attachment.mime }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = attachment.name;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    trackAction("attachment-open", { outcome: "opened" });
+  } catch (error) {
+    const status = (error as { status?: number })?.status;
+    toast(status === 403 || status === 404 ? "This attachment is no longer shared with you." : `Could not open the attachment: ${errorMessage(error)}`, "error", 7000);
+    trackAction("attachment-open", { outcome: "failed" });
+  }
 }
 
 /** Test seam. */

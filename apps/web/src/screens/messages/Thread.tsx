@@ -8,7 +8,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, Paperclip, Users, type LucideIcon } from "lucide-react";
-import { downloadAttachment, markConversationRead, sendSigned, unreadFor } from "../../actions/messages";
+import { downloadAttachment, markConversationRead, sendAttachment, sendSigned, unreadFor } from "../../actions/messages";
 import { activeClient } from "../../actions/relay";
 import { MessageText } from "../../components/MessageText";
 import { usePeerAvatars } from "../../actions/avatars";
@@ -127,6 +127,25 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
     }
   };
 
+  const attachInput = useRef<HTMLInputElement>(null);
+  const attach = async (file: File) => {
+    const client = activeClient();
+    if (!client) {
+      toast("Unlock your identity first", "warning");
+      return;
+    }
+    setSending(true);
+    try {
+      const outcome = await sendAttachment(client, { to: peer, file, thread: threadId, setStatus: (message, tone = "") => setStatus({ text: message, tone }) });
+      if (outcome.status === "sent") {
+        atBottom.current = true;
+        setStatus({ text: "", tone: "" });
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
   let lastDay = "";
 
   return (
@@ -217,7 +236,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
                         variant="secondary"
                         className="bubble-attachment mt-1.5"
                         data-download-attachment={JSON.stringify(message.metadata)}
-                        onClick={() => void downloadAttachment(message.metadata)}
+                        onClick={() => void downloadAttachment(message)}
                       >
                         <Paperclip className="size-4" aria-hidden="true" /> Open
                       </Button>
@@ -254,6 +273,32 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
       )}
 
       <div className="thread-composer flex shrink-0 items-end gap-2 border-t border-sep bg-bg px-3 pt-2 pb-[calc(8px+env(safe-area-inset-bottom,0px))]">
+        {/* Files go to one person: a group has no single drive share to hand out. */}
+        {!group && (
+          <>
+            <button
+              id="btn-thread-attach"
+              type="button"
+              aria-label="Attach a file"
+              disabled={sending}
+              onClick={() => attachInput.current?.click()}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-accent active:bg-surface-2 disabled:opacity-50 [@media(hover:hover)]:hover:bg-surface-2"
+            >
+              <Paperclip className="size-5" aria-hidden="true" />
+            </button>
+            <input
+              ref={attachInput}
+              id="thread-attach-input"
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void attach(file);
+              }}
+            />
+          </>
+        )}
         <textarea
           id="thread-input"
           rows={1}

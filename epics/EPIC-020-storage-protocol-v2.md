@@ -33,7 +33,7 @@
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, cached listings with SSE/pull refresh, direct shares/revocation, offers, encrypted mounts and password links are in; requests, public folders, previews, thumbnails and search remain |
-| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history and CLI attachments (share + sealed payload) are in; web download, the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
+| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history (incremental, inline records), CLI and web attachments (share + sealed payload) and web durability are in; the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
 | **Wave 5 — after launch, demand-led** | | |
@@ -158,16 +158,19 @@ as the test reference; retain already ported temporary system-file tests as regr
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
 - [ ] SDK history journeys, Go/TS history cursors and private sign-in consent log.
-- [ ] Web durability suite: received and sent messages survive reload, unread state
-      persists, anonymous history persists, relay archive is ciphertext. Restore the
+- [x] Web durability (`durability.spec.js`): received and sent messages and read state
+      survive a reload with no on-device snapshot (the drive archive alone), and the relay's
+      store holds none of the plaintext. Still open below: anonymous history persistence.
+- [ ] Web durability, remaining: anonymous history persists. Restore the
       conversation paging-after-reload and journey per-identity archive-isolation
       assertions and the stranger/contact tray persistence journey removed from the
       still-active messaging browser suites.
 - [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
       visibility on a different relay.
 - [ ] Encrypted attachment upload/open: CLI send/save keeps name, MIME and bytes out of
-      the provider (`INT_HISTORY_02`). Still open: 20 MB across two relays, web download,
-      and malformed/missing/revoked attachment failures.
+      the provider (`INT_HISTORY_02`); the web sends and opens them (`attachments.spec.js`,
+      SDK live test incl. a snoop and a tampered hash). Still open: 20 MB across two relays
+      and TS↔Go cross-client coverage.
 - [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
       analytics consent, group create/add/remove and quota display on v2.
 
@@ -696,8 +699,9 @@ Replaces E09-T1's layout and closes E09-T4's plaintext-bytes gap.
       read one tail chunk per conversation
 - [x] Attachments: sealed file + per-file share with the recipient; content key, filename and
       MIME inside the encrypted payload; plaintext metadata keeps only node id, ciphertext size
-      and hash. CLI `send --attach` and `attach save`. The web Open button still shows the
-      name and does not download yet.
+      and hash. CLI `send --attach` and `attach save`; SDK `prepareAttachment`/`openAttachment`;
+      the web attaches from the conversation composer (direct conversations) and Open downloads
+      and verifies the ciphertext hash.
 - [x] CLI `poweur history [peer] --limit --before --thread --json`
 
 **Acceptance:** with 20 conversations and 10k messages the tray fetches ≤ 20 tail chunks;
