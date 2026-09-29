@@ -1,6 +1,6 @@
 # EPIC-020 — Storage v2: an end-to-end encrypted drive with a stateless relay
 
-- **Status:** in progress — v1 removed on master; deployment blocked until baseline + migration; rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
+- **Status:** in progress — storage v2 deployed on 2026-09-29; client features and baseline restoration continue; rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
   service plan; old task IDs are mapped at the end)
 - **Priority:** P0 (pre-launch: changing the storage model now costs nothing in migrations)
 - **Depends on:** EPIC-011 (seed-derived identity keys; recovery is now also file recovery),
@@ -32,7 +32,7 @@
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
-| E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
+| E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, direct person shares/revocation, offers and encrypted mounts are in; links, requests, public folders, previews, thumbnails and search remain |
 | E20-T11 Message history & attachments on v2 | **in progress** | Append-log history and CLI attachments (share + sealed payload) are in; web download, the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
@@ -108,7 +108,8 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       member of the destination (Phase 8 rework).
 - [x] Phase 7 link viewer.
 - [x] TS CLI offers on share add/rm, `drive accept`, `drive mounts`.
-- [ ] Phase 7 remaining: web offers inbox and mounts UI (E20-T10).
+- [x] Phase 7 web offers inbox and encrypted mounts UI (E20-T10); the first Files slice
+      also covers upload/download/folders, direct person sharing and revocation.
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
@@ -644,8 +645,13 @@ both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` conv
 
 ### E20-T10 — Web & mobile Files on v2
 
-- [ ] Files destination, Shared with me, share dialog (people, links, file requests), public
-      folder toggle with a plaintext warning
+- [x] Web Files destination: encrypted upload/download, folders, replace/delete and navigation;
+      Shared with me verifies offers against the source relay and persists accepted mounts in
+      encrypted `.poweur/private/mounts.json`; direct person shares support read/write/admin and
+      immediate revocation. Component coverage plus a real-relay browser journey cover
+      upload → share → accept/open → revoke. Cross-relay browser coverage remains.
+- [ ] Complete the share dialog with links and file requests; public folder toggle with a
+      plaintext warning; mobile-specific interaction coverage
 - [ ] Thumbnails and previews generated on the client at upload and stored as encrypted
       sidecars; name search as a client-side index
 - [ ] Link viewer page decrypting in the browser, streaming large downloads

@@ -1,4 +1,4 @@
-import { MessageCircle, Rocket, Settings, Users, type LucideIcon } from "lucide-react";
+import { Files as FilesIcon, MessageCircle, Rocket, Settings, Users, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "../lib/cn";
 import { navBadges } from "../state/badges";
@@ -9,13 +9,14 @@ import { useSession } from "../state/session";
 const NAV: { page: Destination; label: string; Icon: LucideIcon }[] = [
   { page: "messages", label: "Messages", Icon: MessageCircle },
   { page: "contacts", label: "Contacts", Icon: Users },
+  { page: "files", label: "Files", Icon: FilesIcon },
   { page: "launcher", label: "Apps", Icon: Rocket },
   { page: "settings", label: "Settings", Icon: Settings },
 ];
 
 /**
  * A bottom bar on a phone, an icon rail from 768px, a labelled sidebar from
- * 1024px (E15-T11). Four tabs fit 375px and every one clears 44px.
+ * 1024px (E15-T11). Five tabs fit 375px and every one clears 44px.
  */
 export function BottomNav({ className }: { className?: string }) {
   const page = useRoute((state) => state.page);

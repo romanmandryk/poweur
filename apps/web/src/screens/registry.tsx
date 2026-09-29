@@ -14,6 +14,7 @@ import { ThreadScreen } from "./messages/Thread";
 import { Onboarding } from "./Onboarding";
 import { PairDevice } from "./PairDevice";
 import { Settings } from "./settings/Settings";
+import { Files } from "./files/Files";
 import { SignInApproval } from "./SignInApproval";
 import { Unlock } from "./Unlock";
 
@@ -23,6 +24,8 @@ export function DestinationScreen({ page }: { page: Destination }) {
       return <Contacts />;
     case "launcher":
       return <Launcher />;
+    case "files":
+      return <Files />;
     case "settings":
       return <Settings />;
     default:

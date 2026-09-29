@@ -14,7 +14,7 @@ const RELAY_VERSION = readFileSync(new URL("../../../api/internal/buildinfo/buil
   .match(/var Version = "([^"]+)"/)[1];
 
 /**
- * E15-T1 acceptance: the four destinations render and route, and the shell is
+ * E15-T1/E20-T10 acceptance: the five destinations render and route, and the shell is
  * usable at a 375px viewport.
  *
  * Runs against a real relay with a real registered identity — the destinations
@@ -26,6 +26,7 @@ const MOBILE = { width: 375, height: 667 };
 const DESTINATIONS = [
   { page: "messages", title: "Messages" },
   { page: "contacts", title: "Contacts" },
+  { page: "files", title: "Files" },
   { page: "settings", title: "Settings" },
 ];
 
@@ -33,7 +34,7 @@ function destHandle() {
   return `dest${Date.now().toString(36)}`;
 }
 
-test.describe("four destinations at 375px", () => {
+test.describe("five destinations at 375px", () => {
   /** @type {Awaited<ReturnType<typeof startRelay>>} */
   let relay;
 
@@ -46,7 +47,7 @@ test.describe("four destinations at 375px", () => {
     await stubPasskeys(page);
     await registerIdentity(page, relay, destHandle());
 
-    await expect(page.locator(".nav-tab")).toHaveCount(4);
+    await expect(page.locator(".nav-tab")).toHaveCount(5);
 
     for (const { page: destination, title } of DESTINATIONS) {
       await page.click(`.nav-tab[data-page="${destination}"]`);
@@ -70,7 +71,7 @@ test.describe("four destinations at 375px", () => {
         .toBeGreaterThan(60);
     }
 
-    // The fourth tab is Apps. It used to render "New identity — step 1 of 2":
+    // The Apps tab used to render "New identity — step 1 of 2":
     // the create-identity form was the launcher destination, so someone who
     // already had an identity was offered another one. Claiming moved to the
     // front door (E15-T7), and what is left here says so (E15-T11).
@@ -93,15 +94,15 @@ test.describe("four destinations at 375px", () => {
         const rect = tab.getBoundingClientRect();
         return { height: rect.height, width: rect.width };
       }));
-    // The whole check polls, not just the wait for four tabs: a measurement
+    // The whole check polls, not just the wait for five tabs: a measurement
     // taken while the shell is mid-render sees a nav that is present but not
     // yet laid out, and asserting on that once made this test flake under a
     // full-suite load rather than report a real regression.
     await expect
       .poll(async () => {
         const boxes = await measure();
-        return boxes.length === 4 && boxes.every((box) => box.height >= 44 && box.width >= 44);
-      }, { message: "the bottom nav never settled at four tabs of at least 44px" })
+        return boxes.length === 5 && boxes.every((box) => box.height >= 44 && box.width >= 44);
+      }, { message: "the bottom nav never settled at five tabs of at least 44px" })
       .toBe(true);
   });
 
