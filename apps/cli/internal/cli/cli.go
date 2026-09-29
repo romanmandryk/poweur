@@ -55,6 +55,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runOutbox(args[1:], stdout, stderr)
 	case "drive":
 		return runDrive(args[1:], stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
 	case "devices":
 		return runDevices(args[1:], stdout, stderr)
 	case "history":
@@ -2077,6 +2079,7 @@ func printHelp(w io.Writer) {
   poweur listen [--use-identity=...] [--json] [--once]
   poweur outbox [list|retry]
   poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
+  poweur sync <run|pull|push|status|watch|service> <local-dir> [--drive <owner> --folder /<node>] [--path <p>]
   poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
   poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
   poweur session status [--use-identity=...] [--json]

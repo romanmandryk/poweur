@@ -31,7 +31,7 @@
 | E20-T7 Shares, roles, links & file requests | **in progress** | shares on any node; read/write/append/create/admin; inheritance; caps + PoW; revocation + key rotation; key-in-fragment links; ownership transfer |
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
-| E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
+| E20-T9 Sync daemon & merge drivers | **done, two items open** | `poweur sync run\|pull\|push\|status\|watch\|service` (`apps/cli/internal/sync`): text three-way, JSON by key, append files by relay order, conflicted copies, trash, selective sync, launchd/systemd; `TestINT_SYNC_01–03`, DEVICES_02. Open: per-path `merge.json` overrides, syncing signed `.poweur` files |
 | E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, cached listings with SSE/pull refresh, direct shares/revocation, offers, encrypted mounts and password links are in; requests, public folders, previews, thumbnails and search remain |
 | E20-T11 Message history & attachments on v2 | **done** | Append-log history read newest-first per conversation with one request per older page, appends from the relay's author cursor (no log re-read), inline padded records; CLI and web attachments incl. 20 MB across two relays (`INT_ATTACH_02`); web durability and archive paging after reload |
 | **Wave 4 — cutover** | | |
@@ -157,7 +157,7 @@ as the test reference; retain already ported temporary system-file tests as regr
       `INT_OAUTH_02`) and ABUSE_03 are restored on v2 (`history_restore_test.go`,
       `devices_restore_test.go`, `abuse_restore_test.go`); HISTORY_05's sealed-archive check is
       `INT_HISTORY_01`'s plaintext scan. DEVICES_02 tested the v1 sync cursor and returns with
-      E20-T9.
+      E20-T9 (restored: `TestINT_DEVICES_02_SyncCursorVisibleToOwner` in `sync_v2_test.go`).
       The full profile/web/cross-relay avatar acceptance remains below.
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
@@ -677,12 +677,24 @@ and every action in the EPIC-031 scenarios is reachable from the CLI.
 
 ### E20-T9 — Sync daemon & merge drivers
 
-- [ ] `poweur sync --watch <dir>`: file watcher, debounce, upload on stable files, atomic
-      downloads, trash for deletes, selective sync, ignore rules, resume after sleep
-- [ ] launchd and systemd templates; `poweur status` shows progress, conflicts and rejections
-- [ ] Merge drivers as in Design; append-mode detection (local growth → append commit, rewrite →
-      conflicted copy); overridable per path in `.poweur/private/merge.json`
-- [ ] `.poweur/relay` and `.poweur/public` synced as editable files, signed on upload where required
+- [x] `poweur sync watch <dir>`: local changes by polling (size + mtime snapshot; no fsnotify
+      dependency), remote changes from the drive's change stream, uploads once a file has
+      settled (`--settle`), atomic downloads, a local `.poweur-trash/<date>/` for remote deletes,
+      selective sync (`--path`), `.poweurignore`, and a stream that reconnects with backoff
+      (resume after sleep) plus a full pass every minute. One-shot `run`, `pull`, `push`.
+      Members sync a shared folder: `--drive <owner> --folder /<node>`.
+- [x] launchd and systemd templates: `poweur sync service <dir> --launchd|--systemd`;
+      `poweur sync status` shows pending local changes, remote changes and unresolved conflicts.
+      The relay records each device's position in devices.json (DEVICES_02 restored).
+- [x] Merge drivers as in Design (`.md`/`.txt` line three-way against the last synced version,
+      read back with `ReadVersion`; `.json` by top-level key; everything else a conflicted
+      copy); append files (`.jsonl`, `.log`, `.csv` created as append): local growth → one
+      append record, a rewritten prefix → conflicted copy. Pull skips a pass when only
+      relay-written system files changed, and a sync acknowledges only when it moved something
+      (so the acknowledgement's own devices.json write does not wake a watcher forever).
+- [ ] Per-path overrides in `.poweur/private/merge.json`
+- [ ] `.poweur/relay` and `.poweur/public` synced as editable files, signed on upload where
+      required (excluded by default today), and relay rejection reasons surfaced by `status`
 
 **Acceptance:** two machines editing the same Markdown note offline converge on reconnect with
 both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` convergence on v2.

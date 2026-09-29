@@ -31,8 +31,11 @@ type Client struct {
 	// signing key.
 	LinkID       string
 	LinkVerifier []byte
-	HTTP         *http.Client
-	Cache        ChunkCache
+	// Headers are sent on every drive request (the device headers of a
+	// syncing client, so the relay records its cursor).
+	Headers map[string]string
+	HTTP    *http.Client
+	Cache   ChunkCache
 }
 
 type Error struct {
@@ -98,6 +101,9 @@ func (c *Client) request(ctx context.Context, method, suffix string, body []byte
 	}
 	if method == "POST" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, value := range c.Headers {
+		req.Header.Set(name, value)
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {

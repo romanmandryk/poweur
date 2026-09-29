@@ -536,6 +536,26 @@ The relay publishes its commit and applies the policy before acknowledging. Cold
 start rebuilds that same policy from the provider, including when every local
 cache has been deleted.
 
+## Sync client
+
+`poweur sync` keeps a local directory and a drive folder in step (your own drive, or
+`--drive <owner> --folder /<node>` for a folder shared with you):
+
+```bash
+poweur sync run ~/Poweur            # pull, merge, push until both sides agree
+poweur sync watch ~/Poweur          # keep doing it: change stream + local polling
+poweur sync status ~/Poweur         # pending local changes, remote changes, conflicts
+poweur sync service ~/Poweur --launchd   # or --systemd: run watch at login
+```
+
+The client merges; the relay only refuses a stale write (`409`). Markdown and text files merge
+line by line against the last synced version; JSON merges by top-level key; `.jsonl`, `.log` and
+`.csv` files are created as append files, so each machine's new lines become records in the
+relay's order; anything else keeps the losing side as `name (conflicted copy <device> <time>)`.
+Remote deletes move local files to `.poweur-trash/<date>/`. `.poweurignore` and `--path` limit
+what syncs; `.poweur` system files are excluded by default. Each sync reports its position, so
+`devices.json` shows when every device last synced.
+
 ## Threat model and privacy inventory
 
 The relay and bucket see identity IDs, tree shape, opaque node IDs, padded stored

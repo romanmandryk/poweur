@@ -435,6 +435,14 @@ func (s *Server) handleDriveChanges(w http.ResponseWriter, r *http.Request) {
 	if changes == nil {
 		changes = []engine.Change{}
 	}
+	// A device syncing its owner's drive acknowledges how far it got, so the
+	// owner can see each device's staleness in devices.json (E04-T6).
+	if actor == driveID {
+		if obs := deviceFromRequest(r); obs.Fingerprint != "" {
+			obs.SyncCursor = strconv.FormatUint(next, 10)
+			s.touchDevice(r.Context(), driveID, obs)
+		}
+	}
 	noStore(w)
 	writeJSON(w, http.StatusOK, map[string]any{"changes": changes, "cursor": strconv.FormatUint(next, 10)})
 }
