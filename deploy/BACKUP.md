@@ -23,7 +23,7 @@ The privacy policy's "Storage and backups" row states exactly this; change both 
 account however many buckets and locations there are, with the included storage shared
 across them, so a second bucket costs only the storage it holds beyond the included quota.
 It protects against losing the data centre, not against losing the Hetzner account; the
-Storage Box below covers that.
+restic Storage Box below would, once it also backs up the bucket (today it reads only volumes).
 
 **Ready but switched off:** an off-site, encrypted, file-level backup to a Hetzner Storage
 Box with [restic](https://restic.net/) ([`backup/poweur-backup.sh`](backup/poweur-backup.sh)).
