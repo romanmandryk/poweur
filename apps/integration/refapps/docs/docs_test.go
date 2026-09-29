@@ -68,7 +68,7 @@ func TestReduceComments(t *testing.T) {
 	entries := []Entry{
 		{Author: "carol", Text: record(t, first)},
 		{Author: "carol", Text: record(t, second)},
-		{Author: "carol", Text: record(t, first)},                    // duplicate id: ignored
+		{Author: "carol", Text: record(t, first)},                      // duplicate id: ignored
 		{Author: "mallory", Text: record(t, ResolveComment(first.ID))}, // not the author or owner
 		{Author: "alice", Text: record(t, ResolveComment(first.ID))},   // the owner
 		{Author: "carol", Text: record(t, ResolveComment(second.ID))},  // the author
