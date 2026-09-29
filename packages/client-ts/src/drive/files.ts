@@ -44,6 +44,14 @@ export interface OpenFile {
   position?: number;
   trimmedBefore?: number;
 }
+/** Random-access plaintext source used for bounded-memory uploads. Browser
+ * `File` and Node file handles can implement this without loading the whole
+ * object into memory. */
+export interface DriveFileSource {
+  size: number;
+  slice(start: number, end: number): Promise<Uint8Array>;
+}
+export interface DriveUploadProgress { offset: number; total: number }
 /** Per-author chain state while reading an append file, so a later read can
  * continue from where an earlier one stopped and still check every link. */
 export type AuthorCursors = Map<string, { sequence: number; previous: string }>;
@@ -330,6 +338,37 @@ export class DriveFiles {
     const pages = contentKey ? await this.upload(m, contentKey, bytes) : [];
     await this.client.commit({ manifest: await this.signed(m), pages });
     return { manifest: m, name, folder: parent?.manifest.node ?? "", nodeKey, ...(contentKey ? { contentKey } : {}) };
+  }
+  /** Create a replace file from a random-access source one encrypted chunk at
+   * a time. This is the upload path for multi-gigabyte browser transfers: its
+   * memory use is bounded by one drive chunk, and each chunk upload retains
+   * the client's normal retry/content-address checks. */
+  async createFromSource(parent: OpenFile, name: string, source: DriveFileSource,
+    onProgress?: (progress: DriveUploadProgress) => void | Promise<void>): Promise<OpenFile> {
+    if (parent.manifest.kind !== "folder") throw new Error("not a folder");
+    if (!Number.isSafeInteger(source.size) || source.size < 0) throw new Error("invalid source size");
+    name = normalizeName(name);
+    const nodeKey = randomBytes(32), contentKey = randomBytes(32);
+    const m: Manifest = { format: 1, drive: this.client.drive, node: id(), version: id(), parent: "", operation: "create",
+      author: this.client.signer.identity, generation: 1, kind: "file", mode: "replace", folder: parent.manifest.node,
+      name_hash: "", count: 0, pages: [], signature: "" };
+    m.node_key = wire(sealKey(x25519PublicKey(parent.nodeKey), nodeKey, this.context(m, "node-key")));
+    m.name = wire(sealName(x25519PublicKey(parent.nodeKey), name, this.context(m, "name")));
+    m.name_hash = nameHash(parent.nodeKey, name);
+    m.content_key = wire(sealKey(x25519PublicKey(nodeKey), contentKey, this.context(m, "content-key")));
+    const refs: ChunkRef[] = [];
+    for (let offset = 0; offset < source.size; offset += MAX_PLAINTEXT) {
+      const end = Math.min(source.size, offset + MAX_PLAINTEXT);
+      const plain = await source.slice(offset, end);
+      if (plain.length !== end - offset) throw new Error("source returned the wrong byte range");
+      const encrypted = encryptChunk(contentKey, plain, this.context(m, "content"));
+      refs.push(...await this.client.store([encrypted]));
+      await onProgress?.({ offset: end, total: source.size });
+    }
+    const { pages, hashes } = splitPages(m.drive, m.node, refs);
+    m.pages = hashes; m.count = refs.length;
+    await this.client.commit({ manifest: await this.signed(m), pages });
+    return { manifest: m, name, folder: parent.manifest.node, nodeKey, contentKey };
   }
   private async upload(m: Manifest, key: Uint8Array, bytes: Uint8Array) {
     const blobs: Uint8Array[] = [];

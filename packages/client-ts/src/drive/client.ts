@@ -24,6 +24,7 @@ export interface DriveStreamEvent {
   timestamp: string;
   drive?: { drive: string; seq: number; node?: string; operation: string; version?: string; position?: number };
 }
+export interface DriveLinkStats { link: string; node: string; opens: number; max_downloads?: number; expires?: string }
 export interface CommitResult { seq: number; head: string; positions: number[] | null }
 export interface DriveNode {
   id: string; head: string; generation: number; kind: "file" | "folder";
@@ -157,6 +158,7 @@ export class DriveClient {
     return this.request("GET", `/nodes/${segment(node)}/history`);
   }
   shares(): Promise<{ shares: Share[] }> { return this.request("GET", "/shares"); }
+  linkStats(link: string): Promise<DriveLinkStats> { return this.request("GET", `/links/${segment(link)}/stats`); }
   unshare(id: string): Promise<CommitResult> { return this.commit({ unshare: { id } }); }
   /** Advisory `drive.changed` stream. A missed event is recovered from `changes`. */
   async subscribe(onEvent: (event: DriveStreamEvent) => void | Promise<void>, signal?: AbortSignal): Promise<void> {

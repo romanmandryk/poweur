@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Files } from "../../src/screens/files/Files";
 import { useData } from "../../src/state/data";
 import { useSession } from "../../src/state/session";
+import { useUi } from "../../src/state/ui";
 import { resetStores } from "../helpers/stores";
 
 const mocks = vi.hoisted(() => {
@@ -78,6 +79,8 @@ describe("Files destination (E20-T10)", () => {
     await screen.findByText("note.txt");
     expect(container.querySelector("#btn-upload-file")).toBeTruthy();
     expect(container.querySelector("#btn-new-folder")).toBeTruthy();
+    fireEvent.click(container.querySelector("#btn-send-files")!);
+    expect(useUi.getState().panel?.title).toBe("Send files");
     expect(container.querySelector(".pull-to-refresh .dest-title")?.textContent).toBe("Files");
     expect(container.querySelector(".pull-to-refresh [role=tablist]")).toBeTruthy();
     expect(mocks.ensureBrowserFiles).toHaveBeenCalledWith("alice.poweur.net");

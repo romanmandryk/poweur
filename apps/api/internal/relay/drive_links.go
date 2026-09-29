@@ -159,6 +159,26 @@ func (s *Server) handleDriveLink(w http.ResponseWriter, r *http.Request) {
 	}{driveID, info})
 }
 
+// handleDriveLinkStats exposes no capability secret or recipient data; only
+// the drive owner may inspect the durable open counter.
+func (s *Server) handleDriveLinkStats(w http.ResponseWriter, r *http.Request) {
+	driveID, actor, ok := s.driveCaller(w, r)
+	if !ok {
+		return
+	}
+	if !engine.IsOwner(driveID, actor) {
+		writeError(w, http.StatusForbidden, "forbidden", "only the drive owner sees link statistics")
+		return
+	}
+	stats, err := s.engine.LinkStats(r.Context(), driveID, r.PathValue("link"))
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, stats)
+}
+
 // linkPowPurpose binds a proof-of-work to one link of one drive.
 func linkPowPurpose(driveID, linkID string) string { return "drive-link:" + driveID + "/" + linkID }
 

@@ -101,6 +101,10 @@ func TestLinks(t *testing.T) {
 			t.Fatalf("open %d: %v", i, err)
 		}
 	}
+	stats, err := f.eng.LinkStats(ctx, owner, linkID)
+	if err != nil || stats.Opens != 2 || stats.MaxDownloads != 2 || stats.Node != docs {
+		t.Fatalf("link stats: %+v %v", stats, err)
+	}
 	// Reads with the link actor follow the share's role.
 	actor := LinkActor(linkID)
 	if err := f.eng.Authorize(ctx, owner, actor, notes, drive.RoleRead); err != nil {
@@ -116,6 +120,10 @@ func TestLinks(t *testing.T) {
 	}
 	if _, err := f.eng.Link(ctx, owner, linkID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("exhausted link info: %v", err)
+	}
+	// Exhaustion hides the public link, but its owner retains the receipt.
+	if stats, err := f.eng.LinkStats(ctx, owner, linkID); err != nil || stats.Opens != 2 {
+		t.Fatalf("exhausted link stats: %+v %v", stats, err)
 	}
 	if _, err := f.eng.Link(ctx, owner, "0123456789abcdef0123456789abcdef"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown link: %v", err)
