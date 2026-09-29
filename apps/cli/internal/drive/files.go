@@ -29,9 +29,12 @@ type Files struct {
 	// GroupMembers resolves a group identity's roster, so versions written
 	// by a group's members can be verified. Nil fails such versions closed.
 	GroupMembers func(ctx context.Context, group string) ([]string, error)
-	shares       []protocol.Share
-	sharesLoaded bool
-	nodeShares   map[string][]protocol.Share
+	// EncryptionKeys resolves a member's X25519 public key, to re-issue their
+	// share after a key rotation. Nil reports their shares as stale.
+	EncryptionKeys func(ctx context.Context, member string) ([]byte, error)
+	shares         []protocol.Share
+	sharesLoaded   bool
+	nodeShares     map[string][]protocol.Share
 }
 type File struct {
 	Manifest            protocol.Manifest
@@ -40,16 +43,19 @@ type File struct {
 	NodeKey, ContentKey []byte
 }
 type Node struct {
-	ID            string    `json:"id"`
-	Head          string    `json:"head"`
-	Folder        string    `json:"folder"`
-	Kind          string    `json:"kind"`
-	Mode          string    `json:"mode"`
-	Generation    uint64    `json:"generation"`
-	Removed       bool      `json:"removed"`
-	Position      uint64    `json:"position"`
-	TrimmedBefore uint64    `json:"trimmed_before"`
-	TrimSnapshot  *Snapshot `json:"trim_snapshot"`
+	ID            string `json:"id"`
+	Head          string `json:"head"`
+	Folder        string `json:"folder"`
+	Kind          string `json:"kind"`
+	Mode          string `json:"mode"`
+	Generation    uint64 `json:"generation"`
+	Removed       bool   `json:"removed"`
+	Position      uint64 `json:"position"`
+	TrimmedBefore uint64 `json:"trimmed_before"`
+	// RotateRequired is set after a key-bearing share was revoked: writes
+	// wait for a rotation.
+	RotateRequired bool      `json:"rotate_required"`
+	TrimSnapshot   *Snapshot `json:"trim_snapshot"`
 }
 
 func public(key []byte) ([]byte, error) {
@@ -93,22 +99,31 @@ func (f *Files) verify(m protocol.Manifest) error {
 // owner reports whether the caller owns the drive.
 func (f *Files) owner() bool { return f.Client.LinkID == "" && f.Client.Identity == f.driveID() }
 
-// sharesOn lists the shares on a node and its ancestors (nearest first).
+// sharesOn lists every share that ever stood on a node or its ancestors:
+// active, expired and revoked. They are evidence of past authority for
+// verifying versions, never access (the relay decides that).
 func (f *Files) sharesOn(ctx context.Context, node string) ([]protocol.Share, error) {
 	if cached, ok := f.nodeShares[node]; ok {
 		return cached, nil
 	}
 	var body struct {
-		Shares []protocol.Share `json:"shares"`
+		Shares  []protocol.Share `json:"shares"`
+		Revoked []struct {
+			Share protocol.Share `json:"share"`
+		} `json:"revoked"`
 	}
 	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node)+"/shares", &body); err != nil {
 		return nil, err
 	}
+	shares := body.Shares
+	for _, r := range body.Revoked {
+		shares = append(shares, r.Share)
+	}
 	if f.nodeShares == nil {
 		f.nodeShares = map[string][]protocol.Share{}
 	}
-	f.nodeShares[node] = body.Shares
-	return body.Shares, nil
+	f.nodeShares[node] = shares
+	return shares, nil
 }
 
 // trusted verifies a share's signature and that its issuer could grant it:
@@ -131,8 +146,10 @@ func (f *Files) trusted(ctx context.Context, s protocol.Share, depth int) error 
 	if err != nil {
 		return err
 	}
+	// An admin share that has since expired or been revoked still shows the
+	// issuer could grant this share when it was made.
 	for _, grant := range shares {
-		if grant.Member == s.Issuer && grant.Role == protocol.RoleAdmin && !grant.ExpiredAt(time.Now()) && f.trusted(ctx, grant, depth+1) == nil {
+		if grant.Member == s.Issuer && grant.Role == protocol.RoleAdmin && f.trusted(ctx, grant, depth+1) == nil {
 			return nil
 		}
 	}

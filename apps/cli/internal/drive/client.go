@@ -29,8 +29,8 @@ type Client struct {
 	// signing key.
 	LinkID       string
 	LinkVerifier []byte
-	HTTP                   *http.Client
-	Cache                  ChunkCache
+	HTTP         *http.Client
+	Cache        ChunkCache
 }
 
 type Error struct {

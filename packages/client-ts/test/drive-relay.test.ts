@@ -140,6 +140,49 @@ it("a member reads and writes through their share with only their own keys", asy
   await expect(stranger.open(team.manifest.node)).rejects.toBeTruthy();
 });
 
+it("keeps a revoked member's versions valid and rotates keys so writes resume", async () => {
+  const bob = await createTestIdentity(relay.baseUrl, "revoked");
+  const dave = await createTestIdentity(relay.baseUrl, "remaining");
+  const resolve = localResolveOptions(relay.baseUrl);
+  const publicKeys = {
+    async authorKey(author: string) { return fromBase64((await resolveSigningKey(author, resolve))!); },
+    async encryptionKey(member: string) { return fromBase64((await resolveEncryptionKey(member, resolve))!); },
+  };
+  const ownerFiles = () => new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), { ...fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!), ...publicKeys });
+  const owner = ownerFiles();
+  const text = async (files: DriveFiles, file: OpenFile) => { const chunks = []; for await (const c of files.read(file)) chunks.push(c); return Buffer.concat(chunks).toString(); };
+  const lab = await owner.create(await owner.root(), "lab", "folder");
+  const inner = await owner.create(lab, "inner", "folder");
+  await owner.create(inner, "deep.txt", "file", new TextEncoder().encode("deep"));
+  const journal = await owner.create(lab, "journal.log", "file", new Uint8Array(), "append");
+  await owner.append(journal, new TextEncoder().encode("before"));
+  const bobShare = await owner.shareWith(lab, bob.identity, await publicKeys.encryptionKey(bob.identity), "write");
+  await owner.shareWith(lab, dave.identity, await publicKeys.encryptionKey(dave.identity), "read");
+  const bobFiles = new DriveFiles(new DriveClient(bob.client.relay, bob.client.signer, alice.identity), { ...fileKeys(bob.keys.signingPrivateKey, bob.keys.encryptionPrivateKey!), ...publicKeys });
+  await bobFiles.create(await bobFiles.resolve(`/${lab.manifest.node}`), "bob.txt", "file", new TextEncoder().encode("by bob"));
+
+  await owner.client.unshare(bobShare.id);
+  // Bob's version stays valid for the owner: his revoked share is evidence.
+  const after = ownerFiles();
+  expect(await text(after, await after.resolve("/lab/bob.txt"))).toBe("by bob");
+  // Writes wait for a rotation; the rotation re-keys the subtree and re-issues dave's share.
+  await expect(after.create(await after.resolve("/lab"), "blocked.txt", "file", new Uint8Array([1]))).rejects.toMatchObject({ status: 409 });
+  const { reissued, stale } = await after.rotate(await after.resolve("/lab"));
+  expect(reissued).toBe(1);
+  expect(stale).toEqual([]);
+  const rotated = ownerFiles();
+  await rotated.create(await rotated.resolve("/lab"), "after.txt", "file", new TextEncoder().encode("after"));
+  expect(await text(rotated, await rotated.resolve("/lab/inner/deep.txt"))).toBe("deep");
+  expect(await text(rotated, await rotated.resolve("/lab/bob.txt"))).toBe("by bob");
+  const log = await rotated.resolve("/lab/journal.log");
+  await rotated.append(log, new TextEncoder().encode("after"));
+  expect((await rotated.tail(log, 1)).map(r => new TextDecoder().decode(r.plain))).toEqual(["before", "after"]);
+  // Dave reopens through his re-issued share; bob's old key opens nothing new.
+  const daveFiles = new DriveFiles(new DriveClient(dave.client.relay, dave.client.signer, alice.identity), { ...fileKeys(dave.keys.signingPrivateKey, dave.keys.encryptionPrivateKey!), ...publicKeys });
+  expect(await text(daveFiles, await daveFiles.resolve(`/${lab.manifest.node}/after.txt`))).toBe("after");
+  await expect(bobFiles.open(lab.manifest.node)).rejects.toBeTruthy();
+}, 120_000);
+
 it("opens a password link with only the fragment and the password", async () => {
   const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
   const folder = await owner.create(await owner.root(), "published", "folder");

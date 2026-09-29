@@ -595,6 +595,13 @@ invalid edit is rejected with a readable reason and never half-applied.
       `INT_DRIVE_07`; TS CLI and web UI still to come)
 - [x] Revocation with immediate access removal and key rotation on the next owner write
       (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
+- [x] Client key rotation (Go/TS `Rotate`, `poweur drive rotate`; CLI `share rm`/`link rm` and web
+      revocation rotate automatically): new node keys and re-encrypted replace files through the
+      subtree, append files keep their keys (records are not re-encryptable), remaining members'
+      shares re-issued at the new generation, links reported for recreation. Revoked shares stay
+      listed (`GET …/shares` → `revoked`) as evidence, so versions written through them still
+      verify (`INT_DRIVE_08`, SDK live test). File requests trust only owner-issued links: a link
+      holder cannot see an admin's chain.
 - [x] Links with key-in-fragment and the split password verifier; expiry, download caps,
       rate limits (relay side)
 - [x] Static decrypting viewer at `/s/<link>` with strict CSP and `no-referrer` (web

@@ -224,6 +224,13 @@ func openDriveFiles(use, target string, stderr io.Writer) (*driveclient.Files, b
 		}
 		return idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
 	}
+	files.EncryptionKeys = func(ctx context.Context, member string) ([]byte, error) {
+		res, err := identity.ResolveIdentity(ctx, member)
+		if err != nil {
+			return nil, err
+		}
+		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
+	}
 	// Versions written by a group's members are checked against the group's
 	// roster, which the caller can read only if they are in the group.
 	files.GroupMembers = func(ctx context.Context, group string) ([]string, error) {

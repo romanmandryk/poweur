@@ -29,6 +29,8 @@ export interface DriveNode {
   id: string; head: string; generation: number; kind: "file" | "folder";
   mode?: "replace" | "append"; folder?: string; removed?: boolean; position?: number;
   trimmed_before?: number;
+  /** Set after a key-bearing share was revoked: writes wait for a rotation. */
+  rotate_required?: boolean;
   trim_snapshot?: { node: string; version: string };
 }
 export interface DriveChange { seq: number; node?: string; operation: string; version?: string; position?: number }
@@ -64,7 +66,9 @@ export class DriveClient {
   }
   node(node: string): Promise<DriveNode> { return this.request("GET", `/nodes/${segment(node)}`); }
   /** Shares on a node and its ancestors, for anyone who may read the node. */
-  nodeShares(node: string): Promise<{ shares: Share[] }> { return this.request("GET", `/nodes/${segment(node)}/shares`); }
+  /** Shares on a node and its ancestors, for anyone who may read the node;
+   * revoked ones are evidence for versions written while they stood. */
+  nodeShares(node: string): Promise<{ shares: Share[]; revoked?: { share: Share; revoked_at: string }[] }> { return this.request("GET", `/nodes/${segment(node)}/shares`); }
   children(node: string, cursor = "", limit = 100): Promise<{ children: DriveNode[]; cursor: string }> {
     return this.request("GET", `/nodes/${segment(node)}/children?cursor=${segment(cursor)}&limit=${limit}`);
   }

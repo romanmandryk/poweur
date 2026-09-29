@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { DriveFiles, DriveLog } from "../../drive/index.js";
 import { normalizeName } from "../../drive/names.js";
-import type { ShareRole } from "../../drive/share.js";
+import { keyBearing, type Share, type ShareRole } from "../../drive/share.js";
 import { fromBase64 } from "../../encoding.js";
 import { resolveIdentity } from "../../resolve.js";
 import { nodeResolveOptions } from "../../node/session-factory.js";
@@ -10,11 +10,11 @@ import { offerShare, sendShareMessage } from "./drive-offers.js";
 import { flagBool, flagNumber, flagString, parseArgs, UsageError } from "../args.js";
 import { write, type Streams } from "../output.js";
 
-const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]";
+const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id> [--no-rotate]|ls; rotate <path>; link create <path>|rm <id> [--no-rotate]; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]";
 
 export async function driveOpsCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0]!;
-  const args = parseArgs(argv.slice(1), { bool: ["json", "no-offer"] });
+  const args = parseArgs(argv.slice(1), { bool: ["json", "no-offer", "no-rotate"] });
   const json = flagBool(args, "json");
   const { client, keys, drive, files } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
   const notify = !flagBool(args, "no-offer");
@@ -35,6 +35,7 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       if (!id) throw new UsageError(usage);
       const revoked = (await drive.shares()).shares.find(s => s.id === id);
       await drive.unshare(id);
+      if (revoked && !flagBool(args, "no-rotate")) await rotateAfterRevoke(files, revoked, streams);
       if (revoked?.member && notify) {
         await sendShareMessage(client, revoked.member, "sys.share.revoked", id, { format: 2, drive: revoked.drive, share_id: id, revoked_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") })
           .catch(error => streams.stderr(`revoked, but the member was not told: ${error}\n`));
@@ -65,6 +66,12 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       return write(streams, json, { id: share.id, link: share.link, role: share.role, fragment: secret, url }, `${url}\n`);
     }
     throw new UsageError(usage);
+  }
+  if (sub === "rotate") {
+    const rotated = await files.rotate(await files.resolve(need(args.positional[0])));
+    reportStale(rotated.stale, streams);
+    const { node, generation } = rotated.file.manifest;
+    return write(streams, json, { node, generation, reissued: rotated.reissued, stale: rotated.stale.map(s => s.id) }, `${node} ${generation}\n`);
   }
   if (sub === "history") {
     const file = await files.resolve(need(args.positional[0]));
@@ -115,6 +122,20 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
     return write(streams, json, { node: file.manifest.node, to, to_node: copied.manifest.node, name: copied.name }, `${copied.manifest.node}\n`);
   }
   throw new UsageError(usage);
+}
+/** Re-keys the revoked share's node when the relay asks for it, so writes
+ * there resume and the remaining members get re-issued shares. */
+async function rotateAfterRevoke(files: DriveFiles, revoked: Share, streams: Streams): Promise<void> {
+  if (!keyBearing(revoked.role)) return;
+  try {
+    const rotated = await files.rotateIfRequired(revoked.node);
+    if (rotated) reportStale(rotated.stale, streams);
+  } catch (error) {
+    throw new Error(`revoked, but the keys were not rotated (writes there wait for \`poweur drive rotate\`): ${error instanceof Error ? error.message : error}`);
+  }
+}
+function reportStale(stale: Share[], streams: Streams): void {
+  for (const s of stale) streams.stderr(`share ${s.id} (${s.link ? `link ${s.link}` : s.member}) predates the rotation and must be recreated\n`);
 }
 function need(value: string | undefined): string {
   if (!value) throw new UsageError(usage);

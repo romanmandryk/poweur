@@ -10,7 +10,7 @@ import { DriveFiles, fileKeys } from "../../drive/files.js";
 import { fromBase64 } from "../../encoding.js";
 import { RelayClient } from "../../http.js";
 import { resolveRecipientRelayUrl } from "../../messages.js";
-import { resolveSigningKey } from "../../resolve.js";
+import { resolveEncryptionKey, resolveSigningKey } from "../../resolve.js";
 import { nodeResolveOptions, openClient } from "../../node/session-factory.js";
 
 export async function openDrive(options: { identity?: string; drive?: string }) {
@@ -30,6 +30,17 @@ export async function openDrive(options: { identity?: string; drive?: string }) 
         const key = await resolveSigningKey(author, nodeResolveOptions());
         if (!key) throw new Error(`cannot resolve ${author}'s signing key`);
         return fromBase64(key);
+      },
+      async encryptionKey(member: string) {
+        const key = await resolveEncryptionKey(member, nodeResolveOptions());
+        if (!key) throw new Error(`cannot resolve ${member}'s encryption key`);
+        return fromBase64(key);
+      },
+      // Versions written by a group's members are checked against the
+      // group's roster, which the caller can read only if they are in it.
+      async groupMembers(group: string) {
+        const { document } = await client.groups.roster(client.signer, group);
+        return [...document.members, ...(document.admins ?? [])];
       },
     })
     : undefined;

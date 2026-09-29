@@ -23,7 +23,7 @@ func runDrive(args []string, stdout, stderr io.Writer) int {
 		return runDriveFiles(args, stdout, stderr)
 	case "accept", "mounts":
 		return runDriveOffers(args, stdout, stderr)
-	case "history", "append", "tail", "trim", "watch", "share", "link", "transfer":
+	case "history", "append", "tail", "trim", "watch", "share", "link", "transfer", "rotate":
 		return runDriveOps(args, stdout, stderr)
 	case "info", "node", "ls", "changes", "records":
 	default:

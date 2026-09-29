@@ -34,9 +34,16 @@ export async function openBrowserDrive(home: string, target = home, advertisedRe
       const resolved = await lookup(author, relayUrlFor(home));
       return fromBase64(resolved.document.public_key.replace(/^ed25519:/, ""));
     },
+    async encryptionKey(member) {
+      const resolved = await lookup(member, relayUrlFor(home));
+      const key = resolved.document.encryption_public_key;
+      if (!key) throw new Error(`${member} has no encryption key`);
+      return fromBase64(key.replace(/^x25519:/, ""));
+    },
+    // Admins write through group shares too, so they count as members.
     async groupMembers(group) {
       const { document } = await client.groups.roster(client.signer, group);
-      return document.members;
+      return [...document.members, ...(document.admins ?? [])];
     },
   });
   return { drive, files };

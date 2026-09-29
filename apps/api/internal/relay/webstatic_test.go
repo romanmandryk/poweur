@@ -240,9 +240,9 @@ func TestLinkViewerRoutes(t *testing.T) {
 		t.Fatalf("viewer: %d %v", resp.StatusCode, resp.Header)
 	}
 	for _, c := range []struct{ host, path string }{
-		{"relay.test", link},                   // not an identity host
-		{"nobody.poweur.net", link},            // not hosted here
-		{alice.name, "/s/not-a-link"},          // not a link ID
+		{"relay.test", link},          // not an identity host
+		{"nobody.poweur.net", link},   // not hosted here
+		{alice.name, "/s/not-a-link"}, // not a link ID
 		{alice.name, "/s/assets/..%2Fviewer.html"},
 		{alice.name, "/s/assets/missing.js"},
 	} {

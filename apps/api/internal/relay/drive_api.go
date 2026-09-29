@@ -165,7 +165,7 @@ func (s *Server) handleDriveNodeShares(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	shares, err := s.engine.SharesOn(r.Context(), driveID, r.PathValue("node"))
+	shares, revoked, err := s.engine.SharesOn(r.Context(), driveID, r.PathValue("node"))
 	if err != nil {
 		s.writeDriveError(w, err)
 		return
@@ -173,8 +173,12 @@ func (s *Server) handleDriveNodeShares(w http.ResponseWriter, r *http.Request) {
 	if shares == nil {
 		shares = []drive.Share{}
 	}
+	if revoked == nil {
+		revoked = []engine.RevokedShare{}
+	}
 	noStore(w)
-	writeJSON(w, http.StatusOK, map[string]any{"shares": shares})
+	// Revoked shares are evidence for versions written while they stood.
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares, "revoked": revoked})
 }
 
 // handleDriveShares lists the shares the caller may see: every share for the

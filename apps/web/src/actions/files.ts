@@ -3,6 +3,7 @@ import { fromBase64, toBase64url } from "@poweur/client";
 import {
   OFFER_FORMAT,
   acceptOffer,
+  keyBearing,
   shareHash,
   validateShareOffer,
   type DriveFiles,
@@ -234,8 +235,11 @@ export async function fileRequestBrowserLink(identity: string, folder: OpenFile,
 }
 
 export async function revokeBrowserShare(identity: string, share: Share): Promise<void> {
-  const { drive } = await openBrowserDrive(identity);
+  const { drive, files } = await openBrowserDrive(identity);
   await drive.unshare(share.id);
+  // Revoking a key-bearing share holds writes until the node is re-keyed;
+  // rotating re-issues the remaining members' shares at the new keys.
+  if (keyBearing(share.role)) await files.rotateIfRequired(share.node);
   if (!share.member) return;
   const client = clientFor(identity);
   if (!client) return;

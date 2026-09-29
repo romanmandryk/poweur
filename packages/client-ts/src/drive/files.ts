@@ -24,6 +24,9 @@ export interface FileKeys {
   /** Resolves a group identity's members and admins, to verify versions
    * written through a share to the group. Without it they fail closed. */
   groupMembers?(group: string): Promise<string[]>;
+  /** Resolves a member's X25519 encryption key, to re-issue their share
+   * after a key rotation. Without it rotation reports their share as stale. */
+  encryptionKey?(member: string): Promise<Uint8Array>;
 }
 /** Adapter for CLI/local key custody. Browser callers can supply their own signer. */
 export function fileKeys(signingPrivateKey: Uint8Array, encryptionPrivateKey: Uint8Array): FileKeys {
@@ -40,6 +43,8 @@ export interface OpenFile {
 
 export class DriveFiles {
   private shares?: Share[];
+  /** Per node: every share that ever stood on it or its ancestors (active,
+   * expired or revoked). Evidence of past authority, never access. */
   private readonly nodeShares = new Map<string, Share[]>();
   constructor(readonly client: DriveClient, private readonly keys: FileKeys) {
     if (keys.encryptionPrivateKey.length !== 32) throw new Error("invalid encryption key");
@@ -68,7 +73,11 @@ export class DriveFiles {
   }
   private async sharesOn(node: string): Promise<Share[]> {
     let shares = this.nodeShares.get(node);
-    if (!shares) { shares = (await this.client.nodeShares(node)).shares; this.nodeShares.set(node, shares); }
+    if (!shares) {
+      const listed = await this.client.nodeShares(node);
+      shares = [...listed.shares, ...(listed.revoked ?? []).map(entry => entry.share)];
+      this.nodeShares.set(node, shares);
+    }
     return shares;
   }
   /** A share is trusted when its issuer signed it and could grant it: the
@@ -78,7 +87,9 @@ export class DriveFiles {
     try { verifyShare(share, await this.authorKeyOf(share.issuer)); } catch { return false; }
     if (share.issuer === this.client.drive) return true;
     for (const grant of await this.sharesOn(share.node)) {
-      if (grant.member === share.issuer && grant.role === "admin" && !expired(grant) && await this.trusted(grant, depth + 1)) return true;
+      // An admin share that has since expired or been revoked still shows the
+      // issuer could grant this share when it was made.
+      if (grant.member === share.issuer && grant.role === "admin" && await this.trusted(grant, depth + 1)) return true;
     }
     return false;
   }
@@ -93,7 +104,9 @@ export class DriveFiles {
   private async allowed(node: string, author: string, need: ShareRole): Promise<boolean> {
     if (author === this.client.drive) return true;
     for (const share of await this.sharesOn(node)) {
-      if (!expired(share) && roleGrants(share.role, need) && await this.holds(share, author) && await this.trusted(share)) return true;
+      // Expired and revoked shares still count: versions written while they
+      // stood stay valid. Access itself is decided by the relay.
+      if (roleGrants(share.role, need) && await this.holds(share, author) && await this.trusted(share)) return true;
     }
     return false;
   }
@@ -268,6 +281,76 @@ export class DriveFiles {
       yield decryptChunk(file.contentKey, bytes, this.context(file.manifest, "content"));
     }
   }
+  /**
+   * Re-key a node and everything below it, as the relay requires after a
+   * revocation (`rotate_required`): new node keys, a new content key and
+   * re-encrypted content for replace files, names and keys re-sealed under
+   * each re-keyed folder, and the remaining members' shares re-issued at the
+   * new generation (when `keys.encryptionKey` can resolve them). Append files
+   * keep their node and content keys — past records, including guests'
+   * sealed ones, cannot be re-encrypted — so new records there are protected
+   * by access control, not re-keying. Links on a
+   * rotated node carry the retired key and must be recreated. Needs the
+   * node's parent key: the drive's owner, or an admin of the parent.
+   */
+  async rotate(file: OpenFile): Promise<{ file: OpenFile; reissued: number; stale: Share[] }> {
+    const parentKey = file.folder ? (await this.open(file.folder)).nodeKey : this.keys.encryptionPrivateKey;
+    if (!file.folder && !this.owner) throw new Error("only the owner rotates the root");
+    // Read the whole subtree with the old keys first: once a folder is
+    // re-keyed, its children no longer open through the relay's tree.
+    type Subtree = { node: OpenFile; bytes?: Uint8Array; children: Subtree[] };
+    const collect = async (node: OpenFile): Promise<Subtree> => ({
+      node,
+      ...(node.manifest.kind === "file" && node.manifest.mode === "replace" ? { bytes: await readAll(this.read(node)) } : {}),
+      children: node.manifest.kind === "folder" ? await Promise.all((await this.list(node)).map(collect)) : [],
+    });
+    const tree = await collect(file);
+    const shares = (await this.client.shares()).shares;
+    let reissued = 0;
+    const stale: Share[] = [];
+    const rekey = async (entry: Subtree, parentKey: Uint8Array, parent?: OpenFile): Promise<OpenFile> => {
+      const old = entry.node;
+      const m = this.next(old, "rotate");
+      m.generation = old.manifest.generation + 1;
+      const append = old.manifest.kind === "file" && old.manifest.mode === "append";
+      const nodeKey = append ? old.nodeKey : randomBytes(32);
+      m.node_key = wire(sealKey(x25519PublicKey(parentKey), nodeKey, this.context(m, "node-key")));
+      let contentKey = old.contentKey, pages: Awaited<ReturnType<DriveFiles["upload"]>> = [];
+      if (old.manifest.kind === "file") {
+        if (old.manifest.mode === "replace") {
+          contentKey = randomBytes(32);
+          m.content_key = wire(sealKey(x25519PublicKey(nodeKey), contentKey, this.context(m, "content-key")));
+          pages = await this.upload(m, contentKey, entry.bytes!);
+        } else {
+          m.content_key = wire(sealKey(x25519PublicKey(nodeKey), contentKey!, this.context(m, "content-key")));
+        }
+      }
+      await this.client.commit({ manifest: await this.signed(m), pages });
+      const rotated: OpenFile = { ...old, manifest: m, nodeKey, ...(contentKey ? { contentKey } : {}) };
+      // The name was sealed to the parent's retired key: re-seal it in place.
+      if (parent) { await this.move(rotated, parent, rotated.name); }
+      for (const share of shares.filter(s => s.node === old.manifest.node && keyBearing(s.role) && s.member && s.generation < m.generation)) {
+        const recipient = this.keys.encryptionKey ? await this.keys.encryptionKey(share.member!).catch(() => undefined) : undefined;
+        if (!recipient) { stale.push(share); continue; }
+        await this.grant(rotated, share.member!, "", share.role, share.expires ?? "", recipient, undefined, undefined, share.caps, share.pow ?? 0);
+        await this.client.unshare(share.id);
+        reissued++;
+      }
+      for (const link of shares.filter(s => s.node === old.manifest.node && keyBearing(s.role) && s.link)) stale.push(link);
+      for (const child of entry.children) await rekey(child, nodeKey, rotated);
+      return rotated;
+    };
+    const rotated = await rekey(tree, parentKey);
+    this.shares = undefined;
+    this.nodeShares.clear();
+    return { file: rotated, reissued, stale };
+  }
+  /** Rotates node when a revocation left it waiting for new keys. */
+  async rotateIfRequired(node: string): Promise<Awaited<ReturnType<DriveFiles["rotate"]>> | undefined> {
+    const info = await this.client.node(node);
+    if (!info.rotate_required || info.removed) return undefined;
+    return this.rotate(await this.open(node));
+  }
   async move(file: OpenFile, parent: OpenFile, name: string): Promise<void> {
     if (parent.manifest.kind !== "folder") throw new Error("not a folder");
     name = normalizeName(name);
@@ -380,7 +463,10 @@ export class DriveFiles {
   }
   private async recordChunks(file: OpenFile, record: AppendRecord): Promise<Uint8Array> {
     const parts: Uint8Array[] = [];
-    for (const ref of record.chunks) parts.push(decryptChunk(file.contentKey!, await this.client.chunk(file.manifest.node, ref), this.context(file.manifest, "content")));
+    // A record is encrypted under the key generation it was written at; an
+    // append file keeps its content key across rotations.
+    const context = driveContext(file.manifest.drive, file.manifest.node, "content", record.generation);
+    for (const ref of record.chunks) parts.push(decryptChunk(file.contentKey!, await this.client.chunk(file.manifest.node, ref), context));
     const size = parts.reduce((sum, part) => sum + part.length, 0);
     const out = new Uint8Array(size);
     let offset = 0;
