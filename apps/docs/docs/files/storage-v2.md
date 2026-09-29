@@ -331,7 +331,13 @@ current choices:
   served from the cache and may lag another process until its next write or event.
 - **Idempotency.** A request ID (16 bytes hex) returns the prior result for the same
   content and is refused for different content, across restarts.
-- **GC** drops superseded versions after the retention period through a journalled `gc`
+- **Envelope versions.** Node info carries `key_version`, `name_version` and `content_version`:
+  the newest versions holding each envelope. A reader fetches a listing or a node's ancestry in
+  one request and decrypts each child with the folder key it already holds, instead of walking
+  every node's history and re-opening every ancestor. Readers still verify every version they
+  use; the relay learns nothing new, since it already stores those versions.
+- **GC** never deletes a version that carries a live node's envelope: past the retention period
+  such a version keeps its manifest and releases only its content. Otherwise it drops superseded versions through a journalled `gc`
   operation, deletes chunks no retained version or record references, and deletes
   uncommitted uploads older than the upload TTL. Clients that pause longer than the TTL
   between upload and commit must re-run `chunks/missing`. Run GC in one process per
@@ -342,21 +348,24 @@ current choices:
 ## HTTP surface
 
 All drive endpoints are under `/drive/{identity}` (`apps/api/internal/relay/drive_api.go`).
-Every request is authenticated like an inbox pickup: `GET /auth/challenge?identity=<caller>`,
-then `X-Poweur-Identity`, `X-Poweur-Challenge` and `X-Poweur-Signature` (the challenge signed by
-the identity key or a session key with `X-Poweur-Session-Id`). The caller may be a visitor homed
+Every request is a [signed request](../relay/api-reference.md#signed-requests): the caller signs
+method, path, query, time, a nonce and the body's hash with the identity key or a session key
+(`X-Poweur-Session-Id`), so there is no challenge round trip. The challenge flow of an inbox
+pickup is still accepted. The caller may be a visitor homed
 on another relay; its key is resolved like any peer's. Until node shares (E20-T7) only the drive's
 owner is permitted (`403` otherwise) — superseded by shares below. Knowing a hash is never permission to read a chunk.
 
 | Operation | Request | Response |
 |---|---|---|
-| Drive root, usage, quota | `GET /drive/{identity}` | `{drive, root, used, quota}` |
+| Drive root, usage, quota | `GET /drive/{identity}` | `{drive, root, used, quota, seq}`; `seq` is the changes cursor now |
 | Missing chunks / transfer URLs | `POST /chunks/missing` `{chunks:[{id,size}]}` (≤ 1024) | `{missing:[{id,size,upload:{method,url,headers}}]}` |
 | Upload through the relay | `PUT /chunks/{hash}` (body = encrypted chunk) | `{id,size}`; `422` if bytes do not hash to `{hash}` |
 | Commit | `POST /commit` `{id, manifest, pages}` or `{id, records}` or `{id, trim:{node,before,snapshot:{node,version}}}` | `{seq, head, positions}`; `409 {head}` on a stale base |
 | Changes | `GET /changes?cursor=N&limit=` | `{changes, cursor}` |
 | Node at head | `GET /nodes/{node}` | node info (`ETag` = head) |
-| Children | `GET /nodes/{node}/children?cursor=&limit=` | `{children, cursor}` |
+| Listing | `GET /nodes/{node}/listing?cursor=&limit=` | `{folder, children, cursor, shares, revoked}`: each node with its signed versions (head first, then the versions carrying its key, name and content-key envelopes), and the share evidence on the folder's chain and those children |
+| Ancestry | `GET /nodes/{node}/path` | `{path}`: the node and the ancestors the caller may read, nearest first, each with its versions |
+| Children | `GET /nodes/{node}/children?cursor=&limit=` | `{children, cursor}` (IDs only) |
 | Retained history | `GET /nodes/{node}/history` | `{versions}` |
 | Signed manifest / page | `GET /nodes/{node}/versions/{version}`, `…/pages/{page}` | immutable JSON |
 | Chunk through a version | `GET /nodes/{node}/versions/{version}/chunks/{hash}` | immutable bytes |

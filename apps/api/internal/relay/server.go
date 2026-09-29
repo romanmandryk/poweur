@@ -51,6 +51,7 @@ type Server struct {
 	powSecret       []byte
 	acks            *storage.AckStore
 	challenges      *storage.ChallengeStore
+	requestNonces   requestNonces
 	keystore        *storage.KeystoreStore
 	rendezvous      *storage.RendezvousStore
 	sessions        *storage.SessionStore
@@ -317,6 +318,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/listing", s.handleDriveListing)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/path", s.handleDrivePath)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
@@ -327,7 +330,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /s/assets/{file}", s.handleLinkViewerAsset)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	mountRootIcons(mux, s.cfg.WebStaticDir)
-	return s.instrument(mux, corsMiddleware(mux))
+	return s.instrument(mux, corsMiddleware(hashSignedBodies(mux)))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -1067,6 +1070,10 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 // lets a client hold a push stream open and poll at the same time without the
 // two invalidating each other.
 func (s *Server) consumeChallenge(identity string, r *http.Request) (storage.Challenge, bool) {
+	// A signed request carries its own proof: no challenge round trip.
+	if r.Header.Get("X-Poweur-Timestamp") != "" {
+		return s.signedRequest(identity, r)
+	}
 	if value := r.Header.Get("X-Poweur-Challenge"); value != "" {
 		return s.challenges.ConsumeValue(identity, value)
 	}

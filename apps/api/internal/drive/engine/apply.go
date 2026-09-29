@@ -301,6 +301,10 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 			}
 			added += int64(ref.Size)
 		}
+		// Content sealed into the record counts like chunks do.
+		if record.Sealed != nil {
+			added += int64(len(record.Sealed.Ciphertext))
+		}
 		position++
 		out = append(out, positioned{Position: position, Hash: hash, Record: record})
 	}
@@ -391,6 +395,15 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		if m.Operation == drive.OpRotate {
 			n.RotateRequired = false
 		}
+		if m.NodeKey != nil {
+			n.KeyVersion = m.Version
+		}
+		if m.Name != nil {
+			n.NameVersion = m.Version
+		}
+		if m.ContentKey != nil {
+			n.ContentVersion = m.Version
+		}
 		result.Head = m.Version
 		st.Changes = append(st.Changes, Change{Seq: seq, Node: m.Node, Operation: m.Operation, Version: m.Version, At: op.At})
 	case kindAppend:
@@ -446,6 +459,17 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 				st.Used -= freed
 			}
 			delete(st.Versions, id)
+		}
+		for _, id := range op.GC.Stripped {
+			v := st.Versions[id]
+			if v == nil {
+				continue
+			}
+			for _, hash := range v.Pages {
+				freed, _ := st.unrefPage(hash)
+				st.Used -= freed
+			}
+			v.Pages = nil
 		}
 	case kindSystem:
 		if err := applySystem(st, seq, op); err != nil {

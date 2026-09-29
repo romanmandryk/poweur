@@ -18,19 +18,30 @@ import {
 import { clientFor, lookup } from "../lib/client.js";
 import { openBrowserDrive, readFileBytes } from "../lib/drive";
 import { relayUrlFor } from "../lib/storage.js";
-import { useData } from "../state/data.js";
+import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
+import { useData, type FilesPreviewEntry } from "../state/data.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const stamp = (date = new Date()) => date.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-async function privateFolder(files: DriveFiles): Promise<OpenFile> {
-  let current = await files.root();
-  for (const name of [".poweur", "private"]) {
-    const found = (await files.list(current)).find((file) => file.name === name && file.manifest.kind === "folder");
-    current = found ?? await files.create(current, name, "folder");
+const privateFolders = new WeakMap<DriveFiles, Promise<OpenFile>>();
+/** `.poweur/private`, resolved once per opened drive. */
+function privateFolder(files: DriveFiles): Promise<OpenFile> {
+  let folder = privateFolders.get(files);
+  if (!folder) {
+    folder = (async () => {
+      let current = await files.root();
+      for (const name of [".poweur", "private"]) {
+        const found = (await files.list(current)).find((file) => file.name === name && file.manifest.kind === "folder");
+        current = found ?? await files.create(current, name, "folder");
+      }
+      return current;
+    })();
+    privateFolders.set(files, folder);
+    folder.catch(() => privateFolders.delete(files));
   }
-  return current;
+  return folder;
 }
 
 async function mountsDocument(files: DriveFiles): Promise<{ mounts: Mounts; folder: OpenFile; file?: OpenFile }> {
@@ -63,11 +74,20 @@ export async function ensureBrowserFiles(identity: string, force = false): Promi
   if (loadingFiles?.identity === identity) return loadingFiles.promise;
   const promise = (async () => {
     useData.setState((state) => ({ files: { ...state.files, identity, loading: true, error: null } }));
+    // What this device listed last shows at once, while the drive opens.
+    if (!cached.own) {
+      void loadSnapshot<FilesPreviewEntry[]>(identity, "files").then((preview) => {
+        const now = useData.getState().files;
+        if (preview && now.identity === identity && !now.own) useData.setState((state) => ({ files: { ...state.files, preview } }));
+      });
+    }
     try {
       const opened = cached.own ? { files: cached.own.files } : await openBrowserDrive(identity);
-      const root = cached.own?.root ?? await opened.files.root();
-      const entries = visibleEntries(opened.files, root, await opened.files.list(root));
-      const mounts = await loadMounts(identity, opened.files);
+      // The info call also gives the changes cursor as of this read.
+      const info = await opened.files.client.info();
+      const root = cached.own?.root ?? (info.root ? await opened.files.open(info.root) : await opened.files.root());
+      const [listed, mounts] = await Promise.all([opened.files.list(root), loadMounts(identity, opened.files)]);
+      const entries = visibleEntries(opened.files, root, listed);
       if (useData.getState().files.identity !== identity) return;
       const key = folderKey(opened.files, root);
       useData.setState((state) => ({ files: {
@@ -75,10 +95,13 @@ export async function ensureBrowserFiles(identity: string, force = false): Promi
         own: { files: opened.files, root },
         folders: { ...state.files.folders, [key]: { folder: root, entries } },
         mounts,
+        preview: null,
+        cursor: info.seq ?? null,
         loading: false,
         loaded: true,
         error: null,
       } }));
+      void saveSnapshot(identity, "files", previewOf(entries));
     } catch (cause) {
       if (useData.getState().files.identity !== identity) return;
       const message = cause instanceof Error ? cause.message : String(cause);
@@ -102,27 +125,44 @@ export async function loadBrowserFolder(identity: string, files: DriveFiles, fol
   return entries;
 }
 
-/** Re-read mounts and every folder visited this session after pull-to-refresh or drive SSE. */
+const previewOf = (entries: OpenFile[]): FilesPreviewEntry[] =>
+  entries.map((entry) => ({ node: entry.manifest.node, name: entry.name, kind: entry.manifest.kind }));
+
+/** After pull-to-refresh or drive SSE: ask the drive's change feed whether
+ * anything moved (one request); only then re-read mounts and every folder
+ * visited this session, in parallel. */
 export async function refreshBrowserFiles(identity: string): Promise<void> {
   await ensureBrowserFiles(identity);
   const snapshot = useData.getState().files;
   if (!snapshot.own) return;
+  const client = snapshot.own.files.client;
+  if (snapshot.cursor) {
+    const { changes, cursor } = await client.changes(snapshot.cursor, 1);
+    if (!changes.length) {
+      if (cursor !== snapshot.cursor) useData.setState((state) => ({ files: { ...state.files, cursor } }));
+      return;
+    }
+  }
   const known = Object.values(snapshot.folders).filter(({ folder }) => folder.manifest.drive === identity);
   try {
+    const head = client.info();
     const results = await Promise.all(known.map(async ({ folder }) => ({
       key: folderKey(snapshot.own!.files, folder),
       folder,
       entries: visibleEntries(snapshot.own!.files, folder, await snapshot.own!.files.list(folder)),
     })));
-    const mounts = await loadMounts(identity, snapshot.own.files);
+    const [mounts, { seq }] = await Promise.all([loadMounts(identity, snapshot.own.files), head]);
     if (useData.getState().files.identity !== identity) return;
     useData.setState((state) => ({ files: {
       ...state.files,
       folders: { ...state.files.folders, ...Object.fromEntries(results.map((result) => [result.key, { folder: result.folder, entries: result.entries }])) },
       mounts,
+      cursor: seq ?? null,
       loaded: true,
       error: null,
     } }));
+    const root = results.find((result) => result.folder.manifest.node === snapshot.own!.root.manifest.node);
+    if (root) void saveSnapshot(identity, "files", previewOf(root.entries));
   } catch (cause) {
     if (useData.getState().files.identity !== identity) return;
     const message = cause instanceof Error ? cause.message : String(cause);

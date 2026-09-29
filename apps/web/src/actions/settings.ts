@@ -1,5 +1,6 @@
 /** What Settings changes that is not a document on the relay (from app.js). */
 import { forgetAvatar } from "../state/avatars";
+import { clearSnapshots } from "../lib/snapshot";
 import { clampPowBits } from "@poweur/client";
 import { INBOX_MODES, type InboxPolicy } from "../lib/policy";
 import { forgetNativeSecret, wrapKeysNative as wrapKeysNativeJs } from "../lib/native.js";
@@ -142,6 +143,7 @@ export function removeIdentityFromDevice(identity: string) {
   removeSessionRecord(identity);
   forgetNativeSecret(identity);
   forgetAvatar(identity);
+  void clearSnapshots(identity);
   switchIdentity(listIdentities()[0] || null);
   useRoute.getState().go("messages");
   toast("Identity removed from device", "info");

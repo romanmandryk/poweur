@@ -15,7 +15,7 @@ import { decryptMessage, encryptMessage } from "./crypto/index.js";
 import type { Decryptor, Signer } from "./crypto/keys.js";
 import { rfc3339 } from "./encoding.js";
 import { ChallengeRequiredError, PoweurError, RelayError } from "./errors.js";
-import { RelayClient } from "./http.js";
+import { RelayClient, type RequestSigning } from "./http.js";
 import { newAckId, newMessageId } from "./ids.js";
 import {
   SYSTEM_MESSAGE_TYPES,
@@ -301,19 +301,10 @@ export class Messaging {
     signer: Signer,
     cursors: { through: string; ackThrough?: string },
   ): Promise<{ consumed: number; acks_consumed: number; pending: number }> {
-    const { challenge } = await this.client.request<{ challenge: string }>({
-      method: "GET",
-      path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-    });
-    const signature = await signer.sign(challenge, "base64std");
     return this.client.request({
       method: "POST",
       path: `/messages/${encodeURIComponent(signer.identity)}/consume`,
-      headers: {
-        "X-Poweur-Identity": signer.identity,
-        "X-Poweur-Challenge": challenge,
-        "X-Poweur-Signature": signature,
-      },
+      sign: { signer },
       body: {
         through: cursors.through,
         ...(cursors.ackThrough ? { ack_through: cursors.ackThrough } : {}),
@@ -329,25 +320,14 @@ export class Messaging {
    */
   async fetchInbox(signer: Signer, options: { since?: string } = {}): Promise<InboxResponse> {
     const attempt = async (session: StoredSession | null): Promise<InboxResponse> => {
-      const { challenge } = await this.client.request<{ challenge: string }>({
-        method: "GET",
-        path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-      });
-      const keyHolder = session ? sessionSigner(session) : signer;
-      const signature = await keyHolder.sign(challenge, "base64std");
-      const headers: Record<string, string> = {
-        "X-Poweur-Identity": signer.identity,
-        "X-Poweur-Challenge": challenge,
-        "X-Poweur-Signature": signature,
-      };
-      if (session) headers["X-Poweur-Session-Id"] = session.sessionId;
+      const sign: RequestSigning = session ? { signer: sessionSigner(session), sessionId: session.sessionId } : { signer };
       const query = options.since === undefined
         ? ""
         : `?since=${encodeURIComponent(options.since)}`;
       return this.client.request<InboxResponse>({
         method: "GET",
         path: `/messages/${encodeURIComponent(signer.identity)}${query}`,
-        headers,
+        sign,
       });
     };
 
@@ -440,19 +420,10 @@ export class Messaging {
     signer: Signer,
     decryptor?: Decryptor | null,
   ): Promise<Array<AnonQueueMessage & { plaintext: string | null }>> {
-    const { challenge } = await this.client.request<{ challenge: string }>({
-      method: "GET",
-      path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-    });
-    const signature = await signer.sign(challenge, "base64std");
     const response = await this.client.request<{ messages?: AnonQueueMessage[] }>({
       method: "GET",
       path: `/anon/${encodeURIComponent(signer.identity)}`,
-      headers: {
-        "X-Poweur-Identity": signer.identity,
-        "X-Poweur-Challenge": challenge,
-        "X-Poweur-Signature": signature,
-      },
+      sign: { signer },
     });
     const messages = response.messages ?? [];
     if (!decryptor) return messages.map((m) => ({ ...m, plaintext: null }));

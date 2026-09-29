@@ -216,10 +216,22 @@ export function Files() {
       </TabBar>
       {(error || fileCache.error) && <Notice tone="warn" className="mx-4 mt-3">{error || fileCache.error}</Notice>}
 
-      {view && view.trail.length > 1 && (
+      {view && (tab === "shared" || view.trail.length > 1) && (
         <nav aria-label="Folder path" className="flex gap-1 overflow-x-auto px-4 pt-3 pb-2 text-sm text-muted">
-          {view.trail.map((part, index) => <button key={part.file.manifest.node} className="shrink-0 text-accent" onClick={() => void show({ ...view, folder: part.file, label: part.label, trail: view.trail.slice(0, index + 1) })}>{index ? `/ ${part.label}` : part.label}</button>)}
+          {/* Inside a shared item, the way back to everything shared with you. */}
+          {tab === "shared" && <button className="shrink-0 text-accent" onClick={() => setView(null, "shared")}>Shared with me</button>}
+          {view.trail.map((part, index) => <button key={part.file.manifest.node} className="shrink-0 text-accent" onClick={() => void show({ ...view, folder: part.file, label: part.label, trail: view.trail.slice(0, index + 1) })}>{index || tab === "shared" ? `/ ${part.label}` : part.label}</button>)}
         </nav>
+      )}
+
+      {tab === "mine" && !view && fileCache.preview && fileCache.preview.length > 0 && (
+        // Last seen on this device, shown while the drive opens.
+        <div className="conv-list file-list bg-surface" aria-busy="true" data-files-preview>
+          {fileCache.preview.map((entry) => {
+            const Icon = entry.kind === "folder" ? Folder : FileIcon;
+            return <div key={entry.node} className="file-row flex min-h-13 items-center gap-3 border-b border-sep px-4 py-3 opacity-70 last:border-b-0"><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Icon className="size-[18px]" aria-hidden="true" /></span><span className="truncate text-[15px] font-semibold">{entry.name}</span></div>;
+          })}
+        </div>
       )}
 
       {tab === "shared" && !view && !fileCache.loading && (

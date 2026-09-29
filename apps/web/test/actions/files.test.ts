@@ -12,7 +12,7 @@ vi.mock("../../src/lib/client.js", () => ({ lookup: mocks.lookup, clientFor: moc
 vi.mock("../../src/lib/drive", () => ({ openBrowserDrive: mocks.openBrowserDrive, readFileBytes: vi.fn() }));
 vi.mock("../../src/lib/storage.js", () => ({ relayUrlFor: mocks.relayUrlFor }));
 
-import { ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
+import { ensureBrowserFiles, refreshBrowserFiles, fileRequestBrowserLink, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
 
 const file = {
   manifest: { node: "1".repeat(32), kind: "folder" },
@@ -123,7 +123,8 @@ describe("Files actions", () => {
     const privateFolder = { manifest: { node: "private", drive: "alice.example.com", kind: "folder" }, name: "private", folder: "sys" } as any;
     const note = { manifest: { node: "note", drive: "alice.example.com", kind: "file" }, name: "note.txt", folder: "root" } as any;
     const files = {
-      client: { drive: "alice.example.com", signer: { identity: "alice.example.com" } },
+      client: { drive: "alice.example.com", signer: { identity: "alice.example.com" }, info: vi.fn(async () => ({ root: "root", seq: "5" })) },
+      open: vi.fn(async () => root),
       root: vi.fn(async () => root),
       list: vi.fn(async (folder: any) => folder === root ? [system, note] : folder === system ? [privateFolder] : []),
     } as any;
@@ -133,9 +134,25 @@ describe("Files actions", () => {
     await ensureBrowserFiles("alice.example.com");
 
     expect(mocks.openBrowserDrive).toHaveBeenCalledTimes(1);
-    // Once for the visible root and once while locating the private mounts doc;
-    // the second ensure performs neither operation again.
-    expect(files.root).toHaveBeenCalledTimes(2);
+    // The visible root opens once; the private mounts folder is resolved once
+    // per opened drive; the second ensure performs neither again.
+    expect(files.open).toHaveBeenCalledTimes(1);
+    expect(files.root).toHaveBeenCalledTimes(1);
     expect(useData.getState().files.folders["alice.example.com:root"]?.entries).toEqual([note]);
+    // The changes cursor as of this read, for a cheap refresh later.
+    expect(useData.getState().files.cursor).toBe("5");
+
+    // Nothing moved: one changes request, no folder is read again.
+    files.client.changes = vi.fn(async () => ({ changes: [], cursor: "5" }));
+    files.list.mockClear();
+    await refreshBrowserFiles("alice.example.com");
+    expect(files.client.changes).toHaveBeenCalledWith("5", 1);
+    expect(files.list).not.toHaveBeenCalled();
+    // Something moved: visited folders are read again and the cursor advances.
+    files.client.changes = vi.fn(async () => ({ changes: [{ seq: 6, node: "note", operation: "replace" }], cursor: "6" }));
+    files.client.info = vi.fn(async () => ({ root: "root", seq: "6" }));
+    await refreshBrowserFiles("alice.example.com");
+    expect(files.list).toHaveBeenCalledWith(root);
+    expect(useData.getState().files.cursor).toBe("6");
   });
 });

@@ -57,6 +57,10 @@ type driveHandle struct {
 	segments map[uint64]segment
 	// blobs caches small system documents by hash.
 	blobs map[string][]byte
+	// manifests caches signed versions, which never change once written.
+	// It has its own lock so reads fetch from the store without holding mu.
+	cacheMu   sync.Mutex
+	manifests map[string]drive.Manifest
 }
 
 // New returns an engine over opts.Store.

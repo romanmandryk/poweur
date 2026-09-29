@@ -567,8 +567,13 @@ func TestCollect(t *testing.T) {
 			t.Fatalf("chunk %s survived: %v", id, err)
 		}
 	}
-	if _, err := f.eng.Version(ctx, owner, file, v1); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("collected version still readable: %v", err)
+	// v1 created the file: it carries the only key and name envelopes, so its
+	// manifest stays (content released) or the file could not be opened.
+	if _, err := f.eng.Version(ctx, owner, file, v1); err != nil {
+		t.Fatalf("envelope version collected: %v", err)
+	}
+	if info, _ := f.eng.Node(ctx, owner, file); info.KeyVersion != v1 || info.NameVersion != v1 || info.ContentVersion != v1 {
+		t.Fatalf("envelope versions: %+v", info)
 	}
 	// Collection is journalled: a restart does not bring the version back.
 	f.eng.Forget()

@@ -5,15 +5,19 @@ import { DriveClient } from "../src/drive/client.js";
 import { RelayClient, type FetchLike } from "../src/http.js";
 import { chunkID } from "../src/drive/crypto.js";
 
-const signer = { identity: "alice.poweur.net", publicKey: "unused", sign: async (value: string) => value };
+const signer = { identity: "alice.poweur.net", publicKey: "unused", sign: async (value: string) => Buffer.from(value).toString("base64") };
+/** Counts authenticated requests: each is signed with a fresh nonce, and
+ * none needs a challenge round trip. */
 function fixture(handler: (path: string, init: RequestInit) => Response | Promise<Response>) {
-  let challenges = 0;
+  const nonces: string[] = [];
   const fetch: FetchLike = async (url, init) => {
     const path = new URL(String(url)).pathname;
-    if (path === "/auth/challenge") return Response.json({ challenge: String(++challenges) });
+    if (path === "/auth/challenge") throw new Error("signed requests need no challenge");
+    const nonce = new Headers(init?.headers).get("X-Poweur-Nonce");
+    if (nonce) nonces.push(nonce);
     return handler(path, init ?? {});
   };
-  return { client: new DriveClient(new RelayClient("https://relay.example", { fetch }), signer), challenges: () => challenges };
+  return { client: new DriveClient(new RelayClient("https://relay.example", { fetch }), signer), challenges: () => nonces.length, nonces };
 }
 
 describe("drive helpers", () => {
@@ -33,17 +37,17 @@ describe("drive helpers", () => {
 
 describe("drive transport", () => {
   it("retries an ambiguous commit with identical bytes and fresh authentication", async () => {
-    const bodies: string[] = [], challenges: string[] = [];
-    const { client } = fixture((_path, init) => {
+    const bodies: string[] = [];
+    const { client, nonces } = fixture((_path, init) => {
       bodies.push(String(init.body));
-      challenges.push(new Headers(init.headers).get("X-Poweur-Challenge")!);
       if (bodies.length === 1) throw new TypeError("connection lost after commit");
       return Response.json({ seq: 1, head: "head", positions: null });
     });
     expect(await client.commit({ unshare: { id: "share" } })).toEqual({ seq: 1, head: "head", positions: null });
     expect(bodies[0]).toBe(bodies[1]);
     expect(JSON.parse(bodies[0]!).id).toMatch(/^[0-9a-f]{32}$/);
-    expect(challenges).toEqual(["1", "2"]);
+    expect(nonces.length).toBe(2);
+    expect(nonces[0]).not.toBe(nonces[1]);
   });
   it("surfaces head conflicts without retry or overwrite", async () => {
     const { client, challenges } = fixture(() => Response.json({ error: "conflict" }, { status: 409 }));

@@ -26,7 +26,8 @@
 
 import { open, seal, sha256Bytes } from "./crypto/index.js";
 import type { Decryptor } from "./crypto/keys.js";
-import type { DriveFiles, OpenFile } from "./drive/files.js";
+import { PADDING_BUCKET } from "./drive/crypto.js";
+import type { AuthorCursors, DriveFiles, OpenFile } from "./drive/files.js";
 import { fromUtf8, toBase64url, utf8 } from "./encoding.js";
 import { PoweurError, RelayError } from "./errors.js";
 import { ENCRYPTION_ALG } from "./types.js";
@@ -37,6 +38,25 @@ export const HISTORY_VERSION = 1;
 
 /** 512 KB, matching the relay's message cap. */
 export const MAX_HISTORY_BODY = 512 * 1024;
+
+/** What has been read of one conversation log. */
+interface LogCache {
+  /** The last position read. */
+  through: number;
+  /** Read from position 1, so `cursors` holds every author's chain. */
+  fromStart: boolean;
+  rows: { position: number; record: HistoryRecord }[];
+  cursors: AuthorCursors;
+}
+
+/** Pad a sealed document with trailing spaces (JSON ignores them) to the
+ * drive's padding bucket, so an inline record hides its length as chunks do. */
+function padToBucket(bytes: Uint8Array): Uint8Array {
+  const size = Math.ceil(bytes.length / PADDING_BUCKET) * PADDING_BUCKET;
+  const out = new Uint8Array(size).fill(0x20);
+  out.set(bytes);
+  return out;
+}
 
 export const HISTORY_QUEUE_INBOX = "inbox";
 export const HISTORY_QUEUE_ANONYMOUS = "anonymous";
@@ -309,6 +329,12 @@ export class MessageHistory {
   readonly #files?: DriveFiles;
   #private?: OpenFile;
   #messages?: OpenFile;
+  /** Per conversation log: the records read so far and where to resume, so
+   * a refresh reads only what was appended since. */
+  readonly #logs = new Map<string, LogCache>();
+  /** One read or append per log at a time, so the cache stays in order. */
+  readonly #queues = new Map<string, Promise<unknown>>();
+  #readStateCache?: { version: string; state: ReadState };
 
   constructor(owner: string, decryptor: Decryptor, files?: DriveFiles) {
     this.owner = owner;
@@ -342,13 +368,37 @@ export class MessageHistory {
 
   /** Write one record. A record already stored under its id is skipped. */
   async append(record: HistoryRecord): Promise<void> {
-    validateHistoryRecord({ ...record, version: HISTORY_VERSION });
+    const stored = { ...record, version: HISTORY_VERSION };
+    validateHistoryRecord(stored);
     const files = this.#requireFiles();
     const file = await this.#log(historyPeer(record, this.owner));
-    const existing = await this.#readLog(file);
-    if (existing.some((row) => row.record.id === record.id)) return;
-    const sealed = utf8(await this.seal({ ...record, version: HISTORY_VERSION }));
-    await files.append(file, sealed);
+    const node = file.manifest.node;
+    await this.#serial(node, async () => {
+      const log = await this.#readLogNow(file);
+      if (log.rows.some((row) => row.record.id === record.id)) return;
+      // Sealed inline in the record (one request to read back, not one per
+      // record) and padded like chunks, so the relay cannot see its length.
+      const sealed = padToBucket(utf8(await this.seal(stored)));
+      let cursor = log.fromStart ? log.cursors.get(this.owner) : undefined;
+      if (log.fromStart && !cursor) log.cursors.set(this.owner, cursor = { sequence: 0, previous: "" });
+      let position: number;
+      try {
+        position = await files.append(file, sealed, { inline: true, ...(cursor ? { cursor } : {}) });
+      } catch (error) {
+        // Refused because another device appended since we read: start this
+        // log over and append from the relay's view of our chain.
+        this.#logs.delete(node);
+        if (!cursor || !(error instanceof RelayError) || error.status === undefined || error.status >= 500) throw error;
+        await files.append(file, sealed, { inline: true });
+        return;
+      }
+      if (position === log.through + 1) {
+        log.rows.push({ position, record: stored as HistoryRecord });
+        log.through = position;
+      } else {
+        this.#logs.delete(node); // records we have not read came first
+      }
+    });
   }
 
   /**
@@ -375,11 +425,11 @@ export class MessageHistory {
   async load(): Promise<HistoryRecord[]> {
     if (!this.#files) return [];
     const dir = await this.#messagesDir();
-    const records: HistoryRecord[] = [];
-    for (const child of await this.#files.list(dir)) {
-      if (child.manifest.mode !== "append") continue;
-      for (const row of await this.#readLog(child)) records.push(row.record);
-    }
+    // One listing says how far each log has grown; only logs with new
+    // records are read, and only from where the last read stopped.
+    const logs = (await this.#files.list(dir)).filter((child) => child.manifest.mode === "append");
+    const read = await Promise.all(logs.map((log) => this.#readLog(log)));
+    const records = read.flatMap((rows) => rows.map((row) => row.record));
     return records.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   }
 
@@ -413,9 +463,12 @@ export class MessageHistory {
     await this.#messagesDir();
     const marks = (await this.#files.list(this.#private!)).find((child) => child.name === "read-state.json");
     if (!marks) return empty;
+    if (this.#readStateCache?.version === marks.manifest.version) return this.#readStateCache.state;
     const bytes = await collect(this.#files.read(marks));
     if (!bytes.length) return empty;
-    return parseReadState(JSON.stringify(await this.open<ReadState>(new TextDecoder().decode(bytes))));
+    const state = parseReadState(JSON.stringify(await this.open<ReadState>(new TextDecoder().decode(bytes))));
+    this.#readStateCache = { version: marks.manifest.version, state };
+    return state;
   }
 
   /** Store the read marks. */
@@ -424,8 +477,10 @@ export class MessageHistory {
     const sealed = utf8(await this.seal({ ...state, version: HISTORY_VERSION }));
     await this.#messagesDir();
     const marks = (await this.#files.list(this.#private!)).find((child) => child.name === "read-state.json");
-    if (marks) await this.#files.replace(marks, sealed);
-    else await this.#files.create(this.#private, "read-state.json", "file", sealed);
+    let written: OpenFile;
+    if (marks) { await this.#files.replace(marks, sealed); written = marks; }
+    else written = await this.#files.create(this.#private, "read-state.json", "file", sealed);
+    this.#readStateCache = { version: written.manifest.version, state: parseReadState(JSON.stringify({ ...state, version: HISTORY_VERSION })) };
   }
 
   #requireFiles(): DriveFiles {
@@ -458,13 +513,32 @@ export class MessageHistory {
     const name = historyLogName(peer);
     return (await files.list(dir)).find((child) => child.name === name) ?? await files.create(dir, name, "file", new Uint8Array(), "append");
   }
+  /** Run one step on a log after the ones queued before it. */
+  #serial<T>(node: string, step: () => Promise<T>): Promise<T> {
+    const next = (this.#queues.get(node) ?? Promise.resolve()).catch(() => {}).then(step);
+    this.#queues.set(node, next);
+    return next;
+  }
   async #readLog(file: OpenFile): Promise<{ position: number; record: HistoryRecord }[]> {
-    const rows = await this.#requireFiles().tail(file, 1);
-    const out = [];
-    for (const row of rows) {
-      out.push({ position: row.position, record: await this.open<HistoryRecord>(new TextDecoder().decode(row.plain)) });
+    return (await this.#serial(file.manifest.node, () => this.#readLogNow(file))).rows;
+  }
+  /** Read a log's records not seen yet, continuing each author's chain. */
+  async #readLogNow(file: OpenFile): Promise<LogCache> {
+    const node = file.manifest.node;
+    let log = this.#logs.get(node);
+    if (log && file.position !== undefined && file.position <= log.through) return log;
+    log ??= { through: 0, fromStart: true, rows: [], cursors: new Map() };
+    const rows = await this.#requireFiles().tail(file, log.through + 1, log.cursors);
+    const opened = await Promise.all(rows.map(async (row) => ({
+      position: row.position,
+      record: await this.open<HistoryRecord>(new TextDecoder().decode(row.plain)),
+    })));
+    for (const row of opened) {
+      log.rows.push(row);
+      log.through = Math.max(log.through, row.position);
     }
-    return out;
+    this.#logs.set(node, log);
+    return log;
   }
   async #conversation(peer: string): Promise<{ position: number; record: HistoryRecord }[]> {
     const dir = await this.#messagesDir();

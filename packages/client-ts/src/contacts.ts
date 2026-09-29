@@ -219,19 +219,10 @@ export async function fetchRequests(
   signer: Signer,
   decryptor?: Decryptor | null,
 ): Promise<ContactRequestEntry[]> {
-  const { challenge } = await client.request<{ challenge: string }>({
-    method: "GET",
-    path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-  });
-  const signature = await signer.sign(challenge, "base64std");
   const response = await client.request<{ requests?: ContactRequestEntry[] }>({
     method: "GET",
     path: `/requests/${encodeURIComponent(signer.identity)}`,
-    headers: {
-      "X-Poweur-Identity": signer.identity,
-      "X-Poweur-Challenge": challenge,
-      "X-Poweur-Signature": signature,
-    },
+    sign: { signer },
   });
   const requests = response.requests ?? [];
   if (!decryptor) return requests;

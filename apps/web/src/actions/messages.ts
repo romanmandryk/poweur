@@ -12,6 +12,7 @@ import { ACK_STATE_READ, crypto as poweurCrypto, isSessionValid, sendsReadReceip
 import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/outbox.js";
 import { markCovers } from "../lib/threads.js";
 import { loadSessionRecord } from "../lib/storage.js";
+import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
@@ -19,7 +20,7 @@ import { toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
-import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
+import { activeClient, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
 
 const selfIdentity = () => useSession.getState().identity ?? "";
 
@@ -103,7 +104,7 @@ export function loadInbox({ force = false } = {}): Promise<void> {
     if (force) inboxPending = true;
     return inboxInFlight;
   }
-  inboxInFlight = challengeSerial(async () => {
+  inboxInFlight = (async () => {
     try {
       // Read, receipt and *keep* in one step: a drain gives no second chance.
       const { messages, acks, lost } = await client.inboxAndArchive();
@@ -120,7 +121,7 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       inboxPending = false;
       if (again) queueMicrotask(() => void loadInbox({ force: true }));
     }
-  });
+  })();
   return inboxInFlight;
 }
 
@@ -138,19 +139,30 @@ export function loadHistory({ force = false } = {}): Promise<void> {
   if (!client) return Promise.resolve();
 
   setHistory({ loading: true });
+  const identity = client.signer.identity as string;
+  const show = (records: any[], readState: any) => {
+    // Signed conversations and the anonymous queue are different objects:
+    // one has someone to reply to and one does not.
+    const signed = records.filter((record: any) => record.queue !== "anonymous");
+    const anonymous = records.filter((record: any) => record.queue === "anonymous");
+    mergeMessages(signed.map(recordToMessage));
+    useData.setState((state) => ({
+      anon: { ...state.anon, messages: mergeInto(state.anon.messages, anonymous.map(recordToMessage), messageKey) },
+    }));
+    if (readState) setHistory({ readState });
+  };
   historyInFlight = (async () => {
     try {
+      // What this device saw last shows at once; the relay's answer follows.
+      if (!current.loaded) {
+        const snapshot = await loadSnapshot<{ records: any[]; readState: any }>(identity, "history");
+        if (snapshot && !useData.getState().history.loaded) show(snapshot.records, snapshot.readState);
+      }
       const store = await client.history();
       const [records, readState] = await Promise.all([store.load(), store.readState()]);
-      // Signed conversations and the anonymous queue are different objects:
-      // one has someone to reply to and one does not.
-      const signed = records.filter((record: any) => record.queue !== "anonymous");
-      const anonymous = records.filter((record: any) => record.queue === "anonymous");
-      mergeMessages(signed.map(recordToMessage));
-      useData.setState((state) => ({
-        anon: { ...state.anon, messages: mergeInto(state.anon.messages, anonymous.map(recordToMessage), messageKey) },
-      }));
-      setHistory({ readState, loaded: true, error: null });
+      show(records, readState);
+      setHistory({ loaded: true, error: null });
+      void saveSnapshot(identity, "history", { records, readState });
     } catch (error) {
       setHistory({ error: `Could not load your message history: ${errorMessage(error)}` });
       console.warn("History load failed:", errorMessage(error));
@@ -178,7 +190,7 @@ export function loadAnon({ force = false } = {}): Promise<void> {
 
   const setAnon = (patch: Partial<DataFields["anon"]>) => useData.setState((state) => ({ anon: { ...state.anon, ...patch } }));
   setAnon({ loading: true });
-  anonInFlight = challengeSerial(async () => {
+  anonInFlight = (async () => {
     try {
       const { messages, lost } = await client.anonAndArchive();
       setAnon({ messages: mergeInto(useData.getState().anon.messages, messages, messageKey), loaded: true, error: null });
@@ -192,7 +204,7 @@ export function loadAnon({ force = false } = {}): Promise<void> {
       anonPending = false;
       if (again) queueMicrotask(() => void loadAnon({ force: true }));
     }
-  });
+  })();
   return anonInFlight;
 }
 

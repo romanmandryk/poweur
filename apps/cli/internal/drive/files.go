@@ -35,6 +35,8 @@ type Files struct {
 	shares         []protocol.Share
 	sharesLoaded   bool
 	nodeShares     map[string][]protocol.Share
+	// opened holds decrypted nodes, reused while their head is unchanged.
+	opened map[string]*File
 }
 type File struct {
 	Manifest            protocol.Manifest
@@ -54,7 +56,11 @@ type Node struct {
 	TrimmedBefore uint64 `json:"trimmed_before"`
 	// RotateRequired is set after a key-bearing share was revoked: writes
 	// wait for a rotation.
-	RotateRequired bool      `json:"rotate_required"`
+	RotateRequired bool `json:"rotate_required"`
+	// The versions carrying the key, name and content-key envelopes.
+	KeyVersion     string    `json:"key_version"`
+	NameVersion    string    `json:"name_version"`
+	ContentVersion string    `json:"content_version"`
 	TrimSnapshot   *Snapshot `json:"trim_snapshot"`
 }
 
@@ -271,10 +277,96 @@ func (f *Files) version(ctx context.Context, node, version string) (protocol.Man
 	}
 	return m, f.allowAuthor(ctx, m)
 }
+
+// Open returns a node: one request brings it and its readable ancestors
+// with the versions carrying their envelopes; each is decrypted from the top
+// down with its parent's key (or the caller's share), reusing nodes already
+// decrypted at the same head. Every version used is verified.
 func (f *Files) Open(ctx context.Context, node string) (*File, error) {
-	return f.open(ctx, node, map[string]bool{})
+	var body struct {
+		Path []listedNode `json:"path"`
+	}
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node)+"/path", &body); err != nil {
+		return nil, err
+	}
+	path := body.Path
+	if len(path) == 0 || path[0].ID != node || len(path) > 256 {
+		return nil, errors.New("invalid folder ancestry")
+	}
+	var parent *File
+	for i := len(path) - 1; i >= 0; i-- {
+		if i < len(path)-1 && path[i].Folder != path[i+1].ID {
+			return nil, errors.New("invalid folder ancestry")
+		}
+		opened, err := f.fromListed(ctx, path[i], parent)
+		if err != nil {
+			return nil, err
+		}
+		parent = opened
+	}
+	return parent, nil
 }
-func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool) (*File, error) {
+
+// listedNode is a node with the signed versions needed to open it.
+type listedNode struct {
+	Node
+	Versions []protocol.Manifest `json:"versions"`
+}
+
+// fromListed opens a node from a listing entry, with its parent when known.
+func (f *Files) fromListed(ctx context.Context, entry listedNode, parent *File) (*File, error) {
+	if cached := f.opened[entry.ID]; cached != nil && cached.Manifest.Version == entry.Head && !entry.Removed {
+		return cached, nil
+	}
+	if entry.Removed {
+		return nil, errors.New("node is removed")
+	}
+	byVersion := map[string]*protocol.Manifest{}
+	for i := range entry.Versions {
+		m := &entry.Versions[i]
+		if m.Node != entry.ID {
+			return nil, errors.New("manifest reference mismatch")
+		}
+		byVersion[m.Version] = m
+	}
+	pick := func(id string) *protocol.Manifest {
+		if id == "" {
+			return nil
+		}
+		return byVersion[id]
+	}
+	head, keyVersion, nameVersion, contentVersion := pick(entry.Head), pick(entry.KeyVersion), pick(entry.NameVersion), pick(entry.ContentVersion)
+	// A relay that does not track envelope versions: walk the history.
+	if head == nil || keyVersion == nil || (entry.Folder != "" && nameVersion == nil) || (entry.Kind == protocol.KindFile && contentVersion == nil) {
+		return f.openWalk(ctx, entry.ID, map[string]bool{})
+	}
+	if head.Generation != entry.Generation || head.Kind != entry.Kind {
+		return nil, errors.New("node metadata mismatch")
+	}
+	checked := map[string]bool{}
+	for _, m := range []*protocol.Manifest{head, keyVersion, nameVersion, contentVersion} {
+		if m == nil || checked[m.Version] {
+			continue
+		}
+		checked[m.Version] = true
+		if err := f.verify(*m); err != nil {
+			return nil, err
+		}
+		if err := f.allowAuthor(ctx, *m); err != nil {
+			return nil, err
+		}
+	}
+	return f.decrypt(ctx, entry.Node, *head, keyVersion, nameVersion, contentVersion, func() (*File, error) {
+		if parent != nil && parent.Manifest.Node == entry.Folder {
+			return parent, nil
+		}
+		return f.Open(ctx, entry.Folder)
+	})
+}
+
+// openWalk reconstructs inherited envelopes by walking a node's history, for
+// relays without envelope tracking. Every visited version is verified.
+func (f *Files) openWalk(ctx context.Context, node string, ancestors map[string]bool) (*File, error) {
 	if ancestors[node] || len(ancestors) >= 256 {
 		return nil, errors.New("invalid folder ancestry")
 	}
@@ -322,14 +414,22 @@ func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool
 			return nil, err
 		}
 	}
+	return f.decrypt(ctx, info, head, keyVersion, nameVersion, contentVersion, func() (*File, error) {
+		return f.openWalk(ctx, info.Folder, ancestors)
+	})
+}
+
+// decrypt opens a node's key, name and content key from verified versions.
+func (f *Files) decrypt(ctx context.Context, info Node, head protocol.Manifest, keyVersion, nameVersion, contentVersion *protocol.Manifest, parentOf func() (*File, error)) (*File, error) {
+	node := info.ID
 	if keyVersion.Generation != head.Generation || (contentVersion != nil && contentVersion.Generation != head.Generation) {
 		return nil, errors.New("key generation mismatch")
 	}
 	// A member (or link holder) opens a shared node with the key its share
 	// carries, and nodes below it through their parents. Only the owner
 	// walks up to the root.
-	var key []byte
-	var parentKey []byte
+	var key, parentKey []byte
+	var err error
 	if !f.owner() {
 		share, err := f.myShare(ctx, node)
 		if err != nil {
@@ -354,12 +454,12 @@ func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool
 	if key == nil {
 		parentKey = f.EncryptionKey
 		if info.Folder != "" {
-			parent, err := f.open(ctx, info.Folder, ancestors)
+			parent, err := parentOf()
 			if err != nil {
 				return nil, err
 			}
-			if parent.Manifest.Kind != protocol.KindFolder {
-				return nil, errors.New("parent is not a folder")
+			if parent.Manifest.Node != info.Folder || parent.Manifest.Kind != protocol.KindFolder {
+				return nil, errors.New("parent mismatch")
 			}
 			parentKey = parent.NodeKey
 		} else if !f.owner() {
@@ -383,9 +483,15 @@ func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool
 		}
 	}
 	if contentVersion != nil {
-		result.ContentKey, err = protocol.OpenKey(key, *contentVersion.ContentKey, contextFor(*contentVersion, protocol.PurposeContentKey))
+		if result.ContentKey, err = protocol.OpenKey(key, *contentVersion.ContentKey, contextFor(*contentVersion, protocol.PurposeContentKey)); err != nil {
+			return nil, err
+		}
 	}
-	return result, err
+	if f.opened == nil {
+		f.opened = map[string]*File{}
+	}
+	f.opened[node] = result
+	return result, nil
 }
 
 // A create-only guest holds the folder's public key, not the private key used
@@ -418,14 +524,54 @@ func (f *Files) List(ctx context.Context, folder *File) ([]*File, error) {
 		}
 		seen[cursor] = true
 		var page struct {
-			Children []Node `json:"children"`
-			Cursor   string `json:"cursor"`
+			Folder   listedNode       `json:"folder"`
+			Children []listedNode     `json:"children"`
+			Cursor   string           `json:"cursor"`
+			Shares   []protocol.Share `json:"shares"`
+			Revoked  []struct {
+				Share protocol.Share `json:"share"`
+			} `json:"revoked"`
 		}
-		if err := f.Client.Get(ctx, "/nodes/"+folder.Manifest.Node+"/children?cursor="+url.QueryEscape(cursor), &page); err != nil {
+		if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(folder.Manifest.Node)+"/listing?cursor="+url.QueryEscape(cursor), &page); err != nil {
 			return nil, err
 		}
+		if page.Folder.ID != folder.Manifest.Node {
+			return nil, errors.New("listing is for another folder")
+		}
+		// Share evidence: shares on the folder's chain apply to every child,
+		// a child's own shares only to it.
+		all := page.Shares
+		for _, r := range page.Revoked {
+			all = append(all, r.Share)
+		}
+		children := map[string]bool{}
+		for _, c := range page.Children {
+			children[c.ID] = true
+		}
+		var chain []protocol.Share
+		for _, s := range all {
+			if !children[s.Node] {
+				chain = append(chain, s)
+			}
+		}
+		if f.nodeShares == nil {
+			f.nodeShares = map[string][]protocol.Share{}
+		}
+		f.nodeShares[folder.Manifest.Node] = chain
+		for _, c := range page.Children {
+			own := append([]protocol.Share(nil), chain...)
+			for _, s := range all {
+				if s.Node == c.ID {
+					own = append(own, s)
+				}
+			}
+			f.nodeShares[c.ID] = own
+		}
 		for _, child := range page.Children {
-			entry, err := f.Open(ctx, child.ID)
+			if child.Folder != folder.Manifest.Node {
+				return nil, errors.New("listed child is not in this folder")
+			}
+			entry, err := f.fromListed(ctx, child, folder)
 			if err != nil {
 				return nil, err
 			}

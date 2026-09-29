@@ -602,6 +602,17 @@ invalid edit is rejected with a readable reason and never half-applied.
       listed (`GET …/shares` → `revoked`) as evidence, so versions written through them still
       verify (`INT_DRIVE_08`, SDK live test). File requests trust only owner-issued links: a link
       holder cannot see an admin's chain.
+- [x] Fast reads without format changes (production traced a refresh at 233 requests / 23 s, 2 s
+      of it on the server): signed requests replace the per-request challenge round trip on
+      every endpoint; `GET …/listing` and `GET …/path` return nodes with their envelope versions
+      (tracked per node, filled in for older snapshots) and share evidence in one request; clients
+      decrypt children with the folder key in hand and reuse decrypted nodes; the relay caches
+      manifests and journal segments and reads records in parallel; GC keeps envelope-carrying
+      versions (content released) so old files stay openable; history reads only new records,
+      seals small records inline (padded) and reuses one archive per client; the web app shows
+      the last Files listing and history from an encrypted on-device snapshot and gates
+      pull-to-refresh on the changes cursor (`seq` in `GET /drive/{id}`). A folder now lists in one
+      request, a refresh with nothing new in one.
 - [x] Links with key-in-fragment and the split password verifier; expiry, download caps,
       rate limits (relay side)
 - [x] Static decrypting viewer at `/s/<link>` with strict CSP and `no-referrer` (web

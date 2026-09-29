@@ -43,19 +43,11 @@ export async function streamEvents(
   signer: Signer,
   options: StreamOptions,
 ): Promise<void> {
-  const { challenge } = await client.request<{ challenge: string }>({
-    method: "GET",
-    path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-  });
-  const signature = await signer.sign(challenge, "base64std");
-
   const response = await client.raw({
     method: "GET",
     path: `/events/${encodeURIComponent(signer.identity)}`,
+    sign: { signer },
     headers: {
-      "X-Poweur-Identity": signer.identity,
-      "X-Poweur-Challenge": challenge,
-      "X-Poweur-Signature": signature,
       Accept: "text/event-stream",
     },
     stream: true,

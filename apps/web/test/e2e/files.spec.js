@@ -93,8 +93,12 @@ test.describe("storage-v2 Files", () => {
     await bobAccess.locator("..").getByRole("button", { name: "Revoke" }).click();
     await expect(alicePage.locator('[data-toast-key="success:Access revoked"]')).toBeVisible();
 
+    // Tabs keep their place, as message trays do: back in "Shared with me",
+    // bob is still inside Plans; the path leads back to the list.
     await bobPage.getByRole("tab", { name: "My files" }).click();
     await bobPage.getByRole("tab", { name: "Shared with me" }).click();
+    await expect(bobPage.getByText("roadmap.txt", { exact: true })).toBeVisible();
+    await bobPage.locator('nav[aria-label="Folder path"]').getByRole("button", { name: "Shared with me" }).click();
     await bobPage.getByText("Plans", { exact: true }).click();
     await expect(bobPage.locator(".toast.error")).toBeVisible({ timeout: 20_000 });
 

@@ -29,14 +29,32 @@ func (e *Engine) Collect(ctx context.Context, driveID string) (CollectResult, er
 	}
 	var result CollectResult
 	cutoff := e.now().Add(-e.opts.Retention)
-	var expired []string
+	// A version still carrying a live node's key, name or content-key
+	// envelope is kept however old: the node cannot be opened without it.
+	envelopes := map[string]bool{}
+	for _, n := range h.st.Nodes {
+		if n.Removed {
+			continue
+		}
+		e.fillEnvelopes(ctx, h, n)
+		for _, id := range []string{n.KeyVersion, n.NameVersion, n.ContentVersion} {
+			envelopes[id] = true
+		}
+	}
+	var expired, stripped []string
 	for id, v := range h.st.Versions {
-		if !v.Superseded.IsZero() && v.Superseded.Before(cutoff) {
+		if v.Superseded.IsZero() || !v.Superseded.Before(cutoff) {
+			continue
+		}
+		if !envelopes[id] {
 			expired = append(expired, id)
+		} else if len(v.Pages) > 0 {
+			stripped = append(stripped, id)
 		}
 	}
 	sort.Strings(expired)
-	if len(expired) > 0 {
+	sort.Strings(stripped)
+	if len(expired) > 0 || len(stripped) > 0 {
 		before := make(map[string]bool, len(h.st.Chunks))
 		for id := range h.st.Chunks {
 			before[id] = true
@@ -46,10 +64,10 @@ func (e *Engine) Collect(ctx context.Context, driveID string) (CollectResult, er
 		for _, id := range expired {
 			nodes[id] = h.st.Versions[id].Node
 		}
-		if err := e.publish(ctx, h, journalOp{Kind: kindGC, At: e.now(), GC: &gcOp{Versions: expired}}); err != nil {
+		if err := e.publish(ctx, h, journalOp{Kind: kindGC, At: e.now(), GC: &gcOp{Versions: expired, Stripped: stripped}}); err != nil {
 			return result, err
 		}
-		result.Versions, result.Freed = len(expired), usedBefore-h.st.Used
+		result.Versions, result.Freed = len(expired)+len(stripped), usedBefore-h.st.Used
 		for id := range before {
 			if h.st.Chunks[id] == nil {
 				_ = e.opts.Store.Delete(ctx, h.prefix+"chunks/"+id)

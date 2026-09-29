@@ -20,7 +20,7 @@
 
 import type { Signer } from "./crypto/keys.js";
 import { PoweurError, RelayError } from "./errors.js";
-import type { RelayClient } from "./http.js";
+import type { RelayClient, RequestSigning } from "./http.js";
 import type { DeviceListResponse, DeviceRevokeResponse } from "./types.js";
 
 export const SYS_PUBLIC_DIR = ".poweur/public";
@@ -48,17 +48,9 @@ export class SystemFiles {
     return this.signer.identity;
   }
 
-  async #auth(): Promise<Record<string, string>> {
-    const { challenge } = await this.client.request<{ challenge: string }>({
-      method: "GET",
-      path: `/auth/challenge?identity=${encodeURIComponent(this.identity)}`,
-    });
-    return {
-      ...(this.sessionId ? { "X-Poweur-Session-Id": this.sessionId } : {}),
-      "X-Poweur-Identity": this.identity,
-      "X-Poweur-Challenge": challenge,
-      "X-Poweur-Signature": await this.signer.sign(challenge, "base64std"),
-    };
+  /** Signed requests: one round trip, no challenge fetch. */
+  get signing(): RequestSigning {
+    return { signer: this.signer, ...(this.sessionId ? { sessionId: this.sessionId } : {}) };
   }
 
   async #fetch(
@@ -73,7 +65,8 @@ export class SystemFiles {
       method,
       path: `/identities/${encodeURIComponent(this.identity)}/system/${path}`,
       ...(init.body !== undefined ? { body: init.body } : {}),
-      headers: { ...(await this.#auth()), ...init.headers },
+      ...(init.headers ? { headers: init.headers } : {}),
+      sign: this.signing,
     });
   }
 
@@ -150,25 +143,12 @@ export class DeviceRegistry {
     this.#files = files;
   }
 
-  async #auth(): Promise<Record<string, string>> {
-    const { challenge } = await this.#files.client.request<{ challenge: string }>({
-      method: "GET",
-      path: `/auth/challenge?identity=${encodeURIComponent(this.#files.identity)}`,
-    });
-    return {
-      ...(this.#files.sessionId ? { "X-Poweur-Session-Id": this.#files.sessionId } : {}),
-      "X-Poweur-Identity": this.#files.identity,
-      "X-Poweur-Challenge": challenge,
-      "X-Poweur-Signature": await this.#files.signer.sign(challenge, "base64std"),
-    };
-  }
-
   /** Every device the relay has seen for this identity. */
   async list(): Promise<DeviceListResponse> {
     return this.#files.client.request<DeviceListResponse>({
       method: "GET",
       path: `/devices/${encodeURIComponent(this.#files.identity)}`,
-      headers: await this.#auth(),
+      sign: this.#files.signing,
     });
   }
 
@@ -177,7 +157,7 @@ export class DeviceRegistry {
     return this.#files.client.request<DeviceRevokeResponse>({
       method: "POST",
       path: `/devices/${encodeURIComponent(this.#files.identity)}/revoke`,
-      headers: await this.#auth(),
+      sign: this.#files.signing,
       body: { device_id: deviceId },
     });
   }

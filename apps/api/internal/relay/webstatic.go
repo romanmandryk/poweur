@@ -22,11 +22,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 		// SDK, had every authenticated call blocked before it left the browser.
 		w.Header().Set("Access-Control-Allow-Headers",
 			"Content-Type, Authorization, If-Match, "+
-				"X-Poweur-Identity, X-Poweur-Challenge, X-Poweur-Signature, X-Poweur-Session-Id, "+
+				"X-Poweur-Identity, X-Poweur-Challenge, X-Poweur-Signature, X-Poweur-Session-Id, X-Poweur-Timestamp, X-Poweur-Nonce, "+
 				"X-Poweur-Link, X-Poweur-Link-Verifier, X-Poweur-PoW-Token, X-Poweur-PoW-Solution, X-Poweur-Group-Roster")
 		// ETag is how a system-file read tells the writer what to put in
 		// If-Match; without exposing it a browser client cannot see it.
-		w.Header().Set("Access-Control-Expose-Headers", "ETag")
+		w.Header().Set("Access-Control-Expose-Headers", "ETag, Date")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -65,6 +65,9 @@ type trimOp struct {
 // gcOp drops retained versions; their pages and chunks are released on apply.
 type gcOp struct {
 	Versions []string `json:"versions"`
+	// Stripped versions release their content but stay: they carry a live
+	// node's key, name or content-key envelope.
+	Stripped []string `json:"stripped,omitempty"`
 }
 
 // segment is one immutable journal object.

@@ -12,6 +12,9 @@ import { signManifest, type Manifest } from "../src/drive/manifest.js";
 import { x25519PublicKey } from "../src/crypto/index.js";
 import { createTestIdentity, localResolveOptions, type TestIdentity } from "./helpers/identities.js";
 import { resolveEncryptionKey, resolveSigningKey } from "../src/resolve.js";
+import { RelayClient } from "../src/http.js";
+import { MessageHistory } from "../src/history.js";
+import type { Decryptor } from "../src/crypto/keys.js";
 import { fromBase64 } from "../src/encoding.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 let relay: RunningRelay, alice: TestIdentity;
@@ -106,6 +109,40 @@ it("archives a conversation as a sealed append log and dedupes by id", async () 
   expect((await history.readState()).conversations["bob.poweur.net"]?.id).toBe("m1");
 });
 
+it("reads history incrementally across two devices", async () => {
+  const carol = await createTestIdentity(relay.baseUrl, "history");
+  const requests: string[] = [];
+  const device = (count: boolean) => {
+    const transport = count
+      ? new RelayClient(relay.baseUrl, { fetch: async (url, init) => { requests.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`); return fetch(url, init); } })
+      : carol.client.relay;
+    const files = new DriveFiles(new DriveClient(transport, carol.client.signer), fileKeys(carol.keys.signingPrivateKey, carol.keys.encryptionPrivateKey!));
+    return new MessageHistory(carol.identity, (carol.client as unknown as { decryptor: Decryptor }).decryptor, files);
+  };
+  const phone = device(true), laptop = device(false);
+  const record = (id: string, minute: number) => ({ id, sender: carol.identity, recipient: "dave.poweur.net", timestamp: `2026-09-28T12:0${minute}:00Z`, queue: "sent" as const, body: `body ${id}` });
+  for (const [i, id] of ["a", "b", "c"].entries()) await phone.append(record(id, i));
+  expect((await phone.load()).map(r => r.id)).toEqual(["a", "b", "c"]);
+  // Nothing new: one listing, no record reads.
+  requests.length = 0;
+  expect((await phone.load()).length).toBe(3);
+  expect(requests).toEqual([expect.stringMatching(/\/listing$/)]);
+  // The laptop adds two; the phone reads only those, continuing the chain.
+  await laptop.append(record("d", 3));
+  await laptop.append(record("e", 4));
+  requests.length = 0;
+  expect((await phone.load()).map(r => r.id)).toEqual(["a", "b", "c", "d", "e"]);
+  expect(requests.filter(r => r.endsWith("/records"))).toHaveLength(1);
+  // The laptop's chain is behind the phone's now: its append is refused,
+  // it re-reads, and the record still lands once.
+  await phone.append(record("f", 5));
+  await laptop.append(record("g", 6));
+  expect((await laptop.load()).map(r => r.id)).toEqual(["a", "b", "c", "d", "e", "f", "g"]);
+  expect((await phone.load()).map(r => r.id)).toEqual(["a", "b", "c", "d", "e", "f", "g"]);
+  // Inline records, padded like chunks: no chunk reads at all.
+  expect(requests.some(r => r.includes("/chunks/"))).toBe(false);
+}, 60_000);
+
 it("a member reads and writes through their share with only their own keys", async () => {
   const bob = await createTestIdentity(relay.baseUrl, "member");
   const carol = await createTestIdentity(relay.baseUrl, "stranger");
@@ -182,6 +219,29 @@ it("keeps a revoked member's versions valid and rotates keys so writes resume", 
   expect(await text(daveFiles, await daveFiles.resolve(`/${lab.manifest.node}/after.txt`))).toBe("after");
   await expect(bobFiles.open(lab.manifest.node)).rejects.toBeTruthy();
 }, 120_000);
+
+it("lists a folder in one request, without challenge round trips", async () => {
+  const setup = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const photos = await setup.create(await setup.create(await setup.root(), "albums", "folder"), "photos", "folder");
+  await Promise.all(Array.from({ length: 12 }, (_, i) => setup.create(photos, `p${i}.jpg`, "file", new TextEncoder().encode(`photo ${i}`))));
+  const requests: string[] = [];
+  const counting = new RelayClient(relay.baseUrl, { fetch: async (url, init) => { requests.push(`${init?.method ?? "GET"} ${new URL(String(url)).pathname}`); return fetch(url, init); } });
+  const files = new DriveFiles(new DriveClient(counting, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  // Opening a folder two levels down: one request for it and its ancestors.
+  const folder = await files.open(photos.manifest.node);
+  expect(folder.name).toBe("photos");
+  expect(requests.length).toBe(1);
+  requests.length = 0;
+  const listed = await files.list(folder);
+  expect(listed.map(f => f.name).sort()).toEqual(Array.from({ length: 12 }, (_, i) => `p${i}.jpg`).sort());
+  expect(requests).toEqual([`GET /drive/${alice.identity}/nodes/${photos.manifest.node}/listing`]);
+  // Reading a file needs no further opens.
+  requests.length = 0;
+  const chunks = []; for await (const c of files.read(listed.find(f => f.name === "p3.jpg")!)) chunks.push(c);
+  expect(Buffer.concat(chunks).toString()).toBe("photo 3");
+  expect(requests.every(r => !r.includes("/auth/challenge"))).toBe(true);
+  expect(requests.length).toBeLessThanOrEqual(2);
+}, 60_000);
 
 it("opens a password link with only the fragment and the password", async () => {
   const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));

@@ -15,19 +15,6 @@ export function resolveForActive(identity: string) {
   return resolveProfile(identity, relayUrlFor(useSession.getState().identity));
 }
 
-let challengeChain: Promise<unknown> = Promise.resolve();
-
-/**
- * Run challenge-signed reads one at a time. The relay keeps one outstanding
- * challenge per identity, so whichever of two overlapping drains lands second
- * invalidates the first one's signature.
- */
-export function challengeSerial<T>(task: () => Promise<T>): Promise<T> {
-  const next = challengeChain.then(task, task);
-  challengeChain = next.catch(() => {});
-  return next;
-}
-
 export const parseMessage = (message: any) => (typeof message === "string" ? JSON.parse(message) : message);
 
 export const messageKey = (message: any): string => message.id || `${message.sender}:${message.timestamp}`;

@@ -2,11 +2,11 @@
 import { argon2id } from "@noble/hashes/argon2.js";
 import { signBytes, x25519PublicKey, type SealedPayload } from "../crypto/index.js";
 import { fromBase64, randomBytes, toBase64url, utf8 } from "../encoding.js";
-import { DriveClient } from "./client.js";
+import { DriveClient, type DriveListing, type DriveNode, type ListedNode } from "./client.js";
 import { driveContext, encryptChunk, decryptChunk, sealKey, openKey, MAX_PLAINTEXT } from "./crypto.js";
 import { canonicalManifest, verifyManifest, verifyManifestPages, splitPages, type Manifest, type FileMode } from "./manifest.js";
 import { nameHash, sealName, openName, normalizeName } from "./names.js";
-import { appendRecordHash, canonicalAppendRecord, openRecordContent, verifyAppendRecord, verifyNextRecord, type AppendRecord, type ChunkRef, type DriveSealedPayload } from "./records.js";
+import { appendRecordHash, canonicalAppendRecord, openRecordContent, sealRecordContent, verifyAppendRecord, verifyNextRecord, type AppendRecord, type ChunkRef, type DriveSealedPayload } from "./records.js";
 import { canonicalShare, guestKey, keyBearing, roleGrants, SHARE_KDF, verifierHash, verifyShare, type Share, type ShareCaps, type ShareRole } from "./share.js";
 
 const expired = (share: Share) => Boolean(share.expires) && Date.parse(share.expires!) <= Date.now();
@@ -39,13 +39,24 @@ export interface OpenFile {
   folder: string;
   nodeKey: Uint8Array;
   contentKey?: Uint8Array;
+  /** Append files, as of when the node was opened or last listed: the last
+   * record position and the first retained one. */
+  position?: number;
+  trimmedBefore?: number;
 }
+/** Per-author chain state while reading an append file, so a later read can
+ * continue from where an earlier one stopped and still check every link. */
+export type AuthorCursors = Map<string, { sequence: number; previous: string }>;
+/** Records at most this large may be sealed inline in the record itself. */
+export const MAX_INLINE_RECORD = 16 * 1024;
 
 export class DriveFiles {
   private shares?: Share[];
   /** Per node: every share that ever stood on it or its ancestors (active,
    * expired or revoked). Evidence of past authority, never access. */
   private readonly nodeShares = new Map<string, Share[]>();
+  /** Decrypted nodes by ID, reused while their head is unchanged. */
+  private readonly opened = new Map<string, OpenFile>();
   constructor(readonly client: DriveClient, private readonly keys: FileKeys) {
     if (keys.encryptionPrivateKey.length !== 32) throw new Error("invalid encryption key");
   }
@@ -113,6 +124,9 @@ export class DriveFiles {
   private async allowAuthor(m: Manifest): Promise<void> {
     const need = m.operation === "create" ? "create" : m.operation === "rotate" ? "admin" : "write";
     const target = m.folder && (m.operation === "create" || m.operation === "move") ? m.folder : m.node;
+    if (await this.allowed(target, m.author, need)) return;
+    // The evidence may predate a share granted since it was read: once more, fresh.
+    this.nodeShares.delete(target);
     if (!await this.allowed(target, m.author, need)) throw new Error("author role does not allow this version");
   }
   /** The caller's own key-bearing, trusted share on node. */
@@ -146,9 +160,50 @@ export class DriveFiles {
     await this.verify(m);
     return m;
   }
-  /** Reconstruct inherited envelopes across replacements and renames. Every
+  /** Open a node: one request returns it and its readable ancestors with the
+   * versions carrying their envelopes; each is decrypted with its parent's
+   * key (or the caller's share) from the top down, reusing nodes already
+   * decrypted at the same head. Every version used is verified. */
+  async open(node: string): Promise<OpenFile> {
+    const { path } = await this.client.ancestry(node);
+    if (!path.length || path[0]!.id !== node || path.length > 256) throw new Error("invalid folder ancestry");
+    let parent: OpenFile | undefined;
+    for (let i = path.length - 1; i >= 0; i--) {
+      const entry = path[i]!;
+      if (i < path.length - 1 && entry.folder !== path[i + 1]!.id) throw new Error("invalid folder ancestry");
+      parent = await this.fromListed(entry, parent);
+    }
+    return parent!;
+  }
+  /** Open a node from a listing entry, with its parent when the caller has it. */
+  private async fromListed(entry: ListedNode, parent?: OpenFile): Promise<OpenFile> {
+    const cached = this.opened.get(entry.id);
+    if (cached && cached.manifest.version === entry.head && !entry.removed) {
+      // Appends move the position without a new version.
+      if (entry.position !== undefined) cached.position = entry.position;
+      if (entry.trimmed_before !== undefined) cached.trimmedBefore = entry.trimmed_before;
+      return cached;
+    }
+    if (entry.removed) throw new Error("node is removed");
+    const byVersion = new Map<string, Manifest>();
+    for (const m of entry.versions ?? []) {
+      if (m.node !== entry.id) throw new Error("manifest reference mismatch");
+      byVersion.set(m.version, m);
+    }
+    const head = byVersion.get(entry.head);
+    const pick = (version?: string) => version ? byVersion.get(version) : undefined;
+    const keyVersion = pick(entry.key_version), nameVersion = pick(entry.name_version), contentVersion = pick(entry.content_version);
+    // A relay that does not track envelope versions: walk the history.
+    if (!head || !keyVersion || (entry.folder && !nameVersion) || (entry.kind === "file" && !contentVersion)) return this.openWalk(entry.id);
+    if (head.generation !== entry.generation || head.kind !== entry.kind) throw new Error("node metadata mismatch");
+    await Promise.all([...new Set([head, keyVersion, nameVersion, contentVersion].filter((m): m is Manifest => Boolean(m)))].map(m => this.verify(m)));
+    return this.decrypt(entry, head, keyVersion, nameVersion, contentVersion,
+      async () => parent && parent.manifest.node === entry.folder ? parent : entry.folder ? this.open(entry.folder) : undefined);
+  }
+  /** Reconstruct inherited envelopes across replacements and renames by
+   * walking a node's history (relays without envelope tracking). Every
    * visited version is verified; cycles and excessive chains fail closed. */
-  async open(node: string, ancestors = new Set<string>()): Promise<OpenFile> {
+  private async openWalk(node: string, ancestors = new Set<string>()): Promise<OpenFile> {
     if (ancestors.has(node) || ancestors.size >= 256) throw new Error("invalid folder ancestry");
     ancestors.add(node);
     const info = await this.client.node(node);
@@ -168,6 +223,13 @@ export class DriveFiles {
       if (!m.parent) throw new Error("missing key or name envelope");
       m = await this.version(node, m.parent);
     }
+    return this.decrypt(info, head, keyVersion, nameVersion, contentVersion,
+      async () => info.folder ? this.openWalk(info.folder, ancestors) : undefined);
+  }
+  /** Decrypt a node's key, name and content key from verified versions. */
+  private async decrypt(info: DriveNode, head: Manifest, keyVersion: Manifest, nameVersion: Manifest | undefined, contentVersion: Manifest | undefined,
+    parentOf: () => Promise<OpenFile | undefined>): Promise<OpenFile> {
+    const node = info.id;
     if (keyVersion.generation !== head.generation || (contentVersion && contentVersion.generation !== head.generation)) throw new Error("key generation mismatch");
     // A member (or link holder) opens a shared node with its share's key and
     // what lies below through parents; only the owner walks up to the root.
@@ -179,7 +241,8 @@ export class DriveFiles {
       if (toBase64url(x25519PublicKey(nodeKey)) !== share.node_public) throw new Error("share key does not match its node");
     } else {
       if (!info.folder && !this.owner) throw new Error("no share opens this node");
-      const parent = info.folder ? await this.open(info.folder, ancestors) : undefined;
+      const parent = info.folder ? await parentOf() : undefined;
+      if (info.folder && parent?.manifest.node !== info.folder) throw new Error("parent mismatch");
       if (parent && parent.manifest.kind !== "folder") throw new Error("parent is not a folder");
       parentKey = parent?.nodeKey ?? this.keys.encryptionPrivateKey;
       nodeKey = openKey(parentKey, payload(keyVersion.node_key!), this.context(keyVersion, "node-key"));
@@ -190,8 +253,10 @@ export class DriveFiles {
     // Create-only guests know the folder public key, but cannot compute its
     // private keyed name index. Their random token is replaced on rename.
     if (nameVersion && parentKey && !guestKey(nameVersion.author) && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
-    const result: OpenFile = { manifest: head, name, folder: info.folder ?? "", nodeKey };
+    const result: OpenFile = { manifest: head, name, folder: info.folder ?? "", nodeKey,
+      ...(info.position !== undefined ? { position: info.position } : {}), ...(info.trimmed_before !== undefined ? { trimmedBefore: info.trimmed_before } : {}) };
     if (contentVersion) result.contentKey = openKey(nodeKey, payload(contentVersion.content_key!), this.context(contentVersion, "content-key"));
+    this.opened.set(node, result);
     return result;
   }
   async root(): Promise<OpenFile> {
@@ -199,6 +264,8 @@ export class DriveFiles {
     if (root) return this.open(root);
     return this.create(undefined, "", "folder");
   }
+  /** A folder's children in one request per page, decrypted in parallel with
+   * the folder's key; the page's share evidence refreshes author checks. */
   async list(folder: OpenFile): Promise<OpenFile[]> {
     if (folder.manifest.kind !== "folder") throw new Error("not a folder");
     const result: OpenFile[] = [];
@@ -207,11 +274,26 @@ export class DriveFiles {
     do {
       if (seen.has(cursor)) throw new Error("repeated children cursor");
       seen.add(cursor);
-      const page = await this.client.children(folder.manifest.node, cursor);
-      for (const child of page.children) result.push(await this.open(child.id));
+      const page = await this.client.listing(folder.manifest.node, cursor);
+      if (page.folder.id !== folder.manifest.node) throw new Error("listing is for another folder");
+      this.absorb(page);
+      const children = await Promise.all(page.children.map(child => {
+        if (child.folder !== folder.manifest.node) throw new Error("listed child is not in this folder");
+        return this.fromListed(child, folder);
+      }));
+      result.push(...children);
       cursor = page.cursor;
     } while (cursor);
     return result;
+  }
+  /** Share evidence from a listing: shares on the folder's chain apply to the
+   * folder and every child; a child's own shares only to it. */
+  private absorb(page: DriveListing): void {
+    const all = [...page.shares, ...(page.revoked ?? []).map(entry => entry.share)];
+    const children = new Set(page.children.map(child => child.id));
+    const chain = all.filter(share => !children.has(share.node));
+    this.nodeShares.set(page.folder.id, chain);
+    for (const child of page.children) this.nodeShares.set(child.id, [...chain, ...all.filter(share => share.node === child.id)]);
   }
   /** Absolute or root-relative paths; refuse empty interior segments and traversal. */
   async resolve(path: string): Promise<OpenFile> {
@@ -397,7 +479,8 @@ export class DriveFiles {
       seen.add(from);
       const page = await this.client.records(node, from, 1000);
       out.push(...page.records);
-      if (!page.records.length || page.next === from) return out;
+      // A short page is the last one: no empty request to confirm it.
+      if (page.records.length < 1000 || page.next === from) return out;
       from = page.next;
     }
   }
@@ -425,29 +508,40 @@ export class DriveFiles {
     if (doc.format !== 1 || doc.log !== log) return;
     return doc.cursors?.[this.client.signer.identity];
   }
-  async append(file: OpenFile, plaintext: Uint8Array): Promise<number> {
+  /** Append one signed record. `inline` seals a small record into the record
+   * itself, so readers get it with the record list instead of one chunk
+   * request per record; the caller pads it, since inline content is not.
+   * `cursor` (the caller's own chain state) saves re-reading the log. */
+  async append(file: OpenFile, plaintext: Uint8Array, options: { inline?: boolean; cursor?: { sequence: number; previous: string } } = {}): Promise<number> {
     if (file.manifest.mode !== "append" || !file.contentKey) throw new Error("not an append file");
     if (!plaintext.length) throw new Error("empty append");
-    const cursor = await this.authorCursor(file);
+    const cursor = options.cursor ?? await this.authorCursor(file);
     let record: AppendRecord = { format: 1, drive: this.client.drive, node: file.manifest.node, author: this.client.signer.identity,
       generation: file.manifest.generation, sequence: cursor.sequence + 1, previous: cursor.previous, chunks: [], signature: "" };
-    const blobs: Uint8Array[] = [];
-    for (let offset = 0; offset < plaintext.length; offset += MAX_PLAINTEXT) {
-      blobs.push(encryptChunk(file.contentKey, plaintext.subarray(offset, offset + MAX_PLAINTEXT), this.context(file.manifest, "content")));
+    if (options.inline && plaintext.length <= MAX_INLINE_RECORD) {
+      record = sealRecordContent(record, x25519PublicKey(file.nodeKey), plaintext);
+    } else {
+      const blobs: Uint8Array[] = [];
+      for (let offset = 0; offset < plaintext.length; offset += MAX_PLAINTEXT) {
+        blobs.push(encryptChunk(file.contentKey, plaintext.subarray(offset, offset + MAX_PLAINTEXT), this.context(file.manifest, "content")));
+      }
+      record.chunks = await this.client.store(blobs);
     }
-    record.chunks = await this.client.store(blobs);
     record.signature = toBase64url(await this.keys.sign(canonicalAppendRecord(record)));
     const result = await this.client.commit({ records: [record] });
     const position = result.positions?.[0];
     if (position == null) throw new Error("append returned no position");
+    if (options.cursor) { options.cursor.sequence = record.sequence; options.cursor.previous = appendRecordHash(record); }
+    file.position = position;
     return position;
   }
-  async tail(file: OpenFile, from = 0): Promise<{ position: number; author: string; sequence: number; plain: Uint8Array }[]> {
+  /** Records from `from` on, each checked against its author's chain. Pass
+   * the cursors an earlier read filled in to continue those chains. */
+  async tail(file: OpenFile, from = 0, cursors: AuthorCursors = new Map()): Promise<{ position: number; author: string; sequence: number; plain: Uint8Array }[]> {
     if (file.manifest.mode !== "append" || !file.contentKey) throw new Error("not an append file");
-    const info = await this.client.node(file.manifest.node);
+    const trimmedBefore = file.trimmedBefore ?? (await this.client.node(file.manifest.node)).trimmed_before ?? 0;
     if (!from) from = 1;
-    if ((info.trimmed_before ?? 0) > from) throw new Error("record prefix was trimmed; load the snapshot");
-    const cursors = new Map<string, { sequence: number; previous: string }>();
+    if (trimmedBefore > from) throw new Error("record prefix was trimmed; load the snapshot");
     const out = [];
     for (const item of await this.recordsFrom(file.manifest.node, from)) {
       const key = await this.authorKeyOf(item.record.author);

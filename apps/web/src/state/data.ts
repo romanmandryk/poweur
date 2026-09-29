@@ -39,10 +39,15 @@ export const freshFiles = () => ({
   own: null as { files: DriveFiles; root: OpenFile } | null,
   folders: {} as Record<string, { folder: OpenFile; entries: OpenFile[] }>,
   mounts: [] as Mount[],
+  /** The root listing this device saw last, shown until the drive opens. */
+  preview: null as FilesPreviewEntry[] | null,
+  /** The drive's changes cursor as of the last full refresh. */
+  cursor: null as string | null,
   loading: false,
   loaded: false,
   error: null as string | null,
 });
+export interface FilesPreviewEntry { node: string; name: string; kind: "file" | "folder" }
 
 /** Everything that belongs to whoever is signed in. */
 function freshIdentityData() {

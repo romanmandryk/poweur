@@ -141,13 +141,24 @@ export class PoweurClient {
     if (!this.decryptor) {
       throw new PoweurError("invalid_argument", "message history needs a decryptor to seal to");
     }
-    const encryptionPrivateKey = await this.decryptor.privateKeyBytes();
-    const signBytes = this.signer.signBytes?.bind(this.signer);
-    const files = signBytes
-      ? new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey })
-      : undefined;
-    return new MessageHistory(this.signer.identity, this.decryptor, files);
+    // One archive per client: it remembers the folders it resolved and how
+    // far it has read each conversation, so a refresh reads only what is new.
+    this.#history ??= (async () => {
+      const encryptionPrivateKey = await this.decryptor!.privateKeyBytes();
+      const signBytes = this.signer.signBytes?.bind(this.signer);
+      const files = signBytes
+        ? new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey })
+        : undefined;
+      return new MessageHistory(this.signer.identity, this.decryptor!, files);
+    })();
+    try {
+      return await this.#history;
+    } catch (error) {
+      this.#history = undefined;
+      throw error;
+    }
   }
+  #history?: Promise<MessageHistory>;
 
   /**
    * Archive whatever just came off a queue, best-effort.

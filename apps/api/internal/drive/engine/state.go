@@ -51,6 +51,13 @@ type node struct {
 	// revoked; only a key rotation clears it.
 	RotateRequired bool      `json:"rotate_required,omitempty"`
 	Updated        time.Time `json:"updated"`
+	// The newest versions carrying the node's key, name and content-key
+	// envelopes, so a listing hands a reader everything it needs to decrypt
+	// in one response. Empty in snapshots written before they were tracked;
+	// Listing finds them by walking back from the head and fills them in.
+	KeyVersion     string `json:"key_version,omitempty"`
+	NameVersion    string `json:"name_version,omitempty"`
+	ContentVersion string `json:"content_version,omitempty"`
 	// Append files.
 	Position uint64 `json:"position,omitempty"`
 	// TrimmedBefore is the first retained position; earlier ones are gone.
