@@ -3,8 +3,11 @@ package drive
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -25,6 +28,86 @@ type Record struct {
 type positioned struct {
 	Position uint64                `json:"position"`
 	Record   protocol.AppendRecord `json:"record"`
+}
+
+// CiphertextHash is the SHA-256 and byte length of a replace file's stored
+// chunks, in page order. Callers put this in plaintext attachment metadata.
+func (f *Files) CiphertextHash(ctx context.Context, file *File) (string, uint64, error) {
+	refs, err := f.contentRefs(ctx, file)
+	if err != nil {
+		return "", 0, err
+	}
+	sum := sha256.New()
+	var size uint64
+	for _, ref := range refs {
+		blob, err := f.Client.Chunk(ctx, file.Manifest.Node, file.Manifest.Version, ref)
+		if err != nil {
+			return "", 0, err
+		}
+		sum.Write(blob)
+		size += uint64(len(blob))
+	}
+	return hex.EncodeToString(sum.Sum(nil)), size, nil
+}
+
+// ReadContent downloads a replace file the caller can read by share, decrypting
+// with a content key that arrived inside an encrypted message. author is the
+// manifest signer's public key; the caller does not need the sender's folder keys.
+func (f *Files) ReadContent(ctx context.Context, node string, contentKey []byte, author ed25519.PublicKey) ([]byte, string, uint64, error) {
+	if len(contentKey) != 32 {
+		return nil, "", 0, errors.New("invalid content key")
+	}
+	var info Node
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node), &info); err != nil {
+		return nil, "", 0, err
+	}
+	if info.ID != node || info.Removed || info.Head == "" {
+		return nil, "", 0, errors.New("attachment node is missing")
+	}
+	var manifest protocol.Manifest
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node)+"/versions/"+url.PathEscape(info.Head), &manifest); err != nil {
+		return nil, "", 0, err
+	}
+	if manifest.Node != node || manifest.Version != info.Head || manifest.Mode != protocol.ModeReplace {
+		return nil, "", 0, errors.New("attachment manifest mismatch")
+	}
+	if err := manifest.Verify(author); err != nil {
+		return nil, "", 0, err
+	}
+	file := &File{Manifest: manifest, ContentKey: contentKey}
+	refs, err := fileRefs(ctx, f, file)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	sum := sha256.New()
+	var plain []byte
+	var size uint64
+	for _, ref := range refs {
+		blob, err := f.Client.Chunk(ctx, node, manifest.Version, ref)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		sum.Write(blob)
+		size += uint64(len(blob))
+		part, err := protocol.DecryptChunk(contentKey, blob, contextFor(manifest, protocol.PurposeContent))
+		if err != nil {
+			return nil, "", 0, err
+		}
+		plain = append(plain, part...)
+	}
+	return plain, hex.EncodeToString(sum.Sum(nil)), size, nil
+}
+
+func fileRefs(ctx context.Context, f *Files, file *File) ([]protocol.ChunkRef, error) {
+	pages := []protocol.ChunkPage{}
+	for _, hash := range file.Manifest.Pages {
+		var page protocol.ChunkPage
+		if err := f.Client.Get(ctx, "/nodes/"+file.Manifest.Node+"/versions/"+file.Manifest.Version+"/pages/"+hash, &page); err != nil {
+			return nil, err
+		}
+		pages = append(pages, page)
+	}
+	return file.Manifest.VerifyPages(pages)
 }
 
 func (c *Client) History(ctx context.Context, node string) ([]string, error) {

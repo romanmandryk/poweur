@@ -447,7 +447,12 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			rendered = describeAuthPrompt(msg.Sender, display)
 		}
 		if decrypted && idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeChatAttachment {
-			rendered = fmt.Sprintf("attachment: %s (attachments return with the new storage)", display)
+			if payload, err := idpkg.ParseAttachment([]byte(display)); err == nil {
+				rendered = "attachment: " + payload.Name
+				if payload.Caption != "" {
+					rendered = payload.Caption + " (" + payload.Name + ")"
+				}
+			}
 		}
 		fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
 			rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))

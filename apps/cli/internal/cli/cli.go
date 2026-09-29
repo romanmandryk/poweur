@@ -59,6 +59,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runDevices(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
+	case "attach":
+		return runAttach(args[1:], stdout, stderr)
 	case "messages":
 		return runMessages(args[1:], stdout, stderr)
 	case "relay":
@@ -690,11 +692,12 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	anonFlag := fs.Bool("anon", false, "send anonymously: unsigned, no identity attached (recipient must opt in; may require proof-of-work)")
 	requestOnReject := fs.Bool("request-on-reject", false, "if the recipient's inbox policy rejects the message, send it as a contact request instead (no prompt)")
 	jsonOut := fs.Bool("json", false, "output json")
+	attachPath := fs.String("attach", "", "encrypt a file, share it read-only, and send chat.attachment")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
-	if fs.NArg() < 2 {
-		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--sign-with=session|identity] [--via-home-relay] [--anon]")
+	if fs.NArg() < 1 || (*attachPath == "" && fs.NArg() < 2) {
+		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--attach=<file>] [--sign-with=session|identity] [--via-home-relay] [--anon]")
 		return 1
 	}
 	// Check the envelope before anything is encrypted, signed, journalled or
@@ -760,6 +763,42 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			"Ask them to run `poweur identity add-encryption-key %s` to publish one.\n",
 			recipient, recipient)
 		return 1
+	}
+	if *attachPath != "" {
+		if *msgType != "" && *msgType != idpkg.MsgTypeChatAttachment {
+			fmt.Fprintln(stderr, "--attach sends a chat.attachment message")
+			return 1
+		}
+		*msgType = idpkg.MsgTypeChatAttachment
+		caption := ""
+		if fs.NArg() > 1 {
+			caption = fs.Arg(1)
+		}
+		encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		body, extra, err := prepareAttachment(context.Background(), cfg.RelayURL, identityValue, identityPriv, encPriv, recipientEncPub, recipient, *attachPath, caption)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if meta.values == nil {
+			meta.values = map[string]string{}
+		}
+		for key, value := range extra {
+			if _, exists := meta.values[key]; exists {
+				fmt.Fprintf(stderr, "--meta %s is set by --attach\n", key)
+				return 1
+			}
+			meta.values[key] = value
+		}
+		plaintext = body
+		if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 	sealed, err := cryptoe2e.Encrypt(recipientEncPub, []byte(plaintext))
 	if err != nil {
@@ -846,9 +885,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 		// The relay never hands a sender their own message back, so this copy
 		// is the only record that the conversation has two sides.
-		archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
+		sent := historyRecordThreaded(
 			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-			recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
+			recipient, timestamp, *msgType, *threadID, plaintext)
+		sent.Metadata = meta.Map()
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{sent}, stderr)
 
 		output := map[string]any{
 			"id":             messageID,
@@ -954,9 +995,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 
 	recordTick1(identityValue, messageID, recipient, useViaHomeRelay)
 
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
+	sent := historyRecordThreaded(
 		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
-		recipient, timestamp, *msgType, *threadID, plaintext)}, stderr)
+		recipient, timestamp, *msgType, *threadID, plaintext)
+	sent.Metadata = meta.Map()
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{sent}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,
@@ -2026,7 +2069,8 @@ func printHelp(w io.Writer) {
   poweur identity use <identity> [--json]
   poweur identity list [--json]
   poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
+  poweur send <to> <message> [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
+  poweur attach save <peer> --id=<message-id> --out=<file> [--json]
   poweur inbox [--use-identity=...] [--json]
   poweur listen [--use-identity=...] [--json] [--once]
   poweur outbox [list|retry]

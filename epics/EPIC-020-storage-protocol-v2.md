@@ -33,7 +33,7 @@
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
 | E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
-| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history (Go/TS/CLI/web) with peer-hash names, tail/before and id dedupe; attachments still open |
+| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history and CLI attachments (share + sealed payload) are in; web download, the 20 MB cross-relay case and the rest of the Phase 9 restore list remain |
 | **Wave 4 — cutover** | | |
 | E20-T12 Migration & v1 removal | **in progress** | v1 implementation removed; system-only operator migration and production rehearsal remain open; no deployment |
 | **Wave 5 — after launch, demand-led** | | |
@@ -147,8 +147,9 @@ as the test reference; retain already ported temporary system-file tests as regr
       still-active messaging browser suites.
 - [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
       visibility on a different relay.
-- [ ] Encrypted attachment upload/open: 20 MB across relays; no plaintext bytes/name/MIME
-      in provider storage; malformed/missing/revoked attachments fail safely.
+- [ ] Encrypted attachment upload/open: CLI send/save keeps name, MIME and bytes out of
+      the provider (`INT_HISTORY_02`). Still open: 20 MB across two relays, web download,
+      and malformed/missing/revoked attachment failures.
 - [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
       analytics consent, group create/add/remove and quota display on v2.
 
@@ -640,9 +641,10 @@ Replaces E09-T1's layout and closes E09-T4's plaintext-bytes gap.
       multi-device dedupe by message id
 - [x] SDK: `tail(peer, {limit})`, `before(peer, cursor, {limit})`, `append(records)`; tray loads
       read one tail chunk per conversation
-- [ ] Attachments: sealed file + per-file share with the recipient; content key, filename and
+- [x] Attachments: sealed file + per-file share with the recipient; content key, filename and
       MIME inside the encrypted payload; plaintext metadata keeps only node id, ciphertext size
-      and hash
+      and hash. CLI `send --attach` and `attach save`. The web Open button still shows the
+      name and does not download yet.
 - [x] CLI `poweur history [peer] --limit --before --thread --json`
 
 **Acceptance:** with 20 conversations and 10k messages the tray fetches ≤ 20 tail chunks;
