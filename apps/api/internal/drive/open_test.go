@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -100,5 +102,15 @@ func TestOpenS3(t *testing.T) {
 	}
 	if _, err := store.PutIf(t.Context(), "drives/owner/chunks/object", []byte("other"), ""); !errors.Is(err, provider.ErrPrecondition) {
 		t.Fatal(err)
+	}
+}
+
+func TestProbeTimeoutsAreNotIncompatibility(t *testing.T) {
+	wrapped := fmt.Errorf("S3 conditional create: %w", &url.Error{Op: "Put", URL: "https://s3.test/x", Err: context.DeadlineExceeded})
+	if !timedOut(wrapped) || !timedOut(fmt.Errorf("S3 conditional replace: %w", context.DeadlineExceeded)) {
+		t.Fatal("a slow store was treated as incompatible")
+	}
+	if timedOut(errors.New("S3 conditional create is not enforced (<nil>)")) {
+		t.Fatal("an incompatible store was treated as slow")
 	}
 }
