@@ -104,6 +104,7 @@ relay/identities/<identity>.json
 relay/spool/{messages,acks}/<identity>/<20-digit-sequence>.json
 relay/keystore/<identity>.json
 relay/group-shares/<group>/<drive>
+relay/group-rosters/<group>.json
 ```
 
 Journal segments are immutable JSON envelopes containing a format version, first
@@ -330,7 +331,13 @@ current choices:
   served from the cache and may lag another process until its next write or event.
 - **Idempotency.** A request ID (16 bytes hex) returns the prior result for the same
   content and is refused for different content, across restarts.
-- **GC** drops superseded versions after the retention period through a journalled `gc`
+- **Envelope versions.** Node info carries `key_version`, `name_version` and `content_version`:
+  the newest versions holding each envelope. A reader fetches a listing or a node's ancestry in
+  one request and decrypts each child with the folder key it already holds, instead of walking
+  every node's history and re-opening every ancestor. Readers still verify every version they
+  use; the relay learns nothing new, since it already stores those versions.
+- **GC** never deletes a version that carries a live node's envelope: past the retention period
+  such a version keeps its manifest and releases only its content. Otherwise it drops superseded versions through a journalled `gc`
   operation, deletes chunks no retained version or record references, and deletes
   uncommitted uploads older than the upload TTL. Clients that pause longer than the TTL
   between upload and commit must re-run `chunks/missing`. Run GC in one process per
@@ -338,28 +345,51 @@ current choices:
 - **Trim** releases the chunks of trimmed records; the segments that hold them stay until
   journal compaction.
 
+## Public folders
+
+A public node is published on purpose (E20-T5). Its manifest sets `public: true`, carries its
+name in `plain_name` and a file's content key in `plain_key`, and has no sealed envelopes; its
+name hash is `hex(SHA-256("poweur/drive/public-name/v1\n" + folder + "\n" + name))`, which anyone
+can compute. Chunks keep the normal padded encrypted format, but since the key is public the relay
+(and any cache) can serve them. The canonical signed form appends `public`, `plain_name` and
+`plain_key` only for public manifests, so private manifests encode exactly as before. Public nodes
+never rotate.
+
+The engine keeps public trees coherent: everything under a public folder is public, a public
+tree's top folder sits directly under the drive root, and no node switches between public and
+private (publishing a private item means uploading a public copy). The relay serves them at
+`https://<identity>/pub/<folder>/<path>`: files decrypted, folders as JSON (or an HTML index for
+browsers), `/pub/` lists the public folders at the top. Responses carry an `ETag` (the head
+version), `Cache-Control: public, max-age=60` and `Content-Security-Policy: sandbox …`, so a
+published page's scripts run in an opaque origin, away from the identity host's viewer and
+storage. Nothing private resolves under `/pub`.
+
 ## HTTP surface
 
 All drive endpoints are under `/drive/{identity}` (`apps/api/internal/relay/drive_api.go`).
-Every request is authenticated like an inbox pickup: `GET /auth/challenge?identity=<caller>`,
-then `X-Poweur-Identity`, `X-Poweur-Challenge` and `X-Poweur-Signature` (the challenge signed by
-the identity key or a session key with `X-Poweur-Session-Id`). The caller may be a visitor homed
+Every request is a [signed request](../relay/api-reference.md#signed-requests): the caller signs
+method, path, query, time, a nonce and the body's hash with the identity key or a session key
+(`X-Poweur-Session-Id`), so there is no challenge round trip. The challenge flow of an inbox
+pickup is still accepted. The caller may be a visitor homed
 on another relay; its key is resolved like any peer's. Until node shares (E20-T7) only the drive's
 owner is permitted (`403` otherwise) — superseded by shares below. Knowing a hash is never permission to read a chunk.
 
 | Operation | Request | Response |
 |---|---|---|
-| Drive root, usage, quota | `GET /drive/{identity}` | `{drive, root, used, quota}` |
+| Drive root, usage, quota | `GET /drive/{identity}` | `{drive, root, used, quota, seq}`; `seq` is the changes cursor now |
 | Missing chunks / transfer URLs | `POST /chunks/missing` `{chunks:[{id,size}]}` (≤ 1024) | `{missing:[{id,size,upload:{method,url,headers}}]}` |
 | Upload through the relay | `PUT /chunks/{hash}` (body = encrypted chunk) | `{id,size}`; `422` if bytes do not hash to `{hash}` |
 | Commit | `POST /commit` `{id, manifest, pages}` or `{id, records}` or `{id, trim:{node,before,snapshot:{node,version}}}` | `{seq, head, positions}`; `409 {head}` on a stale base |
 | Changes | `GET /changes?cursor=N&limit=` | `{changes, cursor}` |
 | Node at head | `GET /nodes/{node}` | node info (`ETag` = head) |
-| Children | `GET /nodes/{node}/children?cursor=&limit=` | `{children, cursor}` |
+| Listing | `GET /nodes/{node}/listing?cursor=&limit=` | `{folder, children, cursor, shares, revoked}`: each node with its signed versions (head first, then the versions carrying its key, name and content-key envelopes), and the share evidence on the folder's chain and those children |
+| Ancestry | `GET /nodes/{node}/path` | `{path}`: the node and the ancestors the caller may read, nearest first, each with its versions |
+| Children | `GET /nodes/{node}/children?cursor=&limit=` | `{children, cursor}` (IDs only) |
 | Retained history | `GET /nodes/{node}/history` | `{versions}` |
 | Signed manifest / page | `GET /nodes/{node}/versions/{version}`, `…/pages/{page}` | immutable JSON |
 | Chunk through a version | `GET /nodes/{node}/versions/{version}/chunks/{hash}` | immutable bytes |
 | Chunk of an append record | `GET /nodes/{node}/chunks/{hash}` | immutable bytes |
+| Author cursor | `GET /nodes/{node}/author-cursor` (append role) | `{sequence, previous}`: the caller's chain position, so appending never re-reads the log |
 | Append tail | `GET /nodes/{node}/records?from=N&limit=` | `{records:[{position,record}], next}`; `410 {trimmed_before, snapshot}` |
 | Shares | `GET /shares` | `{shares}`: all for the owner; own and administered for members |
 | Event stream | `GET /events` | SSE `drive.changed`, filtered per caller; `drive.revoked` then close |
@@ -429,7 +459,12 @@ link opens it and is journalled against `caps.downloads`. Each link is limited t
 password is `401 link_password`. Share caps are charged, durably, to the closest share that
 allowed the write: `caps.files` counts creates, `caps.records` appended records (both
 `429 share_limit`), `caps.bytes` new chunk bytes (`507`). The owner is never capped. The
-decrypting viewer at `/s/<token>#<secret>` is web work (Phase 8/9).
+viewer: `https://<owner>/s/<link>#<secret>` serves the standalone web page `viewer.html` (no
+app state, no identity) under `default-src 'none'; script-src 'self'; style-src 'self';
+connect-src 'self' https:; frame-ancestors 'none'` and `no-referrer`. It removes the fragment
+from the address bar and history at load, derives the key (and password verifier) in the
+browser, opens the link with `openLink` (SDK), verifies authors from public identity
+documents, and decrypts file names and downloads locally. Both CLIs print this URL.
 
 **Implemented anonymous writes (file requests).** Someone with only a link signs with a
 throwaway Ed25519 key as a **guest author** `g<base32 key>.guest.invalid` (`drive/guest.go`,
@@ -450,8 +485,26 @@ engine reads rosters from a relay cache that never touches a drive (warmed at st
 first use, replaced when the relay accepts a new roster). A roster update that drops anyone
 journals a `grouprevoke` on the group's drive and every drive indexed as sharing with it
 (`relay/group-shares/<group>/<drive>`): their access ends at once, their streams close, and
-the subtrees of key-bearing shares to the group become `rotate_required`. Groups hosted on
-other relays cannot be members yet: the host relay has no way to read a remote roster.
+the subtrees of key-bearing shares to the group become `rotate_required`.
+
+A group identity hosted on **another relay** can be a member too. Its roster is
+self-verifying, so a member presents it with any drive request (`X-Poweur-Group-Roster`,
+base64url of the signed `group.json`). The host relay verifies the group's signature, that the
+caller is on the roster, and that its `epoch` equals the one the group's relay reports now
+(`GET /groups/{group}/epoch`, public; `0` for identities that are not groups). A verified
+roster is cached and rechecked against the epoch at least every minute; a moved epoch drops it
+until a member presents the new one, so a removed member's copy stops working at once. The last
+verified roster is kept at `relay/group-rosters/<group>.json`; a newer one is diffed against it
+and departed members are revoked as for local groups.
+
+**Implemented offers and mounts (PCP-0008).** Sharing with a member sends them an end-to-end
+encrypted `sys.share.offer` carrying the signed share, the drive's relay and the shared node's
+name and kind (a member cannot decrypt a shared root's own name). Accepting requires the offered
+share to be exactly the one the relay holds for the member (same signed hash) and to open the
+node; the client then records a mount in the member's own encrypted drive at
+`.poweur/private/mounts.json` and answers `sys.share.accept`. Revoking sends `sys.share.revoked`.
+None of these messages grants access. CLI: `poweur drive share add` (offers by default),
+`drive accept <offer.json>`, `drive mounts`, and `--drive <owner> /<node>/…` to work inside a mount.
 
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the

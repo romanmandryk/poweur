@@ -285,13 +285,21 @@ func TestVectors_DriveManifests(t *testing.T) {
 	create, _ := fileCreate(t, refs(1030))
 	replace := create
 	replace.Operation, replace.Parent, replace.Version, replace.Folder, replace.Name, replace.NameHash, replace.NodeKey, replace.ContentKey = OpReplace, mV1, mV2, "", nil, "", nil, nil
+	publicFile := create
+	publicFile.Public, publicFile.Name, publicFile.NodeKey, publicFile.ContentKey = true, nil, nil, nil
+	publicFile.PlainName, publicFile.PlainKey = "report.pdf", enc(bytes.Repeat([]byte{7}, 32))
+	publicFile.NameHash = PublicNameHash(publicFile.Folder, publicFile.PlainName)
+	publicFolder := publicFile
+	publicFolder.Kind, publicFolder.Mode, publicFolder.PlainKey, publicFolder.Count, publicFolder.Pages, publicFolder.PlainName = KindFolder, "", "", 0, []string{}, "site"
+	publicFolder.NameHash = PublicNameHash(publicFolder.Folder, "site")
 	root := create
 	root.Kind, root.Mode, root.ContentKey, root.Count, root.Pages, root.Folder, root.Name, root.NameHash = KindFolder, "", nil, 0, []string{}, "", nil, ""
 	for _, c := range []struct {
 		name string
 		m    Manifest
 		p    []ChunkPage
-	}{{"file-create", create, pages}, {"replace", replace, pages}, {"root-create", root, nil}} {
+	}{{"file-create", create, pages}, {"replace", replace, pages}, {"root-create", root, nil},
+		{"public-file-create", publicFile, pages}, {"public-folder-create", publicFolder, nil}} {
 		m := c.m
 		if err := m.Sign(priv); err != nil {
 			t.Fatal(err)
@@ -312,5 +320,48 @@ func TestVectors_DriveManifests(t *testing.T) {
 	}
 	if err := os.WriteFile("../testdata/vectors/drive-manifests.json", append(raw, '\n'), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Public nodes publish their name and content key on purpose; everything
+// that would make them half-private, rotate or leak into private encoding is
+// refused, and private manifests encode exactly as before.
+func TestManifestPublic(t *testing.T) {
+	enc := base64.RawURLEncoding.EncodeToString
+	base, _ := fileCreate(t, refs(1))
+	private, _ := base.Canonical()
+	m := base
+	m.Public, m.Name, m.NodeKey, m.ContentKey = true, nil, nil, nil
+	m.PlainName, m.PlainKey = "index.html", enc(bytes.Repeat([]byte{7}, 32))
+	m.NameHash = PublicNameHash(m.Folder, m.PlainName)
+	if err := m.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	public, _ := m.Canonical()
+	if bytes.Equal(public, private) || !bytes.Contains(public, []byte("index.html")) {
+		t.Fatal("public fields are not signed")
+	}
+	sealed := base.NodeKey
+	for name, mutate := range map[string]func(*Manifest){
+		"sealed node key":     func(m *Manifest) { m.NodeKey = sealed },
+		"wrong name hash":     func(m *Manifest) { m.NameHash = strings.Repeat("a", 64) },
+		"not normalized name": func(m *Manifest) { m.PlainName = "cafe\u0301.txt"; m.NameHash = PublicNameHash(m.Folder, m.PlainName) },
+		"short key":           func(m *Manifest) { m.PlainKey = enc([]byte{1}) },
+		"file without key":    func(m *Manifest) { m.PlainKey = "" },
+		"public root":         func(m *Manifest) { m.Folder = ""; m.NameHash = PublicNameHash("", m.PlainName) },
+		"rotated":             func(m *Manifest) { m.Generation = 2 },
+		"rotation":            func(m *Manifest) { m.Operation, m.Parent, m.PlainName, m.NameHash, m.Folder = OpRotate, mV1, "", "", "" },
+	} {
+		c := m
+		mutate(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// A private manifest may not carry public fields.
+	leaky := base
+	leaky.PlainName = "x"
+	if err := leaky.Validate(); err == nil {
+		t.Error("private manifest with a plaintext name accepted")
 	}
 }

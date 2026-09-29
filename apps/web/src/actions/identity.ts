@@ -60,6 +60,7 @@ const wrapKeysNative = wrapKeysNativeJs as (
 const wrapKeysWithPRF = wrapKeysWithPRFJs as (prfOutput: unknown, signingJWK: unknown, encJWK: unknown, seed?: Seed) => Promise<unknown>;
 import { generateSeedIdentityJwks, keyBytesFromJwks, publicKeyFromJwk, toBase64url } from "../lib/vault.js";
 import { identityAppUrl, type CustodyChoice } from "../lib/claim";
+import { chatTargetQuery } from "../lib/visit";
 import { useData } from "../state/data";
 import { useRoute, type SubPageId } from "../state/route";
 import { afterUnlock, lockIdentity, refreshSession, switchIdentity, useSession } from "../state/session";
@@ -340,7 +341,7 @@ export async function handOffToIdentityOrigin(identity: string): Promise<boolean
   clearUnlockedKeys();
   refreshSession();
   setLoading(true, `Taking you to ${identity}…`);
-  globalThis.location.href = `${identityAppUrl(identity)}#claim=${payload}`;
+  globalThis.location.href = `${identityAppUrl(identity)}${chatTargetQuery()}#claim=${payload}`;
   return true;
 }
 

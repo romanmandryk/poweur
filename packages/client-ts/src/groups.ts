@@ -77,19 +77,10 @@ export class GroupMessaging {
       ? relayValue.replace(/\/+$/, "")
       : `${this.#scheme()}://${relayValue.replace(/\/+$/, "")}`;
     const relay = this.#clientFor(relayUrl);
-    const { challenge } = await relay.request<{ challenge: string }>({
-      method: "GET",
-      path: `/auth/challenge?identity=${encodeURIComponent(signer.identity)}`,
-    });
-    const signature = await signer.sign(challenge, "base64std");
     const document = await relay.request<ShareGroup>({
       method: "GET",
       path: `/groups/${encodeURIComponent(name)}`,
-      headers: {
-        "X-Poweur-Identity": signer.identity,
-        "X-Poweur-Challenge": challenge,
-        "X-Poweur-Signature": signature,
-      },
+      sign: { signer },
     });
     if (document.group.toLowerCase() !== name || document.owner.toLowerCase() !== name) {
       throw new PoweurError("invalid_document", "relay returned a document for another group");

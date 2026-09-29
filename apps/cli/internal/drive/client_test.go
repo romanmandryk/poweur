@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,31 +14,42 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	protocol "github.com/poweur/identity/drive"
 )
 
+// fixture verifies every request's signature the way the relay does and
+// counts authenticated requests; none may fetch a challenge first.
 func fixture(t *testing.T, handle http.HandlerFunc) (*Client, *int) {
 	t.Helper()
 	pub, key, _ := ed25519.GenerateKey(nil)
-	challenges := 0
+	signed := 0
+	nonces := map[string]bool{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/challenge" {
-			challenges++
-			_ = json.NewEncoder(w).Encode(map[string]string{"challenge": strconv.Itoa(challenges)})
+			t.Error("signed requests need no challenge")
+			w.WriteHeader(400)
 			return
 		}
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		sum := sha256.Sum256(body)
+		nonce := r.Header.Get("X-Poweur-Nonce")
+		message := strings.Join([]string{"poweur-request/v1", r.Header.Get("X-Poweur-Identity"), r.Method, r.URL.RequestURI(), r.Header.Get("X-Poweur-Timestamp"), nonce, hex.EncodeToString(sum[:])}, "\n")
 		signature, err := base64.StdEncoding.DecodeString(r.Header.Get("X-Poweur-Signature"))
-		if err != nil || !ed25519.Verify(pub, []byte(strconv.Itoa(challenges)), signature) {
-			t.Error("invalid challenge signature")
+		if err != nil || nonces[nonce] || !ed25519.Verify(pub, []byte(message), signature) {
+			t.Error("invalid request signature")
 			w.WriteHeader(401)
 			return
 		}
+		nonces[nonce] = true
+		signed++
 		handle(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return &Client{Relay: server.URL, Identity: "alice.poweur.net", Key: key}, &challenges
+	return &Client{Relay: server.URL, Identity: "alice.poweur.net", Key: key}, &signed
 }
 func TestCommitRetry(t *testing.T) {
 	var bodies []string

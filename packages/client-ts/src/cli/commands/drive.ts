@@ -1,5 +1,6 @@
 import { driveFilesCommand } from "./drive-files.js";
 import { driveOpsCommand } from "./drive-ops.js";
+import { driveOffersCommand } from "./drive-offers.js";
 import { DriveClient } from "../../drive/client.js";
 import { openClient } from "../../node/session-factory.js";
 import { flagBool, flagNumber, flagString, parseArgs, requirePositional, UsageError } from "../args.js";
@@ -7,8 +8,9 @@ import { write, type Streams } from "../output.js";
 
 export async function driveCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0];
-  if (["mkdir", "put", "get", "mv", "rm", "list"].includes(sub ?? "")) return driveFilesCommand(argv, streams);
-  if (["history", "append", "tail", "trim", "watch", "share", "link", "transfer"].includes(sub ?? "")) return driveOpsCommand(argv, streams);
+  if (["mkdir", "put", "get", "mv", "rm", "list", "shared"].includes(sub ?? "")) return driveFilesCommand(argv, streams);
+  if (["history", "append", "tail", "trim", "watch", "share", "link", "transfer", "rotate"].includes(sub ?? "")) return driveOpsCommand(argv, streams);
+  if (sub === "accept" || sub === "mounts") return driveOffersCommand(argv, streams);
   if (!["info", "node", "ls", "changes", "records"].includes(sub ?? "")) {
     throw new UsageError("usage: poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]");
   }

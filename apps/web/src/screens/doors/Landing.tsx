@@ -10,6 +10,7 @@ import { goToIdentityDoor, lookUpExistingId, type ExistingIdVerdict } from "../.
 import { cn } from "../../lib/cn";
 import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { hasRelayUrl } from "../../lib/storage.js";
+import { pendingChatTarget } from "../../lib/visit";
 import { useRoute } from "../../state/route";
 import { useSession, type ModeInfo } from "../../state/session";
 import { BrandMark } from "../../ui/Logo";
@@ -35,6 +36,7 @@ export function Landing() {
   // Production is the shell's default relay, so the picker is a switch, not a
   // gate; with no relay at all there is nothing to claim under.
   const showClaim = !prompt || hasRelayUrl();
+  const chatTarget = info.mode === "launcher" ? pendingChatTarget() : "";
 
   return (
     <DoorPage id="landing">
@@ -50,6 +52,11 @@ export function Landing() {
         <p className="landing-sub mt-3 max-w-[360px] animate-fade-in-up text-base leading-normal text-muted">
           Claim an identity you own, and take it everywhere.
         </p>
+        {chatTarget && (
+          <p id="landing-chat-target" className="mt-3 max-w-[360px] rounded-full bg-violet-500/10 px-4 py-1.5 text-sm text-violet-700 dark:text-violet-200">
+            Claim your ID, or open the one you have, to message <span className="font-mono">{chatTarget}</span>.
+          </p>
+        )}
       </div>
       {prompt && (
         <div className={`landing-card ${cardClass}`}>

@@ -13,6 +13,7 @@ import { concatBytes, toBase64url, utf8 } from "../encoding.js";
 import { driveContext } from "./crypto.js";
 import { MAX_COUNTER, hex, lengthPrefixed, sealedFields, strictBase64, validChunk, validHex, validIdentity, validatePayload } from "./internal.js";
 import type { ChunkRef, DriveSealedPayload } from "./records.js";
+import { normalizeName } from "./names.js";
 
 export const PAGE_SIZE = 1024;
 export const MANIFEST_OPERATIONS = ["create", "replace", "move", "rotate", "remove"] as const;
@@ -52,7 +53,49 @@ export interface Manifest {
   content_key?: DriveSealedPayload | null;
   count: number;
   pages: string[];
+  /** Public nodes (EPIC-020 E20-T5): published on purpose, with a plaintext
+   * name and a file's content key in the clear; no sealed envelopes; never
+   * rotated. Private manifests leave these out. */
+  public?: boolean;
+  plain_name?: string;
+  plain_key?: string;
   signature: string;
+}
+
+/** A public node's lookup token: anyone can compute it. */
+export function publicNameHash(folder: string, name: string): string {
+  return hex(sha256(utf8(`poweur/drive/public-name/v1\n${folder}\n${name}`)));
+}
+
+function validatePublic(m: Manifest): void {
+  if (m.name || m.node_key || m.content_key) throw new Error("a public node carries no sealed envelopes");
+  if (m.generation !== 1) throw new Error("a public node never rotates");
+  const plainName = m.plain_name ?? "", plainKey = m.plain_key ?? "";
+  const hasName = plainName !== "";
+  if (hasName) {
+    if (normalizeName(plainName) !== plainName) throw new Error("invalid public name");
+    if (m.name_hash !== publicNameHash(m.folder, plainName)) throw new Error("public name hash mismatch");
+  } else if (m.name_hash !== "") throw new Error("a public name hash needs its name");
+  if (plainKey !== "" && strictBase64(plainKey).length !== 32) throw new Error("invalid public content key");
+  switch (m.operation) {
+    case "create":
+      if (m.parent !== "" || m.folder === "" || !hasName) throw new Error("a public create names its folder and name (the root is never public)");
+      if ((m.kind === "file") !== (plainKey !== "")) throw new Error("a public file create carries its content key, a folder none");
+      break;
+    case "replace":
+      if (m.parent === "" || m.kind !== "file" || hasName || m.folder !== "" || plainKey !== "") throw new Error("a replace changes only a file's content");
+      break;
+    case "move":
+      if (m.parent === "" || m.folder === "" || !hasName || plainKey !== "") throw new Error("a public move carries the new folder and name");
+      break;
+    case "remove":
+      if (m.parent === "" || hasName || m.folder !== "" || plainKey !== "" || m.count !== 0) throw new Error("a removal carries no name, key or content");
+      break;
+    case "rotate":
+      throw new Error("a public node has no keys to rotate");
+    default:
+      throw new Error("unknown manifest operation");
+  }
 }
 
 export function validateChunkPage(page: ChunkPage): void {
@@ -112,6 +155,8 @@ export function validateManifest(m: Manifest): void {
   if ((pages === 0 && m.count !== 0) || (pages > 0 && (m.count <= (pages - 1) * PAGE_SIZE || m.count > pages * PAGE_SIZE))) {
     throw new Error("page list does not match the chunk count");
   }
+  if (m.public) return validatePublic(m);
+  if (m.public === false || m.plain_name || m.plain_key) throw new Error("a plaintext name or key belongs to a public node");
   const hasName = Boolean(m.name) || m.name_hash !== "";
   if (Boolean(m.name) !== (m.name_hash !== "") || (m.name_hash !== "" && !validHex(m.name_hash, 32))) {
     throw new Error("name and name hash go together");
@@ -152,7 +197,9 @@ export function canonicalManifest(m: Manifest): Uint8Array {
   validateManifest(m);
   const fields = ["1", m.drive, m.node, m.version, m.parent, m.operation, m.author, String(m.generation), m.kind, m.mode, m.folder,
     ...sealedFields(m.name), m.name_hash, ...sealedFields(m.node_key), ...sealedFields(m.content_key),
-    String(m.count), String(m.pages.length), ...m.pages];
+    String(m.count), String(m.pages.length), ...m.pages,
+    // Public nodes append their plaintext fields; private ones encode as before.
+    ...(m.public ? ["public", m.plain_name ?? "", m.plain_key ?? ""] : [])];
   return lengthPrefixed("poweur/drive/manifest-sign/v1\n", fields);
 }
 

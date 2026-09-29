@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,8 +26,13 @@ type Client struct {
 	Relay, Identity, Drive string
 	SessionID              string
 	Key                    ed25519.PrivateKey
-	HTTP                   *http.Client
-	Cache                  ChunkCache
+	// LinkID authenticates as a link holder instead of an identity (with
+	// LinkVerifier for a password-protected link); Key is then only a guest
+	// signing key.
+	LinkID       string
+	LinkVerifier []byte
+	HTTP         *http.Client
+	Cache        ChunkCache
 }
 
 type Error struct {
@@ -42,39 +49,36 @@ func (c *Client) httpClient() *http.Client {
 	}
 	return &http.Client{Timeout: 30 * time.Second}
 }
-func (c *Client) auth(ctx context.Context) (http.Header, error) {
+
+// auth sets a request's credentials: a link holder names its link; anyone
+// else signs the request itself (method, path and query, time, nonce and
+// the body's SHA-256), so the relay needs no challenge round trip.
+func (c *Client) auth(req *http.Request, body []byte) error {
+	if c.LinkID != "" {
+		req.Header.Set("X-Poweur-Link", c.LinkID)
+		if len(c.LinkVerifier) > 0 {
+			req.Header.Set("X-Poweur-Link-Verifier", base64.RawURLEncoding.EncodeToString(c.LinkVerifier))
+		}
+		return nil
+	}
 	if len(c.Key) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("invalid signing key")
+		return fmt.Errorf("invalid signing key")
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(c.Relay, "/")+"/auth/challenge?identity="+url.QueryEscape(c.Identity), nil)
-	if err != nil {
-		return nil, err
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
 	}
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, responseError(resp)
-	}
-	var body struct {
-		Challenge string `json:"challenge"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); err != nil {
-		return nil, err
-	}
-	if body.Challenge == "" {
-		return nil, fmt.Errorf("empty auth challenge")
-	}
-	h := http.Header{}
+	sum := sha256.Sum256(body)
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	message := strings.Join([]string{"poweur-request/v1", c.Identity, req.Method, req.URL.RequestURI(), timestamp, hex.EncodeToString(nonce), hex.EncodeToString(sum[:])}, "\n")
 	if c.SessionID != "" {
-		h.Set("X-Poweur-Session-Id", c.SessionID)
+		req.Header.Set("X-Poweur-Session-Id", c.SessionID)
 	}
-	h.Set("X-Poweur-Identity", c.Identity)
-	h.Set("X-Poweur-Challenge", body.Challenge)
-	h.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(ed25519.Sign(c.Key, []byte(body.Challenge))))
-	return h, nil
+	req.Header.Set("X-Poweur-Identity", c.Identity)
+	req.Header.Set("X-Poweur-Timestamp", timestamp)
+	req.Header.Set("X-Poweur-Nonce", hex.EncodeToString(nonce))
+	req.Header.Set("X-Poweur-Signature", base64.StdEncoding.EncodeToString(ed25519.Sign(c.Key, []byte(message))))
+	return nil
 }
 func responseError(resp *http.Response) error {
 	var body struct {
@@ -85,15 +89,13 @@ func responseError(resp *http.Response) error {
 	return &Error{resp.StatusCode, body.Code, body.Detail}
 }
 func (c *Client) request(ctx context.Context, method, suffix string, body []byte) ([]byte, error) {
-	h, err := c.auth(ctx)
-	if err != nil {
-		return nil, err
-	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.Relay, "/")+"/drive/"+url.PathEscape(c.driveID())+suffix, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header = h
+	if err := c.auth(req, body); err != nil {
+		return nil, err
+	}
 	if method == "POST" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -269,15 +271,13 @@ func (c *Client) putChunk(ctx context.Context, target chunkTarget, blob []byte) 
 		if !strings.HasPrefix(target.URL, "/") {
 			return fmt.Errorf("invalid upload url")
 		}
-		h, err := c.auth(ctx)
-		if err != nil {
-			return err
-		}
 		req, err = http.NewRequestWithContext(ctx, method, strings.TrimRight(c.Relay, "/")+target.URL, bytes.NewReader(blob))
 		if err != nil {
 			return err
 		}
-		req.Header = h
+		if err := c.auth(req, blob); err != nil {
+			return err
+		}
 	} else {
 		req, err = http.NewRequestWithContext(ctx, method, target.URL, bytes.NewReader(blob))
 		if err != nil {
@@ -320,15 +320,13 @@ type Event struct {
 // Subscribe reads GET /drive/{id}/events until ctx ends or the relay closes
 // the stream. onEvent returning an error stops the stream.
 func (c *Client) Subscribe(ctx context.Context, onEvent func(Event) error) error {
-	h, err := c.auth(ctx)
-	if err != nil {
-		return err
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.Relay, "/")+"/drive/"+url.PathEscape(c.driveID())+"/events", nil)
 	if err != nil {
 		return err
 	}
-	req.Header = h
+	if err := c.auth(req, nil); err != nil {
+		return err
+	}
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {

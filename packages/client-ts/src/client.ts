@@ -32,6 +32,10 @@ import type { ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
 import { DriveClient } from "./drive/client.js";
 import { DriveFiles } from "./drive/files.js";
+import { DriveJsonLog } from "./drive/jsonlog.js";
+
+/** Where the sign-in consent log lives (EPIC-008 E08-T3). */
+export const AUTH_LOG_PATH = ".poweur/private/logs/auth.log";
 import { DeviceRegistry, SystemFiles } from "./systemfiles.js";
 import {
   CONTACT_ACCEPTED,
@@ -141,12 +145,35 @@ export class PoweurClient {
     if (!this.decryptor) {
       throw new PoweurError("invalid_argument", "message history needs a decryptor to seal to");
     }
-    const encryptionPrivateKey = await this.decryptor.privateKeyBytes();
+    // One archive per client: it remembers the folders it resolved and how
+    // far it has read each conversation, so a refresh reads only what is new.
+    this.#history ??= (async () => {
+      const encryptionPrivateKey = await this.decryptor!.privateKeyBytes();
+      const signBytes = this.signer.signBytes?.bind(this.signer);
+      const files = signBytes
+        ? new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey })
+        : undefined;
+      return new MessageHistory(this.signer.identity, this.decryptor!, files);
+    })();
+    try {
+      return await this.#history;
+    } catch (error) {
+      this.#history = undefined;
+      throw error;
+    }
+  }
+  #history?: Promise<MessageHistory>;
+
+  /**
+   * The sign-in consent log (EPIC-008 E08-T3): every approval this identity
+   * gave, end-to-end encrypted on its own drive at `.poweur/private/logs/auth.log`.
+   */
+  async consentLog(): Promise<DriveJsonLog<Record<string, unknown>>> {
+    if (!this.decryptor) throw new PoweurError("invalid_argument", "the consent log needs the identity's encryption key");
     const signBytes = this.signer.signBytes?.bind(this.signer);
-    const files = signBytes
-      ? new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey })
-      : undefined;
-    return new MessageHistory(this.signer.identity, this.decryptor, files);
+    if (!signBytes) throw new PoweurError("unsupported", "the consent log needs a signer for the drive");
+    const files = new DriveFiles(new DriveClient(this.relay, this.signer), { sign: signBytes, encryptionPrivateKey: await this.decryptor.privateKeyBytes() });
+    return new DriveJsonLog(files, AUTH_LOG_PATH);
   }
 
   /**

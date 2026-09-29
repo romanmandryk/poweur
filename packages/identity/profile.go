@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,18 +24,48 @@ type ProfileLink struct {
 	URL   string `json:"url"`
 }
 
+// IdentityPageSettings controls the relay-rendered public identity page.
+// Pointer booleans preserve the distinction between an omitted field (use the
+// forward-compatible default) and an explicit false. The document is public;
+// enforcement of anonymous ingress remains in the private inbox policy.
+type IdentityPageSettings struct {
+	Enabled                    *bool `json:"enabled,omitempty"`
+	Indexable                  *bool `json:"indexable,omitempty"`
+	AdvertiseAnonymousMessages *bool `json:"advertise_anonymous_messages,omitempty"`
+}
+
+// EnabledOrDefault reports whether the generated page is enabled. Absence is
+// deliberately on so every existing identity gains a page without migration.
+func (s *IdentityPageSettings) EnabledOrDefault() bool {
+	return s == nil || s.Enabled == nil || *s.Enabled
+}
+
+// IndexableOrDefault reports whether crawlers may index the generated page.
+// Off unless the owner turned it on: a profile written for contacts should
+// not become searchable without being asked.
+func (s *IdentityPageSettings) IndexableOrDefault() bool {
+	return s != nil && s.Indexable != nil && *s.Indexable
+}
+
+// AdvertisesAnonymousMessages reports the public presentation preference. It
+// never substitutes for inbox-policy enforcement.
+func (s *IdentityPageSettings) AdvertisesAnonymousMessages() bool {
+	return s != nil && s.AdvertiseAnonymousMessages != nil && *s.AdvertiseAnonymousMessages
+}
+
 // Profile is the schema of .poweur/public/profile.json.
 type Profile struct {
-	Version     int           `json:"version"`
-	DisplayName string        `json:"display_name,omitempty"`
+	Version     int    `json:"version"`
+	DisplayName string `json:"display_name,omitempty"`
 	// Avatar names an image file in the identity's .poweur/public/ (e.g.
 	// "avatar.png"), served at /.well-known/poweur/<name> — never a URL, so
 	// rendering somebody's profile cannot become a request to a host they
 	// chose.
-	Avatar string        `json:"avatar,omitempty"`
-	Bio    string        `json:"bio,omitempty"`
-	Links  []ProfileLink `json:"links,omitempty"`
-	Locale string        `json:"locale,omitempty"`
+	Avatar       string                `json:"avatar,omitempty"`
+	Bio          string                `json:"bio,omitempty"`
+	Links        []ProfileLink         `json:"links,omitempty"`
+	Locale       string                `json:"locale,omitempty"`
+	IdentityPage *IdentityPageSettings `json:"identity_page,omitempty"`
 }
 
 // Validate checks the profile document.
@@ -67,6 +98,12 @@ func ParseProfile(raw []byte) (Profile, error) {
 	var p Profile
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return Profile{}, fmt.Errorf("invalid profile.json: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err == nil {
+		if page, ok := fields["identity_page"]; ok && bytes.Equal(bytes.TrimSpace(page), []byte("null")) {
+			return Profile{}, fmt.Errorf("identity_page must be an object")
+		}
 	}
 	if err := p.Validate(); err != nil {
 		return Profile{}, err

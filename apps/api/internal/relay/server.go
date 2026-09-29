@@ -51,6 +51,7 @@ type Server struct {
 	powSecret       []byte
 	acks            *storage.AckStore
 	challenges      *storage.ChallengeStore
+	requestNonces   requestNonces
 	keystore        *storage.KeystoreStore
 	rendezvous      *storage.RendezvousStore
 	sessions        *storage.SessionStore
@@ -178,6 +179,9 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		logQuotaFileError(err)
 	})
 	s.driveErr = driveErr
+	if driveStore != nil {
+		s.quotas.store = driveStore
+	}
 	s.sysFiles = newMemSystemFiles()
 	if driveStore != nil {
 		s.drive = driveStore
@@ -269,6 +273,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
 	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
 	mux.HandleFunc("GET /groups/{group}", s.handleGroupGet)
+	mux.HandleFunc("GET /groups/{group}/epoch", s.handleGroupEpoch)
 	mux.HandleFunc("POST /groups/{group}/messages", s.handleGroupMessagesPost)
 	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
@@ -306,41 +311,58 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /drive/{identity}/shares", s.handleDriveShares)
 	mux.HandleFunc("GET /drive/{identity}/events", s.handleDriveEvents)
 	mux.HandleFunc("GET /drive/{identity}/links/{link}", s.handleDriveLink)
+	mux.HandleFunc("GET /drive/{identity}/links/{link}/stats", s.handleDriveLinkStats)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/shares", s.handleDriveNodeShares)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/author-cursor", s.handleDriveAuthorCursor)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/listing", s.handleDriveListing)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/path", s.handleDrivePath)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
+	mux.HandleFunc("GET /identity-page/assets/{file}", serveIdentityPageAsset)
+	mux.HandleFunc("GET /s/{link}", s.handleLinkViewer)
+	mux.HandleFunc("GET /pub", s.handlePublic)
+	mux.HandleFunc("GET /pub/{path...}", s.handlePublic)
+	mux.HandleFunc("GET /s/assets/{file}", s.handleLinkViewerAsset)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	mountRootIcons(mux, s.cfg.WebStaticDir)
-	return s.instrument(mux, corsMiddleware(mux))
+	return s.instrument(mux, corsMiddleware(hashSignedBodies(mux)))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Vary", "Accept")
+	host := requestHost(r)
+	s.advertiseIndieAuth(w, r)
+	// Only the exact identity root is the generated page. GET / is also the
+	// catch-all for unknown paths, and those stay the relay JSON document.
+	if r.URL.Path == "/" && wantsHTML(r) && s.identities.Exists(host) {
+		s.serveIdentityPage(w, r, host)
+		return
+	}
 	// Someone with no identity yet who lands on the launcher host wants the
 	// app, not a service banner — but this path is also the relay's root
 	// document, which every client reads to learn the relay's address and which
 	// hosts are launchers. Redirecting that turned the document into an HTML
 	// page and left the app unable to tell which front door it was standing in.
-	// So the redirect is for readers who did not ask for the document.
+	// So the redirect is for readers who did not ask for the document. An
+	// identity page still requires an explicit HTML accept; this redirect
+	// keeps the older launcher rule (E15-T7), including clients that send no
+	// Accept header.
 	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" && !wantsJSON(r) {
-		host := r.Host
-		if h, _, err := splitHostPort(host); err == nil {
-			host = h
-		}
 		if s.cfg.IsLauncherHost(host) {
 			http.Redirect(w, r, "/app/", http.StatusFound)
 			return
 		}
 	}
-	s.advertiseIndieAuth(w, r)
 	version, buildTime, versionHash := s.releaseInfo()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service":       "poweur-relay",
@@ -396,13 +418,6 @@ func (s *Server) releaseInfo() (version, buildTime, versionHash string) {
 		versionHash = buildinfo.Hash
 	}
 	return
-}
-
-// wantsJSON reports whether the caller asked for the root document itself.
-// Every `@poweur/client` JSON request says so; a browser navigating says
-// `text/html`, and curl says `*/*`.
-func wantsJSON(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -1060,6 +1075,10 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 // lets a client hold a push stream open and poll at the same time without the
 // two invalidating each other.
 func (s *Server) consumeChallenge(identity string, r *http.Request) (storage.Challenge, bool) {
+	// A signed request carries its own proof: no challenge round trip.
+	if r.Header.Get("X-Poweur-Timestamp") != "" {
+		return s.signedRequest(identity, r)
+	}
 	if value := r.Header.Get("X-Poweur-Challenge"); value != "" {
 		return s.challenges.ConsumeValue(identity, value)
 	}

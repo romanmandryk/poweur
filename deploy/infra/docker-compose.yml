@@ -107,7 +107,11 @@ services:
     environment:
       OTLP_HTPASSWD: ${OTLP_HTPASSWD:?Run deploy/setup-observability.sh first}
     volumes:
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # The directory, not the file. Deploy does `git reset --hard`, which
+      # replaces config.alloy with a new inode; a single-file bind mount keeps
+      # the old one, so Alloy reloads a config with no faro.receiver and
+      # /faro/collect 502s. Same fix as Caddy above.
+      - ./alloy:/etc/alloy:ro
       - alloy_data:/var/lib/alloy
     networks: [infra_net]
 

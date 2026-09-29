@@ -121,7 +121,14 @@ func (s *Server) driveCaller(w http.ResponseWriter, r *http.Request) (driveID, a
 	if !ok {
 		return "", "", false
 	}
-	return driveID, strings.ToLower(actor), true
+	actor = strings.ToLower(actor)
+	if header := r.Header.Get(groupRosterHeader); header != "" {
+		if err := s.presentRoster(r.Context(), header, actor); err != nil {
+			writeError(w, http.StatusForbidden, "group_roster", "group roster refused: "+err.Error())
+			return "", "", false
+		}
+	}
+	return driveID, actor, true
 }
 
 // driveNode authenticates the caller and checks need on the path's node.
@@ -149,6 +156,29 @@ func (s *Server) driveUploader(w http.ResponseWriter, r *http.Request, driveID, 
 		return false
 	}
 	return true
+}
+
+// handleDriveNodeShares lists the shares on a node and its ancestors to
+// anyone who may read the node, so they can verify version authors.
+func (s *Server) handleDriveNodeShares(w http.ResponseWriter, r *http.Request) {
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
+	if !ok {
+		return
+	}
+	shares, revoked, err := s.engine.SharesOn(r.Context(), driveID, r.PathValue("node"))
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	if shares == nil {
+		shares = []drive.Share{}
+	}
+	if revoked == nil {
+		revoked = []engine.RevokedShare{}
+	}
+	noStore(w)
+	// Revoked shares are evidence for versions written while they stood.
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares, "revoked": revoked})
 }
 
 // handleDriveShares lists the shares the caller may see: every share for the
@@ -222,8 +252,15 @@ func (s *Server) handleDriveGet(w http.ResponseWriter, r *http.Request) {
 		s.writeDriveError(w, err)
 		return
 	}
+	seq, err := s.engine.Seq(r.Context(), driveID)
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
 	noStore(w)
-	writeJSON(w, http.StatusOK, map[string]any{"drive": driveID, "root": root, "used": used, "quota": s.storageQuota(driveID)})
+	// seq is the changes cursor as of now: a client that has just read what it
+	// shows asks /changes?cursor=seq later to learn whether anything moved.
+	writeJSON(w, http.StatusOK, map[string]any{"drive": driveID, "root": root, "used": used, "quota": s.storageQuota(driveID), "seq": strconv.FormatUint(seq, 10)})
 }
 
 type chunkUpload struct {
@@ -496,6 +533,66 @@ func (s *Server) handleDriveRecords(w http.ResponseWriter, r *http.Request) {
 	}
 	noStore(w)
 	writeJSON(w, http.StatusOK, map[string]any{"records": records, "next": next})
+}
+
+// handleDriveAuthorCursor returns the caller's own chain position in an
+// append file, so appending never needs the whole log.
+func (s *Server) handleDriveAuthorCursor(w http.ResponseWriter, r *http.Request) {
+	driveID, actor, ok := s.driveNode(w, r, drive.RoleAppend)
+	if !ok {
+		return
+	}
+	seq, hash, err := s.engine.AuthorCursor(r.Context(), driveID, r.PathValue("node"), actor)
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, map[string]any{"sequence": seq, "previous": hash})
+}
+
+// handleDriveListing returns a folder and a page of its children with the
+// signed versions a reader needs to open each, and the share evidence for
+// them: one request instead of several per child.
+func (s *Server) handleDriveListing(w http.ResponseWriter, r *http.Request) {
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
+	if !ok {
+		return
+	}
+	limit, ok := queryUint(w, r, "limit")
+	if !ok {
+		return
+	}
+	listing, err := s.engine.Listing(r.Context(), driveID, r.PathValue("node"), r.URL.Query().Get("cursor"), int(limit))
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, listing)
+}
+
+// handleDrivePath returns a node and the ancestors the caller may read,
+// nearest first, each with the versions needed to open it.
+func (s *Server) handleDrivePath(w http.ResponseWriter, r *http.Request) {
+	driveID, actor, ok := s.driveNode(w, r, drive.RoleRead)
+	if !ok {
+		return
+	}
+	path, err := s.engine.Path(r.Context(), driveID, r.PathValue("node"))
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	readable := path[:0]
+	for _, n := range path {
+		if s.engine.Authorize(r.Context(), driveID, actor, n.ID, drive.RoleRead) != nil {
+			break
+		}
+		readable = append(readable, n)
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, map[string]any{"path": readable})
 }
 
 func (s *Server) handleDriveVersion(w http.ResponseWriter, r *http.Request) {

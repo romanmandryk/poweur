@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 
 const holder = vi.hoisted(() => ({ client: null as any, dav: null as any }));
 vi.mock("../../src/lib/client.js", async (importOriginal) => ({
@@ -7,7 +8,7 @@ vi.mock("../../src/lib/client.js", async (importOriginal) => ({
   clientFor: () => holder.client,
 }));
 
-import { ProfileEditor } from "../../src/components/ProfileEditor";
+import { ProfileEditor, type ProfileEditorHandle } from "../../src/components/ProfileEditor";
 import { readLocalAvatar, resetAvatarsForTests, saveLocalAvatar } from "../../src/state/avatars";
 import { useData } from "../../src/state/data";
 import { useSession } from "../../src/state/session";
@@ -91,5 +92,41 @@ describe("ProfileEditor photo", () => {
     fireEvent.change($("#pe-avatar")!, { target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] } });
     await waitFor(() => expect($("#pe-status")!.textContent).toBe("Choose an image file for your photo"));
     expect($(".pe-avatar-preview img")).toBeNull();
+  });
+});
+
+describe("ProfileEditor identity page settings", () => {
+  it("defaults the page on, while search indexing and anonymous messaging stay off", async () => {
+    render(<ProfileEditor profile={null} />);
+
+    expect($("#pe-page-enabled")).toBeChecked();
+    expect($("#pe-page-indexable")).not.toBeChecked();
+    expect($("#pe-page-anonymous")).not.toBeChecked();
+
+    fireEvent.click($("#pe-page-enabled")!);
+    fireEvent.click($("#pe-page-indexable")!);
+    fireEvent.click($("#pe-page-anonymous")!);
+    fireEvent.click($("#pe-save")!);
+
+    await waitFor(() => expect(holder.client.setProfile).toHaveBeenCalled());
+    expect(holder.client.setProfile.mock.calls[0][0].identity_page).toEqual({
+      enabled: false,
+      indexable: true,
+      advertise_anonymous_messages: true,
+    });
+  });
+
+  it("onboarding asks about search indexing, unchecked, and saves the choice", async () => {
+    const editor = createRef<ProfileEditorHandle>();
+    render(<ProfileEditor ref={editor} profile={null} showSave={false} />);
+    expect($("#pe-onboard-indexable")).toBeTruthy();
+    expect($("#pe-identity-page-settings")).toBeNull();
+    expect($("#pe-page-indexable")).not.toBeChecked();
+    // Leaving it alone is not input: onboarding writes nothing.
+    expect(editor.current!.hasInput()).toBe(false);
+    fireEvent.click($("#pe-page-indexable")!);
+    expect(editor.current!.hasInput()).toBe(true);
+    await act(async () => { await editor.current!.save(); });
+    expect(holder.client.setProfile.mock.calls[0][0].identity_page).toMatchObject({ indexable: true });
   });
 });

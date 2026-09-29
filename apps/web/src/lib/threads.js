@@ -35,9 +35,15 @@ export function previewFor(message) {
  */
 export function bodyFor(message) {
   if (message.plaintext == null) return "🔒 Could not decrypt";
-  return normalizeMessageType(message.type) === MSG_TYPE_CHAT_ATTACHMENT
-    ? `📎 ${message.metadata?.attachment_name || "Attachment"}`
-    : describeMessage(message.sender ?? "", message.type, message.plaintext);
+  if (normalizeMessageType(message.type) === MSG_TYPE_CHAT_ATTACHMENT) {
+    let name = message.metadata?.attachment_name || "";
+    try {
+      const parsed = JSON.parse(message.plaintext);
+      if (parsed?.name) name = parsed.name;
+    } catch { /* older clients put the label in metadata */ }
+    return `📎 ${name || "Attachment"}`;
+  }
+  return describeMessage(message.sender ?? "", message.type, message.plaintext);
 }
 
 /**

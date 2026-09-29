@@ -23,7 +23,7 @@
 | E05-T4 Public-link shares | **done** | `audience: [{"link": …}]` grant variant (26-char base32 token, argon2id password, expiry, download cap) in `packages/identity/grants.go`; `/s/<token>` endpoint; CLI and web share-dialog creation; spec + threat model; cross-relay `TestINT_SHARE_03` + web coverage |
 | E05-T5 Group identities | **done** | design doc [`group-identities.md`](../apps/docs/docs/files/group-identities.md); `admins` + `epoch` on `ShareGroup`, group's own tree at `poweur-sys/relay/groups/self.json` signed by the group's key; engine resolves named group identities out of their own trees (`apps/api/internal/files/grants.go`); `poweur group create/show/add/remove`; `TestINT_SHARE_04`. **Deferred:** cross-relay group resolution (needs a membership-check endpoint — enumeration oracle); per-admin signed updates; group messaging fan-out + key agreement = EPIC-009 E09-T5 |
 | E05-T6 File requests & guest conversion | **partial** | Create-only requests, isolated uploads, owner context/quotas, opt-in live notifications, claim continuity, explicit owner-approved ID upgrades, and verified/idempotent accepted-share accounting ship across CLI, SDK and web. Single-recipient challenge and durable/offline notification UX remain. |
-| E05-T7 Send: transfer front door, receipts & expiring transfers | **partial** | CLI-first `poweur transfer create` uploads through the resumable endpoint into `/shared/.transfers/<id>/`, issues an expiring read-only link, and supports password/download caps. Multi-file UI/mobile, durable resume state, cleanup, recipient delivery and receipts remain. |
+| E05-T7 Send: transfer front door, receipts & expiring transfers | **partial** | The v2 SDK and web Send panel create bounded-memory, multi-file encrypted transfers under `/shared/.transfers/<id>/`, checkpoint completed files, issue expiring passwordable/download-capped links, deliver expiring offers to Poweur IDs, revoke bytes, and show durable owner-only open counters. Transfers live under the hidden `.poweur/transfers/`; the web app releases expired transfers (files deleted, usage freed) when Files opens, with a browser journey covering Send → clean-browser link. Chunk-level resume of one large file (a dropped 5 GB upload restarts that file), relay-side expiry for owners who never return, mobile share-sheet entry, first-open typed notifications, zip download, email and entitlement limits remain. |
 
 ## Goal
 
@@ -257,6 +257,18 @@ an unverifiable email address. Every transfer is an introduction to Poweur.
       policy allows attachments.
 - [ ] Limits are entitlements (EPIC-026): max transfer size, retention days, egress; branding and
       longer retention are the natural paid line.
+
+**Implemented v2 slice:** `@poweur/client/drive` uploads browser `File` sources one encrypted
+4 MiB chunk at a time, so transfer memory is bounded rather than proportional to file size.
+Transfer checkpoints are encrypted with the web app's identity snapshot key; completed files
+survive a retry, while an interrupted uncommitted file restarts and normal drive GC reclaims its
+orphan chunks. The Files header opens a multi-file Send panel with message, expiry, password,
+download cap, direct Poweur-ID recipients, progress, encrypted local history and immediate
+revocation. Owner-authenticated link statistics expose only the durable open count, node and
+expiry. The link ID remains public capability metadata; fragment keys and passwords never reach
+the relay. This deliberately composes E20-T7/T10 rather than reviving the v1 WebDAV transfer
+implementation. Automatic server-side expiry deletion and first-open typed notifications remain
+open; email delivery remains owned by EPIC-023 and plan enforcement by EPIC-026.
 
 **Acceptance:** a 5 GB transfer resumes after a dropped connection; an email recipient downloads
 without an account and claims an ID with the sender already requested as a contact; an expired

@@ -245,6 +245,23 @@ func TestRevocationForcesRotation(t *testing.T) {
 	if n, _ := f.eng.Node(ctx, owner, log); n.RotateRequired {
 		t.Fatal("append-only revocation forced a rotation")
 	}
+	// Revoked shares stay listed as evidence: versions written through them
+	// remain verifiable after the revocation.
+	_, revoked, err := f.eng.SharesOn(ctx, owner, notes)
+	if err != nil || len(revoked) != 1 || revoked[0].Share.ID != s.ID || revoked[0].RevokedAt.IsZero() {
+		t.Fatalf("revoked evidence: %+v %v", revoked, err)
+	}
+	// Retiring a share that predates a rotation hands back no current key.
+	stale := f.grant(docs, bob, drive.RoleRead)
+	if err := f.rotate(docs); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.unshare(owner, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := f.eng.Node(ctx, owner, docs); n.RotateRequired {
+		t.Fatal("revoking a stale-generation share forced another rotation")
+	}
 }
 
 func TestExpiryAndFilteredChanges(t *testing.T) {

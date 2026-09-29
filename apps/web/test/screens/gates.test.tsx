@@ -8,6 +8,7 @@ const fake = vi.hoisted(() => ({
     setProfile: vi.fn(),
     sessions: { ensure: vi.fn(() => Promise.resolve({})) },
     system: vi.fn(() => ({})),
+    consentLog: vi.fn(async () => ({ append: vi.fn(async () => {}), recent: vi.fn(async () => []) })),
     signer: {},
   },
   consent: vi.fn(),

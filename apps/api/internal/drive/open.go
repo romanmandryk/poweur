@@ -43,7 +43,10 @@ func Open(cfg config.Config) (provider.Store, error) {
 		if err != nil {
 			return nil, err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// S3 is the relay's only durable store: if it cannot answer the
+		// probe promptly the relay refuses to start rather than serve a
+		// degraded service. Each probe step gets stores3.ProbeStepTimeout.
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		if err := store.Probe(ctx); err != nil {
 			return nil, err

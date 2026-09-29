@@ -45,17 +45,24 @@ export function signerFor(identity) {
  * the user to unlock rather than silently doing nothing.
  */
 export function clientFor(identity) {
+  const keys = getUnlockedKeys();
   const keyPair = signerFor(identity);
   if (!keyPair) return null;
   const relayUrl = relayUrlFor(identity);
-  return new PoweurClient({
+  // One client per unlocked identity: it keeps what it has read (message
+  // history position, decrypted folders) between refreshes.
+  if (cachedClient && cachedClient.keys === keys && cachedClient.identity === identity && cachedClient.relayUrl === relayUrl) return cachedClient.client;
+  const client = new PoweurClient({
     relayUrl,
     signer: keyPair.signer,
     decryptor: keyPair.decryptor,
     sessionStore: new BrowserSessionStore(),
     resolve: resolveOptions(relayUrl),
   });
+  cachedClient = { keys, identity, relayUrl, client };
+  return client;
 }
+let cachedClient = null;
 
 /** Registration, health and key publication — the calls that predate a signer. */
 export function identityApiFor(relayUrl, options) {

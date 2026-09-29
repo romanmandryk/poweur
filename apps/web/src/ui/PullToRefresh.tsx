@@ -21,10 +21,14 @@ export function PullToRefresh({
   onRefresh,
   children,
   className,
+  busy = false,
 }: {
   onRefresh: () => Promise<unknown> | unknown;
   children: ReactNode;
   className?: string;
+  /** Work started elsewhere (first load, opening a folder, an upload) shows
+   * the same spinner above the header, so progress never appears in the list. */
+  busy?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const handler = useRef(onRefresh);
@@ -108,29 +112,32 @@ export function PullToRefresh({
   }, []);
 
   const transition = dragging ? "none" : "transform 200ms ease, height 200ms ease";
+  const holding = busy && !dragging && !refreshing && pull === 0;
+  const spinning = refreshing || holding;
+  const offset = holding ? HOLD : pull;
 
   return (
     <div ref={root} className={cn("pull-to-refresh relative", className)}>
       <div
-        aria-hidden={!refreshing}
+        aria-hidden={!spinning}
         className="ptr-indicator pointer-events-none absolute inset-x-0 top-0 flex items-end justify-center overflow-hidden"
-        style={{ height: pull, transition }}
+        style={{ height: offset, transition }}
       >
         <span
-          role={refreshing ? "status" : undefined}
-          aria-label={refreshing ? "Refreshing" : undefined}
+          role={spinning ? "status" : undefined}
+          aria-label={spinning ? (refreshing ? "Refreshing" : "Loading") : undefined}
           className="mb-2.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-surface shadow-pop"
-          style={{ opacity: refreshing ? 1 : Math.min(1, pull / PULL_THRESHOLD) }}
+          style={{ opacity: spinning ? 1 : Math.min(1, pull / PULL_THRESHOLD) }}
         >
           <RefreshCw
-            className={cn("size-[18px] text-accent", refreshing && "animate-spin")}
-            style={refreshing ? undefined : { transform: `rotate(${pull * 3}deg)` }}
+            className={cn("size-[18px] text-accent", spinning && "animate-spin")}
+            style={spinning ? undefined : { transform: `rotate(${pull * 3}deg)` }}
             aria-hidden="true"
           />
         </span>
       </div>
       {/* No transform at rest: a transformed ancestor would capture fixed-position children. */}
-      <div className="ptr-content" style={pull ? { transform: `translateY(${pull}px)`, transition } : { transition }}>
+      <div className="ptr-content" style={offset ? { transform: `translateY(${offset}px)`, transition } : { transition }}>
         {children}
       </div>
     </div>

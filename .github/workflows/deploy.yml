@@ -111,10 +111,13 @@ jobs:
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml up -d
           docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
             exec -T caddy caddy reload --config /etc/caddy/Caddyfile </dev/null || true
-          # `up -d` keeps a running Alloy on its old config when only the
-          # bind-mounted file changed; SIGHUP makes it reload (faro.receiver etc.).
-          docker compose -p infra --env-file .observability.env -f deploy/infra/docker-compose.yml \
-            kill -s SIGHUP alloy </dev/null || true
+          # `up -d` leaves a running Alloy on its previous config when only the
+          # bind-mounted file changed. Reload over its admin API (Caddy is on
+          # infra_net and has wget). Do not `compose kill`: that force-stops
+          # the container, and restart: unless-stopped does not start it again,
+          # so /faro/collect 502s until something starts Alloy.
+          docker exec infra-caddy wget -qO- --post-data='' http://infra-alloy:12345/-/reload </dev/null \
+            || echo "alloy reload failed (non-fatal)" >&2
           if [ -f deploy/betterstack/.env ]; then
             docker compose --env-file deploy/betterstack/.env -f deploy/betterstack/docker-compose.yml up -d \
               || echo "betterstack collector failed (non-fatal)" >&2

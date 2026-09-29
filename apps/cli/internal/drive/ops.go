@@ -3,8 +3,11 @@ package drive
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -25,6 +28,86 @@ type Record struct {
 type positioned struct {
 	Position uint64                `json:"position"`
 	Record   protocol.AppendRecord `json:"record"`
+}
+
+// CiphertextHash is the SHA-256 and byte length of a replace file's stored
+// chunks, in page order. Callers put this in plaintext attachment metadata.
+func (f *Files) CiphertextHash(ctx context.Context, file *File) (string, uint64, error) {
+	refs, err := f.contentRefs(ctx, file)
+	if err != nil {
+		return "", 0, err
+	}
+	sum := sha256.New()
+	var size uint64
+	for _, ref := range refs {
+		blob, err := f.Client.Chunk(ctx, file.Manifest.Node, file.Manifest.Version, ref)
+		if err != nil {
+			return "", 0, err
+		}
+		sum.Write(blob)
+		size += uint64(len(blob))
+	}
+	return hex.EncodeToString(sum.Sum(nil)), size, nil
+}
+
+// ReadContent downloads a replace file the caller can read by share, decrypting
+// with a content key that arrived inside an encrypted message. author is the
+// manifest signer's public key; the caller does not need the sender's folder keys.
+func (f *Files) ReadContent(ctx context.Context, node string, contentKey []byte, author ed25519.PublicKey) ([]byte, string, uint64, error) {
+	if len(contentKey) != 32 {
+		return nil, "", 0, errors.New("invalid content key")
+	}
+	var info Node
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node), &info); err != nil {
+		return nil, "", 0, err
+	}
+	if info.ID != node || info.Removed || info.Head == "" {
+		return nil, "", 0, errors.New("attachment node is missing")
+	}
+	var manifest protocol.Manifest
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(node)+"/versions/"+url.PathEscape(info.Head), &manifest); err != nil {
+		return nil, "", 0, err
+	}
+	if manifest.Node != node || manifest.Version != info.Head || manifest.Mode != protocol.ModeReplace {
+		return nil, "", 0, errors.New("attachment manifest mismatch")
+	}
+	if err := manifest.Verify(author); err != nil {
+		return nil, "", 0, err
+	}
+	file := &File{Manifest: manifest, ContentKey: contentKey}
+	refs, err := fileRefs(ctx, f, file)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	sum := sha256.New()
+	var plain []byte
+	var size uint64
+	for _, ref := range refs {
+		blob, err := f.Client.Chunk(ctx, node, manifest.Version, ref)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		sum.Write(blob)
+		size += uint64(len(blob))
+		part, err := protocol.DecryptChunk(contentKey, blob, contextFor(manifest, protocol.PurposeContent))
+		if err != nil {
+			return nil, "", 0, err
+		}
+		plain = append(plain, part...)
+	}
+	return plain, hex.EncodeToString(sum.Sum(nil)), size, nil
+}
+
+func fileRefs(ctx context.Context, f *Files, file *File) ([]protocol.ChunkRef, error) {
+	pages := []protocol.ChunkPage{}
+	for _, hash := range file.Manifest.Pages {
+		var page protocol.ChunkPage
+		if err := f.Client.Get(ctx, "/nodes/"+file.Manifest.Node+"/versions/"+file.Manifest.Version+"/pages/"+hash, &page); err != nil {
+			return nil, err
+		}
+		pages = append(pages, page)
+	}
+	return file.Manifest.VerifyPages(pages)
 }
 
 func (c *Client) History(ctx context.Context, node string) ([]string, error) {
@@ -72,41 +155,22 @@ func (f *Files) recordsFrom(ctx context.Context, node string, from uint64) ([]po
 		from = page.Next
 	}
 }
+
+// authorCursor is the caller's chain position in an append file, from the
+// relay: one request instead of reading the whole log. The relay enforces
+// the chain on commit, so a wrong answer only makes the append fail.
 func (f *Files) authorCursor(ctx context.Context, file *File) (uint64, string, error) {
-	info, err := f.nodeInfo(ctx, file.Manifest.Node)
-	if err != nil {
+	var cursor struct {
+		Sequence uint64 `json:"sequence"`
+		Previous string `json:"previous"`
+	}
+	if err := f.Client.Get(ctx, "/nodes/"+url.PathEscape(file.Manifest.Node)+"/author-cursor", &cursor); err != nil {
 		return 0, "", err
 	}
-	key, err := f.authorKey(f.Client.Identity)
-	if err != nil {
-		return 0, "", err
+	if (cursor.Sequence == 0) != (cursor.Previous == "") {
+		return 0, "", errors.New("invalid author cursor")
 	}
-	seq, prev, _ := f.snapshotCursor(ctx, file.Manifest.Node, info.TrimSnapshot)
-	from := uint64(1)
-	if info.TrimmedBefore > 1 {
-		from = info.TrimmedBefore
-	}
-	records, err := f.recordsFrom(ctx, file.Manifest.Node, from)
-	if err != nil {
-		return 0, "", err
-	}
-	for _, item := range records {
-		if item.Record.Author != f.Client.Identity {
-			continue
-		}
-		if seq == 0 && item.Record.Sequence != 1 {
-			if err = item.Record.Verify(key); err != nil {
-				return 0, "", err
-			}
-		} else if err = item.Record.VerifyNext(key, seq, prev); err != nil {
-			return 0, "", err
-		}
-		seq = item.Record.Sequence
-		if prev, err = item.Record.Hash(); err != nil {
-			return 0, "", err
-		}
-	}
-	return seq, prev, nil
+	return cursor.Sequence, cursor.Previous, nil
 }
 func (f *Files) openRecord(ctx context.Context, file *File, record protocol.AppendRecord) ([]byte, error) {
 	if record.Sealed != nil {
@@ -118,7 +182,13 @@ func (f *Files) openRecord(ctx context.Context, file *File, record protocol.Appe
 		if err != nil {
 			return nil, err
 		}
-		part, err := protocol.DecryptChunk(file.ContentKey, encrypted, contextFor(file.Manifest, protocol.PurposeContent))
+		// A record is encrypted under the key generation it was written at;
+		// an append file keeps its content key across rotations.
+		context, err := protocol.Context(record.Drive, record.Node, protocol.PurposeContent, record.Generation)
+		if err != nil {
+			return nil, err
+		}
+		part, err := protocol.DecryptChunk(file.ContentKey, encrypted, context)
 		if err != nil {
 			return nil, err
 		}
@@ -195,6 +265,9 @@ func (f *Files) Tail(ctx context.Context, file *File, from uint64) ([]Record, er
 	for _, item := range raw {
 		key, err := f.authorKey(item.Record.Author)
 		if err != nil {
+			return nil, err
+		}
+		if err := f.allowAppender(ctx, file.Manifest.Node, item.Record.Author); err != nil {
 			return nil, err
 		}
 		cur := cursors[item.Record.Author]
@@ -281,6 +354,12 @@ func (f *Files) Link(ctx context.Context, file *File, role, expires, password st
 	return share, fragment, err
 }
 func (f *Files) grant(ctx context.Context, file *File, member, link, role, expires string, recipient, salt, verifier []byte) (protocol.Share, error) {
+	return f.issue(ctx, file, protocol.Share{Member: member, Link: link, Role: role, Expires: expires}, recipient, salt, verifier)
+}
+
+// issue signs and commits a share on file shaped like s (member or link,
+// role, expiry, caps, proof of work) at the node's current generation.
+func (f *Files) issue(ctx context.Context, file *File, s protocol.Share, recipient, salt, verifier []byte) (protocol.Share, error) {
 	id, err := protocol.NewShareID()
 	if err != nil {
 		return protocol.Share{}, err
@@ -289,7 +368,8 @@ func (f *Files) grant(ctx context.Context, file *File, member, link, role, expir
 	if err != nil {
 		return protocol.Share{}, err
 	}
-	share := protocol.Share{Format: 1, Drive: f.driveID(), ID: id, Node: file.Manifest.Node, Member: member, Link: link, Role: role, Generation: file.Manifest.Generation, NodePublic: base64.RawURLEncoding.EncodeToString(nodePub), Expires: expires, Issuer: f.Client.Identity, Issued: nowRFC3339()}
+	role := s.Role
+	share := protocol.Share{Format: 1, Drive: f.driveID(), ID: id, Node: file.Manifest.Node, Member: s.Member, Link: s.Link, Role: role, Generation: file.Manifest.Generation, NodePublic: base64.RawURLEncoding.EncodeToString(nodePub), Expires: s.Expires, Caps: s.Caps, PoW: s.PoW, Issuer: f.Client.Identity, Issued: nowRFC3339()}
 	if protocol.KeyBearing(role) {
 		if len(recipient) != 32 {
 			return protocol.Share{}, errors.New("share recipient key must be 32 bytes")
@@ -377,4 +457,188 @@ func (src *Files) copyNode(ctx context.Context, dst *Files, parent, node *File, 
 		}
 		return dst.Create(ctx, parent, node.Name, protocol.KindFile, bytes.NewReader(buf.Bytes()))
 	}
+}
+
+// Rotated reports a rotation: shares re-issued to remaining members, and the
+// key-bearing shares that could not be (links, or members whose encryption
+// key did not resolve) and must be recreated.
+type Rotated struct {
+	File     *File
+	Reissued int
+	Stale    []protocol.Share
+}
+
+type subtree struct {
+	node     *File
+	content  []byte
+	children []*subtree
+}
+
+// Rotate re-keys file and everything below it, as the relay requires after a
+// revocation (rotate_required): new node keys, a new content key and
+// re-encrypted content for replace files, names and keys re-sealed under
+// each re-keyed folder, and the remaining members' shares re-issued at the
+// new generation (when EncryptionKeys resolves them). Append files keep
+// their node and content keys — past records, including guests' sealed ones,
+// cannot be re-encrypted — so new records there are protected by access
+// control, not re-keying. Needs the parent's key: the drive's owner, or an
+// admin of the parent.
+func (f *Files) Rotate(ctx context.Context, file *File) (*Rotated, error) {
+	parentKey := f.EncryptionKey
+	if file.Folder != "" {
+		parent, err := f.Open(ctx, file.Folder)
+		if err != nil {
+			return nil, err
+		}
+		parentKey = parent.NodeKey
+	} else if !f.owner() {
+		return nil, errors.New("only the owner rotates the root")
+	}
+	// Read the whole subtree with the old keys first: once a folder is
+	// re-keyed, its children no longer open through the relay's tree.
+	var collect func(*File) (*subtree, error)
+	collect = func(n *File) (*subtree, error) {
+		t := &subtree{node: n}
+		if n.Manifest.Kind == protocol.KindFile && n.Manifest.Mode == protocol.ModeReplace {
+			var buf bytes.Buffer
+			if err := f.Read(ctx, n, &buf); err != nil {
+				return nil, err
+			}
+			t.content = buf.Bytes()
+		}
+		if n.Manifest.Kind == protocol.KindFolder {
+			children, err := f.List(ctx, n)
+			if err != nil {
+				return nil, err
+			}
+			for _, child := range children {
+				c, err := collect(child)
+				if err != nil {
+					return nil, err
+				}
+				t.children = append(t.children, c)
+			}
+		}
+		return t, nil
+	}
+	tree, err := collect(file)
+	if err != nil {
+		return nil, err
+	}
+	shares, err := f.Client.Shares(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &Rotated{}
+	var rekey func(t *subtree, parentKey []byte, parent *File) (*File, error)
+	rekey = func(t *subtree, parentKey []byte, parent *File) (*File, error) {
+		old := t.node
+		m, err := f.next(old, protocol.OpRotate)
+		if err != nil {
+			return nil, err
+		}
+		m.Generation = old.Manifest.Generation + 1
+		appendFile := old.Manifest.Kind == protocol.KindFile && old.Manifest.Mode == protocol.ModeAppend
+		nodeKey := old.NodeKey
+		if !appendFile {
+			if nodeKey, err = randomKey(); err != nil {
+				return nil, err
+			}
+		}
+		parentPub, err := public(parentKey)
+		if err != nil {
+			return nil, err
+		}
+		wrapped, err := protocol.SealKey(parentPub, nodeKey, contextFor(m, protocol.PurposeNodeKey))
+		if err != nil {
+			return nil, err
+		}
+		m.NodeKey = &wrapped
+		contentKey := old.ContentKey
+		var pages []protocol.ChunkPage
+		if old.Manifest.Kind == protocol.KindFile {
+			if !appendFile {
+				if contentKey, err = randomKey(); err != nil {
+					return nil, err
+				}
+				if pages, err = f.upload(ctx, &m, contentKey, bytes.NewReader(t.content)); err != nil {
+					return nil, err
+				}
+			}
+			nodePub, err := public(nodeKey)
+			if err != nil {
+				return nil, err
+			}
+			sealed, err := protocol.SealKey(nodePub, contentKey, contextFor(m, protocol.PurposeContentKey))
+			if err != nil {
+				return nil, err
+			}
+			m.ContentKey = &sealed
+		}
+		if err = m.Sign(f.Client.Key); err != nil {
+			return nil, err
+		}
+		if _, err = f.Client.Commit(ctx, Commit{Manifest: &m, Pages: pages}); err != nil {
+			return nil, err
+		}
+		rotated := &File{Manifest: m, Name: old.Name, Folder: old.Folder, NodeKey: nodeKey, ContentKey: contentKey}
+		// The name was sealed to the parent's retired key: re-seal it in place.
+		if parent != nil {
+			if err := f.Move(ctx, rotated, parent, rotated.Name); err != nil {
+				return nil, err
+			}
+		}
+		for _, s := range shares {
+			if s.Node != old.Manifest.Node || !protocol.KeyBearing(s.Role) || s.Generation >= m.Generation {
+				continue
+			}
+			if s.Link != "" || f.EncryptionKeys == nil {
+				out.Stale = append(out.Stale, s)
+				continue
+			}
+			recipient, err := f.EncryptionKeys(ctx, s.Member)
+			if err != nil {
+				out.Stale = append(out.Stale, s)
+				continue
+			}
+			if _, err := f.issue(ctx, rotated, s, recipient, nil, nil); err != nil {
+				return nil, err
+			}
+			if err := f.Client.Unshare(ctx, s.ID); err != nil {
+				return nil, err
+			}
+			out.Reissued++
+		}
+		for _, child := range t.children {
+			if _, err := rekey(child, nodeKey, rotated); err != nil {
+				return nil, err
+			}
+		}
+		return rotated, nil
+	}
+	if out.File, err = rekey(tree, parentKey, nil); err != nil {
+		return nil, err
+	}
+	f.sharesLoaded, f.nodeShares = false, nil
+	return out, nil
+}
+
+// RotateIfRequired rotates node when a revocation left it waiting for new
+// keys; it returns nil when no rotation was needed.
+func (f *Files) RotateIfRequired(ctx context.Context, node string) (*Rotated, error) {
+	info, err := f.nodeInfo(ctx, node)
+	if err != nil || !info.RotateRequired || info.Removed {
+		return nil, err
+	}
+	file, err := f.Open(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	return f.Rotate(ctx, file)
+}
+
+func randomKey() ([]byte, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	return key, err
 }

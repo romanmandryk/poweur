@@ -8,7 +8,7 @@
   (deployment/observability), EPIC-014 (PoW primitive, reused as an outbound send gate)
 - **Interacts with:** EPIC-015 / EPIC-021 (Messages trays, Settings panels), EPIC-018 (onboarding
   step), EPIC-016 (pay-to-send as the outbound fast lane), EPIC-010 (email as an automation
-  trigger), EPIC-012 (contact forms), EPIC-020 (message history v2 — email volume), EPIC-022 (the
+  trigger), EPIC-012 (public contact actions), EPIC-020 (message history v2 — email volume), EPIC-022 (the
   pattern this service copies: separate origin, public-protocol-only coupling)
 - **Unlocks:** `john@poweur.net` for every hosted ID that opts in; email ↔ Poweur conversation
   upgrades; email-driven automations; masked aliases
@@ -264,7 +264,7 @@ Growth loops (E23-T9):
   people already pay for elsewhere.
 - **Email as an automation trigger** (EPIC-010): `email.message` is a typed message, so agents and
   rules can file receipts into folders, forward newsletters, summarize.
-- **Public "email me"** on the identity website (EPIC-012) works for every visitor.
+- **Public "email me"** on the generated identity page (EPIC-012) works for every visitor.
 
 ## Configuration (env / Ansible only)
 

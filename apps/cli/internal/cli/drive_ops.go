@@ -9,26 +9,31 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
+	idpkg "github.com/poweur/identity"
 	protocol "github.com/poweur/identity/drive"
 )
 
 func runDriveOps(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into <path>|--to-node <id>] [--json]"
+	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member> [--no-offer]|rm <id> [--no-rotate]|ls; rotate <path>; accept <offer.json|->; mounts; link create <path>|rm <id> [--no-rotate]; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
 	fs := flag.NewFlagSet("drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
+	target := fs.String("drive", "", "another identity's drive, reached through your shares")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	from := fs.Uint64("from", 0, "first record position")
 	role := fs.String("role", "read", "share or link role")
 	to := fs.String("to", "", "destination drive")
 	toNode := fs.String("to-node", "", "node id already created on the destination")
-	into := fs.String("into", "/", "destination folder when its keys are in this home")
+	into := fs.String("into", "", "destination folder on --to: /<shared-node-id>[/path] as a member, or a path when --to is your own drive")
 	password := fs.String("password", "", "link password")
 	expires := fs.String("expires", "", "RFC3339 expiry")
-	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
+	noOffer := fs.Bool("no-offer", false, "share or revoke without messaging the member")
+	noRotate := fs.Bool("no-rotate", false, "revoke without re-keying the node (writes there wait for `drive rotate`)")
+	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--no-offer": true, "--no-rotate": true})) != nil {
 		return 1
 	}
 	ctx := context.Background()
@@ -65,7 +70,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
-		files, ok := openDriveFiles(*use, stderr)
+		files, ok := openDriveFiles(*use, *target, stderr)
 		if !ok {
 			return 1
 		}
@@ -81,8 +86,25 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, usage)
 				return 1
 			}
+			var revoked *protocol.Share
+			if shares, err := files.Client.Shares(ctx); err == nil {
+				for i := range shares {
+					if shares[i].ID == fs.Arg(1) {
+						revoked = &shares[i]
+					}
+				}
+			}
 			if err := files.Client.Unshare(ctx, fs.Arg(1)); err != nil {
 				return fail(err)
+			}
+			if !*noRotate && !rotateAfterRevoke(ctx, files, revoked, stderr) {
+				return 1
+			}
+			if revoked != nil && revoked.Member != "" && !*noOffer {
+				notice := protocol.ShareRevoked{Format: protocol.OfferFormat, Drive: revoked.Drive, ShareID: revoked.ID, RevokedAt: time.Now().UTC().Format(time.RFC3339)}
+				if err := sendDriveMessage(*use, revoked.Member, idpkg.MsgTypeShareRevoked, revoked.ID, notice, stderr); err != nil {
+					fmt.Fprintln(stderr, "revoked, but the member was not told:", err)
+				}
 			}
 			return writeOutput(stdout, *jsonOut, map[string]string{"removed": fs.Arg(1)}, fs.Arg(1)+"\n")
 		case "add":
@@ -105,18 +127,42 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			if err != nil {
 				return fail(err)
 			}
+			if !*noOffer {
+				if err := offerShare(*use, files, file, share, stderr); err != nil {
+					fmt.Fprintln(stderr, "shared, but the offer was not sent:", err)
+				}
+			}
 			result := map[string]string{"id": share.ID, "node": share.Node, "member": share.Member, "role": share.Role}
 			return writeOutput(stdout, *jsonOut, result, share.ID+"\n")
 		default:
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
+	case "rotate":
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, usage)
+			return 1
+		}
+		files, ok := openDriveFiles(*use, *target, stderr)
+		if !ok {
+			return 1
+		}
+		node, err := files.Resolve(ctx, fs.Arg(0))
+		if err != nil {
+			return fail(err)
+		}
+		rotated, err := files.Rotate(ctx, node)
+		if err != nil {
+			return fail(err)
+		}
+		reportStale(rotated, stderr)
+		return writeOutput(stdout, *jsonOut, map[string]any{"node": rotated.File.Manifest.Node, "generation": rotated.File.Manifest.Generation, "reissued": rotated.Reissued, "stale": staleIDs(rotated)}, fmt.Sprintf("%s %d\n", rotated.File.Manifest.Node, rotated.File.Manifest.Generation))
 	case "link":
 		if fs.NArg() < 1 {
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
-		files, ok := openDriveFiles(*use, stderr)
+		files, ok := openDriveFiles(*use, *target, stderr)
 		if !ok {
 			return 1
 		}
@@ -126,8 +172,19 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, usage)
 				return 1
 			}
+			var revoked *protocol.Share
+			if shares, err := files.Client.Shares(ctx); err == nil {
+				for i := range shares {
+					if shares[i].ID == fs.Arg(1) {
+						revoked = &shares[i]
+					}
+				}
+			}
 			if err := files.Client.Unshare(ctx, fs.Arg(1)); err != nil {
 				return fail(err)
+			}
+			if !*noRotate && !rotateAfterRevoke(ctx, files, revoked, stderr) {
+				return 1
 			}
 			return writeOutput(stdout, *jsonOut, map[string]string{"removed": fs.Arg(1)}, fs.Arg(1)+"\n")
 		case "create":
@@ -144,13 +201,14 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 				return fail(err)
 			}
 			result := map[string]string{"id": share.ID, "link": share.Link, "role": share.Role, "fragment": base64.RawURLEncoding.EncodeToString(fragment)}
-			return writeOutput(stdout, *jsonOut, result, share.Link+"#"+result["fragment"]+"\n")
+			result["url"] = linkURL(files.Client.Relay, share.Drive, share.Link, result["fragment"])
+			return writeOutput(stdout, *jsonOut, result, result["url"]+"\n")
 		default:
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
 	}
-	files, ok := openDriveFiles(*use, stderr)
+	files, ok := openDriveFiles(*use, *target, stderr)
 	if !ok {
 		return 1
 	}
@@ -255,19 +313,12 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			}
 			return writeOutput(stdout, *jsonOut, map[string]string{"node": file.Manifest.Node, "to": *to, "to_node": *toNode}, *toNode+"\n")
 		}
-		cfg, _, _, ok := loadIdentityKey(*use, stderr)
+		// Re-create the subtree on the destination as its owner or as a
+		// member with a share there, then retire it here.
+		dst, ok := openDriveFiles(*use, *to, stderr)
 		if !ok {
 			return 1
 		}
-		destKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, *to))
-		if err != nil {
-			return fail(fmt.Errorf("destination keys are not in this home; pass --to-node after recreating the subtree: %w", err))
-		}
-		destEnc, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, *to))
-		if err != nil {
-			return fail(err)
-		}
-		dst := &driveclient.Files{Client: &driveclient.Client{Relay: cfg.RelayURL, Identity: *to, Key: destKey, Cache: files.Client.Cache}, EncryptionKey: destEnc}
 		parent, err := dst.Resolve(ctx, *into)
 		if err != nil {
 			return fail(err)
@@ -308,4 +359,38 @@ func splitRemote(remote string) (string, string, error) {
 	}
 	base, err := protocol.NormalizeName(base)
 	return dir, base, err
+}
+
+// rotateAfterRevoke re-keys the revoked share's node when the relay asks for
+// it, so writes there resume and the remaining members get re-issued shares.
+func rotateAfterRevoke(ctx context.Context, files *driveclient.Files, revoked *protocol.Share, stderr io.Writer) bool {
+	if revoked == nil || !protocol.KeyBearing(revoked.Role) {
+		return true
+	}
+	rotated, err := files.RotateIfRequired(ctx, revoked.Node)
+	if err != nil {
+		fmt.Fprintln(stderr, "revoked, but the keys were not rotated (writes there wait for `poweur drive rotate`):", err)
+		return false
+	}
+	reportStale(rotated, stderr)
+	return true
+}
+func reportStale(rotated *driveclient.Rotated, stderr io.Writer) {
+	if rotated == nil {
+		return
+	}
+	for _, s := range rotated.Stale {
+		who := s.Member
+		if s.Link != "" {
+			who = "link " + s.Link
+		}
+		fmt.Fprintf(stderr, "share %s (%s) predates the rotation and must be recreated\n", s.ID, who)
+	}
+}
+func staleIDs(rotated *driveclient.Rotated) []string {
+	ids := []string{}
+	for _, s := range rotated.Stale {
+		ids = append(ids, s.ID)
+	}
+	return ids
 }

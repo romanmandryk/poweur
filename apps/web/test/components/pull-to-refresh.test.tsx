@@ -83,4 +83,16 @@ describe("PullToRefresh", () => {
     expect(spinner()).toBeNull();
     expect(useUi.getState().refreshing).toBe(false);
   });
+
+  it("work started elsewhere shows the same spinner above the content, without refreshing", () => {
+    const onRefresh = vi.fn();
+    const { rerender, container } = render(<PullToRefresh onRefresh={onRefresh} busy><p>row</p></PullToRefresh>);
+    const loading = () => container.querySelector('[role="status"][aria-label="Loading"]');
+    expect(loading()).toBeTruthy();
+    expect((container.querySelector(".ptr-content") as HTMLElement).style.transform).toMatch(/translateY\(\d+px\)/);
+    expect(onRefresh).not.toHaveBeenCalled();
+    rerender(<PullToRefresh onRefresh={onRefresh} busy={false}><p>row</p></PullToRefresh>);
+    expect(loading()).toBeNull();
+    expect((container.querySelector(".ptr-content") as HTMLElement).style.transform).toBe("");
+  });
 });

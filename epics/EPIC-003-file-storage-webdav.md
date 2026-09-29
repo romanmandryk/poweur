@@ -23,7 +23,7 @@
 | E03-T3 Auth bridge | **done**, deprecated → E20-T5 auth (no DAV tokens or app passwords) | `POST /auth/dav-token`, app passwords in `poweur-sys/relay/`, CLI `poweur dav` |
 | E03-T4 Cross-identity `/public` | **done**, deprecated → public folders + node shares (E20-T7) | Visitor tokens + access.log; integration `TestINT_DAV_02` |
 | E03-T5 Web file browser | **done**, deprecated → E20-T10 | shipped as `apps/web/js/files.js` + a SPA panel; since E15-T6/T1 the DAV client is `packages/client-ts/src/files.ts` and the browser is a first-class Files destination. Vitest/Playwright coverage |
-| E03-T6 `/pub` web serving | **done**, carries over — served from folders marked public (E20-T5) | `.poweur-web-public` marker; Host-routed `/pub/` |
+| E03-T6 `/pub` web serving | **done**, carried over — public folders on v2 (E20-T5) serve `https://<id>/pub/<folder>/…` | `.poweur-web-public` marker; Host-routed `/pub/` |
 | E03-T7 E2EE design doc | **done**, superseded → E20-T2 (E2EE is the default, not opt-in) | [`apps/docs/docs/files/e2ee-design.md`](../apps/docs/docs/files/e2ee-design.md) |
 | E03-T8 Storage providers | **done** (relay-fs), superseded → E20-T3 (filesystem + S3) | `StorageProvider` interface; `STORAGE_PROVIDER=relay-fs`; S3 deferred |
 
@@ -207,8 +207,9 @@ Sharing a file with the web (not just with IDs) should be a first-class but *exp
 **Acceptance:** marked folder is browsable in a plain browser; unmarked `/public` paths are not
 web-exposed (ID-auth still required).
 
-> Active HTML as a real site at the identity (or a sister host), plus contact forms → messages,
-> is **not** this task — see [EPIC-012](EPIC-012-identity-websites.md) (design notes).
+> The trusted generated page at the identity root is **not** this task — see
+> [EPIC-012](EPIC-012-identity-websites.md). Arbitrary HTML remains inert here; app/static
+> bundle hosting belongs to [EPIC-029](EPIC-029-poweur-apps-platform.md).
 
 ### E03-T7 — Design doc: relay-blind (E2EE) storage option
 

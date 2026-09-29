@@ -15,8 +15,16 @@ import { Header } from "./Header";
 import { LoadingOverlay, PanelHost, Toaster } from "./Overlays";
 import { useBackNavigation } from "./useBackNavigation";
 import { useMessaging } from "./useMessaging";
+import { useFilesSync } from "./useFilesSync";
+import { usePendingChat } from "./usePendingChat";
+import { isPublicAnonymousRoute, PublicAnonymousComposer } from "../screens/PublicAnonymous";
 
 export function App() {
+  if (isPublicAnonymousRoute()) return <PublicAnonymousComposer />;
+  return <PrivateApp />;
+}
+
+function PrivateApp() {
   const identity = useSession((state) => state.identity);
   const hostMode = useSession((state) => state.mode.mode);
   const hostProbed = useSession((state) => state.mode.probed);
@@ -24,6 +32,8 @@ export function App() {
   const sub = useRoute((state) => state.sub);
   useBackNavigation();
   useMessaging();
+  useFilesSync();
+  usePendingChat();
 
   useLayoutEffect(() => {
     document.getElementById("page-content")?.scrollTo?.({ top: 0 });

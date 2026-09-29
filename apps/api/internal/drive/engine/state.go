@@ -41,6 +41,8 @@ type node struct {
 	Mode       string   `json:"mode,omitempty"`
 	Folder     string   `json:"folder,omitempty"`
 	NameHash   string   `json:"name_hash,omitempty"`
+	// Public: plaintext name and content key (E20-T5); served at /pub.
+	Public bool `json:"public,omitempty"`
 	Head       string   `json:"head"`
 	HeadHash   string   `json:"head_hash"`
 	Generation uint64   `json:"generation"`
@@ -51,6 +53,13 @@ type node struct {
 	// revoked; only a key rotation clears it.
 	RotateRequired bool      `json:"rotate_required,omitempty"`
 	Updated        time.Time `json:"updated"`
+	// The newest versions carrying the node's key, name and content-key
+	// envelopes, so a listing hands a reader everything it needs to decrypt
+	// in one response. Empty in snapshots written before they were tracked;
+	// Listing finds them by walking back from the head and fills them in.
+	KeyVersion     string `json:"key_version,omitempty"`
+	NameVersion    string `json:"name_version,omitempty"`
+	ContentVersion string `json:"content_version,omitempty"`
 	// Append files.
 	Position uint64 `json:"position,omitempty"`
 	// TrimmedBefore is the first retained position; earlier ones are gone.
@@ -135,12 +144,13 @@ type state struct {
 	System      map[string]*systemFile      `json:"system"`
 	// groups resolves group members; set on load, never serialized.
 	groups   Groups
-	Shares   map[string]*drive.Share `json:"shares"`
-	ShareUse map[string]*capUse      `json:"share_use"`
-	LinkUses map[string]uint64       `json:"link_uses"`
-	Forwards map[string]Forward      `json:"forwards"`
-	Moved    map[string]Forward      `json:"moved"`
-	Changes  []Change                `json:"changes"`
+	Shares   map[string]*drive.Share  `json:"shares"`
+	ShareUse map[string]*capUse       `json:"share_use"`
+	LinkUses map[string]uint64        `json:"link_uses"`
+	Revoked  map[string]*RevokedShare `json:"revoked_shares"`
+	Forwards map[string]Forward       `json:"forwards"`
+	Moved    map[string]Forward       `json:"moved"`
+	Changes  []Change                 `json:"changes"`
 }
 
 func newState(driveID string) *state {
@@ -148,7 +158,7 @@ func newState(driveID string) *state {
 		Format: stateFormat, Drive: driveID,
 		Nodes: map[string]*node{}, Names: map[string]string{}, Versions: map[string]*version{},
 		Pages: map[string][]drive.ChunkRef{}, PageRefs: map[string]int{}, Chunks: map[string]*chunk{},
-		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{}, ShareUse: map[string]*capUse{}, LinkUses: map[string]uint64{}, Forwards: map[string]Forward{}, Moved: map[string]Forward{},
+		Ops: map[string]opResult{}, Changes: []Change{}, System: map[string]*systemFile{}, Shares: map[string]*drive.Share{}, ShareUse: map[string]*capUse{}, LinkUses: map[string]uint64{}, Revoked: map[string]*RevokedShare{}, Forwards: map[string]Forward{}, Moved: map[string]Forward{},
 	}
 }
 

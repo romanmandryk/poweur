@@ -7,7 +7,7 @@
   [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`, consumed unchanged),
   [EPIC-019](EPIC-019-mobile-app-capacitor.md) (the Capacitor shell must wrap the new build)
 - **Unlocks:** EPIC-015 T7–T12 and E19-T3/T4 built on components instead of string
-  templates; EPIC-012 reusing real components
+  templates; EPIC-012 reusing the same design tokens and interaction language
 
 ## Progress
 

@@ -9,7 +9,7 @@ import { useData, type Contact, type DataFields } from "../state/data";
 import { useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
-import { activeClient, challengeSerial, errorMessage, mergeInto, parseMessage } from "./relay";
+import { activeClient, errorMessage, mergeInto, parseMessage } from "./relay";
 
 const setContacts = (patch: Partial<DataFields["contacts"]>) =>
   useData.setState((state) => ({ contacts: { ...state.contacts, ...patch } }));
@@ -59,7 +59,7 @@ export function loadRequests({ force = false } = {}): Promise<void> {
   if (!client) return Promise.resolve();
 
   setRequests({ loading: true });
-  requestsInFlight = challengeSerial(async () => {
+  requestsInFlight = (async () => {
     try {
       const { requests: incoming, lost } = await client.requestsAndArchive();
       setRequests({ incoming: mergeInto(useData.getState().requests.incoming, incoming), loaded: true, error: null });
@@ -72,11 +72,10 @@ export function loadRequests({ force = false } = {}): Promise<void> {
       requestsInFlight = null;
       const again = requestsPending;
       requestsPending = false;
-      // Outside this serial task: chaining a drain from here would wait on a
-      // promise that cannot resolve until this one does.
+      // After this read settles, not from inside it.
       if (again) queueMicrotask(() => void loadRequests({ force: true }));
     }
-  });
+  })();
   return requestsInFlight;
 }
 

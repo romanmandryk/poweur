@@ -1,6 +1,6 @@
 # EPIC-020 — Storage v2: an end-to-end encrypted drive with a stateless relay
 
-- **Status:** in progress — v1 removed on master; deployment blocked until baseline + migration; rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
+- **Status:** in progress — storage v2 deployed on 2026-09-29; client features and baseline restoration continue; rewritten 2026-09-25 (replaces the earlier chunked-DAV / split files
   service plan; old task IDs are mapped at the end)
 - **Priority:** P0 (pre-launch: changing the storage model now costs nothing in migrations)
 - **Depends on:** EPIC-011 (seed-derived identity keys; recovery is now also file recovery),
@@ -32,10 +32,10 @@
 | **Wave 3 — clients** | | |
 | E20-T8 SDK drive clients & CLI (Go + TS) | **done** | Encrypted file and append workflows, missing-chunk and presigned uploads, change subscriptions, directory and IndexedDB chunk caches, range reads, scoped handles, event-log helper, and `poweur drive` collaboration commands with `--json` |
 | E20-T9 Sync daemon & merge drivers | **open** | `poweur sync --watch`; Obsidian-style per-type merges; conflicted copies |
-| E20-T10 Web & mobile Files on v2 | **open** | Files, Shared with me, share dialog, in-browser link viewer, client-side thumbnails and search |
-| E20-T11 Message history & attachments on v2 | **in progress** | Append-log history (Go/TS/CLI/web) with peer-hash names, tail/before and id dedupe; attachments still open |
+| E20-T10 Web & mobile Files on v2 | **in progress** | Web Files CRUD, cached listings with SSE/pull refresh, direct shares/revocation, offers, encrypted mounts and password links are in; requests, public folders, previews, thumbnails and search remain |
+| E20-T11 Message history & attachments on v2 | **done** | Append-log history read newest-first per conversation with one request per older page, appends from the relay's author cursor (no log re-read), inline padded records; CLI and web attachments incl. 20 MB across two relays (`INT_ATTACH_02`); web durability and archive paging after reload |
 | **Wave 4 — cutover** | | |
-| E20-T12 Migration & v1 removal | **in progress** | v1 implementation removed; system-only operator migration and production rehearsal remain open; no deployment |
+| E20-T12 Migration & v1 removal | **in progress** | v1 removed; `migrate-v1` ran on production 2026-09-29 and v2 is deployed; residual v1 docs and the baseline restore list remain |
 | **Wave 5 — after launch, demand-led** | | |
 | E20-T13 rclone backend | **open** | desktop mount and local `serve webdav/sftp` for third-party tools |
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
@@ -46,7 +46,7 @@
 ## Continuation checkpoint — 2026-09-28
 
 The supplied ten-phase plan is authoritative. Do not push/deploy master until Phase 9
-and the Phase 10 migration rehearsal are complete. Work started in `99901a9` during
+and the Phase 10 migration rehearsal are complete (done: deployed 2026-09-29). Work started in `99901a9` during
 Phase 0; no drive engine/provider existed at that checkpoint.
 
 - [x] Remove v1 relay, SDK, CLI and web file/share/sync surfaces and reference apps.
@@ -102,17 +102,37 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       follow-up authorization fix: moved-node destinations require read access,
       including after transfer revokes a former member. `INT_DRIVE_04` covers
       owner access and denial to retired/unrelated identities.
-- [ ] Phase 7 remaining: client-orchestrated ownership transfer, offers/accepts
-      and mounts, link viewer, remote groups.
+- [x] Phase 7 remote groups: presented rosters verified against the group relay's
+      epoch, cached and rechecked every minute, diffed to revoke departed members.
+- [x] Phase 7 offers/accepts/mounts (PCP-0008) and client-orchestrated transfer as a
+      member of the destination (Phase 8 rework).
+- [x] Phase 7 link viewer.
+- [x] TS CLI offers on share add/rm, `drive accept`, `drive mounts`.
+- [x] Phase 7 web offers inbox and encrypted mounts UI (E20-T10); the first Files slice
+      also covers upload/download/folders, direct person sharing and revocation.
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
       mkdir/put/get/mv/rm/list, append/tail/history/trim, share and link
-      commands, and transfer (re-encrypt into a drive whose keys are local, or
-      retire with `--to-node`). Chunk caches (CLI directory and IndexedDB),
-      range reads, scoped handles, and the event-log helper. Share re-issue
-      during transfer stays with the caller (Phase 7).
-- [ ] Phases 9–10: sync daemon, web and mobile Files, complete baseline, migration and production rehearsal.
+      commands, and transfer. Chunk caches (CLI directory and IndexedDB),
+      range reads, scoped handles, and the event-log helper.
+- [x] Phase 8 rework (review 2026-09-29): members and link holders open shared
+      nodes with their own share key (verified share signature and issuer
+      authority, node public key match); version and record authors are checked
+      against the node's shares via `GET /nodes/{node}/shares`, including guest
+      (link) authors and group members; new versions are authored by the
+      caller. Both CLIs take `--drive <identity>` (the drive's own relay),
+      `shared` lists entry points, member paths start at `/<shared-node-id>`,
+      and transfer copies into a destination as its owner or as a member with a
+      share there — no test or command uses another identity's private keys
+      (`INT_DRIVE_06`, TS live-relay member test).
+- [x] Phase 10: `migrate-v1` rehearsed on a copy of production, then production migrated
+      on 2026-09-29 (7 identities, 3 avatars, 6 key backups, 7 undelivered messages; v1
+      trees kept as `*.v1-backup`, full archive in `/root/backups/`) and the v2 relay
+      deployed; verified identities, profiles, avatars, an encrypted drive round trip and
+      no plaintext on disk.
+- [ ] Remaining: Phase 9 restore list below; sync daemon (E20-T9); web and mobile Files
+      (E20-T10).
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 kept an
 operational owner-authenticated system-file API instead of the plan's unavailable
@@ -133,22 +153,42 @@ as the test reference; retain already ported temporary system-file tests as regr
       live-relay tests cover reads/writes and rejection after session revocation.
 - [x] Integration HISTORY_01: an inbox drain and a sent copy land in per-peer append
       logs, a second pickup does not duplicate them, and the provider holds no plaintext.
-      HISTORY_02–05, TYPED_07, DEVICES_01–02, SIGNIN_01 and ABUSE_03 remain open.
+      HISTORY_02–04, TYPED_07, DEVICES_01, SIGNIN_01 (as consent-log assertions in
+      `INT_OAUTH_02`) and ABUSE_03 are restored on v2 (`history_restore_test.go`,
+      `devices_restore_test.go`, `abuse_restore_test.go`); HISTORY_05's sealed-archive check is
+      `INT_HISTORY_01`'s plaintext scan. DEVICES_02 tested the v1 sync cursor and returns with
+      E20-T9.
       The full profile/web/cross-relay avatar acceptance remains below.
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
-- [ ] SDK history journeys, Go/TS history cursors and private sign-in consent log.
-- [ ] Web durability suite: received and sent messages survive reload, unread state
-      persists, anonymous history persists, relay archive is ciphertext. Restore the
+- [x] Go/TS history cursors: relay author cursors, TS `older`/`before`/`hasOlder` paging.
+- [x] SDK history journeys (both sides, unread to zero and back, anonymous stays anonymous and
+      persists, sealed on the relay) and the private sign-in consent log: it was being dropped on
+      v2 (private system paths are refused) and now is an encrypted append log on the drive
+      (`DriveJsonLog`, `client.consentLog()`, CLI `auth log`), read by Settings → Connected apps.
+- [x] Web durability (`durability.spec.js`): received and sent messages and read state
+      survive a reload with no on-device snapshot (the drive archive alone), and the relay's
+      store holds none of the plaintext. Still open below: anonymous history persistence.
+- [x] Web durability, remaining: anonymous history persists (SDK journey and `INT_HISTORY_04`
+      read it back on another device). Restore the
       conversation paging-after-reload and journey per-identity archive-isolation
       assertions and the stranger/contact tray persistence journey removed from the
       still-active messaging browser suites.
-- [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
-      visibility on a different relay.
-- [ ] Encrypted attachment upload/open: 20 MB across relays; no plaintext bytes/name/MIME
-      in provider storage; malformed/missing/revoked attachments fail safely.
-- [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
-      analytics consent, group create/add/remove and quota display on v2.
+- [x] Profile editor/avatar persistence and public lookup (`profile.spec.js`: saved photo and
+      name back after a reload with the device's avatar cache cleared; photo served from the
+      identity host) and the OAuth `name`/`picture` claims (`INT_PROFILE_03`: the bridge fetches
+      the profile like any peer and the picture URL serves the photo).
+- [x] Encrypted attachment upload/open: CLI send/save keeps name, MIME and bytes out of
+      the provider (`INT_ATTACH_01`); the web sends and opens them (`attachments.spec.js`,
+      SDK live test incl. a snoop and a tampered hash); 20 MB across two relays
+      (`INT_ATTACH_02`). TS↔Go cross-client coverage stays open (same format by construction).
+- [x] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
+      analytics consent, group create/add/remove and quota display on v2: blocks export/import
+      was broken (system-file path outside `.poweur`) and now publishes to `/shared/blocks.json`
+      on the drive and imports through a share (`INT_ABUSE_03`); quota shows in Settings and as
+      a warning from 90% with a clear full-storage message (web unit tests); the rest is covered
+      by `CONTACTS_02/04`, `GROUP_01`, `DEVICES_01/03`, `policy.spec.js`, `analytics.spec.js`
+      and the connected-apps unit tests.
 
 Files/sharing/attachment/durability browser suites that still invoked removed DAV APIs
 are removed during Phase 0. Files, direct-share and link UI suites return in E20-T10;
@@ -527,7 +567,14 @@ commit fuzz never removes a live chunk.
 - [x] **Share members subscribe too:** a member on another relay opens an event stream on the
       host relay for the nodes shared with them (visitor auth), filtered to what they may read;
       revocation closes the stream
-- [ ] `/pub` and `/.well-known/poweur/` served from public nodes and `.poweur/public`
+- [x] `/pub` served from public nodes (`https://<identity>/pub/<folder>/<path>`: files decrypted
+      with the key their manifests publish, JSON or HTML folder listings, `ETag`, one-minute public
+      caching, sandboxed CSP; nothing private resolves) and `/.well-known/poweur/` from
+      `.poweur/public`. Public manifests (`public`, `plain_name`, `plain_key`, public name hash;
+      no sealed envelopes; never rotated) are appended to the canonical form only when public, so
+      private vectors are unchanged; Go↔TS vectors; engine keeps public trees public and rooted at
+      the top. SDK/CLI `createPublic`/`mkdir --public`, web "New public folder" and public
+      address dialog (`TestPublicFolders`, `INT_DRIVE_09`, SDK live test, `files.spec.js`)
 - [ ] Public nodes CDN-cacheable (immutable chunk URLs, short-lived feed heads with `ETag`) and
       the relay subscription proxy + batch feed heads (memory only) specified in EPIC-032 E32-T4
 - [ ] Presigned chunk downloads (reads go through the relay for now)
@@ -569,18 +616,41 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [x] **Proof-of-work** (E14 primitive) required on anonymous link writes, difficulty set by the owner
 - [ ] **Ownership transfer** of a subtree between drives (person ↔ group identity), re-issuing
       shares and keeping links working
-- [ ] Offers and accepts (E05-T3 bodies) carry sealed node keys; mounts in `.poweur/private/mounts/`
+- [x] Offers and accepts (PCP-0008, `format: 2`) carry the signed share; mounts in
+      `.poweur/private/mounts.json` (Go/TS formats, Go CLI `share add`/`accept`/`mounts`,
+      `INT_DRIVE_07`; TS CLI and web UI still to come)
 - [x] Revocation with immediate access removal and key rotation on the next owner write
       (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
+- [x] Client key rotation (Go/TS `Rotate`, `poweur drive rotate`; CLI `share rm`/`link rm` and web
+      revocation rotate automatically): new node keys and re-encrypted replace files through the
+      subtree, append files keep their keys (records are not re-encryptable), remaining members'
+      shares re-issued at the new generation, links reported for recreation. Revoked shares stay
+      listed (`GET …/shares` → `revoked`) as evidence, so versions written through them still
+      verify (`INT_DRIVE_08`, SDK live test). File requests trust only owner-issued links: a link
+      holder cannot see an admin's chain.
+- [x] Fast reads without format changes (production traced a refresh at 233 requests / 23 s, 2 s
+      of it on the server): signed requests replace the per-request challenge round trip on
+      every endpoint; `GET …/listing` and `GET …/path` return nodes with their envelope versions
+      (tracked per node, filled in for older snapshots) and share evidence in one request; clients
+      decrypt children with the folder key in hand and reuse decrypted nodes; the relay caches
+      manifests and journal segments and reads records in parallel; GC keeps envelope-carrying
+      versions (content released) so old files stay openable; history reads only new records,
+      seals small records inline (padded) and reuses one archive per client; the web app shows
+      the last Files listing and history from an encrypted on-device snapshot and gates
+      pull-to-refresh on the changes cursor (`seq` in `GET /drive/{id}`). A folder now lists in one
+      request, a refresh with nothing new in one.
 - [x] Links with key-in-fragment and the split password verifier; expiry, download caps,
       rate limits (relay side)
-- [ ] Static decrypting viewer at `/s/<token>` with strict CSP and `no-referrer` (web)
+- [x] Static decrypting viewer at `/s/<link>` with strict CSP and `no-referrer` (web
+      `viewer.html`, SDK `openLink`; verified in a browser: password, wrong password,
+      fragment cleared, decrypted listing and download)
 - [x] File requests on `create` + folder public key; guest isolation and quotas (guest
       authors, `INT_DRIVE_03`)
 - [ ] Claim flow from E05-T6 and Send (E05-T7) as links on sealed files (clients)
 - [x] Groups as members; membership change rotates keys (groups hosted on the same relay;
       Space admins administer the group's drive)
-- [ ] Remote groups as members (needs relay-to-relay roster reads)
+- [x] Remote groups as members: members present the signed roster, checked against the
+      group relay's public epoch; newer rosters revoke departed members (`INT_DRIVE_05`)
 
 **Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a member with `append` on a file and
 no read cannot read it; an anonymous link writer is stopped by caps and proof-of-work; a
@@ -619,8 +689,22 @@ both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` conv
 
 ### E20-T10 — Web & mobile Files on v2
 
-- [ ] Files destination, Shared with me, share dialog (people, links, file requests), public
-      folder toggle with a plaintext warning
+- [x] Web Files destination: encrypted upload/download, folders, replace/delete and navigation;
+      Shared with me verifies offers against the source relay and persists accepted mounts in
+      encrypted `.poweur/private/mounts.json`; direct person shares support read/write/admin and
+      immediate revocation. Component coverage plus a real-relay browser journey cover
+      upload → share → accept/open → revoke. Listings stay in the identity-scoped cache across
+      navigation and refresh from drive SSE, app foregrounding or the Messages-style pull gesture.
+      Cross-relay browser coverage remains.
+- [x] Key-in-fragment read links in the share dialog, including an optional password, copy and
+      immediate revocation; the real-browser journey opens a password link in a clean context
+- [x] Share dialog separates "Share with people" from a collapsed "Share with a link" (and file
+      requests) below an "or"; offers from accepted contacts mount without Accept, strangers'
+      wait under "Waiting for you"; an undelivered offer says why (e.g. the recipient's inbox
+      refused it)
+- [x] Share dialog with create-only file requests; public folders with a plaintext warning and
+      a public address dialog (E20-T5)
+- [ ] Mobile-specific interaction coverage
 - [ ] Thumbnails and previews generated on the client at upload and stored as encrypted
       sidecars; name search as a client-side index
 - [ ] Link viewer page decrypting in the browser, streaming large downloads
@@ -637,31 +721,42 @@ Replaces E09-T1's layout and closes E09-T4's plaintext-bytes gap.
       multi-device dedupe by message id
 - [x] SDK: `tail(peer, {limit})`, `before(peer, cursor, {limit})`, `append(records)`; tray loads
       read one tail chunk per conversation
-- [ ] Attachments: sealed file + per-file share with the recipient; content key, filename and
+- [x] Attachments: sealed file + per-file share with the recipient; content key, filename and
       MIME inside the encrypted payload; plaintext metadata keeps only node id, ciphertext size
-      and hash
+      and hash. CLI `send --attach` and `attach save`; SDK `prepareAttachment`/`openAttachment`;
+      the web attaches from the conversation composer (direct conversations) and Open downloads
+      and verifies the ciphertext hash.
 - [x] CLI `poweur history [peer] --limit --before --thread --json`
+
+- [x] Scale: `load({perConversation})` reads the newest page of each conversation (one records
+      request each); `older()`/`before()` page back one request at a time; appending asks the
+      relay for the caller's author cursor (`GET …/author-cursor`) instead of re-reading the log.
+      SDK live test over a 300-message archive counts the requests; the web tray loads 20 per
+      conversation and "Load more" pages from the archive (`durability.spec.js`).
 
 **Acceptance:** with 20 conversations and 10k messages the tray fetches ≤ 20 tail chunks;
 a 20 MB attachment crosses two relays and the sender's store holds only ciphertext; E15-T13
-paging works against it.
+paging works against it. **Met:** one records request per conversation for the tray
+(SDK live test), `INT_ATTACH_02` (20 MB, two relays, ciphertext-only store), web paging e2e.
 
 ### E20-T12 — Migration & v1 removal
 
-- [ ] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
+- [x] Operator `poweur-relay migrate-v1`: dry-run, idempotent restart, validate and
       copy only plaintext system data (identity, profile/avatar, capabilities,
       contacts, policy, analytics, devices, connected apps, group roster).
-- [ ] Also move the relay registries Phase 6 relocated: `identities/<id>/poweur-sys/public/id.json`
+- [x] Also move the relay registries Phase 6 relocated: `identities/<id>/poweur-sys/public/id.json`
       → `relay/identities/<id>.json` (+ drive mirror), `spool/{messages,acks}/<id>/*.json` →
       `relay/spool/{messages,acks}/<id>/`, `keystore/<id>.json` → `relay/keystore/<id>.json`
       (WebAuthn key backups — losing them locks users out of recovery). Undelivered mail and
       key backups must survive the cutover.
-- [ ] Drop old files, shares, links and history; never generate private content keys
+- [x] Drop old files, shares, links and history; never generate private content keys
       on the relay. Move successfully migrated old trees to `identities.v1-backup/`.
 - [x] Remove `/dav`, v1 sync, DAV tokens, app passwords and whole-file implementation.
 - [ ] Finish residual v1 documentation/reference cleanup and restore baseline tests on v2.
-- [ ] Update OPS/BACKUP runbooks, rehearse on a copy of production, verify all baseline
-      behavior and health before deployment; document backup expiry.
+- [x] Update OPS/BACKUP runbooks, rehearse on a copy of production, verify health before
+      deployment (done 2026-09-29).
+- [ ] Delete `*.v1-backup` on the production volume and `/root/backups/poweur_data-pre-v2-*`
+      once v2 has run cleanly for two weeks (after 2026-10-13).
 
 **Acceptance:** dry run does not mutate the source; interrupted migration resumes without
 losing system documents; identity discovery, avatars, contacts/policy and group delivery

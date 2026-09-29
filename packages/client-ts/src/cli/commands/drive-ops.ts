@@ -1,25 +1,24 @@
 import { readFile } from "node:fs/promises";
-import { FileChunkCache } from "../../node/drive-cache.js";
-import { DriveClient } from "../../drive/client.js";
-import { DriveFiles, DriveLog, fileKeys } from "../../drive/index.js";
+import { DriveFiles, DriveLog } from "../../drive/index.js";
 import { normalizeName } from "../../drive/names.js";
-import type { ShareRole } from "../../drive/share.js";
+import { keyBearing, type Share, type ShareRole } from "../../drive/share.js";
 import { fromBase64 } from "../../encoding.js";
 import { resolveIdentity } from "../../resolve.js";
-import { nodeResolveOptions, openClient } from "../../node/session-factory.js";
+import { nodeResolveOptions } from "../../node/session-factory.js";
+import { openDrive } from "./drive-open.js";
+import { offerShare, sendShareMessage } from "./drive-offers.js";
 import { flagBool, flagNumber, flagString, parseArgs, UsageError } from "../args.js";
 import { write, type Streams } from "../output.js";
 
-const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into <path>|--to-node <id>] [--json]";
+const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id> [--no-rotate]|ls; rotate <path>; link create <path>|rm <id> [--no-rotate]; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]";
 
 export async function driveOpsCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0]!;
-  const args = parseArgs(argv.slice(1), { bool: ["json"] });
+  const args = parseArgs(argv.slice(1), { bool: ["json", "no-offer", "no-rotate"] });
   const json = flagBool(args, "json");
-  const { client, keys } = await openClient({ identity: flagString(args, "use-identity") });
+  const { client, keys, drive, files } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
+  const notify = !flagBool(args, "no-offer");
   if (!keys.encryptionPrivateKey && sub !== "watch") throw new Error("identity has no encryption key");
-  const drive = new DriveClient(client.relay, client.signer, client.signer.identity, new FileChunkCache());
-  const files = keys.encryptionPrivateKey ? new DriveFiles(drive, fileKeys(keys.signingPrivateKey, keys.encryptionPrivateKey)) : undefined;
   const role = (flagString(args, "role") ?? "read") as ShareRole;
   const expires = flagString(args, "expires") ?? "";
   if (sub === "watch") {
@@ -34,7 +33,13 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
     if (action === "rm") {
       const id = args.positional[1];
       if (!id) throw new UsageError(usage);
+      const revoked = (await drive.shares()).shares.find(s => s.id === id);
       await drive.unshare(id);
+      if (revoked && !flagBool(args, "no-rotate")) await rotateAfterRevoke(files, revoked, streams);
+      if (revoked?.member && notify) {
+        await sendShareMessage(client, revoked.member, "sys.share.revoked", id, { format: 2, drive: revoked.drive, share_id: id, revoked_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") })
+          .catch(error => streams.stderr(`revoked, but the member was not told: ${error}\n`));
+      }
       return write(streams, json, { removed: id }, `${id}\n`);
     }
     if (action === "add" && sub === "share") {
@@ -45,7 +50,9 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       if (!published) throw new Error(`no encryption key for ${member}`);
       const memberKey = fromBase64(published.replace(/^x25519:/, ""));
       if (memberKey.length !== 32) throw new Error(`no encryption key for ${member}`);
-      const share = await files.shareWith(await files.resolve(path), member, memberKey, role, expires);
+      const target = await files.resolve(path);
+      const share = await files.shareWith(target, member, memberKey, role, expires);
+      if (notify) await offerShare(client, drive.relay.relayUrl, target, share).catch(error => streams.stderr(`shared, but the offer was not sent: ${error}\n`));
       return write(streams, json, { id: share.id, node: share.node, member: share.member, role: share.role }, `${share.id}\n`);
     }
     if (action === "create" && sub === "link") {
@@ -53,9 +60,18 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       if (!path) throw new UsageError(usage);
       const { share, fragment } = await files.link(await files.resolve(path), role, expires, flagString(args, "password") ?? "");
       const secret = Buffer.from(fragment).toString("base64url");
-      return write(streams, json, { id: share.id, link: share.link, role: share.role, fragment: secret }, `${share.link}#${secret}\n`);
+      // Shared as https://<drive>/s/<link>#<secret>; the drive's host serves the viewer.
+      const relayUrl = new URL(drive.relay.relayUrl);
+      const url = `${relayUrl.protocol}//${share.drive}${relayUrl.port ? `:${relayUrl.port}` : ""}/s/${share.link}#${secret}`;
+      return write(streams, json, { id: share.id, link: share.link, role: share.role, fragment: secret, url }, `${url}\n`);
     }
     throw new UsageError(usage);
+  }
+  if (sub === "rotate") {
+    const rotated = await files.rotate(await files.resolve(need(args.positional[0])));
+    reportStale(rotated.stale, streams);
+    const { node, generation } = rotated.file.manifest;
+    return write(streams, json, { node, generation, reissued: rotated.reissued, stale: rotated.stale.map(s => s.id) }, `${node} ${generation}\n`);
   }
   if (sub === "history") {
     const file = await files.resolve(need(args.positional[0]));
@@ -97,9 +113,29 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       await drive.commit({ transfer: { node: file.manifest.node, to, to_node: toNode } });
       return write(streams, json, { node: file.manifest.node, to, to_node: toNode }, `${toNode}\n`);
     }
-    throw new UsageError("destination keys for a copy live with the caller; pass --to-node to retire a recreated subtree");
+    // Re-create the subtree on the destination as its owner or as a member
+    // with a share there (--into /<shared-node-id>/...), then retire it here.
+    const into = flagString(args, "into") ?? "";
+    const destination = await openDrive({ identity: flagString(args, "use-identity"), drive: to });
+    if (!destination.files) throw new Error("identity has no encryption key");
+    const copied = await files.transfer(file, destination.files, await destination.files.resolve(into));
+    return write(streams, json, { node: file.manifest.node, to, to_node: copied.manifest.node, name: copied.name }, `${copied.manifest.node}\n`);
   }
   throw new UsageError(usage);
+}
+/** Re-keys the revoked share's node when the relay asks for it, so writes
+ * there resume and the remaining members get re-issued shares. */
+async function rotateAfterRevoke(files: DriveFiles, revoked: Share, streams: Streams): Promise<void> {
+  if (!keyBearing(revoked.role)) return;
+  try {
+    const rotated = await files.rotateIfRequired(revoked.node);
+    if (rotated) reportStale(rotated.stale, streams);
+  } catch (error) {
+    throw new Error(`revoked, but the keys were not rotated (writes there wait for \`poweur drive rotate\`): ${error instanceof Error ? error.message : error}`);
+  }
+}
+function reportStale(stale: Share[], streams: Streams): void {
+  for (const s of stale) streams.stderr(`share ${s.id} (${s.link ? `link ${s.link}` : s.member}) predates the rotation and must be recreated\n`);
 }
 function need(value: string | undefined): string {
   if (!value) throw new UsageError(usage);

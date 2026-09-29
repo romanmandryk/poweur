@@ -23,6 +23,11 @@ import (
 type rosterEntry struct {
 	members, admins []string
 	group           bool
+	// Remote groups (hosted on another relay) are learned from rosters
+	// members present; checked is when their epoch was last confirmed.
+	remote  bool
+	epoch   int
+	checked time.Time
 }
 
 type rosterCache struct {
@@ -42,13 +47,20 @@ func (s *Server) resolveGroup(group string) (members, admins []string, ok bool) 
 	c := s.rosters
 	c.mu.Lock()
 	entry, cached := c.entries[group]
-	start := !cached && !c.loading[group] && s.identities.Exists(group)
-	if start {
+	local := s.identities.Exists(group)
+	start := !cached && !c.loading[group]
+	recheck := cached && entry.remote && time.Since(entry.checked) > remoteRosterTTL && !c.loading[group]
+	if start || recheck {
 		c.loading[group] = true
 	}
 	c.mu.Unlock()
-	if start {
+	switch {
+	case start && local:
 		go s.loadRoster(context.Background(), group)
+	case start:
+		go s.loadRemoteRoster(context.Background(), group)
+	case recheck:
+		go s.recheckRemoteRoster(context.Background(), group)
 	}
 	return entry.members, entry.admins, cached && entry.group
 }
@@ -107,9 +119,6 @@ func (s *Server) groupRosterChanged(ctx context.Context, group string) {
 	old := s.rosters.entries[group]
 	s.rosters.mu.Unlock()
 	updated := s.loadRoster(ctx, group)
-	if s.engine == nil {
-		return
-	}
 	still := map[string]bool{}
 	for _, name := range append(append([]string(nil), updated.members...), updated.admins...) {
 		still[name] = true
@@ -121,7 +130,13 @@ func (s *Server) groupRosterChanged(ctx context.Context, group string) {
 			still[name] = true // once
 		}
 	}
-	if len(removed) == 0 {
+	s.revokeOnDrives(ctx, group, removed)
+}
+
+// revokeOnDrives journals a group revocation on the group's own drive (when
+// hosted here) and every drive indexed as sharing with the group.
+func (s *Server) revokeOnDrives(ctx context.Context, group string, removed []string) {
+	if len(removed) == 0 || s.engine == nil {
 		return
 	}
 	drives := map[string]bool{group: true}
@@ -151,10 +166,10 @@ func (s *Server) groupRosterChanged(ctx context.Context, group string) {
 	}
 }
 
-// noteGroupShare indexes that driveID shares with member, if member is an
-// identity hosted here (it may be, or become, a group).
+// noteGroupShare indexes that driveID shares with member: any identity may
+// be, or become, a group identity, here or on another relay.
 func (s *Server) noteGroupShare(member, driveID string) {
-	if s.drive == nil || member == "" || strings.HasPrefix(member, "link:") || !s.identities.Exists(member) {
+	if s.drive == nil || member == "" || strings.HasPrefix(member, "link:") {
 		return
 	}
 	key := sanitizedOrEmpty(member) + "/" + sanitizedOrEmpty(driveID)

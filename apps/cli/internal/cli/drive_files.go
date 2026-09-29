@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/poweur/cli/internal/config"
 	driveclient "github.com/poweur/cli/internal/drive"
 	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
@@ -20,21 +21,26 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
+	target := fs.String("drive", "", "another identity's drive, reached through your shares")
 	jsonOut := fs.Bool("json", false, "JSON output")
+	publish := fs.Bool("public", false, "mkdir: a public folder at the top of the drive, readable by anyone at https://<id>/pub/<name>/")
 	offset := fs.Int64("offset", 0, "plaintext byte offset for get")
 	length := fs.Int64("length", -1, "plaintext byte count for get; default is the rest of the file")
-	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
+	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--public": true, "--force": true})) != nil {
 		return 1
 	}
 	count := 1
-	if args[0] == "put" || args[0] == "get" || args[0] == "mv" {
+	switch args[0] {
+	case "put", "get", "mv":
 		count = 2
+	case "shared":
+		count = 0
 	}
 	if fs.NArg() != count {
-		fmt.Fprintln(stderr, "usage: poweur drive mkdir|rm|list <remote-path>; put <local-file> <remote-path>; get <remote-path> <local-file>; mv <remote-path> <remote-path> [--json]")
+		fmt.Fprintln(stderr, "usage: poweur drive mkdir|rm|list <remote-path>; put <local-file> <remote-path>; get <remote-path> <local-file>; mv <remote-path> <remote-path>; shared --drive <identity>; every command takes --drive <identity> to work in a drive shared with you [--json]")
 		return 1
 	}
-	files, ok := openDriveFiles(*use, stderr)
+	files, ok := openDriveFiles(*use, *target, stderr)
 	if !ok {
 		return 1
 	}
@@ -57,6 +63,17 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	var err error
 	run := func() error {
 		switch args[0] {
+		case "shared":
+			// A member's paths start at these node IDs: /<node>/sub/path.
+			shared, e := files.Shared(ctx)
+			if e != nil {
+				return e
+			}
+			rows := []map[string]any{}
+			for _, file := range shared {
+				rows = append(rows, map[string]any{"node": file.Manifest.Node, "kind": file.Manifest.Kind, "version": file.Manifest.Version})
+			}
+			result = rows
 		case "list":
 			folder, e := files.Resolve(ctx, fs.Arg(0))
 			if e != nil {
@@ -76,11 +93,19 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 			if e != nil {
 				return e
 			}
-			file, e := files.Create(ctx, folder, base, protocol.KindFolder, nil)
+			create := files.Create
+			if *publish {
+				create = files.CreatePublic
+			}
+			file, e := create(ctx, folder, base, protocol.KindFolder, nil)
 			if e != nil {
 				return e
 			}
-			result = map[string]string{"node": file.Manifest.Node, "name": file.Name}
+			out := map[string]string{"node": file.Manifest.Node, "name": file.Name}
+			if file.Public {
+				out["public"] = "true"
+			}
+			result = out
 		case "put":
 			input, e := os.Open(fs.Arg(0))
 			if e != nil {
@@ -172,7 +197,10 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	return writeOutput(stdout, *jsonOut, result, fmt.Sprint(result))
 }
 
-func openDriveFiles(use string, stderr io.Writer) (*driveclient.Files, bool) {
+// openDriveFiles opens a drive as the caller: their own, or with target
+// another identity's drive (on that drive's relay), which they reach through
+// the shares they hold. It never loads anyone else's private keys.
+func openDriveFiles(use, target string, stderr io.Writer) (*driveclient.Files, bool) {
 	cfg, name, key, ok := loadIdentityKey(use, stderr)
 	if !ok {
 		return nil, false
@@ -187,7 +215,17 @@ func openDriveFiles(use string, stderr io.Writer) (*driveclient.Files, bool) {
 		fmt.Fprintln(stderr, err)
 		return nil, false
 	}
-	files := &driveclient.Files{Client: &driveclient.Client{Relay: cfg.RelayURL, Identity: name, Key: key, Cache: driveclient.FileCache{Dir: filepath.Join(home, ".poweur", "cache", "drive-chunks")}}, EncryptionKey: encryption}
+	relay := cfg.RelayURL
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target != "" && target != name {
+		if relay, err = identityRelayURL(context.Background(), cfg, target); err != nil {
+			fmt.Fprintln(stderr, err)
+			return nil, false
+		}
+	} else {
+		target = ""
+	}
+	files := &driveclient.Files{Client: &driveclient.Client{Relay: relay, Identity: name, Drive: target, Key: key, Cache: driveclient.FileCache{Dir: filepath.Join(home, ".poweur", "cache", "drive-chunks")}}, EncryptionKey: encryption}
 	files.Authors = func(author string) (ed25519.PublicKey, error) {
 		res, err := identity.ResolveIdentity(context.Background(), author)
 		if err != nil {
@@ -195,5 +233,41 @@ func openDriveFiles(use string, stderr io.Writer) (*driveclient.Files, bool) {
 		}
 		return idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
 	}
+	files.EncryptionKeys = func(ctx context.Context, member string) ([]byte, error) {
+		res, err := identity.ResolveIdentity(ctx, member)
+		if err != nil {
+			return nil, err
+		}
+		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
+	}
+	// Versions written by a group's members are checked against the group's
+	// roster, which the caller can read only if they are in the group.
+	files.GroupMembers = func(ctx context.Context, group string) ([]string, error) {
+		groupRelay, err := identityRelayURL(ctx, cfg, group)
+		if err != nil {
+			return nil, err
+		}
+		roster, err := fetchGroupRoster(ctx, groupRelay, group, name, key)
+		if err != nil {
+			return nil, err
+		}
+		return append(append([]string(nil), roster.Members...), roster.Admins...), nil
+	}
 	return files, true
+}
+
+// identityRelayURL is the relay an identity's document names, as a URL.
+func identityRelayURL(ctx context.Context, cfg config.Config, id string) (string, error) {
+	res, err := identity.ResolveIdentity(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve the relay hosting %s: %w", id, err)
+	}
+	relay := strings.TrimRight(strings.TrimSpace(res.Document.Relay), "/")
+	if relay == "" {
+		return "", fmt.Errorf("%s names no relay", id)
+	}
+	if !strings.HasPrefix(relay, "http://") && !strings.HasPrefix(relay, "https://") {
+		relay = schemeFromConfig(cfg) + "://" + relay
+	}
+	return relay, nil
 }

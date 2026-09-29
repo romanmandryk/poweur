@@ -24,6 +24,44 @@
     "valid": true
   },
   {
+    "name": "identity-page-defaults",
+    "raw": {
+      "version": 1,
+      "identity_page": {}
+    },
+    "valid": true
+  },
+  {
+    "name": "identity-page-opt-outs",
+    "raw": {
+      "version": 1,
+      "identity_page": {
+        "enabled": false,
+        "indexable": false,
+        "advertise_anonymous_messages": true
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "identity-page-bad-boolean",
+    "raw": {
+      "version": 1,
+      "identity_page": {
+        "enabled": "no"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "identity-page-null",
+    "raw": {
+      "version": 1,
+      "identity_page": null
+    },
+    "valid": false
+  },
+  {
     "name": "avatar-off-tree",
     "raw": {
       "version": 1,

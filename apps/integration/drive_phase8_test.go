@@ -75,7 +75,48 @@ func TestINT_DRIVE_06_Phase8Client(t *testing.T) {
 	if !bytes.Contains([]byte(raw), []byte(share["id"])) {
 		t.Fatalf("share list: %s", raw)
 	}
+	// Bob reads the shared file with his own keys, through his share.
+	raw, _ = runCLI(t, bobHome, "drive", "shared", "--drive", alice, "--json")
+	var shared []map[string]any
+	if err := json.Unmarshal([]byte(raw), &shared); err != nil || len(shared) != 1 || shared[0]["node"] != share["node"] {
+		t.Fatalf("bob's shared nodes: %s %v", raw, err)
+	}
+	bobCopy := filepath.Join(t.TempDir(), "bob-doc.txt")
+	runCLI(t, bobHome, "drive", "get", "/"+share["node"], bobCopy, "--drive", alice, "--json")
+	if got, err := os.ReadFile(bobCopy); err != nil || string(got) != "hello world" {
+		t.Fatalf("bob reads the shared file: %q %v", got, err)
+	}
+	// Read does not write.
+	if code, _, _ := runCLIFull(t, bobHome, "drive", "put", doc, "/"+share["node"], "--drive", alice, "--json"); code == 0 {
+		t.Fatal("a reader replaced the shared file")
+	}
 	runCLI(t, aliceHome, "drive", "share", "rm", share["id"], "--json")
+	if code, _, _ := runCLIFull(t, bobHome, "drive", "get", "/"+share["node"], bobCopy, "--drive", alice, "--json"); code == 0 {
+		t.Fatal("bob still reads after revocation")
+	}
+
+	// A writer edits inside a shared folder; the owner's client verifies
+	// that bob's version was allowed by the share before trusting it.
+	runCLI(t, aliceHome, "drive", "mkdir", "/team", "--json")
+	runCLI(t, aliceHome, "drive", "put", doc, "/team/plan.txt", "--json")
+	raw, _ = runCLI(t, aliceHome, "drive", "share", "add", "/team", bob, "--role", "write", "--json")
+	var team map[string]string
+	if err := json.Unmarshal([]byte(raw), &team); err != nil {
+		t.Fatal(err)
+	}
+	plan := filepath.Join(t.TempDir(), "plan.txt")
+	if err := os.WriteFile(plan, []byte("bob's plan"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, bobHome, "drive", "put", plan, "/"+team["node"]+"/plan.txt", "--drive", alice, "--json")
+	runCLI(t, bobHome, "drive", "put", plan, "/"+team["node"]+"/notes.txt", "--drive", alice, "--json")
+	for _, name := range []string{"plan.txt", "notes.txt"} {
+		out := filepath.Join(t.TempDir(), name)
+		runCLI(t, aliceHome, "drive", "get", "/team/"+name, out, "--json")
+		if got, err := os.ReadFile(out); err != nil || string(got) != "bob's plan" {
+			t.Fatalf("alice reads bob's %s: %q %v", name, got, err)
+		}
+	}
 
 	raw, _ = runCLI(t, aliceHome, "drive", "trim", "/notes.log", "/notes.snap", "--json")
 	var snap struct {
@@ -90,17 +131,20 @@ func TestINT_DRIVE_06_Phase8Client(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCLI(t, aliceHome, "drive", "put", move, "/move.txt", "--json")
+	// Bob lets alice write into his inbox; she moves her file there as a
+	// member of his drive, with her own keys only.
 	runCLI(t, bobHome, "drive", "mkdir", "/inbox", "--json")
+	raw, _ = runCLI(t, bobHome, "drive", "share", "add", "/inbox", alice, "--role", "write", "--json")
+	var inbox map[string]string
+	if err := json.Unmarshal([]byte(raw), &inbox); err != nil {
+		t.Fatal(err)
+	}
+	runCLI(t, aliceHome, "drive", "transfer", "/move.txt", "--to", bob, "--into", "/"+inbox["node"], "--json")
 	for _, name := range []string{bob + ".key", bob + ".enc"} {
-		in, err := os.ReadFile(filepath.Join(bobHome, ".poweur", "keys", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = os.WriteFile(filepath.Join(aliceHome, ".poweur", "keys", name), in, 0600); err != nil {
-			t.Fatal(err)
+		if _, err := os.Stat(filepath.Join(aliceHome, ".poweur", "keys", name)); !os.IsNotExist(err) {
+			t.Fatalf("alice's home holds bob's %s", name)
 		}
 	}
-	runCLI(t, aliceHome, "drive", "transfer", "/move.txt", "--to", bob, "--into", "/inbox", "--json")
 	copied := filepath.Join(t.TempDir(), "copied.txt")
 	runCLI(t, bobHome, "drive", "get", "/inbox/move.txt", copied, "--json")
 	got, err = os.ReadFile(copied)

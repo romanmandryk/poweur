@@ -24,6 +24,23 @@ The relay exposes two distinct surfaces and authenticates them differently:
   (`issued_at`, `nonce`, `identity_signature`). The DNS-token check on
   `POST /identities` is necessary but no longer sufficient on its own.
 
+### Signed requests (one round trip) {#signed-requests}
+
+Every endpoint that accepts a signed challenge also accepts a **signed request**, which needs no
+`GET /auth/challenge` first. The client signs, with the identity key or a session key:
+
+```text
+poweur-request/v1\n<identity>\n<METHOD>\n<path and query as sent>\n<unix seconds>\n<nonce>\n<hex SHA-256 of the body>
+```
+
+and sends `X-Poweur-Identity`, `X-Poweur-Timestamp`, `X-Poweur-Nonce` (16–64 characters, random),
+`X-Poweur-Signature` (base64) and, for a session key, `X-Poweur-Session-Id`. The relay accepts it
+within 60 seconds of its own clock and refuses a nonce it has already seen in that window, so a
+captured request can be neither altered nor replayed on that relay. Clients learn the relay's
+clock from the `Date` response header (exposed to browsers) and re-sign once on a `401` if theirs
+is off. Bodies of signed requests are limited to 32 MiB. The challenge flow keeps working; the
+keystore fetch, signed by a passkey, still uses it.
+
 | Endpoint | Class | Notes |
 |----------|-------|-------|
 | `POST /messages` | open / messaging | Subject to the at-least-one-local rule (see below) |
@@ -1037,10 +1054,13 @@ event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surf
 | `GET /drive/:identity/nodes/:node/versions/:version[/pages/:page\|/chunks/:hash]` | Signed manifest, chunk-list page, chunk |
 | `GET /drive/:identity/nodes/:node/chunks/:hash` | Chunk of an append record |
 | `GET /drive/:identity/shares` | Shares the caller may see (members: their own, with sealed keys) |
+| `GET /drive/:identity/nodes/:node/shares` | Shares on a node and its ancestors, for readers verifying version authors |
 | `GET /drive/:identity/events` | `drive.changed` SSE filtered to the caller; closes on revocation |
 | `GET /drive/:identity/links/:link` | Public: how to open a link (salt, KDF, PoW, opens left) |
 
 Link holders send `X-Poweur-Link` (and `X-Poweur-Link-Verifier` for a password) instead of the challenge headers.
+A member of a group identity hosted on another relay adds `X-Poweur-Group-Roster` (the group's signed roster, base64url);
+`GET /groups/:group/epoch` (public) returns the group's current membership epoch, `0` for non-groups.
 
 ## Error Format
 

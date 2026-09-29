@@ -1,223 +1,257 @@
-# EPIC-012 — Identity websites (`/public` → browser as a real site)
+# EPIC-012 — Generated identity pages
 
-- **Status:** proposed — **design notes only; not fully specified**
+- **Status:** done (T1–T5)
 - **Priority:** P2
-- **Depends on:** EPIC-003 (`/pub`, layout), EPIC-006 (`poweur-sys` conventions), EPIC-007
-  (inbox policy — especially anonymous / open receive), EPIC-009 (typed messages)
-- **Unlocks:** personal/landing pages per ID; contact forms that become Poweur messages;
-  “every ID can be a tiny website” without a separate hosting product
-- **Apps note:** decide the separate site origin (E12-T1/T2) together with [EPIC-029](EPIC-029-poweur-apps-platform.md), which needs the same sandboxed sister host for app bundles. Custom domains on hosted infra and site egress are EPIC-026 entitlements; E30-T4 adds a storefront block.
+- **Depends on:** EPIC-001 (`/.well-known` identity discovery), EPIC-006 (`profile.json`),
+  EPIC-014 (anonymous messaging, if advertised), EPIC-015 (web-app visual language)
+- **Unlocks:** a useful public homepage for every ID; a safe place for later typed public
+  blocks such as posts, payment links and offers
 
 ## Progress
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E12-T1 Hosting model decision (apex vs `www.` vs alternate) | **open** | Design notes below — pick before build |
-| E12-T2 Security model (active content, CSP, cookies, sandbox) | **open** | Must not weaken `/.well-known` / DAV / app origins |
-| E12-T3 Site root convention + MIME / index serving | **open** | Extends E03-T6; HTML as real HTML |
-| E12-T4 Contact form → Poweur message bridge | **open** | Ties to inbox-policy anon/open modes |
-| E12-T5 Spec + implementation slice | **open** | Blocked on T1–T4 decisions |
-
-> This epic deliberately leaves options open. Do not treat the sketches below as normative
-> until E12-T1/T2 land a written decision in `apps/docs/docs/files/`.
+| E12-T1 Page settings + response contract | **done** | Optional public `identity_page`; defaults page on, indexing off (opt-in), anonymous ads off. Schema, Go, TypeScript, Settings toggles, onboarding indexing question |
+| E12-T2 Server-rendered identity page | **done** | Relay-owned `html/template`; no user HTML. Copy ID; IndieAuth `Link` kept on `/` |
+| E12-T3 HTTP caching, SEO + security headers | **done** | Exact `GET /` only. ETag/`304`, `Vary: Accept`, no in-process page cache |
+| E12-T4 Contact actions | **done** | Copy ID. **Message** via launcher `?to=` (kept through claim or opening an existing ID), one click from an ID in the `poweur_ids` parent-domain cookie. "What is a Poweur ID?" + **Get your own ID**. **Write anonymously** only when advertised, via signed-out `/app/?anonymous=1`. A stale advertisement fails without showing inbox policy |
+| E12-T5 Tests + docs | **done** | [`apps/docs/docs/files/identity-pages.md`](../apps/docs/docs/files/identity-pages.md). Relay, identity, client, web, and `TestINT_IDENTITY_PAGE_01` |
 
 ## Goal
 
-Let an identity publish a **real browser-rendered website** from their home filesystem
-(something people expect from `alice.example.org`), and make **contact / lead forms** a
-first-class way to start a Poweur conversation — including, when the recipient opts in,
-messages from senders who are not yet contacts (and possibly fully anonymous web posters).
+Give every identity a small, useful page at its canonical URL:
 
-Today E03-T6 only exposes marked `/public` trees at `https://<identity>/pub/…` and forces
-HTML/JS to `text/plain`. This epic asks what it would take to go further, and what we must
-refuse to do.
-
-## Background (current constraints)
-
-- Hosted IDs already resolve via a **single DNS wildcard**: `*.poweur.net → relay`
-  (EPIC-002). That covers `alice.poweur.net`, not deeper labels.
-- Host-routing on the relay already distinguishes identity Hosts for
-  `/.well-known/poweur/`, `/dav/`, `/pub/` (EPIC-001/003).
-- `/pub` is intentionally a **file share**, not a web host (stored-XSS on the identity
-  origin was the hard stop).
-- Messaging accepts any signed sender today; **recipient inbox policy** (contacts-only vs
-  open) is EPIC-007 and not yet enforced. Anonymous (unsigned) ingress does not exist.
-
-## Open design notes (not decisions)
-
-### A. Where does the site live in the URL space?
-
-Three candidate shapes — trade-offs are security + DNS + UX, not “which looks nicer”:
-
-| Shape | Example | Pros | Cons |
-|---|---|---|---|
-| **A1. Apex of the ID** | `https://alice.poweur.net/` → site | One Host people already know; no extra DNS | Same origin as `/.well-known`, `/dav`, `/app`, `/pub` — XSS in user HTML can attack cookies/tokens for those paths unless carefully isolated |
-| **A2. `www.<id>`** | `https://www.alice.poweur.net/` | Separate origin from apex (better cookie isolation if apex keeps APIs) | **DNS wildcard problem** — see §B |
-| **A3. Path or sister host** | `https://alice.poweur.net/www/…` or `https://alice.sites.poweur.net/` | Path: no DNS change; sister host: one extra wildcard (`*.sites.poweur.net`) covers all IDs | Path still same-origin as APIs; sister host is a second hostname users must learn / link |
-
-**Sketch preference to debate (not decided):** serve the *rendered site* on a **separate
-origin** (A2 or A3 sister host) and keep the apex for protocol surfaces
-(`.well-known`, DAV, messaging APIs). Marketing can still say “your site is at
-alice…” if we 302 apex `/` → the site origin when a site is published — but that redirect
-must not break `.well-known` or registered API paths.
-
-### B. Can `www.<id>` be wildcarded without per-ID DNS?
-
-**Short answer: not with a single standard DNS wildcard under the parent.**
-
-- `*.poweur.net` matches **one** label: `alice.poweur.net` ✅, `www.alice.poweur.net` ❌.
-- DNS has no `*.*.poweur.net`. Covering `www.<every-id>.poweur.net` means either:
-  1. **Per-identity records** (`www.alice` CNAME/A) — defeats the “zero DNS writes”
-     hosting story, or
-  2. **A different hostname shape** that *is* one label deep under a dedicated parent,
-     e.g. `*.sites.poweur.net` → `alice.sites.poweur.net` (ID is the leftmost label), or
-  3. **Client/SNI tricks** that still need a cert story (wildcard certs also only cover
-     one label: `*.poweur.net` covers apex IDs; `*.sites.poweur.net` needs its own cert).
-
-So if we want “no DNS write per ID” **and** a separate origin for HTML, the viable
-wildcard pattern is probably **`*.sites.<relay-parent>`** (or similar), not
-`www.<id>.<parent>`. `www.<id>` remains attractive for self-hosted domains where the
-owner already controls DNS and can add one CNAME.
-
-Self-hosted IDs (`alice.example.org` with their own zone) are a different case: they can
-point apex and/or `www` however they like; the relay only needs Host-routing + TLS.
-
-### C. Filesystem convention
-
-Candidate (align with EPIC-006 when chosen):
-
-```
-/public/www/          ← site root (index.html, assets/…)
-  .poweur-web-public  ← or a stronger “this is an active site” marker
+```text
+https://alice.poweur.net/
 ```
 
-Open questions:
+The page is generated by the relay from the identity name and validated public profile. It
+uses the web app's visual language but is ordinary server-rendered HTML, not the React app and
+not an editable website. A minimal page with just the Poweur ID exists even when the identity
+has no `profile.json`.
 
-- Is `/public/www` special-cased, or any marked folder?
-- Default document (`index.html`), clean URLs, 404 page?
-- Do we still keep read-only `/pub/` file-share semantics for non-site trees
-  (HTML as `text/plain`), and only enable active MIME for the site root?
+V1 displays:
 
-### D. Security limitations we almost certainly need
+- the Poweur ID and a short explanation that this is its identity page;
+- display name, avatar, bio and links when present in `profile.json`;
+- **Copy ID** with concise instructions to use it in the visitor's Poweur client;
+- an anonymous-message affordance only when the owner explicitly advertises it in their
+  public page settings. The existing anonymous-message protocol remains the authority and
+  may still reject a stale or inconsistent advertisement.
 
-Active HTML on an identity-related host is a **stored XSS / session theft** surface.
-Whatever hosting shape we pick, the epic should require an explicit threat model covering:
+The page is present by default but not indexed: search indexing is opt-in, asked during
+onboarding (unchecked) and changeable in Settings. The owner can independently disable the page
+or turn indexing on.
 
-- **Origin isolation** — prefer site origin ≠ origin that holds DAV tokens, web-app
-  `localStorage`, session cookies, or passkey `rpId` if those share a parent.
-- **Cookie / storage** — `Secure; HttpOnly; Path=` discipline; never set cookies for
-  `/` on a host that also serves user HTML unless Path-scoped away from site trees.
-  Prefer **no cookies at all** on the site origin.
-- **CSP** — default locked-down Content-Security-Policy for published sites
-  (e.g. no `unsafe-inline` by default; opt-in richer CSP via a site manifest). Inline
-  contact-form JS may need a documented exception or a relay-served form endpoint.
-- **MIME + nosniff** — already on `/pub`; keep. Only flip HTML/JS/CSS to executable
-  types inside the approved site root.
-- **Sandboxing options** (heavier) — serve user HTML through `sandbox` iframe on a
-  relay-controlled chrome page; or separate site origin with COOP/COEP. Trade UX vs
-  safety; not decided.
-- **Uploads / forms** — any server-side form POST must be rate-limited, size-capped,
-  CSRF-aware (SameSite / origin checks), and must not become an open relay for spam.
-- **Mixed content / third-party scripts** — decide whether external CDNs are allowed;
-  default deny keeps supply-chain XSS off identity pages.
-- **Collision with reserved paths** — site must never shadow `/.well-known/`, `/dav/`,
-  `/auth/`, `/identities`, `/messages`, `/app/`, etc. on the apex if apex hosting is chosen.
+## Locked decisions
 
-E03-T6’s “HTML as text/plain” stays the safe default until this model is approved.
+### One trusted page on the identity origin
 
-### E. Contact forms → Poweur messages
+`GET /` on a hosted identity returns a relay-controlled identity page for an HTML navigation.
+It does not redirect to another hostname. Canonical identity discovery remains
+`/.well-known/poweur/id.json`; no `/id.json` alias or migration is introduced.
 
-Product intent: a page can include “message me” without email.
+The root already has a machine-readable relay document. Preserve it through explicit content
+negotiation:
 
-Sketch (not specified):
+| Request | Response |
+|---|---|
+| `Accept` includes `text/html` on an enabled identity | generated identity page |
+| `Accept` includes `application/json` | existing relay JSON document |
+| no clear HTML preference, including `curl`'s `*/*` | existing relay JSON document |
+| HTML request on a disabled identity page | minimal `404`, with no profile content and `noindex` |
 
-1. Static site posts to a **relay form endpoint** scoped to the site owner, e.g.
-   `POST /forms/<owner>/contact` (or a capability URL under the site origin).
-2. Relay turns the submission into a **typed message** to the owner
-   (`sys.web.contact` or similar — EPIC-009 type registry), with fields
-   (name, body, optional reply-to).
-3. **Authenticated sender (preferred):** visitor proves a Poweur ID (sign-in lite /
-   EPIC-008, or a short-lived form token minted after ID challenge). Message
-   `sender` is that ID — works with normal inbox policy / contacts.
-4. **Anonymous / unsigned web poster:** only accepted if the owner’s
-   **inbox policy** explicitly allows it (see §F). Body is still size-capped and
-   rate-limited; no encryption to a real sender key (owner-only ciphertext or
-   plaintext-to-owner under relay policy — open design).
-5. Easy authoring: a tiny documented snippet or relay-hosted form partial that site
-   authors drop into `/public/www`, so “contact form” is copy-paste, not a custom app.
+Responses that vary by representation include `Vary: Accept`. `/.well-known/`, `/app/`, API,
+file and authentication routes remain reserved and are never handled by the page renderer.
 
-Open questions: E2E encryption for form bodies (visitor has no enc key if anon);
-attachment of form files into `/shared` or inbox refs (EPIC-009); spam cost on the
-*sender path* vs recipient (E07-T5).
+### No arbitrary HTML or per-user themes
 
-### F. Anonymous / open receive (messaging, not only web)
+V1 has one Poweur-owned layout. Users provide data, never markup, CSS, templates or scripts.
+All strings are rendered through Go `html/template`; profile links are limited to safe URL
+schemes and rendered with `rel="ugc noopener noreferrer"`. Avatars remain identity-owned
+validated image files. There is no Markdown or rich-text rendering in V1.
 
-This is **broader than websites** and belongs primarily in **EPIC-007** inbox policy,
-with this epic as a consumer:
+`/pub` retains its file-share semantics, including inert HTML/JS. This epic does not add a
+site root, executable MIME types, custom domains or static-site publishing.
 
-- Today’s sketch in E07: `contacts_only` | `contacts_and_requests` | `open`.
-- Extend the policy vocabulary (proposal to refine in E07, not invent twice here), e.g.:
-  - `allow_unsigned_web_forms` — accept `sys.web.contact` from the forms bridge
-  - `allow_anonymous_messages` — accept unsigned or ephemeral-sender messages on the
-    normal `/messages` path (dangerous; needs strong rate limits / PoW / captcha)
-  - keep default **deny** for humans; bots/support addresses opt in to `open`
-- Relay must **drop** anon/unsigned ingress unless the recipient’s
-  `poweur-sys/relay/inbox-policy.json` says otherwise — “not dropping anon messages if
-  the user wishes” is an explicit opt-in, never the default on public relays.
+Later public posts, comments, payment links and storefronts must be typed, validated data
+rendered by the same trusted page system. They do not create an escape hatch for arbitrary
+HTML.
 
-Web contact forms should reuse that same policy surface so operators and users learn
-one knob.
+### Public settings, not private-policy inference
 
-## Tasks (placeholders — expand after decisions)
+Add an optional `identity_page` block to the public profile schema, with these semantics:
 
-### E12-T1 — Choose hosting shape (apex vs `www.<id>` vs `*.sites`)
+```json
+{
+  "identity_page": {
+    "enabled": false,
+    "indexable": false,
+    "advertise_anonymous_messages": true
+  }
+}
+```
 
-- [ ] Write a short decision record: DNS reality (§B), cert story, UX for hosted vs
-      self-hosted domains
-- [ ] Recommend one default for `HOSTED_DOMAINS` relays and one for self-hosted IDs
-- [ ] Document how apex `/` behaves when a site is / isn’t published
+Every field is optional. Defaults are:
 
-**Acceptance:** decision checked into docs; epic design direction updated from “open” to
-normative for the chosen shape.
+```text
+enabled = true
+indexable = false
+advertise_anonymous_messages = false
+```
 
-### E12-T2 — Security model for active content
+The block is public because it controls public presentation. The renderer does **not** read
+or reveal the private inbox-policy document. `advertise_anonymous_messages` is only a public
+UI signal; relay enforcement continues to use `inbox-policy.json`, so publication cannot
+weaken the recipient's policy.
 
-- [ ] Threat model: XSS → token theft, form spam, phishing chrome, path shadowing
-- [ ] Required headers (CSP, COOP/COEP?, framing) and cookie rules per origin
-- [ ] What user HTML may load (scripts, fonts, images) — default deny third-party
+When `indexable` is false, the page remains available but sends both an HTML robots directive
+and `X-Robots-Tag: noindex, nofollow`. When `enabled` is false, HTML requests receive the
+minimal disabled response above. Machine discovery and relay APIs continue to work in both
+cases.
 
-**Acceptance:** security note reviewed; E03-T6 threat section cross-linked and updated.
+### Contact starts in Poweur
 
-### E12-T3 — Site convention + serving
+The generated page is not a login wall and does not ask a visitor to sign in on the
+recipient's origin. V1 makes the identity easy to select and copy, with the honest instruction
+to paste it into the visitor's existing Poweur app or web client. There is no generic **Open in
+Poweur** button until a cross-origin/native compose handoff is specified elsewhere.
 
-- [ ] Normative path (likely `/public/www`) + marker semantics vs plain `/pub` file share
-- [ ] `index.html`, asset MIME (HTML/JS/CSS executable only in site root), listings off
-- [ ] Integration tests: rendered HTML on site origin; apex reserved paths still win;
-      unmarked trees stay non-executable
+If the public profile advertises anonymous messages, the page shows **Write anonymously** and
+links to a dedicated signed-out composer under `/app/` on the recipient host. That trusted UI
+uses EPIC-014's existing encrypted unsigned-message + proof-of-work flow; it does not unlock or
+offer an identity left in that origin's storage. The page must not expose challenge settings,
+inbox mode, limits or contact membership. There is no new `sys.web.contact` message type or
+forms bridge in this epic.
 
-**Acceptance:** a dropped-in static site is viewable in a browser as a page (not
-`text/plain` source).
+### Render on demand; cache over HTTP
 
-### E12-T4 — Contact form bridge + inbox-policy hooks
+Do not keep one rendered page per identity in memory. One thousand identities are not a
+rendering problem, but an unbounded identity-keyed cache would make memory grow with
+registrations rather than traffic.
 
-- [ ] Spec form endpoint + `sys.web.contact` (or chosen type) payload
-- [ ] Authenticated-Poweur-ID path (easy UX) and anonymous path gated by inbox policy
-- [ ] Coordinate policy fields with EPIC-007 (single schema, web + general messaging)
-- [ ] Rate limits, size caps, audit log for the owner
+The relay instead:
 
-**Acceptance:** integration test — form POST becomes an inbox message when policy allows;
-denied when policy is contacts-only; anon denied by default.
+1. parses the shared template once at startup;
+2. reads the identity's already-available public record/profile for each request;
+3. renders the small HTML response on demand;
+4. sets an `ETag` derived from the identity, validated profile bytes/page settings and a
+   template-version constant;
+5. honours `If-None-Match` with `304 Not Modified`;
+6. sends `Cache-Control: public, max-age=60, stale-while-revalidate=300` so browsers and any
+   configured caching proxy/CDN cache only pages that receive traffic.
 
-### E12-T5 — Docs, CLI/web helpers, migration from `/pub`
+The cache key at a reverse proxy is the normalized Host + path + representation; `Vary:
+Accept` prevents HTML/JSON confusion. A later in-process cache is allowed only if profiling
+shows it is needed, and then it must be a byte/entry-bounded LRU rather than a map of every
+identity. V1 has no in-process rendered-page cache and therefore no invalidation map to leak
+or grow stale.
 
-- [ ] Docs page `apps/docs/docs/files/identity-websites.md`
-- [ ] Optional: `poweur site init` / web UI “Publish site” that writes marker + sample
-      `index.html` + contact snippet
-- [ ] Clarify relationship to E03-T6 `/pub` (file share remains; site hosting is opt-in)
+### Security baseline
 
-## Out of scope (for now)
+The page shares an origin with `/app/`, so a renderer mistake matters even without user HTML.
+Every HTML response therefore requires:
 
-- Full CMS, server-side templates, or per-request compute
-- Custom domains with automatic TLS beyond what the relay already does for wildcards
-- Collaborative multi-author sites (use EPIC-005 sharing on `/public/www` later if needed)
-- Replacing EPIC-008 sign-in chrome with “login walls” on static sites
+- contextual escaping from `html/template`, plus tests with hostile names, bios and links;
+- a restrictive CSP. Prefer no script at all; if Copy ID needs a tiny shared script, serve a
+  fixed Poweur-owned asset and allow only that asset—never inline or profile-provided code;
+- `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive framing
+  policy, and no user-controlled response headers;
+- self-hosted page CSS/assets under a reserved relay path;
+- no third-party fonts, analytics, images or scripts in V1;
+- no new cookies and no relay/session token embedded in the document.
+
+## Self-hosted identities
+
+A self-hosted identity routed through the Poweur relay receives the same generated page. The
+relay is open source, so an operator that needs a different root immediately can change or
+front the handler themselves.
+
+A future operator-only `IDENTITY_PAGE_TEMPLATE=/path/to/template.html` may load one trusted Go
+HTML template at startup. It would apply relay-wide, use the same bounded data model, escaping,
+headers and tests, and never select a template from an identity's files. The override is not
+part of V1: stabilise the template data contract before making it configurable.
+
+An owner serving their identity domain from infrastructure other than the relay remains free
+to replace the entire website while preserving the Poweur well-known documents. Automatic
+proxying/TLS/configuration for that topology is later work.
+
+## Tasks
+
+### E12-T1 — Page settings and response contract
+
+- [x] Extend Go + TypeScript `Profile` and the JSON Schema with the optional
+      `identity_page` block and defaults above; regenerate conformance vectors.
+- [x] Specify HTML-vs-JSON content negotiation, disabled-page behavior and reserved routes in
+      `apps/docs/docs/files/identity-pages.md`.
+- [x] Add Settings controls for **Show identity page** and **Allow search indexing**; the page is on
+      by default, indexing and anonymous-message advertising are explicit and off by default.
+- [x] Ask "Let search engines show my page" (unchecked) during onboarding.
+
+**Acceptance:** an old profile gets an enabled, non-indexed page without migration; each setting
+round-trips through Go and TypeScript and cannot change inbox enforcement.
+
+### E12-T2 — Server-rendered identity page
+
+- [x] Build one Go `html/template` page using the web app's spacing, colour and typography
+      tokens without importing or booting React.
+- [x] Render identity, optional validated profile fields, avatar and safe links; provide useful
+      empty-profile and missing-avatar states.
+- [x] Add Copy ID and the instruction to use it in the visitor's existing Poweur client; do
+      not invent a recipient-origin sign-in flow or generic compose handoff.
+- [x] Keep the identity root's IndieAuth `Link` metadata on HTML and JSON responses.
+
+**Acceptance:** a browser navigation to a claimed hosted ID produces a responsive, accessible
+identity page; hostile profile strings remain text and cannot alter the DOM or load resources.
+
+### E12-T3 — Routing, caching, indexing and headers
+
+- [x] Implement the locked root response matrix with `Vary: Accept` and reserved paths taking
+      precedence.
+- [x] Add ETag/conditional GET and the HTTP cache policy above; no identity-keyed HTML cache.
+- [x] Emit canonical URL and ordinary indexable markup by default; emit header + markup
+      `noindex` when disabled.
+- [x] Apply the security baseline and shared static-asset caching.
+
+**Acceptance:** integration tests cover two Hosts with different profiles, JSON vs HTML,
+enabled/disabled/indexable combinations, `304`, Host-aware cache keys and unchanged well-known
+and `/app/` routing. Registering many identities does not allocate a rendered-page cache entry
+for each one.
+
+### E12-T4 — Contact actions
+
+- [x] Make the ID copy/select action work without exposing inbox policy.
+- [x] When `advertise_anonymous_messages` is true, link to a dedicated signed-out `/app/`
+      anonymous composer that reuses EPIC-014 unchanged, never offers stored credentials and
+      handles policy rejection as a normal stale-setting case.
+- [x] **Message** CTA: launcher `/app/?to=<identity>`; the launcher carries `to` through a claim
+      hand-off or "I already have an ID", and the identity's app opens the chat after unlock.
+- [x] One click from an ID already used in this browser: identity hosts list themselves in a
+      `poweur_ids` cookie on the parent domain; the page script offers **Message as …**, or
+      **Open your inbox** for the owner. Page HTML stays cacheable (personalised client-side).
+- [x] Logo header and a closing "What is a Poweur ID?" section with **Get your own ID**.
+
+**Acceptance:** a visitor can take the ID into their Poweur client without signing in on the
+recipient origin; an advertised anonymous action reaches the signed-out composer and a stale
+advertisement fails safely; no private policy field appears in HTML or page data.
+
+### E12-T5 — Tests and documentation
+
+- [x] Unit tests for profile defaults/validation, URL sanitisation, escaping, disabled/indexing
+      behavior, ETag inputs and content negotiation.
+- [x] Relay and browser integration tests for the T2/T3 acceptance matrix.
+- [x] User docs for the two settings and operator docs explaining the trusted fixed template,
+      cache behavior and self-hosted options.
+
+**Acceptance:** relay, identity, TypeScript client, web and integration slices pass; the epic
+progress table and docs are updated with shipped behavior.
+
+## Out of scope
+
+- Arbitrary HTML, Markdown, CSS, JavaScript, themes or per-identity templates
+- User-published websites or executable content hosting
+- Serving `/public` as executable content or changing `/pub` semantics
+- Inline authenticated sign-in or key use on somebody else's identity page
+- A new contact-form/message type; file uploads or attachments from the page
+- Blog/posts/comments, payments, storefronts and directories (later typed blocks)
+- Operator template overrides, custom-domain automation and automatic proxying in V1

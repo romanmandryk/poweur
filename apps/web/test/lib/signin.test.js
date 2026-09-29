@@ -53,10 +53,12 @@ describe("web Sign in with Poweur ID", () => {
   });
 
   it("appends a user-owned consent record", async () => {
-    const dav = new FakeFiles();
+    // The consent log is an encrypted append log on the drive.
+    const entries = [];
+    const log = { append: async (entry) => { entries.push(entry); }, recent: async () => entries };
     const { response } = await signBrowserApproval(request(), "alice.poweur.net", { sign: async () => "sig" });
-    await appendBrowserConsent(dav, response, { name: "Tasks", app_id: "example.tasks" });
-    const line = JSON.parse(dav.files[".poweur/private/logs/auth.log"].trim());
+    await appendBrowserConsent(log, response, { name: "Tasks", app_id: "example.tasks" });
+    const line = entries[0];
     expect(line.app_id).toBe("example.tasks");
     expect(line.verified).toBe(true);
     expect(line.signer).toBe("web");
@@ -134,10 +136,8 @@ describe("web Sign in with Poweur ID", () => {
     expect(doc.apps[0].revoked_at).toBe("2026-09-10T12:00:00Z");
   });
 
-  it("reads the JSON Lines consent audit trail", async () => {
-    const dav = new FakeFiles({
-      ".poweur/private/logs/auth.log": '{"app_id":"example.tasks"}\n',
-    });
-    await expect(readConsentLog(dav)).resolves.toEqual([{ app_id: "example.tasks" }]);
+  it("reads the newest consent records from the encrypted log", async () => {
+    const log = { recent: async (limit) => [{ app_id: "example.tasks" }, null, "junk"].slice(0, limit) };
+    await expect(readConsentLog(log)).resolves.toEqual([{ app_id: "example.tasks" }]);
   });
 });

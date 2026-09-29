@@ -469,6 +469,9 @@ func TestDriveLinks(t *testing.T) {
 	if status, _ := asLink(protected, "correct horse", http.MethodGet, base+"/links/"+protected); status != http.StatusOK {
 		t.Fatalf("info after one open: %d", status)
 	}
+	if status, out, _ := driveReq(t, ts, http.MethodGet, alice, base+"/links/"+protected+"/stats", nil); status != http.StatusOK || out["opens"] != float64(1) || out["max_downloads"] != float64(5) {
+		t.Fatalf("owner link stats: %d %v", status, out)
+	}
 	// Guessing the password is throttled per link.
 	for i := 0; i < maxLinkPasswordFailures; i++ {
 		asLink(protected, "guess", http.MethodGet, base+"/shares")

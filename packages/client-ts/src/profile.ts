@@ -44,6 +44,19 @@ export function emptyProfile(): Profile {
   return { version: 1 };
 }
 
+export function identityPageEnabled(profile: Profile | null | undefined): boolean {
+  return profile?.identity_page?.enabled !== false;
+}
+
+/** Search indexing is opt-in: off unless the owner turned it on. */
+export function identityPageIndexable(profile: Profile | null | undefined): boolean {
+  return profile?.identity_page?.indexable === true;
+}
+
+export function advertisesAnonymousMessages(profile: Profile | null | undefined): boolean {
+  return profile?.identity_page?.advertise_anonymous_messages === true;
+}
+
 /** Structural validation mirroring `Profile.Validate`. */
 export function validateProfile(profile: Profile): void {
   if (profile.version !== 0 && profile.version !== 1) {
@@ -70,6 +83,15 @@ export function validateProfile(profile: Profile): void {
       throw new PoweurError("invalid_document", `link ${index}: url is required`);
     }
   });
+  const page = profile.identity_page;
+  if (page !== undefined && (page === null || typeof page !== "object" || Array.isArray(page))) {
+    throw new PoweurError("invalid_document", "identity_page must be an object");
+  }
+  for (const [name, value] of Object.entries(page ?? {})) {
+    if (["enabled", "indexable", "advertise_anonymous_messages"].includes(name) && typeof value !== "boolean") {
+      throw new PoweurError("invalid_document", `identity_page.${name} must be a boolean`);
+    }
+  }
 }
 
 /** Read our own profile document (an absent one is an empty profile). */
@@ -88,6 +110,15 @@ export async function writeProfile(files: SystemFiles, profile: Profile): Promis
   if (profile.avatar?.trim()) document.avatar = profile.avatar.trim();
   if (profile.bio?.trim()) document.bio = profile.bio.trim();
   if (profile.locale?.trim()) document.locale = profile.locale.trim();
+  if (profile.identity_page) {
+    document.identity_page = {
+      ...(profile.identity_page.enabled !== undefined ? { enabled: profile.identity_page.enabled } : {}),
+      ...(profile.identity_page.indexable !== undefined ? { indexable: profile.identity_page.indexable } : {}),
+      ...(profile.identity_page.advertise_anonymous_messages !== undefined
+        ? { advertise_anonymous_messages: profile.identity_page.advertise_anonymous_messages }
+        : {}),
+    };
+  }
   const links = (profile.links ?? []).filter((link) => link.url?.trim());
   if (links.length) {
     document.links = links.map((link) => ({

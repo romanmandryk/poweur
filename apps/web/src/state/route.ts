@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { useData } from "./data";
 
 /** The five primary destinations, in nav order. */
-export const DESTINATIONS = ["messages", "contacts", "launcher", "settings"] as const;
+export const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
 export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth" | "pair";

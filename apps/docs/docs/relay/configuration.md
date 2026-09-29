@@ -39,7 +39,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 |----------|---------|-------------|
 | `STORAGE_PROVIDER` | `fs` | Drive object store: `fs` (under `POWEUR_DATA`) or `s3`. `relay-fs` was removed |
 | `MAX_IDENTITY_BYTES` | `5368709120` (5 GiB) | Configured quota per identity; `0` = unlimited. Drive enforcement is being restored in EPIC-020 |
-| `STORAGE_QUOTAS_FILE` | `$POWEUR_DATA/storage-quotas.json` | Per-identity quotas that override `MAX_IDENTITY_BYTES`: a JSON object from identity to bytes or a size string (`{"alice.example.com": "2GB"}`, `0` = unlimited). Re-read when it changes, so no restart; an invalid edit keeps the last good version |
+| `STORAGE_QUOTAS_FILE` | `$POWEUR_DATA/storage-quotas.json` | Per-identity quotas that override `MAX_IDENTITY_BYTES`: a JSON object from identity to bytes or a size string (`{"alice.example.com": "2GB"}`, `0` = unlimited). A relay with a store keeps them there instead (`relay/storage-quotas.json`, edited with `poweur-relay quotas set <id> <size>` / `unset <id>`, re-read within a minute); this file applies only while the store has none. Either way no restart is needed and an invalid edit keeps the last good version |
 | `QUOTA_CONTACT` | — | Who to ask for more space, usually a Poweur ID. Over-quota `507` responses and `GET /files/{identity}/quota` name it (`contact`) |
 | `MAX_FILE_BYTES` | `2147483648` (2 GiB) | Largest single uploaded file; `0` = unlimited |
 | `S3_ENDPOINT` | *(required for `s3`)* | `host:port`, or an `http`/`https` URL. The URL scheme overrides `S3_SECURE` |

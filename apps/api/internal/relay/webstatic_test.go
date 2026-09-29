@@ -210,3 +210,47 @@ func TestWebStaticObservabilityJSON(t *testing.T) {
 		t.Fatalf("status=%d body=%q", status, body)
 	}
 }
+
+// The link viewer is served only on identity hosts, under a strict CSP and
+// with no referrer; its assets come from the web build beside it.
+func TestLinkViewerRoutes(t *testing.T) {
+	server, ts := newTestRelay(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "viewer.html"), []byte("<!doctype html><title>viewer</title>"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "assets", "viewer-abc.js"), []byte("console.log(1)"), 0o644)
+	server.cfg.WebStaticDir = dir
+	alice := registerTestIdentity(t, server, ts, "viewhost.poweur.net")
+	get := func(host, path string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	link := "/s/" + strings.Repeat("ab", 16)
+	resp := get(alice.name, link)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "script-src 'self'") ||
+		resp.Header.Get("Referrer-Policy") != "no-referrer" || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("viewer: %d %v", resp.StatusCode, resp.Header)
+	}
+	for _, c := range []struct{ host, path string }{
+		{"relay.test", link},          // not an identity host
+		{"nobody.poweur.net", link},   // not hosted here
+		{alice.name, "/s/not-a-link"}, // not a link ID
+		{alice.name, "/s/assets/..%2Fviewer.html"},
+		{alice.name, "/s/assets/missing.js"},
+	} {
+		if resp := get(c.host, c.path); resp.StatusCode == http.StatusOK {
+			t.Fatalf("%s%s served", c.host, c.path)
+		}
+	}
+	if resp := get(alice.name, "/s/assets/viewer-abc.js"); resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Security-Policy") == "" {
+		t.Fatalf("asset: %d", resp.StatusCode)
+	}
+}

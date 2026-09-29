@@ -78,6 +78,16 @@ describe("boot (E21-T4)", () => {
     expect(useRoute.getState().sub).toBeNull();
   });
 
+  it("does not unlock a stored identity on the public anonymous composer", async () => {
+    saveIdentityRecord("alice.poweur.net", { identity: "alice.poweur.net" });
+    setActiveIdentity("alice.poweur.net");
+    mode.next = { mode: "identity", subject: "bob.poweur.net" };
+    at("/app/?anonymous=1");
+    await boot();
+    expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
+    expect(useSession.getState().unlocked).toBe(false);
+  });
+
   it("a stored identity with no keys and no session asks to unlock", async () => {
     saveIdentityRecord("alice.poweur.net", { identity: "alice.poweur.net" });
     setActiveIdentity("alice.poweur.net");

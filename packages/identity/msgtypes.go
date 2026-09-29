@@ -46,9 +46,9 @@ const MsgTypeChatAttachment = "chat.attachment"
 // MsgTypeContactRequest / Accept / Block live in inboxpolicy.go, next to the
 // policy that acts on them.
 const (
-	MsgTypeShareOffer   = "sys.share.offer"   // EPIC-005 pcp-0003
-	MsgTypeShareAccept  = "sys.share.accept"  // EPIC-005 pcp-0003
-	MsgTypeShareRevoked = "sys.share.revoked" // EPIC-005 pcp-0003
+	MsgTypeShareOffer   = "sys.share.offer"   // EPIC-020 pcp-0008
+	MsgTypeShareAccept  = "sys.share.accept"  // EPIC-020 pcp-0008
+	MsgTypeShareRevoked = "sys.share.revoked" // EPIC-020 pcp-0008
 	MsgTypeShareClaim   = "sys.share.claim"   // EPIC-005 E05-T6
 	MsgTypeSyncChanged  = "sys.sync.changed"  // EPIC-004 pcp-0005
 	MsgTypeAbuseReport  = "sys.abuse.report"  // EPIC-007

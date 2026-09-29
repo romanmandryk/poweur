@@ -10,8 +10,9 @@
 import * as sdk from "@poweur/client";
 import * as client from "../lib/client.js";
 import * as storage from "../lib/storage.js";
+import * as messages from "../actions/messages";
 
-const MODULES: Record<string, unknown> = { client, storage, sdk };
+const MODULES: Record<string, unknown> = { client, storage, sdk, messages };
 
 export function installTestSeam() {
   const scope = globalThis as { __POWEUR_TEST_SEAM__?: boolean; __poweurModule?: (name: string) => Promise<unknown> };

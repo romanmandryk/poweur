@@ -7,6 +7,7 @@
  * case asks for the document instead and offers no claim either way.
  */
 import { existingIdFrom, identityAppUrl } from "../lib/claim";
+import { chatTargetQuery } from "../lib/visit";
 import { identityApiFor } from "../lib/client.js";
 import { resolveMode } from "../lib/mode.js";
 import { defaultRelayUrl } from "../lib/storage.js";
@@ -107,7 +108,7 @@ export async function lookUpExistingId(raw: string, info: ModeInfo): Promise<Exi
 /** Leave the launcher for an existing identity's own door. */
 export function goToIdentityDoor(identity: string, url: string) {
   setLoading(true, `Taking you to ${identity}…`);
-  globalThis.location.assign(url);
+  globalThis.location.assign(url + chatTargetQuery());
 }
 
 /** Test seam. */

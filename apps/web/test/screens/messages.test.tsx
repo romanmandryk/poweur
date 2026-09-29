@@ -201,13 +201,16 @@ describe("Conversation view (E15-T13)", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("an attachment bubble explains it cannot be opened until the new storage", async () => {
+  it("an attachment bubble opens from the conversation, and a broken one says so", async () => {
     openWith([inbound(BOB, "report", 1, { type: "chat.attachment", metadata: { attachment_name: "evidence.txt" } })]);
     render(<App />);
     expect($(".bubble-text")!.textContent).toBe("evidence.txt");
     expect($(".bubble-text svg")).toBeTruthy();
+    // Direct conversations can send files.
+    expect($("#btn-thread-attach")).toBeTruthy();
+    // This body is not a sealed attachment: opening it fails plainly.
     fireEvent.click($(".bubble-attachment")!);
-    await waitFor(() => expect(useUi.getState().toasts.some((t: any) => /new storage/.test(t.message))).toBe(true));
+    await waitFor(() => expect(useUi.getState().toasts.some((t: any) => /Could not open the attachment/.test(t.message))).toBe(true));
   });
 
   it("back leaves the conversation", () => {

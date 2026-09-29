@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,9 +15,11 @@ import (
 	"time"
 
 	"github.com/poweur/cli/internal/config"
+	driveclient "github.com/poweur/cli/internal/drive"
 	cliidentity "github.com/poweur/cli/internal/identity"
 	"github.com/poweur/cli/internal/session"
 	idpkg "github.com/poweur/identity"
+	protocol "github.com/poweur/identity/drive"
 	signinpkg "github.com/poweur/identity/signin"
 )
 
@@ -247,25 +248,123 @@ func deliverSignInApproval(ctx context.Context, responseURI string, delivery sig
 	return receipt, nil
 }
 
+// consentLogFile opens the sign-in consent log on the identity's encrypted
+// drive (`.poweur/private/logs/auth.log`, an append file), creating it when
+// create is set. It returns nil, nil when there is no log yet.
+func consentLogFile(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey, create bool) (*driveclient.Files, *driveclient.File, error) {
+	enc, err := cliidentity.LoadEncryptionPrivateKey(cliidentity.EncryptionKeyPath(cfg.KeysDir, identityValue))
+	if err != nil || enc == nil {
+		return nil, nil, fmt.Errorf("no local encryption key for %s: the consent log is encrypted to it", identityValue)
+	}
+	files := ownerFiles(cfg.RelayURL, identityValue, priv, enc)
+	dir, err := files.Root(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	parts := strings.Split(idpkg.AuthLogPath, "/")
+	for _, name := range parts[:len(parts)-1] {
+		if !create {
+			children, err := files.List(ctx, dir)
+			if err != nil {
+				return nil, nil, err
+			}
+			var next *driveclient.File
+			for _, child := range children {
+				if child.Name == name && child.Manifest.Kind == protocol.KindFolder {
+					next = child
+				}
+			}
+			if next == nil {
+				return files, nil, nil
+			}
+			dir = next
+			continue
+		}
+		if dir, err = mkdirDrive(ctx, files, dir, name); err != nil {
+			return nil, nil, err
+		}
+	}
+	name := parts[len(parts)-1]
+	children, err := files.List(ctx, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, child := range children {
+		if child.Name == name {
+			if child.Manifest.Mode != protocol.ModeAppend {
+				return nil, nil, fmt.Errorf("%s is not an append log", idpkg.AuthLogPath)
+			}
+			return files, child, nil
+		}
+	}
+	if !create {
+		return files, nil, nil
+	}
+	file, err := files.CreateAppend(ctx, dir, name)
+	return files, file, err
+}
+
+// appendConsentRecord adds one approval to the encrypted consent log.
 func appendConsentRecord(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey, record idpkg.AuthLogRecord) error {
-	existing, status, err := readSysFile(ctx, cfg.RelayURL, identityValue, priv, idpkg.AuthLogPath)
+	files, file, err := consentLogFile(ctx, cfg, identityValue, priv, true)
 	if err != nil {
 		return err
 	}
-	if status == http.StatusNotFound {
-		existing = nil
-	} else if status != http.StatusOK {
-		return fmt.Errorf("read consent log: HTTP %d", status)
-	}
-	next, err := idpkg.AppendAuthLog(existing, record)
+	raw, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	err = writeSysFile(ctx, cfg.RelayURL, identityValue, priv, idpkg.AuthLogPath, next)
-	if errors.Is(err, errStorageUnavailable) {
-		// Until storage v2 lands there is nowhere to keep the log; the
-		// approval itself does not depend on it.
-		return nil
-	}
+	_, err = files.Append(ctx, file, raw)
 	return err
+}
+
+// runAuthLog prints the newest consent records: `poweur auth log [--limit N] [--json]`.
+func runAuthLog(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("auth log", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	use := fs.String("use-identity", "", "identity")
+	limit := fs.Int("limit", 20, "newest records to show")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	if fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})) != nil || *limit < 1 {
+		return 1
+	}
+	cfg, identityValue, priv, ok := loadIdentityKey(*use, stderr)
+	if !ok {
+		return 1
+	}
+	ctx := context.Background()
+	files, file, err := consentLogFile(ctx, cfg, identityValue, priv, false)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	records := []idpkg.AuthLogRecord{}
+	if file != nil {
+		rows, err := files.Tail(ctx, file, 1)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if len(rows) > *limit {
+			rows = rows[len(rows)-*limit:]
+		}
+		for _, row := range rows {
+			var record idpkg.AuthLogRecord
+			// One bad write must not cost the rest of the log.
+			if json.Unmarshal(bytes.TrimSpace(row.Plain), &record) == nil {
+				records = append(records, record)
+			}
+		}
+	}
+	if *jsonOut {
+		return writeOutput(stdout, true, map[string]any{"identity": identityValue, "records": records}, "")
+	}
+	if len(records) == 0 {
+		fmt.Fprintln(stdout, "no sign-in approvals recorded")
+		return 0
+	}
+	for _, r := range records {
+		fmt.Fprintf(stdout, "%s  %s  %s (%s)\n", r.At, r.Action, r.AppName, r.Audience)
+	}
+	return 0
 }

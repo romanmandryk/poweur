@@ -8,10 +8,15 @@
  * item over once and forgets it, so everything fetched is merged into the
  * store and the archive is what a reload restores from.
  */
-import { ACK_STATE_READ, crypto as poweurCrypto, isSessionValid, sendsReadReceiptsTo, streamForever } from "@poweur/client";
+import { ACK_STATE_READ, crypto as poweurCrypto, fromBase64, isSessionValid, sendsReadReceiptsTo, streamForever } from "@poweur/client";
+import { MAX_ATTACHMENT_BYTES, openAttachment, parseAttachment, prepareAttachment } from "@poweur/client/drive";
+import { lookup } from "../lib/client.js";
+import { openBrowserDrive } from "../lib/drive";
 import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/outbox.js";
 import { markCovers } from "../lib/threads.js";
-import { loadSessionRecord } from "../lib/storage.js";
+import { loadSessionRecord, relayUrlFor } from "../lib/storage.js";
+import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
+import { autoAcceptContactOffers } from "./files";
 import { useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
@@ -19,7 +24,7 @@ import { toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { loadPolicy, loadProfile } from "./account";
 import { checkPinBeforeSend, loadContacts, loadRequests, processContactAccepts } from "./contacts";
-import { activeClient, challengeSerial, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
+import { activeClient, errorMessage, mergeInto, messageKey, parseMessage } from "./relay";
 
 const selfIdentity = () => useSession.getState().identity ?? "";
 
@@ -103,7 +108,7 @@ export function loadInbox({ force = false } = {}): Promise<void> {
     if (force) inboxPending = true;
     return inboxInFlight;
   }
-  inboxInFlight = challengeSerial(async () => {
+  inboxInFlight = (async () => {
     try {
       // Read, receipt and *keep* in one step: a drain gives no second chance.
       const { messages, acks, lost } = await client.inboxAndArchive();
@@ -112,6 +117,10 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       mergeMessages(messages);
       useData.setState((state) => ({ acks: mergeInto(state.acks, acks) }));
       processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
+      // A contact sharing something lands in Files without an extra step.
+      if (messages.some((message: any) => message.type === "sys.share.offer")) {
+        void autoAcceptContactOffers(client.signer.identity).catch((error) => console.warn("Share auto-accept failed:", errorMessage(error)));
+      }
     } catch (error) {
       console.warn("Inbox error:", errorMessage(error));
     } finally {
@@ -120,7 +129,7 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       inboxPending = false;
       if (again) queueMicrotask(() => void loadInbox({ force: true }));
     }
-  });
+  })();
   return inboxInFlight;
 }
 
@@ -138,19 +147,31 @@ export function loadHistory({ force = false } = {}): Promise<void> {
   if (!client) return Promise.resolve();
 
   setHistory({ loading: true });
+  const identity = client.signer.identity as string;
+  const show = (records: any[], readState: any) => {
+    // Signed conversations and the anonymous queue are different objects:
+    // one has someone to reply to and one does not.
+    const signed = records.filter((record: any) => record.queue !== "anonymous");
+    const anonymous = records.filter((record: any) => record.queue === "anonymous");
+    mergeMessages(signed.map(recordToMessage));
+    useData.setState((state) => ({
+      anon: { ...state.anon, messages: mergeInto(state.anon.messages, anonymous.map(recordToMessage), messageKey) },
+    }));
+    if (readState) setHistory({ readState });
+  };
   historyInFlight = (async () => {
     try {
+      // What this device saw last shows at once; the relay's answer follows.
+      if (!current.loaded) {
+        const snapshot = await loadSnapshot<{ records: any[]; readState: any }>(identity, "history");
+        if (snapshot && !useData.getState().history.loaded) show(snapshot.records, snapshot.readState);
+      }
       const store = await client.history();
-      const [records, readState] = await Promise.all([store.load(), store.readState()]);
-      // Signed conversations and the anonymous queue are different objects:
-      // one has someone to reply to and one does not.
-      const signed = records.filter((record: any) => record.queue !== "anonymous");
-      const anonymous = records.filter((record: any) => record.queue === "anonymous");
-      mergeMessages(signed.map(recordToMessage));
-      useData.setState((state) => ({
-        anon: { ...state.anon, messages: mergeInto(state.anon.messages, anonymous.map(recordToMessage), messageKey) },
-      }));
-      setHistory({ readState, loaded: true, error: null });
+      // The newest page of each conversation; a thread pages back on demand.
+      const [records, readState] = await Promise.all([store.load({ perConversation: HISTORY_TRAY_PAGE }), store.readState()]);
+      show(records, readState);
+      setHistory({ loaded: true, error: null });
+      void saveSnapshot(identity, "history", { records, readState });
     } catch (error) {
       setHistory({ error: `Could not load your message history: ${errorMessage(error)}` });
       console.warn("History load failed:", errorMessage(error));
@@ -160,6 +181,27 @@ export function loadHistory({ force = false } = {}): Promise<void> {
     }
   })();
   return historyInFlight;
+}
+
+/** Messages per conversation read from the archive when the app opens. */
+const HISTORY_TRAY_PAGE = 20;
+
+/** Whether a conversation has archived messages older than those loaded. */
+export async function historyHasOlder(peer: string): Promise<boolean> {
+  const client = activeClient();
+  if (!client?.decryptor) return false;
+  try { return await (await client.history()).hasOlder(peer); } catch { return false; }
+}
+
+/** Read the previous page of a conversation from the archive (one request)
+ * and add it to the thread. Returns how many messages arrived. */
+export async function loadOlderHistory(peer: string, limit = 50): Promise<number> {
+  const client = activeClient();
+  if (!client?.decryptor) return 0;
+  const records = await (await client.history()).older(peer, limit);
+  const signed = records.filter((record: any) => record.queue !== "anonymous");
+  mergeMessages(signed.map(recordToMessage));
+  return records.length;
 }
 
 const ANON_DRAIN_INTERVAL_MS = 2000;
@@ -178,7 +220,7 @@ export function loadAnon({ force = false } = {}): Promise<void> {
 
   const setAnon = (patch: Partial<DataFields["anon"]>) => useData.setState((state) => ({ anon: { ...state.anon, ...patch } }));
   setAnon({ loading: true });
-  anonInFlight = challengeSerial(async () => {
+  anonInFlight = (async () => {
     try {
       const { messages, lost } = await client.anonAndArchive();
       setAnon({ messages: mergeInto(useData.getState().anon.messages, messages, messageKey), loaded: true, error: null });
@@ -192,7 +234,7 @@ export function loadAnon({ force = false } = {}): Promise<void> {
       anonPending = false;
       if (again) queueMicrotask(() => void loadAnon({ force: true }));
     }
-  });
+  })();
   return anonInFlight;
 }
 
@@ -448,11 +490,71 @@ export async function openNewChat(identity: string): Promise<boolean> {
 }
 
 /**
- * Attachments are being rebuilt on end-to-end encrypted storage (EPIC-020
- * E20-T11); until then an attachment message can be shown but not opened.
+ * Send a file (EPIC-020 E20-T11): sealed onto our drive, shared read-only
+ * with the recipient, and announced by an encrypted `chat.attachment` whose
+ * body carries the key, name and type. Direct conversations only.
  */
-export async function downloadAttachment(_metadata: unknown) {
-  toast("Attachments come back with the new storage — this one can't be opened yet.", "warning", 6000);
+export async function sendAttachment(client: any, { to, file, thread = "", setStatus }: { to: string; file: File; thread?: string; setStatus: SetStatus }): Promise<SendOutcome> {
+  const self = selfIdentity();
+  try {
+    if (file.size > MAX_ATTACHMENT_BYTES) throw new Error(`Files up to ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB can be attached`);
+    setStatus("Checking their key…");
+    if (!(await checkPinBeforeSend(client, to))) {
+      setStatus("✕ Not sent — key not trusted", "err");
+      return { status: "blocked" };
+    }
+    const resolved = await lookup(to, relayUrlFor(self));
+    const published = resolved.document.encryption_public_key;
+    if (!published) throw new Error(`${to} has no published encryption key`);
+    setStatus("Encrypting and uploading…");
+    const { files } = await openBrowserDrive(self);
+    const { body, metadata } = await prepareAttachment(files, to, fromBase64(published.replace(/^x25519:/, "")), {
+      name: file.name || "file", mime: file.type || "application/octet-stream", bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+    setStatus("Sending…");
+    const sent = await client.sendAndArchive(to, body, {
+      type: "chat.attachment",
+      metadata,
+      signWith: isSessionValid(loadSessionRecord(self)) ? "session" : "identity",
+      ...(thread ? { threadId: thread } : {}),
+    });
+    mergeMessages([{ id: sent.message.id, sender: self, recipient: sent.message.recipient, timestamp: sent.message.timestamp,
+      queue: "sent", type: "chat.attachment", plaintext: body, metadata, ...(thread ? { thread_id: thread } : {}) }]);
+    setStatus("✓ Sent", "ok");
+    if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+    trackAction("send", { kind: "attachment", outcome: "sent" });
+    return { status: "sent" };
+  } catch (error) {
+    setStatus(`✕ ${errorMessage(error)}`, "err");
+    toast(errorMessage(error), "error", 7000);
+    trackAction("send", { kind: "attachment", outcome: "failed" });
+    return { status: "failed" };
+  }
+}
+
+/** Download and decrypt an attachment from its sender's drive, then save it. */
+export async function downloadAttachment(message: any) {
+  const self = selfIdentity();
+  try {
+    const attachment = parseAttachment(message.plaintext ?? message.body ?? "");
+    const sender = String(message.sender || "").toLowerCase();
+    if (!sender) throw new Error("this attachment names no sender");
+    const resolved = await lookup(sender, relayUrlFor(self));
+    const authorKey = fromBase64(resolved.document.public_key.replace(/^ed25519:/, ""));
+    const { drive } = sender === self ? await openBrowserDrive(self) : await openBrowserDrive(self, sender, resolved.document.relay);
+    const bytes = await openAttachment(drive, attachment, message.metadata ?? {}, authorKey);
+    const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: attachment.mime }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = attachment.name;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    trackAction("attachment-open", { outcome: "opened" });
+  } catch (error) {
+    const status = (error as { status?: number })?.status;
+    toast(status === 403 || status === 404 ? "This attachment is no longer shared with you." : `Could not open the attachment: ${errorMessage(error)}`, "error", 7000);
+    trackAction("attachment-open", { outcome: "failed" });
+  }
 }
 
 /** Test seam. */

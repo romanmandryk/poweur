@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/poweur/api/internal/drive/provider"
 	"github.com/poweur/identity/drive"
@@ -28,12 +29,19 @@ type NodeInfo struct {
 	Position       uint64       `json:"position,omitempty"`
 	TrimmedBefore  uint64       `json:"trimmed_before,omitempty"`
 	TrimSnapshot   *SnapshotRef `json:"trim_snapshot,omitempty"`
+	// The versions carrying the key, name and content-key envelopes, so a
+	// reader fetches them directly instead of walking the history.
+	KeyVersion     string `json:"key_version,omitempty"`
+	NameVersion    string `json:"name_version,omitempty"`
+	ContentVersion string `json:"content_version,omitempty"`
+	Public         bool   `json:"public,omitempty"`
 }
 
 func infoOf(n *node) NodeInfo {
 	return NodeInfo{ID: n.ID, Kind: n.Kind, Mode: n.Mode, Folder: n.Folder, NameHash: n.NameHash, Head: n.Head,
 		Generation: n.Generation, Count: n.Count, Removed: n.Removed, RotateRequired: n.RotateRequired, Position: n.Position,
-		TrimmedBefore: n.TrimmedBefore, TrimSnapshot: n.TrimSnapshot}
+		TrimmedBefore: n.TrimmedBefore, TrimSnapshot: n.TrimSnapshot,
+		KeyVersion: n.KeyVersion, NameVersion: n.NameVersion, ContentVersion: n.ContentVersion, Public: n.Public}
 }
 
 // Root returns the drive's root node ID ("" before it is created).
@@ -44,6 +52,34 @@ func (e *Engine) Root(ctx context.Context, driveID string) (string, error) {
 	}
 	defer h.mu.Unlock()
 	return h.st.Root, nil
+}
+
+// AuthorCursor returns an author's latest sequence and record hash in an
+// append file (zero and "" before their first record): what their next
+// record must continue. The relay enforces the chain on commit anyway, so a
+// writer asking here instead of re-reading the whole log loses nothing.
+func (e *Engine) AuthorCursor(ctx context.Context, driveID, nodeID, author string) (uint64, string, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return 0, "", err
+	}
+	defer h.mu.Unlock()
+	n := h.st.Nodes[nodeID]
+	if n == nil || n.Removed || n.Mode != drive.ModeAppend {
+		return 0, "", ErrNotFound
+	}
+	c := n.Authors[author]
+	return c.Sequence, c.Hash, nil
+}
+
+// Seq returns the drive's latest journal sequence: the changes cursor now.
+func (e *Engine) Seq(ctx context.Context, driveID string) (uint64, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return 0, err
+	}
+	defer h.mu.Unlock()
+	return h.st.Seq, nil
 }
 
 // Node returns a node's head.
@@ -134,21 +170,39 @@ func (e *Engine) Version(ctx context.Context, driveID, nodeID, versionID string)
 		return drive.Manifest{}, err
 	}
 	v := h.st.Versions[versionID]
-	prefix := h.prefix
 	h.mu.Unlock()
 	if v == nil || v.Node != nodeID {
 		return drive.Manifest{}, ErrNotFound
 	}
-	obj, err := e.opts.Store.Get(ctx, prefix+"versions/"+nodeID+"/"+versionID+".json", nil)
+	return e.manifest(ctx, h, nodeID, versionID)
+}
+
+// manifest reads a stored version through the handle's cache.
+func (e *Engine) manifest(ctx context.Context, h *driveHandle, nodeID, versionID string) (drive.Manifest, error) {
+	h.cacheMu.Lock()
+	m, ok := h.manifests[versionID]
+	h.cacheMu.Unlock()
+	if ok {
+		return m, nil
+	}
+	obj, err := e.opts.Store.Get(ctx, h.prefix+"versions/"+nodeID+"/"+versionID+".json", nil)
 	if err != nil {
 		return drive.Manifest{}, notFound(err)
 	}
-	var m drive.Manifest
 	if err := json.Unmarshal(obj.Data, &m); err != nil {
 		return drive.Manifest{}, fmt.Errorf("stored manifest %s is corrupt: %w", versionID, err)
 	}
+	h.cacheMu.Lock()
+	if h.manifests == nil || len(h.manifests) >= maxCachedManifests {
+		h.manifests = map[string]drive.Manifest{}
+	}
+	h.manifests[versionID] = m
+	h.cacheMu.Unlock()
 	return m, nil
 }
+
+// maxCachedManifests bounds one drive's manifest cache (a few KiB each).
+const maxCachedManifests = 8192
 
 // Page returns a chunk-list page of a retained version.
 func (e *Engine) Page(ctx context.Context, driveID, nodeID, versionID, pageHash string) (drive.ChunkPage, error) {
@@ -216,50 +270,93 @@ func (e *Engine) Records(ctx context.Context, driveID, nodeID string, from uint6
 	if err != nil {
 		return nil, 0, err
 	}
-	defer h.mu.Unlock()
 	n := h.st.Nodes[nodeID]
 	if n == nil || n.Mode != drive.ModeAppend {
+		h.mu.Unlock()
 		return nil, 0, ErrNotFound
 	}
 	if from == 0 {
 		from = 1
 	}
 	if from < n.TrimmedBefore {
+		h.mu.Unlock()
 		return nil, 0, ErrResync
 	}
 	limit = clampLimit(limit)
-	var out []PositionedRecord
+	var locs []recordLoc
 	pos := from
-	for ; pos <= n.Position && len(out) < limit; pos++ {
+	for ; pos <= n.Position && len(locs) < limit; pos++ {
 		loc, ok := n.Records[pos]
 		if !ok {
+			h.mu.Unlock()
 			return nil, 0, fmt.Errorf("record %d is missing from the index", pos)
 		}
-		seg, err := e.segment(ctx, h, loc.Segment)
-		if err != nil {
-			return nil, 0, err
-		}
+		locs = append(locs, loc)
+	}
+	h.mu.Unlock()
+	// Segments never change once written: fetch the missing ones in
+	// parallel, outside the drive lock.
+	segs := make([]segment, len(locs))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var first error
+	work := make(chan int)
+	for range min(16, len(locs)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				seg, err := e.segment(ctx, h, locs[i].Segment)
+				mu.Lock()
+				if err != nil && first == nil {
+					first = err
+				}
+				segs[i] = seg
+				mu.Unlock()
+			}
+		}()
+	}
+	for i := range locs {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+	if first != nil {
+		return nil, 0, first
+	}
+	out := make([]PositionedRecord, 0, len(locs))
+	for i, loc := range locs {
+		seg := segs[i]
 		if loc.Op >= len(seg.Ops) || loc.Index >= len(seg.Ops[loc.Op].Records) {
-			return nil, 0, fmt.Errorf("record %d is outside its segment", pos)
+			return nil, 0, fmt.Errorf("record %d is outside its segment", from+uint64(i))
 		}
-		out = append(out, PositionedRecord{Position: pos, Record: seg.Ops[loc.Op].Records[loc.Index].Record})
+		out = append(out, PositionedRecord{Position: from + uint64(i), Record: seg.Ops[loc.Op].Records[loc.Index].Record})
 	}
 	return out, pos, nil
 }
 
-// segment returns a journal segment, cached per drive. Caller holds h.mu.
+// maxCachedSegments bounds one drive's segment cache.
+const maxCachedSegments = 4096
+
+// segment returns a journal segment through the drive's segment cache. It
+// takes only the cache lock, so callers may or may not hold h.mu.
 func (e *Engine) segment(ctx context.Context, h *driveHandle, seq uint64) (segment, error) {
-	if seg, ok := h.segments[seq]; ok {
+	h.cacheMu.Lock()
+	seg, ok := h.segments[seq]
+	h.cacheMu.Unlock()
+	if ok {
 		return seg, nil
 	}
 	seg, _, err := loadSegment(ctx, e.opts.Store, h.prefix, seq)
 	if err != nil {
 		return segment{}, err
 	}
-	if len(h.segments) > 256 {
+	h.cacheMu.Lock()
+	if h.segments == nil || len(h.segments) >= maxCachedSegments {
 		h.segments = map[uint64]segment{}
 	}
 	h.segments[seq] = seg
+	h.cacheMu.Unlock()
 	return seg, nil
 }
 

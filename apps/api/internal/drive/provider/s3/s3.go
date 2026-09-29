@@ -102,6 +102,21 @@ func normalizeEndpoint(endpoint string, secure bool) (string, bool, error) {
 // overwrites instead is refused. Ceph-based stores that reject a quoted
 // If-Match are retried with the bare ETag and remembered for later writes.
 func (s *Store) Probe(ctx context.Context) error {
+	return s.probe(ctx, ProbeStepTimeout)
+}
+
+// ProbeStepTimeout bounds each probe request: a store slower than this is
+// treated as unavailable.
+const ProbeStepTimeout = 10 * time.Second
+
+func (s *Store) probe(parent context.Context, step time.Duration) error {
+	// Each request gets its own deadline; ctx follows the current step.
+	ctx, cancel := context.WithTimeout(parent, step)
+	next := func() {
+		cancel()
+		ctx, cancel = context.WithTimeout(parent, step)
+	}
+	defer func() { cancel() }()
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return err
@@ -111,24 +126,29 @@ func (s *Store) Probe(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("S3 conditional create: %w", err)
 	}
-	defer func() { _ = s.Delete(context.WithoutCancel(ctx), key) }()
+	defer func() { _ = s.Delete(context.WithoutCancel(parent), key) }()
+	next()
 	if _, err := s.PutIf(ctx, key, []byte("conflict"), ""); !errors.Is(err, provider.ErrPrecondition) {
 		return fmt.Errorf("S3 conditional create is not enforced (%v)", err)
 	}
+	next()
 	if _, err := s.PutIf(ctx, key, []byte("replaced"), tag); err != nil {
 		if !errors.Is(err, provider.ErrPrecondition) {
 			return fmt.Errorf("S3 conditional replace: %w", err)
 		}
 		s.bare.Store(true)
+		next()
 		if _, err := s.PutIf(ctx, key, []byte("replaced"), tag); err != nil {
 			return fmt.Errorf("S3 conditional replace by ETag is not supported (%v)", err)
 		}
 	}
+	next()
 	got, err := s.Get(ctx, key, nil)
 	if err != nil || string(got.Data) != "replaced" {
 		return fmt.Errorf("S3 conditional replace did not store the new bytes (%v)", err)
 	}
 	if s.presign {
+		next()
 		if err := s.probePresignChecksum(ctx, key+"-presign"); err != nil {
 			return err
 		}

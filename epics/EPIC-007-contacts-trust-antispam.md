@@ -45,9 +45,9 @@ this epic turns verified identity into *usable trust*.
   addresses). Non-contact senders get exactly **one** pending contact-request slot — no
   message stream until accepted. **Follow-on:** optional opt-in for unsigned / web-form /
   anonymous ingress with sender challenges (none / proof-of-work / verified / payment) is
-  [EPIC-014](EPIC-014-anonymous-messaging-challenges.md), consumed by EPIC-012 contact
-  forms — default remains deny; the policy vocabulary lands in this epic's schema so web
-  forms and general messaging share one policy surface.
+  [EPIC-014](EPIC-014-anonymous-messaging-challenges.md), optionally reached from EPIC-012's
+  public contact action — default remains deny; the generated page never exposes this private
+  policy surface.
 - **Contact requests ride on messaging** as typed system messages (`sys.contact.request` with
   a short E2E-encrypted intro, `sys.contact.accept`, `sys.contact.block`). Accept = both sides
   write the other into contacts with pinned keys (mutual, like Signal/XMPP presence

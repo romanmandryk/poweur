@@ -11,7 +11,12 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { HISTORY_QUEUE_SENT, historyPeer, unreadCounts } from "../src/history.js";
+import { HISTORY_QUEUE_SENT, MessageHistory, historyPeer, unreadCounts } from "../src/history.js";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { DriveClient } from "../src/drive/client.js";
+import { DriveFiles, fileKeys } from "../src/drive/files.js";
+import type { Decryptor } from "../src/crypto/keys.js";
 import {
   INBOX_CONTACTS_AND_REQUESTS,
   INBOX_CONTACTS_ONLY,
@@ -251,5 +256,89 @@ describe("journey: anonymous tiers", () => {
     await (await rcpt.client.contacts()).set(sender.identity, CONTACT_ACCEPTED, { pin: true });
     await sender.client.send(rcpt.identity, "signed and known");
     expect((await rcpt.client.inbox()).messages[0]?.plaintext).toBe("signed and known");
+  }, 180_000);
+});
+
+/** Another device of the same identity: same keys, nothing remembered. */
+function secondDevice(who: TestIdentity): MessageHistory {
+  const files = new DriveFiles(new DriveClient(who.client.relay, who.client.signer), fileKeys(who.keys.signingPrivateKey, who.keys.encryptionPrivateKey!));
+  return new MessageHistory(who.identity, (who.client as unknown as { decryptor: Decryptor }).decryptor, files);
+}
+
+// Phase 9 restore list (EPIC-020): the history journeys, on the encrypted
+// drive archive rather than the v1 tree.
+describe("journey: message history survives the drain", () => {
+  it("keeps both sides of a conversation after the relay has forgotten it", async () => {
+    const alice = await createTestIdentity(relay.baseUrl, "j5alice");
+    const bob = await createTestIdentity(relay.baseUrl, "j5bob");
+    await bob.client.sendAndArchive(alice.identity, "morning");
+    const first = await alice.client.inboxAndArchive();
+    expect(first.archived).toBe(1);
+    expect(first.lost).toBe(0);
+    await alice.client.sendAndArchive(bob.identity, "morning yourself");
+    await bob.client.inboxAndArchive();
+    await bob.client.sendAndArchive(alice.identity, "coffee?");
+    await alice.client.inboxAndArchive();
+    // The relay has genuinely forgotten them.
+    expect((await alice.client.inbox()).messages).toHaveLength(0);
+
+    const history = await alice.client.history();
+    const records = await history.load();
+    expect(records.map((r) => r.body)).toEqual(["morning", "morning yourself", "coffee?"]);
+    expect(records[1]?.queue).toBe(HISTORY_QUEUE_SENT);
+    expect(records.every((r) => historyPeer(r, alice.identity) === bob.identity)).toBe(true);
+    expect((await history.conversation(bob.identity)).length).toBe(3);
+    // Another device with the same keys reads the same archive.
+    expect((await secondDevice(alice).load()).map((r) => r.body)).toEqual(["morning", "morning yourself", "coffee?"]);
+  }, 180_000);
+
+  it("counts unread down to zero and back up again", async () => {
+    const alice = await createTestIdentity(relay.baseUrl, "j6alice");
+    const bob = await createTestIdentity(relay.baseUrl, "j6bob");
+    await bob.client.send(alice.identity, "one");
+    await bob.client.send(alice.identity, "two");
+    await alice.client.inboxAndArchive();
+    const history = await alice.client.history();
+    expect((await history.unread())[bob.identity]).toBe(2);
+    await history.markConversationRead(bob.identity, await history.load());
+    expect((await history.unread())[bob.identity] ?? 0).toBe(0);
+    // The read mark lives on the drive: another device sees it cleared.
+    expect((await secondDevice(alice).unread())[bob.identity] ?? 0).toBe(0);
+    await bob.client.send(alice.identity, "three");
+    await alice.client.inboxAndArchive();
+    expect((await history.unread())[bob.identity]).toBe(1);
+  }, 180_000);
+
+  it("archives anonymous messages without inventing a sender", async () => {
+    const rcpt = await createTestIdentity(relay.baseUrl, "j7r");
+    const sender = await createTestIdentity(relay.baseUrl, "j7s");
+    await rcpt.client.setPolicy(INBOX_OPEN, { allow: true, challenge: "none" });
+    await sender.client.send(rcpt.identity, "signed and attributable");
+    await anonSend(relay.baseUrl, rcpt.identity, "unsigned and not");
+    await rcpt.client.inboxAndArchive();
+    await rcpt.client.anonAndArchive();
+    // Anonymous history persists: read back on another device.
+    const history = secondDevice(rcpt);
+    const records = await history.load();
+    expect(records.find((r) => r.queue === "inbox")?.sender).toBe(sender.identity);
+    expect(records.find((r) => r.queue === "anonymous")?.sender ?? "").toBe("");
+    const counts = unreadCounts(await history.readState(), rcpt.identity, records);
+    expect(counts[sender.identity]).toBe(1);
+    expect(counts["anonymous"]).toBe(1);
+  }, 180_000);
+
+  it("stores the archive sealed, not in the clear", async () => {
+    const alice = await createTestIdentity(relay.baseUrl, "j8alice");
+    const bob = await createTestIdentity(relay.baseUrl, "j8bob");
+    const secret = "the passphrase is hunter2";
+    await bob.client.send(alice.identity, secret);
+    await alice.client.inboxAndArchive();
+    expect((await (await alice.client.history()).load()).map((r) => r.body)).toContain(secret);
+    // Nothing in the relay's store holds it in the clear.
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? walk(path) : [path];
+    });
+    for (const path of walk(relay.dataDir)) expect(readFileSync(path).includes(secret), path).toBe(false);
   }, 180_000);
 });

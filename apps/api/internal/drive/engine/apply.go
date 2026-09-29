@@ -140,6 +140,9 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 		if m.Parent != current.Head {
 			return journalOp{}, ErrConflict
 		}
+		if m.Public != current.Public {
+			return journalOp{}, invalid("a node cannot switch between public and private; publish a copy instead")
+		}
 		if m.Kind != current.Kind || m.Kind == drive.KindFile && m.Mode != current.Mode {
 			return journalOp{}, invalid("a node keeps its kind and mode")
 		}
@@ -166,6 +169,15 @@ func (e *Engine) validateManifest(ctx context.Context, h *driveHandle, req Reque
 		}
 		if m.Operation == drive.OpMove && st.isAncestor(m.Node, m.Folder) {
 			return journalOp{}, invalid("a folder cannot move into itself")
+		}
+		// Public trees (E20-T5): everything under a public folder is public,
+		// and a public tree's top sits directly under the root, so /pub/<name>
+		// is unambiguous.
+		if folder.Public && !m.Public {
+			return journalOp{}, invalid("a public folder holds only public nodes")
+		}
+		if m.Public && !folder.Public && m.Folder != st.Root {
+			return journalOp{}, invalid("a public folder's top sits directly under the drive root")
 		}
 		if owner, taken := st.Names[nameKey(m.Folder, m.NameHash)]; taken && owner != m.Node {
 			return journalOp{}, fmt.Errorf("%w: a sibling already has this name", ErrExists)
@@ -301,6 +313,10 @@ func (e *Engine) validateAppend(ctx context.Context, h *driveHandle, records []d
 			}
 			added += int64(ref.Size)
 		}
+		// Content sealed into the record counts like chunks do.
+		if record.Sealed != nil {
+			added += int64(len(record.Sealed.Ciphertext))
+		}
 		position++
 		out = append(out, positioned{Position: position, Hash: hash, Record: record})
 	}
@@ -360,7 +376,7 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		}
 		n := st.Nodes[m.Node]
 		if n == nil {
-			n = &node{ID: m.Node, Kind: m.Kind, Mode: m.Mode}
+			n = &node{ID: m.Node, Kind: m.Kind, Mode: m.Mode, Public: m.Public}
 			st.Nodes[m.Node] = n
 			if m.Folder == "" {
 				st.Root = m.Node
@@ -390,6 +406,15 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 		n.Head, n.HeadHash, n.Generation, n.Count, n.Pages, n.Updated = m.Version, op.ManifestHash, m.Generation, m.Count, append([]string(nil), m.Pages...), op.At
 		if m.Operation == drive.OpRotate {
 			n.RotateRequired = false
+		}
+		if m.NodeKey != nil {
+			n.KeyVersion = m.Version
+		}
+		if m.Name != nil || m.PlainName != "" {
+			n.NameVersion = m.Version
+		}
+		if m.ContentKey != nil || m.PlainKey != "" {
+			n.ContentVersion = m.Version
 		}
 		result.Head = m.Version
 		st.Changes = append(st.Changes, Change{Seq: seq, Node: m.Node, Operation: m.Operation, Version: m.Version, At: op.At})
@@ -446,6 +471,17 @@ func applyOp(st *state, seq uint64, index int, op journalOp) error {
 				st.Used -= freed
 			}
 			delete(st.Versions, id)
+		}
+		for _, id := range op.GC.Stripped {
+			v := st.Versions[id]
+			if v == nil {
+				continue
+			}
+			for _, hash := range v.Pages {
+				freed, _ := st.unrefPage(hash)
+				st.Used -= freed
+			}
+			v.Pages = nil
 		}
 	case kindSystem:
 		if err := applySystem(st, seq, op); err != nil {

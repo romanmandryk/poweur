@@ -1,5 +1,6 @@
 /** What Settings changes that is not a document on the relay (from app.js). */
 import { forgetAvatar } from "../state/avatars";
+import { clearSnapshots } from "../lib/snapshot";
 import { clampPowBits } from "@poweur/client";
 import { INBOX_MODES, type InboxPolicy } from "../lib/policy";
 import { forgetNativeSecret, wrapKeysNative as wrapKeysNativeJs } from "../lib/native.js";
@@ -18,6 +19,7 @@ import {
 import { generateEncryptionJwk } from "../lib/vault.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, touchSession, useSession } from "../state/session";
+import { forgetIdHint } from "../lib/visit";
 import { setLoading, toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
 import { activeClient, errorMessage } from "./relay";
@@ -140,8 +142,10 @@ export async function revokeRelaySession() {
 export function removeIdentityFromDevice(identity: string) {
   removeIdentity(identity);
   removeSessionRecord(identity);
+  forgetIdHint(identity, useSession.getState().mode.domain);
   forgetNativeSecret(identity);
   forgetAvatar(identity);
+  void clearSnapshots(identity);
   switchIdentity(listIdentities()[0] || null);
   useRoute.getState().go("messages");
   toast("Identity removed from device", "info");

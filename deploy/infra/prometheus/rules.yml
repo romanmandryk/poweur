@@ -19,5 +19,3 @@ groups:
         expr: max by (state) (poweur_state{state=~"adopt_.+",deployment_environment_name="production"})
       - record: poweur_growth_hosted_identities
         expr: max(poweur_state{state="hosted_identities",deployment_environment_name="production"})
-      - record: poweur_growth_storage_bytes
-        expr: max(poweur_state{state="storage_bytes",deployment_environment_name="production"})

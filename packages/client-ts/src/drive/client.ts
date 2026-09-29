@@ -1,8 +1,8 @@
 /** Authenticated storage-v2 transport. Callers retain custody of all keys. */
 import type { Signer } from "../crypto/keys.js";
-import { randomBytes } from "../encoding.js";
+import { randomBytes, toBase64url } from "../encoding.js";
 import { RelayError } from "../errors.js";
-import { RelayClient, toRelayError } from "../http.js";
+import { RelayClient, toRelayError, type RequestOptions } from "../http.js";
 import { chunkID } from "./crypto.js";
 import { chunkPageHash, type ChunkPage, type Manifest } from "./manifest.js";
 import type { AppendRecord, ChunkRef } from "./records.js";
@@ -24,12 +24,32 @@ export interface DriveStreamEvent {
   timestamp: string;
   drive?: { drive: string; seq: number; node?: string; operation: string; version?: string; position?: number };
 }
+export interface DriveLinkStats { link: string; node: string; opens: number; max_downloads?: number; expires?: string }
 export interface CommitResult { seq: number; head: string; positions: number[] | null }
 export interface DriveNode {
   id: string; head: string; generation: number; kind: "file" | "folder";
   mode?: "replace" | "append"; folder?: string; removed?: boolean; position?: number;
   trimmed_before?: number;
+  /** Set after a key-bearing share was revoked: writes wait for a rotation. */
+  rotate_required?: boolean;
+  /** Published (E20-T5): plaintext name and content key. */
+  public?: boolean;
+  /** Versions carrying the key, name and content-key envelopes. */
+  key_version?: string;
+  name_version?: string;
+  content_version?: string;
   trim_snapshot?: { node: string; version: string };
+}
+/** A node with the signed versions needed to open it: head first, then its
+ * envelope versions when older. */
+export interface ListedNode extends DriveNode { versions: Manifest[] }
+export interface DriveListing {
+  folder: ListedNode;
+  children: ListedNode[];
+  cursor: string;
+  /** Shares (and revoked ones) on the folder's chain and on these children. */
+  shares: Share[];
+  revoked: { share: Share; revoked_at: string }[];
 }
 export interface DriveChange { seq: number; node?: string; operation: string; version?: string; position?: number }
 export interface ChunkCache {
@@ -39,29 +59,51 @@ export interface ChunkCache {
 const segment = (value: string) => encodeURIComponent(value);
 
 export class DriveClient {
+  /** Authenticate as a link holder instead of an identity; the signer is then
+   * only a guest key (see guestAuthor). */
+  link?: { id: string; verifier?: Uint8Array };
   constructor(readonly relay: RelayClient, readonly signer: Signer, readonly drive = signer.identity,
     readonly cache?: ChunkCache, readonly sessionId?: string) {}
 
-  private async auth(): Promise<Record<string, string>> {
-    const { challenge } = await this.relay.request<{ challenge: string }>({
-      method: "GET", path: `/auth/challenge?identity=${segment(this.signer.identity)}`,
-    });
-    return { ...(this.sessionId ? { "X-Poweur-Session-Id": this.sessionId } : {}), "X-Poweur-Identity": this.signer.identity, "X-Poweur-Challenge": challenge,
-      "X-Poweur-Signature": await this.signer.sign(challenge, "base64std") };
+  /** A link holder names its link; anyone else signs the request itself
+   * (one round trip, no challenge fetch). */
+  private auth(headers: Record<string, string> = {}): Pick<RequestOptions, "headers" | "sign"> {
+    if (this.link) {
+      return { headers: { ...headers, "X-Poweur-Link": this.link.id, ...(this.link.verifier ? { "X-Poweur-Link-Verifier": toBase64url(this.link.verifier) } : {}) } };
+    }
+    return { headers, sign: { signer: this.signer, ...(this.sessionId ? { sessionId: this.sessionId } : {}) } };
   }
   private path(suffix: string): string { return `/drive/${segment(this.drive)}${suffix}`; }
-  private async request<T>(method: string, suffix: string, body?: unknown): Promise<T> {
-    return this.relay.request<T>({ method, path: this.path(suffix), body, headers: await this.auth() });
+  private async request<T>(method: string, suffix: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.relay.request<T>({ method, path: this.path(suffix), body, ...this.auth(headers) });
   }
-  info(): Promise<{ drive: string; root: string; used: number; quota: number }> {
+  /** `seq` is the changes cursor as of this answer. */
+  info(): Promise<{ drive: string; root: string; used: number; quota: number; seq?: string }> {
     return this.request("GET", "");
   }
   node(node: string): Promise<DriveNode> { return this.request("GET", `/nodes/${segment(node)}`); }
+  /** Shares on a node and its ancestors, for anyone who may read the node. */
+  /** Shares on a node and its ancestors, for anyone who may read the node;
+   * revoked ones are evidence for versions written while they stood. */
+  nodeShares(node: string): Promise<{ shares: Share[]; revoked?: { share: Share; revoked_at: string }[] }> { return this.request("GET", `/nodes/${segment(node)}/shares`); }
+  /** A folder and a page of its children, ready to open, in one request. */
+  listing(folder: string, cursor = "", limit = 200): Promise<DriveListing> {
+    return this.request("GET", `/nodes/${segment(folder)}/listing?cursor=${segment(cursor)}&limit=${limit}`);
+  }
+  /** A node and the ancestors the caller may read, nearest first. */
+  ancestry(node: string): Promise<{ path: ListedNode[] }> {
+    return this.request("GET", `/nodes/${segment(node)}/path`);
+  }
   children(node: string, cursor = "", limit = 100): Promise<{ children: DriveNode[]; cursor: string }> {
     return this.request("GET", `/nodes/${segment(node)}/children?cursor=${segment(cursor)}&limit=${limit}`);
   }
   changes(cursor = "0", limit = 100): Promise<{ changes: DriveChange[]; cursor: string }> {
     return this.request("GET", `/changes?cursor=${segment(cursor)}&limit=${limit}`);
+  }
+  /** The caller's chain position in an append file: `previous` is the hash
+   * of their last record ("" before the first). */
+  authorCursor(node: string): Promise<{ sequence: number; previous: string }> {
+    return this.request("GET", `/nodes/${segment(node)}/author-cursor`);
   }
   records(node: string, from = 0, limit = 100): Promise<{ records: { position: number; record: AppendRecord }[]; next: number }> {
     return this.request("GET", `/nodes/${segment(node)}/records?from=${from}&limit=${limit}`);
@@ -76,11 +118,11 @@ export class DriveClient {
   }
   /** Retry only transient failures; reuse the exact request ID and bytes. A
    * head conflict must be merged by the caller, never silently overwritten. */
-  async commit(input: DriveCommit): Promise<CommitResult> {
+  async commit(input: DriveCommit, headers?: Record<string, string>): Promise<CommitResult> {
     const id = input.id ?? Array.from(randomBytes(16), b => b.toString(16).padStart(2, "0")).join("");
     const body = JSON.stringify({ ...input, id });
     for (let attempt = 0; ; attempt++) {
-      try { return await this.request("POST", "/commit", body); }
+      try { return await this.request("POST", "/commit", body, headers); }
       catch (error) {
         const transient = error instanceof TypeError || (error instanceof RelayError && [502, 503, 504].includes(error.status ?? 0));
         if (!transient || attempt >= 2) throw error;
@@ -107,8 +149,8 @@ export class DriveClient {
   }
   private async putChunk(upload: { method?: string; url: string; headers?: Record<string, string> }, bytes: Uint8Array): Promise<void> {
     const absolute = /^https?:\/\//.test(upload.url);
-    const headers = { ...(upload.headers ?? {}), ...(absolute ? {} : await this.auth()) };
-    const response = await this.relay.raw({ method: upload.method || "PUT", path: upload.url, body: bytes, headers, redirect: "error" });
+    const auth = absolute ? { headers: upload.headers ?? {} } : this.auth(upload.headers ?? {});
+    const response = await this.relay.raw({ method: upload.method || "PUT", path: upload.url, body: bytes, ...auth, redirect: "error" });
     if (!response.ok) {
       const text = await response.text();
       throw toRelayError(response.status, text, undefined);
@@ -123,11 +165,11 @@ export class DriveClient {
     return this.request("GET", `/nodes/${segment(node)}/history`);
   }
   shares(): Promise<{ shares: Share[] }> { return this.request("GET", "/shares"); }
+  linkStats(link: string): Promise<DriveLinkStats> { return this.request("GET", `/links/${segment(link)}/stats`); }
   unshare(id: string): Promise<CommitResult> { return this.commit({ unshare: { id } }); }
   /** Advisory `drive.changed` stream. A missed event is recovered from `changes`. */
   async subscribe(onEvent: (event: DriveStreamEvent) => void | Promise<void>, signal?: AbortSignal): Promise<void> {
-    const headers = { ...(await this.auth()), Accept: "text/event-stream" };
-    const response = await this.relay.raw({ method: "GET", path: this.path("/events"), headers, stream: true, ...(signal ? { signal } : {}) });
+    const response = await this.relay.raw({ method: "GET", path: this.path("/events"), ...this.auth({ Accept: "text/event-stream" }), stream: true, ...(signal ? { signal } : {}) });
     if (!response.ok || !response.body) throw new Error(`drive stream refused (${response.status})`);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -157,7 +199,7 @@ export class DriveClient {
     const cached = await this.cache?.get(ref.id).catch(() => null);
     if (cached && cached.length === ref.size && chunkID(cached) === ref.id) return cached;
     const suffix = `/nodes/${segment(node)}${version ? `/versions/${segment(version)}` : ""}/chunks/${segment(ref.id)}`;
-    const response = await this.relay.raw({ method: "GET", path: this.path(suffix), headers: await this.auth() });
+    const response = await this.relay.raw({ method: "GET", path: this.path(suffix), ...this.auth() });
     if (!response.ok) {
       const text = await response.text();
       let data: unknown; try { data = JSON.parse(text); } catch { /* non-JSON relay failure */ }

@@ -1,10 +1,10 @@
 # EPIC-014 — Anonymous messaging & sender challenges (proof-of-work)
 
-- **Status:** core complete (T1–T3 + CLI + web app + registration gate shipped; public contact page + stranger-challenge seam open)
+- **Status:** core complete (T1–T3 + CLI + web app + registration gate shipped; public identity-page action shipped in EPIC-012; stranger-challenge seam open)
 - **Priority:** P2 (after EPIC-007 lands the inbox-policy surface it extends)
 - **Depends on:** EPIC-007 (inbox policy + requests queue), EPIC-006 (policy schema);
-  feeds EPIC-012 (web contact forms), EPIC-002 (deferred PoW registration gate)
-- **Unlocks:** contact forms and open inboxes without opening the spam floodgates; a
+  feeds EPIC-012 (public anonymous contact action), EPIC-002 (deferred PoW registration gate)
+- **Unlocks:** public anonymous contact actions and open inboxes without opening the spam floodgates; a
   reusable PoW primitive for every "stranger wants in" surface
 
 ## Progress
@@ -14,7 +14,7 @@
 | E14-T1 Spec | **done** | [`apps/docs/docs/trust/anonymous-and-challenges.md`](../apps/docs/docs/trust/anonymous-and-challenges.md) + PCP-0006; measured difficulty table committed (native: 16 bits ≈ 40 ms, 20 ≈ 0.6 s, 24 ≈ 9 s); coordinated with E07's schema (the `anonymous` block extends `inbox-policy.schema.json`) |
 | E14-T2 PoW primitive | **done** | `packages/identity/pow.go` (HMAC-sealed stateless tokens, purpose-bound, bit dial clamped [8, 30], cancellable solve, benchmark) + the JS solver, since moved into `packages/client-ts/src/pow.ts` by E15-T6 (was `apps/web/js/pow.js`) |
 | E14-T3 Relay enforcement | **done** | Unsigned envelopes → opt-in check → 428 challenge → verified single-use solution → dedicated anon queue (`GET /anon/{identity}`); encrypt-only holds (ephemeral keys); size/daily caps + per-IP rate limit; load auto-raises the difficulty floor (+4 bits over 120 challenges/min); `verified`/`payment` return typed envelopes with 501 on attempts. Full rejection-path matrix in `anon_test.go`. **Open:** `stranger_challenge` gate for identified non-contacts (seam specified; stays here — E07-T5 shipped without it, see the task notes) |
-| E14-T4 Client UX | **done for CLI + web app** | CLI shipped: `poweur send --anon` (auto-solve with progress), `poweur anon` (decrypting drain with ANONYMOUS marker + trust warning), `poweur policy set --anon-*`; `TestINT_ANON_01` end to end, all three tiers (closed / free / priced) in `TestINT_JOURNEY_04`. Web app shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T3: policy panel with the difficulty slider, anonymous tray, in-page solving on send. **Fixed since:** an accepted anonymous message published no push event, so a reader sitting on the Messages screen saw nothing until an unrelated re-render happened to poll the queue. It now publishes its own kind (`anon`) rather than `message` — told `message`, a client fetches the inbox, which by design never holds an anonymous message. The tray badge counts *unread* rather than held, so it clears when the tray is looked at, and the messages themselves are archived like any other. **Open (EPIC-012):** the same send from a public page with no identity |
+| E14-T4 Client UX | **done for CLI + web app** | CLI shipped: `poweur send --anon` (auto-solve with progress), `poweur anon` (decrypting drain with ANONYMOUS marker + trust warning), `poweur policy set --anon-*`; `TestINT_ANON_01` end to end, all three tiers (closed / free / priced) in `TestINT_JOURNEY_04`. Web app shipped with [EPIC-015](EPIC-015-web-app-ux.md) E15-T3: policy panel with the difficulty slider, anonymous tray, in-page solving on send. **Fixed since:** an accepted anonymous message published no push event, so a reader sitting on the Messages screen saw nothing until an unrelated re-render happened to poll the queue. It now publishes its own kind (`anon`) rather than `message` — told `message`, a client fetches the inbox, which by design never holds an anonymous message. The tray badge counts *unread* rather than held, so it clears when the tray is looked at, and the messages themselves are archived like any other. **Shipped in EPIC-012:** the same send from a public identity page, with no identity offered or unlocked on that origin |
 | E14-T5 Second consumers | **done** (E07 hook open) | `REGISTRATION_GATE=pow` + `REGISTRATION_POW_BITS` + `GET /auth/pow` + CLI auto-solve (`TestINT_ANON_02`) — **closes the EPIC-002 deferral**; PCP-0006 filed; contact-request PoW is **not** with EPIC-007 — E07-T5 shipped and left it here, with E14-T3's `stranger_challenge` gate |
 
 ## Goal
@@ -36,8 +36,8 @@ and payment land as designed slots with stub enforcement.
   this epic extends that same policy file rather than adding a second policy surface.
   E07-T5 already wishes for "proof-of-work on contact requests from unknown relays": it
   consumes the primitive built here.
-- **EPIC-012** (identity websites) needs anonymous contact-form ingress and explicitly
-  deferred the policy vocabulary to EPIC-007/here.
+- **EPIC-012** may advertise a Poweur-controlled anonymous contact action from the generated
+  identity page; it reuses this protocol and does not expose private policy fields.
 - **EPIC-002** deferred a PoW gate on hosted registration — same primitive, second
   consumer.
 - A challenge store already exists (`apps/api/internal/storage/challenges.go`, used for
@@ -164,9 +164,8 @@ deferral gets a note pointing here once the primitive exists.
 - [x] Anonymous **sending** from the web app's compose screen, with in-page solving,
       attempt-count progress and an abort — `sendAnonymous` gained `onSolveProgress` and
       `signal` for it
-- [ ] **Still EPIC-012's:** the same send path on a *public* page with no signed-in
-      identity — the components are ready (they take no app-shell dependency); that epic
-      owns the website shape
+- [ ] **Still EPIC-012's:** link or present the same send path from the generated public page
+      when the owner explicitly advertises it; that page does not infer or expose inbox policy
 
 **Acceptance:** two-browser demo: recipient enables anon+PoW, visitor sends without any
 identity, message appears in the anon queue; slider changes measurably change solve time.

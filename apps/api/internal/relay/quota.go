@@ -1,7 +1,11 @@
 package relay
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,29 +14,48 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/poweur/api/internal/drive/provider"
 )
 
-// quotaOverrides is the operator's per-identity storage quota file: a JSON
-// object from identity to size, where a size is bytes or a string with a unit
-// ("500MB", "2GiB"; 0 = unlimited). Support raises one identity's limit by
-// editing it, so it is re-read whenever it changes on disk, and a broken edit
+// quotaOverrides is the operator's per-identity storage quota document: a
+// JSON object from identity to size, where a size is bytes or a string with
+// a unit ("500MB", "2GiB"; 0 = unlimited). Support raises one identity's
+// limit by editing it, so it is re-read when it changes, and a broken edit
 // keeps the last good version rather than dropping everyone to the default.
+//
+// On a relay with a store it lives there, at relay/storage-quotas.json (edit
+// it with `poweur-relay quotas`), so an S3 relay needs no disk and every
+// relay process sees the same limits; it is re-read at most every
+// quotaStoreInterval. While the store has none, the local file
+// (STORAGE_QUOTAS_FILE, or $POWEUR_DATA/storage-quotas.json) is used, as on
+// a relay without a store.
 type quotaOverrides struct {
 	path   string
+	store  provider.Store
 	onBad  func(error)
 	mu     sync.Mutex
 	mod    time.Time
 	size   int64
 	values map[string]int64
+	// Store source: when it was last checked and what it held.
+	checked   time.Time
+	storeHash string
+	fromStore bool
 }
+
+// QuotaObjectKey is where a relay's quota overrides live in its store.
+const QuotaObjectKey = "relay/storage-quotas.json"
+
+const quotaStoreInterval = time.Minute
 
 func newQuotaOverrides(path string, onBad func(error)) *quotaOverrides {
 	return &quotaOverrides{path: path, onBad: onBad}
 }
 
-// lookup returns the identity's own quota, if the file names one.
+// lookup returns the identity's own quota, if the document names one.
 func (q *quotaOverrides) lookup(identity string) (int64, bool) {
-	if q == nil || q.path == "" {
+	if q == nil || q.path == "" && q.store == nil {
 		return 0, false
 	}
 	q.mu.Lock()
@@ -43,6 +66,40 @@ func (q *quotaOverrides) lookup(identity string) (int64, bool) {
 }
 
 func (q *quotaOverrides) refreshLocked() {
+	if q.store != nil {
+		if !q.checked.IsZero() && time.Since(q.checked) < quotaStoreInterval {
+			return
+		}
+		q.checked = time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		obj, err := q.store.Get(ctx, QuotaObjectKey, nil)
+		cancel()
+		switch {
+		case err == nil:
+			sum := sha256.Sum256(obj.Data)
+			hash := hex.EncodeToString(sum[:])
+			if q.fromStore && hash == q.storeHash {
+				return
+			}
+			q.fromStore, q.storeHash = true, hash
+			values, err := parseQuotaOverrides(obj.Data)
+			if err == nil {
+				q.values = values
+			} else if q.onBad != nil {
+				q.onBad(err)
+			}
+			return
+		case !errors.Is(err, provider.ErrNotFound):
+			// The store is briefly unreachable: keep what we have.
+			return
+		}
+		if q.fromStore {
+			q.fromStore, q.storeHash, q.values, q.mod, q.size = false, "", nil, time.Time{}, 0
+		}
+		if q.path == "" {
+			return
+		}
+	}
 	info, err := os.Stat(q.path)
 	if err != nil {
 		// No file is the normal case: nobody has an override.
@@ -66,6 +123,46 @@ func (q *quotaOverrides) refreshLocked() {
 		q.onBad(err)
 	}
 }
+
+// EditQuotas changes the quota document in a store: edit receives the
+// current entries (identity → size, as written) and changes them in place.
+// The result is validated before it is written, and the write is
+// conditional, so two operators editing at once cannot lose an update.
+func EditQuotas(ctx context.Context, store provider.Store, edit func(map[string]json.RawMessage) error) (map[string]int64, error) {
+	obj, err := store.Get(ctx, QuotaObjectKey, nil)
+	doc := map[string]json.RawMessage{}
+	match := ""
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(obj.Data, &doc); err != nil {
+			return nil, fmt.Errorf("stored quotas are not valid JSON: %w", err)
+		}
+		match = obj.ETag
+	case !errors.Is(err, provider.ErrNotFound):
+		return nil, err
+	}
+	if err := edit(doc); err != nil {
+		return nil, err
+	}
+	raw, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	values, err := parseQuotaOverrides(raw)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := store.PutIf(ctx, QuotaObjectKey, append(raw, '\n'), match); err != nil {
+		if errors.Is(err, provider.ErrPrecondition) {
+			return nil, errors.New("the quotas changed while editing; run the command again")
+		}
+		return nil, err
+	}
+	return values, nil
+}
+
+// ParseQuotaSize parses a size as the quota document accepts it.
+func ParseQuotaSize(text string) (int64, error) { return parseQuotaSize(text) }
 
 func parseQuotaOverrides(raw []byte) (map[string]int64, error) {
 	var doc map[string]json.RawMessage

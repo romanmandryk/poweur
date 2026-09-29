@@ -14,11 +14,14 @@ export function askText({
   label,
   initial = "",
   confirmLabel = "OK",
+  message = "",
 }: {
   title: string;
   label: string;
   initial?: string;
   confirmLabel?: string;
+  /** Shown above the field: what the answer will do. */
+  message?: string;
 }): Promise<string | null> {
   return new Promise((resolve) => {
     let answer: string | null = null;
@@ -29,6 +32,7 @@ export function askText({
           label={label}
           initial={initial}
           confirmLabel={confirmLabel}
+          message={message}
           onSubmit={(value) => {
             answer = value.trim() || null;
             close();
@@ -45,12 +49,14 @@ function TextForm({
   label,
   initial,
   confirmLabel,
+  message,
   onSubmit,
   onCancel,
 }: {
   label: string;
   initial: string;
   confirmLabel: string;
+  message: string;
   onSubmit: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -62,6 +68,7 @@ function TextForm({
         onSubmit(field.current?.value ?? "");
       }}
     >
+      {message && <p className="dialog-message mb-4 text-sm text-muted">{message}</p>}
       <FormGroup>
         <Label htmlFor="dialog-text">{label}</Label>
         <Input ref={field} id="dialog-text" type="text" defaultValue={initial} autoComplete="off" onFocus={(event) => event.currentTarget.select()} />

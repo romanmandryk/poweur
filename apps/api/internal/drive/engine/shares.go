@@ -317,7 +317,12 @@ func applyUnshare(st *state, seq uint64, op journalOp) error {
 	s := st.Shares[u.ID]
 	delete(st.Shares, u.ID)
 	delete(st.ShareUse, u.ID)
-	if drive.KeyBearing(s.Role) {
+	// A revoked share still proves what its holder was allowed to write
+	// while it stood: readers verify old versions against it.
+	st.Revoked[u.ID] = &RevokedShare{Share: *s, RevokedAt: op.At, Seq: seq}
+	// A share made before the node's last key rotation carries a retired key:
+	// revoking it (e.g. when re-issuing it after a rotation) forces nothing.
+	if n := st.Nodes[s.Node]; drive.KeyBearing(s.Role) && n != nil && s.Generation == n.Generation {
 		// Everything the member could decrypt is below the shared node.
 		for _, n := range st.Nodes {
 			if !n.Removed && st.isAncestor(s.Node, n.ID) {
@@ -470,4 +475,50 @@ func applyGroupRevoke(st *state, seq uint64, op journalOp) error {
 		st.Changes = append(st.Changes, Change{Seq: seq, Node: s.Node, Operation: "group.revoke", Share: s.ID, Member: g.Group, At: op.At})
 	}
 	return nil
+}
+
+// SharesOn lists the shares on a node and its ancestors, nearest first:
+// what a reader needs to check that each version's author held the role
+// it needed. Sealed node keys are sealed to their members, so listing them
+// reveals who has access, not what they can open.
+func (e *Engine) SharesOn(ctx context.Context, driveID, nodeID string) ([]drive.Share, []RevokedShare, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer h.mu.Unlock()
+	var out []drive.Share
+	var revoked []RevokedShare
+	for seen, id := 0, nodeID; id != "" && seen <= len(h.st.Nodes); seen++ {
+		var here []drive.Share
+		for _, s := range h.st.Shares {
+			if s.Node == id {
+				here = append(here, *s)
+			}
+		}
+		sort.Slice(here, func(i, j int) bool { return here[i].ID < here[j].ID })
+		out = append(out, here...)
+		var gone []RevokedShare
+		for _, r := range h.st.Revoked {
+			if r.Share.Node == id {
+				gone = append(gone, *r)
+			}
+		}
+		sort.Slice(gone, func(i, j int) bool { return gone[i].Share.ID < gone[j].Share.ID })
+		revoked = append(revoked, gone...)
+		n := h.st.Nodes[id]
+		if n == nil {
+			break
+		}
+		id = n.Folder
+	}
+	return out, revoked, nil
+}
+
+// RevokedShare is a share that was revoked, kept as evidence of what its
+// holder could write before RevokedAt. It grants nothing.
+type RevokedShare struct {
+	Share     drive.Share `json:"share"`
+	RevokedAt time.Time   `json:"revoked_at"`
+	Seq       uint64      `json:"seq"`
 }
