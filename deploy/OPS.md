@@ -153,7 +153,9 @@ docker compose -p poweur --env-file .observability.env -f docker-compose.prod.ym
 ```
 
 The volume stays mounted for `storage-quotas.json`; the old `drives/` and `relay/` on it can go once
-the bucket-backed relay is verified.
+the bucket-backed relay is verified. Production moved to the Hetzner bucket `poweur` (hel1) on
+2026-09-29. New Hetzner credentials can be refused by some gateways for several minutes after
+creation; wait until a burst of requests all succeeds before cutting over.
 
 It moves identity documents, profiles and avatars, capabilities, contacts, policy, analytics,
 devices, connected apps, group rosters, key backups and undelivered mail; v1 files, shares, links
