@@ -281,8 +281,22 @@ and stay in the thread to answer. Never ask for upvotes; HN and Reddit penalise 
 ### Phase 1b — expert communities, framed as "feedback wanted" (Oct 5–12)
 
 **Identity / auth**
+- [ ] **IndieAuth gate first (E22-T8):** run two independent IndieAuth clients live against
+      oauth.poweur.org (indieauth.rocks, indielogin.com, a hosted Micropub client) and fix
+      what breaks. Don't reach out to IndieWeb people before this passes; they will test it
+      within the hour
 - [ ] IndieWeb chat (`#indieweb-dev`, chat.indieweb.org): the IndieAuth bridge is directly
-      relevant to them. Add a page to the indieweb.org wiki once it works for their sites
+      relevant to them. Add a page to the indieweb.org wiki once it works for their sites.
+      Draft in [`outreach-drafts.md`](outreach-drafts.md)
+- [ ] IndieWeb wiki: a `Poweur` page (what it is, how to sign in to an IndieAuth site with
+      an ID, known limits) and an entry on the IndieAuth "implementations" page
+- [ ] IndieAuth spec community: the W3C Social Web CG / indieweb.org discussion places
+      (check where the spec's issues and mailing list live now). Ask for a review of how the
+      bridge maps a `poweur` ID to a profile URL (`IndieAuthProfileURL`), not for promotion
+- [ ] Maintainers of IndieAuth servers and clients (IndieLogin, IndieAuth.com successors,
+      Micropub/Micro.blog, Known, WordPress IndieAuth plugin, Selfoss-style apps): a short
+      personal note each, asking whether an ID works as `me` for them. Keep names and
+      dates in the tracker below
 - [ ] Decentralized Identity Foundation (DIF) Slack and W3C Credentials Community Group
       list: frame it around `did:web` projection and web-first identity documents
 - [ ] Internet Identity Workshop (IIW): check the next date (it runs twice a year, spring and
@@ -317,6 +331,34 @@ and stay in the thread to answer. Never ask for upvotes; HN and Reddit penalise 
 - [ ] Privacy Guides forum (discuss.privacyguides.net): expect hard questions about metadata
       and the relay operator. Prepare an honest threat-model page first
 - [ ] r/degoogle, r/privacy: only once the site loads no third-party fonts or trackers
+
+### Outreach tracker
+
+One row per person or place. Fill in the contact and date when you've decided to reach out,
+and update the status the same day you send or hear back. Message drafts:
+[`outreach-drafts.md`](outreach-drafts.md).
+
+Status: `todo` → `drafted` → `sent` → `replied` → `done` / `dropped`.
+
+| Channel / person | Ask | Planned date | Status | Notes |
+|------------------|-----|--------------|--------|-------|
+| Friends & ex-colleagues (20–30) | Claim a name, message me on Poweur | Oct 1–4 | todo | List names in a private note, not the repo |
+| Trusted developers (2–3) | Self-host it and break it | Oct 1–4 | todo | |
+| Identity / security contacts | 20 min of critique | Oct 1–4 | todo | |
+| IndieWeb chat `#indieweb-dev` | Feedback on IndieAuth bridge | Oct 6 | todo | Blocked on live IndieAuth clients (E22-T8) |
+| indieweb.org wiki page | Document sign-in with a Poweur ID | Oct 7 | todo | Same gate |
+| IndieAuth client/server maintainers | Does an ID work as `me`? | Oct 6–9 | todo | One row each once named |
+| DIF Slack / W3C CCG list | Feedback on `did:web` projection | Oct 8 | todo | |
+| IIW | Book a session at the next event | check date | todo | |
+| Local-first Discord | Feedback | Oct 9 | todo | |
+| Solid forum | Honest comparison, feedback | Oct 9 | todo | |
+| Fediverse + Bluesky accounts | Create accounts, first post | Oct 5 | todo | |
+| NLnet / NGI Zero | Apply to the next call | check deadline | todo | |
+| r/selfhosted + selfh.st | Self-hosting feedback | Oct 10–11 | todo | Needs the fresh-VM guide test |
+| Privacy Guides forum | Threat-model feedback | Oct 12 | todo | Needs the threat-model page |
+| Lobsters invite | Ask someone for an invite | Oct 1–4 | todo | Needed for launch week |
+| Newsletters (Console.dev, Golang Weekly, …) | Submit tips | Oct 13–17 | todo | |
+| Press / podcasts | Personal pitch | Oct 13–20 | todo | Name the writer per outlet |
 
 ### Phase 2 — launch week (Tue Oct 13 onward)
 
