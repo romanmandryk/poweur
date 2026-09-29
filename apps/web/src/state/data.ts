@@ -8,6 +8,7 @@ import { create } from "zustand";
 import type { DriveFiles, Mount, OpenFile } from "@poweur/client/drive";
 
 export type Tray = "inbox" | "requests" | "anonymous";
+export type FilesTab = "mine" | "shared";
 
 export interface Contact {
   identity: string;
@@ -64,6 +65,8 @@ export function freshData() {
   return {
     ...freshIdentityData(),
     tray: "inbox" as Tray,
+    /** The Files tab, kept across navigation like the message tray. */
+    filesTab: "mine" as FilesTab,
     /** null unless the first-run flow is on screen. */
     onboard: null as any,
     /** The identity host's own name (E15-T9). */

@@ -1,6 +1,6 @@
 /** Storage-v2 Files destination: encrypted files, direct shares and mounts. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
+import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
 import { acceptBrowserOffer, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
@@ -23,8 +23,23 @@ export function Files() {
   const messages = useData((state) => state.messages);
   const fileCache = useData((state) => state.files);
   const offers = useMemo(() => shareOffers(messages, identity), [identity, messages]);
-  const [view, setView] = useState<View | null>(() => fileCache.own ? ({ files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] }) : null);
-  const [tab, setTab] = useState<"mine" | "shared">("mine");
+  const tab = useData((state) => state.filesTab);
+  // Each tab keeps its own place, as message trays do: switching back returns
+  // to the folder you left. Tapping the active tab again goes to its top.
+  const [views, setViews] = useState<{ mine: View | null; shared: View | null }>(() => ({
+    mine: fileCache.own ? { files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] } : null,
+    shared: null,
+  }));
+  const view = views[tab];
+  const setView = (next: View | null, which = tab) => setViews((current) => ({ ...current, [which]: next }));
+  const selectTab = (next: typeof tab) => {
+    if (next === tab) {
+      if (next === "mine") void openMine();
+      else setView(null, "shared");
+      return;
+    }
+    useData.setState({ filesTab: next });
+  };
   const [error, setError] = useState("");
   const [folderLoading, setFolderLoading] = useState(false);
   const [working, setWorking] = useState(false);
@@ -32,8 +47,8 @@ export function Files() {
   const entries = view ? cachedBrowserFolder(view.files, view.folder) ?? [] : [];
   const mounts = fileCache.mounts;
 
-  async function show(next: View) {
-    setView(next);
+  async function show(next: View, which = tab) {
+    setView(next, which);
     if (cachedBrowserFolder(next.files, next.folder)) return;
     setFolderLoading(true);
     try {
@@ -48,7 +63,7 @@ export function Files() {
 
   async function openMine() {
     const own = useData.getState().files.own;
-    if (own) await show({ files: own.files, folder: own.root, label: "Files", trail: [{ file: own.root, label: "Files" }] });
+    if (own) await show({ files: own.files, folder: own.root, label: "Files", trail: [{ file: own.root, label: "Files" }] }, "mine");
     else await ensureBrowserFiles(identity);
   }
 
@@ -57,9 +72,9 @@ export function Files() {
   }, [identity]);
 
   useEffect(() => {
-    if (tab !== "mine" || view || !fileCache.own) return;
-    setView({ files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] });
-  }, [fileCache.own, tab, view]);
+    if (views.mine || !fileCache.own) return;
+    setView({ files: fileCache.own.files, folder: fileCache.own.root, label: "Files", trail: [{ file: fileCache.own.root, label: "Files" }] }, "mine");
+  }, [fileCache.own, views.mine]);
 
   async function refresh() {
     try { await refreshBrowserFiles(identity); setError(""); }
@@ -154,12 +169,12 @@ export function Files() {
       const shared = await openBrowserDrive(identity, mount.drive, mount.relay);
       const root = await shared.files.open(mount.node);
       const label = mount.name || mount.drive;
-      setTab("shared");
       if (root.manifest.kind === "file") {
         await downloadFrom(shared.files, root, label);
         return;
       }
-      await show({ files: shared.files, folder: root, label, trail: [{ file: root, label }] });
+      useData.setState({ filesTab: "shared" });
+      await show({ files: shared.files, folder: root, label, trail: [{ file: root, label }] }, "shared");
     } catch (cause) {
       toast(errorMessage(cause), "error", 7000);
     } finally {
@@ -184,8 +199,8 @@ export function Files() {
   const atOwnRoot = tab === "mine" && view?.trail.length === 1;
   return (
     <>
-      <PullToRefresh onRefresh={refresh}>
-      <DestHeader title={view?.label || "Files"}>
+      <PullToRefresh onRefresh={refresh} busy={fileCache.loading || folderLoading || working}>
+      <DestHeader title="Files">
         {tab === "mine" && view && (
           <>
             <IconButton id="btn-new-folder" aria-label="New folder" onClick={() => void newFolder()}><FolderPlus className="size-5" /></IconButton>
@@ -195,16 +210,14 @@ export function Files() {
         )}
       </DestHeader>
 
-      <TabBar aria-label="Files view">
-        <Tab active={tab === "mine"} onClick={() => { setTab("mine"); setView(null); void openMine(); }}>My files</Tab>
-        <Tab active={tab === "shared"} onClick={() => { setTab("shared"); setView(null); }}>Shared with me</Tab>
+      <TabBar className="tray-bar" aria-label="Files view">
+        <Tab data-files-tab="mine" active={tab === "mine"} onClick={() => selectTab("mine")}>My files</Tab>
+        <Tab data-files-tab="shared" active={tab === "shared"} onClick={() => selectTab("shared")}>Shared with me</Tab>
       </TabBar>
-      {(error || fileCache.error) && <Notice tone="warn" className="mx-4">{error || fileCache.error}</Notice>}
-
-      {(fileCache.loading || folderLoading || working) && <div role="status" className="flex items-center justify-center gap-2 px-4 py-3 text-sm text-muted"><RefreshCw className="size-4 animate-spin text-accent" />{working ? "Updating files…" : "Loading files…"}</div>}
+      {(error || fileCache.error) && <Notice tone="warn" className="mx-4 mt-3">{error || fileCache.error}</Notice>}
 
       {view && view.trail.length > 1 && (
-        <nav aria-label="Folder path" className="flex gap-1 overflow-x-auto px-4 pb-2 text-sm text-muted">
+        <nav aria-label="Folder path" className="flex gap-1 overflow-x-auto px-4 pt-3 pb-2 text-sm text-muted">
           {view.trail.map((part, index) => <button key={part.file.manifest.node} className="shrink-0 text-accent" onClick={() => void show({ ...view, folder: part.file, label: part.label, trail: view.trail.slice(0, index + 1) })}>{index ? `/ ${part.label}` : part.label}</button>)}
         </nav>
       )}
@@ -213,12 +226,12 @@ export function Files() {
         <SharedList offers={offers.filter((offer) => !mounts.some((mount) => mount.share_id === offer.share.id))} mounts={mounts} onAccept={accept} onOpen={openMount} />
       )}
 
-      {view && entries.length === 0 && !folderLoading && !working && (
+      {view && entries.length === 0 && !fileCache.loading && !folderLoading && !working && (
         <EmptyState icon={atOwnRoot ? Upload : Folder} title={atOwnRoot ? "Your drive is empty" : "This folder is empty"} body={atOwnRoot ? "Upload a file or create a folder. Names and contents are encrypted before they leave this device." : undefined} action={atOwnRoot ? <Button className="w-auto px-6" onClick={() => input.current?.click()}>Upload a file</Button> : undefined} />
       )}
 
       {view && entries.length > 0 && (
-        <div className="mx-4 overflow-hidden rounded-card bg-surface">
+        <div className="conv-list file-list bg-surface">
           {entries.map((file) => <FileRow key={file.manifest.node} file={file} own={tab === "mine"} onOpen={() => void enter(file)} onShare={() => openShareDialog(identity, file)} onDelete={() => void remove(file)} />)}
         </div>
       )}
@@ -229,8 +242,8 @@ export function Files() {
 
 function FileRow({ file, own, onOpen, onShare, onDelete }: { file: OpenFile; own: boolean; onOpen: () => void; onShare: () => void; onDelete: () => void }) {
   const Icon = file.manifest.kind === "folder" ? Folder : FileIcon;
-  return <div className="flex min-h-14 items-center gap-2 border-b border-sep px-3 last:border-0">
-    <button className="flex min-w-0 flex-1 items-center gap-3 py-3 text-left" onClick={onOpen}><Icon className="size-5 shrink-0 text-accent" /><span className="truncate font-medium">{file.name || "Shared item"}</span></button>
+  return <div className="file-row flex min-h-13 items-center gap-2 border-b border-sep px-4 transition-colors last:border-b-0 [@media(hover:hover)]:hover:bg-surface-2">
+    <button className="flex min-w-0 flex-1 items-center gap-3 py-3 text-left" onClick={onOpen}><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Icon className="size-[18px]" aria-hidden="true" /></span><span className="truncate text-[15px] font-semibold">{file.name || "Shared item"}</span></button>
     {file.manifest.kind === "file" && <IconButton aria-label={`Download ${file.name}`} onClick={onOpen}><Download className="size-4" /></IconButton>}
     {own && <IconButton aria-label={`Share ${file.name}`} onClick={onShare}><Share2 className="size-4" /></IconButton>}
     {own && <IconButton aria-label={`Delete ${file.name}`} className="text-danger" onClick={onDelete}><Trash2 className="size-4" /></IconButton>}
@@ -239,9 +252,9 @@ function FileRow({ file, own, onOpen, onShare, onDelete }: { file: OpenFile; own
 
 function SharedList({ offers, mounts, onAccept, onOpen }: { offers: ShareOfferLike[]; mounts: Awaited<ReturnType<typeof loadMounts>>; onAccept: (offer: ShareOfferLike) => void; onOpen: (mount: (typeof mounts)[number]) => void }) {
   if (!offers.length && !mounts.length) return <EmptyState icon={Share2} title="Nothing shared yet" body="Files and folders people share with you will appear here after you accept them." />;
-  return <div className="mx-4 space-y-4">
-    {offers.length > 0 && <section><h2 className="mb-2 text-sm font-bold text-muted">Offers</h2><div className="overflow-hidden rounded-card bg-surface">{offers.map((offer) => <div key={offer.share.id} className="flex items-center gap-3 border-b border-sep p-3 last:border-0"><Share2 className="size-5 text-accent" /><div className="min-w-0 flex-1"><div className="truncate font-semibold">{offer.name || "Shared item"}</div><div className="truncate text-sm text-muted">from {offer.share.issuer} · {offer.share.role}</div></div><Button size="sm" onClick={() => onAccept(offer)}>Accept</Button></div>)}</div></section>}
-    {mounts.length > 0 && <section><h2 className="mb-2 text-sm font-bold text-muted">Mounted</h2><div className="overflow-hidden rounded-card bg-surface">{mounts.map((mount) => <button key={`${mount.drive}:${mount.node}`} className="flex min-h-14 w-full items-center gap-3 border-b border-sep p-3 text-left last:border-0" onClick={() => onOpen(mount)}><Folder className="size-5 text-accent" /><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{mount.name || "Shared item"}</span><span className="block truncate text-sm text-muted">{mount.drive} · {mount.role}</span></span></button>)}</div></section>}
+  return <div>
+    {offers.length > 0 && <section><h2 className="px-4 pt-4 pb-2 text-[13px] font-bold tracking-wide text-muted uppercase">Offers</h2><div className="conv-list bg-surface">{offers.map((offer) => <div key={offer.share.id} className="flex min-h-13 items-center gap-3 border-b border-sep px-4 py-3 last:border-b-0"><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Share2 className="size-[18px]" aria-hidden="true" /></span><div className="min-w-0 flex-1"><div className="truncate font-semibold">{offer.name || "Shared item"}</div><div className="truncate text-sm text-muted">from {offer.share.issuer} · {offer.share.role}</div></div><Button size="sm" onClick={() => onAccept(offer)}>Accept</Button></div>)}</div></section>}
+    {mounts.length > 0 && <section><h2 className="px-4 pt-4 pb-2 text-[13px] font-bold tracking-wide text-muted uppercase">Shared with you</h2><div className="conv-list bg-surface">{mounts.map((mount) => <button key={`${mount.drive}:${mount.node}`} className="flex min-h-13 w-full items-center gap-3 border-b border-sep px-4 py-3 text-left transition-colors last:border-b-0 [@media(hover:hover)]:hover:bg-surface-2" onClick={() => onOpen(mount)}><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-2 text-accent"><Folder className="size-[18px]" aria-hidden="true" /></span><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{mount.name || "Shared item"}</span><span className="block truncate text-sm text-muted">{mount.drive} · {mount.role}</span></span></button>)}</div></section>}
   </div>;
 }
 
