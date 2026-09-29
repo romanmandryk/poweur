@@ -21,7 +21,7 @@
     <div class="wrap legal-wrap">
       <div class="eyebrow">Legal</div>
       <h1 class="h2 gradient-text">Privacy Policy</h1>
-      <p class="legal-meta">Last updated 24 September 2026</p>
+      <p class="legal-meta">Last updated 30 September 2026</p>
       <nav class="legal-nav" aria-label="Legal pages">
         <a href="../">Overview &amp; contact</a>
         <a href="./" aria-current="page">Privacy Policy</a>
@@ -68,12 +68,12 @@
           <tr><td><strong>Profile</strong> you choose to publish (display name, picture)</td><td>Shown to people who look you up. <strong>Public.</strong></td><td>Until you change or delete it</td></tr>
           <tr><td><strong>Encrypted key backup</strong> and device list</td><td>So your own devices can unlock and add each other</td><td>Until you delete your ID</td></tr>
           <tr><td><strong>Messages in transit</strong>: ciphertext plus sender, recipient, time and size</td><td>To deliver messages, including while you're offline</td><td>Until delivered; undelivered messages expire after 30 days</td></tr>
-          <tr><td><strong>Files</strong> you upload, and folder and share settings</td><td>To store and share them as you ask. <strong>Not end-to-end encrypted today</strong>, so treat them like files in any cloud drive.</td><td>Until you delete them or your ID</td></tr>
+          <tr><td><strong>Files</strong> you upload, and folder and share settings</td><td>To store and share them as you ask. File contents and names are <strong>end-to-end encrypted</strong>: we see sizes, times, how folders nest and who a folder is shared with, not what is in them. Folders you make <strong>public</strong> are not encrypted and anyone with the address can read them.</td><td>Until you delete them or your ID</td></tr>
           <tr><td><strong>Contacts, inbox rules, shares and app grants</strong></td><td>The relay has to read these to deliver messages and enforce your permissions</td><td>Until you change them or delete your ID</td></tr>
           <tr><td><strong>Public links and link statistics</strong> (download counts)</td><td>So you can share files with people without an ID and see that they were used</td><td>Until the link expires or you remove it</td></tr>
           <tr><td><strong>Sign-in sessions</strong></td><td>To keep you signed in on a device</td><td>Short-lived and held in memory only</td></tr>
           <tr><td><strong>Server logs and metrics</strong>: route, result, timing, errors</td><td>To keep the service running, debug it and stop abuse</td><td>Logs 14 days; aggregate metrics 30 days</td></tr>
-          <tr><td><strong>Backups</strong> of the above</td><td>So a hardware failure doesn't lose your data. Daily copies of the whole server, kept by our hosting provider (Hetzner) in the EU. For recovering the service, not for restoring individual files</td><td>7 days, then deleted</td></tr>
+          <tr><td><strong>Storage and backups</strong></td><td>Your home (files, message history, settings) is kept in Hetzner Object Storage in one data centre in Germany. Each piece is spread across several servers, so up to three can fail without losing data. Hetzner does not publish a durability guarantee, and we do not yet keep a second copy in another location. The rest of the server is copied daily by Hetzner in the EU, for recovering the service, not for restoring individual files</td><td>Your home: until you delete it. Server copies: 7 days, then deleted</td></tr>
         </tbody>
       </table>
       <p><strong>Diagnostics.</strong> The app, the sign-in bridge, the website and the docs send anonymous diagnostics to our own server: which screens and pages are viewed, errors and loading speed, with your browser name, version, operating system and screen size. Before anything leaves your browser, Poweur IDs, domain names and email addresses are replaced with placeholders and link queries and fragments are removed; no IP address is kept and nothing is stored on your device. We keep them for 14 days. If you tick <em>Include my ID</em> in Settings → Diagnostics, the app’s diagnostics carry your ID and relay logs about your requests include your ID and IP address, which lets us find problems you run into. Untick it at any time: from then on, logs record only a keyed hash of your ID and no IP address.</p>
