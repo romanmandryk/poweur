@@ -15,6 +15,8 @@ import (
 
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/drive/provider/fs"
 	"github.com/poweur/api/internal/migrate"
 	"github.com/poweur/api/internal/relay"
 )
@@ -23,7 +25,41 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "migrate-v1" {
 		os.Exit(migrateV1(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "copy-store" {
+		os.Exit(copyStore(os.Args[2:]))
+	}
 	os.Exit(run())
+}
+
+// copyStore copies a relay's objects from a data directory into the store the
+// environment configures (STORAGE_PROVIDER=s3 …); run it with the relay stopped.
+func copyStore(args []string) int {
+	flags := flag.NewFlagSet("copy-store", flag.ContinueOnError)
+	from := flags.String("from", "", "data directory to copy from (the fs provider root)")
+	dry := flags.Bool("dry-run", false, "count what would be copied, write nothing")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	cfg := config.FromEnv()
+	if *from == "" || cfg.StorageProvider != config.StorageS3 {
+		fmt.Fprintln(os.Stderr, "copy-store: pass --from <dir> and configure STORAGE_PROVIDER=s3 and the S3_* variables")
+		return 2
+	}
+	source, err := fs.Open(*from)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "copy-store:", err)
+		return 1
+	}
+	target, err := drive.Open(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "copy-store: destination:", err)
+		return 1
+	}
+	if _, err := migrate.CopyStore(context.Background(), source, target, *dry, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "copy-store:", err)
+		return 1
+	}
+	return 0
 }
 
 // migrateV1 converts a v1 POWEUR_DATA to the v2 layout; run it with the relay

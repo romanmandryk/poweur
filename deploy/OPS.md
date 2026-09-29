@@ -140,6 +140,21 @@ docker run --rm -v poweur_poweur_data:/data --entrypoint /relay "$RELAY_IMAGE" m
 docker start poweur-relay
 ```
 
+To move a relay from its disk to an S3 bucket, stop it, copy every object into the bucket (idempotent;
+each copy is read back and compared), then switch the relay's environment to S3 and start it:
+
+```bash
+docker stop poweur-relay
+docker run --rm -v poweur_poweur_data:/data --env-file apps/api/.env.prod -e STORAGE_PROVIDER=s3 \
+  --entrypoint /relay "$RELAY_IMAGE" copy-store --from /data
+# add STORAGE_PROVIDER=s3, S3_ENDPOINT, S3_BUCKET, S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY and
+# S3_PRESIGN=0 (Hetzner does not enforce presigned checksums) to apps/api/.env.prod, then:
+docker compose -p poweur --env-file .observability.env -f docker-compose.prod.yml up -d relay
+```
+
+The volume stays mounted for `storage-quotas.json`; the old `drives/` and `relay/` on it can go once
+the bucket-backed relay is verified.
+
 It moves identity documents, profiles and avatars, capabilities, contacts, policy, analytics,
 devices, connected apps, group rosters, key backups and undelivered mail; v1 files, shares, links
 and history are not migrated. Rerunning is safe. The v1 trees are renamed `*.v1-backup`; delete them
