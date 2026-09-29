@@ -50,7 +50,10 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       if (!path) throw new UsageError(usage);
       const { share, fragment } = await files.link(await files.resolve(path), role, expires, flagString(args, "password") ?? "");
       const secret = Buffer.from(fragment).toString("base64url");
-      return write(streams, json, { id: share.id, link: share.link, role: share.role, fragment: secret }, `${share.link}#${secret}\n`);
+      // Shared as https://<drive>/s/<link>#<secret>; the drive's host serves the viewer.
+      const relayUrl = new URL(drive.relay.relayUrl);
+      const url = `${relayUrl.protocol}//${share.drive}${relayUrl.port ? `:${relayUrl.port}` : ""}/s/${share.link}#${secret}`;
+      return write(streams, json, { id: share.id, link: share.link, role: share.role, fragment: secret, url }, `${url}\n`);
     }
     throw new UsageError(usage);
   }

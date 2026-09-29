@@ -117,3 +117,62 @@ func serveRootIcon(w http.ResponseWriter, r *http.Request, root, name, contentTy
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	http.ServeFile(w, r, path)
 }
+
+// linkViewerCSP is the drive-link viewer's policy: its own scripts and
+// styles only, no framing, no forms, no referrer; it may fetch this relay
+// and collaborators' public identity documents to verify authors.
+const linkViewerCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; " +
+	"connect-src 'self' https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// handleLinkViewer serves the standalone link viewer (web build viewer.html)
+// at https://<identity>/s/<link>. The decryption key stays in the URL
+// fragment, which browsers never send.
+func (s *Server) handleLinkViewer(w http.ResponseWriter, r *http.Request) {
+	root := s.cfg.WebStaticDir
+	host := r.Host
+	if h, _, err := splitHostPort(host); err == nil {
+		host = h
+	}
+	link := r.PathValue("link")
+	if root == "" || len(link) != 32 || !isHexString(link) || !s.identities.Exists(strings.ToLower(strings.TrimSuffix(host, "."))) {
+		http.NotFound(w, r)
+		return
+	}
+	viewerHeaders(w)
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeFile(w, r, filepath.Join(filepath.Clean(root), "viewer.html"))
+}
+
+// handleLinkViewerAsset serves the viewer's hashed assets beside it.
+func (s *Server) handleLinkViewerAsset(w http.ResponseWriter, r *http.Request) {
+	root := s.cfg.WebStaticDir
+	name := r.PathValue("file")
+	if root == "" || name == "" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, ".") {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(filepath.Clean(root), "assets", name)
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	viewerHeaders(w)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, path)
+}
+
+func viewerHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", linkViewerCSP)
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+}
+
+func isHexString(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}

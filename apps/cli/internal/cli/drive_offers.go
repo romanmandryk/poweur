@@ -232,3 +232,17 @@ func runDriveOffers(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stderr, "usage: poweur drive accept <offer.json|->; mounts [--json]")
 	return 1
 }
+
+// linkURL is the address a link is shared as: https://<drive>/s/<link>#<secret>.
+// The drive's own host serves the viewer; a development relay's port is kept.
+func linkURL(relay, drive, link, fragment string) string {
+	scheme, port := "https", ""
+	if u, err := url.Parse(relay); err == nil && u.Scheme != "" {
+		scheme, port = u.Scheme, u.Port()
+	}
+	host := drive
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host + "/s/" + link + "#" + fragment
+}

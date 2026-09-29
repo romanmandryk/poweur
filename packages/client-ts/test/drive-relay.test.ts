@@ -1,4 +1,5 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
+import { LinkPasswordRequired, openLink, parseLinkUrl } from "../src/drive/link.js";
 import { DriveLog } from "../src/drive/log.js";
 import { DriveScope } from "../src/drive/scope.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
@@ -136,4 +137,23 @@ it("a member reads and writes through their share with only their own keys", asy
   // Without a share, carol gets nothing — the relay refuses and so does her client.
   const stranger = new DriveFiles(new DriveClient(carol.client.relay, carol.client.signer, alice.identity), { ...fileKeys(carol.keys.signingPrivateKey, carol.keys.encryptionPrivateKey!), ...publicKeys });
   await expect(stranger.open(team.manifest.node)).rejects.toBeTruthy();
+});
+
+it("opens a password link with only the fragment and the password", async () => {
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const folder = await owner.create(await owner.root(), "published", "folder");
+  await owner.create(folder, "report.txt", "file", new TextEncoder().encode("quarterly numbers"));
+  const { share, fragment } = await owner.link(folder, "read", "", "open sesame");
+  const base = { origin: relay.baseUrl, drive: alice.identity, link: share.link!, fragment, resolve: localResolveOptions(relay.baseUrl) };
+  await expect(openLink(base)).rejects.toBeInstanceOf(LinkPasswordRequired);
+  await expect(openLink({ ...base, password: "wrong" })).rejects.toMatchObject({ status: 401 });
+  const { files, root, info } = await openLink({ ...base, password: "open sesame" });
+  expect(info).toMatchObject({ drive: alice.identity, role: "read", password: true });
+  const [report] = await files.list(root);
+  expect(report?.name).toBe("report.txt");
+  const chunks = []; for await (const c of files.read(report!)) chunks.push(c);
+  expect(Buffer.concat(chunks).toString()).toBe("quarterly numbers");
+  // A wrong fragment decrypts nothing, even with the right password.
+  await expect(openLink({ ...base, fragment: new Uint8Array(32).fill(1), password: "open sesame" })).rejects.toBeTruthy();
+  expect(parseLinkUrl(`https://${alice.identity}/s/${share.link}#${Buffer.from(fragment).toString("base64url")}`)).toMatchObject({ drive: alice.identity, link: share.link });
 });

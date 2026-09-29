@@ -320,6 +320,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
 	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
 	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
+	mux.HandleFunc("GET /s/{link}", s.handleLinkViewer)
+	mux.HandleFunc("GET /s/assets/{file}", s.handleLinkViewerAsset)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(mux))

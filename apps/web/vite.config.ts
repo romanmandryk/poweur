@@ -17,6 +17,9 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+    // viewer.html is the standalone drive-link viewer the relay serves at
+    // /s/<link> (no app state, strict CSP).
+    rollupOptions: { input: { main: "index.html", viewer: "viewer.html" } },
   },
   test: {
     environment: "happy-dom",

@@ -167,7 +167,8 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 				return fail(err)
 			}
 			result := map[string]string{"id": share.ID, "link": share.Link, "role": share.Role, "fragment": base64.RawURLEncoding.EncodeToString(fragment)}
-			return writeOutput(stdout, *jsonOut, result, share.Link+"#"+result["fragment"]+"\n")
+			result["url"] = linkURL(files.Client.Relay, share.Drive, share.Link, result["fragment"])
+			return writeOutput(stdout, *jsonOut, result, result["url"]+"\n")
 		default:
 			fmt.Fprintln(stderr, usage)
 			return 1

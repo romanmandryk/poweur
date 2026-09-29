@@ -106,7 +106,8 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       epoch, cached and rechecked every minute, diffed to revoke departed members.
 - [x] Phase 7 offers/accepts/mounts (PCP-0008) and client-orchestrated transfer as a
       member of the destination (Phase 8 rework).
-- [ ] Phase 7 remaining: link viewer (web), TS CLI offers.
+- [x] Phase 7 link viewer.
+- [ ] Phase 7 remaining: TS CLI offers/accept, web offers inbox and mounts UI (E20-T10).
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
@@ -588,7 +589,9 @@ invalid edit is rejected with a readable reason and never half-applied.
       (revoked key-bearing shares mark the subtree `rotate_required`; writes there `409` until rotated)
 - [x] Links with key-in-fragment and the split password verifier; expiry, download caps,
       rate limits (relay side)
-- [ ] Static decrypting viewer at `/s/<token>` with strict CSP and `no-referrer` (web)
+- [x] Static decrypting viewer at `/s/<link>` with strict CSP and `no-referrer` (web
+      `viewer.html`, SDK `openLink`; verified in a browser: password, wrong password,
+      fragment cleared, decrypted listing and download)
 - [x] File requests on `create` + folder public key; guest isolation and quotas (guest
       authors, `INT_DRIVE_03`)
 - [ ] Claim flow from E05-T6 and Send (E05-T7) as links on sealed files (clients)

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Shared with you · Poweur</title>
+  <link rel="stylesheet" href="./src/index.css" />
+</head>
+<body class="bg-bg text-fg antialiased">
+  <main id="viewer" aria-live="polite" class="mx-auto max-w-xl px-4 py-12">
+    <h1 class="mb-4 text-2xl font-semibold">Shared with you</h1>
+    <p id="status" class="text-muted">Opening…</p>
+    <form id="password" hidden class="my-4 flex flex-wrap gap-2">
+      <label for="password-input" class="w-full">This link needs a password</label>
+      <input id="password-input" type="password" autocomplete="off" required class="min-w-0 flex-1 rounded-lg border border-sep bg-surface px-3 py-2" />
+      <button type="submit" class="rounded-lg bg-accent px-4 py-2 font-medium text-white">Open</button>
+    </form>
+    <ul id="items" class="my-4 divide-y divide-sep rounded-xl bg-surface"></ul>
+    <p class="mt-8 text-sm text-muted">Decrypted in this browser. The server never sees the key, which lives after the <code>#</code> in the link.</p>
+  </main>
+  <script type="module" src="./src/viewer/viewer.ts"></script>
+</body>
+</html>

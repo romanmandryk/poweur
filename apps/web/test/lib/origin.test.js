@@ -18,7 +18,11 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../src");
 const JS_DIR = join(SRC_DIR, "lib");
 
 /** The single sanctioned reader of the page origin, and why. */
-const ALLOWED = new Map([["lib/storage.js", "defaultRelayUrl()"]]);
+const ALLOWED = new Map([
+  ["lib/storage.js", "defaultRelayUrl()"],
+  // Only ever served by the drive's own relay at https://<identity>/s/<link>.
+  ["viewer/viewer.ts", "the link viewer's relay is its origin"],
+]);
 
 function walk(dir) {
   return readdirSync(dir).flatMap((name) => {

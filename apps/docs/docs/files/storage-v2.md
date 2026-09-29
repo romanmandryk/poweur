@@ -430,7 +430,12 @@ link opens it and is journalled against `caps.downloads`. Each link is limited t
 password is `401 link_password`. Share caps are charged, durably, to the closest share that
 allowed the write: `caps.files` counts creates, `caps.records` appended records (both
 `429 share_limit`), `caps.bytes` new chunk bytes (`507`). The owner is never capped. The
-decrypting viewer at `/s/<token>#<secret>` is web work (Phase 8/9).
+viewer: `https://<owner>/s/<link>#<secret>` serves the standalone web page `viewer.html` (no
+app state, no identity) under `default-src 'none'; script-src 'self'; style-src 'self';
+connect-src 'self' https:; frame-ancestors 'none'` and `no-referrer`. It removes the fragment
+from the address bar and history at load, derives the key (and password verifier) in the
+browser, opens the link with `openLink` (SDK), verifies authors from public identity
+documents, and decrypts file names and downloads locally. Both CLIs print this URL.
 
 **Implemented anonymous writes (file requests).** Someone with only a link signs with a
 throwaway Ed25519 key as a **guest author** `g<base32 key>.guest.invalid` (`drive/guest.go`,
