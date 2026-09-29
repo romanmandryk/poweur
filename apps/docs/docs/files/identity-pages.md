@@ -32,17 +32,19 @@ The optional public `identity_page` profile block controls presentation:
   "version": 1,
   "identity_page": {
     "enabled": true,
-    "indexable": true,
+    "indexable": false,
     "advertise_anonymous_messages": false
   }
 }
 ```
 
-Each field is optional. The defaults are page enabled, search indexing allowed, and anonymous
-messaging not advertised. Existing profiles therefore gain a page without a migration. Owners
-can change all three values in the web app's profile settings.
+Each field is optional. The defaults are page enabled, search indexing **off**, and anonymous
+messaging not advertised. Existing profiles therefore gain a page without a migration, but no
+search engine lists it until its owner opts in: a profile written for contacts should not become
+searchable without being asked. Onboarding asks ("Let search engines show my page", unchecked),
+and owners can change all three values in the web app's profile settings.
 
-Disabling indexing keeps the page available but adds both an HTML robots directive and
+Without indexing the page stays available but carries both an HTML robots directive and
 `X-Robots-Tag: noindex, nofollow`. Disabling the page makes HTML requests return a minimal `404`
 without profile content. Neither setting disables identity discovery or relay APIs.
 

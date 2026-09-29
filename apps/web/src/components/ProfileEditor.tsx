@@ -67,7 +67,9 @@ export function ProfileEditor({
   const pickedUrl = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pageEnabled, setPageEnabled] = useState(doc.identity_page?.enabled !== false);
-  const [pageIndexable, setPageIndexable] = useState(doc.identity_page?.indexable !== false);
+  // Opt-in: a page is listed by search engines only when its owner says so.
+  const [pageIndexable, setPageIndexable] = useState(doc.identity_page?.indexable === true);
+  const [indexChosen, setIndexChosen] = useState(false);
   const [advertiseAnonymous, setAdvertiseAnonymous] = useState(doc.identity_page?.advertise_anonymous_messages === true);
   const [status, setStatus] = useState<{ text: string; tone: "" | "ok" | "warn" }>({ text: "", tone: "" });
   const value = (id: string) => form.current?.querySelector<HTMLInputElement>(`#${id}`)?.value ?? "";
@@ -145,7 +147,7 @@ export function ProfileEditor({
 
   useImperativeHandle(ref, () => ({
     save: submit,
-    hasInput: () => Boolean(value("pe-name").trim() || value("pe-bio").trim() || picked || removed),
+    hasInput: () => Boolean(value("pe-name").trim() || value("pe-bio").trim() || picked || removed || indexChosen),
   }));
 
   return (
@@ -189,6 +191,20 @@ export function ProfileEditor({
               : "Public: anyone who looks you up sees it. Stored in your own /public folder."}
         </p>
       </FormGroup>
+      {!showSave && (
+        // Onboarding asks the one question that changes who can find you.
+        <FormGroup className="mb-3.5" id="pe-onboard-indexable">
+          <div className="rounded-card bg-surface px-4 shadow-card">
+            <CheckRow
+              id="pe-page-indexable"
+              checked={pageIndexable}
+              onCheckedChange={(checked) => { setPageIndexable(checked); setIndexChosen(true); }}
+              label="Let search engines show my page"
+              detail={`Your page at ${identity || "your Poweur ID"} shows your name, photo and bio to anyone with the address. This decides whether search engines list it too. You can change it in Settings.`}
+            />
+          </div>
+        </FormGroup>
+      )}
       {showSave && (
         <FormGroup className="mb-3.5" id="pe-identity-page-settings">
           <Label>Identity page</Label>

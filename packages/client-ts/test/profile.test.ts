@@ -8,10 +8,10 @@ import {
 } from "../src/profile.js";
 
 describe("identity page profile settings", () => {
-  it("defaults existing profiles to an enabled, indexable page without anonymous advertising", () => {
+  it("defaults existing profiles to an enabled page, not indexed, without anonymous advertising", () => {
     const profile = { version: 1 };
     expect(identityPageEnabled(profile)).toBe(true);
-    expect(identityPageIndexable(profile)).toBe(true);
+    expect(identityPageIndexable(profile)).toBe(false);
     expect(advertisesAnonymousMessages(profile)).toBe(false);
   });
 

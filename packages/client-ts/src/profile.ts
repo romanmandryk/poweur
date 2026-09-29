@@ -48,8 +48,9 @@ export function identityPageEnabled(profile: Profile | null | undefined): boolea
   return profile?.identity_page?.enabled !== false;
 }
 
+/** Search indexing is opt-in: off unless the owner turned it on. */
 export function identityPageIndexable(profile: Profile | null | undefined): boolean {
-  return profile?.identity_page?.indexable !== false;
+  return profile?.identity_page?.indexable === true;
 }
 
 export function advertisesAnonymousMessages(profile: Profile | null | undefined): boolean {

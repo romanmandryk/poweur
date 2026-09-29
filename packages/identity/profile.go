@@ -41,8 +41,10 @@ func (s *IdentityPageSettings) EnabledOrDefault() bool {
 }
 
 // IndexableOrDefault reports whether crawlers may index the generated page.
+// Off unless the owner turned it on: a profile written for contacts should
+// not become searchable without being asked.
 func (s *IdentityPageSettings) IndexableOrDefault() bool {
-	return s == nil || s.Indexable == nil || *s.Indexable
+	return s != nil && s.Indexable != nil && *s.Indexable
 }
 
 // AdvertisesAnonymousMessages reports the public presentation preference. It

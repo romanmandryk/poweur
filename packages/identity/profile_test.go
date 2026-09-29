@@ -9,8 +9,11 @@ func boolPtr(v bool) *bool { return &v }
 
 func TestIdentityPageSettingsDefaults(t *testing.T) {
 	var absent *IdentityPageSettings
-	if !absent.EnabledOrDefault() || !absent.IndexableOrDefault() || absent.AdvertisesAnonymousMessages() {
-		t.Fatal("absent settings must enable and index the page without advertising anonymous messages")
+	if !absent.EnabledOrDefault() || absent.IndexableOrDefault() || absent.AdvertisesAnonymousMessages() {
+		t.Fatal("absent settings must enable the page, not index it, and not advertise anonymous messages")
+	}
+	if (&IdentityPageSettings{}).IndexableOrDefault() || !(&IdentityPageSettings{Indexable: boolPtr(true)}).IndexableOrDefault() {
+		t.Fatal("search indexing must be opt-in")
 	}
 
 	settings := &IdentityPageSettings{

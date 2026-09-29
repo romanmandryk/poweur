@@ -11,7 +11,7 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E12-T1 Page settings + response contract | **done** | Optional public `identity_page`; defaults page on, indexing on, anonymous ads off. Schema, Go, TypeScript, Settings toggles |
+| E12-T1 Page settings + response contract | **done** | Optional public `identity_page`; defaults page on, indexing off (opt-in), anonymous ads off. Schema, Go, TypeScript, Settings toggles, onboarding indexing question |
 | E12-T2 Server-rendered identity page | **done** | Relay-owned `html/template`; no user HTML. Copy ID; IndieAuth `Link` kept on `/` |
 | E12-T3 HTTP caching, SEO + security headers | **done** | Exact `GET /` only. ETag/`304`, `Vary: Accept`, no in-process page cache |
 | E12-T4 Contact actions | **done** | Copy ID. **Write anonymously** only when advertised, via signed-out `/app/?anonymous=1`. A stale advertisement fails without showing inbox policy |
@@ -39,8 +39,9 @@ V1 displays:
   public page settings. The existing anonymous-message protocol remains the authority and
   may still reject a stale or inconsistent advertisement.
 
-The page is present and indexable by default. The owner can independently disable the page
-or search indexing.
+The page is present by default but not indexed: search indexing is opt-in, asked during
+onboarding (unchecked) and changeable in Settings. The owner can independently disable the page
+or turn indexing on.
 
 ## Locked decisions
 
@@ -95,7 +96,7 @@ Every field is optional. Defaults are:
 
 ```text
 enabled = true
-indexable = true
+indexable = false
 advertise_anonymous_messages = false
 ```
 
@@ -183,10 +184,11 @@ proxying/TLS/configuration for that topology is later work.
       `identity_page` block and defaults above; regenerate conformance vectors.
 - [x] Specify HTML-vs-JSON content negotiation, disabled-page behavior and reserved routes in
       `apps/docs/docs/files/identity-pages.md`.
-- [x] Add Settings controls for **Show identity page** and **Allow search indexing**, both on
-      by default; anonymous-message advertising is explicit and off by default.
+- [x] Add Settings controls for **Show identity page** and **Allow search indexing**; the page is on
+      by default, indexing and anonymous-message advertising are explicit and off by default.
+- [x] Ask "Let search engines show my page" (unchecked) during onboarding.
 
-**Acceptance:** an old profile gets an enabled/indexable page without migration; each setting
+**Acceptance:** an old profile gets an enabled, non-indexed page without migration; each setting
 round-trips through Go and TypeScript and cannot change inbox enforcement.
 
 ### E12-T2 — Server-rendered identity page

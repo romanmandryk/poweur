@@ -29,8 +29,9 @@ func TestINT_IDENTITY_PAGE_01_HostRoutingNegotiationAndOptOuts(t *testing.T) {
 	bobHome := t.TempDir()
 	runCLI(t, aliceHome, "identity", "create", "pagealice.poweur.net", "--hosted", "--relay", relayURL, "--json")
 	runCLI(t, bobHome, "identity", "create", "pagebob.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	// Search indexing is opt-in (off by default); alice opted in.
 	putPublicDoc(t, relayURL, aliceHome, "pagealice.poweur.net", "profile.json", map[string]any{
-		"version": 1, "display_name": "Alice Page",
+		"version": 1, "display_name": "Alice Page", "identity_page": map[string]any{"indexable": true},
 	})
 	putPublicDoc(t, relayURL, bobHome, "pagebob.poweur.net", "profile.json", map[string]any{
 		"version": 1, "display_name": "Bob Page",

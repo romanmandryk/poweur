@@ -60,8 +60,9 @@ func TestIdentityPageDefaultAndRootNegotiation(t *testing.T) {
 	if !strings.Contains(body, pageIdentity) || !strings.Contains(body, "Copy ID") {
 		t.Fatalf("default page is missing identity content: %s", body)
 	}
-	if strings.Contains(body, `name="robots"`) || html.Header().Get("X-Robots-Tag") != "" {
-		t.Fatal("old profiles must be indexable by default")
+	// Search indexing is opt-in: a default profile's page says noindex.
+	if !strings.Contains(body, `name="robots"`) || html.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
+		t.Fatal("old profiles must not be indexable by default")
 	}
 	if got := html.Header().Get("Vary"); !strings.Contains(got, "Accept") {
 		t.Fatalf("Vary = %q", got)

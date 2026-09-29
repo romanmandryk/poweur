@@ -44,7 +44,7 @@
     },
     "identity_page": {
       "type": "object",
-      "description": "Public presentation settings for the relay-rendered identity page; omitted booleans use enabled/indexable true and anonymous advertisement false",
+      "description": "Public presentation settings for the relay-rendered identity page; omitted booleans use enabled true, indexable false (search indexing is opt-in) and anonymous advertisement false",
       "properties": {
         "enabled": {
           "type": "boolean"
