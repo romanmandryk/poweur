@@ -102,8 +102,10 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       follow-up authorization fix: moved-node destinations require read access,
       including after transfer revokes a former member. `INT_DRIVE_04` covers
       owner access and denial to retired/unrelated identities.
+- [x] Phase 7 remote groups: presented rosters verified against the group relay's
+      epoch, cached and rechecked every minute, diffed to revoke departed members.
 - [ ] Phase 7 remaining: client-orchestrated ownership transfer, offers/accepts
-      and mounts, link viewer, remote groups.
+      and mounts, link viewer.
 - [x] Phase 8: Go/TS drive clients and both CLIs. Challenge authentication,
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
@@ -580,7 +582,8 @@ invalid edit is rejected with a readable reason and never half-applied.
 - [ ] Claim flow from E05-T6 and Send (E05-T7) as links on sealed files (clients)
 - [x] Groups as members; membership change rotates keys (groups hosted on the same relay;
       Space admins administer the group's drive)
-- [ ] Remote groups as members (needs relay-to-relay roster reads)
+- [x] Remote groups as members: members present the signed roster, checked against the
+      group relay's public epoch; newer rosters revoke departed members (`INT_DRIVE_05`)
 
 **Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a member with `append` on a file and
 no read cannot read it; an anonymous link writer is stopped by caps and proof-of-work; a

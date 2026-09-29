@@ -121,7 +121,14 @@ func (s *Server) driveCaller(w http.ResponseWriter, r *http.Request) (driveID, a
 	if !ok {
 		return "", "", false
 	}
-	return driveID, strings.ToLower(actor), true
+	actor = strings.ToLower(actor)
+	if header := r.Header.Get(groupRosterHeader); header != "" {
+		if err := s.presentRoster(r.Context(), header, actor); err != nil {
+			writeError(w, http.StatusForbidden, "group_roster", "group roster refused: "+err.Error())
+			return "", "", false
+		}
+	}
+	return driveID, actor, true
 }
 
 // driveNode authenticates the caller and checks need on the path's node.

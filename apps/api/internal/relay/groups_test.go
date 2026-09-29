@@ -618,3 +618,26 @@ func TestGroupWithForgedMembershipIsNotResolvable(t *testing.T) {
 		t.Fatalf("a forged membership document must not resolve: %d", rosterResp.StatusCode)
 	}
 }
+
+// The public epoch endpoint answers 0 for an identity that is not a group,
+// so it tells a stranger nothing about which identities are groups.
+func TestGroupEpochEndpoint(t *testing.T) {
+	fx := newGroupFixture(t)
+	for name, want := range map[string]float64{fx.groupName: 1, fx.alice.name: 0} {
+		resp, err := http.Get(fx.ts.URL + "/groups/" + name + "/epoch")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]float64
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || out["epoch"] != want {
+			t.Fatalf("%s: %d %v", name, resp.StatusCode, out)
+		}
+	}
+	resp, _ := http.Get(fx.ts.URL + "/groups/nobody.poweur.net/epoch")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unhosted: %d", resp.StatusCode)
+	}
+}

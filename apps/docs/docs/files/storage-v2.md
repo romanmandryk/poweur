@@ -104,6 +104,7 @@ relay/identities/<identity>.json
 relay/spool/{messages,acks}/<identity>/<20-digit-sequence>.json
 relay/keystore/<identity>.json
 relay/group-shares/<group>/<drive>
+relay/group-rosters/<group>.json
 ```
 
 Journal segments are immutable JSON envelopes containing a format version, first
@@ -450,8 +451,17 @@ engine reads rosters from a relay cache that never touches a drive (warmed at st
 first use, replaced when the relay accepts a new roster). A roster update that drops anyone
 journals a `grouprevoke` on the group's drive and every drive indexed as sharing with it
 (`relay/group-shares/<group>/<drive>`): their access ends at once, their streams close, and
-the subtrees of key-bearing shares to the group become `rotate_required`. Groups hosted on
-other relays cannot be members yet: the host relay has no way to read a remote roster.
+the subtrees of key-bearing shares to the group become `rotate_required`.
+
+A group identity hosted on **another relay** can be a member too. Its roster is
+self-verifying, so a member presents it with any drive request (`X-Poweur-Group-Roster`,
+base64url of the signed `group.json`). The host relay verifies the group's signature, that the
+caller is on the roster, and that its `epoch` equals the one the group's relay reports now
+(`GET /groups/{group}/epoch`, public; `0` for identities that are not groups). A verified
+roster is cached and rechecked against the epoch at least every minute; a moved epoch drops it
+until a member presents the new one, so a removed member's copy stops working at once. The last
+verified roster is kept at `relay/group-rosters/<group>.json`; a newer one is diffed against it
+and departed members are revoked as for local groups.
 
 A new private file: generate node/content keys, seal the name and keys, encrypt and
 upload chunks, then sign and commit its manifest. Editing one chunk reuses the

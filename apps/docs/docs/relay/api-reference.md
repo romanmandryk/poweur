@@ -1041,6 +1041,8 @@ event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surf
 | `GET /drive/:identity/links/:link` | Public: how to open a link (salt, KDF, PoW, opens left) |
 
 Link holders send `X-Poweur-Link` (and `X-Poweur-Link-Verifier` for a password) instead of the challenge headers.
+A member of a group identity hosted on another relay adds `X-Poweur-Group-Roster` (the group's signed roster, base64url);
+`GET /groups/:group/epoch` (public) returns the group's current membership epoch, `0` for non-groups.
 
 ## Error Format
 
