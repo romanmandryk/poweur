@@ -7,7 +7,9 @@ import { driveContext, encryptChunk, decryptChunk, sealKey, openKey, MAX_PLAINTE
 import { canonicalManifest, verifyManifest, verifyManifestPages, splitPages, type Manifest, type FileMode } from "./manifest.js";
 import { nameHash, sealName, openName, normalizeName } from "./names.js";
 import { appendRecordHash, canonicalAppendRecord, openRecordContent, verifyAppendRecord, verifyNextRecord, type AppendRecord, type ChunkRef, type DriveSealedPayload } from "./records.js";
-import { canonicalShare, keyBearing, roleGrants, SHARE_KDF, verifierHash, type Share, type ShareRole } from "./share.js";
+import { canonicalShare, guestKey, keyBearing, roleGrants, SHARE_KDF, verifierHash, verifyShare, type Share, type ShareRole } from "./share.js";
+
+const expired = (share: Share) => Boolean(share.expires) && Date.parse(share.expires!) <= Date.now();
 
 const id = () => Array.from(randomBytes(16), b => b.toString(16).padStart(2, "0")).join("");
 const wire = (p: SealedPayload): DriveSealedPayload => ({ ephemeral_public_key: p.ephemeralPublicKey, nonce: p.nonce, ciphertext: p.ciphertext });
@@ -19,6 +21,9 @@ export interface FileKeys {
   encryptionPrivateKey: Uint8Array;
   /** Resolves collaborators. The owner's own key is used without this. */
   authorKey?(author: string): Promise<Uint8Array>;
+  /** Resolves a group identity's members and admins, to verify versions
+   * written through a share to the group. Without it they fail closed. */
+  groupMembers?(group: string): Promise<string[]>;
 }
 /** Adapter for CLI/local key custody. Browser callers can supply their own signer. */
 export function fileKeys(signingPrivateKey: Uint8Array, encryptionPrivateKey: Uint8Array): FileKeys {
@@ -35,6 +40,7 @@ export interface OpenFile {
 
 export class DriveFiles {
   private shares?: Share[];
+  private readonly nodeShares = new Map<string, Share[]>();
   constructor(readonly client: DriveClient, private readonly keys: FileKeys) {
     if (keys.encryptionPrivateKey.length !== 32) throw new Error("invalid encryption key");
   }
@@ -44,27 +50,82 @@ export class DriveFiles {
     await this.verify(m);
     return m;
   }
+  /** Whether the caller owns the drive (members and link holders do not). */
+  private get owner(): boolean { return !this.client.link && this.client.signer.identity === this.client.drive; }
+  private async authorKeyOf(author: string): Promise<Uint8Array> {
+    const guest = guestKey(author);
+    if (guest) return guest;
+    const key = author === this.client.signer.identity
+      ? fromBase64(this.client.signer.publicKey.replace(/^ed25519:/, ""))
+      : await this.keys.authorKey?.(author);
+    if (!key) throw new Error("untrusted manifest author");
+    return key;
+  }
   private async verify(m: Manifest): Promise<void> {
     if (m.drive !== this.client.drive) throw new Error("manifest drive mismatch");
-    const key = m.author === this.client.signer.identity
-      ? fromBase64(this.client.signer.publicKey.replace(/^ed25519:/, ""))
-      : await this.keys.authorKey?.(m.author);
-    if (!key) throw new Error("untrusted manifest author");
-    verifyManifest(m, key);
+    verifyManifest(m, await this.authorKeyOf(m.author));
     if (m.author !== this.client.drive) await this.allowAuthor(m);
+  }
+  private async sharesOn(node: string): Promise<Share[]> {
+    let shares = this.nodeShares.get(node);
+    if (!shares) { shares = (await this.client.nodeShares(node)).shares; this.nodeShares.set(node, shares); }
+    return shares;
+  }
+  /** A share is trusted when its issuer signed it and could grant it: the
+   * owner, or an admin through a share that is itself trusted. */
+  private async trusted(share: Share, depth = 0): Promise<boolean> {
+    if (share.drive !== this.client.drive || depth > 8) return false;
+    try { verifyShare(share, await this.authorKeyOf(share.issuer)); } catch { return false; }
+    if (share.issuer === this.client.drive) return true;
+    for (const grant of await this.sharesOn(share.node)) {
+      if (grant.member === share.issuer && grant.role === "admin" && !expired(grant) && await this.trusted(grant, depth + 1)) return true;
+    }
+    return false;
+  }
+  /** Whether a share covers an author: its member, a member of the group it
+   * names, or — for a guest author — the link it grants. */
+  private async holds(share: Share, author: string): Promise<boolean> {
+    if (guestKey(author)) return Boolean(share.link);
+    if (share.member === author) return true;
+    if (!share.member || !this.keys.groupMembers) return false;
+    try { return (await this.keys.groupMembers(share.member)).some(m => m.toLowerCase() === author.toLowerCase()); } catch { return false; }
+  }
+  private async allowed(node: string, author: string, need: ShareRole): Promise<boolean> {
+    if (author === this.client.drive) return true;
+    for (const share of await this.sharesOn(node)) {
+      if (!expired(share) && roleGrants(share.role, need) && await this.holds(share, author) && await this.trusted(share)) return true;
+    }
+    return false;
   }
   private async allowAuthor(m: Manifest): Promise<void> {
     const need = m.operation === "create" ? "create" : m.operation === "rotate" ? "admin" : "write";
+    const target = m.folder && (m.operation === "create" || m.operation === "move") ? m.folder : m.node;
+    if (!await this.allowed(target, m.author, need)) throw new Error("author role does not allow this version");
+  }
+  /** The caller's own key-bearing, trusted share on node. */
+  private async myShare(node: string): Promise<Share | undefined> {
     this.shares ??= (await this.client.shares()).shares;
-    let id: string | undefined = m.node;
-    const seen = new Set<string>();
-    while (id && !seen.has(id) && seen.size < 256) {
-      seen.add(id);
-      if (this.shares.some(share => share.member === m.author && share.node === id && roleGrants(share.role, need))) return;
-      if (id === m.node && m.folder && (m.operation === "create" || m.operation === "move")) { id = m.folder; continue; }
-      id = (await this.client.node(id)).folder;
+    const link = this.client.link?.id;
+    for (const share of this.shares) {
+      const mine = link ? share.link === link : share.member === this.client.signer.identity;
+      if (mine && share.node === node && share.node_key && !expired(share)) {
+        if (!await this.trusted(share)) throw new Error("share is not signed by someone who may grant it");
+        return share;
+      }
     }
-    throw new Error("author role does not allow this version");
+    return undefined;
+  }
+  /** Every node shared with the caller that carries a key. */
+  async shared(): Promise<OpenFile[]> {
+    this.shares ??= (await this.client.shares()).shares;
+    const link = this.client.link?.id, out: OpenFile[] = [], seen = new Set<string>();
+    for (const share of this.shares) {
+      const mine = link ? share.link === link : share.member === this.client.signer.identity;
+      if (!mine || !share.node_key || seen.has(share.node) || expired(share)) continue;
+      seen.add(share.node);
+      out.push(await this.open(share.node));
+    }
+    return out;
   }
   private async version(node: string, version: string): Promise<Manifest> {
     const m = await this.client.version(node, version);
@@ -95,12 +156,25 @@ export class DriveFiles {
       m = await this.version(node, m.parent);
     }
     if (keyVersion.generation !== head.generation || (contentVersion && contentVersion.generation !== head.generation)) throw new Error("key generation mismatch");
-    const parent = info.folder ? await this.open(info.folder, ancestors) : undefined;
-    if (parent && parent.manifest.kind !== "folder") throw new Error("parent is not a folder");
-    const parentKey = parent?.nodeKey ?? this.keys.encryptionPrivateKey;
-    const nodeKey = openKey(parentKey, payload(keyVersion.node_key!), this.context(keyVersion, "node-key"));
-    const name = nameVersion ? openName(parentKey, payload(nameVersion.name!), this.context(nameVersion, "name")) : "";
-    if (nameVersion && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
+    // A member (or link holder) opens a shared node with its share's key and
+    // what lies below through parents; only the owner walks up to the root.
+    let nodeKey: Uint8Array | undefined, parentKey: Uint8Array | undefined;
+    const share = this.owner ? undefined : await this.myShare(node);
+    if (share) {
+      if (share.generation !== head.generation) throw new Error("the share predates a key rotation; ask for it to be re-issued");
+      nodeKey = openKey(this.keys.encryptionPrivateKey, payload(share.node_key!), driveContext(this.client.drive, node, "node-key", share.generation));
+      if (toBase64url(x25519PublicKey(nodeKey)) !== share.node_public) throw new Error("share key does not match its node");
+    } else {
+      if (!info.folder && !this.owner) throw new Error("no share opens this node");
+      const parent = info.folder ? await this.open(info.folder, ancestors) : undefined;
+      if (parent && parent.manifest.kind !== "folder") throw new Error("parent is not a folder");
+      parentKey = parent?.nodeKey ?? this.keys.encryptionPrivateKey;
+      nodeKey = openKey(parentKey, payload(keyVersion.node_key!), this.context(keyVersion, "node-key"));
+    }
+    // A name is sealed to its parent: a shared node's own name is known only
+    // to those who can open the parent.
+    const name = nameVersion && parentKey ? openName(parentKey, payload(nameVersion.name!), this.context(nameVersion, "name")) : "";
+    if (nameVersion && parentKey && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
     const result: OpenFile = { manifest: head, name, folder: info.folder ?? "", nodeKey };
     if (contentVersion) result.contentKey = openKey(nodeKey, payload(contentVersion.content_key!), this.context(contentVersion, "content-key"));
     return result;
@@ -127,7 +201,12 @@ export class DriveFiles {
   /** Absolute or root-relative paths; refuse empty interior segments and traversal. */
   async resolve(path: string): Promise<OpenFile> {
     const parts = path === "/" || path === "" ? [] : path.replace(/^\//, "").split("/").map(normalizeName);
-    let current = await this.root();
+    // The owner's paths start at the root; a member's at a node shared with
+    // them, named by its ID: /<node-id>/sub/path.
+    let current: OpenFile;
+    if (this.owner) current = await this.root();
+    else if (!parts.length) throw new Error("a shared path starts with the shared node's ID");
+    else current = await this.open(parts.shift()!);
     for (const name of parts) {
       const next = (await this.list(current)).find(child => child.name === name);
       if (!next) throw new Error(`drive path not found: ${name}`);
@@ -286,10 +365,8 @@ export class DriveFiles {
     const cursors = new Map<string, { sequence: number; previous: string }>();
     const out = [];
     for (const item of await this.recordsFrom(file.manifest.node, from)) {
-      const key = item.record.author === this.client.signer.identity
-        ? fromBase64(this.client.signer.publicKey.replace(/^ed25519:/, ""))
-        : await this.keys.authorKey?.(item.record.author);
-      if (!key) throw new Error("untrusted manifest author");
+      const key = await this.authorKeyOf(item.record.author);
+      if (!await this.allowed(file.manifest.node, item.record.author, "append")) throw new Error("record author may not append to this file");
       const cur = cursors.get(item.record.author) ?? { sequence: 0, previous: "" };
       if (cur.sequence === 0 && item.record.sequence !== 1) verifyAppendRecord(item.record, key);
       else verifyNextRecord(item.record, key, cur.sequence, cur.previous);

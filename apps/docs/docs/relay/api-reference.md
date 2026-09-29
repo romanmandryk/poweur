@@ -1037,6 +1037,7 @@ event are specified in [Storage v2 → HTTP surface](/files/storage-v2#http-surf
 | `GET /drive/:identity/nodes/:node/versions/:version[/pages/:page\|/chunks/:hash]` | Signed manifest, chunk-list page, chunk |
 | `GET /drive/:identity/nodes/:node/chunks/:hash` | Chunk of an append record |
 | `GET /drive/:identity/shares` | Shares the caller may see (members: their own, with sealed keys) |
+| `GET /drive/:identity/nodes/:node/shares` | Shares on a node and its ancestors, for readers verifying version authors |
 | `GET /drive/:identity/events` | `drive.changed` SSE filtered to the caller; closes on revocation |
 | `GET /drive/:identity/links/:link` | Public: how to open a link (salt, KDF, PoW, opens left) |
 

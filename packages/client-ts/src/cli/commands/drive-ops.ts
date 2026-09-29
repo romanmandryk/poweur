@@ -1,25 +1,22 @@
 import { readFile } from "node:fs/promises";
-import { FileChunkCache } from "../../node/drive-cache.js";
-import { DriveClient } from "../../drive/client.js";
-import { DriveFiles, DriveLog, fileKeys } from "../../drive/index.js";
+import { DriveFiles, DriveLog } from "../../drive/index.js";
 import { normalizeName } from "../../drive/names.js";
 import type { ShareRole } from "../../drive/share.js";
 import { fromBase64 } from "../../encoding.js";
 import { resolveIdentity } from "../../resolve.js";
-import { nodeResolveOptions, openClient } from "../../node/session-factory.js";
+import { nodeResolveOptions } from "../../node/session-factory.js";
+import { openDrive } from "./drive-open.js";
 import { flagBool, flagNumber, flagString, parseArgs, UsageError } from "../args.js";
 import { write, type Streams } from "../output.js";
 
-const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into <path>|--to-node <id>] [--json]";
+const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]";
 
 export async function driveOpsCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0]!;
   const args = parseArgs(argv.slice(1), { bool: ["json"] });
   const json = flagBool(args, "json");
-  const { client, keys } = await openClient({ identity: flagString(args, "use-identity") });
+  const { keys, drive, files } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
   if (!keys.encryptionPrivateKey && sub !== "watch") throw new Error("identity has no encryption key");
-  const drive = new DriveClient(client.relay, client.signer, client.signer.identity, new FileChunkCache());
-  const files = keys.encryptionPrivateKey ? new DriveFiles(drive, fileKeys(keys.signingPrivateKey, keys.encryptionPrivateKey)) : undefined;
   const role = (flagString(args, "role") ?? "read") as ShareRole;
   const expires = flagString(args, "expires") ?? "";
   if (sub === "watch") {
@@ -97,7 +94,13 @@ export async function driveOpsCommand(argv: string[], streams: Streams): Promise
       await drive.commit({ transfer: { node: file.manifest.node, to, to_node: toNode } });
       return write(streams, json, { node: file.manifest.node, to, to_node: toNode }, `${toNode}\n`);
     }
-    throw new UsageError("destination keys for a copy live with the caller; pass --to-node to retire a recreated subtree");
+    // Re-create the subtree on the destination as its owner or as a member
+    // with a share there (--into /<shared-node-id>/...), then retire it here.
+    const into = flagString(args, "into") ?? "";
+    const destination = await openDrive({ identity: flagString(args, "use-identity"), drive: to });
+    if (!destination.files) throw new Error("identity has no encryption key");
+    const copied = await files.transfer(file, destination.files, await destination.files.resolve(into));
+    return write(streams, json, { node: file.manifest.node, to, to_node: copied.manifest.node, name: copied.name }, `${copied.manifest.node}\n`);
   }
   throw new UsageError(usage);
 }

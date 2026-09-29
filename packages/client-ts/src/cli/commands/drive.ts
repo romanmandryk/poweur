@@ -7,7 +7,7 @@ import { write, type Streams } from "../output.js";
 
 export async function driveCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0];
-  if (["mkdir", "put", "get", "mv", "rm", "list"].includes(sub ?? "")) return driveFilesCommand(argv, streams);
+  if (["mkdir", "put", "get", "mv", "rm", "list", "shared"].includes(sub ?? "")) return driveFilesCommand(argv, streams);
   if (["history", "append", "tail", "trim", "watch", "share", "link", "transfer"].includes(sub ?? "")) return driveOpsCommand(argv, streams);
   if (!["info", "node", "ls", "changes", "records"].includes(sub ?? "")) {
     throw new UsageError("usage: poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]");

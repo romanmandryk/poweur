@@ -16,16 +16,17 @@ import (
 )
 
 func runDriveOps(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into <path>|--to-node <id>] [--json]"
+	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member>|rm <id>|ls; link create <path>|rm <id>; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
 	fs := flag.NewFlagSet("drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
+	target := fs.String("drive", "", "another identity's drive, reached through your shares")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	from := fs.Uint64("from", 0, "first record position")
 	role := fs.String("role", "read", "share or link role")
 	to := fs.String("to", "", "destination drive")
 	toNode := fs.String("to-node", "", "node id already created on the destination")
-	into := fs.String("into", "/", "destination folder when its keys are in this home")
+	into := fs.String("into", "", "destination folder on --to: /<shared-node-id>[/path] as a member, or a path when --to is your own drive")
 	password := fs.String("password", "", "link password")
 	expires := fs.String("expires", "", "RFC3339 expiry")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true})) != nil {
@@ -65,7 +66,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
-		files, ok := openDriveFiles(*use, stderr)
+		files, ok := openDriveFiles(*use, *target, stderr)
 		if !ok {
 			return 1
 		}
@@ -116,7 +117,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, usage)
 			return 1
 		}
-		files, ok := openDriveFiles(*use, stderr)
+		files, ok := openDriveFiles(*use, *target, stderr)
 		if !ok {
 			return 1
 		}
@@ -150,7 +151,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	files, ok := openDriveFiles(*use, stderr)
+	files, ok := openDriveFiles(*use, *target, stderr)
 	if !ok {
 		return 1
 	}
@@ -255,19 +256,12 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			}
 			return writeOutput(stdout, *jsonOut, map[string]string{"node": file.Manifest.Node, "to": *to, "to_node": *toNode}, *toNode+"\n")
 		}
-		cfg, _, _, ok := loadIdentityKey(*use, stderr)
+		// Re-create the subtree on the destination as its owner or as a
+		// member with a share there, then retire it here.
+		dst, ok := openDriveFiles(*use, *to, stderr)
 		if !ok {
 			return 1
 		}
-		destKey, err := identity.LoadPrivateKey(identity.KeyPath(cfg.KeysDir, *to))
-		if err != nil {
-			return fail(fmt.Errorf("destination keys are not in this home; pass --to-node after recreating the subtree: %w", err))
-		}
-		destEnc, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, *to))
-		if err != nil {
-			return fail(err)
-		}
-		dst := &driveclient.Files{Client: &driveclient.Client{Relay: cfg.RelayURL, Identity: *to, Key: destKey, Cache: files.Client.Cache}, EncryptionKey: destEnc}
 		parent, err := dst.Resolve(ctx, *into)
 		if err != nil {
 			return fail(err)

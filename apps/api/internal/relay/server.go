@@ -310,6 +310,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
+	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/shares", s.handleDriveNodeShares)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
 	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)

@@ -8,7 +8,9 @@ import { DriveClient } from "../src/drive/client.js";
 import { driveContext, sealKey } from "../src/drive/crypto.js";
 import { signManifest, type Manifest } from "../src/drive/manifest.js";
 import { x25519PublicKey } from "../src/crypto/index.js";
-import { createTestIdentity, type TestIdentity } from "./helpers/identities.js";
+import { createTestIdentity, localResolveOptions, type TestIdentity } from "./helpers/identities.js";
+import { resolveEncryptionKey, resolveSigningKey } from "../src/resolve.js";
+import { fromBase64 } from "../src/encoding.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
 let relay: RunningRelay, alice: TestIdentity;
 beforeAll(async () => { relay = await startRelay(); alice = await createTestIdentity(relay.baseUrl, "drive"); }, 180_000);
@@ -100,4 +102,38 @@ it("archives a conversation as a sealed append log and dedupes by id", async () 
   expect(await history.before("bob.poweur.net", 1)).toEqual([]);
   await history.putReadState({ conversations: { "bob.poweur.net": { timestamp: record.timestamp, id: "m1" } } });
   expect((await history.readState()).conversations["bob.poweur.net"]?.id).toBe("m1");
+});
+
+it("a member reads and writes through their share with only their own keys", async () => {
+  const bob = await createTestIdentity(relay.baseUrl, "member");
+  const carol = await createTestIdentity(relay.baseUrl, "stranger");
+  const resolve = localResolveOptions(relay.baseUrl);
+  const publicKeys = {
+    async authorKey(author: string) {
+      const key = await resolveSigningKey(author, resolve);
+      if (!key) throw new Error(`cannot resolve ${author}`);
+      return fromBase64(key);
+    },
+  };
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), { ...fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!), ...publicKeys });
+  const team = await owner.create(await owner.root(), "team", "folder");
+  await owner.create(team, "plan.txt", "file", new TextEncoder().encode("alice's plan"));
+  const bobEnc = fromBase64((await resolveEncryptionKey(bob.identity, resolve))!);
+  await owner.shareWith(team, bob.identity, bobEnc, "write");
+
+  // Bob: his signer, his encryption key, alice's drive.
+  const member = new DriveFiles(new DriveClient(bob.client.relay, bob.client.signer, alice.identity), { ...fileKeys(bob.keys.signingPrivateKey, bob.keys.encryptionPrivateKey!), ...publicKeys });
+  const shared = await member.shared();
+  expect(shared.map(file => file.manifest.node)).toEqual([team.manifest.node]);
+  const text = async (files: DriveFiles, path: string) => { const chunks = []; for await (const c of files.read(await files.resolve(path))) chunks.push(c); return Buffer.concat(chunks).toString(); };
+  expect(await text(member, `/${team.manifest.node}/plan.txt`)).toBe("alice's plan");
+  await member.replace(await member.resolve(`/${team.manifest.node}/plan.txt`), new TextEncoder().encode("bob's plan"));
+  await member.create(await member.resolve(`/${team.manifest.node}`), "notes.txt", "file", new TextEncoder().encode("bob's notes"));
+  // Alice's client accepts bob's versions only because his share allows them.
+  const fresh = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), { ...fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!), ...publicKeys });
+  expect(await text(fresh, "/team/plan.txt")).toBe("bob's plan");
+  expect(await text(fresh, "/team/notes.txt")).toBe("bob's notes");
+  // Without a share, carol gets nothing — the relay refuses and so does her client.
+  const stranger = new DriveFiles(new DriveClient(carol.client.relay, carol.client.signer, alice.identity), { ...fileKeys(carol.keys.signingPrivateKey, carol.keys.encryptionPrivateKey!), ...publicKeys });
+  await expect(stranger.open(team.manifest.node)).rejects.toBeTruthy();
 });

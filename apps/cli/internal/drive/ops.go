@@ -280,6 +280,9 @@ func (f *Files) Tail(ctx context.Context, file *File, from uint64) ([]Record, er
 		if err != nil {
 			return nil, err
 		}
+		if err := f.allowAppender(ctx, file.Manifest.Node, item.Record.Author); err != nil {
+			return nil, err
+		}
 		cur := cursors[item.Record.Author]
 		if cur.seq == 0 && item.Record.Sequence != 1 {
 			err = item.Record.Verify(key)

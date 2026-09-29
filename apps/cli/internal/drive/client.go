@@ -24,6 +24,11 @@ type Client struct {
 	Relay, Identity, Drive string
 	SessionID              string
 	Key                    ed25519.PrivateKey
+	// LinkID authenticates as a link holder instead of an identity (with
+	// LinkVerifier for a password-protected link); Key is then only a guest
+	// signing key.
+	LinkID       string
+	LinkVerifier []byte
 	HTTP                   *http.Client
 	Cache                  ChunkCache
 }
@@ -43,6 +48,14 @@ func (c *Client) httpClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 func (c *Client) auth(ctx context.Context) (http.Header, error) {
+	if c.LinkID != "" {
+		h := http.Header{}
+		h.Set("X-Poweur-Link", c.LinkID)
+		if len(c.LinkVerifier) > 0 {
+			h.Set("X-Poweur-Link-Verifier", base64.RawURLEncoding.EncodeToString(c.LinkVerifier))
+		}
+		return h, nil
+	}
 	if len(c.Key) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("invalid signing key")
 	}

@@ -110,10 +110,18 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       missing-chunk and presigned uploads, verified downloads, idempotent commit
       retries, cursors, and `drive.changed` subscriptions. Encrypted
       mkdir/put/get/mv/rm/list, append/tail/history/trim, share and link
-      commands, and transfer (re-encrypt into a drive whose keys are local, or
-      retire with `--to-node`). Chunk caches (CLI directory and IndexedDB),
-      range reads, scoped handles, and the event-log helper. Share re-issue
-      during transfer stays with the caller (Phase 7).
+      commands, and transfer. Chunk caches (CLI directory and IndexedDB),
+      range reads, scoped handles, and the event-log helper.
+- [x] Phase 8 rework (review 2026-09-29): members and link holders open shared
+      nodes with their own share key (verified share signature and issuer
+      authority, node public key match); version and record authors are checked
+      against the node's shares via `GET /nodes/{node}/shares`, including guest
+      (link) authors and group members; new versions are authored by the
+      caller. Both CLIs take `--drive <identity>` (the drive's own relay),
+      `shared` lists entry points, member paths start at `/<shared-node-id>`,
+      and transfer copies into a destination as its owner or as a member with a
+      share there — no test or command uses another identity's private keys
+      (`INT_DRIVE_06`, TS live-relay member test).
 - [ ] Phases 9–10: sync daemon, web and mobile Files, complete baseline, migration and production rehearsal.
 
 **Inherited implementation deviation (resolved in Phase 6):** Phase 0 kept an

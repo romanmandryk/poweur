@@ -158,6 +158,25 @@ func (s *Server) driveUploader(w http.ResponseWriter, r *http.Request, driveID, 
 	return true
 }
 
+// handleDriveNodeShares lists the shares on a node and its ancestors to
+// anyone who may read the node, so they can verify version authors.
+func (s *Server) handleDriveNodeShares(w http.ResponseWriter, r *http.Request) {
+	driveID, _, ok := s.driveNode(w, r, drive.RoleRead)
+	if !ok {
+		return
+	}
+	shares, err := s.engine.SharesOn(r.Context(), driveID, r.PathValue("node"))
+	if err != nil {
+		s.writeDriveError(w, err)
+		return
+	}
+	if shares == nil {
+		shares = []drive.Share{}
+	}
+	noStore(w)
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares})
+}
+
 // handleDriveShares lists the shares the caller may see: every share for the
 // owner; for a member their own (with their sealed node keys) and those on
 // nodes they administer.

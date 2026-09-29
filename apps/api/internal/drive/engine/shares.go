@@ -471,3 +471,32 @@ func applyGroupRevoke(st *state, seq uint64, op journalOp) error {
 	}
 	return nil
 }
+
+// SharesOn lists the shares on a node and its ancestors, nearest first:
+// what a reader needs to check that each version's author held the role
+// it needed. Sealed node keys are sealed to their members, so listing them
+// reveals who has access, not what they can open.
+func (e *Engine) SharesOn(ctx context.Context, driveID, nodeID string) ([]drive.Share, error) {
+	h, err := e.open(ctx, driveID)
+	if err != nil {
+		return nil, err
+	}
+	defer h.mu.Unlock()
+	var out []drive.Share
+	for seen, id := 0, nodeID; id != "" && seen <= len(h.st.Nodes); seen++ {
+		var here []drive.Share
+		for _, s := range h.st.Shares {
+			if s.Node == id {
+				here = append(here, *s)
+			}
+		}
+		sort.Slice(here, func(i, j int) bool { return here[i].ID < here[j].ID })
+		out = append(out, here...)
+		n := h.st.Nodes[id]
+		if n == nil {
+			break
+		}
+		id = n.Folder
+	}
+	return out, nil
+}

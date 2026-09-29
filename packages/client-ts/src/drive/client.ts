@@ -1,6 +1,6 @@
 /** Authenticated storage-v2 transport. Callers retain custody of all keys. */
 import type { Signer } from "../crypto/keys.js";
-import { randomBytes } from "../encoding.js";
+import { randomBytes, toBase64url } from "../encoding.js";
 import { RelayError } from "../errors.js";
 import { RelayClient, toRelayError } from "../http.js";
 import { chunkID } from "./crypto.js";
@@ -39,10 +39,16 @@ export interface ChunkCache {
 const segment = (value: string) => encodeURIComponent(value);
 
 export class DriveClient {
+  /** Authenticate as a link holder instead of an identity; the signer is then
+   * only a guest key (see guestAuthor). */
+  link?: { id: string; verifier?: Uint8Array };
   constructor(readonly relay: RelayClient, readonly signer: Signer, readonly drive = signer.identity,
     readonly cache?: ChunkCache, readonly sessionId?: string) {}
 
   private async auth(): Promise<Record<string, string>> {
+    if (this.link) {
+      return { "X-Poweur-Link": this.link.id, ...(this.link.verifier ? { "X-Poweur-Link-Verifier": toBase64url(this.link.verifier) } : {}) };
+    }
     const { challenge } = await this.relay.request<{ challenge: string }>({
       method: "GET", path: `/auth/challenge?identity=${segment(this.signer.identity)}`,
     });
@@ -57,6 +63,8 @@ export class DriveClient {
     return this.request("GET", "");
   }
   node(node: string): Promise<DriveNode> { return this.request("GET", `/nodes/${segment(node)}`); }
+  /** Shares on a node and its ancestors, for anyone who may read the node. */
+  nodeShares(node: string): Promise<{ shares: Share[] }> { return this.request("GET", `/nodes/${segment(node)}/shares`); }
   children(node: string, cursor = "", limit = 100): Promise<{ children: DriveNode[]; cursor: string }> {
     return this.request("GET", `/nodes/${segment(node)}/children?cursor=${segment(cursor)}&limit=${limit}`);
   }

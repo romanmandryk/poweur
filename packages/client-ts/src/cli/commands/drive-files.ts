@@ -1,25 +1,21 @@
-import { FileChunkCache } from "../../node/drive-cache.js";
 import { readFile } from "node:fs/promises";
 import { open, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { DriveClient } from "../../drive/client.js";
-import { DriveFiles, fileKeys } from "../../drive/files.js";
 import { normalizeName } from "../../drive/names.js";
-import { openClient } from "../../node/session-factory.js";
+import { openDrive } from "./drive-open.js";
 import { flagBool, flagString, parseArgs, UsageError } from "../args.js";
 import { write, type Streams } from "../output.js";
 
 export async function driveFilesCommand(argv: string[], streams: Streams): Promise<number> {
   const sub = argv[0]!;
   const args = parseArgs(argv.slice(1), { bool: ["json"] });
-  const count = ["put", "get", "mv"].includes(sub) ? 2 : 1;
-  if (args.positional.length !== count) throw new UsageError("drive file command needs remote path (put/get/mv need two paths)");
+  const count = ["put", "get", "mv"].includes(sub) ? 2 : sub === "shared" ? 0 : 1;
+  if (args.positional.length !== count) throw new UsageError("drive file command needs remote path (put/get/mv need two paths); shared takes none. --drive <identity> works in a drive shared with you, with paths /<shared-node-id>/...");
   const [first, second] = args.positional as [string, string];
-  const { client, keys } = await openClient({ identity: flagString(args, "use-identity") });
-  if (!keys.encryptionPrivateKey) throw new Error("identity has no encryption key");
-  const drive = new DriveClient(client.relay, client.signer, client.signer.identity, new FileChunkCache());
-  const files = new DriveFiles(drive, fileKeys(keys.signingPrivateKey, keys.encryptionPrivateKey));
+  const { files: opened } = await openDrive({ identity: flagString(args, "use-identity"), drive: flagString(args, "drive") });
+  if (!opened) throw new Error("identity has no encryption key");
+  const files = opened;
   const parent = async (path: string) => {
     const remote = path.replace(/^\//, ""), at = remote.lastIndexOf("/");
     const name = normalizeName(remote.slice(at + 1));
@@ -27,6 +23,9 @@ export async function driveFilesCommand(argv: string[], streams: Streams): Promi
   };
   let result: unknown;
   switch (sub) {
+    case "shared": {
+      result = (await files.shared()).map(file => ({ node: file.manifest.node, kind: file.manifest.kind, version: file.manifest.version })); break;
+    }
     case "list": {
       const children = await files.list(await files.resolve(first));
       result = children.map(file => ({ node: file.manifest.node, name: file.name, kind: file.manifest.kind, version: file.manifest.version })); break;
