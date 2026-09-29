@@ -2,8 +2,7 @@
 
 - **Status:** proposed; start after the EPIC-025 reference editor proves the session layer
 - **Priority:** P2 (the developer-adoption engine)
-- **Depends on:** EPIC-012 (separate sandboxed origin for active content — decide both together),
-  EPIC-008 (consented, path-scoped app grants), EPIC-006 (app namespaces, conventions),
+- **Depends on:** EPIC-008 (consented, path-scoped app grants), EPIC-006 (app namespaces, conventions),
   EPIC-025 (durable documents + T7 rooms API), EPIC-017 (`@poweur/client`), EPIC-020 (scoped
   drive handles, event-log helper, sealed appends), EPIC-009 T7–T8 (intent types, typed
   routing); the [EPIC-031](EPIC-031-reference-app-scenarios.md) headless apps are the proving
@@ -21,7 +20,7 @@
 |------|--------|-------|
 | E29-T1 App manifest & signed bundles | open | `app.json`: entry, permissions, conventions, publisher signature |
 | E29-T2 Publish from a home | open | `poweur app publish` → immutable versioned bundle |
-| E29-T3 App origin & sandbox | open | per-app origin on the E12 sister host; no relay cookies/tokens |
+| E29-T3 App origin & sandbox | open | per-app origin on a different registrable domain; no relay cookies/tokens |
 | E29-T4 Runtime bridge (`@poweur/app`) | open | identity, scoped drive, event logs, documents, rooms, typed messages via `postMessage` |
 | E29-T5 Open, install, revoke | open | consent screen, app folder + picker grants (no `/apps` root), launcher |
 | E29-T6 Sharing & open-with | open | share a document → recipient opens it in a compatible app |
@@ -45,8 +44,11 @@ platform. This epic is that platform, built only once the editor shows the layer
 
 ## Background
 
-- E12 concluded active HTML must not share the identity/API origin and sketched a sister host
-  (`*.sites.poweur.net`). Apps need the same isolation, so the decision should cover both.
+- EPIC-012 deliberately permits no user HTML on the identity origin. App publication belongs
+  wholly here. Hosted apps use a dedicated, different registrable domain such as `poweur.site`
+  (the exact production name is a deployment choice), not `*.poweur.net`: hosted passkeys are
+  scoped to the parent identity domain, so an ordinary sister subdomain is not a sufficient
+  trust boundary.
 - E08 already grants consented, path-scoped access to an app's own namespace; `apps/tasks` and
   `apps/guestbook` are working precedents of "app data lives in the user's home".
 - E10-T5 designs an opt-in agent directory and a "what can touch my home" panel; apps reuse both.
@@ -86,7 +88,9 @@ platform. This epic is that platform, built only once the editor shows the layer
 **Acceptance:** publishing v2 leaves v1 pinned users unaffected.
 
 ### E29-T3 — Origin & sandbox
-- [ ] Per-app origin on the sister host; strict CSP; service-worker scope rules; no relay cookies.
+- [ ] Choose the dedicated registrable app domain and a wildcard-compatible per-app hostname;
+      paths on one publisher origin are not isolation. Apply strict CSP, service-worker scope
+      rules, no relay cookies and no WebAuthn eligibility for the identity RP ID.
 - [ ] Security suite: a hostile app cannot read another app's data, the relay session or the
       identity origin.
 

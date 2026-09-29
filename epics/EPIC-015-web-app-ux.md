@@ -21,7 +21,7 @@
   profiles, resolved by Messages, Thread, Contacts, the Files owner picker and the identity door
 - **Priority:** P1 (the backend of EPICs 003–007/014 has almost no web surface; this is where the product becomes usable)
 - **Depends on:** EPIC-003 (files/DAV), EPIC-004 (sync/changes), EPIC-005 (sharing), EPIC-006 (profiles/capabilities), EPIC-007 (contacts/policy), EPIC-014 (anon/PoW); consumes [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`) via E15-T6; the second wave consumes [EPIC-018](EPIC-018-identity-onboarding-naming.md)'s name policy, `GET /hosted/availability` and credential scope
-- **Unlocks:** real user testing, EPIC-012 (identity websites reuse these components),
+- **Unlocks:** real user testing, EPIC-012 (identity pages reuse its visual language),
   [EPIC-019](EPIC-019-mobile-app-capacitor.md) (the Capacitor shell wraps this UI), adoption
 - **Related:** [EPIC-018](EPIC-018-identity-onboarding-naming.md) owns the *mechanism* of
   identity claiming — name policy, the availability endpoint, the launcher host, credential
@@ -58,7 +58,7 @@ people from a received message in one tap, or by typing/searching a name), brows
 manage their files, and share a file or folder with someone by contact or by typed name —
 without ever touching the CLI. This epic also **re-thinks the information architecture**
 now that there are six feature areas, and lays reusable components (identity picker,
-audience picker, policy controls) that EPIC-012's contact-form/website work builds on.
+audience picker and policy controls) whose interaction language EPIC-012's generated page follows.
 
 ## Background (current web app — what exists, what's missing)
 
@@ -146,8 +146,8 @@ shell ([EPIC-019](EPIC-019-mobile-app-capacitor.md)) wraps *this* UI verbatim.
       unit tests (21 tests, happy-dom). They build **DOM, not HTML strings** — they take
       user-typed identities and remote profile text, and a template literal is how an
       injection lands; `js/components/dom.js` sets text through the DOM API so escaping is
-      not something a caller can forget. No app-shell imports either, so EPIC-012 can embed
-      them in a public contact form
+      not something a caller can forget. No app-shell imports either, so other trusted web
+      surfaces can reuse them where a client-side identity picker is actually needed
 - [x] Resolver helper for `profile.json` / `capabilities.json` (EPIC-006 well-known),
       cached and request-coalesced, used by ProfileCard and IdentityInput. It lives in the
       new `js/profiles.js` rather than `js/api.js` — E15-T6 deleted that file
@@ -841,7 +841,7 @@ filtering a conversation still means opening everything.
   - "New message" is a To picker that opens the conversation; a group identity is recognised by its roster.
   - Contact rows, the contact sheet's "Message" button and add-contact "Message" all open the conversation.
   - Attachments send from the 📎 button beside the reply box, using any typed text as the caption.
-- **"Send anonymously" is no longer offered in the signed-in app.** The SDK path (`sendAnonymous`, PoW solved in-page) is unchanged and `policy.spec.js` drives it directly. A signed-out anonymous send surface belongs with EPIC-012's contact page.
+- **"Send anonymously" is no longer offered in the signed-in app.** The SDK path (`sendAnonymous`, PoW solved in-page) is unchanged and `policy.spec.js` drives it directly. A signed-out anonymous send surface may be linked from EPIC-012 when the owner publicly advertises it.
 - **Nav badges:**
   - Messages counts unread messages (signed, from read marks, plus unread anonymous).
   - Contacts counts incoming requests waiting for an answer.
@@ -954,9 +954,9 @@ This is a re-skin: **token values change, token names do not.** Components alrea
   `alice.r1.com/app/` cannot see an identity stored by `alice.r2.com`). Keep identity-scoped
   state keyed by identity rather than global, so the same modules work under both.
 
-- **EPIC-012 (identity websites / contact forms):** IdentityInput, ProfileCard and the anon
-  PoW send path are the exact pieces a public contact form needs — keep them free of
-  app-shell dependencies so they can be embedded standalone.
+- **EPIC-012 (generated identity pages):** its server-rendered page follows the same profile
+  card, spacing and contact-action language. The anon PoW send path remains reusable by a
+  Poweur-controlled public composer, without booting the signed-in app shell.
 - **EPIC-010 (agents/apps):** the Launcher destination stays the seam for installed apps;
   the `/apps/<app-id>` file views (E15-T4) are where app data becomes visible.
 - **EPIC-009 (messaging v2 — push/attachments):** build the Messages trays so a WebSocket

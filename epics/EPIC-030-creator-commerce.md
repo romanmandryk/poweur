@@ -1,6 +1,6 @@
 # EPIC-030 — Creator commerce: paid shares, subscriptions, tips & paid apps
 
-- **Status:** proposed; demand-led — build after sharing, Spaces and identity websites show
+- **Status:** proposed; demand-led — build after sharing, Spaces and identity pages show
   repeat use and creators ask for it
 - **Priority:** P3
 - **Depends on:** EPIC-016 (payment challenge protocol, hosted gateway and cut accounting — reuse,
@@ -18,7 +18,7 @@
 | E30-T1 Paid grant protocol | open | payment settles → owner's relay issues a signed grant |
 | E30-T2 Subscriptions as renewing grants | open | each successful charge extends `expires_at` |
 | E30-T3 Tips & pay-what-you-want | open | profile, site and message surfaces |
-| E30-T4 Storefront block | open | EPIC-012 site block listing public offers |
+| E30-T4 Storefront block | open | typed EPIC-012 identity-page block listing public offers |
 | E30-T5 Broadcast channels | open | 1 → many subscriber fan-out; distinct from small E2E groups |
 | E30-T6 Paid apps & in-app purchases | open | EPIC-029 bridge `purchase()` |
 | E30-T7 Payouts, refunds & receipts | open | Connect-style onboarding; refund revokes grant |
@@ -56,7 +56,7 @@ expiry moves forward on each successful charge; a lapse is simply expiry.
 **Acceptance:** a tip arrives with a receipt and the cut is recorded.
 
 ### E30-T4 — Storefront
-- [ ] EPIC-012 block rendering public offers; checkout by Poweur ID or by email with a claim link.
+- [ ] Typed EPIC-012 identity-page block rendering public offers; checkout by Poweur ID or by email with a claim link.
 
 **Acceptance:** a visitor without an ID buys by email and claims an ID that already holds the grant.
 

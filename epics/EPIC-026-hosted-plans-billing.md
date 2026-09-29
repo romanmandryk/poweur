@@ -67,7 +67,7 @@ Charge for what costs the operator money or effort; never for the network itself
 | Never charged (trust anchor) | Metered resources (hosted cost) | Cut on value moved (E16, E30) |
 |---|---|---|
 | Having an ID, keys, recovery, rotation | Stored unique bytes and version-history days | Pay-to-send fast lane |
-| E2E messaging between Poweur IDs (fair use) | Public egress: links, sites, apps (EPIC-012/029) | Paid shares, subscriptions, tips |
+| E2E messaging between Poweur IDs (fair use) | Public egress: links, identity pages, apps (EPIC-012/029) | Paid shares, subscriptions, tips |
 | Contacts, inbox policy, anti-spam | TURN bytes (E25-T8) | Paid apps / in-app purchases |
 | Sign-in, OAuth bridge for individuals | Outbound email, aliases, custom mail domains (E23) | Registrar referral for custom domains |
 | Export and migration to another relay | Compute seconds (E27), SLAs, support, dedicated ops (E28) | |
@@ -253,4 +253,3 @@ Poweur relay" a business for others and keeps the project honest.
 - Paid or auctioned premium names (EPIC-018 non-goal stands); a registrar referral for custom
   domains is fine.
 - Rate-limiting ordinary contact-to-contact messaging as a pricing lever.
-

@@ -1,10 +1,10 @@
 # EPIC-014 — Anonymous messaging & sender challenges (proof-of-work)
 
-- **Status:** core complete (T1–T3 + CLI + web app + registration gate shipped; public contact page + stranger-challenge seam open)
+- **Status:** core complete (T1–T3 + CLI + web app + registration gate shipped; public identity-page action + stranger-challenge seam open)
 - **Priority:** P2 (after EPIC-007 lands the inbox-policy surface it extends)
 - **Depends on:** EPIC-007 (inbox policy + requests queue), EPIC-006 (policy schema);
-  feeds EPIC-012 (web contact forms), EPIC-002 (deferred PoW registration gate)
-- **Unlocks:** contact forms and open inboxes without opening the spam floodgates; a
+  feeds EPIC-012 (public anonymous contact action), EPIC-002 (deferred PoW registration gate)
+- **Unlocks:** public anonymous contact actions and open inboxes without opening the spam floodgates; a
   reusable PoW primitive for every "stranger wants in" surface
 
 ## Progress
@@ -36,8 +36,8 @@ and payment land as designed slots with stub enforcement.
   this epic extends that same policy file rather than adding a second policy surface.
   E07-T5 already wishes for "proof-of-work on contact requests from unknown relays": it
   consumes the primitive built here.
-- **EPIC-012** (identity websites) needs anonymous contact-form ingress and explicitly
-  deferred the policy vocabulary to EPIC-007/here.
+- **EPIC-012** may advertise a Poweur-controlled anonymous contact action from the generated
+  identity page; it reuses this protocol and does not expose private policy fields.
 - **EPIC-002** deferred a PoW gate on hosted registration — same primitive, second
   consumer.
 - A challenge store already exists (`apps/api/internal/storage/challenges.go`, used for
@@ -164,9 +164,8 @@ deferral gets a note pointing here once the primitive exists.
 - [x] Anonymous **sending** from the web app's compose screen, with in-page solving,
       attempt-count progress and an abort — `sendAnonymous` gained `onSolveProgress` and
       `signal` for it
-- [ ] **Still EPIC-012's:** the same send path on a *public* page with no signed-in
-      identity — the components are ready (they take no app-shell dependency); that epic
-      owns the website shape
+- [ ] **Still EPIC-012's:** link or present the same send path from the generated public page
+      when the owner explicitly advertises it; that page does not infer or expose inbox policy
 
 **Acceptance:** two-browser demo: recipient enables anon+PoW, visitor sends without any
 identity, message appears in the anon queue; slider changes measurably change solve time.

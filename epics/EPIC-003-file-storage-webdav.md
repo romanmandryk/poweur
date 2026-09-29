@@ -207,8 +207,9 @@ Sharing a file with the web (not just with IDs) should be a first-class but *exp
 **Acceptance:** marked folder is browsable in a plain browser; unmarked `/public` paths are not
 web-exposed (ID-auth still required).
 
-> Active HTML as a real site at the identity (or a sister host), plus contact forms → messages,
-> is **not** this task — see [EPIC-012](EPIC-012-identity-websites.md) (design notes).
+> The trusted generated page at the identity root is **not** this task — see
+> [EPIC-012](EPIC-012-identity-websites.md). Arbitrary HTML remains inert here; app/static
+> bundle hosting belongs to [EPIC-029](EPIC-029-poweur-apps-platform.md).
 
 ### E03-T7 — Design doc: relay-blind (E2EE) storage option
 
