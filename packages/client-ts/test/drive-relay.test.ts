@@ -1,5 +1,6 @@
 import { DriveFiles, fileKeys, type OpenFile } from "../src/drive/files.js";
 import { LinkPasswordRequired, openLink, parseLinkUrl } from "../src/drive/link.js";
+import { openFileRequest } from "../src/drive/request.js";
 import { DriveLog } from "../src/drive/log.js";
 import { DriveScope } from "../src/drive/scope.js";
 import { SystemFiles, DeviceRegistry } from "../src/systemfiles.js";
@@ -156,4 +157,23 @@ it("opens a password link with only the fragment and the password", async () => 
   // A wrong fragment decrypts nothing, even with the right password.
   await expect(openLink({ ...base, fragment: new Uint8Array(32).fill(1), password: "open sesame" })).rejects.toBeTruthy();
   expect(parseLinkUrl(`https://${alice.identity}/s/${share.link}#${Buffer.from(fragment).toString("base64url")}`)).toMatchObject({ drive: alice.identity, link: share.link });
+});
+
+it("uploads through a password-protected create-only file request", async () => {
+  const owner = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const folder = await owner.create(await owner.root(), "requests", "folder");
+  const { share, fragment } = await owner.link(folder, "create", "", "drop here", { caps: { files: 2 }, pow: 8 });
+  const options = { origin: relay.baseUrl, drive: alice.identity, link: share.link!, fragment, resolve: localResolveOptions(relay.baseUrl) };
+  await expect(openFileRequest(options)).rejects.toBeInstanceOf(LinkPasswordRequired);
+  const request = await openFileRequest({ ...options, password: "drop here" });
+  await request.submit("budget.pdf", new TextEncoder().encode("encrypted submission"));
+  await request.submit("notes.txt", new TextEncoder().encode("second submission"));
+  await expect(request.submit("over-cap.txt", new Uint8Array([1]))).rejects.toMatchObject({ status: 429 });
+
+  const fresh = new DriveFiles(new DriveClient(alice.client.relay, alice.client.signer), fileKeys(alice.keys.signingPrivateKey, alice.keys.encryptionPrivateKey!));
+  const uploaded = await fresh.list(await fresh.open(folder.manifest.node));
+  expect(uploaded.map(file => file.name).sort()).toEqual(["budget.pdf", "notes.txt"]);
+  const budget = uploaded.find(file => file.name === "budget.pdf")!;
+  const chunks = []; for await (const chunk of fresh.read(budget)) chunks.push(chunk);
+  expect(Buffer.concat(chunks).toString()).toBe("encrypted submission");
 });

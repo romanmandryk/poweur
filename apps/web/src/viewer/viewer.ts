@@ -5,12 +5,16 @@
  * decrypts everything here; the relay only ever sees the link ID (and, for a
  * password, the derived verifier).
  */
-import { LinkPasswordRequired, openLink, parseLinkUrl, type OpenedLink, type OpenFile } from "@poweur/client/drive";
+import { inspectLink, LinkPasswordRequired, openFileRequest, openLink, parseLinkUrl, type OpenedFileRequest, type OpenedLink, type OpenFile } from "@poweur/client/drive";
 
 const status = document.getElementById("status")!;
+const title = document.getElementById("title")!;
 const items = document.getElementById("items")!;
 const form = document.getElementById("password") as HTMLFormElement;
 const input = document.getElementById("password-input") as HTMLInputElement;
+const requestForm = document.getElementById("file-request") as HTMLFormElement;
+const requestFiles = document.getElementById("request-files") as HTMLInputElement;
+const requestSubmit = document.getElementById("request-submit") as HTMLButtonElement;
 
 function say(text: string, error = false) {
   status.textContent = text;
@@ -61,6 +65,8 @@ function row(opened: OpenedLink, file: OpenFile) {
   items.append(li);
 }
 
+let fileRequest: OpenedFileRequest | null = null;
+
 async function open(password?: string) {
   say("Opening…");
   try {
@@ -68,6 +74,15 @@ async function open(password?: string) {
     // this relay (which serves hosted identities and resolves the rest).
     const local = location.hostname === "localhost" || location.hostname.endsWith(".localhost");
     const resolve = { scheme: location.protocol === "http:" ? "http" as const : "https" as const, relayUrl: location.origin, skipDns: true, allowPrivate: local };
+    const info = await inspectLink({ origin: location.origin, drive: parsed.drive, link: parsed.link });
+    if (info.role === "create") {
+      fileRequest = await openFileRequest({ origin: location.origin, drive: parsed.drive, link: parsed.link, fragment: parsed.fragment, resolve, ...(password ? { password } : {}) });
+      form.hidden = true;
+      requestForm.hidden = false;
+      title.textContent = "File request";
+      say("Files are encrypted in this browser. You cannot see other submissions.");
+      return;
+    }
     const opened = await openLink({ origin: location.origin, drive: parsed.drive, link: parsed.link, fragment: parsed.fragment, resolve, ...(password ? { password } : {}) });
     form.hidden = true;
     items.replaceChildren();
@@ -96,5 +111,23 @@ async function open(password?: string) {
 form.addEventListener("submit", event => {
   event.preventDefault();
   void open(input.value);
+});
+requestForm.addEventListener("submit", event => {
+  event.preventDefault();
+  if (!fileRequest || !requestFiles.files?.length) return;
+  requestSubmit.disabled = true;
+  const selected = [...requestFiles.files];
+  void (async () => {
+    for (let index = 0; index < selected.length; index++) {
+      const file = selected[index]!;
+      say(`Encrypting ${index + 1} of ${selected.length}: ${file.name}`);
+      await fileRequest!.submit(file.name, new Uint8Array(await file.arrayBuffer()), attempts => say(`Securing upload… ${attempts.toLocaleString()} attempts`));
+    }
+    requestFiles.value = "";
+    say(`${selected.length} file${selected.length === 1 ? "" : "s"} uploaded. You can close this page or send more.`);
+  })().catch(error => {
+    const code = (error as { status?: number }).status;
+    say(code === 429 ? "This file request has reached its upload limit." : "The upload failed. Please try again.", true);
+  }).finally(() => { requestSubmit.disabled = false; });
 });
 void open();

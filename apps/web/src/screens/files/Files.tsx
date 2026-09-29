@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, File as FileIcon, Folder, FolderPlus, Link2, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import type { DriveFiles, OpenFile, Share, ShareRole } from "@poweur/client/drive";
-import { acceptBrowserOffer, cachedBrowserFolder, ensureBrowserFiles, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
+import { acceptBrowserOffer, cachedBrowserFolder, ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, loadBrowserFolder, loadMounts, refreshBrowserFiles, revokeBrowserShare, shareBrowserFile, shareOffers, sharesForFile } from "../../actions/files";
 import { askConfirm, askText } from "../../components/Dialogs";
 import { openBrowserDrive, readFileBytes } from "../../lib/drive";
 import { errorMessage } from "../../actions/relay";
@@ -14,6 +14,7 @@ import { EmptyState, Notice } from "../../ui/Display";
 import { FormGroup, Input, Label } from "../../ui/Field";
 import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
+import { Tab, TabBar } from "../../ui/Tabs";
 
 type View = { files: DriveFiles; folder: OpenFile; label: string; trail: { file: OpenFile; label: string }[] };
 
@@ -183,6 +184,7 @@ export function Files() {
   const atOwnRoot = tab === "mine" && view?.trail.length === 1;
   return (
     <>
+      <PullToRefresh onRefresh={refresh}>
       <DestHeader title={view?.label || "Files"}>
         {tab === "mine" && view && (
           <>
@@ -193,12 +195,10 @@ export function Files() {
         )}
       </DestHeader>
 
-      <div role="tablist" aria-label="Files view" className="mx-4 mb-3 grid grid-cols-2 rounded-control bg-surface-2 p-1">
-        <button role="tab" aria-selected={tab === "mine"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "mine" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("mine"); setView(null); void openMine(); }}>My files</button>
-        <button role="tab" aria-selected={tab === "shared"} className={`min-h-10 rounded-lg text-sm font-semibold ${tab === "shared" ? "bg-surface text-accent shadow-sm" : "text-muted"}`} onClick={() => { setTab("shared"); setView(null); }}>Shared with me</button>
-      </div>
-
-      <PullToRefresh onRefresh={refresh}>
+      <TabBar aria-label="Files view">
+        <Tab active={tab === "mine"} onClick={() => { setTab("mine"); setView(null); void openMine(); }}>My files</Tab>
+        <Tab active={tab === "shared"} onClick={() => { setTab("shared"); setView(null); }}>Shared with me</Tab>
+      </TabBar>
       {(error || fileCache.error) && <Notice tone="warn" className="mx-4">{error || fileCache.error}</Notice>}
 
       {(fileCache.loading || folderLoading || working) && <div role="status" className="flex items-center justify-center gap-2 px-4 py-3 text-sm text-muted"><RefreshCw className="size-4 animate-spin text-accent" />{working ? "Updating files…" : "Loading files…"}</div>}
@@ -259,6 +259,7 @@ function ShareForm({ identity, file, close }: { identity: string; file: OpenFile
   const [password, setPassword] = useState("");
   const [linkDays, setLinkDays] = useState("7");
   const [linkUrl, setLinkUrl] = useState("");
+  const [requestUrl, setRequestUrl] = useState("");
   useEffect(() => { void sharesForFile(identity, file).then(setShares, () => {}); }, [identity, file]);
   return <form onSubmit={(event) => { event.preventDefault(); const member = field.current?.value.trim(); if (!member) return; setBusy(true); void shareBrowserFile(identity, file, member, role).then(({ notified }) => { toast(notified ? `Shared with ${member}` : `Access granted, but ${member} could not be notified`, notified ? "success" : "warning", 7000); close(); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>
     <FormGroup><Label htmlFor="share-member">Poweur ID</Label><Input ref={field} id="share-member" autoComplete="off" placeholder="alex.example.com" /></FormGroup>
@@ -269,8 +270,9 @@ function ShareForm({ identity, file, close }: { identity: string; file: OpenFile
       <p className="mb-3 text-sm text-muted">Anyone with the complete link can view this {file.manifest.kind}. Add a password for another layer of protection.</p>
       <div className="grid grid-cols-[1fr_auto] gap-2"><Input id="link-password" type="password" autoComplete="new-password" placeholder="Password (optional)" value={password} onChange={(event) => setPassword(event.currentTarget.value)} /><select aria-label="Link expiry" value={linkDays} onChange={(event) => setLinkDays(event.currentTarget.value)} className="input rounded-control border-[1.5px] border-sep bg-surface px-3"><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option><option value="">Never</option></select><Button type="button" variant="secondary" className="col-span-2" disabled={busy} onClick={() => { const expires = linkDays ? new Date(Date.now() + Number(linkDays) * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z") : ""; setBusy(true); void linkBrowserFile(identity, file, password, expires).then(({ share, url }) => { setShares((current) => [...current, share]); setLinkUrl(url); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}><Link2 className="size-4" />Create link</Button></div>
       {linkUrl && <div className="mt-2 flex gap-2"><Input aria-label="Share link" readOnly value={linkUrl} /><IconButton type="button" aria-label="Copy share link" onClick={() => { if (!navigator.clipboard) { toast("Copy is not available in this browser", "error"); return; } void navigator.clipboard.writeText(linkUrl).then(() => toast("Link copied", "success"), (cause) => toast(errorMessage(cause), "error")); }}><Copy className="size-4" /></IconButton></div>}
+      {file.manifest.kind === "folder" && <div className="mt-4 border-t border-sep pt-4"><p className="mb-2 text-sm text-muted">Create an upload-only request. Visitors can add encrypted files but cannot see this folder or anyone else's submissions.</p><Button type="button" variant="secondary" className="w-full" disabled={busy} onClick={() => { const expires = linkDays ? new Date(Date.now() + Number(linkDays) * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z") : ""; setBusy(true); void fileRequestBrowserLink(identity, file, password, expires).then(({ share, url }) => { setShares((current) => [...current, share]); setRequestUrl(url); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}><Upload className="size-4" />Create file request</Button>{requestUrl && <div className="mt-2 flex gap-2"><Input aria-label="File request link" readOnly value={requestUrl} /><IconButton type="button" aria-label="Copy file request link" onClick={() => { if (!navigator.clipboard) { toast("Copy is not available in this browser", "error"); return; } void navigator.clipboard.writeText(requestUrl).then(() => toast("File request copied", "success"), (cause) => toast(errorMessage(cause), "error")); }}><Copy className="size-4" /></IconButton></div>}</div>}
     </div>
-    {shares.length > 0 && <div className="mb-4"><Label>Access</Label><div className="overflow-hidden rounded-control bg-surface-2">{shares.map((share) => <div key={share.id} className="flex items-center gap-2 border-b border-sep px-3 py-2 last:border-0"><span className="min-w-0 flex-1 truncate text-sm">{share.member || "Anyone with the link"} · {share.role}</span><Button type="button" variant="danger" size="sm" data-revoke-share={share.id} onClick={() => { setBusy(true); void revokeBrowserShare(identity, share).then(() => { setShares((current) => current.filter((entry) => entry.id !== share.id)); if (share.link) setLinkUrl(""); toast("Access revoked", "success"); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>Revoke</Button></div>)}</div></div>}
+    {shares.length > 0 && <div className="mb-4"><Label>Access</Label><div className="overflow-hidden rounded-control bg-surface-2">{shares.map((share) => <div key={share.id} className="flex items-center gap-2 border-b border-sep px-3 py-2 last:border-0"><span className="min-w-0 flex-1 truncate text-sm">{share.member || (share.role === "create" ? "File request" : "Anyone with the link")} · {share.role}</span><Button type="button" variant="danger" size="sm" data-revoke-share={share.id} onClick={() => { setBusy(true); void revokeBrowserShare(identity, share).then(() => { setShares((current) => current.filter((entry) => entry.id !== share.id)); if (share.role === "create") setRequestUrl(""); else if (share.link) setLinkUrl(""); toast("Access revoked", "success"); setBusy(false); }, (cause) => { toast(errorMessage(cause), "error", 7000); setBusy(false); }); }}>Revoke</Button></div>)}</div></div>}
     <div className="flex gap-2"><Button variant="secondary" className="min-h-11 flex-1" onClick={close}>Cancel</Button><Button type="submit" className="min-h-11 flex-1 p-3 text-[15px]" disabled={busy}>{busy ? "Sharing…" : "Share"}</Button></div>
   </form>;
 }

@@ -56,8 +56,8 @@ export class DriveClient {
       "X-Poweur-Signature": await this.signer.sign(challenge, "base64std") };
   }
   private path(suffix: string): string { return `/drive/${segment(this.drive)}${suffix}`; }
-  private async request<T>(method: string, suffix: string, body?: unknown): Promise<T> {
-    return this.relay.request<T>({ method, path: this.path(suffix), body, headers: await this.auth() });
+  private async request<T>(method: string, suffix: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.relay.request<T>({ method, path: this.path(suffix), body, headers: { ...await this.auth(), ...headers } });
   }
   info(): Promise<{ drive: string; root: string; used: number; quota: number }> {
     return this.request("GET", "");
@@ -84,11 +84,11 @@ export class DriveClient {
   }
   /** Retry only transient failures; reuse the exact request ID and bytes. A
    * head conflict must be merged by the caller, never silently overwritten. */
-  async commit(input: DriveCommit): Promise<CommitResult> {
+  async commit(input: DriveCommit, headers?: Record<string, string>): Promise<CommitResult> {
     const id = input.id ?? Array.from(randomBytes(16), b => b.toString(16).padStart(2, "0")).join("");
     const body = JSON.stringify({ ...input, id });
     for (let attempt = 0; ; attempt++) {
-      try { return await this.request("POST", "/commit", body); }
+      try { return await this.request("POST", "/commit", body, headers); }
       catch (error) {
         const transient = error instanceof TypeError || (error instanceof RelayError && [502, 503, 504].includes(error.status ?? 0));
         if (!transient || attempt >= 2) throw error;

@@ -21,6 +21,11 @@ export class LinkPasswordRequired extends Error {
 }
 export interface OpenedLink { info: LinkInfo; files: DriveFiles; root: OpenFile }
 
+export async function inspectLink(options: { origin: string; drive: string; link: string; fetch?: typeof fetch }): Promise<LinkInfo> {
+  const relay = new RelayClient(options.origin, options.fetch ? { fetch: options.fetch } : {});
+  return relay.request<LinkInfo>({ method: "GET", path: `/drive/${encodeURIComponent(options.drive)}/links/${options.link}` });
+}
+
 /** Split a link URL (or its path and fragment) into drive, link ID and secret. */
 export function parseLinkUrl(href: string): { drive: string; link: string; fragment: Uint8Array } {
   const url = new URL(href);
@@ -47,7 +52,7 @@ export async function openLink(options: {
 }): Promise<OpenedLink> {
   const relay = new RelayClient(options.origin, options.fetch ? { fetch: options.fetch } : {});
   // Follows the owner's redirect when the shared subtree moved drives.
-  const info = await relay.request<LinkInfo>({ method: "GET", path: `/drive/${encodeURIComponent(options.drive)}/links/${options.link}` });
+  const info = await inspectLink(options);
   let secret = options.fragment, verifier: Uint8Array | undefined;
   if (info.password) {
     if (!options.password) throw new LinkPasswordRequired();

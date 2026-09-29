@@ -12,7 +12,7 @@ vi.mock("../../src/lib/client.js", () => ({ lookup: mocks.lookup, clientFor: moc
 vi.mock("../../src/lib/drive", () => ({ openBrowserDrive: mocks.openBrowserDrive, readFileBytes: vi.fn() }));
 vi.mock("../../src/lib/storage.js", () => ({ relayUrlFor: mocks.relayUrlFor }));
 
-import { ensureBrowserFiles, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
+import { ensureBrowserFiles, fileRequestBrowserLink, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
 
 const file = {
   manifest: { node: "1".repeat(32), kind: "folder" },
@@ -104,6 +104,17 @@ describe("Files actions", () => {
       url: expect.stringMatching(/^https:\/\/alice\.example\.com\/s\/b{32}#[A-Za-z0-9_-]+$/),
     });
     expect(link).toHaveBeenCalledWith(file, "read", "", "secret");
+  });
+
+  it("creates a capped, proof-of-work file request for a folder", async () => {
+    const requestShare = { ...validShare, member: undefined, link: "c".repeat(32), role: "create" };
+    const link = vi.fn(async () => ({ share: requestShare, fragment: new Uint8Array(32).fill(9) }));
+    mocks.openBrowserDrive.mockResolvedValue({ files: { link } });
+    await expect(fileRequestBrowserLink("alice.example.com", file, "secret", "2026-10-06T00:00:00Z", 5)).resolves.toEqual({
+      share: requestShare,
+      url: expect.stringContaining(`/s/${"c".repeat(32)}#`),
+    });
+    expect(link).toHaveBeenCalledWith(file, "create", "2026-10-06T00:00:00Z", "secret", { caps: { files: 5, per_hour: 50 }, pow: 18 });
   });
 
   it("reuses the decrypted drive listing across visits", async () => {

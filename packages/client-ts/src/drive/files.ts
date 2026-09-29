@@ -7,7 +7,7 @@ import { driveContext, encryptChunk, decryptChunk, sealKey, openKey, MAX_PLAINTE
 import { canonicalManifest, verifyManifest, verifyManifestPages, splitPages, type Manifest, type FileMode } from "./manifest.js";
 import { nameHash, sealName, openName, normalizeName } from "./names.js";
 import { appendRecordHash, canonicalAppendRecord, openRecordContent, verifyAppendRecord, verifyNextRecord, type AppendRecord, type ChunkRef, type DriveSealedPayload } from "./records.js";
-import { canonicalShare, guestKey, keyBearing, roleGrants, SHARE_KDF, verifierHash, verifyShare, type Share, type ShareRole } from "./share.js";
+import { canonicalShare, guestKey, keyBearing, roleGrants, SHARE_KDF, verifierHash, verifyShare, type Share, type ShareCaps, type ShareRole } from "./share.js";
 
 const expired = (share: Share) => Boolean(share.expires) && Date.parse(share.expires!) <= Date.now();
 
@@ -174,7 +174,9 @@ export class DriveFiles {
     // A name is sealed to its parent: a shared node's own name is known only
     // to those who can open the parent.
     const name = nameVersion && parentKey ? openName(parentKey, payload(nameVersion.name!), this.context(nameVersion, "name")) : "";
-    if (nameVersion && parentKey && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
+    // Create-only guests know the folder public key, but cannot compute its
+    // private keyed name index. Their random token is replaced on rename.
+    if (nameVersion && parentKey && !guestKey(nameVersion.author) && nameHash(parentKey, name) !== nameVersion.name_hash) throw new Error("name index mismatch");
     const result: OpenFile = { manifest: head, name, folder: info.folder ?? "", nodeKey };
     if (contentVersion) result.contentKey = openKey(nodeKey, payload(contentVersion.content_key!), this.context(contentVersion, "content-key"));
     return result;
@@ -388,7 +390,7 @@ export class DriveFiles {
   async shareWith(file: OpenFile, member: string, memberPublic: Uint8Array, role: ShareRole, expires = ""): Promise<Share> {
     return this.grant(file, member, "", role, expires, memberPublic);
   }
-  async link(file: OpenFile, role: ShareRole, expires = "", password = ""): Promise<{ share: Share; fragment: Uint8Array }> {
+  async link(file: OpenFile, role: ShareRole, expires = "", password = "", options: { caps?: ShareCaps; pow?: number } = {}): Promise<{ share: Share; fragment: Uint8Array }> {
     const link = id();
     const fragment = randomBytes(32);
     let secret = fragment, salt: Uint8Array | undefined, verifier: Uint8Array | undefined;
@@ -398,12 +400,12 @@ export class DriveFiles {
       secret = linkSecret(fragment, derived.subarray(0, 32));
       verifier = derived.subarray(32);
     }
-    const share = await this.grant(file, "", link, role, expires, x25519PublicKey(secret), salt, verifier);
+    const share = await this.grant(file, "", link, role, expires, x25519PublicKey(secret), salt, verifier, options.caps, options.pow);
     return { share, fragment };
   }
-  private async grant(file: OpenFile, member: string, link: string, role: ShareRole, expires: string, recipient: Uint8Array, salt?: Uint8Array, verifier?: Uint8Array): Promise<Share> {
+  private async grant(file: OpenFile, member: string, link: string, role: ShareRole, expires: string, recipient: Uint8Array, salt?: Uint8Array, verifier?: Uint8Array, caps: ShareCaps = {}, pow = 0): Promise<Share> {
     const share: Share = { format: 1, drive: this.client.drive, id: id(), node: file.manifest.node, ...(member ? { member } : { link }), role,
-      generation: file.manifest.generation, node_public: toBase64url(x25519PublicKey(file.nodeKey)), ...(expires ? { expires } : {}), caps: {},
+      generation: file.manifest.generation, node_public: toBase64url(x25519PublicKey(file.nodeKey)), ...(expires ? { expires } : {}), caps, ...(pow ? { pow } : {}),
       issuer: this.client.signer.identity, issued: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), signature: "" };
     if (keyBearing(role)) {
       if (recipient.length !== 32) throw new Error("share recipient key must be 32 bytes");

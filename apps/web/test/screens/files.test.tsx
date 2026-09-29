@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     sharesForFile: vi.fn(async () => []),
     revokeBrowserShare: vi.fn(),
     linkBrowserFile: vi.fn(),
+    fileRequestBrowserLink: vi.fn(),
     ensureBrowserFiles: vi.fn(),
     loadBrowserFolder: vi.fn(),
     refreshBrowserFiles: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("../../src/actions/files", () => ({
   sharesForFile: mocks.sharesForFile,
   revokeBrowserShare: mocks.revokeBrowserShare,
   linkBrowserFile: mocks.linkBrowserFile,
+  fileRequestBrowserLink: mocks.fileRequestBrowserLink,
   ensureBrowserFiles: mocks.ensureBrowserFiles,
   loadBrowserFolder: mocks.loadBrowserFolder,
   refreshBrowserFiles: mocks.refreshBrowserFiles,
@@ -76,6 +78,8 @@ describe("Files destination (E20-T10)", () => {
     await screen.findByText("note.txt");
     expect(container.querySelector("#btn-upload-file")).toBeTruthy();
     expect(container.querySelector("#btn-new-folder")).toBeTruthy();
+    expect(container.querySelector(".pull-to-refresh .dest-title")?.textContent).toBe("Files");
+    expect(container.querySelector(".pull-to-refresh [role=tablist]")).toBeTruthy();
     expect(mocks.ensureBrowserFiles).toHaveBeenCalledWith("alice.poweur.net");
   });
 

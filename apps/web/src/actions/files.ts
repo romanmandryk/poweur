@@ -223,6 +223,16 @@ export async function linkBrowserFile(identity: string, file: OpenFile, password
   return { share, url: `${origin}/s/${share.link}#${toBase64url(fragment)}` };
 }
 
+export async function fileRequestBrowserLink(identity: string, folder: OpenFile, password = "", expires = "", maxFiles = 20): Promise<{ share: Share; url: string }> {
+  if (folder.manifest.kind !== "folder") throw new Error("file requests need a folder");
+  if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000) throw new Error("file request limit must be between 1 and 1000");
+  const { files } = await openBrowserDrive(identity);
+  const { share, fragment } = await files.link(folder, "create", expires, password, { caps: { files: maxFiles, per_hour: 50 }, pow: 18 });
+  const relay = new URL(relayUrlFor(identity));
+  const origin = `${relay.protocol}//${share.drive}${relay.port ? `:${relay.port}` : ""}`;
+  return { share, url: `${origin}/s/${share.link}#${toBase64url(fragment)}` };
+}
+
 export async function revokeBrowserShare(identity: string, share: Share): Promise<void> {
   const { drive } = await openBrowserDrive(identity);
   await drive.unshare(share.id);

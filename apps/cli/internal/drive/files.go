@@ -361,7 +361,7 @@ func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool
 			return nil, err
 		}
 		hash, err := protocol.NameHash(parentKey, result.Name)
-		if err != nil || hash != nameVersion.NameHash {
+		if err != nil || !nameIndexMatches(nameVersion.Author, hash, nameVersion.NameHash) {
 			return nil, errors.New("name index mismatch")
 		}
 	}
@@ -369,6 +369,12 @@ func (f *Files) open(ctx context.Context, node string, ancestors map[string]bool
 		result.ContentKey, err = protocol.OpenKey(key, *contentVersion.ContentKey, contextFor(*contentVersion, protocol.PurposeContentKey))
 	}
 	return result, err
+}
+
+// A create-only guest holds the folder's public key, not the private key used
+// by the name index. Its random token is valid only on its signed create.
+func nameIndexMatches(author, calculated, stored string) bool {
+	return protocol.IsGuest(author) || calculated == stored
 }
 func (f *Files) Root(ctx context.Context) (*File, error) {
 	var info struct {
