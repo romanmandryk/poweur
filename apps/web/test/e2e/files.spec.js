@@ -45,6 +45,9 @@ test.describe("storage-v2 Files", () => {
 
     await alicePage.locator('nav[aria-label="Folder path"] button').first().click();
     await alicePage.getByRole("button", { name: "Share Plans" }).click();
+    // Links sit below direct sharing, collapsed until asked for.
+    await expect(alicePage.locator("#link-password")).toBeHidden();
+    await alicePage.getByText("Share with a link").click();
     await alicePage.fill("#link-password", "blue-sky");
     await alicePage.getByRole("button", { name: "Create link" }).click();
     const createdLink = await alicePage.getByRole("textbox", { name: "Share link" }).inputValue();
@@ -65,7 +68,7 @@ test.describe("storage-v2 Files", () => {
     await requestPage.getByRole("button", { name: "Upload files" }).click();
     await expect(requestPage.getByText("1 file uploaded. You can close this page or send more.")).toBeVisible({ timeout: 30_000 });
     await requestContext.close();
-    await alicePage.getByRole("button", { name: "Cancel" }).click();
+    await alicePage.getByRole("button", { name: "Done" }).click();
 
     await alicePage.getByText("Plans", { exact: true }).click();
     await expect(alicePage.getByText("guest.txt", { exact: true })).toBeVisible({ timeout: 20_000 });

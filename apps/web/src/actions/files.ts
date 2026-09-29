@@ -190,6 +190,49 @@ export function shareOffers(messages: any[], identity: string): ShareOffer[] {
   return offers;
 }
 
+/** Why a share offer did not reach its recipient, in words they can act on. */
+function notifyFailure(error: unknown): string {
+  const code = (error as { relayCode?: string })?.relayCode;
+  if (code === "policy_rejected") return "their inbox does not accept messages from you (they may have blocked you). Send them the item another way.";
+  if (code === "rate_limit_exceeded") return "too many messages were sent just now. They will see it in Shared with me once they are told another way.";
+  return "the message did not go through. They can still open it once they know about it.";
+}
+
+const autoAccepting = new Set<string>();
+/**
+ * Mount offers from accepted contacts without asking: a contact sharing
+ * something is expected. Offers from anyone else wait for Accept, so a
+ * stranger cannot push items into your Files. Each offer is tried once per
+ * session; a failure leaves it for the Accept button.
+ */
+export async function autoAcceptContactOffers(identity: string): Promise<number> {
+  const data = useData.getState();
+  const contacts = new Set(data.contacts.list.filter((contact: any) => contact.state === "accepted").map((contact: any) => String(contact.identity).toLowerCase()));
+  const pending = shareOffers(data.messages, identity).filter((offer) =>
+    contacts.has(offer.share.issuer.toLowerCase()) && !autoAccepting.has(offer.share.id));
+  if (!pending.length) return 0;
+  await ensureBrowserFiles(identity);
+  const mounted = new Set(useData.getState().files.mounts.map((mount) => mount.share_id));
+  let accepted = 0;
+  for (const offer of pending) {
+    autoAccepting.add(offer.share.id);
+    if (mounted.has(offer.share.id)) continue;
+    try {
+      const mount = await acceptBrowserOffer(identity, offer);
+      mounted.add(mount.share_id);
+      accepted++;
+    } catch {
+      // Left in Shared with me for an explicit Accept.
+    }
+  }
+  if (accepted) {
+    const own = useData.getState().files.own;
+    const mounts = own ? await loadMounts(identity, own.files).catch(() => null) : null;
+    if (mounts && useData.getState().files.identity === identity) useData.setState((state) => ({ files: { ...state.files, mounts } }));
+  }
+  return accepted;
+}
+
 /** Verify an offer against the source relay, persist its mount encrypted, and acknowledge it. */
 export async function acceptBrowserOffer(identity: string, offer: ShareOffer): Promise<Mount> {
   validateShareOffer(offer);
@@ -216,7 +259,7 @@ export async function acceptBrowserOffer(identity: string, offer: ShareOffer): P
 }
 
 /** Create a direct share and notify the recipient with the canonical offer. */
-export async function shareBrowserFile(identity: string, file: OpenFile, member: string, role: ShareRole): Promise<{ share: Share; notified: boolean }> {
+export async function shareBrowserFile(identity: string, file: OpenFile, member: string, role: ShareRole): Promise<{ share: Share; notified: boolean; reason?: string }> {
   const target = member.trim().toLowerCase();
   const resolved = await lookup(target, relayUrlFor(identity));
   const published = resolved.document.encryption_public_key;
@@ -244,9 +287,9 @@ export async function shareBrowserFile(identity: string, file: OpenFile, member:
       expiresAt: stamp(new Date(Date.now() + 7 * 24 * 3600 * 1000)),
     });
     return { share, notified: true };
-  } catch {
+  } catch (error) {
     // The grant already exists and must not be described as a failed share.
-    return { share, notified: false };
+    return { share, notified: false, reason: notifyFailure(error) };
   }
 }
 

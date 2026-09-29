@@ -13,6 +13,7 @@ import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/ou
 import { markCovers } from "../lib/threads.js";
 import { loadSessionRecord } from "../lib/storage.js";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
+import { autoAcceptContactOffers } from "./files";
 import { useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
@@ -113,6 +114,10 @@ export function loadInbox({ force = false } = {}): Promise<void> {
       mergeMessages(messages);
       useData.setState((state) => ({ acks: mergeInto(state.acks, acks) }));
       processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
+      // A contact sharing something lands in Files without an extra step.
+      if (messages.some((message: any) => message.type === "sys.share.offer")) {
+        void autoAcceptContactOffers(client.signer.identity).catch((error) => console.warn("Share auto-accept failed:", errorMessage(error)));
+      }
     } catch (error) {
       console.warn("Inbox error:", errorMessage(error));
     } finally {

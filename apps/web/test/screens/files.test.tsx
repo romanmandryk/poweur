@@ -38,6 +38,7 @@ vi.mock("../../src/lib/drive", () => ({ openBrowserDrive: mocks.openBrowserDrive
 vi.mock("../../src/actions/files", () => ({
   loadMounts: mocks.loadMounts,
   acceptBrowserOffer: mocks.acceptBrowserOffer,
+  autoAcceptContactOffers: vi.fn(async () => 0),
   shareBrowserFile: mocks.shareBrowserFile,
   sharesForFile: mocks.sharesForFile,
   revokeBrowserShare: mocks.revokeBrowserShare,

@@ -12,7 +12,7 @@ vi.mock("../../src/lib/client.js", () => ({ lookup: mocks.lookup, clientFor: moc
 vi.mock("../../src/lib/drive", () => ({ openBrowserDrive: mocks.openBrowserDrive, readFileBytes: vi.fn() }));
 vi.mock("../../src/lib/storage.js", () => ({ relayUrlFor: mocks.relayUrlFor }));
 
-import { ensureBrowserFiles, refreshBrowserFiles, fileRequestBrowserLink, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
+import { autoAcceptContactOffers, ensureBrowserFiles, refreshBrowserFiles, fileRequestBrowserLink, linkBrowserFile, revokeBrowserShare, shareBrowserFile, shareOffers } from "../../src/actions/files";
 
 const file = {
   manifest: { node: "1".repeat(32), kind: "folder" },
@@ -83,7 +83,49 @@ describe("Files actions", () => {
     mocks.lookup.mockResolvedValue({ document: { encryption_public_key: `x25519:${"A".repeat(43)}` } });
     mocks.openBrowserDrive.mockResolvedValue({ files: { shareWith: vi.fn(async () => validShare) }, drive: { relay: { relayUrl: "https://relay.example" } } });
     mocks.clientFor.mockReturnValue({ sendAndArchive: vi.fn(async () => { throw new Error("offline"); }) });
-    await expect(shareBrowserFile("alice.example.com", file, "bob.example.com", "read")).resolves.toEqual({ share: validShare, notified: false });
+    await expect(shareBrowserFile("alice.example.com", file, "bob.example.com", "read")).resolves.toMatchObject({ share: validShare, notified: false, reason: expect.stringContaining("did not go through") });
+  });
+
+  it("says when the recipient's inbox refused the offer", async () => {
+    mocks.lookup.mockResolvedValue({ document: { encryption_public_key: `x25519:${"A".repeat(43)}` } });
+    mocks.openBrowserDrive.mockResolvedValue({ files: { shareWith: vi.fn(async () => validShare) }, drive: { relay: { relayUrl: "https://relay.example" } } });
+    mocks.clientFor.mockReturnValue({ sendAndArchive: vi.fn(async () => { throw Object.assign(new Error("rejected"), { status: 403, relayCode: "policy_rejected" }); }) });
+    const result = await shareBrowserFile("alice.example.com", file, "bob.example.com", "read");
+    expect(result.notified).toBe(false);
+    expect(result.reason).toContain("does not accept messages from you");
+  });
+
+  it("mounts offers from contacts by itself and leaves strangers' for Accept", async () => {
+    const offerFrom = (issuer: string, id: string) => ({
+      format: 2, relay: "relay.example", name: `from ${issuer}`, kind: "folder", offered_at: "2026-09-29T00:00:00Z",
+      share: { ...validShare, drive: issuer, id: id.repeat(32), node: "b".repeat(32), member: "alice.example.com", issuer },
+    });
+    const fromBob = offerFrom("bob.example.com", "b"), fromCarol = offerFrom("carol.example.com", "c");
+    useData.setState({
+      messages: [fromBob, fromCarol].map((offer) => ({ type: "sys.share.offer", recipient: "alice.example.com", plaintext: JSON.stringify(offer) })),
+      contacts: { ...useData.getState().contacts, list: [{ identity: "bob.example.com", state: "accepted" }] },
+      files: { ...useData.getState().files, identity: "alice.example.com", loaded: true, mounts: [] },
+    } as any);
+    const root = { manifest: { node: "root", kind: "folder" }, name: "" }, system = { manifest: { node: "sys", kind: "folder" }, name: ".poweur" };
+    const privateDir = { manifest: { node: "priv", kind: "folder" }, name: "private" };
+    const own = {
+      root: vi.fn(async () => root),
+      list: vi.fn(async (folder: any) => folder === root ? [system] : folder === system ? [privateDir] : []),
+      create: vi.fn(async () => ({})),
+    };
+    mocks.openBrowserDrive.mockImplementation(async (_identity: string, drive?: string) => drive
+      ? { drive: { shares: async () => ({ shares: [fromBob.share] }) }, files: { open: vi.fn(async () => ({})) } }
+      : { files: own });
+    const sendAndArchive = vi.fn(async () => ({}));
+    mocks.clientFor.mockReturnValue({ sendAndArchive });
+
+    await expect(autoAcceptContactOffers("alice.example.com")).resolves.toBe(1);
+    expect(mocks.openBrowserDrive).toHaveBeenCalledWith("alice.example.com", "bob.example.com", "relay.example");
+    expect(mocks.openBrowserDrive).not.toHaveBeenCalledWith("alice.example.com", "carol.example.com", expect.anything());
+    expect(own.create).toHaveBeenCalledWith(privateDir, "mounts.json", "file", expect.any(Uint8Array));
+    expect(sendAndArchive).toHaveBeenCalledWith("bob.example.com", expect.any(String), expect.objectContaining({ type: "sys.share.accept" }));
+    // Tried once per session.
+    await expect(autoAcceptContactOffers("alice.example.com")).resolves.toBe(0);
   });
 
   it("revokes immediately even if the best-effort notice fails", async () => {

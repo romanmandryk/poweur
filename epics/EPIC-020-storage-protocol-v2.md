@@ -672,6 +672,10 @@ both edits; a binary conflict yields one conflicted copy; `TestINT_SYNC_01` conv
       Cross-relay browser coverage remains.
 - [x] Key-in-fragment read links in the share dialog, including an optional password, copy and
       immediate revocation; the real-browser journey opens a password link in a clean context
+- [x] Share dialog separates "Share with people" from a collapsed "Share with a link" (and file
+      requests) below an "or"; offers from accepted contacts mount without Accept, strangers'
+      wait under "Waiting for you"; an undelivered offer says why (e.g. the recipient's inbox
+      refused it)
 - [ ] Complete the share dialog with create-only file requests; public folder toggle with a
       plaintext warning; mobile-specific interaction coverage
 - [ ] Thumbnails and previews generated on the client at upload and stored as encrypted
