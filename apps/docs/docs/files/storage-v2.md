@@ -213,6 +213,13 @@ pages and may replace only the last partial page, not the preceding history.
 Manifest canonicalization and its vectors are specified below and pinned in
 `drive-manifests.json`.
 
+A replace commit names the version it replaces as its parent; the relay refuses (`409`) a
+parent that is no longer the head. Editors use this for optimistic saves: `poweur drive put
+--base <version>` exits 3 with `{"error":"conflict","head":…}` when someone saved first, and
+`poweur drive get --version <version>` reads the common base for a three-way merge (see the
+Markdown reference app, EPIC-031 E31-T2). `poweur drive link get <url> <file> [--path]
+[--password]` opens a key-in-fragment link without a Poweur ID, like the web viewer.
+
 Replace commits compare `base_version` to the current head and return `409` with
 the head on mismatch. Creating a node requires a nonexistent ID and an unused
 sibling name hash. A move verifies the destination is not a descendant and changes

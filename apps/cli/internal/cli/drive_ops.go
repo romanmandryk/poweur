@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 )
 
 func runDriveOps(args []string, stdout, stderr io.Writer) int {
-	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch; share add <path> <member> [--no-offer]|rm <id> [--no-rotate]|ls; rotate <path>; accept <offer.json|->; mounts; link create <path>|rm <id> [--no-rotate]; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
+	const usage = "usage: poweur drive history|tail <path> [--from=1]; append <path> <file>; trim <log> <snapshot>; watch [--drive <id>] [--count N] [--timeout D]; share add <path> <member> [--no-offer]|rm <id> [--no-rotate]|ls; rotate <path>; accept <offer.json|->; mounts; link create <path> [--password p]|rm <id> [--no-rotate]|get <url> <local-file> [--path <file-in-folder>] [--password p]; transfer <path> --to <drive> [--into </shared-node-id/path>|--to-node <id>]; any command takes --drive <identity> [--json]"
 	fs := flag.NewFlagSet("drive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	use := fs.String("use-identity", "", "identity")
@@ -33,6 +34,9 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 	expires := fs.String("expires", "", "RFC3339 expiry")
 	noOffer := fs.Bool("no-offer", false, "share or revoke without messaging the member")
 	noRotate := fs.Bool("no-rotate", false, "revoke without re-keying the node (writes there wait for `drive rotate`)")
+	count := fs.Int("count", 0, "watch: exit after this many change events (the ready event not counted)")
+	inside := fs.String("path", "", "link get: a file inside a linked folder")
+	timeout := fs.Duration("timeout", 0, "watch: exit after this long (e.g. 30s)")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--no-offer": true, "--no-rotate": true})) != nil {
 		return 1
 	}
@@ -52,16 +56,46 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		client := &driveclient.Client{Relay: cfg.RelayURL, Identity: name, Key: key}
+		// A drive shared with you streams from the owner's relay.
+		if drive := strings.ToLower(strings.TrimSpace(*target)); drive != "" && drive != name {
+			relay, err := identityRelayURL(ctx, cfg, drive)
+			if err != nil {
+				return fail(err)
+			}
+			client.Relay, client.Drive = relay, drive
+		}
+		if *timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, *timeout)
+			defer cancel()
+		}
+		seen := 0
+		errEnough := errors.New("enough events")
 		err := client.Subscribe(ctx, func(event driveclient.Event) error {
+			if event.Type != "ready" {
+				seen++
+			}
 			if *jsonOut {
 				raw, _ := json.Marshal(event)
 				fmt.Fprintln(stdout, string(raw))
-				return nil
+			} else {
+				fmt.Fprintf(stdout, "%s %s\n", event.Type, event.Timestamp)
 			}
-			fmt.Fprintf(stdout, "%s %s\n", event.Type, event.Timestamp)
+			if *count > 0 && seen >= *count {
+				return errEnough
+			}
 			return nil
 		})
-		if err != nil && ctx.Err() == nil {
+		switch {
+		case errors.Is(err, errEnough):
+			return 0
+		case *count > 0 && seen < *count:
+			// Asked for events that did not come: the stream ended or timed out.
+			if err == nil {
+				err = errors.New("the change stream ended")
+			}
+			return fail(err)
+		case err != nil && ctx.Err() == nil:
 			return fail(err)
 		}
 		return 0
@@ -161,6 +195,18 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 		if fs.NArg() < 1 {
 			fmt.Fprintln(stderr, usage)
 			return 1
+		}
+		// Opening a link needs no identity: it is what someone without an ID does.
+		if fs.Arg(0) == "get" {
+			if fs.NArg() != 3 {
+				fmt.Fprintln(stderr, usage)
+				return 1
+			}
+			result, err := runLinkGet(ctx, fs.Arg(1), *inside, *password, fs.Arg(2), stderr)
+			if err != nil {
+				return fail(err)
+			}
+			return writeOutput(stdout, *jsonOut, result, result["path"]+"\n")
 		}
 		files, ok := openDriveFiles(*use, *target, stderr)
 		if !ok {

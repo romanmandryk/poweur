@@ -32,3 +32,10 @@ func ResetDNSResolver() { identity.ResetResolver() }
 func ConfigureIdentityResolver(scheme string, allowPrivate bool, dialAddr string) {
 	identity.ConfigureResolver(scheme, allowPrivate, dialAddr, nil)
 }
+
+// ConfigureIdentityResolverHosts is ConfigureIdentityResolver for tests with
+// several relays: dialHost maps an identity host to the relay address serving
+// it (an empty answer dials the host itself).
+func ConfigureIdentityResolverHosts(scheme string, allowPrivate bool, dialHost func(host string) string) {
+	identity.ConfigureResolverHosts(scheme, allowPrivate, dialHost)
+}

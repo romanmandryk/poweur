@@ -877,6 +877,28 @@ func (f *Files) Read(ctx context.Context, file *File, writer io.Writer) error {
 	return nil
 }
 
+// ReadVersion writes the plaintext of an earlier version of file. The
+// version must come from the file's current key generation: versions written
+// before a key rotation were encrypted with keys this client no longer holds.
+func (f *Files) ReadVersion(ctx context.Context, file *File, version string, writer io.Writer) error {
+	if version == file.Manifest.Version {
+		return f.Read(ctx, file, writer)
+	}
+	m, err := f.version(ctx, file.Manifest.Node, version)
+	if err != nil {
+		return err
+	}
+	if m.Generation != file.Manifest.Generation {
+		return errors.New("version predates a key rotation")
+	}
+	if m.Mode != protocol.ModeReplace {
+		return errors.New("version has no readable content")
+	}
+	old := *file
+	old.Manifest = m
+	return f.Read(ctx, &old, writer)
+}
+
 // ReadRange writes plaintext bytes [offset, offset+length). Files written by
 // this client use fixed MaxPlaintext chunks, so earlier chunks are not
 // downloaded. A short chunk before the last one of the file is refused.

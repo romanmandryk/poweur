@@ -5,10 +5,14 @@
 package relay
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"github.com/poweur/api/internal/config"
 	"github.com/poweur/api/internal/dns"
+	"github.com/poweur/api/internal/drive"
+	"github.com/poweur/api/internal/drive/provider"
 	irelay "github.com/poweur/api/internal/relay"
 	"github.com/poweur/api/internal/telemetry"
 )
@@ -54,4 +58,38 @@ func NewServer(cfg Config, resolver Resolver, providers *ProviderFactory) *Serve
 // passing to httptest.NewServer.
 func Router(s *Server) http.Handler {
 	return s.Router()
+}
+
+// WalkStore calls fn with the key and bytes of every object in cfg's drive
+// store (the filesystem under POWEUR_DATA, or the S3 bucket and prefix). It is
+// for tests and audits that must see exactly what the relay persisted, such
+// as the privacy scans of the reference-app scenarios.
+func WalkStore(ctx context.Context, cfg Config, fn func(key string, data []byte) error) error {
+	store, err := drive.Open(cfg)
+	if err != nil || store == nil {
+		return err
+	}
+	cursor := ""
+	for {
+		page, err := store.List(ctx, "", cursor, 1000)
+		if err != nil {
+			return err
+		}
+		for _, info := range page.Objects {
+			object, err := store.Get(ctx, info.Key, nil)
+			if errors.Is(err, provider.ErrNotFound) {
+				continue // removed while we walked
+			}
+			if err != nil {
+				return err
+			}
+			if err = fn(info.Key, object.Data); err != nil {
+				return err
+			}
+		}
+		if page.Next == "" {
+			return nil
+		}
+		cursor = page.Next
+	}
 }

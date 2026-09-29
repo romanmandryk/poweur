@@ -144,7 +144,13 @@ func run() int {
 		logger.Error("invalid relay configuration", "error", err.Error())
 		return 1
 	}
-	server := relay.NewServer(cfg, dns.NewNetResolver(), dns.NewProviderFactory(cfg))
+	var resolver dns.Resolver = dns.NewNetResolver()
+	// Several local relays reach each other's hosted identities through a
+	// hosts file (tests, development); never with the SSRF guard on.
+	if path := os.Getenv("RESOLVER_HOSTS_FILE"); path != "" && cfg.ResolverAllowPrivate {
+		resolver = &dns.HostsFileResolver{Path: path, Next: resolver}
+	}
+	server := relay.NewServer(cfg, resolver, dns.NewProviderFactory(cfg))
 	if err := server.DriveError(); err != nil {
 		logger.Error("drive storage unavailable", "error", err.Error())
 		return 1

@@ -1,6 +1,6 @@
 # EPIC-031 — Headless reference apps: collaboration scenarios as the acceptance gate
 
-- **Status:** proposed
+- **Status:** in progress — T1 (harness) and T2 (Markdown documents) done
 - **Priority:** P0 — gates [EPIC-020](EPIC-020-storage-protocol-v2.md) waves 2–3 and
   [EPIC-009](EPIC-009-messaging-upgrades.md) T7–T10
 - **Depends on:** EPIC-020 (drive, shares, append logs, sealed appends, CLI), EPIC-009 T7–T10
@@ -14,8 +14,8 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E31-T1 Scenario harness & topology matrix | **open** | actors on one relay, across relays, Go CLI / Go SDK / TS SDK; privacy scan; fault injection |
-| E31-T2 Collaborative Markdown documents | **open** | doc folder, concurrent edits + merge, comment-only member, links, revocation |
+| E31-T1 Scenario harness & topology matrix | **done** | `apps/integration/scenario_harness_test.go`: CLI actors (Go SDK underneath) on same/cross-relay × fs/S3 (MinIO via `POWEUR_TEST_S3_*`); privacy scan over the provider (`relay.WalkStore`); relay restart, dropped SSE; TS `startRelays()` + `scenario-cross-relay.test.ts`; `make refapps` / `pnpm refapps:test` |
+| E31-T2 Collaborative Markdown documents | **done** | `refapps/docs` (layout, comment reducer, paragraph three-way merge) + `TestE31_T2_CollaborativeMarkdown` in every topology and provider |
 | E31-T3 Personal site, contact & newsletter | **open** | public folder, `contact.message`, `list.subscribe`, anonymous senders, follow feed |
 | E31-T4 Form → CSV | **open** | sealed appends from link and ID respondents, caps, proof-of-work, one response per ID |
 | E31-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, Space hosting, transfer |
@@ -68,13 +68,19 @@ worked around in the app.
 
 ### E31-T1 — Scenario harness & topology matrix
 
-- [ ] Actor abstraction and scenario runner in `apps/integration` (in-process relays, fake DNS,
-      CLI subprocess and Go SDK actors); topology and provider matrix as table-driven subtests
-- [ ] TS side: `packages/client-ts/test/helpers/relay.ts` starts two relays with a resolver
-      override so TS actors can run cross-relay
-- [ ] Privacy scanner over a provider's stored objects; fault injection: actor offline/online,
-      relay restart with caches wiped, dropped SSE connection
-- [ ] `make refapps` / `pnpm refapps:test` entry points; runs in CI with the integration suite
+- [x] Actor abstraction and scenario runner in `apps/integration` (in-process relays, fake DNS,
+      CLI actors in-process — the Go SDK underneath; a subprocess cannot see the in-memory DNS
+      zone); topology and provider matrix as table-driven subtests. Test relays and the CLI
+      resolver dial each identity's own relay through the zone, so hosted identities work
+      across relays.
+- [x] TS side: `startRelays(n)` in `packages/client-ts/test/helpers/relay.ts` shares a hosts
+      file between relays (`RESOLVER_HOSTS_FILE`, honoured only with `RESOLVER_ALLOW_PRIVATE`)
+      and gives clients a Host-routing `fetch`
+- [x] Privacy scanner over a provider's stored objects (`relay.WalkStore`, fs and S3; an empty
+      store fails the scan); fault injection: relay restart with caches wiped, dropped SSE
+      connection. Offline work is a save from an old base: the conflict/merge path (T2).
+- [x] `make refapps` / `pnpm refapps:test` entry points; the scenarios are ordinary
+      integration tests, so CI runs them with the suite (S3 leg when `POWEUR_TEST_S3_ENDPOINT` is set)
 
 **Acceptance:** a trivial two-actor scenario (share a file, edit, read back) passes in every
 topology and provider, and the privacy scanner catches a deliberately planted plaintext file.
@@ -97,6 +103,32 @@ one; create a password-protected read link and open it without an account; revok
 - Bob on relay B sees Alice's edit through the change stream without polling
 - the anonymous link reader decrypts the doc in a clean client; the relay never saw the key
 - after revocation Bob cannot read, and his cached keys do not open newer versions
+
+**Done.** `apps/integration/refapps/docs` + `TestE31_T2_CollaborativeMarkdown`. The CLI keeps no
+node keys between commands, so "cached keys" is covered cryptographically by `INT_DRIVE_08`
+(rotation on revoke); here Bob's reads fail after revocation and Carol keeps reading.
+Adjacent-paragraph edits by two people merge paragraph by paragraph; the same paragraph becomes
+a labelled conflict block holding both versions.
+
+| User action | `poweur` command | SDK |
+|---|---|---|
+| Create the doc folder | `drive mkdir /Docs/<title>` | `Files.Create(folder)` |
+| Write / edit `doc.md` | `drive put <local> /Docs/<title>/doc.md [--base <version>]` | `Files.Create` / `Files.Replace` |
+| Add an image | `drive put <img> /Docs/<title>/assets/<name>` | `Files.Create` |
+| Share with an editor / reader | `drive share add <folder> <id> --role write\|read` | `Files.ShareWith` |
+| Comment-only on the log | `drive share add <folder>/comments.jsonl <id> --role append` | `Files.ShareWith` |
+| Accept an offer (mount) | `inbox`, then `drive accept <offer.json>` | offer verify + mounts |
+| Watch for changes | `drive watch --drive <owner> [--count N] [--timeout D]` | `Client.Subscribe` |
+| Save loses a race | `drive put … --base <v>` exits 3 with `{"error":"conflict","head":…}` | relay `409` on a stale parent |
+| Merge and save | `drive get … --version <base>` + `drive get …`, `docs.Merge`, `drive put … --base <head>` | `Files.ReadVersion` |
+| Comment / resolve | `drive append <folder>/comments.jsonl <record.json>` | `Files.Append`, `docs.Reduce` |
+| Read comments | `drive tail <folder>/comments.jsonl` | `Files.Tail` |
+| List versions / restore | `drive history <doc>`; `drive get <doc> <out> --version <v>` + `drive put` | `Client.History`, `Files.ReadVersion` |
+| Password read link | `drive link create <folder> --password <p>` | `Files.Link` |
+| Open it with no account | `drive link get <url> <out> --path doc.md --password <p>` | link client (`LinkID`, verifier) |
+| Revoke an editor | `drive share ls`, `drive share rm <id>` (rotates keys) | `Client.Unshare` + `Rotate` |
+
+Members address a shared folder by node ID: `/<folder-node>/doc.md` with `--drive <owner>`.
 
 ### E31-T3 — Personal site, contact & newsletter
 

@@ -6,7 +6,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -109,4 +110,72 @@ export async function startRelay(
   }
 
   return { baseUrl, address, port, dataDir, stop, child };
+}
+
+/**
+ * Several relays that reach each other's hosted identities (E31-T1): they
+ * share a hosts file (`RESOLVER_HOSTS_FILE`, honoured only with
+ * `RESOLVER_ALLOW_PRIVATE`), and `host()` records which relay serves an
+ * identity. `fetch` does the same for clients: an identity's well-known
+ * document is fetched from its relay with the identity as Host (Node's fetch
+ * drops a custom Host header, so this uses node:http).
+ */
+export interface RelayNetwork {
+  relays: RunningRelay[];
+  host(identity: string, relay: RunningRelay): void;
+  fetch: typeof globalThis.fetch;
+  stop(): void;
+}
+
+export async function startRelays(count: number, options: { env?: Record<string, string> } = {}): Promise<RelayNetwork> {
+  const dir = mkdtempSync(join(tmpdir(), "poweur-ts-hosts-"));
+  const hostsFile = join(dir, "hosts.json");
+  const hosts: Record<string, string> = {};
+  writeFileSync(hostsFile, "{}");
+  const relays: RunningRelay[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      relays.push(await startRelay({ env: { RESOLVER_HOSTS_FILE: hostsFile, ...(options.env ?? {}) } }));
+    }
+  } catch (error) {
+    relays.forEach((relay) => relay.stop());
+    throw error;
+  }
+  const routedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input.toString() : input.url);
+    const address = hosts[url.hostname.toLowerCase()];
+    if (!address) return globalThis.fetch(input, init);
+    const [host, port] = address.split(":");
+    return new Promise<Response>((resolve, reject) => {
+      const request = httpRequest(
+        { host, port: Number(port), path: url.pathname + url.search, method: init?.method ?? "GET", headers: { ...(init?.headers as Record<string, string>), Host: url.host } },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () => {
+            const headers = new Headers();
+            for (const [name, value] of Object.entries(response.headers)) {
+              if (typeof value === "string") headers.set(name, value);
+            }
+            resolve(new Response(response.statusCode === 204 || response.statusCode === 304 ? null : Buffer.concat(chunks), { status: response.statusCode ?? 500, headers }));
+          });
+        },
+      );
+      request.on("error", reject);
+      init?.signal?.addEventListener("abort", () => request.destroy(new Error("aborted")));
+      request.end();
+    });
+  }) as typeof globalThis.fetch;
+  return {
+    relays,
+    host(identity, relay) {
+      hosts[identity.toLowerCase()] = relay.address;
+      writeFileSync(hostsFile, JSON.stringify(hosts));
+    },
+    fetch: routedFetch,
+    stop() {
+      relays.forEach((relay) => relay.stop());
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }

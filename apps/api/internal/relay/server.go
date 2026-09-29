@@ -1329,9 +1329,11 @@ func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) 
 
 // virtualHostClient dials this relay's address while preserving the request Host,
 // so well-known fetches work in tests (and any setup) where the identity FQDN
-// is not in system DNS but is Host-routed on this relay.
+// is not in system DNS but is Host-routed on this relay. When the resolver maps
+// the host to a host:port (several relays in one test), that relay is dialed.
 func (s *Server) virtualHostClient() *http.Client {
 	dialAddr := s.cfg.RelayAddress
+	resolver := s.resolver
 	return &http.Client{
 		Timeout: idpkg.DefaultTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -1339,7 +1341,15 @@ func (s *Server) virtualHostClient() *http.Client {
 		},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, dialAddr)
+				target := dialAddr
+				if host, _, err := net.SplitHostPort(addr); err == nil && resolver != nil {
+					if hosts, err := resolver.LookupHost(ctx, host); err == nil && len(hosts) > 0 {
+						if _, _, err := net.SplitHostPort(hosts[0]); err == nil {
+							target = hosts[0]
+						}
+					}
+				}
+				return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, target)
 			},
 		},
 	}
