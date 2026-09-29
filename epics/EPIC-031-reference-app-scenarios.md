@@ -1,6 +1,6 @@
 # EPIC-031 — Headless reference apps: collaboration scenarios as the acceptance gate
 
-- **Status:** in progress — T1 (harness) and T2 (Markdown documents) done
+- **Status:** in progress — T1 (harness), T2 (Markdown documents), Tasks and the Guestbook relying party done
 - **Priority:** P0 — gates [EPIC-020](EPIC-020-storage-protocol-v2.md) waves 2–3 and
   [EPIC-009](EPIC-009-messaging-upgrades.md) T7–T10
 - **Depends on:** EPIC-020 (drive, shares, append logs, sealed appends, CLI), EPIC-009 T7–T10
@@ -16,6 +16,8 @@
 |------|--------|-------|
 | E31-T1 Scenario harness & topology matrix | **done** | `apps/integration/scenario_harness_test.go`: CLI actors (Go SDK underneath) on same/cross-relay × fs/S3 (MinIO via `POWEUR_TEST_S3_*`); privacy scan over the provider (`relay.WalkStore`); relay restart, dropped SSE; TS `startRelays()` + `scenario-cross-relay.test.ts`; `make refapps` / `pnpm refapps:test` |
 | E31-T2 Collaborative Markdown documents | **done** | `refapps/docs` (layout, comment reducer, paragraph three-way merge) + `TestE31_T2_CollaborativeMarkdown` in every topology and provider |
+| Tasks (v1 PCP-0007 successor) | **done** | `refapps/tasks`: a project is an event log (`events.jsonl`) folded by a last-writer-wins reducer; PCP-0007 status vocabulary and unknown-field preservation; `TestE31_Tasks` (offline edits by two members converge, read-only observer refused, typed assignment notice, late joiner, revocation) in every topology and provider. The Kanban scenario (T5) builds on it |
+| Guestbook relying party | **done** | `refapps/guestbook`: the v1 "Sign in with Poweur ID" reference site restored without the retired WebDAV grant (entries stay with the site); its unit suite plus `TestINT_SIGNIN_01/02` (CLI approval cross-device; same-device approval finishes only in the starting browser) |
 | E31-T3 Personal site, contact & newsletter | **open** | public folder, `contact.message`, `list.subscribe`, anonymous senders, follow feed |
 | E31-T4 Form → CSV | **open** | sealed appends from link and ID respondents, caps, proof-of-work, one response per ID |
 | E31-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, Space hosting, transfer |

@@ -56,7 +56,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-028](EPIC-028-managed-sovereign-hosting.md) | Managed, dedicated, customer-cloud & sovereign hosting (+ secondary inbox, backup & directory for self-hosters) | Enterprise / Infra | proposed; demand-led | E13, E20, E26 |
 | [EPIC-029](EPIC-029-poweur-apps-platform.md) | Poweur Apps: publish, open and share local-first apps (game kit included) | Ecosystem / Developers | proposed; after the E25 reference editor | E08, E06, E25, E17 |
 | [EPIC-030](EPIC-030-creator-commerce.md) | Creator commerce: paid shares, subscriptions, tips, channels & paid apps | Payments / Commercial | proposed; demand-led | E16, INT-002, E05, E26 |
-| [EPIC-031](EPIC-031-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | in progress (T1 harness, T2 Markdown done), **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
+| [EPIC-031](EPIC-031-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | in progress (T1 harness, T2 Markdown, Tasks, Guestbook done), **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
 | [EPIC-032](EPIC-032-public-web-feeds-boards-indexers.md) | Public web: feeds, following, community boards & indexers | Social / Growth | proposed | E20, E09, E14, E24, E31 |
 
 ## Integration epics (`integrations/`)
