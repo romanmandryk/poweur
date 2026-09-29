@@ -153,27 +153,42 @@ as the test reference; retain already ported temporary system-file tests as regr
       live-relay tests cover reads/writes and rejection after session revocation.
 - [x] Integration HISTORY_01: an inbox drain and a sent copy land in per-peer append
       logs, a second pickup does not duplicate them, and the provider holds no plaintext.
-      HISTORY_02–05, TYPED_07, DEVICES_01–02, SIGNIN_01 and ABUSE_03 remain open.
+      HISTORY_02–04, TYPED_07, DEVICES_01, SIGNIN_01 (as consent-log assertions in
+      `INT_OAUTH_02`) and ABUSE_03 are restored on v2 (`history_restore_test.go`,
+      `devices_restore_test.go`, `abuse_restore_test.go`); HISTORY_05's sealed-archive check is
+      `INT_HISTORY_01`'s plaintext scan. DEVICES_02 tested the v1 sync cursor and returns with
+      E20-T9.
       The full profile/web/cross-relay avatar acceptance remains below.
 - [ ] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP;
       the removed test depended directly on the retired Guestbook server.
 - [x] Go/TS history cursors: relay author cursors, TS `older`/`before`/`hasOlder` paging.
-- [ ] SDK history journeys and the private sign-in consent log.
+- [x] SDK history journeys (both sides, unread to zero and back, anonymous stays anonymous and
+      persists, sealed on the relay) and the private sign-in consent log: it was being dropped on
+      v2 (private system paths are refused) and now is an encrypted append log on the drive
+      (`DriveJsonLog`, `client.consentLog()`, CLI `auth log`), read by Settings → Connected apps.
 - [x] Web durability (`durability.spec.js`): received and sent messages and read state
       survive a reload with no on-device snapshot (the drive archive alone), and the relay's
       store holds none of the plaintext. Still open below: anonymous history persistence.
-- [ ] Web durability, remaining: anonymous history persists. Restore the
+- [x] Web durability, remaining: anonymous history persists (SDK journey and `INT_HISTORY_04`
+      read it back on another device). Restore the
       conversation paging-after-reload and journey per-identity archive-isolation
       assertions and the stranger/contact tray persistence journey removed from the
       still-active messaging browser suites.
-- [ ] Profile editor/avatar persistence, public lookup and OAuth picture claim, peer avatar
-      visibility on a different relay.
+- [x] Profile editor/avatar persistence and public lookup (`profile.spec.js`: saved photo and
+      name back after a reload with the device's avatar cache cleared; photo served from the
+      identity host) and the OAuth `name`/`picture` claims (`INT_PROFILE_03`: the bridge fetches
+      the profile like any peer and the picture URL serves the photo).
 - [x] Encrypted attachment upload/open: CLI send/save keeps name, MIME and bytes out of
       the provider (`INT_ATTACH_01`); the web sends and opens them (`attachments.spec.js`,
       SDK live test incl. a snoop and a tampered hash); 20 MB across two relays
       (`INT_ATTACH_02`). TS↔Go cross-client coverage stays open (same format by construction).
-- [ ] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
-      analytics consent, group create/add/remove and quota display on v2.
+- [x] Contacts, policy, blocks export/import, devices/session revocation, connected apps,
+      analytics consent, group create/add/remove and quota display on v2: blocks export/import
+      was broken (system-file path outside `.poweur`) and now publishes to `/shared/blocks.json`
+      on the drive and imports through a share (`INT_ABUSE_03`); quota shows in Settings and as
+      a warning from 90% with a clear full-storage message (web unit tests); the rest is covered
+      by `CONTACTS_02/04`, `GROUP_01`, `DEVICES_01/03`, `policy.spec.js`, `analytics.spec.js`
+      and the connected-apps unit tests.
 
 Files/sharing/attachment/durability browser suites that still invoked removed DAV APIs
 are removed during Phase 0. Files, direct-share and link UI suites return in E20-T10;

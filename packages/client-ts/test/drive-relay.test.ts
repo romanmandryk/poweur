@@ -17,6 +17,9 @@ import { resolveEncryptionKey, resolveSigningKey } from "../src/resolve.js";
 import { RelayClient } from "../src/http.js";
 import { get as httpGet } from "node:http";
 import { MessageHistory } from "../src/history.js";
+import { DriveJsonLog } from "../src/drive/jsonlog.js";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { Decryptor } from "../src/crypto/keys.js";
 import { fromBase64 } from "../src/encoding.js";
 import { startRelay, type RunningRelay } from "./helpers/relay.js";
@@ -424,4 +427,18 @@ it("publishes a public folder that anyone reads at /pub", async () => {
   const secret = await owner.create(root, `secret${Date.now().toString(36)}.txt`, "file", new TextEncoder().encode("private"));
   await expect(owner.move(secret, site, "secret.txt")).rejects.toThrow("publishing needs a copy");
   await expect(owner.createPublic(site, "nested", "folder")).resolves.toMatchObject({ public: true });
+});
+
+it("keeps the sign-in consent log encrypted on the drive", async () => {
+  const erin = await createTestIdentity(relay.baseUrl, "consent");
+  const log = await erin.client.consentLog();
+  expect(await log.recent()).toEqual([]);
+  await log.append({ at: "2026-09-29T12:00:00Z", action: "signin", audience: "https://secret-app.example", signer: "web" });
+  await log.append({ at: "2026-09-29T12:01:00Z", action: "signin", audience: "https://second-app.example", signer: "web" });
+  expect((await log.recent(1)).map((r) => r.audience)).toEqual(["https://second-app.example"]);
+  // Another device reads it; the relay's store never holds it in the clear.
+  const other = new DriveJsonLog<Record<string, unknown>>(new DriveFiles(new DriveClient(erin.client.relay, erin.client.signer), fileKeys(erin.keys.signingPrivateKey, erin.keys.encryptionPrivateKey!)), ".poweur/private/logs/auth.log");
+  expect((await other.recent()).map((r) => r.audience)).toEqual(["https://secret-app.example", "https://second-app.example"]);
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => { const path = join(dir, name); return statSync(path).isDirectory() ? walk(path) : [path]; });
+  for (const path of walk(relay.dataDir)) expect(readFileSync(path).includes("secret-app.example"), path).toBe(false);
 });
