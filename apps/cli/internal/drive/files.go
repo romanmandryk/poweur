@@ -35,10 +35,10 @@ type Files struct {
 	// GroupKeys holds, per group the caller belongs to, the group's epoch
 	// private keys newest first (EPIC-024 E24-T3): a share to that group
 	// is the caller's share too.
-	GroupKeys map[string][][]byte
-	shares         []protocol.Share
-	sharesLoaded   bool
-	nodeShares     map[string][]protocol.Share
+	GroupKeys    map[string][][]byte
+	shares       []protocol.Share
+	sharesLoaded bool
+	nodeShares   map[string][]protocol.Share
 	// opened holds decrypted nodes, reused while their head is unchanged.
 	opened map[string]*File
 }
