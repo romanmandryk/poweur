@@ -486,7 +486,7 @@ and can neither list the folder nor read any submission — including their own.
 
 **Implemented groups as members.** A share may name a group identity hosted on the same
 relay; its signed, verified roster (`.poweur/relay/group.json`) decides who the share
-reaches — members and admins alike. On a group identity's own drive (a Space), roster admins
+reaches — members and admins alike. On a group identity's own drive (the group folder), roster admins
 act with `admin` everywhere and a share may name the group itself to reach every member. The
 engine reads rosters from a relay cache that never touches a drive (warmed at start-up and on
 first use, replaced when the relay accepts a new roster). A roster update that drops anyone

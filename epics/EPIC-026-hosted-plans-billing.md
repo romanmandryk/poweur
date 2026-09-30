@@ -101,7 +101,7 @@ abuse suspension (T6).
 ### Organization is commercial ownership, not identity authority
 
 An organization owns subscriptions, pooled allocations and administrative assignments. Poweur
-group identities and Space roles remain signed collaboration authority. An organization admin may
+group identities and group roles remain signed collaboration authority. An organization admin may
 allocate service resources or suspend hosting, but does not automatically receive a user's private
 keys or decrypt their data.
 
@@ -222,7 +222,7 @@ without making an admin a key holder.
       Nextcloud, …) with group claims derived from org roles.
 - [ ] Opt-in org recovery: an admin quorum as an E11 social-recovery guardian for org-issued IDs
       only; never for linked personal IDs.
-- [ ] Offboarding: org-owned Space content stays with the org, member grants/devices under the
+- [ ] Offboarding: org-owned group content stays with the org, member grants/devices under the
       org domain are revoked, personal IDs are untouched.
 
 **Acceptance:** an admin provisions three `*.acme.com` members, one signs into a Forgejo instance

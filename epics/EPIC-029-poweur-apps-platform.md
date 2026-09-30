@@ -7,7 +7,7 @@
   drive handles, event-log helper, sealed appends), EPIC-009 T7–T8 (intent types, typed
   routing); the [EPIC-031](EPIC-031-reference-app-scenarios.md) headless apps are the proving
   ground and become templates (E29-T9)
-- **Interacts with:** EPIC-024 (Apps slot in a Space), EPIC-010-T5 (directory/trust surface),
+- **Interacts with:** EPIC-024 (Apps slot in a group), EPIC-010-T5 (directory/trust surface),
   EPIC-027-T7 (neutral hosted authorities), EPIC-030 (paid apps), EPIC-026 (egress entitlements)
 - **Unlocks:** third-party apps with no backend; multiplayer games; whiteboard/design/co-editing
   tools by people other than us; the "everything app" feel from many small apps
@@ -62,7 +62,7 @@ platform. This epic is that platform, built only once the editor shows the layer
   drive key** — the host frame encrypts and decrypts.
 - **Storage access like Google Drive's `drive.file`.** An app sees the folder created for it at
   install plus the nodes the user explicitly opens with it; nothing else. Shared state lives in
-  one host drive (the creator's or a Space's) and collaborators reach it through shares
+  one host drive (the creator's or a group's) and collaborators reach it through shares
   (EPIC-020 "Who hosts and who pays").
 - **Collaboration pattern.** Most apps are an append-file event log folded by a deterministic
   reducer plus snapshots (EPIC-020 "Append files as ordered event logs"); the bridge exposes the
@@ -110,7 +110,7 @@ platform. This epic is that platform, built only once the editor shows the layer
 - [ ] Consent screen with publisher ID, permissions and conventions; the app's folder is created
       where the user chooses (default `Apps/<app name>/`, an ordinary folder); picker grants
       recorded per node; the record of what each app may touch lives in `.poweur/private/apps/`;
-      launcher tile; pin into a Space's Apps slot (EPIC-024).
+      launcher tile; pin into a group's Apps slot (EPIC-024).
 
 **Acceptance:** install → use → revoke is fully visible in the "what can touch my home" panel.
 

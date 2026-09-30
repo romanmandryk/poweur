@@ -96,7 +96,7 @@ Phase 0; no drive engine/provider existed at that checkpoint.
       durable download caps, hourly caps) and share caps charged durably per share.
 - [x] Phase 7 slice 3: anonymous writes through links with self-certifying guest authors
       and proof-of-work; file requests (`INT_DRIVE_03`).
-- [x] Phase 7 slice 4: groups as members and Spaces; roster removals journal group
+- [x] Phase 7 slice 4: groups as members; roster removals journal group
       revocations that force rotation.
 - [x] Phase 7 source retirement and link forwarding (commit `e17fddb`), with a
       follow-up authorization fix: moved-node destinations require read access,
@@ -435,10 +435,10 @@ enforces the `append` or `create` role, caps and proof-of-work, and never reads 
 - **Shared app state:** exactly one host drive — by default the creator's. Every member's
   writes count against the host's quota (as files in Google Drive count against their owner),
   so shares carry **per-member and per-link caps** (bytes, records, rate).
-- **Team or long-lived state:** hosted by a **group identity** (an EPIC-024 Space) whose drive
+- **Team or long-lived state:** hosted by a **group identity** (an EPIC-024 group) whose drive
   is billed to an organization or a sponsoring member (EPIC-026 pooled storage), so no single
   member leaving takes it down.
-- **Ownership transfer** moves a subtree between drives (a person → a Space, or to another
+- **Ownership transfer** moves a subtree between drives (a person → a group, or to another
   person): ciphertext chunks are copied, the subtree root key is re-sealed, shares are
   re-issued by the new owner. Nothing is decrypted by the relay.
 - **Public-facing inputs** (forms, contact, signups) are paid by the owner and bounded by
@@ -648,13 +648,13 @@ invalid edit is rejected with a readable reason and never half-applied.
       authors, `INT_DRIVE_03`)
 - [ ] Claim flow from E05-T6 and Send (E05-T7) as links on sealed files (clients)
 - [x] Groups as members; membership change rotates keys (groups hosted on the same relay;
-      Space admins administer the group's drive)
+      group admins administer the group's drive)
 - [x] Remote groups as members: members present the signed roster, checked against the
       group relay's public epoch; newer rosters revoke departed members (`INT_DRIVE_05`)
 
 **Acceptance:** `TestINT_SHARE_*` equivalents pass on v2; a member with `append` on a file and
 no read cannot read it; an anonymous link writer is stopped by caps and proof-of-work; a
-board transferred from a person to a Space keeps its members and links; a revoked member's cached keys do
+board transferred from a person to a group keeps its members and links; a revoked member's cached keys do
 not open post-revocation writes; a link opens in a clean browser and the relay's logs and
 store never contain the key or password.
 

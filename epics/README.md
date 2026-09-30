@@ -49,7 +49,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-021](EPIC-021-web-app-rewrite-react-tailwind.md) | React + Tailwind web app rewrite and `/app/` cutover | Web / UX | **complete** (T1–T14; the React app is `apps/web`, served at `/app/`; legacy app removed) | E15, E17, E19 |
 | [EPIC-022](EPIC-022-oauth-oidc-indieauth-bridge.md) | Generic OAuth 2.0 / OIDC bridge with IndieAuth compatibility | Auth / Ecosystem | in progress (T1–T7, T9–T10 done; T8 partial — conformance, additional live clients and remaining operations work) | E01, E08, E13 |
 | [EPIC-023](EPIC-023-email-bridge.md) | Email bridge: `john@poweur.net` for opted-in IDs, Emails tray, pluggable outbound | Messaging / Growth | proposed | E01, E06, E07, E09, E13, E14 |
-| [EPIC-024](EPIC-024-spaces-collaborative-workspaces.md) | Spaces: group identity + files + discussion + activity as one collaborative object | Collaboration / Product | proposed | E05-T3, E09, E17 |
+| [EPIC-024](EPIC-024-groups.md) | Groups: a Poweur ID people share — members, group chat, group folder, group key; owner/admins; ownership transfer | Collaboration / Product | in progress (T3 group key), P1 | E05, E09, E20, E17 |
 | [EPIC-025](EPIC-025-realtime-collaboration.md) | Real-time collaboration protocol & collaborative Markdown reference editor | Collaboration / Protocol | proposed | E20, E24, E17 |
 | [EPIC-026](EPIC-026-hosted-plans-billing.md) | Hosted accounts, organizations, plans, entitlements & billing | Commercial / Hosted service | proposed | E02, E03, E13, E18 |
 | [EPIC-027](EPIC-027-hosted-agent-runtime.md) | Hosted automation & agent runtime | Agents / Commercial / Infra | proposed after local-runner validation | E10, E20, E26 |
@@ -165,12 +165,12 @@ EPIC-009 + EPIC-007 + EPIC-014 + EPIC-013 ──► EPIC-023 (email bridge)
                    ├─ outbound `email.send` gated by quotas + the E14 PoW primitive
                    └─ growth loops: footer, invites, email → native E2E thread upgrade
 
-EPIC-005-T3 + EPIC-009 + EPIC-017 ──► EPIC-024 (Spaces)
+EPIC-005-T3 + EPIC-009 + EPIC-017 ──► EPIC-024 (groups)
                    ├─ composes a group identity, shared root and thread; no second ACL system
                    ├─ owns invitations, membership roles, activity, comments and mentions
                    └─ gives files/messages/agents one user-facing collaborative object
 
-EPIC-020 + EPIC-024 + EPIC-017 ──► EPIC-025 (real-time collaboration)
+EPIC-020 + EPIC-017 ──► EPIC-025 (real-time collaboration; group folders via EPIC-024)
                    ├─ adopts an existing CRDT; storage remains an unopinionated versioned store
                    ├─ separates durable updates from ephemeral presence/cursors
                    ├─ proves the protocol with a collaborative Markdown editor
@@ -228,13 +228,13 @@ organic ID claims. Do not collect filenames, contents or exported social graphs 
 
 ### Next — create the repeat-use product
 
-5. Build **EPIC-024 Spaces** as the coherent home for a group, files, discussion and activity.
+5. Build **EPIC-024 Groups**: a shared Poweur ID with members, a group chat, a group folder and a group key.
 6. Implement **EPIC-023 Email** in parallel only where operational capacity permits; it gives an ID
    immediate usefulness outside the Poweur network and a path back to native conversations.
 7. Execute **INT-000** and the smallest high-leverage integrations before broadening the protocol:
    integration starter kit, WebDAV recipes, OIDC configurations and one visible upstream win.
 
-**Evidence to advance:** Spaces retained over multiple weeks, multiple active members, repeated
+**Evidence to advance:** groups retained over multiple weeks, multiple active members, repeated
 file/message activity, email opt-in and successful third-party sign-ins/integrations.
 
 ### Then — differentiated collaboration
@@ -328,7 +328,7 @@ proprietary.
 - Desktop continuous sync, native Files/Storage integration, mobile push/background sync and store
   releases are unfinished. The web file browser does poll the changes feed while open.
 - The email bridge, general agent/automation
-  runtime, Spaces, real-time collaborative documents, subscriptions, managed hosting, the apps
+  runtime, groups, real-time collaborative documents, subscriptions, managed hosting, the apps
   platform and creator commerce are not implemented.
 - The relay's default inbox policy remains open when no policy document exists for compatibility;
   clients can establish the recommended contacts-and-requests policy during onboarding.
@@ -342,7 +342,7 @@ proprietary.
 - **EPIC-023** adds an isolated email bridge that translates opted-in email traffic into encrypted
   Poweur messages without giving the bridge relay credentials.
 - **EPIC-024 and EPIC-025** compose existing groups, grants, messages and files into portable
-  Spaces, then add explicit CRDT document formats and ephemeral live sessions without making the
+  groups, then add explicit CRDT document formats and ephemeral live sessions without making the
   storage service merge arbitrary files.
 - **EPIC-029 and EPIC-030** open the platform to third-party local-first apps (games included) and
   let identities sell access to their content through signed grants.

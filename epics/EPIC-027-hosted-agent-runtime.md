@@ -4,7 +4,7 @@
 - **Priority:** P2
 - **Depends on:** EPIC-010 (agent identities, SDK, rules and local runner), EPIC-020 (`append`,
   versioned storage), EPIC-026 (entitlements and metering)
-- **Interacts with:** INT-003, INT-005, EPIC-024 (agents in Spaces), EPIC-013 (observability),
+- **Interacts with:** INT-003, INT-005, EPIC-024 (agents in groups), EPIC-013 (observability),
   EPIC-025-T7 / EPIC-029 (neutral authorities for multiplayer apps and games)
 - **Unlocks:** paid scheduled automations, always-on agents and team-controlled execution
 
@@ -48,7 +48,7 @@ action, and the same workflow runs against the local EPIC-010 runner with declar
 
 ### E27-T2 — Sandboxed runner, scheduler & event delivery
 
-- [ ] Durable schedules and subscriptions for typed messages, file changes and Space events.
+- [ ] Durable schedules and subscriptions for typed messages, file changes and group events.
 - [ ] At-least-once delivery with event IDs, idempotency keys, bounded retries, dead-letter state
       and user-visible replay.
 - [ ] CPU, wall time, memory, disk, process, network and concurrency limits enforced outside the

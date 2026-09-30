@@ -1,9 +1,9 @@
 # EPIC-025 — Real-time collaboration protocol & reference editor
 
 - **Status:** proposed
-- **Priority:** P2 (build after Spaces makes collaboration discoverable and usable)
-- **Depends on:** EPIC-020 (append-mode files, version-checked commits, E20-T15 latency), EPIC-024 (Space membership),
-  EPIC-017 (`@poweur/client`)
+- **Priority:** P2 (does not wait for EPIC-024: documents work in any shared folder; a group folder is one)
+- **Depends on:** EPIC-020 (append-mode files, version-checked commits, shares, E20-T15 latency),
+  EPIC-017 (`@poweur/client`); interacts with EPIC-024 (a group folder is where most team documents live)
 - **Interacts with:** EPIC-009 (typed messages/SSE), EPIC-011 (key epochs), EPIC-019 (mobile)
 - **Unlocks:** interoperable co-editing applications, whiteboards and live tools on Poweur;
   the generic room transport that EPIC-029 apps and games build on
@@ -27,7 +27,7 @@
 
 Define the smallest open layer applications need to collaborate live while retaining Poweur's
 identity, federation, sharing and user-owned storage properties. Prove it with one excellent
-collaborative Markdown editor inside a Space.
+collaborative Markdown editor inside a group.
 
 The storage service does **not** merge arbitrary files. Collaborative applications store an
 explicit CRDT update log and snapshots as normal versioned Poweur data. The generic layer covers
@@ -83,14 +83,14 @@ interrupted append loses at most the incomplete frame and never corrupts an earl
 
 ### E25-T3 — Ephemeral live-session transport
 
-- [ ] Session descriptor: document/Space, participant ID, device/session proof, supported
+- [ ] Session descriptor: document/group, participant ID, device/session proof, supported
       protocol versions and expiry.
 - [ ] Awareness messages for join/leave, presence, cursor/selection, typing and app-defined
       transient state; hard size/rate/TTL limits.
 - [ ] Authenticated relay fallback with fan-out only to current authorized participants and no
       insertion into durable inbox/history.
 - [ ] Optional peer transport negotiation through signed signaling; end-to-end encrypt peer and
-      relay awareness traffic under the document/Space key domain.
+      relay awareness traffic under the document/group key domain.
 - [ ] Reconnect switches transports without duplicating durable updates or presenting two copies
       of one device.
 - [ ] Privacy behavior: presence is opt-in per session, not a public identity status.
@@ -100,8 +100,8 @@ disconnecting a client expires its state, and no cursor record appears in durabl
 
 ### E25-T4 — Authorization, encryption & membership changes
 
-- [ ] Map view/comment/edit/manage roles to Space membership and existing grants; document how a
-      standalone shared document works outside a Space.
+- [ ] Map view/comment/edit/manage roles to group membership and existing grants; document how a
+      standalone shared document works outside a group.
 - [ ] Encrypt durable updates and snapshots in the shared key domain; bind every update to an
       authenticated actor/device without exposing plaintext to relays.
 - [ ] Membership epoch transition: distribute the next key, close the old live session and reject
@@ -116,7 +116,7 @@ remaining members continue after rotation and can attribute every durable update
 
 ### E25-T5 — Collaborative Markdown reference application
 
-- [ ] Editor embedded in EPIC-024 Spaces and usable as a standalone shared file.
+- [ ] Editor embedded in EPIC-024 groups and usable as a standalone shared file.
 - [ ] Offline-first create/edit/reconnect with visible sync state and deterministic convergence.
 - [ ] Markdown source plus safe preview, attachments stored in the document's shared root, and
       ordinary `.md` export/import.
@@ -141,7 +141,7 @@ converge; export produces a usable Markdown bundle; removal during editing fails
 
 **Acceptance:** the documented participant and operation targets pass under relay fallback; a
 malicious participant is throttled without corrupting the durable document or starving unrelated
-Spaces.
+groups.
 
 ### E25-T7 — General-purpose rooms API for non-document apps
 
@@ -150,7 +150,7 @@ T3's session transport is useful beyond documents: game moves, shared pointers, 
 app inventing a side channel.
 
 - [ ] Room reference `room:<host-id>/<room-id>` with three binding kinds: `document` (T3/T4
-      authorization), `space` (EPIC-024 membership) and `invite` (signed, expiring invite token
+      authorization), `group` (EPIC-024 membership) and `invite` (signed, expiring invite token
       for ad-hoc sessions such as a game with a friend-of-a-friend, gated by inbox policy).
 - [ ] Topology: clients connect to their own relay, which holds one upstream per remote room to
       the host relay (star, not mesh); the host relay fans out and assigns per-sender sequence

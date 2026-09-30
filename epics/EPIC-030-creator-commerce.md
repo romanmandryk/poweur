@@ -1,6 +1,6 @@
 # EPIC-030 — Creator commerce: paid shares, subscriptions, tips & paid apps
 
-- **Status:** proposed; demand-led — build after sharing, Spaces and identity pages show
+- **Status:** proposed; demand-led — build after sharing, groups and identity pages show
   repeat use and creators ask for it
 - **Priority:** P3
 - **Depends on:** EPIC-016 (payment challenge protocol, hosted gateway and cut accounting — reuse,

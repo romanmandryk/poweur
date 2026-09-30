@@ -115,7 +115,7 @@ supported regional profile and receive evidence matching what the system actuall
 - [ ] Teardown proof covering active data, replicas, backups and retained statutory records.
 
 **Acceptance:** an exit drill moves a dedicated customer to a customer-operated deployment while
-preserving IDs and Space/share references; the former environment is verifiably retired according
+preserving IDs and group/share references; the former environment is verifiably retired according
 to retention policy.
 
 ### E28-T7 — Secondary inbox for independent relays

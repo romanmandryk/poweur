@@ -20,8 +20,8 @@
 | Guestbook relying party | **done** | `refapps/guestbook`: the v1 "Sign in with Poweur ID" reference site restored without the retired WebDAV grant (entries stay with the site); its unit suite plus `TestINT_SIGNIN_01/02` (CLI approval cross-device; same-device approval finishes only in the starting browser) |
 | E31-T3 Personal site, contact & newsletter | **open** | public folder, `contact.message`, `list.subscribe`, anonymous senders, follow feed |
 | E31-T4 Form → CSV | **open** | sealed appends from link and ID respondents, caps, proof-of-work, one response per ID |
-| E31-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, Space hosting, transfer |
-| E31-T6 CRM with shared inbox | **open** | Space-hosted records, shared-inbox identity, email-only customers, member removal |
+| E31-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, group hosting, transfer |
+| E31-T6 CRM with shared inbox | **open** | group-hosted records, shared-inbox identity, email-only customers, member removal |
 | E31-T7 Whiteboard (durable layer) | **open** | object ops with last-writer-wins by position, batching, latency budget; cursors deferred |
 | E31-T8 TypeScript mirror & mixed-implementation actors | **open** | TS headless apps; a Go actor and a TS actor collaborate in every scenario that has one |
 | E31-T9 Community board & classifieds | **open** | group-hosted public board, member and anonymous posts, listings, moderation, legal removal, followers |
@@ -177,13 +177,13 @@ form (revokes the link).
 **Layout:** `Boards/<name>/board.log` (append: `list.create`, `card.create`, `card.move`,
 `card.update`, `card.assign`, `comment.add`), `snapshot.json`, `cards/<id>/` attachments.
 **Actors:** Alice (creator, A), Bob (member, B), Carol (observer: read + comment, B), Dan (joins
-later, C), the Space `team` (group identity) that ends up hosting the board.
+later, C), the group `team` that ends up hosting the board.
 
 Actions: create the board with lists and cards; share with Bob and Carol; move and edit cards
 concurrently; assign a card to Bob (sends `sys.app.notify`); attach a file to a card; Bob goes
 offline, makes three moves, reconnects; Carol tries a move (ignored by reducers) and adds a
 comment (allowed); snapshot and trim; Dan joins and loads snapshot + tail; transfer the board
-from Alice to the Space; Alice leaves the Space; a member hits the per-member write cap.
+from Alice to the group; Alice leaves the group; a member hits the per-member write cap.
 
 **Acceptance:**
 - every actor's folded state is identical after each step, including concurrent moves of one
@@ -191,22 +191,22 @@ from Alice to the Space; Alice leaves the Space; a member hits the per-member wr
 - Bob receives the assignment notification through typed routing, not chat
 - Carol's move has no effect on anyone's state; her comment appears
 - Dan's first load reads the snapshot and the tail only
-- after the transfer and Alice leaving, the board keeps working and bills to the Space drive
+- after the transfer and Alice leaving, the board keeps working and bills to the group drive
 - runs on the filesystem and S3 providers
 
 ### E31-T6 — CRM with shared inbox
 
-**Layout (Space `acme` drive):** `CRM/contacts/<id>.json` (a pinned Poweur ID or an email-only
+**Layout (group `acme` drive):** `CRM/contacts/<id>.json` (a pinned Poweur ID or an email-only
 record), `CRM/deals.log` (append), `CRM/activity.log` (append); shared-inbox identity
 `sales.acme…` (EPIC-009 T9).
 **Actors:** Alice and Bob (members, relays A and B), Carl (customer with a Poweur ID, C), an
 email-only prospect.
 
-Actions: create the Space, the shared inbox and the CRM folder; add Carl as a contact (key
+Actions: create the group, the shared inbox and the CRM folder; add Carl as a contact (key
 pinned) and the prospect as an email-only record; Carl messages `sales`; both members read the
 thread; Bob replies on behalf of `sales`; Alice links the thread to Carl's record and logs an
 activity; both move one deal through the pipeline concurrently; Carl's key changes and the CRM
-flags it; Bob is removed from the Space.
+flags it; Bob is removed from the group.
 
 **Acceptance:**
 - both members read the same thread from the shared inbox; Carl sees Bob's reply as from
