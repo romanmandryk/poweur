@@ -20,7 +20,7 @@ COPY --from=ui /src/apps/oauth/bridge/web/dist ./apps/oauth/bridge/web/dist
 WORKDIR /src/apps/oauth
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /poweur-oauth ./cmd/poweur-oauth
 
-FROM alpine:3.20
+FROM alpine:3.24
 ARG VERSION_HASH=
 ARG BUILD_TIME=
 RUN apk add --no-cache ca-certificates tzdata \
