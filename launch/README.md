@@ -54,9 +54,14 @@ polish, not new epics**.
       answers it on poweur.net, relay.poweur.net and oauth.poweur.org. Tick this once the
       Caddyfile is deployed and `curl https://poweur.net/.well-known/security.txt` returns it.* Be honest in the docs that the external security review (E11-T7) is still
       outstanding
-- [ ] **Abuse path:** reports go to `info@poweur.org` (see operational accounts below), a runbook for suspending a hosted name (who, how, how
-      fast), and a list of reserved names checked for obvious impersonation (brands, `admin`,
-      `support`, `poweur`, `security`, …)
+- [ ] **Abuse path:** reports go to `info@poweur.org`. *Runbook written:
+      [`deploy/ABUSE.md`](../deploy/ABUSE.md) (targets, how to act, who). Reserved names and
+      a brand blocklist are in `docker-compose.prod.yml` and `deploy/relay/blocked-terms.txt`,
+      and take effect on the next deploy (push to `master`), then check a claim of
+      `paypal-help` is refused.* Still open: the relay has **no suspend or delete command**
+      (no remove call in the identity store), yet the terms and privacy policy promise both.
+      Build `relay identities suspend|unsuspend|delete` (beside `quotas`) before launch week,
+      or soften the wording
 - [ ] **Backups: prove them.** Production has Hetzner's automatic server backups (nightly,
       7 days), which is what the privacy policy says. Restore one to a scratch server once
       and write down how long it took. Later: turn on the off-site encrypted restic backup
