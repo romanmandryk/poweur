@@ -53,7 +53,7 @@ test.describe("first run", () => {
     // ── Step 1: the inbox policy, which is why the flow exists ─────────────
     await expect(alice.locator(".onboard-title")).toHaveText("Who can message you?");
     await expect(alice.locator(".policy-mode.selected")).toHaveAttribute(
-      "data-mode", "contacts_and_requests",
+      "data-mode", "open",
     );
     await alice.click("#btn-onboard-next");
 
@@ -71,7 +71,7 @@ test.describe("first run", () => {
     // Both choices stuck, and Settings reports them.
     await alice.click('.nav-tab[data-page="settings"]');
     await expect(alice.locator("#row-policy .settings-row-value"))
-      .toHaveText("Contacts, and requests from others", { timeout: 20_000 });
+      .toHaveText("Anyone", { timeout: 20_000 });
     await expect(alice.locator("#row-profile .settings-row-value")).toHaveText("Alice Example");
 
     // ── …and the app works, all of it, from the UI ─────────────────────────

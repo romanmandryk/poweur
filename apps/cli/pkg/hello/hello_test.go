@@ -53,23 +53,34 @@ func TestCommandAndReplyAreFixedText(t *testing.T) {
 	}
 }
 
-func TestLimiterCooldownAndDailyCap(t *testing.T) {
-	l := newLimiter(time.Minute, 3)
+func TestLimiterBurstRefillAndDailyCap(t *testing.T) {
+	l := newLimiter(3, 2*time.Second, 5)
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	if !l.allow("a.poweur.net", t0) {
-		t.Fatal("first reply refused")
+	for i := 0; i < 3; i++ {
+		if !l.allow("a.poweur.net", t0) {
+			t.Fatalf("message %d of the burst refused", i+1)
+		}
 	}
-	if l.allow("a.poweur.net", t0.Add(30*time.Second)) {
-		t.Fatal("reply inside the cooldown")
+	if l.allow("a.poweur.net", t0) {
+		t.Fatal("a fourth message in the same instant")
 	}
-	if !l.allow("b.poweur.net", t0.Add(30*time.Second)) {
+	if !l.allow("b.poweur.net", t0) {
 		t.Fatal("another sender was held up")
 	}
-	if !l.allow("a.poweur.net", t0.Add(2*time.Minute)) || !l.allow("a.poweur.net", t0.Add(4*time.Minute)) {
-		t.Fatal("replies after the cooldown refused")
+	if l.allow("a.poweur.net", t0.Add(time.Second)) {
+		t.Fatal("refilled too early")
 	}
-	if l.allow("a.poweur.net", t0.Add(6*time.Minute)) {
-		t.Fatal("a fourth reply in a day")
+	if !l.allow("a.poweur.net", t0.Add(2*time.Second)) {
+		t.Fatal("a chat at one message every two seconds was refused")
+	}
+	if l.allow("a.poweur.net", t0.Add(2*time.Second)) {
+		t.Fatal("token spent twice")
+	}
+	if !l.allow("a.poweur.net", t0.Add(10*time.Second)) {
+		t.Fatal("fifth reply refused")
+	}
+	if l.allow("a.poweur.net", t0.Add(20*time.Second)) {
+		t.Fatal("a sixth reply in a day")
 	}
 	if !l.allow("a.poweur.net", t0.Add(24*time.Hour)) {
 		t.Fatal("the daily cap did not reset")
@@ -103,7 +114,7 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 	}
 	pickup, _ := json.Marshal(map[string]any{"messages": []any{
 		msg("m1", "alice.poweur.net", "chat.text", seal("ping")),
-		msg("m2", "alice.poweur.net", "chat.text", seal("ping again")),                    // inside the cooldown
+		msg("m2", "alice.poweur.net", "chat.text", seal("ping again")),                    // a quick follow-up still gets an answer
 		msg("m3", "bobby.poweur.net", "org.example.app", seal("hi")),                      // not chat text
 		msg("m4", "carol.poweur.net", "chat.text", map[string]any{"payload": "plain"}),    // not encrypted
 		msg("m5", "hello.poweur.net", "chat.text", seal("talking to myself")),             // itself
@@ -134,8 +145,8 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 		}
 		to = append(to, a[1])
 	}
-	if strings.Join(to, ",") != "alice.poweur.net,dave.poweur.net" {
-		t.Fatalf("replied to %v, want alice and dave only", to)
+	if strings.Join(to, ",") != "alice.poweur.net,alice.poweur.net,dave.poweur.net" {
+		t.Fatalf("replied to %v, want both of alice's messages and dave only", to)
 	}
 	if !strings.HasPrefix(sent[0][2], "pong.") {
 		t.Errorf("alice got %q", sent[0][2])

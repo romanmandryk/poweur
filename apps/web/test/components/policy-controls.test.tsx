@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { PolicyControls, type PolicyControlsHandle } from "../../src/components/PolicyControls";
-import { describePowBits, INBOX_MODES, POW_UNCOMFORTABLE_BITS, powCost, type InboxPolicy } from "../../src/lib/policy";
+import { describePowBits, INBOX_MODES, ONBOARDING_MODES, POW_UNCOMFORTABLE_BITS, powCost, type InboxPolicy } from "../../src/lib/policy";
 
 const save = () => Promise.resolve();
 
@@ -20,6 +20,20 @@ describe("PolicyControls", () => {
     const selected = $(".policy-mode.selected");
     expect(selected.dataset.mode).toBe("contacts_only");
     expect(selected.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("warns on the strict mode and can leave it out, unless it is already the current one", () => {
+    const { container, $ } = setup({ mode: "open" });
+    expect(container.querySelectorAll(".policy-mode-warning")).toHaveLength(1);
+    expect($('[data-mode="contacts_only"] .policy-mode-warning').textContent).toMatch(/Not for new IDs/);
+
+    const limited = render(<PolicyControls policy={{ mode: "open" }} modes={ONBOARDING_MODES} onSave={save} />);
+    expect([...limited.container.querySelectorAll<HTMLElement>(".policy-mode")].map((el) => el.dataset.mode)).toEqual(["open", "contacts_and_requests"]);
+    limited.unmount();
+
+    // Someone already on the strict mode still sees where they are.
+    const current = render(<PolicyControls policy={{ mode: "contacts_only" }} modes={ONBOARDING_MODES} onSave={save} />);
+    expect([...current.container.querySelectorAll<HTMLElement>(".policy-mode")].map((el) => el.dataset.mode)).toContain("contacts_only");
   });
 
   it("writes no anonymous block at all when anonymous is off", () => {

@@ -63,8 +63,8 @@ func (p InboxPolicy) SendsReadReceiptsTo(peer string) bool {
 //
 // Absence of inbox-policy.json means DefaultInboxMode — open, for backward
 // compatibility with pre-policy identities. Clients SHOULD write an
-// explicit policy at identity creation (contacts_and_requests is the
-// recommended human default). Anonymous (unsigned) ingress is a separate
+// explicit policy at identity creation (the web app starts new IDs on open, so a
+// first message arrives at once, and offers contacts_and_requests for later). Anonymous (unsigned) ingress is a separate
 // opt-in block specified in EPIC-014 and always defaults to deny.
 const (
 	InboxOpen                = "open"

@@ -85,6 +85,7 @@ export function PolicyControls({
   explicit = true,
   onSave,
   showSave = true,
+  modes,
 }: {
   ref?: Ref<PolicyControlsHandle>;
   policy?: InboxPolicy;
@@ -93,6 +94,8 @@ export function PolicyControls({
   onSave: (policy: InboxPolicy) => Promise<void> | void;
   /** false when the host supplies the button and calls `save()` itself. */
   showSave?: boolean;
+  /** Offer only these modes (the current one is always shown). Default: all. */
+  modes?: readonly string[];
 }) {
   const [state, setState] = useState(() => initialState(policy));
   const stateRef = useRef(state);
@@ -139,7 +142,7 @@ export function PolicyControls({
 
       <SectionLabel className="px-0">Who can message you</SectionLabel>
       <div className="policy-modes mb-2 flex flex-col gap-2" role="radiogroup" aria-label="Who can message you">
-        {INBOX_MODES.map((mode) => {
+        {INBOX_MODES.filter((mode) => !modes || modes.includes(mode.id) || mode.id === state.mode).map((mode) => {
           const selected = state.mode === mode.id;
           return (
             <button
@@ -156,6 +159,9 @@ export function PolicyControls({
             >
               <div className="policy-mode-label mb-0.5 text-[15px] font-semibold">{mode.label}</div>
               <div className="policy-mode-detail text-[13px] leading-snug text-muted">{mode.detail}</div>
+              {mode.warning && (
+                <div className="policy-mode-warning mt-1.5 text-[13px] leading-snug font-medium text-warning">{mode.warning}</div>
+              )}
             </button>
           );
         })}

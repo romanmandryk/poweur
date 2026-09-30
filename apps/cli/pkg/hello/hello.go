@@ -36,10 +36,12 @@ type Options struct {
 	Run func(args []string, stdout, stderr io.Writer) int
 	// Once stops after the first pickup (tests; `listen --once`).
 	Once bool
-	// Cooldown is the minimum time between two replies to the same sender
-	// (default one minute). MaxPerDay caps replies per sender per UTC day
-	// (default 50), which also ends two bots answering each other.
-	Cooldown  time.Duration
+	// A sender may send Burst messages at once and then one more every Refill
+	// (defaults 6 and 2 seconds), so a conversation never feels throttled and
+	// only a flood is dropped. MaxPerDay caps replies per sender per UTC day
+	// (default 500), which also ends two bots answering each other.
+	Burst     int
+	Refill    time.Duration
 	MaxPerDay int
 	// DemoURL is what the `demo` command links to; empty says "coming soon".
 	DemoURL string
@@ -73,11 +75,14 @@ func Serve(ctx context.Context, opt Options) error {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
-	if opt.Cooldown == 0 {
-		opt.Cooldown = time.Minute
+	if opt.Burst == 0 {
+		opt.Burst = 6
+	}
+	if opt.Refill == 0 {
+		opt.Refill = 2 * time.Second
 	}
 	if opt.MaxPerDay == 0 {
-		opt.MaxPerDay = 50
+		opt.MaxPerDay = 500
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -87,7 +92,7 @@ func Serve(ctx context.Context, opt Options) error {
 	if err != nil {
 		return fmt.Errorf("hello: no encryption key for %s in %s: %w", opt.Identity, cfg.KeysDir, err)
 	}
-	b := &bot{opt: opt, encPriv: encPriv, limiter: newLimiter(opt.Cooldown, opt.MaxPerDay)}
+	b := &bot{opt: opt, encPriv: encPriv, limiter: newLimiter(opt.Burst, opt.Refill, opt.MaxPerDay)}
 
 	args := []string{"listen", "--json", "--use-identity", opt.Identity}
 	if opt.Once {
@@ -221,7 +226,7 @@ func Reply(in Incoming, now time.Time, demoURL string) string {
 		return fmt.Sprintf("You are %s. Your message (%s) reached me encrypted with %s and signed by the key published at https://%s/.well-known/poweur/id.json, so I can tell it came from you.",
 			in.Sender, shortID(in.MessageID), in.Alg, in.Sender)
 	case "docs":
-		return "Docs: " + docsURL + "\nClaim your own ID: " + claimURL
+		return "Docs: " + docsURL + "\nKnow someone who'd like an ID? They can claim one at " + claimURL + " and message you."
 	case "demo":
 		if demoURL == "" {
 			return "The sign-in demo is coming soon. Until then: " + docsURL
@@ -229,7 +234,7 @@ func Reply(in Incoming, now time.Time, demoURL string) string {
 		return "Try \"Sign in with Poweur\": " + demoURL
 	}
 	return fmt.Sprintf("Hi %s 👋 That message reached me end-to-end encrypted and signed by your key. Nobody in between could read it.\n"+
-		"Try: help · ping · whoami · docs\nClaim your own ID at %s", in.Sender, claimURL)
+		"Try: help · ping · whoami · docs\nTell a friend to claim their own ID at %s, then message them the same way.", in.Sender, claimURL)
 }
 
 func latency(sentAt string, now time.Time) string {
@@ -254,46 +259,55 @@ func shortID(id string) string {
 	return id
 }
 
-// limiter allows one reply per sender per cooldown and at most max per UTC day.
+// limiter is a token bucket per sender (burst tokens, one more every refill)
+// plus a cap on replies per UTC day.
 type limiter struct {
-	mu       sync.Mutex
-	cooldown time.Duration
-	max      int
-	last     map[string]time.Time
-	day      map[string]dayCount
+	mu     sync.Mutex
+	burst  int
+	refill time.Duration
+	max    int
+	state  map[string]*bucket
 }
 
-type dayCount struct {
-	date string
-	n    int
+type bucket struct {
+	tokens float64
+	last   time.Time
+	date   string
+	day    int
 }
 
-func newLimiter(cooldown time.Duration, max int) *limiter {
-	return &limiter{cooldown: cooldown, max: max, last: map[string]time.Time{}, day: map[string]dayCount{}}
+func newLimiter(burst int, refill time.Duration, max int) *limiter {
+	return &limiter{burst: burst, refill: refill, max: max, state: map[string]*bucket{}}
 }
 
 func (l *limiter) allow(sender string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if prev, ok := l.last[sender]; ok && now.Sub(prev) < l.cooldown {
+	b, ok := l.state[sender]
+	if !ok {
+		b = &bucket{tokens: float64(l.burst), last: now}
+		l.state[sender] = b
+	}
+	if elapsed := now.Sub(b.last); elapsed > 0 {
+		b.tokens += float64(elapsed) / float64(l.refill)
+		if b.tokens > float64(l.burst) {
+			b.tokens = float64(l.burst)
+		}
+	}
+	b.last = now
+	if date := now.UTC().Format("2006-01-02"); b.date != date {
+		b.date, b.day = date, 0
+	}
+	if b.tokens < 1 || b.day >= l.max {
 		return false
 	}
-	date := now.UTC().Format("2006-01-02")
-	c := l.day[sender]
-	if c.date != date {
-		c = dayCount{date: date}
-	}
-	if c.n >= l.max {
-		return false
-	}
-	c.n++
-	l.day[sender], l.last[sender] = c, now
+	b.tokens--
+	b.day++
 	// A sender that has gone quiet is forgotten, so this map cannot grow without bound.
-	if len(l.last) > 10000 {
-		for k, t := range l.last {
-			if now.Sub(t) > 24*time.Hour {
-				delete(l.last, k)
-				delete(l.day, k)
+	if len(l.state) > 10000 {
+		for k, v := range l.state {
+			if now.Sub(v.last) > 24*time.Hour {
+				delete(l.state, k)
 			}
 		}
 	}

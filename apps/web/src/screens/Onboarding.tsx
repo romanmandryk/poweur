@@ -11,6 +11,7 @@ import { PolicyControls, type PolicyControlsHandle } from "../components/PolicyC
 import { ProfileEditor, type ProfileEditorHandle } from "../components/ProfileEditor";
 import { cn } from "../lib/cn";
 import { handleOf } from "../lib/identity";
+import { ONBOARDING_MODES } from "../lib/policy";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
@@ -101,9 +102,11 @@ export function Onboarding() {
             // Recommended, not imposed: Skip leaves the relay's default in place.
             <PolicyControls
               ref={policyControls}
-              // The relay's implicit default ("open") is not a choice anyone made,
-              // so an identity with no saved policy starts on the recommendation.
-              policy={policy.explicit && policy.doc ? policy.doc : { version: 1, mode: "contacts_and_requests" }}
+              // Start open: the first message (from a friend, or the hello.poweur.net
+              // demo) must arrive without a detour through Requests. The strict mode
+              // is not offered to a new ID at all.
+              policy={policy.explicit && policy.doc ? policy.doc : { version: 1, mode: "open" }}
+              modes={ONBOARDING_MODES}
               explicit={policy.explicit}
               showSave={false}
               onSave={savePolicy}

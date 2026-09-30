@@ -39,9 +39,11 @@ you here.
 
 Then a three-step setup runs. Every step is skippable, and skipping writes nothing:
 
-1. **Who can message you** — the inbox policy. It opens on `contacts_and_requests`,
-   the [recommended human default](../trust/contacts.md), and can also turn on
-   anonymous messages.
+1. **Who can message you** — the inbox policy. It opens on `open` ("Anyone"), so a first
+   message from a friend, or from the `hello.poweur.net` demo, arrives straight away; the
+   alternative offered is `contacts_and_requests` once strangers start to bother you. The
+   strict `contacts_only` mode is not offered to a new ID (it is in Settings, with a warning).
+   The step can also turn on anonymous messages. See [contacts and trust](../trust/contacts.md).
 2. **How people see you** — display name, bio, avatar, one link →
    `.poweur/public/profile.json`.
 3. **You're set.**
