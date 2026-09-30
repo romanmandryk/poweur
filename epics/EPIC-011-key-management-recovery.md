@@ -63,6 +63,7 @@
 | E11-T2 Recovery-master role & elevated ops | **done** | v1 | enforceable via actor assertion; kill-lost-device |
 | E11-T3 Enrollment ceremony | **done** | v1 | typed code, no PAKE needed — see correction below; **superseded by E11-T8** |
 | E11-T8 Pairing v2: commit-then-reveal, QR, short codes | **done** | v1 | v1's six digits were a function of the key alone, so a malicious relay could grind a matching key and take the seed — see E11-T8 |
+| E11-T11 One "Keys & devices" list | **done** | v1 | Every client (web, app, Go and TS CLI) registers in the device registry with `client` / `platform` / `browser` and, once backed up, its keystore `enrollment_id`; the web panel merges registry and keystore into one list (name first, then client · platform · browser · added · last used) with a restorability note instead of a second section. `key enroll` registers the machine immediately. Relay 0.2.11, CLI 0.2.7, SDK 0.2.10, web 0.2.13 |
 | E11-T4 CLI/bot key storage hardening | **done** | v1 | scrypt + AES-GCM at rest; FIDO2 in CLI deferred |
 | E11-T5 Social recovery | open | later | design doc gates implementation |
 | E11-T6 Poweur ID as recovery anchor | open | later | needs EPIC-008 |

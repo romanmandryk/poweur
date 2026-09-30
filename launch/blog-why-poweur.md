@@ -1,6 +1,6 @@
 ---
-title: "Why I'm building Poweur: one open ID for an internet you don't have to rent"
-description: "Identity, messaging and data sharing are the three things almost everything online is built on. Right now we rent all three. Poweur is an attempt to make them open."
+title: "Why we need the open internet ID and not big tech silos"
+description: "Identity, messaging and data sharing are the three things almost everything online is built on. Right now we rent all three. Poweur is an attempt to make them open and easy to self-host"
 author: Roman Mandryk
 date: 2026-10-13
 draft: true

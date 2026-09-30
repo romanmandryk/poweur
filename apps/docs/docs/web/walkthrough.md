@@ -104,8 +104,10 @@ at once. See [sharing](../files/storage-v2.md).
 
 ## Keys, devices and recovery
 
-**Settings → Keys & devices** lists every enrolled authenticator, marks this one, and
-can remove one (revoking its sessions). **Recovery kit** renders 24 words derived from
+**Settings → Keys & devices** lists every device using the identity — web, app and CLI —
+with its name, client, platform, when it was added and last used, and marks this one. Each
+row notes whether a passkey backup exists to restore it after a reinstall. You can remove
+one (ending its sessions). **Recovery kit** renders 24 words derived from
 the identity seed and checks them back. A device that holds no key can join an existing
 identity through the six-digit comparison ceremony — see
 [key management](../security/key-management.md).

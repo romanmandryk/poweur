@@ -325,3 +325,28 @@ func TestDeviceStale(t *testing.T) {
 		t.Fatalf("offset timestamp: age=%v ok=%v", age, ok)
 	}
 }
+
+func TestDeviceClientMetadata(t *testing.T) {
+	if NormalizeDeviceClient(" CLI ") != DeviceClientCLI || NormalizeDeviceClient("toaster") != "" {
+		t.Fatal("client normalization")
+	}
+	if got := SanitizeDeviceField("mac\x00OS" + strings.Repeat("x", 100)); strings.Contains(got, "\x00") || len(got) > MaxDeviceFieldLen {
+		t.Fatalf("field not sanitized: %q", got)
+	}
+	if SanitizeEnrollmentID("ok_id-1") != "ok_id-1" || SanitizeEnrollmentID("bad id") != "" || SanitizeEnrollmentID(strings.Repeat("a", 65)) != "" {
+		t.Fatal("enrollment id sanitization")
+	}
+	good := Device{ID: DeviceIDFromFingerprint("x"), Client: DeviceClientApp, Platform: "iOS", Browser: "Safari", EnrollmentID: "e1"}
+	if err := good.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]Device{
+		"client":     {ID: good.ID, Client: "toaster"},
+		"platform":   {ID: good.ID, Platform: strings.Repeat("p", 40)},
+		"enrollment": {ID: good.ID, EnrollmentID: "no spaces"},
+	} {
+		if bad.Validate() == nil {
+			t.Fatalf("%s: invalid device accepted", name)
+		}
+	}
+}

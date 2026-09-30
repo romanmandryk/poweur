@@ -126,7 +126,11 @@ func deviceHeaders() map[string]string {
 	if err != nil || d.Fingerprint == "" {
 		return nil
 	}
-	h := map[string]string{"X-Poweur-Device": d.Fingerprint}
+	h := map[string]string{
+		"X-Poweur-Device":          d.Fingerprint,
+		"X-Poweur-Device-Client":   idpkg.DeviceClientCLI,
+		"X-Poweur-Device-Platform": platformName(),
+	}
 	if d.Name != "" {
 		h["X-Poweur-Device-Name"] = d.Name
 	}
@@ -276,10 +280,33 @@ func runDeviceList(args []string, stdout, stderr io.Writer) int {
 		if d.Revoked {
 			state = "revoked " + d.RevokedAt
 		}
-		fmt.Fprintf(stdout, "%s %s  %-24s %-8s last seen %s  %s\n",
-			marker, d.ID, name, d.Kind, orDash(d.LastSeen), state)
+		// Name first, then what and where it is, then when.
+		fmt.Fprintf(stdout, "%s %-28s %-22s added %s  last seen %s  %s  %s\n",
+			marker, name, describeDeviceClient(d), dateOnly(d.AddedAt), orDash(d.LastSeen), state, d.ID)
 	}
 	return 0
+}
+
+// describeDeviceClient reads "cli · macOS", "web · macOS · Safari" or, for a
+// row from before clients reported themselves, just the kind.
+func describeDeviceClient(d idpkg.Device) string {
+	var parts []string
+	for _, p := range []string{d.Client, d.Platform, d.Browser} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) == 0 {
+		return d.Kind
+	}
+	return strings.Join(parts, " · ")
+}
+
+func dateOnly(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return "-"
 }
 
 // printJSON emits payload as indented JSON, reporting a marshal failure on

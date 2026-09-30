@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ type newDevicePairing struct {
 	Commitment  string `json:"commitment"`
 	ExpiresAt   string `json:"expires_at"`
 	Revealed    bool   `json:"revealed,omitempty"`
+	// Label is what the user called this machine at `key enroll --label`.
+	// Kept so `key claim` (a later command) can still name the device.
+	Label string `json:"label,omitempty"`
 }
 
 // approverPairing is the approving side's state: its nonce must stay the same
@@ -237,6 +241,7 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 	}
 	p := newDevicePairing{
 		Identity:   identityValue,
+		Label:      strings.TrimSpace(*label),
 		Relay:      strings.TrimRight(*relayURL, "/"),
 		PublicKey:  base64.RawURLEncoding.EncodeToString(ephPub),
 		PrivateKey: base64.RawURLEncoding.EncodeToString(ephPriv),
@@ -344,8 +349,54 @@ func stepNewDevice(p *newDevicePairing) (status, sas string, seed []byte, err er
 // adoptSeed saves the keys a delivered seed derives — only if they are the
 // identity's published keys, so a seed that is not this identity's is never
 // adopted.
+// registerEnrolledDevice makes the freshly enrolled machine show up in the
+// owner's "Keys & devices" list right away. The relay only learns a device
+// from an authenticated request carrying the device headers, and enrolling
+// makes none, so without this the machine stays invisible until its first
+// `poweur inbox`. Best effort: the keys are already saved, so a failure is a
+// warning, never an error.
+func registerEnrolledDevice(p newDevicePairing, priv ed25519.PrivateKey, stderr io.Writer) bool {
+	d, err := loadDevice()
+	if err == nil {
+		d.Name = enrolledDeviceName(p.Label, d.Name)
+		err = saveDevice(d)
+	}
+	if err == nil {
+		_, err = ensureSession(context.Background(), p.Relay, p.Identity, priv)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "enrolled, but could not register this device with the relay yet (%v); it will appear after its first command\n", err)
+		return false
+	}
+	return true
+}
+
+// enrolledDeviceName is what the owner sees as the device's name: the label
+// they gave, else the hostname. The platform and client type travel as their
+// own fields, so they are not folded into the name.
+func enrolledDeviceName(label, hostname string) string {
+	base := strings.TrimSpace(label)
+	if base == "" {
+		base = hostname
+	}
+	return idpkg.SanitizeDeviceName(base)
+}
+
+func platformName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macOS"
+	case "linux":
+		return "Linux"
+	case "windows":
+		return "Windows"
+	default:
+		return runtime.GOOS
+	}
+}
+
 func adoptSeed(cfg config.Config, p newDevicePairing, seed []byte, stdout, stderr io.Writer, jsonOut bool) int {
-	pub, _, err := identity.KeypairFromSeed(seed)
+	pub, priv, err := identity.KeypairFromSeed(seed)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -375,8 +426,10 @@ func adoptSeed(cfg config.Config, p newDevicePairing, seed []byte, stdout, stder
 		return 1
 	}
 	dropPairing("new", p.Identity, p.Code)
+	registered := registerEnrolledDevice(p, priv, stderr)
 	return writeOutput(stdout, jsonOut, map[string]any{
 		"identity": p.Identity, "key_path": keyPath, "encryption_key_path": encKeyPath, "enrolled": true,
+		"device_registered": registered,
 	}, fmt.Sprintf("enrolled %s on this device\n", p.Identity))
 }
 

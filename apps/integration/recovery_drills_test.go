@@ -517,6 +517,11 @@ func TestDrill_EnrollNewDeviceViaCode(t *testing.T) {
 	if idpkg.NormalizePublicKeyKey(want.PublicKey) != idpkg.NormalizePublicKeyKey(doc.PublicKey) {
 		t.Fatal("enrolled device does not hold the published identity key")
 	}
+	// The machine shows up in the owner's device list at once, named for
+	// what it is, rather than only after its first command.
+	if listed, _ := runCLI(t, oldDevice, "devices", "list", "--use-identity", "enrolled.poweur.net", "--relay", relay.url, "--json"); !strings.Contains(listed, `"name": "laptop"`) || !strings.Contains(listed, `"client": "cli"`) || !strings.Contains(listed, `"platform"`) {
+		t.Fatalf("enrolled machine missing from the device registry:\n%s", listed)
+	}
 	// Spent: the pairing is gone.
 	if code, _, _ := runCLIFull(t, newDevice, "key", "claim", "enrolled.poweur.net", good.Code, "--json"); code == 0 {
 		t.Fatal("a spent pairing was claimed twice")

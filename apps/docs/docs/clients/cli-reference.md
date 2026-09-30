@@ -55,6 +55,13 @@ All commands accept these global flags:
 
 ## Commands
 
+Run `poweur` for the list of commands with a line each, `poweur <command>` for that command's
+subcommands with their `<required>` and `[optional]` arguments, and `poweur <command> <subcommand> --help`
+for one. A command that needs a subcommand exits non-zero and prints that list.
+
+`poweur key enroll` also registers the new machine with the relay, so it appears in **Keys & devices**
+(named for its label or hostname, with client `cli` and its platform) as soon as it is approved.
+
 ### `poweur identity create <name>`
 
 Generate a new long-lived Ed25519 signing keypair **and** an X25519 encryption keypair, then register with the configured relay. Two modes:

@@ -51,6 +51,10 @@ type deviceObservation struct {
 	Fingerprint string
 	Name        string
 	Kind        string
+	Client      string
+	Platform    string
+	Browser     string
+	Enrollment  string
 	SyncScopes  []string
 	SyncCursor  string
 }
@@ -86,6 +90,10 @@ func deviceFromRequest(r *http.Request) deviceObservation {
 		Fingerprint: strings.TrimSpace(r.Header.Get("X-Poweur-Device")),
 		Name:        r.Header.Get("X-Poweur-Device-Name"),
 		Kind:        r.Header.Get("X-Poweur-Device-Kind"),
+		Client:      r.Header.Get("X-Poweur-Device-Client"),
+		Platform:    r.Header.Get("X-Poweur-Device-Platform"),
+		Browser:     r.Header.Get("X-Poweur-Device-Browser"),
+		Enrollment:  r.Header.Get("X-Poweur-Device-Enrollment"),
 	}
 }
 
@@ -171,6 +179,22 @@ func (s *Server) touchDevice(ctx context.Context, owner string, obs deviceObserv
 			device.Kind = kind
 			changed = true
 		}
+	}
+	if client := idpkg.NormalizeDeviceClient(obs.Client); client != "" && client != device.Client {
+		device.Client = client
+		changed = true
+	}
+	if platform := idpkg.SanitizeDeviceField(obs.Platform); platform != "" && platform != device.Platform {
+		device.Platform = platform
+		changed = true
+	}
+	if browser := idpkg.SanitizeDeviceField(obs.Browser); browser != "" && browser != device.Browser {
+		device.Browser = browser
+		changed = true
+	}
+	if enrollment := idpkg.SanitizeEnrollmentID(obs.Enrollment); enrollment != "" && enrollment != device.EnrollmentID {
+		device.EnrollmentID = enrollment
+		changed = true
 	}
 	if len(obs.SyncScopes) > 0 && !sameStrings(obs.SyncScopes, device.SyncScopes) {
 		scopes := obs.SyncScopes

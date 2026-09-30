@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { describeDevice, describeDeviceSync, deviceIcon, DEVICE_KIND_ICON }
+import { describeDevice, describeDeviceSync, deviceIcon, DEVICE_KIND_ICON, describeThisDevice, deviceHeadersFor, describeDeviceRow, mergeKeysAndDevices, restoreNote }
   from "../../src/lib/devices.js";
 
 const NOW = Date.parse("2026-09-10T12:00:00Z");
@@ -73,4 +73,82 @@ describe("describeDevice", () => {
       .toBe("unknown · never seen · never synced");
   });
 
+});
+
+describe("describeThisDevice", () => {
+  const macChrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0 Safari/537.36";
+  const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Version/17.0 Safari/605.1";
+  const android = "Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile Safari/537.36";
+
+  it("splits a browser into name, client, platform and browser", () => {
+    expect(describeThisDevice(macChrome)).toEqual({
+      name: "Chrome on Mac", client: "web", platform: "macOS", browser: "Chrome", kind: "browser",
+    });
+  });
+
+  it("reports the native shell as an app, not as its WebView", () => {
+    expect(describeThisDevice(iphone, { native: true })).toEqual({
+      name: "iPhone", client: "app", platform: "iOS", browser: "", kind: "phone",
+    });
+    expect(describeThisDevice(android, { native: true })).toMatchObject({ client: "app", platform: "Android", kind: "phone" });
+  });
+
+  it("copes with an empty user agent", () => {
+    expect(describeThisDevice("")).toMatchObject({ client: "web", platform: "", browser: "" });
+  });
+});
+
+describe("deviceHeadersFor", () => {
+  it("sends only what it knows", () => {
+    const info = describeThisDevice("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Safari/605.1", { native: true });
+    expect(deviceHeadersFor("fp", info, "enr1")).toEqual({
+      "X-Poweur-Device": "fp",
+      "X-Poweur-Device-Name": "iPhone",
+      "X-Poweur-Device-Kind": "phone",
+      "X-Poweur-Device-Client": "app",
+      "X-Poweur-Device-Platform": "iOS",
+      "X-Poweur-Device-Enrollment": "enr1",
+    });
+    expect(Object.keys(deviceHeadersFor("fp", { name: "", client: "web" }))).toEqual(["X-Poweur-Device", "X-Poweur-Device-Client"]);
+  });
+});
+
+describe("describeDeviceRow", () => {
+  it("reads client, platform, browser, then added and last used", () => {
+    const row = describeDeviceRow({ client: "web", platform: "macOS", browser: "Safari", added_at: "2026-09-30T09:00:00Z", last_seen: "2026-09-30T10:00:00Z" });
+    expect(row.startsWith("Web · macOS · Safari · added ")).toBe(true);
+    expect(row).toContain("last used");
+  });
+  it("falls back to the kind for rows from before clients reported themselves", () => {
+    expect(describeDeviceRow({ kind: "laptop" })).toBe("laptop · never used");
+  });
+});
+
+describe("mergeKeysAndDevices", () => {
+  const enrollments = [
+    { enrollment_id: "e1", kind: "passkey", wrap: "prf", has_passkey: true, current: true },
+    { enrollment_id: "e2", kind: "native", wrap: "native", created_at: "2026-09-01T00:00:00Z" },
+  ];
+  const registry = [
+    { id: "dev_a", name: "CLI", client: "cli", last_seen: "2026-09-30T00:00:00Z" },
+    { id: "dev_b", name: "Chrome", client: "web", enrollment_id: "e1", last_seen: "2026-09-10T00:00:00Z" },
+    { id: "dev_old", name: "Old phone", revoked: true, last_seen: "2026-09-29T00:00:00Z" },
+  ];
+
+  it("joins by enrollment id, keeps unclaimed enrollments, and orders current first, revoked last", () => {
+    const rows = mergeKeysAndDevices(enrollments, registry);
+    expect(rows.map((r) => r.id)).toEqual(["device:dev_b", "device:dev_a", "enrollment:e2", "device:dev_old"]);
+    expect(rows[0].enrollment.enrollment_id).toBe("e1");
+    expect(rows[0].current).toBe(true);
+  });
+
+  it("never drops an enrollment when the registry is unreadable", () => {
+    expect(mergeKeysAndDevices(enrollments, null ?? [])).toHaveLength(2);
+  });
+
+  it("notes restorability without ranking the device", () => {
+    expect(restoreNote({ enrollment: enrollments[0] })).toMatch(/Passkey backup/);
+    expect(restoreNote({ enrollment: enrollments[1] })).toMatch(/pair it again/);
+    expect(restoreNote({ device: registry[0] })).toMatch(/this machine only/);
+  });
 });

@@ -14,7 +14,7 @@ import { PolicyControls } from "../../components/PolicyControls";
 import { ProfileEditor } from "../../components/ProfileEditor";
 import { cn } from "../../lib/cn";
 import { identityApiFor, lookup } from "../../lib/client.js";
-import { describeDevice } from "../../lib/devices.js";
+import { describeDeviceRow, mergeKeysAndDevices, restoreNote } from "../../lib/devices.js";
 import {
   buildRecoveryKit,
   enrollThisBrowser,
@@ -290,9 +290,12 @@ export async function openKeysAndDevicesPanel() {
   openPanel("Keys & devices", () => <KeysAndDevices identity={identity} enrollments={enrollments} registry={registry} />);
 }
 
+type MergedRow = { id: string; device?: any; enrollment?: any; current: boolean };
+
 function KeysAndDevices({ identity, enrollments, registry }: { identity: string; enrollments: any[]; registry: any[] | null }) {
   const record: any = loadIdentityRecord(identity);
   const thisEnrolled = enrollments.some((enrollment) => enrollment.current);
+  const rows = mergeKeysAndDevices(enrollments, registry ?? []);
   const here = isShellRuntime() ? "device" : "browser";
   const loseHow = isShellRuntime() ? "clearing app data" : "clearing site data";
 
@@ -310,38 +313,28 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
     void openKeysAndDevicesPanel();
   };
 
-  const removeDevice = async (enrollmentId: string) => {
+  // One action per row: drop its keystore copy if it has one, and end the
+  // sessions of the device the relay has seen for it.
+  const removeRow = async (row: MergedRow) => {
+    const { device, enrollment } = row;
     const confirmed = await askConfirm({
-      title: "Remove device",
-      message: "Remove this device? It will lose access to your stored keys and its sessions end.",
-      confirmLabel: "Remove",
+      title: enrollment ? "Remove device" : "Revoke device",
+      message: enrollment
+        ? "Remove this device? It will lose access to your stored keys and its sessions end."
+        : "Revoke this device? Its sessions stop working.",
+      confirmLabel: enrollment ? "Remove" : "Revoke",
     });
     if (confirmed) {
-      setLoading(true, "Removing device…");
+      setLoading(true, enrollment ? "Removing device…" : "Revoking device…");
       try {
-        await removeEnrollment(activeClient(), identity, enrollmentId);
+        if (enrollment) await removeEnrollment(activeClient(), identity, enrollment.enrollment_id);
+        if (device) {
+          const result = await activeClient().devices().revoke(device.id);
+          toast(`Revoked: ${result.sessions_revoked} session(s)`, "success", 5000);
+        } else {
+          toast("Device removed", "success");
+        }
         setLoading(false);
-        toast("Device removed", "success");
-      } catch (error) {
-        setLoading(false);
-        toast(errorMessage(error), "error", 8000);
-      }
-    }
-    void openKeysAndDevicesPanel();
-  };
-
-  const revokeDevice = async (deviceId: string) => {
-    const confirmed = await askConfirm({
-      title: "Revoke device",
-      message: "Revoke this device? Its sessions stop working.",
-      confirmLabel: "Revoke",
-    });
-    if (confirmed) {
-      setLoading(true, "Revoking device…");
-      try {
-        const result = await activeClient().devices().revoke(deviceId);
-        setLoading(false);
-        toast(`Revoked: ${result.sessions_revoked} session(s)`, "success", 5000);
       } catch (error) {
         setLoading(false);
         toast(errorMessage(error), "error", 8000);
@@ -362,39 +355,52 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         </Notice>
       )}
 
-      {enrollments.length ? (
+      {rows.length ? (
         <div className="enrollment-list flex flex-col">
-          {enrollments.map((enrollment) => (
-            <div key={enrollment.enrollment_id} className="enrollment-row flex min-h-15 items-center gap-3 border-b border-sep py-3 last:border-b-0">
-              <RowIcon icon={ENROLLMENT_ICON[enrollment.kind] ?? Smartphone} />
-              <div className="enrollment-body min-w-0 flex-1">
-                <div className="enrollment-label flex flex-wrap items-center gap-1.5 text-[15px] font-semibold">
-                  {enrollment.label || ENROLLMENT_KIND_LABEL[enrollment.kind] || enrollment.kind}
-                  {enrollment.current && <Chip tone="success">this device</Chip>}
-                  {enrollment.role === "recovery-master" && <Chip tone="warning">recovery master</Chip>}
+          {rows.map((row) => {
+            const { device, enrollment } = row;
+            const title = device?.name || enrollment?.label || (enrollment && (ENROLLMENT_KIND_LABEL[enrollment.kind] ?? enrollment.kind)) || "Unnamed device";
+            const revoked = Boolean(device?.revoked);
+            const kind = device?.kind ?? "";
+            return (
+              <div key={row.id} className={cn("enrollment-row flex min-h-15 items-center gap-3 border-b border-sep py-3 last:border-b-0", revoked && "is-revoked opacity-55")}>
+                <RowIcon icon={(enrollment && ENROLLMENT_ICON[enrollment.kind]) || DEVICE_ICON[kind] || (enrollment ? Smartphone : Hexagon)} />
+                <div className="enrollment-body min-w-0 flex-1">
+                  <div className="enrollment-label flex flex-wrap items-center gap-1.5 text-[15px] font-semibold">
+                    {title}
+                    {row.current && <Chip tone="success">this device</Chip>}
+                    {enrollment?.role === "recovery-master" && <Chip tone="warning">recovery master</Chip>}
+                    {revoked && <Chip tone="warning">revoked</Chip>}
+                  </div>
+                  <div className="enrollment-meta mt-0.5 text-[13px] text-muted">
+                    {device ? describeDeviceRow(device) : `${ENROLLMENT_KIND_LABEL[enrollment.kind] ?? enrollment.kind}${enrollment.created_at ? ` · added ${fmtTime(enrollment.created_at)}` : ""}`}
+                  </div>
+                  <div className="enrollment-restore mt-0.5 text-[13px] text-muted">
+                    {restoreNote(row)}
+                    {enrollment ? ` Unlocked by ${ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}${enrollment.payload === "legacy-keypair" ? ", pre-seed keys" : ""}.` : ""}
+                  </div>
                 </div>
-                <div className="enrollment-meta mt-0.5 text-[13px] text-muted">
-                  {ENROLLMENT_KIND_LABEL[enrollment.kind] ?? enrollment.kind} · unlocked by {ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}
-                  {enrollment.payload === "legacy-keypair" ? " · pre-seed keys" : ""}
-                  {enrollment.created_at ? ` · added ${fmtTime(enrollment.created_at)}` : ""}
-                </div>
+                {!revoked && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    data-remove-enrollment={enrollment?.enrollment_id}
+                    data-revoke-device={device?.id}
+                    disabled={row.current}
+                    aria-label={`${enrollment ? "Remove" : "Revoke"} ${title}`}
+                    onClick={() => void removeRow(row)}
+                  >
+                    {enrollment ? "Remove" : "Revoke"}
+                  </Button>
+                )}
               </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                data-remove-enrollment={enrollment.enrollment_id}
-                disabled={Boolean(enrollment.current)}
-                aria-label={`Remove ${enrollment.label || enrollment.enrollment_id}`}
-                onClick={() => void removeDevice(enrollment.enrollment_id)}
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="text-[13px] text-muted">No devices registered yet.</p>
       )}
+      {registry === null && <p className="mt-2 text-[13px] text-muted">Could not read when devices were last used.</p>}
 
       <Button
         id="btn-enroll-device"
@@ -409,49 +415,10 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
       {record && !record.seedDerived && (
         <p className="mt-2.5 text-[13px] text-muted">This identity predates recovery kits — see Settings → Recovery kit.</p>
       )}
-      <p className="mt-2.5 text-[13px] text-muted">
-        Removing a device stops it reading your stored keys and ends its sessions. It does not protect against someone who already copied
-        them — that needs a key rotation.
-      </p>
 
-      <h3 className="panel-subhead mt-7 mb-1.5 text-[13px] font-semibold tracking-[.04em] text-muted uppercase">Devices using this identity</h3>
-      <p className="text-[13px] text-muted">
-        What the relay has seen: apps and machines holding sessions, app passwords or sync cursors. Only you can see this list.
-      </p>
-      {registry === null ? (
-        <p className="text-[13px] text-muted">Could not read the device registry.</p>
-      ) : registry.length ? (
-        <div className="enrollment-list flex flex-col">
-          {registry.map((device) => (
-            <div key={device.id} className={cn("enrollment-row flex min-h-15 items-center gap-3 border-b border-sep py-3 last:border-b-0", device.revoked && "is-revoked opacity-55")}>
-              <RowIcon icon={DEVICE_ICON[device.kind] ?? Hexagon} />
-              <div className="enrollment-body min-w-0 flex-1">
-                <div className="enrollment-label flex flex-wrap items-center gap-1.5 text-[15px] font-semibold">
-                  {device.name || "Unnamed device"}
-                  {device.revoked && <Chip tone="warning">revoked</Chip>}
-                </div>
-                <div className="enrollment-meta mt-0.5 text-[13px] text-muted">{describeDevice(device)}</div>
-              </div>
-              {!device.revoked && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  data-revoke-device={device.id}
-                  aria-label={`Revoke ${device.name || device.id}`}
-                  onClick={() => void revokeDevice(device.id)}
-                >
-                  Revoke
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[13px] text-muted">No devices recorded yet.</p>
-      )}
       <p className="mt-2.5 text-[13px] text-muted">
-        Revoking ends that device's sessions, DAV tokens and app passwords. A device that still holds your identity key can enrol again —
-        that case needs a key rotation.
+        Removing a device ends its sessions and, if it has a backup, stops it reading your stored keys. A device that already holds your
+        identity key can enrol again — that needs a key rotation.
       </p>
     </div>
   );

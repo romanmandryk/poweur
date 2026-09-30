@@ -41,6 +41,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	}
+	if code, handled := routeHelp(args, stdout, stderr); handled {
+		return code
+	}
 
 	switch args[0] {
 	case "identity":
@@ -96,7 +99,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	default:
-		fmt.Fprintln(stderr, "unknown command")
+		fmt.Fprintf(stderr, "poweur: unknown command %q\n\n", args[0])
 		printHelp(stderr)
 		return 1
 	}
@@ -2055,56 +2058,6 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 	}
 	fmt.Fprint(w, message)
 	return 0
-}
-
-func printHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--operator-token=...] [--json]
-  poweur key recover <identity> --seed <base64url|mnemonic> [--relay=...] [--parent-domain=...] [--json]
-  poweur key derive --seed <base64url|mnemonic> [--json]
-  poweur key kit --seed <base64url|mnemonic> [--use-identity=...] [--json]
-  poweur key ls [--use-identity=...] [--relay=...] [--json]
-  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]   (shows a QR and a code)
-  poweur key approve <pairing-link | code> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--no-wait] [--json]
-  poweur key claim <identity> <code> [--json]                       (next step of a pairing started without --wait)
-  poweur key protect|unprotect [--use-identity=...] [--passphrase=...] [--json]
-  poweur identity show [--use-identity=...] [--json]
-  poweur identity dns <identity> [--use-identity=...] [--json]
-  poweur identity use <identity> [--json]
-  poweur identity list [--json]
-  poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
-  poweur attach save <peer> --id=<message-id> --out=<file> [--json]
-  poweur inbox [--use-identity=...] [--json]
-  poweur listen [--use-identity=...] [--json] [--once]
-  poweur outbox [list|retry]
-  poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
-  poweur sync <run|pull|push|status|watch|service> <local-dir> [--drive <owner> --folder /<node>] [--path <p>]
-  poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
-  poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
-  poweur session status [--use-identity=...] [--json]
-  poweur session refresh [--use-identity=...] [--json]
-  poweur session revoke [--use-identity=...] [--json]
-  poweur relay status [--json]
-  poweur group create <group-id> [--admin=<id> ...] [--member=<id> ...] [--json]
-  poweur group show <group-id> [--json]
-  poweur group add <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
-  poweur group remove <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
-  poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
-  poweur requests [--use-identity=...] [--json]
-  poweur analytics <show|on|off> [--use-identity=...] [--json]
-  poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
-  poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
-  poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
-  poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--trusted-auth=<bridge id>|none] [--use-identity=...]
-  poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
-  poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
-  poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver] [--json]
-      (--code: the number shown by the screen that started the sign-in, when approving from another device)
-  poweur auth inspect <request-file-or-url> [--json]
-  poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
-  poweur version
-`)
 }
 
 func resolveIdentity(flagValue string, fallback string) string {

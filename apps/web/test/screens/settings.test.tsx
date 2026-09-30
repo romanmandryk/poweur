@@ -26,7 +26,7 @@ vi.mock("../../src/lib/keystore.js", async (importOriginal) => ({
   listEnrollments: vi.fn(() =>
     Promise.resolve([
       { enrollment_id: "e1", kind: "native", wrap: "native", current: true, label: "This phone" },
-      { enrollment_id: "e2", kind: "passkey", wrap: "prf", current: false, label: "Laptop" },
+      { enrollment_id: "e2", kind: "passkey", wrap: "prf", has_passkey: true, current: false, label: "Laptop" },
     ]),
   ),
   removeEnrollment: vi.fn(() => Promise.resolve()),
@@ -215,6 +215,38 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect($("#dialog-confirm")).toBeTruthy());
     fireEvent.click($("#dialog-confirm")!);
     await waitFor(() => expect(removeEnrollment).toHaveBeenCalledWith(holder.client, ME, "e2"));
+  });
+
+  it("keys & devices is one list: a device joins its keystore entry, shows client, platform and last use", async () => {
+    const revoke = vi.fn(() => Promise.resolve({ device_id: "d2", sessions_revoked: 2 }));
+    holder.client.devices = vi.fn(() => ({
+      list: async () => ({
+        devices: [
+          { id: "d2", name: "Chrome on Mac", client: "web", platform: "macOS", browser: "Chrome", enrollment_id: "e2", added_at: "2026-09-01T10:00:00Z", last_seen: "2026-09-30T09:00:00Z" },
+          { id: "d3", name: "MBP4.local", client: "cli", platform: "macOS", added_at: "2026-09-30T08:00:00Z", last_seen: "2026-09-30T09:44:22Z" },
+        ],
+      }),
+      revoke,
+    }));
+    render(<App />);
+    fireEvent.click($("#row-keys-devices")!);
+    // e1 (this phone, no device row), d2 joined to e2, and the CLI machine.
+    await waitFor(() => expect(document.querySelectorAll("#panel-root .enrollment-row")).toHaveLength(3));
+    const panel = $("#panel-root")!;
+    expect(panel.textContent).toContain("Chrome on Mac");
+    expect(panel.textContent).toContain("Web · macOS · Chrome");
+    expect(panel.textContent).toContain("CLI · macOS");
+    expect(panel.textContent).toContain("last used");
+    expect(panel.textContent).toContain("Passkey backup");
+    expect(panel.textContent).toContain("Keeps its keys on this machine only");
+    expect(panel.textContent).not.toContain("Devices using this identity");
+
+    // Removing the joined row drops its keystore copy and ends its sessions.
+    fireEvent.click($('[data-remove-enrollment="e2"]')!);
+    await waitFor(() => expect($("#dialog-confirm")).toBeTruthy());
+    fireEvent.click($("#dialog-confirm")!);
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("d2"));
+    expect(removeEnrollment).toHaveBeenCalledWith(holder.client, ME, "e2");
   });
 
   it("a typed code approves a new device only after the digits are compared", async () => {

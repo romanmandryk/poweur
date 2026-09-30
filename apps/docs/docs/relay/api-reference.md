@@ -967,6 +967,26 @@ attacker who already extracted the seed — that is what rotation is for.
 
 ---
 
+## Device registry
+
+`GET /devices/:identity` (owner-authenticated) lists the devices the relay has seen for an identity,
+and `POST /devices/:identity/revoke` with `{ "device_id": "dev_…" }` ends a device's sessions.
+Every client — web, native app, Go and TS CLI — announces itself with optional headers on the
+requests that open a session, and the relay records them on one row per device:
+
+| Header | Row field | Notes |
+|--------|-----------|-------|
+| `X-Poweur-Device` | `id` (hashed) | random per-install fingerprint; the relay keeps only `dev_` + a hash |
+| `X-Poweur-Device-Name` | `name` | hostname, or "Safari on Mac", "iPhone" (≤ 64 bytes) |
+| `X-Poweur-Device-Kind` | `kind` | `laptop`, `phone`, `browser`, `agent`, … |
+| `X-Poweur-Device-Client` | `client` | `app`, `web` or `cli`; anything else is dropped |
+| `X-Poweur-Device-Platform` | `platform` | "macOS", "iOS", … (≤ 32 bytes) |
+| `X-Poweur-Device-Browser` | `browser` | web clients only (≤ 32 bytes) |
+| `X-Poweur-Device-Enrollment` | `enrollment_id` | the device's keystore enrollment, when it has one |
+
+All are self-reported labels, never credentials. A later request that omits a header leaves the
+stored value alone. Rows also carry `added_at` and `last_seen`.
+
 ## Device pairing (EPIC-011 E11-T8)
 
 Moving a seed to a new device needs an **authentic** channel, not a secret one — and the relay

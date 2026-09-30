@@ -26,6 +26,7 @@ import {
 
 import { assertChallenge, credentialRpId, wrapKeysWithPRF } from "./passkey.js";
 import { loadIdentityRecord, relayUrlFor, rpIdFor, saveIdentityRecord, isShellRuntime } from "./storage.js";
+import { describeThisDevice } from "./devices.js";
 import { jwksFromSeed, publicKeyFromJwk } from "./vault.js";
 
 /** A stable id for an enrollment, independent of the credential it wraps. */
@@ -109,24 +110,7 @@ export async function enrollThisBrowser(client, identity, { label = deviceLabel(
  * should say "iPhone", not "Safari on iOS".
  */
 export function deviceLabel(userAgent = globalThis.navigator?.userAgent ?? "", { native = isShellRuntime() } = {}) {
-  if (native) {
-    if (/iPad/i.test(userAgent)) return "iPad";
-    if (/iPhone/i.test(userAgent)) return "iPhone";
-    if (/Android/i.test(userAgent)) return "Android";
-    return "This device";
-  }
-  const platform =
-    /iPhone|iPad/i.test(userAgent) ? "iOS" :
-    /Android/i.test(userAgent) ? "Android" :
-    /Mac OS X/i.test(userAgent) ? "Mac" :
-    /Windows/i.test(userAgent) ? "Windows" :
-    /Linux/i.test(userAgent) ? "Linux" : "Device";
-  const browser =
-    /Edg\//.test(userAgent) ? "Edge" :
-    /Firefox\//.test(userAgent) ? "Firefox" :
-    /Chrome\//.test(userAgent) ? "Chrome" :
-    /Safari\//.test(userAgent) ? "Safari" : "browser";
-  return `${browser} on ${platform}`;
+  return describeThisDevice(userAgent, { native }).name;
 }
 
 // ─── Removal ──────────────────────────────────────────────────────────────────
