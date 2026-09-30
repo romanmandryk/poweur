@@ -175,6 +175,8 @@ test.describe("native custody", () => {
     const panel = page.locator("#panel-root");
     await expect(panel.locator(".enrollment-row")).toHaveCount(1, { timeout: 20_000 });
     await expect(panel).toContainText("this device");
+    // The restorability note sits behind a tap-to-open tip.
+    for (const tip of await panel.locator(".info-tip button").all()) await tip.click();
     await expect(panel).toContainText("the OS keystore");
     await expect(panel).not.toContainText("this browser");
     await expect(panel).not.toContainText("Back up this browser");

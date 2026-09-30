@@ -32,6 +32,7 @@ import { refreshSession, useSession } from "../../state/session";
 import { closePanel, openPanel, setLoading, toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { Chip, KvRow, Notice, SectionLabel } from "../../ui/Display";
+import { InfoTip } from "../../ui/InfoTip";
 import { FormGroup, Input, inputClass, Label, Textarea } from "../../ui/Field";
 
 const activeIdentity = () => useSession.getState().identity ?? "";
@@ -318,19 +319,17 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
   const removeRow = async (row: MergedRow) => {
     const { device, enrollment } = row;
     const confirmed = await askConfirm({
-      title: enrollment ? "Remove device" : "Revoke device",
-      message: enrollment
-        ? "Remove this device? It will lose access to your stored keys and its sessions end."
-        : "Revoke this device? Its sessions stop working.",
-      confirmLabel: enrollment ? "Remove" : "Revoke",
+      title: "Remove device",
+      message: "Sign this device out and delete its backup? If it may be compromised, rotate your keys afterwards — a device that has your key can sign back in.",
+      confirmLabel: "Remove",
     });
     if (confirmed) {
-      setLoading(true, enrollment ? "Removing device…" : "Revoking device…");
+      setLoading(true, "Removing device…");
       try {
         if (enrollment) await removeEnrollment(activeClient(), identity, enrollment.enrollment_id);
         if (device) {
           const result = await activeClient().devices().revoke(device.id);
-          toast(`Revoked: ${result.sessions_revoked} session(s)`, "success", 5000);
+          toast(`Removed: ${result.sessions_revoked} session(s) ended`, "success", 5000);
         } else {
           toast("Device removed", "success");
         }
@@ -375,9 +374,11 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
                   <div className="enrollment-meta mt-0.5 text-[13px] text-muted">
                     {device ? describeDeviceRow(device) : `${ENROLLMENT_KIND_LABEL[enrollment.kind] ?? enrollment.kind}${enrollment.created_at ? ` · added ${fmtTime(enrollment.created_at)}` : ""}`}
                   </div>
-                  <div className="enrollment-restore mt-0.5 text-[13px] text-muted">
-                    {restoreNote(row)}
-                    {enrollment ? ` Unlocked by ${ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}${enrollment.payload === "legacy-keypair" ? ", pre-seed keys" : ""}.` : ""}
+                  <div className="enrollment-restore mt-0.5">
+                    <InfoTip label={enrollment?.has_passkey && enrollment.wrap === "prf" ? "Restorable" : "Not restorable"}>
+                      {restoreNote(row)}
+                      {enrollment ? ` Unlocked by ${ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}${enrollment.payload === "legacy-keypair" ? ", pre-seed keys" : ""}.` : ""}
+                    </InfoTip>
                   </div>
                 </div>
                 {!revoked && (
@@ -387,10 +388,10 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
                     data-remove-enrollment={enrollment?.enrollment_id}
                     data-revoke-device={device?.id}
                     disabled={row.current}
-                    aria-label={`${enrollment ? "Remove" : "Revoke"} ${title}`}
+                    aria-label={`Remove ${title}`}
                     onClick={() => void removeRow(row)}
                   >
-                    {enrollment ? "Remove" : "Revoke"}
+                    Remove
                   </Button>
                 )}
               </div>
@@ -416,10 +417,12 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
         <p className="mt-2.5 text-[13px] text-muted">This identity predates recovery kits — see Settings → Recovery kit.</p>
       )}
 
-      <p className="mt-2.5 text-[13px] text-muted">
-        Removing a device ends its sessions and, if it has a backup, stops it reading your stored keys. A device that already holds your
-        identity key can enrol again — that needs a key rotation.
-      </p>
+      <div className="mt-2.5">
+        <InfoTip label="What removing means">
+          Removing signs the device out and deletes its backup. It does not change your key, so a device that already has it could sign
+          back in. If you think one is compromised, rotate your keys.
+        </InfoTip>
+      </div>
     </div>
   );
 }

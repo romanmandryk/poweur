@@ -204,6 +204,8 @@ describe("Settings destination (E21-T11)", () => {
     fireEvent.click($("#row-keys-devices")!);
     await waitFor(() => expect(document.querySelectorAll("#panel-root .enrollment-row")).toHaveLength(3));
     const panel = $("#panel-root")!;
+    // The restorability notes sit behind a tap-to-open tip.
+    panel.querySelectorAll<HTMLButtonElement>(".info-tip button").forEach((tip) => fireEvent.click(tip));
     expect(panel.textContent).toContain("this device");
     expect(panel.textContent).toContain("the OS keystore");
     expect(panel.textContent).toContain("CLI on server");
@@ -233,6 +235,7 @@ describe("Settings destination (E21-T11)", () => {
     // e1 (this phone, no device row), d2 joined to e2, and the CLI machine.
     await waitFor(() => expect(document.querySelectorAll("#panel-root .enrollment-row")).toHaveLength(3));
     const panel = $("#panel-root")!;
+    panel.querySelectorAll<HTMLButtonElement>(".info-tip button").forEach((tip) => fireEvent.click(tip));
     expect(panel.textContent).toContain("Chrome on Mac");
     expect(panel.textContent).toContain("Web · macOS · Chrome");
     expect(panel.textContent).toContain("CLI · macOS");
@@ -240,6 +243,10 @@ describe("Settings destination (E21-T11)", () => {
     expect(panel.textContent).toContain("Passkey backup");
     expect(panel.textContent).toContain("Keeps its keys on this machine only");
     expect(panel.textContent).not.toContain("Devices using this identity");
+    // One verb for every row, with the honest caveat behind a tip.
+    expect(panel.textContent).not.toContain("Revoke");
+    expect(panel.textContent).toContain("What removing means");
+    expect(panel.textContent).toContain("does not change your key");
 
     // Removing the joined row drops its keystore copy and ends its sessions.
     fireEvent.click($('[data-remove-enrollment="e2"]')!);
