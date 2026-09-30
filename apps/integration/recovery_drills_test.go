@@ -582,3 +582,55 @@ func TestDrill_EnrollNewDeviceViaCode(t *testing.T) {
 	runCLI(t, peerHome, "send", "enrolled.poweur.net", "hello new device")
 	assertDecryptedInbox(t, mustInbox(t, newDevice), "peer5.poweur.net", "hello new device")
 }
+
+// Drill: the device that created an identity approves a new one from the
+// pairing link alone: no --seed (it stored the seed), no --use-identity (the
+// link names the identity, even when another one is this device's default).
+// A device without a stored seed is told to pass one.
+func TestDrill_ApproveNeedsNoSeedOnTheCreatingDevice(t *testing.T) {
+	relay := newDrillRelay(t, "stored.poweur.net", "default.poweur.net")
+	oldDevice, newDevice := t.TempDir(), t.TempDir()
+	seed := createSeedIdentity(t, oldDevice, "stored.poweur.net", relay.url)
+	// The last identity created becomes the configured default.
+	createSeedIdentity(t, oldDevice, "default.poweur.net", relay.url)
+
+	type offer struct {
+		Code string `json:"code"`
+		Link string `json:"link"`
+	}
+	stdout, _ := runCLI(t, newDevice, "key", "enroll", "stored.poweur.net", "--relay", relay.url, "--label", "laptop", "--json")
+	var o offer
+	if err := json.Unmarshal([]byte(stdout), &o); err != nil {
+		t.Fatalf("enroll offer: %v\n%s", err, stdout)
+	}
+	runCLIFull(t, oldDevice, "key", "approve", o.Link, "--relay", relay.url, "--no-wait", "--json")
+	runCLI(t, newDevice, "key", "claim", "stored.poweur.net", o.Code, "--json")
+	if code, out, errOut := runCLIFull(t, oldDevice, "key", "approve", o.Link, "--relay", relay.url, "--json"); code != 0 || !strings.Contains(out, `"approved": true`) {
+		t.Fatalf("approve without --seed = %d %s %s", code, out, errOut)
+	}
+	claimed, _ := runCLI(t, newDevice, "key", "claim", "stored.poweur.net", o.Code, "--json")
+	if !strings.Contains(claimed, `"enrolled": true`) {
+		t.Fatalf("new device did not collect the keys:\n%s", claimed)
+	}
+	derived, _ := runCLI(t, newDevice, "key", "derive", "--seed", seed, "--json")
+	var want struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.Unmarshal([]byte(derived), &want); err != nil {
+		t.Fatal(err)
+	}
+	doc := fetchDoc(t, relay.url+"/identities/stored.poweur.net")
+	if idpkg.NormalizePublicKeyKey(want.PublicKey) != idpkg.NormalizePublicKeyKey(doc.PublicKey) {
+		t.Fatal("the new device does not hold the identity's key")
+	}
+
+	// The device that got its keys by enrolling now holds the seed as well, so it
+	// can approve the next one; a device with no seed at all is told what to do.
+	if _, err := os.Stat(filepath.Join(newDevice, ".poweur", "keys", "stored.poweur.net.seed")); err != nil {
+		t.Fatalf("enrolled device kept no seed: %v", err)
+	}
+	stranger := t.TempDir()
+	if code, _, errOut := runCLIFull(t, stranger, "key", "approve", o.Link, "--relay", relay.url); code == 0 || !strings.Contains(errOut, "no stored seed") {
+		t.Fatalf("approve on a device with no seed = %d %s", code, errOut)
+	}
+}

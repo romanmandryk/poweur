@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -41,6 +42,49 @@ func SaveEncryptionPrivateKey(identity string, privateKey []byte) (string, error
 		return "", err
 	}
 	return path, nil
+}
+
+// SeedPath returns the path for an identity's stored master seed.
+func SeedPath(keysDir, identity string) string {
+	return filepath.Join(keysDir, identity+".seed")
+}
+
+// SaveSeed writes the master seed next to the derived keys, in the same format
+// and with the same protections (mode 0600, `key protect`). The seed derives
+// both keys, so it grants nothing the key files don't already; keeping it lets
+// this device approve other devices (`poweur key approve`) the way the app does.
+func SaveSeed(identity string, seed []byte) (string, error) {
+	keysDir, err := config.KeysDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(keysDir, 0o700); err != nil {
+		return "", err
+	}
+	path := SeedPath(keysDir, identity)
+	encoded := base64.RawStdEncoding.EncodeToString(seed)
+	if err := os.WriteFile(path, []byte(encoded), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// LoadSeed reads a stored master seed, decrypting a protected file with
+// POWEUR_KEY_PASSPHRASE. A missing file returns an error wrapping os.ErrNotExist
+// (identities created before seeds were stored have none).
+func LoadSeed(path string) ([]byte, error) {
+	raw, _, err := readKeyFile(path, "")
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := decodeKeyBytes(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(decoded) != SeedLen {
+		return nil, errors.New("invalid seed size")
+	}
+	return decoded, nil
 }
 
 // LoadPrivateKey reads a signing key, transparently decrypting a
@@ -154,6 +198,9 @@ func SaveKeysFromSeed(identity string, seed []byte) (keyPath, encKeyPath string,
 		return "", "", err
 	}
 	if encKeyPath, err = SaveEncryptionPrivateKey(identity, encPriv); err != nil {
+		return "", "", err
+	}
+	if _, err = SaveSeed(identity, seed); err != nil {
 		return "", "", err
 	}
 	return keyPath, encKeyPath, nil

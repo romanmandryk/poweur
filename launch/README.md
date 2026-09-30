@@ -83,7 +83,7 @@ polish, not new epics**.
 
 ### P0 — operational accounts and contacts
 
-- [ ] **`info@poweur.org` mailbox.** The legal pages, `security.txt` and `SECURITY.md`
+- [x] **`info@poweur.org` mailbox.** *(done 30 Sep: sending and receiving work)* The legal pages, `security.txt` and `SECURITY.md`
       already point at it, so it must work before the pages go live. Cheapest setup:
       Cloudflare Email Routing (free) forwarding to your inbox for receiving, plus a
       mailbox provider for replying from the address (Fastmail, Zoho, Proton, Google
@@ -94,7 +94,7 @@ polish, not new epics**.
       laptop's browser with "Add this device" + `poweur key approve`, and set
       `QUOTA_CONTACT=support.poweur.net` in the deploy environment. Do `hello.poweur.net`
       (the demo bot) the same way. Unset `OPERATOR_TOKEN` afterwards
-- [ ] **npm:** create the `@poweur` org and 2FA-protect the account now; the names
+- [x] **npm:** *(done 30 Sep: `@poweur` org created)* create the `@poweur` org and 2FA-protect the account now; the names
       `@poweur/client` and `poweur` are free today (checked 25 Sep 2026) and cost nothing
       to hold. See the publish item under P1
 - [ ] **Developer accounts for the mobile beta** (Part 1b): Apple Developer Program and

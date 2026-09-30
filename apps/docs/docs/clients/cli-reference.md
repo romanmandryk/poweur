@@ -494,18 +494,19 @@ poweur key enroll alice.poweur.net --relay https://relay.poweur.net --label "wor
 
 It prints a QR code for the Poweur app (`poweur://pair?…`), the browser link, the command
 below, and an 8-character code like `K7QM-4XP2`. On a device that
-already holds the identity, either **use the link** — nothing to compare, the link carries the new
+already holds the identity (approving needs no recovery kit: the CLI keeps the identity's seed next to
+its keys, as `~/.poweur/keys/<identity>.seed`), either **use the link** — nothing to compare, the link carries the new
 device's commitment:
 
 ```bash
-poweur key approve 'https://alice.poweur.net/app/#pair=K7QM4XP2.…&id=alice.poweur.net' --seed "$(cat alice.seed)"
+poweur key approve 'https://alice.poweur.net/app/#pair=K7QM4XP2.…&id=alice.poweur.net'
 ```
 
 — or **type the code**; both machines then show six digits, and this side delivers only once
 they are confirmed (typed at the prompt, or given with `--sas`):
 
 ```bash
-poweur key approve K7QM-4XP2 --seed "$(cat alice.seed)"
+poweur key approve K7QM-4XP2
 ```
 
 Without `--wait`, run `poweur key claim alice.poweur.net K7QM4XP2` on the new device to move each
@@ -516,7 +517,7 @@ then `--sas` the same way.
 |------|---------|-------------|
 | `--label <text>` | enroll | Device description shown to the approver |
 | `--wait` | enroll | Keep going until approved, then install the keys |
-| `--seed <value>` | approve | Master seed; it lives only on your devices, never on the relay |
+| `--seed <value>` | approve | Master seed (base64url or mnemonic). Default: the seed this device stored when it created, recovered or enrolled the identity. Only needed for an identity set up on this device before seeds were stored: run `poweur key recover <id> --seed …` once to store it |
 | `--sas <digits>` | approve | The six digits the new device shows (typed code only) |
 | `--no-wait` | approve | Return at once if the new device has not answered yet |
 

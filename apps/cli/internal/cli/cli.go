@@ -215,6 +215,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	seedPath, err := identity.SaveSeed(identityValue, seed)
+	if err != nil {
+		identity.RemoveKeyFiles(keyPath, encKeyPath)
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 
 	publicKey := identity.PublicKeyString(pub)
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
@@ -226,7 +232,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		keepKeys := false
 		defer func() {
 			if !keepKeys {
-				identity.RemoveKeyFiles(keyPath, encKeyPath)
+				identity.RemoveKeyFiles(keyPath, encKeyPath, seedPath)
 			}
 		}()
 		if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
@@ -2133,7 +2139,7 @@ func runKeyProtect(args []string, stdout, stderr io.Writer, protect bool) int {
 		}
 	}
 	changed := map[string]bool{}
-	for _, suffix := range []string{".key", ".enc"} {
+	for _, suffix := range []string{".key", ".enc", ".seed"} {
 		path := filepath.Join(keysDir, identityValue+suffix)
 		if _, statErr := os.Stat(path); statErr != nil {
 			continue
@@ -2502,11 +2508,17 @@ func runKeyRotate(args []string, stdout, stderr io.Writer) int {
 	_ = os.Rename(oldPath, oldPath+".pre-rotate")
 	oldEncPath := identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
 	_ = os.Rename(oldEncPath, oldEncPath+".pre-rotate")
+	oldSeedPath := identity.SeedPath(cfg.KeysDir, identityValue)
+	_ = os.Rename(oldSeedPath, oldSeedPath+".pre-rotate")
 	if _, err := identity.SavePrivateKey(identityValue, newPriv); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if _, err := identity.SaveEncryptionPrivateKey(identityValue, newEncPriv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if _, err := identity.SaveSeed(identityValue, newSeed); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

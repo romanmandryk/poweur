@@ -101,7 +101,7 @@ anyone can message them.
 2. On your laptop, keys are generated locally and never touch the server:
 
    ```bash
-   POWEUR_OPERATOR_TOKEN=<token> poweur identity create support.poweur.net --hosted --from-seed --relay https://poweur.net
+   POWEUR_OPERATOR_TOKEN=<token> poweur identity create support.poweur.net --hosted --relay https://relay.poweur.net
    ```
 
    It prints the **recovery kit** (seed and 24-word mnemonic). Store it in your password
