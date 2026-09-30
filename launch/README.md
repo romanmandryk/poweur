@@ -13,10 +13,130 @@ The accompanying motivation essay is [`blog-why-poweur.md`](blog-why-poweur.md).
 Five complete editorial drafts and their proposed dates are listed in the
 [blog series plan](blog-series.md); publication and scheduling remain open.
 
+**First:** [Part 0, publish the repository](#part-0--publish-the-repository-before-any-phase-1b-post-links-to-it).
+Nothing in Part 3 can link to a private repo, and after the split this checklist and the blog
+drafts live in the private one.
+
 **Rule for every item:** if it isn't done by the phase gate, it moves to the next phase or
 comes off the list. The launch date doesn't move for a feature.
 
 ---
+
+## Part 0 — Publish the repository (before any Phase 1b post links to it)
+
+Today `romanmandryk/poweur` is private and mixes the open-source product with launch plans,
+operator runbooks and design explorations. Publish a **clean** public repo and keep the rest in a
+private one (`poweur-private`, or `poweur-ops` if deploy moves there). Audit done 30 Sep 2026
+(1290 tracked files, 320 commits): no secrets or keys in the tree or the history (checked for
+private keys, cloud/GitHub/Slack/Sentry-style tokens, `.env` files), so this is about what
+**doesn't belong**, not a leak.
+
+### Decisions first
+
+- [ ] **History: squash or rewrite?** Moving files with `git rm` leaves them in every old commit.
+      Recommended: publish a **new repo with one "Initial public release" commit** (clean, no
+      agent noise, no old private paths). The old private repo stays as the archive. Keeping
+      history means `git filter-repo` from a fresh clone, stripping the private paths below,
+      the odd refs and rewriting the author email; more work, and blame/DCO history is of
+      little value for a one-person project so far
+- [ ] **Commit author address.** History carries `roman.mandryk@gmail.com`. Use your GitHub
+      `…@users.noreply.github.com` address for the public repo (`git config user.email`, and
+      `.mailmap` if history is kept)
+- [ ] **Where does it live?** `romanmandryk/poweur` today. A `poweur` GitHub organisation reads
+      better for a project and for GHCR image names (`ghcr.io/poweur/…`); the repo URL is
+      baked into the site, docs, `security.txt` and the compose files (20 files mention
+      `romanmandryk`, listed by `git grep romanmandryk`)
+- [ ] **Epics stay public or not?** `epics/` is the roadmap, linked from the README, CONTRIBUTING
+      and AGENTS.md, and useful to contributors: recommend **keeping 001–025, 031, 032 and
+      `integrations/` public**. EPIC-026 (plans and billing), 027 (hosted agent runtime), 028
+      (managed hosting), 029 and 030 (commerce) read as the business plan and pricing:
+      move them to the private repo, or keep them, your call. If moved, edit the links in
+      `epics/README.md` and the README
+- [ ] **Is the operator runbook public?** `deploy/ABUSE.md` is fine to publish (transparency
+      builds trust) but you may prefer the enforcement detail private. Decide before the split
+
+### Move to the private repo (everything here comes out of the public tree)
+
+| Path | Why |
+|------|-----|
+| `launch/` (this checklist, `outreach-drafts.md`, all `blog-*.md` drafts and `blog-series.md`) | Launch plans, contact lists, draft posts, vendor and account notes. Publish each blog post through the site when it's ready, not as a draft in git |
+| `deploy/OPS.md` | Production runbook: bucket names, incident notes, server paths, recovery steps |
+| `deploy/BACKUP.md` | Storage Box and backup layout specific to your account |
+| `deploy/ansible/inventory.yml` | Real server IP (`77.42.124.83`). Publish an `inventory.example.yml` with a placeholder instead |
+| `deploy/ansible/secrets*.yml`, any `.env.prod`, `.observability.env` | Never tracked today; keep it that way (they're in `.gitignore`: verify) |
+| `deploy/betterstack/uptime.json` | Your monitor definitions and endpoints |
+| `design/claude/png/`, `design/claude/tones/`, `design/openai/` | Logo exploration rounds. **Keep** `design/claude/black-glass/`, `flat/` and `lockups/`: the web app, the brand README and the press kit use them (consider moving them to `design/brand/logos/` and updating `Logo.tsx` and `design/brand/README.md`) |
+| `design/brand/README.md` line linking the claude.ai design canvas | Private artifact link |
+| `requirements.md`, `test-scenarios.md` | Review first: if they're internal product notes or name your hosting (Hetzner staging project), move them; if they're specs for contributors, keep and edit |
+| `.claude/launch.json` | Your editor's preview config; not part of the product |
+| Claude memory, scratch notes, anything under `/Users/romanmandryk/.claude` | Already outside the repo; don't copy it in |
+
+### Keep public, but scrub
+
+- [ ] `apps/site/legal/**`: the imprint shows your name, address and NIF. That is the legal
+      imprint the EU requires on a website, so it stays on poweur.org; decide whether it
+      should also sit in a public repo under your name (it will)
+- [ ] `deploy/` (infra stack, Caddyfile, Alloy/Grafana/Prometheus config, backup scripts,
+      compose, Ansible playbook): the self-hosting story is stronger with a real example, so
+      keep it, but read each file for your hostnames, IDs and account specifics.
+      `docker-compose.prod.yml` holds your reserved names and brand blocklist; fine to show,
+      but consider a generic `docker-compose.example.yml` for self-hosters and keeping the
+      prod one private
+- [ ] `.github/workflows/deploy*.yml`, `health-monitor.yml`: they reference your secrets by
+      name (`DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`) and deploy on every push to
+      `master`. Public is fine, but a public repo lets anyone open PRs: keep workflows
+      `push`/`workflow_dispatch` only (never `pull_request_target` with secrets), protect
+      `master`, and require approval for first-time contributors' workflow runs. A cleaner end
+      state is an **ops repo** holding the deploy workflows, prod compose, Caddyfile and
+      inventory, pulling the published image by digest: do that after launch, not now
+- [ ] `AGENTS.md`, `CLAUDE.md`: fine to publish, but check they don't point at moved paths
+      (`deploy/OPS.md`, `launch/`, `epics/EPIC-026…`)
+- [ ] Docs and code comments: `git grep -niE "TODO|FIXME|XXX|hack" | grep -iE "roman|private|secret|prod"`
+      and skim `apps/docs` for unreleased or internal statements
+- [ ] Mail and account names in docs: `info@poweur.org` is intended; `admin@poweur.net` (Caddy
+      ACME contact), `tlsrpt@poweur.org`, `u123456@…your-storagebox.de` are placeholders or
+      intended, but confirm none is a real, monitored personal address
+
+### Clean up the local repo before anything is pushed
+
+- [ ] **Do not push `--all`, `--mirror` or `--tags`.** This clone has 6 `worktree-agent-*`
+      branches, `wave2/*`, `t3code/*` and `refs/t3/checkpoints/*` refs from tooling. A fresh
+      clone/squash repo avoids them; if you publish this one, delete them first
+      (`git for-each-ref`, then `git update-ref -d` / `git branch -D`) and on GitHub check
+      `git ls-remote origin` for strays
+- [ ] `git worktree list` and `.claude/worktrees/`: they hold full copies of the tree (old
+      versions of the files above). Remove them (`git worktree remove`) before making the
+      public repo, so nothing is copied by accident
+
+### The steps
+
+1. [ ] Make the decisions above.
+2. [ ] Create `poweur-private` (private). Copy in the "move" paths, commit, and push. Until
+       you're sure it's complete, don't delete anything here.
+3. [ ] In a **fresh clone** (`git clone --no-local` of the private-today repo), remove the
+       moved paths, apply the scrubs, fix links (README, CONTRIBUTING, AGENTS.md, epics
+       index), update the repo URL, bump nothing that didn't change behaviour.
+4. [ ] Run the tests that guard paths and links: `go test ./...` in each module,
+       `pnpm -r test`, the docs build (`pnpm --filter docs build`), the site build, and the
+       integration suite. A missing file shows up as a failing test.
+5. [ ] **Secret scan the exact tree and history you'll publish**: install `gitleaks` or
+       `trufflehog` and run it (`gitleaks detect --source . --log-opts="--all"`), plus
+       `git grep -nE "77\.42|rclone|OPERATOR_TOKEN|your-storagebox|u[0-9]{6}\."`. Expect only
+       example values.
+6. [ ] Create the GitHub repo (empty, **no** auto-generated README/licence), push `main`
+       only. Enable: branch protection on `main`, required review for workflow changes,
+       "Require approval for all outside collaborators" for Actions, Dependabot alerts,
+       secret scanning with push protection, private vulnerability reporting (matches
+       `SECURITY.md`), Discussions, issue and PR templates.
+7. [ ] Re-create Actions **secrets** and variables in the new repo (`DEPLOY_HOST`,
+       `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`), make the GHCR packages public (or pull
+       with a token), point the VM's `/opt/apps/poweur` checkout at the new remote, and
+       run **Deploy** once to prove the pipeline still works. Update the repo URL
+       everywhere (site, docs, `security.txt`, compose, `package.json` `repository`).
+8. [ ] Archive the old repo as private; keep it as the private history. Add a one-line
+       README there saying what replaced what.
+9. [ ] Final read as a stranger: open the public repo in a private window, read the README,
+       the file list, the first screen of `apps/docs`, and every top-level folder.
 
 ## Part 1 — Product (Phase 0, one week)
 
