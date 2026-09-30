@@ -84,18 +84,16 @@ poweur identity create alice --hosted --relay http://127.0.0.1:8080
 poweur identity create alice --dns-provider cloudflare
 ```
 
-**Seed-derived** (`--from-seed` or `--seed`): both long-lived keys are derived from a single
-32-byte master seed, so the whole identity can be recovered from those 32 bytes alone. See
+Every identity is **seed-based**: both long-lived keys are derived from a single 32-byte master
+seed, so the whole identity can be recovered from those 32 bytes alone. See
 [Key management & recovery](/security/key-management).
 
 ```bash
-poweur identity create alice --hosted --from-seed --relay http://127.0.0.1:8080
+poweur identity create alice --hosted --relay http://127.0.0.1:8080
 ```
 
-`--from-seed` generates a seed and prints it — **this is the only copy**. `--seed <base64url>`
-uses a seed you already hold, and never re-prints it. Without either flag the CLI generates two
-independent random keys, as before; those identities cannot produce a recovery seed until they
-rotate to one.
+The CLI generates the seed and prints it (with its 24-word mnemonic) — **this is the only copy**.
+`--seed <base64url>` uses a seed you already hold instead, and never re-prints it.
 
 Private keys are written to `~/.poweur/keys/` (`<identity>.key` and `<identity>.enc`). Existing
 files are never overwritten: a second `create` for a name this machine already holds fails and
@@ -113,12 +111,9 @@ enroll or recover.
 | `--dns-token <value>` | DNS API token (prefer `CLOUDFLARE_API_TOKEN` / `HETZNER_API_TOKEN`) |
 | `--parent-domain <domain>` | Parent domain used when a handle is provided |
 | `--relay <url>` | Relay URL override |
-| `--from-seed` | Generate a master seed and derive both keys from it; the seed is printed once |
-| `--seed <base64url>` | Derive both keys from an existing master seed (never re-printed) |
+| `--seed <base64url>` | Derive both keys from an existing master seed instead of generating one (never re-printed) |
 | `--use-identity <subdomain>` | Override identity for this command |
 | `--json` | Machine-readable output |
-
-`--from-seed` and `--seed` are mutually exclusive.
 
 **Example (JSON output):**
 ```bash
@@ -134,15 +129,16 @@ poweur identity create alice --dns-provider cloudflare --json
   "encryption_key_path":   "~/.poweur/keys/alice.poweur.net.enc",
   "relay":                 "https://relay.poweur.net",
   "registered":            true,
-  "seed_derived":          false
+  "seed":                  "…",
+  "mnemonic":              "…"
 }
 ```
 
-With `--from-seed`, the response additionally carries `"seed"` (unpadded base64url). It is
-returned exactly once — store it before the process exits:
+Unless you passed `--seed`, the response carries the generated `"seed"` (unpadded base64url) and
+its `"mnemonic"`. They are returned exactly once — store them before the process exits:
 
 ```bash
-poweur identity create alice --hosted --from-seed --json | jq -r .seed > alice.seed
+poweur identity create alice --hosted --json | jq -r .seed > alice.seed
 chmod 600 alice.seed
 ```
 
@@ -215,30 +211,13 @@ poweur identity list
 
 ---
 
-### `poweur identity add-encryption-key`
-
-Retrofit an existing identity with an X25519 encryption key. Use this on identities created before E2E encryption was mandatory (they have no `_poweur-enc.<identity>` record and therefore cannot receive messages). The command generates an X25519 keypair on disk, hands the public half and a scoped DNS token to the relay, and waits until the relay confirms the DNS `TXT` record was written.
-
-```bash
-poweur identity add-encryption-key --use-identity alice.poweur.net
-```
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--use-identity <identity>` | Identity to retrofit (overrides active identity) |
-| `--json` | Machine-readable output |
-
----
-
 ### `poweur send <to> <message>`
 
 Sign and send an end-to-end-encrypted message. The CLI:
 
 1. Loads (or creates) a session for the active identity via `ensure session`.
 2. Generates a client-side message id (ULID-shaped) and writes a `queued` entry to the local pending journal (`~/.poweur/pending/<identity>.jsonl`).
-3. Looks up the recipient's X25519 encryption public key at `_poweur-enc.<recipient>`. **If no record is found, the send is aborted** with an error that points the recipient at `poweur identity add-encryption-key`. There is no plaintext fallback.
+3. Looks up the recipient's X25519 encryption public key at `_poweur-enc.<recipient>`. **If no record is found, the send is aborted.** There is no plaintext fallback.
 4. Encrypts the payload with ChaCha20-Poly1305 under an X25519-derived key (see [End-to-End Encryption](/protocol/message-format#end-to-end-encryption)).
 5. Signs the canonical envelope (including the `id:` line and the `enc:` line) with the **session private key**.
 6. Attaches `session_id` and `session_proof` so the recipient's relay can verify without contacting the sender's relay.
@@ -388,10 +367,16 @@ Latency:  42ms
 
 ### `poweur key rotate`
 
-Replace the identity's signing key, publishing a rotation statement so verifiers accept the new
-key while the old one stays valid for a grace period (see
-[Web identity](/protocol/web-identity)). Contacts who pinned the old key follow the statement
-rather than warning.
+Move the identity onto a **new master seed**: both the signing and the encryption key change, and
+the new seed and mnemonic are printed — the only copy. A rotation statement is published so
+verifiers accept the new signing key while the old one stays valid for a grace period (see
+[Web identity](/protocol/web-identity)); contacts who pinned the old key follow the statement
+rather than warning. The old key files are kept beside the new ones as `*.pre-rotate` (the old
+encryption key still opens mail sent to it).
+
+Rotation is how you lock out a device that may be compromised: every device holds the identity
+key, so removing a device does not stop it, but a new key does. Your other devices must then be
+paired again.
 
 ```bash
 poweur key rotate --grace 168h

@@ -26,7 +26,6 @@ type KeystoreEnrollRequest struct {
 	EnrollmentID        string          `json:"enrollment_id"`
 	Kind                string          `json:"kind"`
 	Wrap                string          `json:"wrap"`
-	Payload             string          `json:"payload"`
 	CredentialID        string          `json:"credential_id,omitempty"`
 	CredentialPublicKey string          `json:"credential_public_key,omitempty"`
 	CredentialAlg       int             `json:"credential_alg,omitempty"`
@@ -127,13 +126,6 @@ func (s *Server) handleKeystorePut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "unknown wrap method")
 		return
 	}
-	if req.Payload == "" {
-		req.Payload = "seed"
-	}
-	if req.Payload != "seed" && req.Payload != "legacy-keypair" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "payload must be seed or legacy-keypair")
-		return
-	}
 	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -183,7 +175,6 @@ func (s *Server) handleKeystorePut(w http.ResponseWriter, r *http.Request) {
 		EnrollmentID:        req.EnrollmentID,
 		Kind:                req.Kind,
 		Wrap:                req.Wrap,
-		Payload:             req.Payload,
 		CredentialID:        req.CredentialID,
 		CredentialPublicKey: req.CredentialPublicKey,
 		CredentialAlg:       req.CredentialAlg,
@@ -220,7 +211,6 @@ type KeystoreSummary struct {
 	EnrollmentID string `json:"enrollment_id"`
 	Kind         string `json:"kind"`
 	Wrap         string `json:"wrap"`
-	Payload      string `json:"payload"`
 	Label        string `json:"label,omitempty"`
 	Role         string `json:"role,omitempty"`
 	HasPasskey   bool   `json:"has_passkey"`
@@ -260,7 +250,6 @@ func (s *Server) handleKeystoreList(w http.ResponseWriter, r *http.Request) {
 			EnrollmentID: e.EnrollmentID,
 			Kind:         e.Kind,
 			Wrap:         e.Wrap,
-			Payload:      e.Payload,
 			Label:        e.Label,
 			Role:         e.Role,
 			HasPasskey:   e.CredentialID != "",

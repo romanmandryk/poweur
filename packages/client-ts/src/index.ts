@@ -50,6 +50,7 @@ export {
   LocalSigner,
   MemoryKeyStore,
   generateIdentityKeys,
+  generateSeedIdentity,
   identityKeysFromSeed,
   signerFor,
   requireKeys,

@@ -278,7 +278,7 @@ func TestDrill_LostAllDevicesHaveKit(t *testing.T) {
 	home, peerHome := t.TempDir(), t.TempDir()
 
 	stdout, _ := runCLI(t, home, "identity", "create", "lost2.poweur.net",
-		"--hosted", "--from-seed", "--relay", relay.url, "--json")
+		"--hosted", "--relay", relay.url, "--json")
 	var created struct {
 		Mnemonic string `json:"mnemonic"`
 	}
@@ -359,11 +359,29 @@ func TestDrill_CompromisedSeedRotation(t *testing.T) {
 	before := fetchDoc(t, relay.url+"/identities/rotated.poweur.net")
 	oldKey := idpkg.NormalizePublicKeyKey(before.PublicKey)
 
-	runCLI(t, home, "key", "rotate", "--use-identity", "rotated.poweur.net", "--grace", "1h", "--json")
+	rotated, _ := runCLI(t, home, "key", "rotate", "--use-identity", "rotated.poweur.net", "--grace", "1h", "--json")
+	var rot struct {
+		Seed     string `json:"seed"`
+		Mnemonic string `json:"mnemonic"`
+	}
+	if err := json.Unmarshal([]byte(rotated), &rot); err != nil || rot.Seed == "" || rot.Mnemonic == "" {
+		t.Fatalf("rotation must hand back the new seed (the only copy): %v\n%s", err, rotated)
+	}
 
 	after := fetchDoc(t, relay.url+"/identities/rotated.poweur.net")
 	if idpkg.NormalizePublicKeyKey(after.PublicKey) == oldKey {
 		t.Fatal("rotation did not change the signing key")
+	}
+	// The new keys come from the new seed, so a recovery kit still covers them.
+	derived, _ := runCLI(t, t.TempDir(), "key", "derive", "--seed", rot.Seed, "--json")
+	var want struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.Unmarshal([]byte(derived), &want); err != nil {
+		t.Fatal(err)
+	}
+	if idpkg.NormalizePublicKeyKey(want.PublicKey) != idpkg.NormalizePublicKeyKey(after.PublicKey) {
+		t.Fatal("rotated key is not the one the new seed derives")
 	}
 	found := false
 	for _, pk := range after.PreviousKeys {

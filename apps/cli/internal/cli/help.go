@@ -45,14 +45,13 @@ const (
 
 var helpTree = []cmdHelp{
 	{Name: "identity", Summary: "Create, inspect and switch between your identities", Subs: []subHelp{
-		{Name: "create", Usage: "<name> [--dns-provider=cloudflare|hetzner] [--dns-token=<t>] [--parent-domain=<d>] " + relayFl + " [--seed=<b64url>|--from-seed] [--operator-token=<t>] [--json]", Summary: "Create an identity and register it with a relay"},
+		{Name: "create", Usage: "<name> [--dns-provider=cloudflare|hetzner] [--dns-token=<t>] [--parent-domain=<d>] " + relayFl + " [--seed=<b64url>] [--operator-token=<t>] [--json]", Summary: "Create an identity and register it with a relay"},
 		{Name: "show", Usage: idFlags, Summary: "Show the active identity"},
 		{Name: "list", Usage: "[--json]", Summary: "List identities on this machine"},
 		{Name: "use", Usage: "<identity> [--json]", Summary: "Make an identity the active one"},
 		{Name: "dns", Usage: "<identity> " + idFlags, Summary: "Print the DNS records an identity needs"},
 		{Name: "lookup", Usage: "<identity> [--json]", Summary: "Resolve someone else's identity"},
 		{Name: "export", Usage: idFlags, Summary: "Export the identity document"},
-		{Name: "add-encryption-key", Usage: "[<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=<t>] " + relayFl + " [--json]", Summary: "Publish (or rotate) the message-encryption key"},
 	}},
 	{Name: "key", Summary: "Recover, derive, back up and pair keys and devices", Subs: []subHelp{
 		{Name: "enroll", Usage: "<identity> " + relayFl + " [--label=<text>] [--wait]", Summary: "Pair THIS machine with an existing identity (shows a QR and a code)"},
@@ -62,7 +61,7 @@ var helpTree = []cmdHelp{
 		{Name: "recover", Usage: "<identity> --seed <b64url|mnemonic> " + relayFl + " [--parent-domain=<d>] [--json]", Summary: "Restore an identity on this machine from its seed"},
 		{Name: "derive", Usage: "--seed <b64url|mnemonic> [--json]", Summary: "Show the public keys a seed produces"},
 		{Name: "kit", Usage: "--seed <b64url|mnemonic> [--use-identity=<id>] [--json]", Summary: "Print a recovery kit"},
-		{Name: "rotate", Usage: "[--use-identity=<id>] [--json]", Summary: "Rotate the identity key"},
+		{Name: "rotate", Usage: "[--use-identity=<id>] [--grace=<duration>] [--json]", Summary: "Move the identity onto a new seed (new signing and encryption keys)"},
 		{Name: "protect", Usage: "[--use-identity=<id>] [--passphrase=<p>] [--json]", Summary: "Encrypt the private keys on disk with a passphrase"},
 		{Name: "unprotect", Usage: "[--use-identity=<id>] [--passphrase=<p>] [--json]", Summary: "Remove the passphrase from the keys on disk"},
 	}},

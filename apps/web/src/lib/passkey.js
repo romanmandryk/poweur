@@ -207,7 +207,7 @@ export async function authenticatePasskey(credentialId, { rpId: scope = null } =
  * Encrypt the identity's private key JWKs using the PRF output as key material.
  * Returns an object suitable for storage.
  */
-export async function wrapKeysWithPRF(prfOutput, signingJWK, encJWK, seed = null) {
+export async function wrapKeysWithPRF(prfOutput, signingJWK, encJWK, seed) {
   const wrapped = await wrapKeysAES(prfOutput, signingJWK, encJWK, seed);
   return { ...wrapped, kdf: "prf" };
 }

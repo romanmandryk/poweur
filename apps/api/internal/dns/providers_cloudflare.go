@@ -61,23 +61,6 @@ func (p *CloudflareProvider) WriteIdentityRecords(ctx context.Context, token, id
 	return nil
 }
 
-func (p *CloudflareProvider) WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error {
-	if token == "" {
-		return errors.New("missing cloudflare api token")
-	}
-	if encryptionPublicKey == "" {
-		return errors.New("missing encryption public key")
-	}
-	zoneID, err := p.findZoneID(ctx, token, identity)
-	if err != nil {
-		return err
-	}
-	ttl := int(defaultTTL(p.cfg).Seconds())
-	encName := fmt.Sprintf("_poweur-enc.%s", identity)
-	encValue := fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
-	return p.upsertRecord(ctx, token, zoneID, "TXT", encName, encValue, ttl, false)
-}
-
 func (p *CloudflareProvider) findZoneID(ctx context.Context, token, identity string) (string, error) {
 	labels := strings.Split(identity, ".")
 	for i := 0; i < len(labels)-1; i++ {

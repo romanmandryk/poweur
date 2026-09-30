@@ -113,7 +113,6 @@ describe("web keystore ↔ real relay", () => {
       relay: relay.baseUrl,
       createdAt: new Date().toISOString(),
       supportsPRF: true,
-      seedDerived: true,
     });
     setActiveIdentity(identity);
     setUnlockedKeys(identity, signingJWK, encJWK, toBase64url(seed));
@@ -138,7 +137,6 @@ describe("web keystore ↔ real relay", () => {
       label: "Chrome on Mac",
       kind: "passkey",
       wrap: "prf",
-      payload: "seed",
       current: true,
     });
     const record = loadIdentityRecord(identity);

@@ -285,7 +285,6 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
 	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
 	mux.HandleFunc("GET /hosted/availability", s.handleHostedAvailability)
-	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
 	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
 	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
 	mux.HandleFunc("PUT /identities/{identity}/keystore", s.handleKeystorePut)
@@ -666,75 +665,6 @@ func mustDecodeB64(s string) []byte {
 		b, _ = base64.StdEncoding.DecodeString(s)
 	}
 	return b
-}
-
-// handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
-// `_poweur-enc.<identity>` TXT record for an already-registered identity.
-// Owner-only: caller must sign the canonical encryption-key-update string
-// with the long-lived identity key (verified via DNS or local store).
-//
-// This endpoint exists because early identities were minted before E2E
-// encryption landed, so they have a signing record in DNS but no encryption
-// record. A separate endpoint (instead of POST /identities with upsert
-// semantics) keeps the primary registration flow strict — "create once" —
-// and makes the "retro-fit an existing identity" flow explicit and auditable.
-func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.Request) {
-	identityValue := r.PathValue("identity")
-	if identityValue == "" {
-		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
-		return
-	}
-	var req EncryptionKeyRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		return
-	}
-	if req.EncryptionPublicKey == "" || req.DNSProvider == "" || req.DNSToken == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
-		return
-	}
-	if req.IssuedAt == "" || req.Nonce == "" || req.IdentitySignature == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "missing identity-signed admin envelope (issued_at, nonce, identity_signature)")
-		return
-	}
-	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-
-	normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
-		return
-	}
-
-	identityPub, err := s.resolveIdentityPublicKey(r.Context(), identityValue)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-		return
-	}
-	canonical := crypto.CanonicalEncryptionKeyUpdate(identityValue, normalizedEnc, req.IssuedAt, req.Nonce)
-	if err := crypto.VerifySignature(identityPub, canonical, req.IdentitySignature); err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
-		return
-	}
-	verifiedActor(r, identityValue)
-
-	provider, err := s.providers.Provider(req.DNSProvider)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
-		return
-	}
-
-	if err := provider.WriteEncryptionKey(r.Context(), req.DNSToken, identityValue, normalizedEnc); err != nil {
-		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, EncryptionKeyResponse{
-		Identity:            identityValue,
-		EncryptionPublicKey: normalizedEnc,
-		UpdatedAt:           time.Now().UTC().Format(time.RFC3339),
-	})
 }
 
 // requireRecentTimestamp parses an RFC3339 timestamp and rejects it if it

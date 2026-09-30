@@ -34,7 +34,7 @@ func TestHelpGroupWithoutSubcommandListsThem(t *testing.T) {
 	if code == 0 || out != "" {
 		t.Fatalf("code=%d stdout=%q", code, out)
 	}
-	for _, want := range []string{"poweur identity: subcommand required", "create", "<name>", "[--json]", "add-encryption-key"} {
+	for _, want := range []string{"poweur identity: subcommand required", "create", "<name>", "[--json]", "lookup"} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("missing %q:\n%s", want, errOut)
 		}

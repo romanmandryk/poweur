@@ -9,8 +9,8 @@
 //
 // These tests assert that the unauthenticated and forged-signature paths
 // are both rejected; the positive (CLI signs successfully) paths are
-// already exercised by every other test that runs `identity create` or
-// `identity add-encryption-key`, so we don't duplicate them here.
+// already exercised by every other test that runs `identity create`, so we
+// don't duplicate them here.
 package integration_test
 
 import (
@@ -61,7 +61,7 @@ func TestINT_ADMIN_02_IdentityCreateRejectsForgedSignature(t *testing.T) {
 	zone := newZone(t)
 	_, relayAddr := newRelay(t, zone)
 
-	pub, _, _ := ed25519.GenerateKey(nil) // body's public_key (claimed)
+	pub, _, _ := ed25519.GenerateKey(nil)        // body's public_key (claimed)
 	_, forgedPriv, _ := ed25519.GenerateKey(nil) // signs with a different key
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	nonce := "n0123456789abcdef"
@@ -92,79 +92,6 @@ func TestINT_ADMIN_02_IdentityCreateRejectsForgedSignature(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for forged identity create, got %d", resp.StatusCode)
-	}
-}
-
-// TestINT_ADMIN_03_EncryptionKeyRejectsUnsigned: POST /identities/:identity/
-// encryption-key must reject an unsigned body with 400, even from a
-// caller who can satisfy the DNS-token check.
-func TestINT_ADMIN_03_EncryptionKeyRejectsUnsigned(t *testing.T) {
-	zone := newZone(t)
-	_, relayAddr := newRelay(t, zone)
-
-	bobHome := t.TempDir()
-	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
-		"--dns-provider", "mock", "--dns-token", "integration")
-
-	body, _ := json.Marshal(map[string]any{
-		"encryption_public_key": base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
-		"dns_provider":          "mock",
-		"dns_token":             "integration",
-	})
-	resp, err := http.Post("http://"+relayAddr+"/identities/bob.poweur.net/encryption-key",
-		"application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("post unsigned encryption-key: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 invalid_request for unsigned encryption-key publish, got %d", resp.StatusCode)
-	}
-}
-
-// TestINT_ADMIN_04_EncryptionKeyRejectsForgedSignature: even with a
-// well-formed admin envelope, if the signature comes from a key other
-// than the registered identity's signing key, the relay rejects with
-// 401 unauthorized.
-func TestINT_ADMIN_04_EncryptionKeyRejectsForgedSignature(t *testing.T) {
-	zone := newZone(t)
-	_, relayAddr := newRelay(t, zone)
-
-	bobHome := t.TempDir()
-	runCLI(t, bobHome, "identity", "create", "bob",
-		"--parent-domain", "poweur.net", "--relay", "http://"+relayAddr,
-		"--dns-provider", "mock", "--dns-token", "integration")
-
-	encPub := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	_, forgedPriv, _ := ed25519.GenerateKey(nil)
-	issuedAt := time.Now().UTC().Format(time.RFC3339)
-	nonce := "nffeeddccbbaa9988"
-	canonical := strings.Join([]string{
-		"identity-encryption-key",
-		"bob.poweur.net",
-		encPub,
-		issuedAt,
-		nonce,
-	}, "\n")
-	sig := ed25519.Sign(forgedPriv, []byte(canonical))
-
-	body, _ := json.Marshal(map[string]any{
-		"encryption_public_key": encPub,
-		"dns_provider":          "mock",
-		"dns_token":             "integration",
-		"issued_at":             issuedAt,
-		"nonce":                 nonce,
-		"identity_signature":    base64.StdEncoding.EncodeToString(sig),
-	})
-	resp, err := http.Post("http://"+relayAddr+"/identities/bob.poweur.net/encryption-key",
-		"application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("post forged encryption-key: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for forged encryption-key publish, got %d", resp.StatusCode)
 	}
 }
 

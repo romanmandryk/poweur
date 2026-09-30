@@ -1,6 +1,6 @@
 # EPIC-011 — Key management, multi-passkey enrollment & recovery
 
-- **Status:** proposed
+- **Status:** v1 shipped (T1–T4, T8, T11, T12 done; T5/T6 later; T13 "Remove and secure" open)
 - **Priority:** P0 (a primary identity that can be permanently lost is not a primary identity)
 - **Depends on:** EPIC-001 (rotation statements, E01-T5), EPIC-002 (durable storage); interacts with EPIC-004 (device registry), EPIC-007 (contacts — for social recovery), EPIC-008 (Poweur as recovery anchor for other services), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (credential scope / rpId, E18-T4)
 - **Unlocks (also):** [EPIC-019](EPIC-019-mobile-app-capacitor.md) E19-T8 — the mobile shell's "bring an existing identity over" reuses E11-T3's ceremony rather than inventing its own
@@ -63,7 +63,9 @@
 | E11-T2 Recovery-master role & elevated ops | **done** | v1 | enforceable via actor assertion; kill-lost-device |
 | E11-T3 Enrollment ceremony | **done** | v1 | typed code, no PAKE needed — see correction below; **superseded by E11-T8** |
 | E11-T8 Pairing v2: commit-then-reveal, QR, short codes | **done** | v1 | v1's six digits were a function of the key alone, so a malicious relay could grind a matching key and take the seed — see E11-T8 |
-| E11-T11 One "Keys & devices" list | **done** | v1 | Every client (web, app, Go and TS CLI) registers in the device registry with `client` / `platform` / `browser` and, once backed up, its keystore `enrollment_id`; the web panel merges registry and keystore into one list (name first, then client · platform · browser · added · last used) with a restorability note instead of a second section. `key enroll` registers the machine immediately. Relay 0.2.11, CLI 0.2.7, SDK 0.2.10, web 0.2.13 |
+| E11-T11 One "Keys & devices" list | **done** | v1 | Every client (web, app, Go and TS CLI) registers in the device registry with `client` / `platform` / `browser` and, once backed up, its keystore `enrollment_id`; the web panel merges registry and keystore into one list (name first, then client · platform · browser · added · last used) with a restorability note instead of a second section. `key enroll` registers the machine immediately. Relay 0.2.11, CLI 0.2.7, SDK 0.2.10, web 0.2.14 |
+| E11-T12 Seed-only identities: alpha leftovers deleted | **done** | v1 | Every identity is seed-based. Removed: keystore `payload`/`legacy-keypair`, web `seedDerived` and the "predates recovery kits" UI, independent-key `identity create` (default is now a generated seed; `--from-seed` gone), and encryption-key-only rotation (`identity add-encryption-key`, `POST /identities/{id}/encryption-key`, `canonicalEncryptionKeyUpdate`, DNS `WriteEncryptionKey`, web "Rotate encryption key"). `key rotate` (Go and TS) now moves onto a **new seed**. Relay 0.2.11, CLI 0.2.7, SDK 0.2.10, web 0.2.14 |
+| E11-T13 Remove and secure a device | open | v1.1 | Removing a device ends its sessions and deletes its backup, but **every device holds the identity key**, so a compromised device can still sign as you (found when a revoked CLI still listed devices). The real removal is rotation with no grace period plus re-pairing survivors — see E11-T13 |
 | E11-T4 CLI/bot key storage hardening | **done** | v1 | scrypt + AES-GCM at rest; FIDO2 in CLI deferred |
 | E11-T5 Social recovery | open | later | design doc gates implementation |
 | E11-T6 Poweur ID as recovery anchor | open | later | needs EPIC-008 |
@@ -106,12 +108,11 @@ instead of an email address being the thing that recovers your Poweur ID.
 
 | Key / credential | Type | Where it lives today | Protection | Lifetime |
 |---|---|---|---|---|
-| Identity signing key | Ed25519 | CLI: `keys_dir/<id>.key` (`apps/cli/internal/identity/keys.go`); Web: JWK in localStorage, signed inside WebCrypto (`apps/web/js/vault.js`) | CLI: **plaintext base64, file mode 0600**; Web: AES-wrapped | permanent |
-| Encryption key | X25519 | CLI: `keys_dir/<id>.enc`; Web: JWK in localStorage | same as above | permanent |
-| Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/js/passkey.js`); authenticators without PRF are **refused** |
+| Identity signing key | Ed25519, derived from the master seed | CLI: `keys_dir/<id>.key` (`apps/cli/internal/identity/keys.go`); Web/mobile: JWK in localStorage, signed inside WebCrypto (`apps/web/src/lib/vault.js`) | CLI: file mode 0600, optionally scrypt+AES-GCM (`key protect`); Web: AES-wrapped by passkey PRF or the OS keystore | until rotated |
+| Encryption key | X25519, derived from the same seed | CLI: `keys_dir/<id>.enc`; Web: JWK in localStorage | same as above | until rotated |
+| Passkey (WebAuthn) | platform/roaming authenticator | browser/OS keystore | biometric/UV | n/a — **wraps** the two keys above via the PRF extension (`apps/web/src/lib/passkey.js`); authenticators without PRF are **refused** |
 | Session keys | Ed25519 | client memory/disk + relay session store | identity-signed `SessionProof`, ≤ 24 h TTL (`apps/api/internal/relay/sessions.go`) | hours |
 | Relay challenges | nonce | relay memory | single-use, short expiry | minutes |
-| (planned) DAV tokens / app passwords | bearer / argon2id hash | relay + `poweur-sys/relay/` | scoped, revocable (E03-T3) | hours–long |
 | (planned) agent tokens | bearer | relay | path/scope-bound (E08-T4, E10) | configurable |
 
 Key observations driving the design:
@@ -123,11 +124,10 @@ Key observations driving the design:
 2. **Everything already chains to one root.** Sessions, tokens and (per EPIC-001) rotation
    statements are all signed by the identity key. Recovery therefore has exactly one job:
    *never lose the ability to produce one Ed25519 signature* — everything else re-derives.
-3. **The CLI stores root keys in plaintext.** Acceptable for bots on hardened hosts, not for
-   humans; needs at-rest encryption regardless of recovery work.
+3. **The CLI stored root keys in plaintext.** Fixed by E11-T4: `poweur key protect` encrypts them
+   at rest; unprotected files remain the default for bots on hardened hosts.
 4. **The synced keystore is circular unless it has its own bootstrap read.** Reading anything
-   under `poweur-sys/` means minting a DAV token, which means signing the canonical
-   `dav-token` string **with the identity key** (`packages/client-ts/src/files.ts`). The keystore exists
+   under `poweur-sys/` needs a session or request signed **with the identity key**. The keystore exists
    to *recover* that key. So a synced keystore is a fine **backup and multi-device sync**
    mechanism for a client that is already unlocked, but it is **not** by itself an answer to
    "I cleared site data" — that needs a read path authenticated by something other than the
@@ -155,9 +155,7 @@ so the discoverable-credential requirement of the bootstrap read needs no client
 **One master seed, many wrappings, explicit roles.**
 
 - Derive both long-lived keys from a single 32-byte master seed via HKDF with distinct info
-  strings (`poweur/v1/sign`, `poweur/v1/enc`). One seed = one recovery artifact. (Migration:
-  existing identities keep their independent keys; the seed model applies at next rotation via
-  E01-T5 — write the migration path explicitly.)
+  strings (`poweur/v1/sign`, `poweur/v1/enc`). One seed = one recovery artifact.
 - A **keystore** of wrapped seed copies, one per enrolled authenticator/device, held by the
   relay as opaque ciphertext (see the split table above) and addressed by the endpoints in
   E11-T1. The relay only ever sees ciphertext — wrapping keys never leave authenticators.
@@ -193,7 +191,6 @@ multi-enrollment needs — **no change to the salt for multi-passkey support.**
   "enrollment_id": "<base64url, 16 random bytes>",
   "kind": "passkey | hardware-key | cli-passphrase | recovery-kit | native",
   "wrap": "prf | passphrase | native",
-  "payload": "seed | legacy-keypair",
   "credential_id": "<base64url>",
   "credential_public_key": "<COSE key, base64url>",
   "wrapped": { "iv": "<b64url>", "ciphertext": "<b64url>", "salt": "<b64url, passphrase only>" },
@@ -242,7 +239,7 @@ credential IDs to an unverified caller (discoverable credentials — already sat
   transcribes by hand, because it adds a typo-catching checksum and avoids base64url's `l/I/1`
   and `O/0` confusions. **The carrier is not part of the spec** — a printed card, a PDF, a text
   file and a password-manager entry are equally valid, and the CLI simply prints the base64url
-  seed (`--from-seed`). Do not build a PDF generator as though it were the deliverable. The kit
+  seed. Do not build a PDF generator as though it were the deliverable. The kit
   is itself just another "enrollment" (kind `recovery-kit`) recorded in the policy so the UI can
   nag if none exists.
 - **Social recovery (phase 2)** = Shamir shares (SLIP-0039) of the seed, each encrypted to a
@@ -263,7 +260,7 @@ recovery kit → inventory UI.
 
 - [x] Spec [`apps/docs/docs/security/key-management.md`](../apps/docs/docs/security/key-management.md):
       seed derivation (normative), the passkey-is-a-lock framing, seed recovery, kit encoding,
-      and the legacy-identity path. Also brought
+      and the passkey-is-a-lock framing. Also brought
       [`clients/cli-reference.md`](../apps/docs/docs/clients/cli-reference.md) up to date — it
       documented 18 of 33 commands; `key`, `contacts`, `requests`, `policy`, `anon`, `share`,
       `sync` and `auth` were entirely missing
@@ -282,7 +279,7 @@ recovery kit → inventory UI.
       conforming TS in [`packages/client-ts/src/crypto/seed.ts`](../packages/client-ts/src/crypto/seed.ts),
       pinned by `testdata/vectors/seed-derivation.json` + `test/seed.test.ts` (22 tests). Vectors
       sign a fixed message so derivation is checked end-to-end, not just byte equality
-- [x] `identityKeysFromSeed()` in the SDK and CLI seed support: `identity create --seed/--from-seed`,
+- [x] `identityKeysFromSeed()` in the SDK and CLI seed support: `identity create` (always seed-based; `--seed` to supply one),
       `key recover <id> --seed`, `key derive --seed`. Live-relay coverage in
       `packages/client-ts/test/seed-relay.test.ts` (6) and `apps/integration/seed_test.go`
       (`TestINT_SEED_01`–`04`), including the full recovery drill and the wrong-seed negative
@@ -301,8 +298,8 @@ recovery kit → inventory UI.
 - [x] Multi-enrollment **protocol and client**: the keystore holds N wrapped copies keyed by
       `enrollment_id`, and `KeystoreApi` in `@poweur/client` drives enrolment, listing, the
       bootstrap read and removal. Verified with several authenticators per identity
-- [ ] **Web UI** for multi-passkey enrolment — deferred to **EPIC-015**, which owns `apps/web`
-      and is being worked in parallel. It must fix the single-`credentialId` assumption in
+- [x] **Web UI** for multi-passkey enrolment — shipped in **EPIC-015** / EPIC-021 (see the
+      Progress note above). It had to fix the single-`credentialId` assumption in
       `apps/web/js/passkey.js` and the `encryptedKeys` shape in `apps/web/js/storage.js`;
       localStorage becomes a cache of the enrollment that unlocked this browser. The SDK it
       needs is shipped, so this is UI work, not protocol work
@@ -311,7 +308,7 @@ recovery kit → inventory UI.
       [`packages/client-ts/src/kit.ts`](../packages/client-ts/src/kit.ts)). Go uses
       `tyler-smith/go-bip39`, TS uses `@scure/bip39`; because those are different
       implementations, `testdata/vectors/recovery-kit.json` pins them to identical words. Every
-      `--seed` flag accepts either encoding (`ParseSeedOrMnemonic`), `--from-seed` emits both,
+      `--seed` flag accepts either encoding (`ParseSeedOrMnemonic`), `identity create` emits both,
       and `poweur key kit` converts offline. No PDF generator — the carrier is not part of the
       spec Restore flow: mnemonic → seed → keys → new enrollment
       registered, sessions optionally revoked
@@ -323,31 +320,21 @@ recovery kit → inventory UI.
       removal without rotation does not protect against an attacker who already extracted the
       seed** — that is what E11-T2 rotation is for
 
-#### Migration for existing identities (must not strand anyone)
+#### Migration for identities that predate the seed model — dropped
 
-Identities registered today have two **independent** keys that are not seed-derived, so they
-cannot produce a 24-word kit. Do not force a rotation to fix this.
-
-- [ ] Support `payload: "legacy-keypair"` keystore entries — the wrapped blob holds both JWKs
-      instead of a seed. Every flow except the recovery kit works unchanged for these:
-      multi-enrollment, bootstrap fetch, removal, inventory
-- [ ] Offer (never force) **rotate-to-seed**: generate a seed, derive new keys, publish via the
-      **shipped** E01-T5 rotation (`POST /identities/{id}/rotate`, `previous_keys` +
-      `identity-rotation` canonical string) and `POST /identities/{id}/encryption-key` — do not
-      invent a second rotation protocol
-- [ ] The recovery kit is offered only for seed-based identities; legacy identities see a
-      "rotate to enable a recovery kit" prompt explaining the tradeoff (contacts re-pin keys,
-      EPIC-007 T4)
-- [ ] Integration coverage in `apps/integration/`: a legacy identity enrolls a second
-      authenticator, does a bootstrap fetch, then rotates to seed and produces a valid kit
+Alpha identities with two independent random keys (no seed, no recovery kit) are **not
+supported**: pre-v1 there is nothing to migrate them for. The `legacy-keypair` keystore payload,
+the `seedDerived` flag, the "predates recovery kits" UI, `identity create`'s independent-key
+default, and the encryption-key-only rotation (`identity add-encryption-key`,
+`POST /identities/{id}/encryption-key`, web "Rotate encryption key") were deleted in E11-T12.
+Every identity is seed-based; anything else must be re-created.
 
 **Acceptance:** register on laptop → enroll phone passkey + YubiKey → clear laptop site data →
 recover via any of: phone, YubiKey, or paper mnemonic; inventory shows all enrollments;
 integration test covers mnemonic round-trip. Specifically assert the circularity is broken:
 after clearing site data the laptop fetches the keystore with **only** a WebAuthn assertion
 (no identity-key signature available), and a caller without an enrolled authenticator gets
-nothing — including no credential IDs. A legacy two-key identity passes every case except the
-kit, and passes that too after opting into rotation.
+nothing — including no credential IDs.
 
 ### E11-T2 — Recovery-master role & elevated operations
 
@@ -366,10 +353,12 @@ kit, and passes that too after opting into rotation.
 - [x] "Kill my lost device" end-to-end: recovery-master removes the enrollment and
       `revoke_sessions` ends its live access in the same call. Covered by
       `TestDrill_StolenDeviceKill`, which also asserts the thief *cannot* evict the
-      recovery-master. DAV tokens and app passwords are not yet swept — see below
+      recovery-master. 
 - [x] Rotation as compromise response reuses the **shipped** E01-T5 protocol (`poweur key
       rotate` → `POST /identities/{id}/rotate`, old key retained in `previous_keys` for the
-      grace window). Covered by `TestDrill_CompromisedSeedRotation`
+      grace window). Since E11-T12 it moves the identity onto a **new seed** (both keys change,
+      the new seed and mnemonic are printed). Covered by `TestDrill_CompromisedSeedRotation`,
+      which asserts the rotated key is the one the new seed derives
 - [ ] Re-wrap the new seed under all surviving enrollments in the same ceremony, and notify
       contacts with `sys.key.rotated` so pinned keys update with a continuity proof
       (EPIC-007 T4). Today rotation and keystore re-enrolment are separate steps
@@ -380,6 +369,29 @@ kit, and passes that too after opting into rotation.
 **Acceptance:** stolen-phone drill in integration tests: phone enrollment removed by hardware
 key, phone's session can no longer read inbox, contacts' clients accept the rotation without
 key-change warnings.
+
+### E11-T13 — Remove and secure a device (rotation as the real removal)
+
+**Why.** Every device holds the same identity key (the seed), so "remove device" can only end
+sessions and delete that device's keystore backup; a device that still has the key can create a
+new session and sign owner requests (`devices list` works from a "revoked" CLI). The UI now says
+so, but the honest fix is to change the key: the relay accepts owner requests only from the
+identity's *current* key, so rotation locks the old one out.
+
+- [ ] Web/mobile **"Remove and secure"** action: generate a new seed, rotate via the shipped
+      E01-T5 protocol with **no grace period** (grace only keeps the old signing key valid for
+      verifiers), publish the new signing **and** encryption keys, replace this device's
+      keystore entry, and show the new recovery kit
+- [ ] Delete every other keystore entry (they wrap the old seed) and mark surviving devices
+      "needs re-pairing"; walk the user through pairing each (E11-T3/T8 ceremony)
+- [ ] Notify contacts with `sys.key.rotated` so pinned keys update with a continuity proof
+      (EPIC-007 T4)
+- [ ] Web has no identity-key rotation today (CLI only); this is its first
+- [ ] Integration drill: a device holding the old seed can no longer list devices, open a
+      session or read the inbox after rotation; the rotating device and a re-paired one can
+
+**Acceptance:** the compromised-CLI scenario end to end — remove and secure from the phone,
+`poweur devices list` on the old CLI fails, phone and re-paired web keep working.
 
 ### E11-T3 — New-device enrollment ceremony (no seed typing)
 
@@ -607,5 +619,5 @@ Still open:
   cannot recover. Only the global limiter applies today.
 - **Notify all devices when an enrollment completes** — needs the EPIC-009 typed-message
   channel. `poweur key ls` shows it after the fact, which is weaker than a push.
-- **Sweep DAV tokens and app passwords on enrollment removal** — sessions are revoked today,
-  those are not, so a removed device keeps any long-lived tokens it minted.
+- ~~**Sweep DAV tokens and app passwords on enrollment removal**~~ — moot: DAV and app
+  passwords no longer exist (EPIC-020); sessions are the only derived credential.

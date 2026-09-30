@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { crypto as sdk, toBase64url, fromBase64 } from "@poweur/client";
 import {
-  generateIdentityJwks, generateEncryptionJwk,
+  generateSeedIdentityJwks,
   jwksFromKeyBytes, keyBytesFromJwks,
   WebCryptoSigner, JwkDecryptor,
   wrapKeysAES, unwrapKeysAES,
@@ -19,7 +19,7 @@ import {
 
 describe("vault — JWK ↔ @poweur/client key bytes", () => {
   it("derives the same public keys as the SDK", async () => {
-    const { signingJWK, encJWK, publicKey, encPublicKey } = await generateIdentityJwks();
+    const { signingJWK, encJWK, publicKey, encPublicKey } = await generateSeedIdentityJwks();
     const bytes = keyBytesFromJwks("alice.poweur.net", signingJWK, encJWK);
 
     expect(toBase64url(sdk.ed25519PublicKey(bytes.signingPrivateKey))).toBe(publicKey);
@@ -52,7 +52,7 @@ describe("vault — JWK ↔ @poweur/client key bytes", () => {
 
 describe("vault — WebCryptoSigner", () => {
   it("produces signatures the SDK verifies, in both encodings", async () => {
-    const { signingJWK, publicKey } = await generateIdentityJwks();
+    const { signingJWK, publicKey } = await generateSeedIdentityJwks();
     const signer = new WebCryptoSigner("alice.poweur.net", signingJWK);
     const canonical = "identity-registration\nalice.poweur.net";
     const message = new TextEncoder().encode(canonical);
@@ -68,7 +68,7 @@ describe("vault — WebCryptoSigner", () => {
   });
 
   it("matches the SDK's own LocalSigner byte for byte (Ed25519 is deterministic)", async () => {
-    const { signingJWK } = await generateIdentityJwks();
+    const { signingJWK } = await generateSeedIdentityJwks();
     const bytes = keyBytesFromJwks("alice.poweur.net", signingJWK, null);
     const mine = await new WebCryptoSigner("alice.poweur.net", signingJWK).sign("canonical\nstring");
     const theirs = toBase64url(sdk.signBytes(bytes.signingPrivateKey, new TextEncoder().encode("canonical\nstring")));
@@ -78,7 +78,7 @@ describe("vault — WebCryptoSigner", () => {
 
 describe("vault — JwkDecryptor", () => {
   it("opens a message the SDK sealed to its public key", async () => {
-    const { encJWK, encPublicKey } = await generateEncryptionJwk();
+    const { encJWK, encPublicKey } = await generateSeedIdentityJwks();
     const decryptor = new JwkDecryptor(encJWK);
     expect(decryptor.encryptionPublicKey).toBe(`x25519:${encPublicKey}`);
     const sealed = sdk.seal(fromBase64(encPublicKey), "hello poweur");
@@ -89,9 +89,9 @@ describe("vault — JwkDecryptor", () => {
 
 describe("vault — key wrapping (format is frozen for EPIC-011)", () => {
   it("round-trips under a 32-byte secret (the passkey PRF path)", async () => {
-    const { signingJWK, encJWK } = await generateIdentityJwks();
+    const { signingJWK, encJWK, seed } = await generateSeedIdentityJwks();
     const secret = crypto.getRandomValues(new Uint8Array(32));
-    const wrapped = await wrapKeysAES(secret, signingJWK, encJWK);
+    const wrapped = await wrapKeysAES(secret, signingJWK, encJWK, seed);
 
     expect(wrapped).toHaveProperty("iv");
     expect(wrapped).toHaveProperty("ciphertext");
@@ -103,8 +103,8 @@ describe("vault — key wrapping (format is frozen for EPIC-011)", () => {
   });
 
   it("rejects the wrong secret", async () => {
-    const { signingJWK, encJWK } = await generateIdentityJwks();
-    const wrapped = await wrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), signingJWK, encJWK);
+    const { signingJWK, encJWK, seed } = await generateSeedIdentityJwks();
+    const wrapped = await wrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), signingJWK, encJWK, seed);
     await expect(unwrapKeysAES(crypto.getRandomValues(new Uint8Array(32)), wrapped)).rejects.toThrow();
   });
 });

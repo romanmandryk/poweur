@@ -103,7 +103,7 @@ and share imports were removed; v2 clients are under construction.
 | `@poweur/client/crypto` | Ed25519, X25519 + HKDF + ChaCha20-Poly1305, `Signer`/`KeyStore` |
 | `@poweur/client/canonical` | every canonical signing string |
 | `@poweur/client/resolve` | web-first resolution with the SSRF guards |
-| `@poweur/client/identity` | register, publish/rotate encryption keys, export, rotate |
+| `@poweur/client/identity` | register, export, rotate |
 | `@poweur/client/messages` | send (session or identity), inbox, acks, anonymous send |
 | `@poweur/client/contacts` | contacts.json, key pinning, request queue |
 | `@poweur/client/policy` | inbox-policy.json |

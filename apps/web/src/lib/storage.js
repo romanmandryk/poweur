@@ -256,7 +256,6 @@ export function saveConfig(config) {
  *   relay: string,              // relay URL this identity lives on
  *   userId: string,             // base64url random bytes (WebAuthn user ID)
  *   createdAt: string,          // ISO timestamp
- *   seedDerived: boolean,       // keys come from one master seed → a kit is possible
  *   enrollmentId?: string,      // this browser's row in the relay keystore (EPIC-011)
  *   credentialPublicKey?: string, // SPKI DER, base64url — what the relay verifies
  *   credentialAlg?: number,     // COSE alg id for that key
@@ -358,7 +357,7 @@ export function rpIdFor(identity) {
   return globalThis.location?.hostname ?? "";
 }
 
-export function setUnlockedKeys(identity, signingJWK, encJWK, seed = null) {
+export function setUnlockedKeys(identity, signingJWK, encJWK, seed) {
   _unlockedKeys = { identity, signingJWK, encJWK, seed };
 }
 

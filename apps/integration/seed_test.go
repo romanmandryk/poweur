@@ -24,21 +24,17 @@ func createSeedIdentity(t *testing.T, home, identity, relayURL string) string {
 	t.Helper()
 	stdout, _ := runCLI(t, home,
 		"identity", "create", identity,
-		"--hosted", "--from-seed", "--relay", relayURL, "--json",
+		"--hosted", "--relay", relayURL, "--json",
 	)
 	var out struct {
-		Seed        string `json:"seed"`
-		SeedDerived bool   `json:"seed_derived"`
-		PublicKey   string `json:"public_key"`
+		Seed      string `json:"seed"`
+		PublicKey string `json:"public_key"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
 		t.Fatalf("parse create output: %v\n%s", err, stdout)
 	}
-	if !out.SeedDerived {
-		t.Fatal("expected seed_derived=true")
-	}
 	if out.Seed == "" {
-		t.Fatal("--from-seed must return the seed; without it the identity is unrecoverable")
+		t.Fatal("identity create must return the seed it generated; without it the identity is unrecoverable")
 	}
 	return out.Seed
 }
@@ -223,7 +219,7 @@ func TestINT_SEED_05_RecoverFromMnemonic(t *testing.T) {
 
 	stdout, _ := runCLI(t, home,
 		"identity", "create", "paperkit.poweur.net",
-		"--hosted", "--from-seed", "--relay", relayURL, "--json",
+		"--hosted", "--relay", relayURL, "--json",
 	)
 	var created struct {
 		Seed     string `json:"seed"`
@@ -233,7 +229,7 @@ func TestINT_SEED_05_RecoverFromMnemonic(t *testing.T) {
 		t.Fatalf("parse create output: %v\n%s", err, stdout)
 	}
 	if created.Mnemonic == "" {
-		t.Fatal("--from-seed must emit a mnemonic; a seed nobody can transcribe is a poor kit")
+		t.Fatal("identity create must emit a mnemonic; a seed nobody can transcribe is a poor kit")
 	}
 	if got := len(strings.Fields(created.Mnemonic)); got != idpkg.MnemonicWords {
 		t.Fatalf("want %d words, got %d", idpkg.MnemonicWords, got)

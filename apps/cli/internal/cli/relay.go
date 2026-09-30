@@ -340,61 +340,6 @@ func RotateIdentity(ctx context.Context, relayURL, identity string, req Identity
 	return response, nil
 }
 
-// EncryptionKeyResponse matches the relay's reply when publishing or rotating
-// an identity's X25519 encryption key via POST /identities/{identity}/encryption-key.
-type EncryptionKeyResponse struct {
-	Identity            string `json:"identity"`
-	EncryptionPublicKey string `json:"encryption_public_key"`
-	UpdatedAt           string `json:"updated_at"`
-}
-
-// EncryptionKeyPublishRequest is the wire shape of POST
-// /identities/{identity}/encryption-key. As with identity registration,
-// the owner-only fields (issued_at, nonce, identity_signature) prove
-// ownership of the long-lived signing key — without them the relay
-// rejects the request.
-type EncryptionKeyPublishRequest struct {
-	EncryptionPublicKey string `json:"encryption_public_key"`
-	DNSProvider         string `json:"dns_provider,omitempty"`
-	DNSToken            string `json:"dns_token,omitempty"`
-	IssuedAt            string `json:"issued_at"`
-	Nonce               string `json:"nonce"`
-	IdentitySignature   string `json:"identity_signature"`
-}
-
-func PublishEncryptionKey(ctx context.Context, relayURL, identityID string, req EncryptionKeyPublishRequest) (EncryptionKeyResponse, error) {
-	if relayURL == "" {
-		return EncryptionKeyResponse{}, errors.New("relay url is required")
-	}
-	if identityID == "" {
-		return EncryptionKeyResponse{}, errors.New("identity is required")
-	}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return EncryptionKeyResponse{}, err
-	}
-	url := fmt.Sprintf("%s/identities/%s/encryption-key", relayURL, identityID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return EncryptionKeyResponse{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return EncryptionKeyResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return EncryptionKeyResponse{}, parseErrorResponse("encryption key publish failed", resp)
-	}
-	var response EncryptionKeyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return EncryptionKeyResponse{}, err
-	}
-	return response, nil
-}
-
 func RegisterSession(ctx context.Context, relayURL string, req SessionCreateRequest) (SessionResponse, error) {
 	if relayURL == "" {
 		return SessionResponse{}, errors.New("relay url is required")

@@ -134,7 +134,7 @@ func (s *IdentityStore) Add(identity Identity) bool {
 	return true
 }
 
-// Put upserts an identity (used for encryption-key updates and DNS registrations
+// Put upserts an identity (used for key rotation and DNS registrations
 // that synthesize a document).
 func (s *IdentityStore) Put(identity Identity) error {
 	s.mu.Lock()

@@ -74,7 +74,7 @@ poweur-enckey=<algorithm>:<base64url-public-key>
 
 ### Presence
 
-The encryption record is written at the same time as the identity public key when an identity is created. Existing identities that predate E2E support can add one later via `poweur identity add-encryption-key`. The record is effectively mandatory for inbound messaging: senders that cannot find a recipient's encryption record abort with a clear error (there is no plaintext fallback), and relays reject any `POST /messages` whose envelope lacks encryption metadata with `400 encryption_required`.
+The encryption record is written at the same time as the identity public key when an identity is created. The record is effectively mandatory for inbound messaging: senders that cannot find a recipient's encryption record abort with a clear error (there is no plaintext fallback), and relays reject any `POST /messages` whose envelope lacks encryption metadata with `400 encryption_required`.
 
 ---
 

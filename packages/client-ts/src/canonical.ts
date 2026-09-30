@@ -128,16 +128,6 @@ export function canonicalIdentityRotation(
   return ["identity-rotation", identity, oldPublicKey, newPublicKey, issuedAt, nonce].join("\n");
 }
 
-/** POST /identities/{id}/encryption-key (crypto.CanonicalEncryptionKeyUpdate). */
-export function canonicalEncryptionKeyUpdate(
-  identity: string,
-  encryptionPublicKey: string,
-  issuedAt: string,
-  nonce: string,
-): string {
-  return ["identity-encryption-key", identity, encryptionPublicKey, issuedAt, nonce].join("\n");
-}
-
 /** POST /sessions (crypto.CanonicalSessionRegistration). */
 export function canonicalSessionRegistration(
   identity: string,

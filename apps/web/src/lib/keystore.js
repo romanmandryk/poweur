@@ -88,7 +88,6 @@ export async function enrollThisBrowser(client, identity, { label = deviceLabel(
     enrollmentId,
     kind: kdf === "native" ? "native" : "passkey",
     wrap: kdf === "native" ? "native" : "prf",
-    payload: record.seedDerived ? "seed" : "legacy-keypair",
     wrapped,
     ...(kdf === "prf" ? {
       credentialId: record.credentialId,
@@ -188,7 +187,7 @@ export async function recoverFromKeystore(identity, { relayUrl = relayUrlFor(ide
     assertion,
     signingJWK: opened.signingJWK,
     encJWK: opened.encJWK,
-    seed: opened.seed ?? null,
+    seed: opened.seed,
   };
 }
 
@@ -225,7 +224,6 @@ export function restoreLocalRecord(identity, recovered, { relayUrl }) {
     userId: toBase64url(crypto.getRandomValues(new Uint8Array(16))),
     createdAt: entry.created_at || new Date().toISOString(),
     supportsPRF: true,
-    seedDerived: Boolean(seed) || entry.payload === "seed",
     enrollmentId: entry.enrollment_id,
   };
   saveIdentityRecord(identity, record);
@@ -233,22 +231,6 @@ export function restoreLocalRecord(identity, recovered, { relayUrl }) {
 }
 
 // ─── Recovery kit ─────────────────────────────────────────────────────────────
-
-/**
- * Whether a kit can exist for this identity.
- *
- * A kit is the master seed as 24 words. An identity generated as two
- * independent keys has no seed to encode — the normal case for anything the
- * web app registered before EPIC-011 — and rotating to fix that makes contacts
- * re-pin the key, so it is offered, never forced.
- */
-export function recoveryKitEligibility(identity) {
-  const record = loadIdentityRecord(identity);
-  if (!record) return { eligible: false, reason: "unknown-identity" };
-  return record.seedDerived
-    ? { eligible: true, reason: null }
-    : { eligible: false, reason: "legacy-keypair" };
-}
 
 /**
  * The kit itself: 24 words plus the base64url seed.

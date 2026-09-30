@@ -104,7 +104,6 @@ Use for native mobile and passkey validation.
 | INT-07 | Integration | `POST /messages` with a forged signature returns `401` and does not reach any inbox | Automated |
 | INT-08 | Integration | Tampering with the DNS `_poweur.<id>` TXT record breaks cross-relay verification on the receiving relay; forwarding fails and the attacker's payload is never delivered | Automated |
 | INT-09 | Integration | Full two-way conversation: both users create identities, auto-register sessions on first send, exchange an Alice→Bob message and a Bob→Alice reply, both sides decrypt successfully | Automated |
-| INT-10 | Integration | Retrofit: a legacy identity without `_poweur-enc.<id>` cannot receive messages (sender aborts / relay returns `400 encryption_required`); after `poweur identity add-encryption-key`, the same recipient accepts and decrypts a fresh send | Automated |
 | INT-IDSIGN-01 | Integration | `poweur send --sign-with=identity` on a single relay: message accepted, recipient decrypts, and sender's local session file is NOT created | Automated |
 | INT-IDSIGN-02 | Integration | `poweur send --sign-with=identity` across two relays: receiving relay verifies the identity signature using the sender's DNS-published signing key; recipient decrypts | Automated |
 | INT-IDSIGN-03 | Integration | Forged identity-signed envelope (empty `session_id`, signature under an unknown key) is rejected with `401` and never reaches the recipient's inbox | Automated |
@@ -119,8 +118,6 @@ Use for native mobile and passkey validation.
 | DLV-04 | Integration | A `POST /acks` body whose signature was produced by a key nobody in the system holds is rejected with `401 unauthorized`; the sender's journal does NOT advance to tick 2 | Automated |
 | ADMIN-01 | Integration | `POST /identities` without an identity-signed admin envelope is rejected with `400 invalid_request`; no DNS write happens | Automated |
 | ADMIN-02 | Integration | `POST /identities` whose identity_signature was produced by a different key than the one in `public_key` is rejected with `401 unauthorized` | Automated |
-| ADMIN-03 | Integration | `POST /identities/:identity/encryption-key` without an identity-signed admin envelope is rejected with `400 invalid_request` | Automated |
-| ADMIN-04 | Integration | `POST /identities/:identity/encryption-key` whose identity_signature does not match the registered identity's signing key is rejected with `401 unauthorized` | Automated |
 | ADMIN-05 | Integration | `DELETE /sessions/:id` without an identity-signed admin envelope is rejected with `400 invalid_request` | Automated |
 | ADMIN-06 | Integration | `DELETE /sessions/:id` whose identity_signature does not match the claimed identity's signing key is rejected with `401 unauthorized`, even with a plausible session id | Automated |
 | INFRA-01 | Infra | Terraform plan succeeds with staging variables | Automated |
@@ -298,8 +295,7 @@ to tick 2.
 Goal: pin down the owner-only ("admin") endpoint class. In v1 the
 messaging surface is intentionally open (anyone may post a properly-
 signed message or ack), but state-mutating per-identity endpoints
-(`POST /identities`, `POST /identities/:identity/encryption-key`,
-`DELETE /sessions/:id`) require an identity-signed admin envelope —
+(`POST /identities`, `DELETE /sessions/:id`) require an identity-signed admin envelope —
 `issued_at`, `nonce`, `identity_signature` over a relay-known canonical
 string.
 
@@ -311,8 +307,8 @@ For each admin endpoint the suite asserts BOTH:
   different key) is rejected with `401 unauthorized`.
 
 The positive (correctly signed) paths are exercised by every other
-integration test that runs `identity create` or
-`identity add-encryption-key`, so they are not duplicated here.
+integration test that runs `identity create`, so they are not
+duplicated here.
 
 ### Integration Suite (INT-01 .. INT-09)
 

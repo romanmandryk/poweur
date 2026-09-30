@@ -93,7 +93,6 @@ test.describe("new-device pairing", () => {
     const laptopRecord = await laptopPage.evaluate((id) => JSON.parse(localStorage.getItem(`poweur:identity:${id}`)), identity);
     expect(phoneRecord.publicKey).toBe(laptopRecord.publicKey);
     expect(phoneRecord.encPublicKey).toBe(laptopRecord.encPublicKey);
-    expect(phoneRecord.seedDerived).toBe(true);
     expect(phoneRecord.enrollmentId).not.toBe(laptopRecord.enrollmentId);
 
     await laptop.close();

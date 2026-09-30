@@ -230,19 +230,6 @@ Existing installs keep working and can opt in when they choose.
 The passphrase protects the key *file*, not the identity: losing it is equivalent to losing the
 device, and the answer is the same — recover from the seed or another enrolled device.
 
-## Identities created before the seed model
-
-Identities registered before this design have **two independent keys** that are not derived from
-any seed, so they cannot produce a recovery kit. They are not stranded and are not forced to
-change:
-
-- Every flow except the recovery kit works unchanged.
-- `poweur key rotate` can move an identity onto a seed, publishing a rotation statement so
-  contacts follow the new key instead of warning about it.
-
-`poweur identity create` without `--seed` or `--from-seed` still generates two independent
-random keys, so nothing changes for existing scripts.
-
 ## Related
 
 - [Security Model](/security/model) — overall threat model

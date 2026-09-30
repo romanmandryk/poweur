@@ -54,7 +54,7 @@ export const GATE_DEVICE = "device";
  * unchanged — only where the 32 bytes come from differs, which is the whole
  * point of the `kdf` field.
  */
-export async function wrapKeysNative(identity, signingJWK, encJWK, seed = null, options = {}) {
+export async function wrapKeysNative(identity, signingJWK, encJWK, seed, options = {}) {
   const store = requirePlugin();
   const gate = options.gate ?? GATE_BIOMETRIC;
   const secret = randomSecret();

@@ -389,7 +389,6 @@ var routeActions = map[string]string{
 	"GET /messages/{identity}": "message.pickup", "POST /messages/{identity}/consume": "message.consume",
 	"POST /acks": "ack.submit", "GET /requests/{identity}": "contact.pickup", "GET /anon/{identity}": "anonymous.pickup",
 	"POST /identities/{identity}/export": "identity.export", "POST /identities/{identity}/rotate": "identity.rotate",
-	"POST /identities/{identity}/encryption-key":  "identity.encryption_key",
 	"PUT /identities/{identity}/system/{path...}": "system.write", "DELETE /identities/{identity}/system/{path...}": "system.delete",
 	"PUT /identities/{identity}/keystore": "keystore.put", "POST /identities/{identity}/keystore/list": "keystore.list",
 	"POST /identities/{identity}/keystore/fetch": "keystore.fetch", "DELETE /identities/{identity}/keystore/{enrollment}": "keystore.delete",

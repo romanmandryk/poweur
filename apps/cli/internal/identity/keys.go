@@ -7,20 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/poweur/cli/internal/config"
-	cryptoe2e "github.com/poweur/cli/internal/crypto"
 	idpkg "github.com/poweur/identity"
 )
-
-// GenerateKeypair returns a new Ed25519 signing keypair for long-lived identity signing.
-func GenerateKeypair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
-	return ed25519.GenerateKey(nil)
-}
-
-// GenerateEncryptionKeypair returns a new X25519 keypair used for end-to-end
-// payload encryption. Public keys are published in DNS alongside signing keys.
-func GenerateEncryptionKeypair() (publicKey, privateKey []byte, err error) {
-	return cryptoe2e.GenerateX25519Keypair()
-}
 
 func SavePrivateKey(identity string, privateKey ed25519.PrivateKey) (string, error) {
 	keysDir, err := config.KeysDir()
@@ -67,8 +55,8 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 // LoadEncryptionPrivateKey reads the X25519 private key for an identity.
 // Returns os.ErrNotExist wrapped when the key file is missing so callers can
 // surface an actionable error — there is no plaintext fallback, so a missing
-// key means the identity cannot decrypt inbound messages until one is
-// generated and published via `poweur identity add-encryption-key`.
+// key means the identity cannot decrypt inbound messages; restore it with
+// `poweur key recover` or `poweur key enroll`.
 func LoadEncryptionPrivateKey(path string) ([]byte, error) {
 	key, _, err := LoadEncryptionPrivateKeyWithPassphrase(path, "")
 	return key, err

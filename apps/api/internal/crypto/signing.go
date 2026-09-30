@@ -194,19 +194,6 @@ func CanonicalIdentityRotation(identity, oldPublicKey, newPublicKey, issuedAt, n
 	}, "\n")
 }
 
-// CanonicalEncryptionKeyUpdate is the string an identity owner signs to
-// authorize an encryption-key (re)publication. Verified against the
-// identity's long-lived signing key (resolved via DNS or local store).
-func CanonicalEncryptionKeyUpdate(identity, encryptionPublicKey, issuedAt, nonce string) string {
-	return strings.Join([]string{
-		"identity-encryption-key",
-		identity,
-		encryptionPublicKey,
-		issuedAt,
-		nonce,
-	}, "\n")
-}
-
 // CanonicalSessionRevocation is the string the identity owner signs to
 // authorize a `DELETE /sessions/:id`. Verified against the identity's
 // long-lived signing key.

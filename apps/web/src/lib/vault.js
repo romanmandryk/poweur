@@ -10,8 +10,7 @@
  * The wrapped blob format is the shipped one, extended additively: HKDF salt
  * `poweur-key-wrapping-v1`, AES-256-GCM, payload
  * `{"signingJWK":…,"encJWK":…,"seed":…}`. EPIC-011 re-wraps this same payload
- * under each additional authenticator, and blobs written before `seed` existed
- * still open — they simply have no kit (see `keystore.js`).
+ * under each additional authenticator.
  *
  * Keys are stored as WebCrypto JWKs and signing happens inside WebCrypto, so
  * the raw Ed25519 private key never crosses into package code. The X25519 key
@@ -37,28 +36,6 @@ export const fromBase64url = fromBase64;
 export { toBase64url };
 
 // ─── Key generation & conversion ──────────────────────────────────────────────
-
-/**
- * Generate a fresh identity keypair as WebCrypto JWKs.
- *
- * Deliberately WebCrypto rather than the SDK's `generateIdentityKeys()`: the
- * signing key is then non-extractable-by-default in shape and, more
- * importantly, the stored JWK format matches every identity already in a
- * user's browser.
- */
-export async function generateIdentityJwks() {
-  const signing = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
-  const encryption = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
-  const signingJWK = await crypto.subtle.exportKey("jwk", signing.privateKey);
-  const encJWK = await crypto.subtle.exportKey("jwk", encryption.privateKey);
-  return {
-    signingJWK,
-    encJWK,
-    seed: null, // two independent keys: no seed, so no recovery kit
-    publicKey: toBase64url(new Uint8Array(await crypto.subtle.exportKey("raw", signing.publicKey))),
-    encPublicKey: toBase64url(new Uint8Array(await crypto.subtle.exportKey("raw", encryption.publicKey))),
-  };
-}
 
 /**
  * Generate a **seed-derived** identity: one 32-byte secret, both keys derived
@@ -89,15 +66,6 @@ export function jwksFromSeed(seed) {
     encJWK,
     publicKey: toBase64url(signing.publicKey),
     encPublicKey: toBase64url(encryption.publicKey),
-  };
-}
-
-/** A fresh X25519 keypair on its own — the encryption-key rotation path. */
-export async function generateEncryptionJwk() {
-  const kp = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
-  return {
-    encJWK: await crypto.subtle.exportKey("jwk", kp.privateKey),
-    encPublicKey: toBase64url(new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey))),
   };
 }
 
@@ -221,7 +189,7 @@ async function aesKeyFromSecret(secret32Bytes) {
 
 async function seal(key, signingJWK, encJWK, seed) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const payload = enc.encode(JSON.stringify({ signingJWK, encJWK, ...(seed ? { seed } : {}) }));
+  const payload = enc.encode(JSON.stringify({ signingJWK, encJWK, seed }));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, payload);
   return { iv: toBase64url(iv), ciphertext: toBase64url(new Uint8Array(ciphertext)) };
 }
@@ -236,7 +204,7 @@ async function unseal(key, { iv, ciphertext }) {
 }
 
 /** Wrap under a 32-byte secret — the passkey PRF output. */
-export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK, seed = null) {
+export async function wrapKeysAES(secret32Bytes, signingJWK, encJWK, seed) {
   return seal(await aesKeyFromSecret(secret32Bytes), signingJWK, encJWK, seed);
 }
 

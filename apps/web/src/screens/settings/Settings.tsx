@@ -16,7 +16,6 @@ import {
   MonitorSmartphone,
   Package,
   Puzzle,
-  RefreshCw,
   Scale,
   ScrollText,
   Search,
@@ -30,7 +29,7 @@ import {
 } from "lucide-react";
 import { isSessionValid, SDK_BUILD_TIME, SDK_VERSION } from "@poweur/client";
 import { loadPolicy, loadProfile } from "../../actions/account";
-import { policySummary, removeIdentityFromDevice, rotateEncryptionKey, usesDnsPath } from "../../actions/settings";
+import { policySummary, removeIdentityFromDevice, usesDnsPath } from "../../actions/settings";
 import { resetSignInRequest } from "../../actions/signin";
 import { APP_BUILD_TIME, APP_VERSION } from "../../build-info";
 import { askConfirm } from "../../components/Dialogs";
@@ -168,8 +167,6 @@ export function Settings() {
                 id="row-recovery-kit"
                 icon={ScrollText}
                 label="Recovery kit"
-                value={record.seedDerived ? "Available" : "Not available"}
-                valueTone={record.seedDerived ? "ok" : "warn"}
                 onClick={openRecoveryKitPanel}
               />
             </SettingsGroup>
@@ -206,7 +203,6 @@ export function Settings() {
               {usesDnsPath(record, identity, mode.hostedDomains) && (
                 <SettingsRow id="row-dns" icon={Globe} label="DNS provider" value={config.dnsProvider || "Cloudflare"} onClick={openDnsPanel} />
               )}
-              <SettingsRow id="row-rotate-enc" icon={RefreshCw} label="Rotate encryption key" onClick={() => void rotateEncryptionKey()} />
               <SettingsRow
                 id="row-remove-id"
                 icon={Trash2}

@@ -19,7 +19,6 @@ import {
   buildRecoveryKit,
   enrollThisBrowser,
   listEnrollments,
-  recoveryKitEligibility,
   removeEnrollment,
   verifyRecoveryKit,
 } from "../../lib/keystore.js";
@@ -294,7 +293,6 @@ export async function openKeysAndDevicesPanel() {
 type MergedRow = { id: string; device?: any; enrollment?: any; current: boolean };
 
 function KeysAndDevices({ identity, enrollments, registry }: { identity: string; enrollments: any[]; registry: any[] | null }) {
-  const record: any = loadIdentityRecord(identity);
   const thisEnrolled = enrollments.some((enrollment) => enrollment.current);
   const rows = mergeKeysAndDevices(enrollments, registry ?? []);
   const here = isShellRuntime() ? "device" : "browser";
@@ -377,7 +375,7 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
                   <div className="enrollment-restore mt-0.5">
                     <InfoTip label={enrollment?.has_passkey && enrollment.wrap === "prf" ? "Restorable" : "Not restorable"}>
                       {restoreNote(row)}
-                      {enrollment ? ` Unlocked by ${ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}${enrollment.payload === "legacy-keypair" ? ", pre-seed keys" : ""}.` : ""}
+                      {enrollment ? ` Unlocked by ${ENROLLMENT_WRAP_LABEL[enrollment.wrap] ?? enrollment.wrap}.` : ""}
                     </InfoTip>
                   </div>
                 </div>
@@ -413,9 +411,6 @@ function KeysAndDevices({ identity, enrollments, registry }: { identity: string;
       >
         Add a device
       </Button>
-      {record && !record.seedDerived && (
-        <p className="mt-2.5 text-[13px] text-muted">This identity predates recovery kits — see Settings → Recovery kit.</p>
-      )}
 
       <div className="mt-2.5">
         <InfoTip label="What removing means">
@@ -435,28 +430,11 @@ export function openRecoveryKitPanel() {
 }
 
 function RecoveryKit({ identity }: { identity: string }) {
-  const { eligible, reason } = recoveryKitEligibility(identity) as { eligible: boolean; reason?: string };
   const keys: any = getUnlockedKeys();
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<boolean | null>(null);
   const typed = useRef<HTMLTextAreaElement>(null);
 
-  if (!eligible) {
-    return (
-      <div>
-        <p className="mb-3 text-[13px] text-muted">
-          A recovery kit is your identity's master secret written as 24 words. With it you can rebuild this identity anywhere — no relay, no
-          email, nothing else to remember.
-        </p>
-        <Notice tone="warn">
-          <strong>Not available for this identity.</strong>{" "}
-          {reason === "legacy-keypair"
-            ? "It was created with two independent keys rather than from a single seed, so there is no seed to write down. Identities created from now on have one. Converting this one means rotating your keys, which asks every contact to re-pin them — worth it for some people, not for others, so it is offered rather than done for you."
-            : "No local record for this identity."}
-        </Notice>
-      </div>
-    );
-  }
   if (!keys?.seed) return <Notice tone="warn">Unlock this identity to see its recovery kit.</Notice>;
 
   const words = (buildRecoveryKit(identity, keys.seed) as { mnemonic: string }).mnemonic.split(" ");

@@ -190,7 +190,7 @@ Messages MUST be end-to-end encrypted. A recipient without a published X25519 en
 - **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"poweur/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** the ciphertext (base64url) goes into `payload`; `ephemeral_public_key` and `nonce` (base64url) go into the `encryption` object; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-There is no plaintext fallback. If the recipient's `_poweur-enc.<identity>` record is missing, all clients (CLI and mobile) must refuse to send and surface a clear error pointing the user at `poweur identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected before rate-limit or signature checks run.
+There is no plaintext fallback. If the recipient's `_poweur-enc.<identity>` record is missing, all clients (CLI and mobile) must refuse to send and surface a clear error. Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected before rate-limit or signature checks run.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger or more standardized suite. The `alg` field is the version marker; clients must reject envelopes whose `alg` they do not implement.
 
@@ -294,7 +294,7 @@ The relay is the core server component, implemented in Go (`apps/api`). Its resp
 - **At-least-one-local enforcement**: Accept a message or ack iff the sender or the recipient is a locally hosted identity. Otherwise reject with `403 not_authorized`.
 - **Message delivery**: Store accepted messages in local inboxes when the recipient is local; forward to the recipient relay (over HTTPS) when the sender is local but the recipient is remote (the privacy-proxy case).
 - **Ack ingestion**: Accept signed `delivered_client` acks at `POST /acks` and surface them via inbox polls.
-- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the configured DNS provider (Cloudflare or Hetzner). Identity registration, encryption-key rotation, and session revocation must be authenticated as the identity owner (see **Endpoint Classification**).
+- **Identity registration**: On behalf of a registering client, write the appropriate DNS records (public key `TXT`, routing `A`/`CNAME`) via the configured DNS provider (Cloudflare or Hetzner). Identity registration and session revocation must be authenticated as the identity owner (see **Endpoint Classification**).
 
 The relay exposes an HTTP/JSON API consumed by the mobile app, the CLI, and peer relays.
 
@@ -310,7 +310,6 @@ Every relay endpoint falls into one of two classes:
   - `POST /sessions` — already requires `identity_signature`; unchanged.
   - `DELETE /sessions/:id` — requires the session's bearer signature **or** the long-lived identity signature.
   - `POST /identities` — requires both the DNS provider token (authorizing the DNS write) **and** an `identity_signature` over the canonical registration string verified against the `public_key` in the body.
-  - `POST /identities/:identity/encryption-key` — requires an `identity_signature` verified against the registered identity's long-lived signing key (resolved from DNS).
 
 ### At-Least-One-Local Rule
 

@@ -159,17 +159,6 @@
       "signature": "vmcUcxOpgasLNLdHarvqpJXgE_NpvmecTPet7btAthMok4m1rsS3KD2XIqP7bOU6wcv2lVxkFf5oCDV_DFw0Bg"
     },
     {
-      "name": "identity-encryption-key",
-      "inputs": {
-        "encryption_public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
-        "identity": "alice.poweur.net",
-        "issued_at": "2026-01-15T09:30:00Z",
-        "nonce": "dmVjdG9yLW5vbmNlLTAwMQ"
-      },
-      "canonical": "identity-encryption-key\nalice.poweur.net\nAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA\n2026-01-15T09:30:00Z\ndmVjdG9yLW5vbmNlLTAwMQ",
-      "signature": "pDuE39hbfnsOVdix-H7kzCBdbJmKY3gqVQmcXCcjZktsUyHYFjNCHynsw7jdLKShK6l_5MfrmZP0DPH80CJ2Bw"
-    },
-    {
       "name": "keystore-enroll",
       "inputs": {
         "credential_id": "Y3JlZC0wMDE",

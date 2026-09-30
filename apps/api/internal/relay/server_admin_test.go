@@ -68,54 +68,6 @@ func TestIdentitiesPostSuccess(t *testing.T) {
 	}
 }
 
-// TestAddEncryptionKeySuccess for an already-registered identity in the
-// local store.
-func TestAddEncryptionKeySuccess(t *testing.T) {
-	cfg := config.Config{
-		ListenAddr:   ":0",
-		RelayAddress: "relay.reg.test",
-		RelayScheme:  "http",
-		DNSTTL:       time.Minute,
-		ChallengeTTL: time.Minute,
-		Version:      "t",
-		RateLimits:   config.RateLimits{PerMinute: 100, PerHour: 1000, PerDay: 10000},
-	}
-	pub, priv, _ := ed25519.GenerateKey(nil)
-	f := dns.NewProviderFactory(cfg)
-	f.Register("mock", dns.NewMemoryProvider(cfg))
-	s := NewServer(cfg, &fakeResolver{}, f)
-	s.identities.Add(storage.Identity{
-		Identity:       "ex.reg.test",
-		PublicKey:      base64.RawURLEncoding.EncodeToString(pub),
-		PublicKeyBytes: pub,
-		CreatedAt:      time.Now().UTC(),
-	})
-	ts := httptest.NewServer(s.Router())
-	defer ts.Close()
-	enc32 := [32]byte{1: 5}
-	encB64 := base64.RawURLEncoding.EncodeToString(enc32[:])
-	issued := time.Now().UTC().Format(time.RFC3339)
-	nonce := "enc-nonce"
-	canon := crypto.CanonicalEncryptionKeyUpdate("ex.reg.test", encB64, issued, nonce)
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(canon)))
-	b, _ := json.Marshal(EncryptionKeyRequest{
-		EncryptionPublicKey: encB64,
-		DNSProvider:         "mock",
-		DNSToken:            "t",
-		IssuedAt:            issued,
-		Nonce:               nonce,
-		IdentitySignature:   sig,
-	})
-	resp, err := http.Post(ts.URL+"/identities/ex.reg.test/encryption-key", "application/json", bytes.NewReader(b))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d", resp.StatusCode)
-	}
-}
-
 // TestSessionDeleteWithIdentitySignature exercises DELETE /sessions/:id
 // with a valid identity_signature on the long-lived key.
 func TestSessionDeleteWithIdentitySignature(t *testing.T) {

@@ -91,7 +91,6 @@ beforeEach(() => {
     relay: "http://127.0.0.1:8080",
     createdAt: "2026-09-15T10:00:00Z",
     encryptedKeys: { kdf: "native" },
-    seedDerived: true,
     hosted: true,
   });
   // storage.js types `seed = null`; it takes a base64url seed.
@@ -107,13 +106,12 @@ describe("Settings destination (E21-T11)", () => {
     render(<App />);
     expect($(".settings-id-name")!.textContent).toBe("alice");
     expect($(".settings-id-card .chip")!.textContent).toBe("Device keystore");
-    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-rotate-enc", "row-remove-id"]) {
+    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-remove-id"]) {
       expect($(`#${id}`), id).toBeTruthy();
     }
     // A hosted identity has no DNS credentials to configure (E15-T10).
     expect($("#row-dns")).toBeNull();
     expect($("#row-session .settings-row-value")!.textContent).toBe("None");
-    expect($("#row-recovery-kit .settings-row-value")!.textContent).toBe("Available");
     await waitFor(() => expect($("#row-profile .settings-row-value")!.textContent).toBe("Not set"));
     await waitFor(() => expect($("#about-relay-version")!.textContent).toBe("0.1.7"));
     expect($("#about-app-version")!.textContent).toMatch(/^\d+\.\d+\.\d+$/);
