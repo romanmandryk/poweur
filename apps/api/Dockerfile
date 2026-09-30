@@ -26,7 +26,7 @@ COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile --filter @poweur/web...
 RUN pnpm --filter @poweur/client build && pnpm --filter @poweur/web build
 
-FROM alpine:3.20
+FROM alpine:3.24
 ARG VERSION_HASH=
 ARG BUILD_TIME=
 ENV VERSION_HASH=${VERSION_HASH}
