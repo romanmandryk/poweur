@@ -218,9 +218,14 @@ func runGroupCreate(args []string, stdout, stderr io.Writer) int {
 	if !gs.store(group, stderr) {
 		return 1
 	}
+	// A new membership gets a new group key (EPIC-024 E24-T3).
+	if err := gs.issueGroupKeys(context.Background(), group); err != nil {
+		fmt.Fprintln(stderr, "membership saved, but the group key was not issued:", err)
+		return 1
+	}
 	return writeOutput(stdout, *jsonOut, group, fmt.Sprintf(
 		"group identity %s created (epoch %d)\n  admins: %s\n  members: %s\n\n"+
-			"Share with it using: poweur share add <path> --with-group %s\n",
+			"Share a folder with it: poweur drive share add <path> %s --role write\n",
 		groupID, group.Epoch,
 		strings.Join(group.Admins, ", "), strings.Join(group.Members, ", "), groupID))
 }
@@ -312,6 +317,11 @@ func runGroupUpdate(args []string, stdout, stderr io.Writer, add bool) int {
 		return 0
 	}
 	if !gs.store(group, stderr) {
+		return 1
+	}
+	// A new membership gets a new group key (EPIC-024 E24-T3).
+	if err := gs.issueGroupKeys(context.Background(), group); err != nil {
+		fmt.Fprintln(stderr, "membership saved, but the group key was not issued:", err)
 		return 1
 	}
 	return writeOutput(stdout, *jsonOut, group, fmt.Sprintf(

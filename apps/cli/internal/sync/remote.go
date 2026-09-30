@@ -56,7 +56,13 @@ func (r *DriveRemote) Changes(ctx context.Context, since string) (string, bool, 
 		}
 		// Without the device headers: reading is not acknowledging.
 		headers := r.Files.Client.Headers
-		r.Files.Client.Headers = nil
+		reading := map[string]string{}
+		for name, value := range headers {
+			if !strings.HasPrefix(name, "X-Poweur-Device") {
+				reading[name] = value
+			}
+		}
+		r.Files.Client.Headers = reading
 		err := r.Files.Client.Get(ctx, "/changes?cursor="+url.QueryEscape(cursor)+"&limit=500", &body)
 		r.Files.Client.Headers = headers
 		if err != nil {

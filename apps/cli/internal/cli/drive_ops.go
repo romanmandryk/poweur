@@ -13,7 +13,6 @@ import (
 	"time"
 
 	driveclient "github.com/poweur/cli/internal/drive"
-	"github.com/poweur/cli/internal/identity"
 	idpkg "github.com/poweur/identity"
 	protocol "github.com/poweur/identity/drive"
 )
@@ -36,6 +35,8 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 	noRotate := fs.Bool("no-rotate", false, "revoke without re-keying the node (writes there wait for `drive rotate`)")
 	count := fs.Int("count", 0, "watch: exit after this many change events (the ready event not counted)")
 	inside := fs.String("path", "", "link get: a file inside a linked folder")
+	var groups pathList
+	fs.Var(&groups, "group", "open a drive shared with this group you are in (repeatable)")
 	timeout := fs.Duration("timeout", 0, "watch: exit after this long (e.g. 30s)")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--no-offer": true, "--no-rotate": true})) != nil {
 		return 1
@@ -105,7 +106,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		files, ok := openDriveFiles(*use, *target, stderr)
-		if !ok {
+		if !ok || !joinGroups(files, *use, groups, stderr) {
 			return 1
 		}
 		switch fs.Arg(0) {
@@ -150,11 +151,9 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			if err != nil {
 				return fail(err)
 			}
-			memberKey, err := identity.LookupEncryptionKey(ctx, fs.Arg(2))
-			if err != nil || len(memberKey) != 32 {
-				if err == nil {
-					err = fmt.Errorf("no encryption key for %s", fs.Arg(2))
-				}
+			// A group is shared with through its current group key.
+			memberKey, err := shareRecipientKey(ctx, fs.Arg(2))
+			if err != nil {
 				return fail(err)
 			}
 			share, err := files.ShareWith(ctx, file, fs.Arg(2), memberKey, *role, *expires)
@@ -178,7 +177,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		files, ok := openDriveFiles(*use, *target, stderr)
-		if !ok {
+		if !ok || !joinGroups(files, *use, groups, stderr) {
 			return 1
 		}
 		node, err := files.Resolve(ctx, fs.Arg(0))
@@ -209,7 +208,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 			return writeOutput(stdout, *jsonOut, result, result["path"]+"\n")
 		}
 		files, ok := openDriveFiles(*use, *target, stderr)
-		if !ok {
+		if !ok || !joinGroups(files, *use, groups, stderr) {
 			return 1
 		}
 		switch fs.Arg(0) {
@@ -255,7 +254,7 @@ func runDriveOps(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	files, ok := openDriveFiles(*use, *target, stderr)
-	if !ok {
+	if !ok || !joinGroups(files, *use, groups, stderr) {
 		return 1
 	}
 	switch args[0] {

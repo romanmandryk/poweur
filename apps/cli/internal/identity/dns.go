@@ -268,3 +268,9 @@ func resolveOptions() idpkg.ResolveOptions {
 	}
 	return opts
 }
+
+// FetchGroupPublicKey reads a group identity's current public key (EPIC-024
+// E24-T3), verified against the group's own signing key.
+func FetchGroupPublicKey(ctx context.Context, group string) (idpkg.GroupPublicKey, error) {
+	return idpkg.FetchGroupPublicKey(ctx, group, resolveOptions())
+}

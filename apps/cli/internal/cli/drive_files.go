@@ -30,6 +30,8 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	length := fs.Int64("length", -1, "plaintext byte count for get; default is the rest of the file")
 	baseVersion := fs.String("base", "", "put: the version this edit started from; if the file changed since, exit 3 (conflict) without writing")
 	version := fs.String("version", "", "get: an earlier version (from drive history) instead of the latest")
+	var groups pathList
+	fs.Var(&groups, "group", "open a drive shared with this group you are in (repeatable)")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--public": true, "--force": true})) != nil {
 		return 1
 	}
@@ -45,7 +47,7 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	files, ok := openDriveFiles(*use, *target, stderr)
-	if !ok {
+	if !ok || !joinGroups(files, *use, groups, stderr) {
 		return 1
 	}
 	ctx := context.Background()
@@ -265,13 +267,8 @@ func openDriveFiles(use, target string, stderr io.Writer) (*driveclient.Files, b
 		}
 		return idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
 	}
-	files.EncryptionKeys = func(ctx context.Context, member string) ([]byte, error) {
-		res, err := identity.ResolveIdentity(ctx, member)
-		if err != nil {
-			return nil, err
-		}
-		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
-	}
+	// Re-issued shares seal to the member's key, or a group's current key.
+	files.EncryptionKeys = shareRecipientKey
 	// Versions written by a group's members are checked against the group's
 	// roster, which the caller can read only if they are in the group.
 	files.GroupMembers = func(ctx context.Context, group string) ([]string, error) {

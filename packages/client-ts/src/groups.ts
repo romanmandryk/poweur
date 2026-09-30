@@ -3,8 +3,9 @@
 import { canonicalMessage, canonicalShareGroup } from "./canonical.js";
 import { encryptMessage, parseEd25519PublicKey, verifyCanonical } from "./crypto/index.js";
 import type { Signer } from "./crypto/keys.js";
-import { rfc3339, stripKeyPrefix } from "./encoding.js";
+import { fromBase64, rfc3339, stripKeyPrefix, toBase64url, utf8 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
+import { openGroupKeyring, verifyGroupKeyring, verifyGroupPublicKey, type GroupEpochKey, type GroupKeyring, type GroupPublicKey } from "./groupkeys.js";
 import { RelayClient } from "./http.js";
 import { newMessageId } from "./ids.js";
 import { validateEnvelopeExtensions, validateThreadId } from "./msgtypes.js";
@@ -89,6 +90,42 @@ export class GroupMessaging {
       throw new PoweurError("invalid_signature", "group membership document signature is invalid");
     }
     return { document, relay, relayUrl };
+  }
+
+  /**
+   * The group keys the caller can reach (EPIC-024 E24-T3), newest first,
+   * and the signed roster to present to a relay that does not host the
+   * group (`DriveClient.groupRoster`). Verified against the group's own key.
+   */
+  async keys(signer: Signer, group: string, encryptionPrivateKey: Uint8Array): Promise<{ keys: GroupEpochKey[]; roster: string }> {
+    const name = group.trim().toLowerCase();
+    const { document, relay } = await this.roster(signer, name);
+    const resolved = await resolveIdentity(name, this.#options.resolve ?? {});
+    const groupKey = parseEd25519PublicKey(resolved.document.public_key);
+    const ring = await relay.request<GroupKeyring>({ method: "GET", path: `/groups/${encodeURIComponent(name)}/keys`, sign: { signer } });
+    if (ring.group.toLowerCase() !== name || ring.epoch !== document.epoch || !verifyGroupKeyring(ring, groupKey)) {
+      throw new PoweurError("invalid_signature", "the group keyring does not verify against its roster");
+    }
+    return {
+      keys: openGroupKeyring(ring, signer.identity, encryptionPrivateKey),
+      roster: toBase64url(utf8(JSON.stringify(document))),
+    };
+  }
+
+  /**
+   * A group's current public key, to share with it from outside (E24-T3),
+   * from the group's relay and verified against the group's own key.
+   */
+  async publicKey(group: string): Promise<{ epoch: number; key: Uint8Array }> {
+    const name = group.trim().toLowerCase();
+    const resolved = await resolveIdentity(name, this.#options.resolve ?? {});
+    const relayValue = resolved.document.relay || name;
+    const relayUrl = /^https?:\/\//.test(relayValue) ? relayValue.replace(/\/+$/, "") : `${this.#scheme()}://${relayValue.replace(/\/+$/, "")}`;
+    const doc = await this.#clientFor(relayUrl).request<GroupPublicKey>({ method: "GET", path: `/groups/${encodeURIComponent(name)}/public-key` });
+    if (doc.group?.toLowerCase() !== name || !verifyGroupPublicKey(doc, parseEd25519PublicKey(resolved.document.public_key))) {
+      throw new PoweurError("invalid_signature", "the group key does not verify");
+    }
+    return { epoch: doc.epoch, key: fromBase64(doc.public) };
   }
 
   async send(signer: Signer, group: string, plaintext: string, options: GroupSendOptions = {}): Promise<GroupSendResult> {

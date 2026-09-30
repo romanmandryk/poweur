@@ -32,6 +32,10 @@ type Files struct {
 	// EncryptionKeys resolves a member's X25519 public key, to re-issue their
 	// share after a key rotation. Nil reports their shares as stale.
 	EncryptionKeys func(ctx context.Context, member string) ([]byte, error)
+	// GroupKeys holds, per group the caller belongs to, the group's epoch
+	// private keys newest first (EPIC-024 E24-T3): a share to that group
+	// is the caller's share too.
+	GroupKeys map[string][][]byte
 	shares         []protocol.Share
 	sharesLoaded   bool
 	nodeShares     map[string][]protocol.Share
@@ -235,6 +239,32 @@ func (f *Files) allowAppender(ctx context.Context, node, author string) error {
 	return errors.New("record author may not append to this file")
 }
 
+// isMine reports whether a share is the caller's: theirs by name or link,
+// or made to a group whose keys they hold.
+func (f *Files) isMine(s protocol.Share) bool {
+	if f.Client.LinkID != "" {
+		return s.Link == f.Client.LinkID
+	}
+	if s.Member == f.Client.Identity {
+		return true
+	}
+	return s.Member != "" && len(f.GroupKeys[strings.ToLower(s.Member)]) > 0
+}
+
+// openShareKey opens a share's node key with the caller's key, or for a
+// share to a group, with whichever of the group's epoch keys sealed it.
+func (f *Files) openShareKey(s protocol.Share, context []byte) ([]byte, error) {
+	if keys := f.GroupKeys[strings.ToLower(s.Member)]; s.Member != f.Client.Identity && len(keys) > 0 {
+		for _, k := range keys {
+			if key, err := protocol.OpenKey(k, *s.NodeKey, context); err == nil {
+				return key, nil
+			}
+		}
+		return nil, errors.New("none of the group's keys opens this share; ask for it to be re-issued")
+	}
+	return protocol.OpenKey(f.EncryptionKey, *s.NodeKey, context)
+}
+
 // myShare finds the caller's own key-bearing share on node.
 func (f *Files) myShare(ctx context.Context, node string) (*protocol.Share, error) {
 	shares, err := f.shareList(ctx)
@@ -243,8 +273,7 @@ func (f *Files) myShare(ctx context.Context, node string) (*protocol.Share, erro
 	}
 	for i := range shares {
 		s := shares[i]
-		mine := f.Client.LinkID != "" && s.Link == f.Client.LinkID || f.Client.LinkID == "" && s.Member == f.Client.Identity
-		if mine && s.Node == node && s.NodeKey != nil && !s.ExpiredAt(time.Now()) {
+		if f.isMine(s) && s.Node == node && s.NodeKey != nil && !s.ExpiredAt(time.Now()) {
 			if err := f.trusted(ctx, s, 0); err != nil {
 				return nil, err
 			}
@@ -297,8 +326,20 @@ func (f *Files) Open(ctx context.Context, node string) (*File, error) {
 	if len(path) == 0 || path[0].ID != node || len(path) > 256 {
 		return nil, errors.New("invalid folder ancestry")
 	}
+	// A member starts at the highest node their share opens: the relay may
+	// list ancestors they may read but hold no key for (a group admin sees
+	// the group's whole drive, whose root is sealed to the group alone).
+	start := len(path) - 1
+	if !f.owner() {
+		for i := len(path) - 1; i > 0; i-- {
+			if share, err := f.myShare(ctx, path[i].ID); err == nil && share != nil {
+				break
+			}
+			start = i - 1
+		}
+	}
 	var parent *File
-	for i := len(path) - 1; i >= 0; i-- {
+	for i := start; i >= 0; i-- {
 		if i < len(path)-1 && path[i].Folder != path[i+1].ID {
 			return nil, errors.New("invalid folder ancestry")
 		}
@@ -450,7 +491,7 @@ func (f *Files) decrypt(ctx context.Context, info Node, head protocol.Manifest, 
 			if err != nil {
 				return nil, err
 			}
-			if key, err = protocol.OpenKey(f.EncryptionKey, *share.NodeKey, ctxBytes); err != nil {
+			if key, err = f.openShareKey(*share, ctxBytes); err != nil {
 				return nil, err
 			}
 			if pub, err := public(key); err != nil || base64.RawURLEncoding.EncodeToString(pub) != share.NodePublic {
@@ -646,8 +687,7 @@ func (f *Files) Shared(ctx context.Context) ([]*File, error) {
 	var out []*File
 	seen := map[string]bool{}
 	for _, s := range shares {
-		mine := f.Client.LinkID != "" && s.Link == f.Client.LinkID || f.Client.LinkID == "" && s.Member == f.Client.Identity
-		if !mine || s.NodeKey == nil || seen[s.Node] || s.ExpiredAt(time.Now()) {
+		if !f.isMine(s) || s.NodeKey == nil || seen[s.Node] || s.ExpiredAt(time.Now()) {
 			continue
 		}
 		seen[s.Node] = true

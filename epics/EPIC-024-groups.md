@@ -1,6 +1,6 @@
 # EPIC-024 — Groups: a Poweur ID that people share
 
-- **Status:** in progress — T3 (group key & sharing with a group) in progress; rewritten
+- **Status:** in progress — T3 (group key & sharing with a group) done; rewritten
   2026-09-30 (replaces "Spaces": a group *is* the collaborative place, there is no separate
   Space object or `space.json`)
 - **Priority:** P1 (the product layer that turns identities, messages and files into a place a
@@ -20,7 +20,7 @@
 |------|--------|-------|
 | E24-T1 Group model: owner, admins, members, group folder | open | the owner is a person and pays; `group.json` is the only manifest |
 | E24-T2 Admin authority | open | admins sign membership changes with their own keys; owner adds/removes admins |
-| E24-T3 Group key & sharing with a group | **in progress** | a group key per membership epoch, sealed to every member; shares to a group seal to it (CLI + TS) |
+| E24-T3 Group key & sharing with a group | **done** | a group key per membership epoch, sealed to every member; shares to a group seal to it; CLI `--group`, TS `groups.keys/publicKey`; `TestINT_GROUP_SHARE_01`, Go↔TS interop |
 | E24-T4 SDK & web: create and run a group | open | TS group management; web create, members, group screen = chat + folder |
 | E24-T5 Invitations & joining | open | invite by ID or link, accept/decline/leave, guest → ID |
 | E24-T6 Activity (optional) | open | decide after T4 whether chat + file changes are enough |
@@ -109,16 +109,23 @@ group's identity key; a removed admin can no longer change membership.
 A share seals a node key to one public key. For a group that must be a key every member holds.
 
 - [x] Design (see "Group key" below).
-- [ ] `packages/identity`: group keyring format, seal domain `poweur/group/key/v1`, vectors;
-      `@poweur/client` twin.
-- [ ] Relay: validate `.poweur/relay/group-keys.json` and `.poweur/public/group-key.json` on
-      commit (group-signed, epoch = `group.json` epoch, sealed to exactly members ∪ admins).
-- [ ] CLI: every membership change issues the next epoch key; `drive share add <path> <group>`
-      seals to the group key; members open with `--group <group>` (roster presented for groups
-      on another relay); key rotation re-issues group shares at the new epoch key.
-- [ ] TS SDK: member opens a group share; sharer seals to a group key.
-- [ ] Integration: group folder and a folder shared by an outsider, across relays and
-      providers; removal rotates and locks the removed member out; a new member reads it all.
+- [x] `packages/identity`: group keyring format (`groupkeys.go`), seal domain
+      `poweur/group/key/v1`, `group-keys.json` vectors; `@poweur/client` twin (`groupkeys.ts`).
+- [x] Relay: validates `.poweur/relay/group-keys.json` and `.poweur/public/group-key.json` on
+      write (group-signed, epoch = `group.json` epoch, sealed to exactly group ∪ members ∪
+      admins); `GET /groups/{group}/keys` for members, `GET /groups/{group}/public-key` for
+      anyone; the group itself may read its roster (its drive verifies members' versions).
+- [x] CLI: `group create|add|remove` issue the next epoch key; `drive share add <path> <group>`
+      seals to the group key; members open with `--group <group>` on drive and sync commands
+      (the roster is presented to a relay that does not host the group); rotation re-issues group
+      shares to the current group key.
+- [x] TS SDK: `groups.keys()` and `groups.publicKey()`, `FileKeys.groupKeys`,
+      `DriveClient.groupRoster`; Go↔TS interop test (`group-share-interop.test.ts`).
+- [x] Integration: `TestINT_GROUP_SHARE_01` — group folder and a folder shared by an outsider on a
+      third relay; removal rotates and locks the removed member out; a later member reads old
+      and new content; fs and S3, same and cross relay.
+- [x] Clients start decrypting at the highest node their share opens: a group admin sees the
+      whole group drive but holds keys only through the group key.
 
 **Acceptance:** Bob and Carol, on another relay than the group, read and write a folder shared
 with the group using only their own keys; after Carol's removal she cannot read new content and

@@ -8,8 +8,10 @@ Three phases, starting Thursday 2026-09-24:
 | **1. Pre-launch** | Oct 1 – Oct 12 | Real users, real feedback, fix the top issues | Friends, then small expert communities (identity/auth, open internet, self-hosters) |
 | **2. Launch** | Tue Oct 13 (+ that week) | Public story, as much reach as possible in one week | Hacker News, Product Hunt, Reddit, newsletters, press |
 
-The blog post draft is [`blog-why-poweur.md`](blog-why-poweur.md). Both the pre-launch posts and
-the launch day link to it.
+The short opening announcement is [`blog-introducing-poweur-id.md`](blog-introducing-poweur-id.md).
+The accompanying motivation essay is [`blog-why-poweur.md`](blog-why-poweur.md).
+Five complete editorial drafts and their proposed dates are listed in the
+[blog series plan](blog-series.md); publication and scheduling remain open.
 
 **Rule for every item:** if it isn't done by the phase gate, it moves to the next phase or
 comes off the list. The launch date doesn't move for a feature.
@@ -243,8 +245,11 @@ pipeline (E19-T5). Allow about two weeks; the two store clocks below are the lon
 
 ## Part 2 — The story
 
-- [ ] Finish [`blog-why-poweur.md`](blog-why-poweur.md): fill in the personal parts marked
-      `[YOU: …]`, and have two people outside the project read it
+- [x] Finish [`blog-why-poweur.md`](blog-why-poweur.md): complete prose covering identity
+      history, open internet motivation, people and agents, and the peer-to-peer vision
+- [x] Write three complete follow-up posts and a [weekly editorial plan](blog-series.md)
+- [x] Shorten the motivation essay and write a separate one-page Poweur ID introduction
+- [ ] Have two people outside the project read the opening post
 - [ ] Publish on poweur.org (add `/blog/`), with an OG image and a canonical URL. Every
       cross-post (dev.to, Hashnode, Medium, LinkedIn article) points its canonical URL back
       to it

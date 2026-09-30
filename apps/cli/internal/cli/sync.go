@@ -42,6 +42,8 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	target := fs.String("drive", "", "the drive to sync (default: your own)")
 	folder := fs.String("folder", "", "remote folder: /<shared-node-id>[/path] in a drive shared with you, or a path in your own")
 	var roots pathList
+	var groups pathList
+	fs.Var(&groups, "group", "sync a folder shared with this group you are in")
 	fs.Var(&roots, "path", "a path to sync (repeatable; default: everything but .poweur)")
 	settle := fs.Duration("settle", 2*time.Second, "watch: upload a file only after it has been unchanged this long")
 	interval := fs.Duration("interval", 3*time.Second, "watch: how often to look for local changes")
@@ -78,6 +80,9 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 	}
 	// The device headers let the relay record how far this device synced.
 	files.Client.Headers = deviceHeaders()
+	if !joinGroups(files, *use, groups, stderr) {
+		return 1
+	}
 	drive := files.Client.Drive
 	if drive == "" {
 		drive = files.Client.Identity

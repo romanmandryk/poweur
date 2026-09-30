@@ -274,6 +274,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
 	mux.HandleFunc("GET /groups/{group}", s.handleGroupGet)
 	mux.HandleFunc("GET /groups/{group}/epoch", s.handleGroupEpoch)
+	mux.HandleFunc("GET /groups/{group}/keys", s.handleGroupKeysGet)
+	mux.HandleFunc("GET /groups/{group}/public-key", s.handleGroupPublicKey)
 	mux.HandleFunc("POST /groups/{group}/messages", s.handleGroupMessagesPost)
 	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
 	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)

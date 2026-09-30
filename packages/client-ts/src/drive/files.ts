@@ -27,6 +27,9 @@ export interface FileKeys {
   /** Resolves a member's X25519 encryption key, to re-issue their share
    * after a key rotation. Without it rotation reports their share as stale. */
   encryptionKey?(member: string): Promise<Uint8Array>;
+  /** Per group the caller belongs to, the group's epoch private keys newest
+   * first (E24-T3, from `groups.keys()`): a share to that group is theirs. */
+  groupKeys?: Record<string, Uint8Array[]>;
 }
 /** Adapter for CLI/local key custody. Browser callers can supply their own signer. */
 export function fileKeys(signingPrivateKey: Uint8Array, encryptionPrivateKey: Uint8Array): FileKeys {
@@ -140,13 +143,29 @@ export class DriveFiles {
     this.nodeShares.delete(target);
     if (!await this.allowed(target, m.author, need)) throw new Error("author role does not allow this version");
   }
+  /** Whether a share is the caller's: by name or link, or to a group whose keys they hold. */
+  private isMine(share: Share): boolean {
+    const link = this.client.link?.id;
+    if (link) return share.link === link;
+    if (share.member === this.client.signer.identity) return true;
+    return !!share.member && (this.keys.groupKeys?.[share.member.toLowerCase()]?.length ?? 0) > 0;
+  }
+  /** A share's node key: the caller's key opens their own share, a group's epoch keys a group share. */
+  private openShareKey(share: Share, context: Uint8Array): Uint8Array {
+    const groupKeys = share.member && share.member !== this.client.signer.identity ? this.keys.groupKeys?.[share.member.toLowerCase()] : undefined;
+    if (groupKeys?.length) {
+      for (const key of groupKeys) {
+        try { return openKey(key, payload(share.node_key!), context); } catch { /* sealed at another epoch */ }
+      }
+      throw new Error("none of the group's keys opens this share; ask for it to be re-issued");
+    }
+    return openKey(this.keys.encryptionPrivateKey, payload(share.node_key!), context);
+  }
   /** The caller's own key-bearing, trusted share on node. */
   private async myShare(node: string): Promise<Share | undefined> {
     this.shares ??= (await this.client.shares()).shares;
-    const link = this.client.link?.id;
     for (const share of this.shares) {
-      const mine = link ? share.link === link : share.member === this.client.signer.identity;
-      if (mine && share.node === node && share.node_key && !expired(share)) {
+      if (this.isMine(share) && share.node === node && share.node_key && !expired(share)) {
         if (!await this.trusted(share)) throw new Error("share is not signed by someone who may grant it");
         return share;
       }
@@ -156,10 +175,9 @@ export class DriveFiles {
   /** Every node shared with the caller that carries a key. */
   async shared(): Promise<OpenFile[]> {
     this.shares ??= (await this.client.shares()).shares;
-    const link = this.client.link?.id, out: OpenFile[] = [], seen = new Set<string>();
+    const out: OpenFile[] = [], seen = new Set<string>();
     for (const share of this.shares) {
-      const mine = link ? share.link === link : share.member === this.client.signer.identity;
-      if (!mine || !share.node_key || seen.has(share.node) || expired(share)) continue;
+      if (!this.isMine(share) || !share.node_key || seen.has(share.node) || expired(share)) continue;
       seen.add(share.node);
       out.push(await this.open(share.node));
     }
@@ -178,8 +196,18 @@ export class DriveFiles {
   async open(node: string): Promise<OpenFile> {
     const { path } = await this.client.ancestry(node);
     if (!path.length || path[0]!.id !== node || path.length > 256) throw new Error("invalid folder ancestry");
+    // A member starts at the highest node their share opens: the relay may
+    // list ancestors they may read but hold no key for (a group admin sees
+    // the group's whole drive, whose root is sealed to the group alone).
+    let start = path.length - 1;
+    if (!this.owner) {
+      for (let i = path.length - 1; i > 0; i--) {
+        if (await this.myShare(path[i]!.id)) break;
+        start = i - 1;
+      }
+    }
     let parent: OpenFile | undefined;
-    for (let i = path.length - 1; i >= 0; i--) {
+    for (let i = start; i >= 0; i--) {
       const entry = path[i]!;
       if (i < path.length - 1 && entry.folder !== path[i + 1]!.id) throw new Error("invalid folder ancestry");
       parent = await this.fromListed(entry, parent);
@@ -266,7 +294,7 @@ export class DriveFiles {
     const share = this.owner ? undefined : await this.myShare(node);
     if (share) {
       if (share.generation !== head.generation) throw new Error("the share predates a key rotation; ask for it to be re-issued");
-      nodeKey = openKey(this.keys.encryptionPrivateKey, payload(share.node_key!), driveContext(this.client.drive, node, "node-key", share.generation));
+      nodeKey = this.openShareKey(share, driveContext(this.client.drive, node, "node-key", share.generation));
       if (toBase64url(x25519PublicKey(nodeKey)) !== share.node_public) throw new Error("share key does not match its node");
     } else {
       if (!info.folder && !this.owner) throw new Error("no share opens this node");
