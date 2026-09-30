@@ -17,7 +17,7 @@ the substrate (IDs + files + messages + conventions) is shared.
 
 ## Background
 
-- Bots/agents are already in the identity model (`requirements.md`: "bots and automated agents
+- Bots/agents are already in the identity model (the original MVP requirements: "bots and automated agents
   manage their own key pairs programmatically"; CLI supports `--sign-with=identity` headless
   signing). What's missing is the *platform* around them: scoped capabilities, event sources,
   lifecycle and discovery.

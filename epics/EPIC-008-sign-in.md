@@ -28,7 +28,7 @@ portable across apps by construction.
 
 ## Background
 
-- `requirements.md` and `apps/docs/docs/future/capabilities.md` already sketch the flow
+- `apps/docs/docs/future/capabilities.md` already sketches the flow
   (request object with `domain/audience/nonce/issued_at/expires_at/action/statement`, QR/deep
   link handoff, mobile app as signer, verification against DNS) — this epic turns the sketch
   into a spec + reference implementations. The relay's own challenge-response
@@ -104,7 +104,7 @@ suite. The guestbook's own `server_test.go` covers what a correct RP *refuses*.
 
 ### E08-T3 — Signer UX in web client and CLI
 
-Native mobile apps are the end-state signer (per `requirements.md`), but the ecosystem needs
+Native mobile apps are the end-state signer (the original MVP requirements), but the ecosystem needs
 signers *now*:
 
 - [x] Web client: handle `poweur://auth` / pasted request / QR scan — show origin, action,

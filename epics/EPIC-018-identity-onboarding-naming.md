@@ -49,7 +49,7 @@ Two things stand between the current code and that flow:
 
   This is an impersonation vector *and* a correctness bug: a raw UTF-8 label is not a valid
   DNS label and is not covered by the `*.poweur.net` wildcard certificate
-  (`requirements.md`, wildcard certificate strategy).
+  (`apps/docs/docs/relay/self-hosting.md`, wildcard certificate strategy).
 - There is **no availability check**. The web app's only client-side rule is
   `handle.length < 3`; a taken handle is discovered by a failed `POST /identities` after the
   user has already created a passkey.

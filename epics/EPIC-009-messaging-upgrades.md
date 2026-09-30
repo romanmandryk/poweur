@@ -29,7 +29,7 @@ not crypto changes (except groups, which get their own carefully-scoped task).
 - Inbox is in-memory (`apps/api/internal/storage/inbox.go`); restart loses undelivered mail.
   Clients poll `GET /messages/{identity}` (challenge-signed, see `handleMessagesGet`).
 - The protocol already reserves forward-compatible fields: `type`, `thread_id`, `expires_at`,
-  `metadata` (`apps/docs/docs/protocol/message-format.md` / `requirements.md`) — typed
+  `metadata` (`apps/docs/docs/protocol/message-format.md`) — typed
   messages are an *activation* of reserved design, not a breaking change.
 - Acks are two-tick (`Ack` in `apps/api/internal/relay/types.go`); 512 KB message cap
   (`maxMessageBytes`) is the right boundary to keep — files go through EPIC-003 storage.
