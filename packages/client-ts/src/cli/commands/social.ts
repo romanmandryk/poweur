@@ -11,6 +11,7 @@ import { openClient } from "../../node/session-factory.js";
 import {
   ANON_CHALLENGE_POW,
   CONTACT_ACCEPTED,
+  MSG_TYPE_CONTACT_ACCEPT,
   type AnonymousPolicy,
   type InboxMode,
 } from "../../types.js";
@@ -114,7 +115,7 @@ export async function requestsCommand(argv: string[], streams: Streams): Promise
   const { client } = await openClient({
     ...(flagString(args, "use-identity") ? { identity: flagString(args, "use-identity") } : {}),
   });
-  const requests = await client.requests();
+  const requests = (await client.requests()).filter((entry) => entry.type !== MSG_TYPE_CONTACT_ACCEPT);
   if (flagBool(args, "json")) return write(streams, true, { requests }, "");
   if (requests.length === 0) {
     streams.stdout("no pending requests\n");

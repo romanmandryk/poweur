@@ -172,3 +172,22 @@ Pinning is client-side defense-in-depth: it fails open when contacts are unreach
 Beyond the individual inbox — per-sender-relay request metering, `sys.abuse.report`,
 and shareable signed blocklists — is
 [Relay reputation & abuse pressure](relay-reputation).
+
+### Completing and clearing a request
+
+One approval completes the handshake: B records A as accepted and sends
+`sys.contact.accept`; when A's client receives that answer, it promotes B from
+`requested` to `accepted` without another approval. Automatic promotion checks
+the key pinned when A sent the request. Unknown or blocked identities are never
+promoted, and a failed resolution or changed key leaves the request unpromoted.
+The Go CLI processes replies on pickup; the TypeScript SDK processes them in
+`requests()` and `requestsAndArchive()`. The web app also processes archived
+answers on history restore, so an interrupted contact write can be retried.
+
+The web app keeps answered-request positions in the existing encrypted
+`read-state.json` conversation map, using `contact-request:<lowercase identity>`
+keys and the request's timestamp/ID. These marks are separate from chat read
+marks: reading chat cannot approve a request. Accept and Block persist the mark
+before removing the pending row. History reloads and other devices use that
+mark to suppress answered requests while allowing newer requests from the same
+identity. Repeated clicks during an approval share the same operation.

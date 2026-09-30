@@ -170,6 +170,7 @@ export function loadHistory({ force = false } = {}): Promise<void> {
       // The newest page of each conversation; a thread pages back on demand.
       const [records, readState] = await Promise.all([store.load({ perConversation: HISTORY_TRAY_PAGE }), store.readState()]);
       show(records, readState);
+      await processContactAccepts();
       setHistory({ loaded: true, error: null });
       void saveSnapshot(identity, "history", { records, readState });
     } catch (error) {

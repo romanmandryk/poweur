@@ -8,6 +8,7 @@ import { vi } from "vitest";
 export function fakeClient(overrides: Record<string, unknown> = {}) {
   const store = {
     load: vi.fn(async () => [] as any[]),
+    putReadState: vi.fn(async () => {}),
     readState: vi.fn(async () => ({ conversations: {} as Record<string, unknown> })),
     markConversationRead: vi.fn(async (peer: string, records: any[]) => {
       const last = records.at(-1);
@@ -47,6 +48,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     devices: vi.fn(() => deviceRegistry),
     history: vi.fn(async () => store),
     contacts: vi.fn(async () => contactsApi),
+    processContactAccepts: vi.fn(async () => [] as string[]),
     inboxAndArchive: vi.fn(async () => ({ messages: [] as any[], acks: [] as any[], lost: 0 })),
     requests,
     requestsAndArchive: vi.fn(async () => ({ requests: await requests(), archived: 0, lost: 0 })),

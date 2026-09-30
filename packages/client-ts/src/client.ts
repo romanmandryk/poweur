@@ -313,8 +313,24 @@ export class PoweurClient {
   }
 
   /** Pending contact requests, with their intros decrypted when we can. */
-  requests(): Promise<ContactRequestEntry[]> {
-    return fetchRequests(this.relay, this.signer, this.decryptor);
+  async requests(): Promise<ContactRequestEntry[]> {
+    const requests = await fetchRequests(this.relay, this.signer, this.decryptor);
+    // Never discard a drained answer if its contact write fails. Callers can retry it.
+    await this.processContactAccepts(requests).catch(() => []);
+    return requests;
+  }
+
+  #contactAccepts: Promise<string[]> = Promise.resolve([]);
+
+  /** Also usable when replaying archived answers after an interrupted handshake. */
+  async processContactAccepts(entries: { type?: string; sender?: string }[]): Promise<string[]> {
+    const senders = entries.filter((entry) => entry.type === MSG_TYPE_CONTACT_ACCEPT && entry.sender)
+      .map((entry) => entry.sender!);
+    if (!senders.length) return [];
+    const previous = this.#contactAccepts;
+    this.#contactAccepts = previous.catch(() => []).then(async () =>
+      (await this.contacts()).promoteAccepted(senders));
+    return this.#contactAccepts;
   }
 
   /** Drain pending consent gestures and durably archive decrypted entries. */
@@ -323,7 +339,7 @@ export class PoweurClient {
     archived: number;
     lost: number;
   }> {
-    const requests = await this.requests();
+    const requests = await fetchRequests(this.relay, this.signer, this.decryptor);
     const { archived, lost } = await this.archive(
       requests
         .filter((entry) => entry.plaintext !== null && entry.plaintext !== undefined)
@@ -340,6 +356,8 @@ export class PoweurClient {
           body: entry.plaintext ?? "",
         })),
     );
+    // Archive before promotion: a failed write can be retried from history.
+    await this.processContactAccepts(requests).catch(() => []);
     return { requests, archived, lost };
   }
 

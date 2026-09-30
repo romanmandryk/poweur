@@ -146,6 +146,24 @@ export class Contacts {
     return entry;
   }
 
+  /** Finish only handshakes we started, preserving the key pinned at request time. */
+  async promoteAccepted(senders: string[]): Promise<string[]> {
+    const file = await this.load();
+    const promoted: string[] = [];
+    for (const sender of new Set(senders.map((value) => value.trim().toLowerCase()))) {
+      const contact = findContact(file, sender);
+      if (contact?.state !== CONTACT_REQUESTED) continue;
+      // Resolution failure or a changed key must never silently establish trust.
+      const pin = await this.resolvePin(sender).catch(() => null);
+      if (!pin || (contact.pinned_key && stripKeyPrefix(contact.pinned_key) !== stripKeyPrefix(pin))) continue;
+      contact.state = CONTACT_ACCEPTED;
+      contact.pinned_key = pin;
+      promoted.push(sender);
+    }
+    if (promoted.length) await this.save(file);
+    return promoted;
+  }
+
   async remove(identity: string): Promise<boolean> {
     const { file, removed } = removeContact(await this.load(), identity);
     if (removed) await this.save(file);

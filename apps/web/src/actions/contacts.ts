@@ -3,8 +3,9 @@
  * for the Requests tray and for marking strangers; the Contacts destination
  * (E21-T8) builds on the same actions.
  */
+import { markRead } from "@poweur/client";
 import { confirmKeyChange } from "../components/KeyMismatchDialog";
-import { contactFor } from "../state/badges";
+import { contactFor, contactRequestMarkKey } from "../state/badges";
 import { useData, type Contact, type DataFields } from "../state/data";
 import { useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
@@ -16,9 +17,18 @@ const setContacts = (patch: Partial<DataFields["contacts"]>) =>
 const setRequests = (patch: Partial<DataFields["requests"]>) =>
   useData.setState((state) => ({ requests: { ...state.requests, ...patch } }));
 
-export async function loadContacts({ force = false } = {}) {
+let contactsInFlight: Promise<void> | null = null;
+export function loadContacts({ force = false } = {}): Promise<void> {
+  if (contactsInFlight) {
+    return force ? contactsInFlight.then(() => loadContacts({ force: true })) : contactsInFlight;
+  }
+  contactsInFlight = readContacts({ force }).finally(() => { contactsInFlight = null; });
+  return contactsInFlight;
+}
+
+async function readContacts({ force = false } = {}) {
   const current = useData.getState().contacts;
-  if (current.loading || (current.loaded && !force)) return;
+  if (current.loaded && !force) return;
   const client = activeClient();
   if (!client) return;
 
@@ -64,7 +74,7 @@ export function loadRequests({ force = false } = {}): Promise<void> {
       const { requests: incoming, lost } = await client.requestsAndArchive();
       setRequests({ incoming: mergeInto(useData.getState().requests.incoming, incoming), loaded: true, error: null });
       if (lost) toast(`${lost} request${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
-      processContactAccepts().catch((error) => console.warn("Accept processing failed:", errorMessage(error)));
+      await processContactAccepts();
     } catch (error) {
       setRequests({ error: `Could not read requests: ${errorMessage(error)}` });
     } finally {
@@ -98,30 +108,19 @@ export async function refreshContacts() {
 export async function processContactAccepts() {
   const client = activeClient();
   if (!client) return;
-  await loadContacts();
-
   const self = useSession.getState().identity;
-  const { messages, requests, contacts } = useData.getState();
-  const senders = new Set(
-    [...messages.map(parseMessage), ...requests.incoming]
-      .filter((entry: any) => entry.type === "sys.contact.accept" && entry.sender !== self)
-      .map((entry: any) => entry.sender as string)
-      .filter((sender) => contactFor(contacts.list, sender)?.state === "requested"),
-  );
-  if (!senders.size) return;
-
-  const api = await client.contacts();
-  let promoted = 0;
-  for (const sender of senders) {
-    const pin = await api.checkPin(sender).catch(() => null);
-    if (pin && pin.status !== "ok" && pin.status !== "unpinned") {
-      toast(`${sender} accepted, but their key changed — review it in Contacts`, "warning", 8000);
-      continue;
+  const { messages, requests } = useData.getState();
+  const answers = [...messages.map(parseMessage), ...requests.incoming]
+    .filter((entry: any) => entry.type === "sys.contact.accept" && entry.sender !== self);
+  if (!answers.length) return;
+  await client.processContactAccepts(answers);
+  // The SDK may already have promoted these while draining. Always refresh.
+  await loadContacts({ force: true });
+  for (const sender of new Set(answers.map((entry: any) => entry.sender as string))) {
+    if (contactFor(useData.getState().contacts.list, sender)?.state === "requested") {
+      toast(`${sender} accepted, but their key could not be verified — review it in Contacts`, "warning", 8000);
     }
-    await api.set(sender, "accepted", {});
-    promoted += 1;
   }
-  if (promoted) await refreshContacts();
 }
 
 /** Drop a handshake just answered so it does not linger after Accept/Block. */
@@ -130,13 +129,41 @@ export function dropIncomingRequest(identity: string) {
   useData.setState((state) => ({
     requests: {
       ...state.requests,
-      incoming: state.requests.incoming.filter((entry: any) => String(entry.sender ?? "").toLowerCase() !== wanted),
+      incoming: state.requests.incoming.filter((entry: any) => String(entry.sender ?? "").toLowerCase() !== wanted ||
+        (entry.type && entry.type !== "sys.contact.request" && entry.type !== "sys.contact.accept")),
     },
     messages: state.messages.filter((raw) => {
       const message = parseMessage(raw);
       return !(String(message.sender ?? "").toLowerCase() === wanted && message.type === "sys.contact.request");
     }),
   }));
+}
+
+/** Keep answered request watermarks in the existing encrypted, synced read state. */
+async function rememberAnsweredRequest(client: any, identity: string) {
+  const wanted = identity.toLowerCase();
+  const data = useData.getState();
+  const entries = [...data.requests.incoming, ...data.messages.map(parseMessage)]
+    .filter((entry: any) => String(entry.sender ?? "").toLowerCase() === wanted &&
+      (!entry.type || entry.type === "sys.contact.request"));
+  if (!entries.length) return;
+  const history = await client.history();
+  let state = await history.readState();
+  for (const entry of entries) {
+    state = markRead(state, contactRequestMarkKey(identity), entry.timestamp, entry.id ?? "");
+  }
+  await history.putReadState(state);
+  useData.setState((data) => ({ history: { ...data.history, readState: state } }));
+}
+
+const contactAnswers = new Map<string, Promise<boolean>>();
+function answerContact(identity: string, label: string, work: (client: any) => Promise<void>): Promise<boolean> {
+  const key = identity.trim().toLowerCase();
+  const existing = contactAnswers.get(key);
+  if (existing) return existing;
+  const pending = withClient(label, work).finally(() => contactAnswers.delete(key));
+  contactAnswers.set(key, pending);
+  return pending;
 }
 
 async function withClient(label: string, work: (client: any) => Promise<void>): Promise<boolean> {
@@ -168,7 +195,7 @@ export function requestContact(identity: string, { intro, petname }: { intro?: s
 
 /** Accept (or, `silent`, unblock): pin their key now; tell them unless unblocking. */
 export function acceptContact(identity: string, { silent = false, petname }: { silent?: boolean; petname?: string } = {}) {
-  return withClient(`Accepting ${identity}…`, async (client) => {
+  return answerContact(identity, `Accepting ${identity}…`, async (client) => {
     if (silent) {
       const contacts = await client.contacts();
       await contacts.set(identity, "accepted", petname ? { petname } : {});
@@ -181,16 +208,18 @@ export function acceptContact(identity: string, { silent = false, petname }: { s
       );
     }
     trackAction("contact", { kind: silent ? "unblock" : "accept" });
+    await rememberAnsweredRequest(client, identity);
     dropIncomingRequest(identity);
     await refreshContacts();
   });
 }
 
 export function blockContact(identity: string) {
-  return withClient(`Blocking ${identity}…`, async (client) => {
+  return answerContact(identity, `Blocking ${identity}…`, async (client) => {
     await client.blockContact(identity);
     toast(`${identity} blocked`, "success");
     trackAction("contact", { kind: "block" });
+    await rememberAnsweredRequest(client, identity);
     dropIncomingRequest(identity);
     await refreshContacts();
   });
@@ -257,4 +286,6 @@ export async function checkPinBeforeSend(client: any, recipient: string): Promis
 export function resetContactsForTests() {
   requestsInFlight = null;
   requestsPending = false;
+  contactAnswers.clear();
+  contactsInFlight = null;
 }

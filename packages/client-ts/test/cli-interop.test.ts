@@ -122,6 +122,25 @@ describe("Go CLI ↔ TypeScript client", () => {
     }
   });
 
+  it("one Go approval completes the TypeScript CLI requester and clears both queues", async () => {
+    expect((await tsCli(["contacts", "request", goIdentity, "let us connect", "--use-identity", tsIdentity])).code).toBe(0);
+    await goCli(["requests", "--use-identity", goIdentity]);
+    // The test identities share this local relay; route the reply through it.
+    const config = loadConfig();
+    saveConfig({ ...config, via_home_relay: true });
+    let approval;
+    try { approval = await goCli(["contacts", "accept", tsIdentity, "--use-identity", goIdentity]); }
+    finally { saveConfig(config); }
+    expect(approval.stderr).not.toContain("could not be sent");
+    const answer = await tsCli(["requests", "--use-identity", tsIdentity]);
+    expect(answer.code, answer.stderr).toBe(0);
+    expect(answer.stdout).not.toContain("accept with");
+    const contacts = await tsCli(["contacts", "ls", "--json", "--use-identity", tsIdentity]);
+    expect(JSON.parse(contacts.stdout).contacts).toContainEqual(expect.objectContaining({ identity: goIdentity, state: "accepted" }));
+    expect((await tsCli(["requests", "--use-identity", tsIdentity])).stdout).toContain("no pending requests");
+    expect((await goCli(["requests", "--use-identity", goIdentity])).stdout).toContain("no pending requests");
+  });
+
   it("shares the config file the Go CLI wrote", () => {
     const config = loadConfig();
     expect(config.identity).toBe(goIdentity);

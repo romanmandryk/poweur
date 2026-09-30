@@ -7,7 +7,7 @@ vi.mock("../../src/lib/client.js", async (importOriginal) => ({
   clientFor: () => holder.client,
 }));
 
-import { acceptContact, blockContact, loadRequests, resetContactsForTests } from "../../src/actions/contacts";
+import { acceptContact, blockContact, dropIncomingRequest, loadContacts, loadRequests, resetContactsForTests } from "../../src/actions/contacts";
 import {
   loadHistory,
   loadInbox,
@@ -16,6 +16,7 @@ import {
   sendSigned,
   unreadFor,
 } from "../../src/actions/messages";
+import { incomingRequests, navBadges } from "../../src/state/badges";
 import { mergeInto, messageKey } from "../../src/actions/relay";
 import { loadWebOutbox } from "../../src/lib/outbox.js";
 import { PanelHost } from "../../src/shell/Overlays";
@@ -163,10 +164,76 @@ describe("requests", () => {
     expect(useData.getState().requests.incoming).toEqual([]);
   });
 
+  it("keeps answered requests cleared after history reload, without hiding a later request", async () => {
+    const request = { id: "r1", sender: BOB, timestamp: "2026-09-15T10:00:00Z", type: "sys.contact.request", plaintext: "hi" };
+    holder.client.requests.mockResolvedValueOnce([request]);
+    await loadRequests({ force: true });
+    await acceptContact(BOB);
+    const saved = holder.client.store.putReadState.mock.calls[0][0];
+    resetStores();
+    useSession.setState({ identity: ME, unlocked: true });
+    holder.client.store.readState.mockResolvedValue(saved);
+    holder.client.store.load.mockResolvedValue([{ ...request, queue: "requests", body: "hi" }]);
+    await loadHistory();
+    expect(incomingRequests(useData.getState(), ME)).toEqual([]);
+    expect(navBadges(useData.getState(), ME, true).contacts).toBe(0);
+    useData.setState({ requests: { ...useData.getState().requests, incoming: [{ ...request, id: "r2", timestamp: "2026-09-23T10:00:00Z" }] } });
+    expect(incomingRequests(useData.getState(), ME)).toHaveLength(1);
+  });
+
+  it("processes an acceptance restored from history", async () => {
+    holder.client.store.load.mockResolvedValue([{ id: "a1", sender: BOB, type: "sys.contact.accept", queue: "requests", timestamp: "2026-09-15T10:00:00Z", body: "accepted" }]);
+    await loadHistory();
+    expect(holder.client.processContactAccepts).toHaveBeenCalledWith([expect.objectContaining({ sender: BOB, type: "sys.contact.accept" })]);
+  });
+
+  it("coalesces repeated approvals while the first is being saved", async () => {
+    let finish!: (value: { notified: boolean }) => void;
+    holder.client.acceptContact.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const first = acceptContact(BOB);
+    const second = acceptContact(BOB);
+    expect(second).toBe(first);
+    finish({ notified: true });
+    await first;
+    expect(holder.client.acceptContact).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a request actionable when saving its answer fails", async () => {
+    const request = { id: "r1", sender: BOB, timestamp: "2026-09-15T10:00:00Z", type: "sys.contact.request" };
+    holder.client.requests.mockResolvedValueOnce([request]);
+    await loadRequests({ force: true });
+    holder.client.store.putReadState.mockRejectedValueOnce(new Error("offline"));
+    expect(await acceptContact(BOB)).toBe(false);
+    expect(incomingRequests(useData.getState(), ME)).toHaveLength(1);
+    expect(await acceptContact(BOB)).toBe(true);
+    expect(incomingRequests(useData.getState(), ME)).toEqual([]);
+  });
+
+  it("does not discard a share offer when answering a contact request", () => {
+    useData.setState({ requests: { ...useData.getState().requests, incoming: [
+      { id: "request", sender: BOB, type: "sys.contact.request" },
+      { id: "offer", sender: BOB, type: "sys.share.offer" },
+    ] } });
+    dropIncomingRequest(BOB);
+    expect(useData.getState().requests.incoming.map((entry) => entry.id)).toEqual(["offer"]);
+  });
+
+  it("waits for an older contacts read before refreshing an approval", async () => {
+    let finish!: (value: any) => void;
+    holder.client.contactsApi.load.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const first = loadContacts();
+    await Promise.resolve();
+    const refreshed = loadContacts({ force: true });
+    holder.client.contactsApi.load.mockResolvedValue({ contacts: [{ identity: BOB, state: "accepted" }] });
+    finish({ contacts: [{ identity: BOB, state: "requested" }] });
+    await Promise.all([first, refreshed]);
+    expect(useData.getState().contacts.list[0]?.state).toBe("accepted");
+  });
+
   it("finishes our own handshake when they accept", async () => {
     holder.client.contactsApi.load.mockResolvedValue({ contacts: [{ identity: BOB, state: "requested" }] });
     holder.client.requests.mockResolvedValueOnce([{ id: "a1", sender: BOB, timestamp: "2026-09-15T10:00:00Z", type: "sys.contact.accept" }]);
     await loadRequests({ force: true });
-    await waitFor(() => expect(holder.client.contactsApi.set).toHaveBeenCalledWith(BOB, "accepted", {}));
+    expect(holder.client.processContactAccepts).toHaveBeenCalledWith([expect.objectContaining({ sender: BOB, type: "sys.contact.accept" })]);
   });
 });
