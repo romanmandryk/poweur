@@ -46,4 +46,4 @@ HTML scenes (`.art-*` in `site.css`) styled like the app. The terminal window is
 - Hero video: drop an original or licensed loop at `assets/hero.mp4` and uncomment the `<video>` in `index.html`.
 - X / LinkedIn links in `assets/site.js` (`#` until the accounts exist).
 - The SDK snippet in the Apps section shows the intended API shape, not the current `@poweur/client` surface.
-- Fonts load from Google Fonts; self-host Sora/Inter per `design/brand/README.md`.
+- Fonts are self-hosted in `assets/fonts/` (Sora, Inter, JetBrains Mono, Latin subsets from Fontsource, SIL OFL 1.1; licences alongside). The site makes no third-party requests.

@@ -173,7 +173,7 @@ Proportions of the P inside each icon:
 
 - UI: the system stack already in the app (`-apple-system, BlinkMacSystemFont, "Segoe UI", …`). Keep it:
   it is fast and native in the Capacitor shell.
-- Display and wordmark: **Sora** SemiBold (600), from Google Fonts under the SIL Open Font License.
+- Display and wordmark: **Sora** SemiBold (600), under the SIL Open Font License (self-hosted on the site in `apps/site/assets/fonts/`).
   Use it for headings on marketing pages and for the wordmark. Self-host it (no CDN, per E15-T6).
 
 ## Lockups

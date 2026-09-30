@@ -1,3 +1,19 @@
+/* Self-hosted fonts (SIL Open Font License 1.1, see fonts/LICENSE-*.txt). Latin subset from Fontsource. */
+@font-face { font-family: "Sora"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/sora-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Sora"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/sora-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+
 /* poweur.org marketing site — dark-first, glass, brand tokens from design/brand/tokens.css */
 :root {
   --violet-200: #DBD5FF; --violet-300: #C3B7FF; --violet-400: #A890FE; --violet-500: #8B6BE9;
