@@ -110,7 +110,8 @@ anyone can message them.
    approve the code from the laptop with `poweur key approve <code> --use-identity support.poweur.net`.
 4. An agent or support system gets it with `poweur key recover support.poweur.net --seed <kit>`
    (or `@poweur/client` with the seed).
-5. Set `QUOTA_CONTACT=support.poweur.net` so a full drive tells people to message it.
+5. `QUOTA_CONTACT` defaults to `support.poweur.net` in `docker-compose.prod.yml`, so a full drive
+   tells people to message it. It is read from the compose environment, not from `.env.prod`.
 6. Remove `OPERATOR_TOKEN` again when you're done creating names.
 
 ## Backup, restore and moving the stack

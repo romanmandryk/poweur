@@ -49,7 +49,7 @@ services:
       # bucket, picked up within a minute), and QUOTA_CONTACT is the ID an
       # over-quota upload is told to message.
       MAX_IDENTITY_BYTES: "209715200"
-      QUOTA_CONTACT: ${QUOTA_CONTACT:-}
+      QUOTA_CONTACT: ${QUOTA_CONTACT:-support.poweur.net}
       # NAME_RESERVED: extra names, CSV — adds to the built-in list
       # NAME_BLOCKED_FILE: /data/blocked-terms.txt (one term per line)
       # NAME_BLOCK_MODE: substring | exact
