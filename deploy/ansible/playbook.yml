@@ -1,7 +1,7 @@
 # Usage:
 #   ansible-galaxy collection install -r requirements.yml
 #   cp secrets.example.yml secrets.yml && $EDITOR secrets.yml
-#   $EDITOR inventory.yml          # set ansible_host to your server IP
+#   cp inventory.example.yml inventory.yml && $EDITOR inventory.yml   # your server IP
 #   ansible-playbook -i inventory.yml playbook.yml
 #
 # Re-run at any time — skips completed steps, applies only diffs.
@@ -255,7 +255,7 @@
 
     # ── 10b. Backups (restic → Hetzner Storage Box) ─────────────────────────────
     # Needs storage_box_user, storage_box_host and restic_password in secrets.yml;
-    # skipped until they are set. Runbook: deploy/BACKUP.md.
+    # skipped until they are set. Runbook: deploy/backup/README.md.
 
     - name: Backup config directories
       ansible.builtin.file:
@@ -380,5 +380,5 @@
           {{
             'Repo clone failed — add the deploy key to GitHub, then re-run.'
             if repo_clone.failed | default(false) else
-            'Done. Follow deploy/OPS.md for the first release and legacy systemd migration'
+            'Done. Follow deploy/README.md for the first release and legacy systemd migration'
           }}

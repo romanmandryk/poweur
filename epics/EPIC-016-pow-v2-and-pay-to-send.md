@@ -12,7 +12,7 @@
   out-spamming it 10⁴×; a recipient-priced **pay-to-send** fast-lane (crypto + fiat) that
   monetizes willingness-to-pay and gives hosted Poweur a revenue line, without taxing
   self-hosters
-- **Shared gateway:** the payment gateway, settlement callback and cut accounting built here are reused by [EPIC-030](EPIC-030-creator-commerce.md) for paid grants and subscriptions — one gateway, not two. An active paid entitlement may lower (never bypass abuse controls on) registration/anon PoW difficulty.
+- **Shared gateway:** the payment gateway, settlement callback and cut accounting built here are reused by COM-5 for paid grants and subscriptions — one gateway, not two. An active paid entitlement may lower (never bypass abuse controls on) registration/anon PoW difficulty.
 
 ## Progress
 

@@ -40,7 +40,7 @@ export function Logo({
   );
 }
 
-/** The lockup's artwork is 3164 × 864 (design/claude/lockups); width follows height. */
+/** The lockup's artwork is 3164 × 864 (design/brand/scripts/lockup.py); width follows height. */
 const lockupWidthFor = (height: number) => Math.round((height * 3164) / 864);
 
 /**

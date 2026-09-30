@@ -1,36 +1,11 @@
-# Backing up and restoring Poweur
+# Off-site backups (restic to a Hetzner Storage Box)
 
-**Today:** user data — every encrypted drive and the relay's identity index, spool and key
-backups (`drives/`, `relay/`) — lives in **Hetzner Object Storage**, bucket `poweur1` in
-`nbg1` (`S3_*` in `.env.prod`). Nothing else copies it. What protects it is Hetzner's own
-design ([FAQ](https://docs.hetzner.com/storage/object-storage/faq/general/)): objects are
-erasure-coded across servers so up to three can fail, with redundant power and network — but
-the whole bucket sits in **one data centre**, there is **no published durability SLA**, no
-cross-location replication, and Hetzner itself calls it "only one part of a secure backup
-strategy". A data-centre loss, an account problem or a bad delete by the relay loses the data,
-and because it is end-to-end encrypted the relay cannot rebuild it.
-
-The rest of the server (OAuth bridge database, TLS certificates, Grafana, config) relies on
-**Hetzner's automatic server backups**: a full image of the VM every night (about 22:35 UTC),
-kept for **7 days**. Restore = roll the server back, or create a new server from a backup
-image and copy what you need out of it. They cover the server's own disk only, **not the
-bucket and not attached Cloud Volumes**.
-
-The privacy policy's "Storage and backups" row states exactly this; change both together.
-
-**Cheapest next step:** a nightly `rclone sync` of `poweur1` into a bucket in another location
-(the emptied `poweur` bucket in `hel1` will do). Object Storage bills one base price per
-account however many buckets and locations there are, with the included storage shared
-across them, so a second bucket costs only the storage it holds beyond the included quota.
-It protects against losing the data centre, not against losing the Hetzner account; the
-restic Storage Box below would, once it also backs up the bucket (today it reads only volumes).
-
-**Ready but switched off:** an off-site, encrypted, file-level backup to a Hetzner Storage
-Box with [restic](https://restic.net/) ([`backup/poweur-backup.sh`](backup/poweur-backup.sh)).
-It survives losing the server or the account, restores single files, and verifies itself
-weekly. The Ansible playbook installs it only once `storage_box_user` is set in
-`secrets.yml`. If you turn it on, choose its retention (`backup_keep_within`) and update the
-privacy policy's backup row to match. The rest of this page describes it.
+An encrypted, file-level backup of a Poweur relay host to a Hetzner Storage Box with
+[restic](https://restic.net/), by [`poweur-backup.sh`](poweur-backup.sh) on a systemd timer. It
+survives losing the server or the account, restores single files and verifies itself weekly. It is
+**off until configured**: the Ansible playbook (`../ansible/`) installs it only once
+`storage_box_user` is set in `secrets.yml` (see `secrets.example.yml`). Choose the retention
+(`backup_keep_within`) and keep your privacy policy's backup statement in step with it.
 
 ## What is in a snapshot
 

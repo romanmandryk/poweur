@@ -1,11 +1,11 @@
-# EPIC-032 — Public web: feeds, following, community boards & indexers
+# EPIC-027 — Public web: feeds, following, community boards & indexers
 
 - **Status:** proposed
 - **Priority:** P1 (after EPIC-020 waves 1–3; community boards need nothing beyond them)
 - **Depends on:** EPIC-020 (public folders, append files, change feeds, caps, proof-of-work
   links), EPIC-009 T7–T10 (intent types, typed routing, follow feeds), EPIC-014 (anonymous
-  messages), EPIC-024 (group identities as hosts), EPIC-031 (headless scenarios)
-- **Interacts with:** EPIC-030 (paid feeds as renewing shares, broadcast channels), INT-006
+  messages), EPIC-024 (group identities as hosts), EPIC-026 (headless scenarios)
+- **Interacts with:** COM-5 (paid feeds as renewing shares, broadcast channels), INT-006
   (Bluesky/Nostr/Fediverse handles), INT-002 (payments for listings)
 - **Unlocks:** microblogs, blogs and newsletters for every ID; community and classifieds boards;
   network-wide timelines, search, topics and location search through replaceable indexers
@@ -14,15 +14,15 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E32-T1 Post & feed convention | **open** | post/reply/repost/like records, `feed.json`, Atom, microformats, tombstones |
-| E32-T2 Following & followers-only feeds | **open** | private follow list, client timelines, approved followers via shares with epoch keys |
-| E32-T3 Social notifications | **open** | mention/reply (and optional follow) intents with inbox-policy rules |
-| E32-T4 Public caching & subscription proxy | **open** | CDN-friendly public nodes; one client connection fanned in by the user's relay |
-| E32-T5 Community boards | **open** | a group identity's public append log; members, proof-of-work links, moderation, removal |
-| E32-T6 Listings & reviews | **open** | classifieds schema with coarse location cells, expiry, categories; signed reviews |
-| E32-T7 Indexer role | **open** | service identities that crawl opted-in public data and answer signed queries |
-| E32-T8 Reference indexer | **open** | timelines, threads, hashtags, search, counts, location search — outside the relay |
-| E32-T9 Interop: Fediverse & Bluesky | **open** | webmentions + microformats for Bridgy Fed; handle linking via INT-006 |
+| E27-T1 Post & feed convention | **open** | post/reply/repost/like records, `feed.json`, Atom, microformats, tombstones |
+| E27-T2 Following & followers-only feeds | **open** | private follow list, client timelines, approved followers via shares with epoch keys |
+| E27-T3 Social notifications | **open** | mention/reply (and optional follow) intents with inbox-policy rules |
+| E27-T4 Public caching & subscription proxy | **open** | CDN-friendly public nodes; one client connection fanned in by the user's relay |
+| E27-T5 Community boards | **open** | a group identity's public append log; members, proof-of-work links, moderation, removal |
+| E27-T6 Listings & reviews | **open** | classifieds schema with coarse location cells, expiry, categories; signed reviews |
+| E27-T7 Indexer role | **open** | service identities that crawl opted-in public data and answer signed queries |
+| E27-T8 Reference indexer | **open** | timelines, threads, hashtags, search, counts, location search — outside the relay |
+| E27-T9 Interop: Fediverse & Bluesky | **open** | webmentions + microformats for Bridgy Fed; handle linking via INT-006 |
 
 ## Goal
 
@@ -71,7 +71,7 @@ paid subscribers are practical. Public feeds have no per-follower cost at all.
    re-registered by clients on connect, so the relay stays stateless.
 
 Push fan-out (one message per follower per post) stays for email subscribers and explicit
-alerts only (EPIC-030-T5).
+alerts only (COM5-T5).
 
 ### Indexers
 
@@ -90,7 +90,7 @@ queues, search, geo indexes). It is never part of the relay.
   their data whatever an indexer decides.
 - **Not AT Protocol.** Its public-first repositories conflict with the encrypted drive and a
   PDS is a database-backed service. Interop comes through handles (INT-006) and Bridgy Fed
-  (E32-T9); a Poweur PDS can be a separate service identity later if demand appears.
+  (E27-T9); a Poweur PDS can be a separate service identity later if demand appears.
 
 ### Community boards
 
@@ -115,7 +115,7 @@ listing and the counterparty; indexers aggregate them.
 
 ## Tasks
 
-### E32-T1 — Post & feed convention
+### E27-T1 — Post & feed convention
 
 - [ ] PCP: post, reply, repost, like, tombstone records (stable ids, references by
       `identity + node + record id`, Markdown body, media as sibling files); `feed.json` index
@@ -127,18 +127,18 @@ listing and the counterparty; indexers aggregate them.
 **Acceptance:** a post, a reply on another relay and a delete round-trip through `feed.json`,
 Atom and microformats; a feed reader (Miniflux in INT-006 CI) shows the posts.
 
-### E32-T2 — Following & followers-only feeds
+### E27-T2 — Following & followers-only feeds
 
 - [ ] Follow list in `.poweur/private/follows.json`; `poweur follow|unfollow|timeline`;
       client-side timeline assembly from followed feeds (reuses E09-T10)
 - [ ] Followers-only feeds: follow request → owner approval → share with epoch keys; removal
-      starts a new epoch; paid tiers are renewing shares (EPIC-030)
+      starts a new epoch; paid tiers are renewing shares (COM-5)
 - [ ] Measured budget: sealing cost and time per epoch for 10k followers
 
 **Acceptance:** a follower on relay C sees public posts without the author knowing; an approved
 follower reads followers-only posts and loses access to posts in the next epoch after removal.
 
-### E32-T3 — Social notifications
+### E27-T3 — Social notifications
 
 - [ ] Intent types in the E09-T7 registry: `sys.social.mention`, `sys.social.reply`, optional
       `sys.social.follow` (off by default for public follows)
@@ -149,7 +149,7 @@ follower reads followers-only posts and loses access to posts in the next epoch 
 **Acceptance:** a stranger's reply reaches the author as a notification under proof-of-work; a
 flood is refused; the thread renders from notifications alone.
 
-### E32-T4 — Public caching & subscription proxy
+### E27-T4 — Public caching & subscription proxy
 
 - [ ] Public nodes: immutable chunk URLs with long `Cache-Control`, short-lived feed heads with
       `ETag`; documented CDN setup (Cloudflare in production, per deploy docs)
@@ -162,18 +162,18 @@ flood is refused; the thread renders from notifications alone.
 **Acceptance:** the author's relay request rate stays flat as followers grow behind the CDN; the
 reader holds one connection and receives every followed post.
 
-### E32-T5 — Community boards
+### E27-T5 — Community boards
 
 - [ ] Board convention: group identity, public `board.log`, entry types (post, reference, hide,
       pin), `board.json` (name, rules, categories, moderators)
 - [ ] Member `append`, anonymous posting links with caps and proof-of-work, moderator hide,
       legal removal by compaction + trim
 - [ ] CLI `poweur board create|post|hide|remove|follow`
-- [ ] Headless scenario E31-T9
+- [ ] Headless scenario E26-T9
 
-**Acceptance:** E31-T9 passes on one relay and across relays.
+**Acceptance:** E26-T9 passes on one relay and across relays.
 
-### E32-T6 — Listings & reviews
+### E27-T6 — Listings & reviews
 
 - [ ] Listing PCP (fields above, H3 cell resolution guidance, expiry), category taxonomy with
       namespaces; review record PCP
@@ -183,7 +183,7 @@ reader holds one connection and receives every followed post.
 **Acceptance:** a listing validates in both languages; an expired listing is hidden by reducers
 and indexers; no listing carries more than a coarse cell.
 
-### E32-T7 — Indexer role
+### E27-T7 — Indexer role
 
 - [ ] Spec: indexer identity and capabilities document, opt-in announcement (`sys.index.announce`
       or a feed flag), crawl over public change feeds, tombstone and opt-out handling, signed
@@ -194,7 +194,7 @@ and indexers; no listing carries more than a coarse cell.
 **Acceptance:** spec merged with worked examples; a client verifies an indexer's result against
 the author's signature and detects a forged item.
 
-### E32-T8 — Reference indexer
+### E27-T8 — Reference indexer
 
 - [ ] `apps/indexer`: a separate service (its own database and queue — not the relay) with
       timelines for a user's follows, threads, hashtags, full-text search, like/reply counts,
@@ -205,9 +205,9 @@ the author's signature and detects a forged item.
 **Acceptance:** with the indexer on, a reader finds a listing by category within a radius and
 a post by hashtag; with it off, following and boards still work.
 
-### E32-T9 — Interop: Fediverse & Bluesky
+### E27-T9 — Interop: Fediverse & Bluesky
 
-- [ ] Webmention endpoint for public feeds and microformats (E32-T1) so Bridgy Fed can bridge
+- [ ] Webmention endpoint for public feeds and microformats (E27-T1) so Bridgy Fed can bridge
       posts to Mastodon and Bluesky; document opt-in
 - [ ] Handle linking via INT-006-T5 (atproto-did, NIP-05, WebFinger)
 

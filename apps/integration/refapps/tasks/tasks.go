@@ -1,4 +1,4 @@
-// Package tasks is the headless task app of EPIC-031, the successor to the
+// Package tasks is the headless task app of EPIC-026, the successor to the
 // v1 PCP-0007 `poweur-tasks` dogfood app, rebuilt on storage v2.
 //
 // v1 kept one JSON document per task and merged by last writer. On v2 a
@@ -11,7 +11,7 @@
 //
 // PCP-0007's vocabulary carries over: status todo|doing|done|cancelled, an
 // unknown status displays as todo and is preserved, and fields this version
-// does not know survive in Task.Extra. Like every EPIC-031 app it never talks
+// does not know survive in Task.Extra. Like every EPIC-026 app it never talks
 // to a relay: storage, sharing and notification are `poweur` commands.
 package tasks
 

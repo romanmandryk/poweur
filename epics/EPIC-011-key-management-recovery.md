@@ -19,7 +19,7 @@
 > for this epic. **This is why the seed model is the right shape** — one seed, N wrappings,
 > copied whole to each device (E11-T3) rather than split per device. Record the constraint in
 > E11-T1's spec so it is not rediscovered.
-- **Plans note (EPIC-026):** recovery, key rotation, device removal and export are never gated by plan, payment or over-quota state.
+- **Plans note (COM-1):** recovery, key rotation, device removal and export are never gated by plan, payment or over-quota state.
 
 ## Progress
 

@@ -113,7 +113,7 @@ export async function startRelay(
 }
 
 /**
- * Several relays that reach each other's hosted identities (E31-T1): they
+ * Several relays that reach each other's hosted identities (E26-T1): they
  * share a hosts file (`RESOLVER_HOSTS_FILE`, honoured only with
  * `RESOLVER_ALLOW_PRIVATE`), and `host()` records which relay serves an
  * identity. `fetch` does the same for clients: an identity's well-known

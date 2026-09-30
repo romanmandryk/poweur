@@ -1,7 +1,7 @@
 package integration_test
 
 // Sign in with Poweur ID against the reference relying party (EPIC-008),
-// restored on storage v2 with the guestbook as an EPIC-031 headless app.
+// restored on storage v2 with the guestbook as an EPIC-026 headless app.
 
 import (
 	"bytes"

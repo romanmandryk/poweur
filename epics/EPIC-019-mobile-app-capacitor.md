@@ -4,7 +4,7 @@
 - **Priority:** P2 (after EPIC-015 makes the web app worth wrapping; the decision itself is P1 because it constrains E15)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the UI being wrapped), [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (onboarding + credential scope), [EPIC-011](EPIC-011-key-management-recovery.md) (T8 key transfer)
 - **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), `requirements.md`'s mobile-app requirements
-- **Plans note (EPIC-026):** store builds show plan state and link out to web checkout; no in-app purchase (reader-app / DMA link-out rules; the platform cut would erase the margin).
+- **Plans note (COM-1):** store builds show plan state and link out to web checkout; no in-app purchase (reader-app / DMA link-out rules; the platform cut would erase the margin).
 
 ## Progress
 

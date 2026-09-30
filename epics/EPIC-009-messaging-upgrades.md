@@ -1,6 +1,6 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-031 reference apps)
+- **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
@@ -14,7 +14,7 @@
 > conversation — is [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T11. Do not add paging or
 > compaction to the v1 layout. E20-T11 also closes E09-T4's gap: attachment bytes are stored in
 > plaintext today (only the caption is encrypted).
-- **Plans note (EPIC-026):** 1:1 and small-group messaging stay unmetered fair use — never a pricing lever. Large 1 → many *broadcast channels* are a separate, metered shape owned by EPIC-030-T5.
+- **Plans note (COM-1):** 1:1 and small-group messaging stay unmetered fair use — never a pricing lever. Large 1 → many *broadcast channels* are a separate, metered shape owned by COM5-T5.
 
 ## Goal
 
@@ -271,10 +271,10 @@ down, returning at a new address, and receiving the queued message.
 
 ## Messaging for apps (T7–T10)
 
-Working through the [EPIC-031](EPIC-031-reference-app-scenarios.md) reference apps (site
+Working through the [EPIC-026](EPIC-026-reference-app-scenarios.md) reference apps (site
 contact + newsletter, forms, board, CRM, whiteboard) showed four gaps. Storage-side needs are
 in [EPIC-020](EPIC-020-storage-protocol-v2.md); app permissions are in
-[EPIC-029](EPIC-029-poweur-apps-platform.md).
+COM-4.
 
 ### E09-T7 — Well-known intent types
 
@@ -288,11 +288,11 @@ vocabulary, every app invents its own and inbox policy cannot reason about any o
       - `sys.list.subscribe` / `sys.list.unsubscribe` — join or leave a named list
         (newsletter, updates) with an optional email for bridge delivery (EPIC-023)
       - `sys.app.invite` — "join me in this board/doc/game": app id, node reference, optional
-        share offer; builds on E29-T6's `opened_with`
+        share offer; builds on COM4-T6's `opened_with`
       - `sys.app.notify` — a short notification from a share member ("assigned to you",
         "mentioned you"), carrying a node reference
       - social types (`sys.social.mention`, `sys.social.reply`, optional `sys.social.follow`)
-        are added by EPIC-032 E32-T3
+        are added by EPIC-027 E27-T3
 - [ ] Inbox-policy hooks per type: `contact.message` and `list.subscribe` accepted from
       strangers under rate limits / proof-of-work (never opening a chat); `app.notify` accepted
       only from members of a share the recipient has accepted; `app.invite` follows the
@@ -309,7 +309,7 @@ chat, and a flood is stopped by proof-of-work and rate limits.
 
 - [ ] Inbox query by `type` / type prefix (the envelope `type` is already plaintext and signed),
       so an app reads only its own messages and the chat tray never shows them
-- [ ] Clients route non-chat types to the installed app that declares them (EPIC-029 manifest);
+- [ ] Clients route non-chat types to the installed app that declares them (COM-4 manifest);
       unknown types keep the existing generic line
 - [ ] Per-type retention: app messages can be acked and dropped once the app has materialized
       them into its files (e.g. subscribers into a list file)
@@ -338,15 +338,15 @@ different relays read the thread and one replies; a removed member cannot read l
 
 Newsletters and updates for Poweur IDs should not need push fan-out from the owner. The post
 and feed formats, followers-only feeds, the relay subscription proxy and indexers are specified
-in [EPIC-032](EPIC-032-public-web-feeds-boards-indexers.md); this task delivers the follow
+in [EPIC-027](EPIC-027-public-web-feeds-boards-indexers.md); this task delivers the follow
 mechanics they build on.
 
 - [ ] Convention for a feed folder (posts + `feed.json` index) published publicly or shared
-      with subscribers (paid tiers = subscriptions as renewing shares, EPIC-030)
+      with subscribers (paid tiers = subscriptions as renewing shares, COM-5)
 - [ ] Following = subscribing to that folder's change events (E20-T5) plus a local follow
       list; the owner need not know public followers
 - [ ] `list.subscribe` (T7) remains for owners who want a subscriber list and for email
-      subscribers, who get pushed copies via EPIC-023; 1 → many push stays EPIC-030-T5
+      subscribers, who get pushed copies via EPIC-023; 1 → many push stays COM5-T5
 - [ ] CLI `poweur follow|unfollow|feed`
 
 **Acceptance:** an owner publishes a post; followers on two relays receive it from the feed

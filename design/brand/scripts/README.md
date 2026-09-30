@@ -1,13 +1,15 @@
 # Logo generators
 
-These scripts produce the logo files under `design/claude/`.
+These scripts produce the logo files. `lockup.py` writes to `design/brand/out/` (not tracked); the
+logos in use are copied into `apps/site/assets/brand/`, `apps/web/src/assets/brand/` and
+`apps/docs/static/img/`.
 
 - `pgeo3.py`: the geometry of the P, traced from the reference render. It unions and splits shapes
   with shapely.
 - `blackglass.py`: the black glass SVG, built with SVG lighting filters. The `black_glass(px, uid)`
   function returns the whole `<svg>`.
 - `lockup.py`: the P with the Sora wordmark, shaped with HarfBuzz and converted to outlines with
-  fontTools. It writes `design/claude/lockups/`.
+  fontTools. It writes `design/brand/out/lockups/`.
 - `icons.py`: every icon, splash screen and social image. It writes into `apps/web`, `apps/mobile`
   and `design/brand/assets/` (see the brand README). Set `SORA_TTF` to include the social images,
   which carry the wordmark.

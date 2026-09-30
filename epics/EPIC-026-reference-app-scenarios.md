@@ -1,4 +1,4 @@
-# EPIC-031 — Headless reference apps: collaboration scenarios as the acceptance gate
+# EPIC-026 — Headless reference apps: collaboration scenarios as the acceptance gate
 
 - **Status:** in progress — T1 (harness), T2 (Markdown documents), Tasks and the Guestbook relying party done
 - **Priority:** P0 — gates [EPIC-020](EPIC-020-storage-protocol-v2.md) waves 2–3 and
@@ -6,25 +6,25 @@
 - **Depends on:** EPIC-020 (drive, shares, append logs, sealed appends, CLI), EPIC-009 T7–T10
   (intent types, typed routing, shared inboxes, follow feeds), EPIC-014 (anonymous messages,
   proof-of-work), EPIC-024 (group identity as host of shared state)
-- **Also exercises:** EPIC-032 (community boards, listings, following) in E31-T9
-- **Unlocks:** EPIC-029 templates (each headless app becomes a UI later without protocol
+- **Also exercises:** EPIC-027 (community boards, listings, following) in E26-T9
+- **Unlocks:** COM-4 templates (each headless app becomes a UI later without protocol
   work), EPIC-025 (the Markdown and whiteboard scenarios are its starting point)
 
 ## Progress
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E31-T1 Scenario harness & topology matrix | **done** | `apps/integration/scenario_harness_test.go`: CLI actors (Go SDK underneath) on same/cross-relay × fs/S3 (MinIO via `POWEUR_TEST_S3_*`); privacy scan over the provider (`relay.WalkStore`); relay restart, dropped SSE; TS `startRelays()` + `scenario-cross-relay.test.ts`; `make refapps` / `pnpm refapps:test` |
-| E31-T2 Collaborative Markdown documents | **done** | `refapps/docs` (layout, comment reducer, paragraph three-way merge) + `TestE31_T2_CollaborativeMarkdown` in every topology and provider |
-| Tasks (v1 PCP-0007 successor) | **done** | `refapps/tasks`: a project is an event log (`events.jsonl`) folded by a last-writer-wins reducer; PCP-0007 status vocabulary and unknown-field preservation; `TestE31_Tasks` (offline edits by two members converge, read-only observer refused, typed assignment notice, late joiner, revocation) in every topology and provider. The Kanban scenario (T5) builds on it |
+| E26-T1 Scenario harness & topology matrix | **done** | `apps/integration/scenario_harness_test.go`: CLI actors (Go SDK underneath) on same/cross-relay × fs/S3 (MinIO via `POWEUR_TEST_S3_*`); privacy scan over the provider (`relay.WalkStore`); relay restart, dropped SSE; TS `startRelays()` + `scenario-cross-relay.test.ts`; `make refapps` / `pnpm refapps:test` |
+| E26-T2 Collaborative Markdown documents | **done** | `refapps/docs` (layout, comment reducer, paragraph three-way merge) + `TestE26_T2_CollaborativeMarkdown` in every topology and provider |
+| Tasks (v1 PCP-0007 successor) | **done** | `refapps/tasks`: a project is an event log (`events.jsonl`) folded by a last-writer-wins reducer; PCP-0007 status vocabulary and unknown-field preservation; `TestE26_Tasks` (offline edits by two members converge, read-only observer refused, typed assignment notice, late joiner, revocation) in every topology and provider. The Kanban scenario (T5) builds on it |
 | Guestbook relying party | **done** | `refapps/guestbook`: the v1 "Sign in with Poweur ID" reference site restored without the retired WebDAV grant (entries stay with the site); its unit suite plus `TestINT_SIGNIN_01/02` (CLI approval cross-device; same-device approval finishes only in the starting browser) |
-| E31-T3 Personal site, contact & newsletter | **open** | public folder, `contact.message`, `list.subscribe`, anonymous senders, follow feed |
-| E31-T4 Form → CSV | **open** | sealed appends from link and ID respondents, caps, proof-of-work, one response per ID |
-| E31-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, group hosting, transfer |
-| E31-T6 CRM with shared inbox | **open** | group-hosted records, shared-inbox identity, email-only customers, member removal |
-| E31-T7 Whiteboard (durable layer) | **open** | object ops with last-writer-wins by position, batching, latency budget; cursors deferred |
-| E31-T8 TypeScript mirror & mixed-implementation actors | **open** | TS headless apps; a Go actor and a TS actor collaborate in every scenario that has one |
-| E31-T9 Community board & classifieds | **open** | group-hosted public board, member and anonymous posts, listings, moderation, legal removal, followers |
+| E26-T3 Personal site, contact & newsletter | **open** | public folder, `contact.message`, `list.subscribe`, anonymous senders, follow feed |
+| E26-T4 Form → CSV | **open** | sealed appends from link and ID respondents, caps, proof-of-work, one response per ID |
+| E26-T5 Kanban board | **open** | event log + reducer, offline convergence, notifications, group hosting, transfer |
+| E26-T6 CRM with shared inbox | **open** | group-hosted records, shared-inbox identity, email-only customers, member removal |
+| E26-T7 Whiteboard (durable layer) | **open** | object ops with last-writer-wins by position, batching, latency budget; cursors deferred |
+| E26-T8 TypeScript mirror & mixed-implementation actors | **open** | TS headless apps; a Go actor and a TS actor collaborate in every scenario that has one |
+| E26-T9 Community board & classifieds | **open** | group-hosted public board, member and anonymous posts, listings, moderation, legal removal, followers |
 
 ## Goal
 
@@ -39,7 +39,7 @@ worked around in the app.
 
 - **Headless apps are real code, not test fixtures.** Go versions live in
   `apps/integration/refapps/<app>/`; TypeScript versions in `packages/refapps/` (on
-  `@poweur/client`), which later seed EPIC-029's templates. An app module is its folder layout,
+  `@poweur/client`), which later seed COM-4's templates. An app module is its folder layout,
   record types, reducer and a thin API ("create board", "move card") over the SDK's scoped drive
   handle, event-log helper and typed messages.
 - **Every user action has a CLI path.** Each scenario document carries a table
@@ -48,7 +48,7 @@ worked around in the app.
   is added only where an action cannot be expressed with them.
 - **Actors** are an identity + its relay + a client kind (`cli`, `go-sdk`, `ts-sdk`). Scenarios
   are written against actors, so the same scenario runs in every topology.
-- **Topologies** (every scenario runs in the first two; E31-T8 adds the third):
+- **Topologies** (every scenario runs in the first two; E26-T8 adds the third):
   1. **Same relay** — all actors on relay A.
   2. **Cross relay** — the host drive on relay A, members on relay B (and C where a scenario
      has an outside party), resolved through the integration suite's fake DNS.
@@ -68,7 +68,7 @@ worked around in the app.
 
 ## Tasks
 
-### E31-T1 — Scenario harness & topology matrix
+### E26-T1 — Scenario harness & topology matrix
 
 - [x] Actor abstraction and scenario runner in `apps/integration` (in-process relays, fake DNS,
       CLI actors in-process — the Go SDK underneath; a subprocess cannot see the in-memory DNS
@@ -87,7 +87,7 @@ worked around in the app.
 **Acceptance:** a trivial two-actor scenario (share a file, edit, read back) passes in every
 topology and provider, and the privacy scanner catches a deliberately planted plaintext file.
 
-### E31-T2 — Collaborative Markdown documents
+### E26-T2 — Collaborative Markdown documents
 
 **Layout:** `Docs/<title>/` with `doc.md` (replace), `comments.jsonl` (append), `assets/`.
 **Actors:** Alice (owner, relay A), Bob (editor, B), Carol (commenter, B), anonymous link reader.
@@ -106,7 +106,7 @@ one; create a password-protected read link and open it without an account; revok
 - the anonymous link reader decrypts the doc in a clean client; the relay never saw the key
 - after revocation Bob cannot read, and his cached keys do not open newer versions
 
-**Done.** `apps/integration/refapps/docs` + `TestE31_T2_CollaborativeMarkdown`. The CLI keeps no
+**Done.** `apps/integration/refapps/docs` + `TestE26_T2_CollaborativeMarkdown`. The CLI keeps no
 node keys between commands, so "cached keys" is covered cryptographically by `INT_DRIVE_08`
 (rotation on revoke); here Bob's reads fail after revocation and Carol keeps reading.
 Adjacent-paragraph edits by two people merge paragraph by paragraph; the same paragraph becomes
@@ -132,7 +132,7 @@ a labelled conflict block holding both versions.
 
 Members address a shared folder by node ID: `/<folder-node>/doc.md` with `--drive <owner>`.
 
-### E31-T3 — Personal site, contact & newsletter
+### E26-T3 — Personal site, contact & newsletter
 
 **Layout:** `Site/` (public folder: `index.html`, `posts/*.md`, `feed.json`);
 `Newsletter/subscribers.jsonl` (private, append).
@@ -153,7 +153,7 @@ feed; Alice publishes a second post; Frank receives it.
 - Frank receives the new post on relay C without Alice sending anything to him
 - the public site is plaintext by design and is the only plaintext Alice has besides `.poweur`
 
-### E31-T4 — Form → CSV
+### E26-T4 — Form → CSV
 
 **Layout:** `Forms/<name>/form.json` (published or link-shared), `responses.csv` (append; header
 written by the owner).
@@ -172,7 +172,7 @@ form (revokes the link).
 - the exported CSV is byte-identical before and after compaction
 - after the link is revoked, submissions fail; runs on the filesystem and S3 providers
 
-### E31-T5 — Kanban board
+### E26-T5 — Kanban board
 
 **Layout:** `Boards/<name>/board.log` (append: `list.create`, `card.create`, `card.move`,
 `card.update`, `card.assign`, `comment.add`), `snapshot.json`, `cards/<id>/` attachments.
@@ -194,7 +194,7 @@ from Alice to the group; Alice leaves the group; a member hits the per-member wr
 - after the transfer and Alice leaving, the board keeps working and bills to the group drive
 - runs on the filesystem and S3 providers
 
-### E31-T6 — CRM with shared inbox
+### E26-T6 — CRM with shared inbox
 
 **Layout (group `acme` drive):** `CRM/contacts/<id>.json` (a pinned Poweur ID or an email-only
 record), `CRM/deals.log` (append), `CRM/activity.log` (append); shared-inbox identity
@@ -215,7 +215,7 @@ flags it; Bob is removed from the group.
 - the key change is flagged on Carl's record, not silently accepted
 - after removal Bob can read neither new messages to `sales` nor new CRM writes
 
-### E31-T7 — Whiteboard (durable layer)
+### E26-T7 — Whiteboard (durable layer)
 
 **Layout:** `Boards/<name>.canvas/ops.log` (append: `shape.create`, `shape.update` per property,
 `shape.delete`), `snapshot.json`.
@@ -231,7 +231,7 @@ from snapshot + tail; measure append-to-remote-event latency.
 - recorded as expected-missing: live cursors and in-progress drags (EPIC-025 rooms), rich text
   inside shapes (CRDT, EPIC-025)
 
-### E31-T8 — TypeScript mirror & mixed-implementation actors
+### E26-T8 — TypeScript mirror & mixed-implementation actors
 
 - [ ] `packages/refapps/` TS versions of T2–T7 and T9's app modules on `@poweur/client`
 - [ ] Every scenario runs once with mixed actors (e.g. Alice on the Go CLI, Bob on the TS SDK);
@@ -241,11 +241,11 @@ from snapshot + tail; measure append-to-remote-event latency.
 **Acceptance:** all seven scenarios pass in the mixed topology; the shared fixtures fold
 identically in Go and TS.
 
-### E31-T9 — Community board & classifieds
+### E26-T9 — Community board & classifieds
 
-**Layout:** group identity `ericeira-market` (EPIC-032 E32-T5) hosting `Board/board.json` and
+**Layout:** group identity `ericeira-market` (EPIC-027 E27-T5) hosting `Board/board.json` and
 `Board/board.log` (public append); sellers keep listings in their own `Classifieds/` folders
-(E32-T6).
+(E27-T6).
 **Actors:** Alice (creator and moderator, relay A), Bob (member and seller, B), Carol (no
 Poweur ID, posts through the anonymous link), Dan (follows the board, C), Eve (buyer, C).
 
@@ -268,6 +268,6 @@ deletes a listing (tombstone); the board is transferred to a second moderator.
 
 ## Non-goals
 
-- UI of any kind (EPIC-029 templates and the web app build on these modules later)
+- UI of any kind (COM-4 templates and the web app build on these modules later)
 - Email delivery (EPIC-023), live cursors/presence and text CRDTs (EPIC-025)
 - App-specific servers — if a scenario seems to need one, that is a protocol gap to fix

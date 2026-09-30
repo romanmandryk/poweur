@@ -20,7 +20,7 @@ VERSION=0.1.1
 Start the relay:
 
 ```bash
-cd /Users/romanmandryk/git/poweur/apps/api
+cd apps/api
 go run .
 ```
 

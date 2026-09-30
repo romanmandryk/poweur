@@ -1,10 +1,10 @@
-// Package docs is the headless collaborative Markdown app of EPIC-031 (E31-T2).
+// Package docs is the headless collaborative Markdown app of EPIC-026 (E26-T2).
 //
 // It is real app code, not a fixture: the folder layout, the comment records
 // and their reducer, and the paragraph-level three-way merge an editor runs
 // when its save loses a race. Storage, sharing, links and change streams are
 // the drive's — every action has a `poweur drive` command (see the scenario
-// table in epics/EPIC-031-reference-app-scenarios.md), and this package never
+// table in epics/EPIC-026-reference-app-scenarios.md), and this package never
 // talks to a relay.
 //
 // Layout of one document:

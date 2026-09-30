@@ -21,11 +21,11 @@ COVERPKGS := github.com/poweur/api/...,github.com/poweur/cli/...
 test:
 	go test -count=1 ./...
 
-# EPIC-031 reference-app scenarios (headless apps under refapps/ and their
-# TestE31_* scenarios). Set POWEUR_TEST_S3_ENDPOINT (+ POWEUR_TEST_S3_BUCKET)
+# EPIC-026 reference-app scenarios (headless apps under refapps/ and their
+# TestE26_* scenarios). Set POWEUR_TEST_S3_ENDPOINT (+ POWEUR_TEST_S3_BUCKET)
 # to add the S3 provider to the matrix.
 refapps:
-	go test -count=1 ./refapps/... && go test -count=1 -run 'TestE31_' ./
+	go test -count=1 ./refapps/... && go test -count=1 -run 'TestE26_' ./
 
 cover:
 	@mkdir -p $(COV_DIR)

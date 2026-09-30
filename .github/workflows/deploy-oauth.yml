@@ -125,7 +125,7 @@ jobs:
             cat <<'EOF'
           set -euo pipefail
           cd /opt/apps/poweur-oauth
-          test -s .env.prod || { echo "/opt/apps/poweur-oauth/.env.prod is missing (see deploy/OPS.md)" >&2; exit 1; }
+          test -s .env.prod || { echo "/opt/apps/poweur-oauth/.env.prod is missing (see deploy/README.md)" >&2; exit 1; }
           docker compose -p poweur-oauth -f docker-compose.yml up -d --pull always
           for _ in $(seq 1 30); do
             health="$(docker exec poweur-oauth wget -qO- http://127.0.0.1:8090/health || true)"

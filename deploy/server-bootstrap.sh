@@ -184,7 +184,7 @@ echo "$ACTIONS_PRIVKEY"
 echo -e "\n${YELLOW}ACTION 3 of 3 — Add DEPLOY_HOST secret${NC}"
 echo -e "${CYAN}Name: DEPLOY_HOST   Value: $(curl -4 -s ifconfig.me 2>/dev/null || echo '<your-server-ip>')${NC}"
 
-echo -e "\n${YELLOW}Finish with deploy/OPS.md:${NC}"
+echo -e "\n${YELLOW}Finish with deploy/README.md:${NC}"
 echo -e "  ${CYAN}sudo bash deploy/setup-observability.sh --file .observability.env --import-env /opt/infra/.env${NC}"
 echo -e "  ${CYAN}nano /opt/apps/poweur/apps/api/.env.prod${NC}   (app config)"
 echo -e "  Then push to master (Deploy runs on that push)."

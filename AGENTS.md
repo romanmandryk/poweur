@@ -164,7 +164,7 @@ web app, plus infra config) every time, and **Deploy OAuth bridge**
 `packages/identity/**` or `go.work` change. Both check that `/health` reports
 the pushed commit's `versionHash`. Neither runs CI unless the dispatch checks
 **Run tests** or the `RUN_CI` repository variable is `true`. Runbook:
-[`deploy/OPS.md`](deploy/OPS.md).
+[`deploy/README.md`](deploy/README.md).
 
 ## Style
 

@@ -5,7 +5,7 @@
 # so the relay's deploy (which resets /opt/apps/poweur) never touches it.
 # Secrets and per-operator values live beside it in .env.prod (0600, never
 # committed): OAUTH_KEY_ENCRYPTION_KEY, OAUTH_ABUSE_CONTACT,
-# OAUTH_SECURITY_CONTACT. See deploy/OPS.md.
+# OAUTH_SECURITY_CONTACT. See deploy/README.md.
 services:
   oauth:
     image: ${OAUTH_IMAGE:?Set OAUTH_IMAGE to a GHCR digest}

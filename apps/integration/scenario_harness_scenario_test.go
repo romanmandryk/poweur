@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// TestE31_T1_TrivialScenario is the harness acceptance: share a file, the
+// TestE26_T1_TrivialScenario is the harness acceptance: share a file, the
 // member edits it, the owner reads it back — in every topology and provider,
 // across a restart of the host relay with its caches gone, with the privacy
 // scan clean, and the scanner catching a deliberately planted plaintext.
-func TestE31_T1_TrivialScenario(t *testing.T) {
+func TestE26_T1_TrivialScenario(t *testing.T) {
 	forEachScenario(t, func(t *testing.T, s *scenario) {
 		alice := s.newActor("t1alice", "A")
 		bob := s.newActor("t1bob", "B")

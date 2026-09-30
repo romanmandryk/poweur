@@ -38,7 +38,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-010](EPIC-010-agents-automation.md) | Agents, app ecosystem & no-code automations | Ecosystem | proposed | E04, E05, E09 |
 | [EPIC-011](EPIC-011-key-management-recovery.md) | Key management, multi-passkey enrollment & recovery | Identity / Security | v1 complete (T1–T4, T8 done; T7 external review partial; T5/T6 later phases) | E01, E02 |
 | [EPIC-012](EPIC-012-identity-websites.md) | Generated identity pages (trusted HTML, profile, contact actions) | Identity / Web | **done** (T1–T5) | E01, E06, E14, E15 |
-| [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (OTLP, logs/events, consent modes, Grafana, public growth) | Infra / Ops | implemented; rollout steps in deploy/OPS.md, T5 deferred | E02 |
+| [EPIC-013](EPIC-013-prod-deployment-observability.md) | Production deployment & observability (OTLP, logs/events, consent modes, Grafana, public growth) | Infra / Ops | implemented; rollout steps in deploy/README.md, T5 deferred | E02 |
 | [EPIC-014](EPIC-014-anonymous-messaging-challenges.md) | Anonymous messaging & sender challenges (proof-of-work) | Trust / Messaging | core complete (web app shipped with E15-T3; public identity-page action shipped in E12; stranger gate remains in E14-T3) | E06, E07 |
 | [EPIC-015](EPIC-015-web-app-ux.md) | Web app UX: settings, contacts, files & sharing for a fresh user | Web / UX | in progress (T1–T6 done; T7–T12 open — host-aware front doors, desktop/tablet layout; T14 partial — logo & icons shipped, palette remap open) | E03, E04, E05, E06, E07, E14, E18 |
 | [EPIC-016](EPIC-016-pow-v2-and-pay-to-send.md) | Sender-challenge v2: pluggable memory-hard PoW & pay-to-send | Trust / Messaging / Payments | proposed | E14, E07, E06, INT-002 |
@@ -51,13 +51,8 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-023](EPIC-023-email-bridge.md) | Email bridge: `john@poweur.net` for opted-in IDs, Emails tray, pluggable outbound | Messaging / Growth | proposed | E01, E06, E07, E09, E13, E14 |
 | [EPIC-024](EPIC-024-groups.md) | Groups: a Poweur ID people share — members, group chat, group folder, group key; owner/admins; ownership transfer | Collaboration / Product | in progress (T3 group key), P1 | E05, E09, E20, E17 |
 | [EPIC-025](EPIC-025-realtime-collaboration.md) | Real-time collaboration protocol & collaborative Markdown reference editor | Collaboration / Protocol | proposed | E20, E24, E17 |
-| [EPIC-026](EPIC-026-hosted-plans-billing.md) | Hosted accounts, organizations, plans, entitlements & billing | Commercial / Hosted service | proposed | E02, E03, E13, E18 |
-| [EPIC-027](EPIC-027-hosted-agent-runtime.md) | Hosted automation & agent runtime | Agents / Commercial / Infra | proposed after local-runner validation | E10, E20, E26 |
-| [EPIC-028](EPIC-028-managed-sovereign-hosting.md) | Managed, dedicated, customer-cloud & sovereign hosting (+ secondary inbox, backup & directory for self-hosters) | Enterprise / Infra | proposed; demand-led | E13, E20, E26 |
-| [EPIC-029](EPIC-029-poweur-apps-platform.md) | Poweur Apps: publish, open and share local-first apps (game kit included) | Ecosystem / Developers | proposed; after the E25 reference editor | E08, E06, E25, E17 |
-| [EPIC-030](EPIC-030-creator-commerce.md) | Creator commerce: paid shares, subscriptions, tips, channels & paid apps | Payments / Commercial | proposed; demand-led | E16, INT-002, E05, E26 |
-| [EPIC-031](EPIC-031-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | in progress (T1 harness, T2 Markdown, Tasks, Guestbook done), **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
-| [EPIC-032](EPIC-032-public-web-feeds-boards-indexers.md) | Public web: feeds, following, community boards & indexers | Social / Growth | proposed | E20, E09, E14, E24, E31 |
+| [EPIC-026](EPIC-026-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | in progress (T1 harness, T2 Markdown, Tasks, Guestbook done), **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
+| [EPIC-027](EPIC-027-public-web-feeds-boards-indexers.md) | Public web: feeds, following, community boards & indexers | Social / Growth | proposed | E20, E09, E14, E24, E26 |
 
 ## Integration epics (`integrations/`)
 
@@ -142,12 +137,12 @@ EPIC-005/006/009/011 ──► EPIC-020 (storage v2: E2EE drive, stateless relay
                    ├─ replace + append commits; message history v2 → E15-T13 paging
                    └─ append files are the substrate EPIC-025 builds realtime on
 
-EPIC-020 + EPIC-009 (T7–T10) ──► EPIC-031 (headless reference apps)
+EPIC-020 + EPIC-009 (T7–T10) ──► EPIC-026 (headless reference apps)
                    ├─ Markdown docs, site + contact + newsletter, form → CSV, board, CRM, whiteboard
                    ├─ every user action via SDK or CLI; same relay, cross relay, Go + TS actors
-                   └─ the modules become EPIC-029 templates; gaps are fixed in the protocol, not the apps
+                   └─ the modules become app templates; gaps are fixed in the protocol, not the apps
 
-EPIC-020 + EPIC-009 (T7–T10) + EPIC-024 ──► EPIC-032 (public web)
+EPIC-020 + EPIC-009 (T7–T10) + EPIC-024 ──► EPIC-027 (public web)
                    ├─ one → many: feed folders, Atom/microformats, following lighter than contacts
                    ├─ many → many in a community: boards hosted by group identities (classifieds)
                    ├─ scale: CDN-cached public nodes + relay subscription proxy (memory only)
@@ -175,44 +170,19 @@ EPIC-020 + EPIC-017 ──► EPIC-025 (real-time collaboration; group folders v
                    ├─ separates durable updates from ephemeral presence/cursors
                    ├─ proves the protocol with a collaborative Markdown editor
                    └─ T7 exposes the session transport as a general rooms API; T8 meters TURN
-
-EPIC-002/003/013/018 ──► EPIC-026 (hosted plans & billing)
-                   ├─ customer and organization accounts stay separate from Poweur identities
-                   ├─ services enforce generic entitlements, never vendor plan names
-                   └─ supplies storage/email/auth/compute meters without changing federation
-
-EPIC-010 + EPIC-020 + EPIC-026 ──► EPIC-027 (hosted agent runtime)
-                   ├─ follows validation of the portable local runner
-                   ├─ adds sandboxing, schedules, secrets, approval, audit and compute metering
-                   └─ every workflow remains movable to a customer-run runner
-
-EPIC-013 + EPIC-020 + EPIC-026 ──► EPIC-028 (managed & sovereign hosting)
-                   ├─ dedicated/customer-cloud/air-gapped profiles run the open components
-                   ├─ sells operation, SLOs, backups, support and evidence—not protocol access
-                   ├─ demand-led; credible customer exit is an acceptance criterion
-                   └─ T7–T9: secondary inbox, backup target and relay directory for self-hosters
-
-EPIC-025 + EPIC-008 ──► EPIC-029 (Poweur Apps)
-                   ├─ "an app is a folder": signed static bundles on a separate app domain
-                   ├─ app data lives in the user's home; realtime via E25-T7 rooms
-                   └─ game kit; neutral authorities via E27-T7
-
-EPIC-016 + INT-002 + EPIC-026 ──► EPIC-030 (creator commerce)
-                   ├─ payment → signed grant; subscription = renewing grant
-                   └─ reuses E16's gateway and cut accounting; no cut for bring-your-own gateway
 ```
 
-## Product, adoption & monetization sequence
+## Product & adoption sequence
 
-The numbered epics are a dependency map, not a command to build everything in numeric order. For
-the hosted service, use the following sequence unless user evidence changes it:
+The numbered epics are a dependency map, not a command to build everything in numeric order. Use
+the following sequence unless user evidence changes it:
 
 ### Now — close the viral sharing loop
 
 0. **Storage v2 first (EPIC-020 waves 1–4, with EPIC-009 T7–T10).** Pre-launch is the cheapest
    moment to change the storage model, and the remaining sharing work (E05-T6 notifications,
    E05-T7 Send) should be built once, on node shares and encrypted links, not twice. It is done
-   when the EPIC-031 headless reference apps pass on one relay and across relays.
+   when the EPIC-026 headless reference apps pass on one relay and across relays.
 
 1. Finish **E05-T3** share offer → accept → recipient mount. The primitives exist and this is the
    missing end-to-end journey.
@@ -248,46 +218,14 @@ file/message activity, email opt-in and successful third-party sign-ins/integrat
 **Evidence to broaden:** users co-edit across devices/relays, offline edits converge, exported
 documents remain useful and applications other than the reference editor ask to reuse the layer.
 
-10. Once that evidence exists, open the layer to third parties with **EPIC-029 Poweur Apps**
+10. Once that evidence exists, open the layer to third parties with **COM-4 Poweur Apps**
     (signed static apps on a sandboxed origin, the E25-T7 rooms API and a game kit). Games and
-    whiteboards are the showcase; developers pay nothing until an app's egress is significant.
-
-### Monetize hosted convenience without closing the network
-
-11. Build **EPIC-026** before accepting recurring payment: account ownership, organizations,
-   entitlements, metering, lifecycle, invoices, export and deletion are one product surface.
-12. Initial hosted tiers may package Free, Personal, Pro and Team, but names/prices remain billing
-    configuration. Protocol services see only resource entitlements.
-13. Keep contact-to-contact messaging, identity verification, federation, standard formats and
-    migration available to free and self-hosted users. Charge for durable resources, public
-    delivery, bridges, administrative control, support and guarantees.
-
-**Evidence to expand:** paid conversion, storage/public-transfer unit economics, support load,
-organization invitations and retention—not theoretical feature differentiation.
-
-The free/paid line and an illustrative Free / Personal / Pro / Team table live in EPIC-026's
-design direction. Short version: never charge for the ID, recovery, E2E messaging, sign-in or
-export; meter what costs money (bytes, egress, TURN, outbound email, compute); take a cut only on
-money moved through the operator's gateway (E16, EPIC-030). Mobile uses web checkout. Parallel,
-non-plan funding worth pursuing early: NLnet / NGI Zero grants, sponsorships and support
-contracts with institutional self-hosters.
+    whiteboards are the showcase.
 
 ### Demand-led expansion
 
-14. Complete EPIC-010's portable/local agent runner and validate real workflows before building
-    **EPIC-027 Hosted Runtime**.
-15. Pursue **EPIC-028 Managed & Sovereign Hosting** only with design partners prepared to pay for
-    isolation, residency, SLOs, backups or support.
-16. Add marketplace payments only after third-party package installation and retention demonstrate
-    demand; discovery and sideloading must remain open. **EPIC-030** covers paid shares,
-    subscriptions, tips, channels and paid apps on the E16 gateway.
-17. Offer the small self-hoster services in **E28-T7–T9** (secondary inbox, encrypted backup
-    target, relay directory) early if community relays appear — they grow federation.
-
-This sequence intentionally lets the open protocol create adoption while poweur.net monetizes
-scarce hosted resources and operational assurance. A subscription or suspension can limit what
-poweur.net hosts; it must not invalidate a person's Poweur identity or make exported data
-proprietary.
+Commercial, hosted-service and partner-driven work is planned outside this repository. The open
+protocol, relay, clients and self-hosting path in these epics stand on their own.
 
 ## Architecture at a glance
 
@@ -328,8 +266,7 @@ proprietary.
 - Desktop continuous sync, native Files/Storage integration, mobile push/background sync and store
   releases are unfinished. The web file browser does poll the changes feed while open.
 - The email bridge, general agent/automation
-  runtime, groups, real-time collaborative documents, subscriptions, managed hosting, the apps
-  platform and creator commerce are not implemented.
+  runtime, groups and real-time collaborative documents are not implemented.
 - The relay's default inbox policy remains open when no policy document exists for compatibility;
   clients can establish the recommended contacts-and-requests policy during onboarding.
 
@@ -344,13 +281,6 @@ proprietary.
 - **EPIC-024 and EPIC-025** compose existing groups, grants, messages and files into portable
   groups, then add explicit CRDT document formats and ephemeral live sessions without making the
   storage service merge arbitrary files.
-- **EPIC-029 and EPIC-030** open the platform to third-party local-first apps (games included) and
-  let identities sell access to their content through signed grants.
-- **EPIC-026** adds customer accounts, organizations, generic entitlements and billing outside the
-  federated protocol; self-hosters do not depend on it and hosted identities retain export and
-  migration paths.
-- **EPIC-027 and EPIC-028** add, only after demand is demonstrated, portable hosted agent execution
-  and managed/dedicated/sovereign deployment operations.
 
 ## How to work on a task
 

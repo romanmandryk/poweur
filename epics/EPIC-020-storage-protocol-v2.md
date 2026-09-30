@@ -9,12 +9,12 @@
 - **Supersedes:** EPIC-003's storage model (WebDAV, fixed roots, path grants, `relay-fs`
   whole files, E03-T7 opt-in E2EE design), EPIC-004's v1 sync protocol, EPIC-009 E09-T1's
   history layout and E09-T4's plaintext attachment bytes
-- **Gated by:** [EPIC-031](EPIC-031-reference-app-scenarios.md) — waves 2–3 are done only when
+- **Gated by:** [EPIC-026](EPIC-026-reference-app-scenarios.md) — waves 2–3 are done only when
   the headless reference apps (Markdown docs, site + contact + newsletter, forms, board, CRM,
   whiteboard) pass on one relay and across relays
 - **Unlocks:** honest "files are end-to-end encrypted" claims, S3-compatible hosting, desktop
   sync, message-history paging (E15-T13), append-based collaboration (EPIC-024/025), hosted
-  agents with explicit key grants (EPIC-027), ciphertext-only managed hosting (EPIC-028)
+  agents with explicit key grants (COM-2), ciphertext-only managed hosting (COM-3)
 
 ## Progress
 
@@ -41,7 +41,7 @@
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
 | E20-T15 Append performance for live apps | **open** | latency budgets and batching so EPIC-025 can build CRDT/realtime on append files |
 | E20-T16 Advanced shares & delegation | **open** | time-box presets, version-pinned snapshots, resharing (caps moved to E20-T7) |
-| E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale for EPIC-028 |
+| E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale for COM-3 |
 
 ## Continuation checkpoint — 2026-09-28
 
@@ -159,7 +159,7 @@ as the test reference; retain already ported temporary system-file tests as regr
       `INT_HISTORY_01`'s plaintext scan. DEVICES_02 tested the v1 sync cursor and returns with
       E20-T9 (restored: `TestINT_DEVICES_02_SyncCursorVisibleToOwner` in `sync_v2_test.go`).
       The full profile/web/cross-relay avatar acceptance remains below.
-- [x] SIGNIN_02 browser-bound completion returns with the EPIC-031 replacement RP
+- [x] SIGNIN_02 browser-bound completion returns with the EPIC-026 replacement RP
       (`refapps/guestbook`, `signin_restore_test.go`, with SIGNIN_01's cross-device approval).
 - [x] Go/TS history cursors: relay author cursors, TS `older`/`before`/`hasOlder` paging.
 - [x] SDK history journeys (both sides, unread to zero and back, anonymous stays anonymous and
@@ -192,7 +192,7 @@ as the test reference; retain already ported temporary system-file tests as regr
 
 Files/sharing/attachment/durability browser suites that still invoked removed DAV APIs
 are removed during Phase 0. Files, direct-share and link UI suites return in E20-T10;
-Tasks/Guestbook return via EPIC-031; sync via E20-T9. The onboarding upload/share
+Tasks/Guestbook return via EPIC-026; sync via E20-T9. The onboarding upload/share
 flow and keyboard folder navigation return in E20-T10. Messaging-only browser coverage stays.
 
 ## Goal
@@ -436,7 +436,7 @@ enforces the `append` or `create` role, caps and proof-of-work, and never reads 
   writes count against the host's quota (as files in Google Drive count against their owner),
   so shares carry **per-member and per-link caps** (bytes, records, rate).
 - **Team or long-lived state:** hosted by a **group identity** (an EPIC-024 group) whose drive
-  is billed to an organization or a sponsoring member (EPIC-026 pooled storage), so no single
+  is billed to an organization or a sponsoring member (COM-1 pooled storage), so no single
   member leaving takes it down.
 - **Ownership transfer** moves a subtree between drives (a person → a group, or to another
   person): ciphertext chunks are copied, the subtree root key is re-sealed, shares are
@@ -446,7 +446,7 @@ enforces the `append` or `create` role, caps and proof-of-work, and never reads 
 
 ### Apps and storage access
 
-Apps run as static code on a sandboxed origin (EPIC-029); the host frame holds keys and hands
+Apps run as static code on a sandboxed origin (COM-4); the host frame holds keys and hands
 the app a **scoped drive handle**: the folder created for the app at install plus the nodes the
 user explicitly opens with it (a picker grant, like Google Drive's `drive.file` scope). Headless
 agents and tests use the same scoped handle from the SDK. There is no reserved `/apps` root.
@@ -541,7 +541,7 @@ wrong bytes is rejected by the store.
 - [x] Uncommitted chunks expire (24 h); GC marks from live + retained versions and never
       deletes a chunk referenced by an in-flight commit (one GC process per drive; see
       E20-T17 for multi-instance)
-- [x] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for EPIC-026
+- [x] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for COM-1
 - [x] Append positions (total order per node) returned on commit and exposed to readers
 - [x] Prefix trim before a snapshot position (owner/`admin` only); trimmed record chunks are
       released
@@ -576,7 +576,7 @@ commit fuzz never removes a live chunk.
       the top. SDK/CLI `createPublic`/`mkdir --public`, web "New public folder" and public
       address dialog (`TestPublicFolders`, `INT_DRIVE_09`, SDK live test, `files.spec.js`)
 - [ ] Public nodes CDN-cacheable (immutable chunk URLs, short-lived feed heads with `ETag`) and
-      the relay subscription proxy + batch feed heads (memory only) specified in EPIC-032 E32-T4
+      the relay subscription proxy + batch feed heads (memory only) specified in EPIC-027 E27-T4
 - [ ] Presigned chunk downloads (reads go through the relay for now)
 
 **Acceptance:** integration suite (`apps/integration`, real relays) covers upload, resume,
@@ -665,7 +665,7 @@ store never contain the key or password.
 - [x] Chunk cache: a directory under the CLI home; IndexedDB in web/shell — immutable, never revalidated
 - [x] Streaming decrypt with range reads for large files and media
 - [x] **Scoped drive handles:** a client restricted to a folder plus picked nodes, used by the
-      EPIC-029 bridge, agents and the EPIC-031 headless apps
+      COM-4 bridge, agents and the EPIC-026 headless apps
 - [x] **Event-log helper:** `open(log, reducer)` → fold snapshot + tail, subscribe, append with
       per-author sequence, write snapshots, trim; Go and TS
 - [x] **CLI:** `poweur drive ls|put|get|mv|rm|history|append|tail --from|trim|watch`,
@@ -673,7 +673,7 @@ store never contain the key or password.
       all with `--json`, so every collaboration action is scriptable
 
 **Acceptance:** both SDKs pass the same scenario suite against a real relay on each provider,
-and every action in the EPIC-031 scenarios is reachable from the CLI.
+and every action in the EPIC-026 scenarios is reachable from the CLI.
 
 ### E20-T9 — Sync daemon & merge drivers
 
@@ -816,7 +816,7 @@ share is revoked.
 
 - [ ] Per-identity leases with conditional writes; request routing to the owning instance;
       lease takeover on failure
-- [ ] Deployment profile for EPIC-028
+- [ ] Deployment profile for COM-3
 
 **Acceptance:** killing the owning instance moves the identity to another within the lease
 timeout without losing an acknowledged commit.
@@ -829,7 +829,7 @@ timeout without losing an acknowledged commit.
 - Server-side merging; the relay never interprets file formats
 - Recovering files for someone who loses their seed and every device (EPIC-011 owns recovery)
 - DRM-style "view but not copy"
-- App backends: apps that need a neutral authority use EPIC-027, not the relay
+- App backends: apps that need a neutral authority use COM-2, not the relay
 
 ## Superseded task IDs (the pre-2026-09-25 plan)
 

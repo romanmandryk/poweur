@@ -16,7 +16,7 @@
 # /etc/poweur-backup/restic-password. Keep a copy of that password outside the
 # server: without it the backups cannot be read.
 #
-# What is backed up (restore order and details: deploy/BACKUP.md):
+# What is backed up (restore order and details: deploy/backup/README.md):
 #   - the relay's data volume (identities, files, spool, consent): read live,
 #     file by file; the relay writes files whole, so no pause is needed
 #   - the OAuth bridge's SQLite database: copied while the container is paused
@@ -178,7 +178,7 @@ cmd_restore() {
   mkdir -p "$target"
   RESTIC_MOUNTS=(-v "$(cd "$target" && pwd):/restore")
   restic_run restore "$snapshot" --target /restore
-  log "restored $snapshot into $target (see deploy/BACKUP.md to put it back)"
+  log "restored $snapshot into $target (see deploy/backup/README.md to put it back)"
 }
 
 case "${1:-}" in

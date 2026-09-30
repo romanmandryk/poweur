@@ -1,5 +1,5 @@
 /**
- * E31-T1, TypeScript side: SDK actors on two relays. Alice (relay A) shares a
+ * E26-T1, TypeScript side: SDK actors on two relays. Alice (relay A) shares a
  * folder with Bob (relay B); Bob edits through his share on Alice's relay with
  * only his own keys; Alice reads it back; relay A's store holds none of it.
  */

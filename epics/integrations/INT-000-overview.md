@@ -98,7 +98,7 @@ OIDC surface is usable and turns that generic service into upstream adoption:
 
 ### INT-000-T3 — Reference WebDAV/storage recipes
 - [ ] Cookbook: "store your app's per-user data in the user's Poweur drive" for the T3 tier —
-      scoped drive handles, the app-folder convention (EPIC-029), event logs and merge
+      scoped drive handles, the app-folder convention (COM-4), event logs and merge
       guidance (EPIC-020), with runnable samples in Go/TS/Python; plus `rclone serve` recipes
       for desktop tools
 - [ ] The public supported-apps list and its compatibility CI live in INT-006

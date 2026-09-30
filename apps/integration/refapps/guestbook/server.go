@@ -1,5 +1,5 @@
 // Package guestbook is the reference relying party for "Sign in with Poweur
-// ID" (EPIC-008 E08-T2), restored on storage v2 as an EPIC-031 headless app:
+// ID" (EPIC-008 E08-T2), restored on storage v2 as an EPIC-026 headless app:
 // the API a site needs, driven end to end by the integration suite. v1 also
 // wrote entries into the user's home through a path grant; storage v2 has no
 // grants for sites, so the guestbook keeps its entries itself.

@@ -1,6 +1,6 @@
 package integration_test
 
-// E31-T1: the scenario harness for the headless reference apps.
+// E26-T1: the scenario harness for the headless reference apps.
 //
 // A scenario is written once against actors (an identity, its home relay, a
 // client) and runs in every topology: all actors on one relay, and the host
@@ -165,7 +165,7 @@ func (s *scenario) startRelay(cfg relaypkg.Config) *httptest.Server {
 }
 
 // restart stops a relay and starts a new process over the same store: every
-// in-memory cache is gone (E31 statelessness assertion).
+// in-memory cache is gone (E26 statelessness assertion).
 func (s *scenario) restart(name string) {
 	s.t.Helper()
 	r := s.relays[name]

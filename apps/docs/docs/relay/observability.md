@@ -68,4 +68,4 @@ Every five minutes the relay also samples adoption across hosted identities into
 
 Metrics: `poweur_http_requests_total`, HTTP duration histogram, `poweur_actions_total` (labels `action`, `detail`, `outcome`), `poweur_state` (identities/inbox/storage/adoption), `poweur_telemetry_dropped`, and heartbeat timestamp. Counters/histograms have bounded labels only, with no identities/IPs/paths. Public recording rules compute increases per source series before summing, so process resets do not become growth. Public counts are estimates with possible export gaps.
 
-For deployment, DNS, private/public sharing, retention and recovery, see the repository's `deploy/OPS.md` runbook.
+For deployment, DNS, private/public sharing, retention and recovery, see the repository's `deploy/README.md` runbook.

@@ -8,11 +8,11 @@ import (
 	"github.com/poweur/integration/refapps/tasks"
 )
 
-// TestE31_Tasks is the tasks app on v2 (successor of v1's PCP-0007
+// TestE26_Tasks is the tasks app on v2 (successor of v1's PCP-0007
 // poweur-tasks): a project is an event log every member folds to the same
 // board. Alice owns it (relay A); Bob edits and Carol observes from relay B;
 // Dan joins later from relay C.
-func TestE31_Tasks(t *testing.T) {
+func TestE26_Tasks(t *testing.T) {
 	forEachScenario(t, func(t *testing.T, s *scenario) {
 		alice := s.newActor("taskalice", "A")
 		bob := s.newActor("taskbob", "B")

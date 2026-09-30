@@ -4,7 +4,7 @@
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
-- **Plans note:** the "no paid premium names" non-goal stands under EPIC-026. Monetize custom domains instead via an optional registrar referral that auto-configures `.well-known`.
+- **Plans note:** the "no paid premium names" non-goal stands under COM-1. Monetize custom domains instead via an optional registrar referral that auto-configures `.well-known`.
 
 ## Progress
 

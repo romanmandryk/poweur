@@ -1,7 +1,7 @@
 # poweur.org — marketing site
 
 Static HTML/CSS/JS, no build step. In production the docs (`apps/docs`) are built into this
-tree at `/docs` by `.github/workflows/deploy-web.yml` (see `deploy/OPS.md`); locally, `/docs`
+tree at `/docs` by `.github/workflows/deploy-web.yml` (see `deploy/README.md`); locally, `/docs`
 links 404 unless you copy `apps/docs/build` to `apps/site/docs` (gitignore it).
 
 ```bash

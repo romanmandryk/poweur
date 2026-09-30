@@ -9,12 +9,12 @@ import (
 	"github.com/poweur/integration/refapps/docs"
 )
 
-// TestE31_T2_CollaborativeMarkdown is EPIC-031's Markdown documents scenario,
+// TestE26_T2_CollaborativeMarkdown is EPIC-026's Markdown documents scenario,
 // run through `poweur` commands only (the table in the epic lists each one).
 // Alice owns the document on relay A; Bob edits and Carol comments from relay
 // B (the same relay in the same-relay topology); an anonymous reader opens a
 // password link.
-func TestE31_T2_CollaborativeMarkdown(t *testing.T) {
+func TestE26_T2_CollaborativeMarkdown(t *testing.T) {
 	forEachScenario(t, func(t *testing.T, s *scenario) {
 		alice := s.newActor("docalice", "A")
 		bob := s.newActor("docbob", "B")

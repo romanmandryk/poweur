@@ -51,6 +51,10 @@ apps/cli/poweur
 
 # Ansible secrets (never commit)
 deploy/ansible/secrets.yml
+deploy/ansible/inventory.yml
+
+# Generated logo renders (design/brand/scripts/lockup.py)
+design/brand/out/
 
 # OS
 .DS_Store

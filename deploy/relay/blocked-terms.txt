@@ -6,7 +6,7 @@
 # to embed in a handle. Short or common words belong in NAME_RESERVED
 # (docker-compose.prod.yml), which matches a whole handle only: substring-blocking
 # "apple" would refuse "pineapple". Adding a term never affects an ID that
-# already exists; deal with those under "Stopping an ID" in deploy/ABUSE.md.
+# already exists; use `poweur-relay identities suspend` (apps/docs/docs/relay/configuration.md).
 #
 # Handles are ASCII a-z, 0-9 and hyphen only, so look-alikes from other alphabets
 # are already refused; digit swaps such as "paypa1" are not, so add them when seen.

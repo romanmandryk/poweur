@@ -10,8 +10,8 @@
 - **Consolidates:** EPIC-005 E05-T5 (group identities), EPIC-009 E09-T5 (group chat) and
   EPIC-020 E20-T7 (groups as share members) — those tasks stay done; everything about *managing*
   groups is owned here from now on
-- **Interacts with:** EPIC-025 (live documents in a group folder), EPIC-026 (the owner pays),
-  EPIC-010 / EPIC-027 (agents as members), EPIC-029 (apps pinned to a group)
+- **Interacts with:** EPIC-025 (live documents in a group folder), COM-1 (the owner pays),
+  EPIC-010 / COM-2 (agents as members), COM-4 (apps pinned to a group)
 - **Unlocks:** project rooms, family folders, client workspaces, game parties, agent teams
 
 ## Progress
@@ -49,7 +49,7 @@ still sees a chat thread and a shared folder.
 
 | Role | How many | Can |
 |---|---|---|
-| **owner** | exactly one, a person's Poweur ID | everything an admin can; add and remove admins; delete the group; transfer ownership. The group's storage counts against the owner's quota and plan (EPIC-026). |
+| **owner** | exactly one, a person's Poweur ID | everything an admin can; add and remove admins; delete the group; transfer ownership. The group's storage counts against the owner's quota and plan (COM-1). |
 | **admin** | any number | add and remove members; manage the group folder's shares; rename |
 | **member** | up to 100 for chat (E09-T5 fan-out limit), 1000 in `group.json` | read and write the group folder and chat |
 
@@ -58,7 +58,7 @@ fan-out); there is no second permission engine. Guests (a subset of the folder, 
 are ordinary drive shares to a person, not group members.
 
 **Organizations** — one party managing many IDs, seats and invoices — are a separate concern
-(EPIC-026). A group does not need an organization, and an organization may own many groups.
+(COM-1). A group does not need an organization, and an organization may own many groups.
 
 ### What happens when someone leaves or is removed
 
@@ -81,7 +81,7 @@ are ordinary drive shares to a person, not group members.
 - [ ] Group folder convention: `group create` makes the group drive's root the group folder and
       shares it with the group (`write`); members reach it as `--drive <group>`.
 - [ ] Storage attribution: a group's drive usage is reported against its owner (hook for
-      EPIC-026; today the relay counts it on the group identity).
+      COM-1; today the relay counts it on the group identity).
 - [ ] Late join: members added later do not see earlier chat (E09-T5 decision). Decide whether
       a group-key-sealed chat archive in the group folder should change that.
 - [ ] Migrate existing groups: the creator becomes owner.
@@ -177,7 +177,7 @@ The owner hands the group to another person — for example, stepping back from 
 
 - [ ] `sys.group.transfer` offer; the new owner must **accept** (ownership costs quota).
 - [ ] On acceptance: the group identity's keys are sealed to the new owner, `group.json` names the
-      new owner, and storage attribution moves (EPIC-026).
+      new owner, and storage attribution moves (COM-1).
 - [ ] **No data moves and nothing is re-encrypted.** Files, the group folder and group metadata
       live in the *group's* drive under the group's keys, not in the owner's drive; chat history
       lives with each member. Only key custody and billing change.
@@ -229,5 +229,5 @@ per member.
 - A Space object, `space.json` or a workspace database — a group is the place.
 - A second permission system beside `group.json`, drive shares and message fan-out.
 - CRDT merging and live cursors — EPIC-025.
-- Plans, seats and invoices — EPIC-026 (organizations live there).
+- Plans, seats and invoices — COM-1 (organizations live there).
 - Voice/video and game matchmaking.
