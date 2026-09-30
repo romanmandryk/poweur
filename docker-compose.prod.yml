@@ -70,6 +70,33 @@ services:
       - poweur_net
       - infra_net
 
+  # hello.poweur.net, the demo bot (apps/cli/pkg/hello): answers any message with a
+  # fixed reply. The same image as the relay, a different binary. Its ID's key
+  # files live on the host in /opt/apps/poweur-hello/keys (hello.poweur.net.key
+  # and .enc, mode 600, never in git); nothing else about it is persistent.
+  hello:
+    image: ${RELAY_IMAGE:?Set RELAY_IMAGE to a GHCR digest}
+    container_name: poweur-hello
+    restart: unless-stopped
+    entrypoint: ["/hello-bot"]
+    environment:
+      IDENTITY: hello.poweur.net
+      RELAY_URL: https://relay.poweur.net
+      KEYS_DIR: /keys
+      HOME: /home/bot
+      HELLO_DEMO_URL: ${HELLO_DEMO_URL:-}
+    volumes:
+      - /opt/apps/poweur-hello/keys:/keys:ro
+    # Sessions and the CLI's bookkeeping are throwaway: memory only, bounded.
+    tmpfs:
+      - /home/bot:size=64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - poweur_net
+
 volumes:
   poweur_data:
 
