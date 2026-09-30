@@ -4,7 +4,7 @@
 - **Priority:** P1
 - **Depends on:** EPIC-002; instruments the relay features added by other epics
 - **Unlocks:** reliable releases, searchable errors, private analytics and public growth
-- **Billing note:** metrics here stay "not a billing ledger"; COM1-T4 owns the idempotent usage ledger. Add per-plan cost dashboards (bytes, egress, TURN, email, compute) so plan unit economics are visible.
+- **Billing note:** metrics here are operational, not a billing ledger.
 
 ## Progress
 

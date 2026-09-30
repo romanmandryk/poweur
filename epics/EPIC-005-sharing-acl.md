@@ -255,8 +255,8 @@ an unverifiable email address. Every transfer is an introduction to Poweur.
 - [ ] Guest senders: a visitor without an ID can send files *to* an ID through its inbox policy
       (EPIC-014 anon ingress + PoW or E16 payment); files land on the recipient's quota only if the
       policy allows attachments.
-- [ ] Limits are entitlements (COM-1): max transfer size, retention days, egress; branding and
-      longer retention are the natural paid line.
+- [ ] Limits are operator-configurable: max transfer size, retention days, egress. Plan
+      enforcement is external to the protocol.
 
 **Implemented v2 slice:** `@poweur/client/drive` uploads browser `File` sources one encrypted
 4 MiB chunk at a time, so transfer memory is bounded rather than proportional to file size.
@@ -268,7 +268,7 @@ revocation. Owner-authenticated link statistics expose only the durable open cou
 expiry. The link ID remains public capability metadata; fragment keys and passwords never reach
 the relay. This deliberately composes E20-T7/T10 rather than reviving the v1 WebDAV transfer
 implementation. Automatic server-side expiry deletion and first-open typed notifications remain
-open; email delivery remains owned by EPIC-023 and plan enforcement by COM-1.
+open; email delivery remains owned by EPIC-023 and plan enforcement is external.
 
 **Acceptance:** a 5 GB transfer resumes after a dropped connection; an email recipient downloads
 without an account and claims an ID with the sender already requested as a contact; an expired

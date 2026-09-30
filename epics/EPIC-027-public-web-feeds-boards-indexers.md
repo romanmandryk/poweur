@@ -5,7 +5,7 @@
 - **Depends on:** EPIC-020 (public folders, append files, change feeds, caps, proof-of-work
   links), EPIC-009 T7–T10 (intent types, typed routing, follow feeds), EPIC-014 (anonymous
   messages), EPIC-024 (group identities as hosts), EPIC-026 (headless scenarios)
-- **Interacts with:** COM-5 (paid feeds as renewing shares, broadcast channels), INT-006
+- **Interacts with:** paid feeds as renewing shares, broadcast channels, INT-006
   (Bluesky/Nostr/Fediverse handles), INT-002 (payments for listings)
 - **Unlocks:** microblogs, blogs and newsletters for every ID; community and classifieds boards;
   network-wide timelines, search, topics and location search through replaceable indexers
@@ -71,7 +71,7 @@ paid subscribers are practical. Public feeds have no per-follower cost at all.
    re-registered by clients on connect, so the relay stays stateless.
 
 Push fan-out (one message per follower per post) stays for email subscribers and explicit
-alerts only (COM5-T5).
+alerts only.
 
 ### Indexers
 
@@ -132,7 +132,7 @@ Atom and microformats; a feed reader (Miniflux in INT-006 CI) shows the posts.
 - [ ] Follow list in `.poweur/private/follows.json`; `poweur follow|unfollow|timeline`;
       client-side timeline assembly from followed feeds (reuses E09-T10)
 - [ ] Followers-only feeds: follow request → owner approval → share with epoch keys; removal
-      starts a new epoch; paid tiers are renewing shares (COM-5)
+      starts a new epoch; paid tiers are renewing shares
 - [ ] Measured budget: sealing cost and time per epoch for 10k followers
 
 **Acceptance:** a follower on relay C sees public posts without the author knowing; an approved

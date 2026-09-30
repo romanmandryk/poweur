@@ -14,7 +14,7 @@
   whiteboard) pass on one relay and across relays
 - **Unlocks:** honest "files are end-to-end encrypted" claims, S3-compatible hosting, desktop
   sync, message-history paging (E15-T13), append-based collaboration (EPIC-024/025), hosted
-  agents with explicit key grants (COM-2), ciphertext-only managed hosting (COM-3)
+  agents with explicit key grants, ciphertext-only managed hosting
 
 ## Progress
 
@@ -41,7 +41,7 @@
 | E20-T14 Native OS file integration | **open** | macOS/iOS File Provider, Windows Cloud Files, Android DocumentsProvider |
 | E20-T15 Append performance for live apps | **open** | latency budgets and batching so EPIC-025 can build CRDT/realtime on append files |
 | E20-T16 Advanced shares & delegation | **open** | time-box presets, version-pinned snapshots, resharing (caps moved to E20-T7) |
-| E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale for COM-3 |
+| E20-T17 Multi-instance relays over one store | **open** | per-identity leases via conditional writes; horizontal scale |
 
 ## Continuation checkpoint — 2026-09-28
 
@@ -436,7 +436,7 @@ enforces the `append` or `create` role, caps and proof-of-work, and never reads 
   writes count against the host's quota (as files in Google Drive count against their owner),
   so shares carry **per-member and per-link caps** (bytes, records, rate).
 - **Team or long-lived state:** hosted by a **group identity** (an EPIC-024 group) whose drive
-  is billed to an organization or a sponsoring member (COM-1 pooled storage), so no single
+  is billed to an organization or a sponsoring member (pooled storage), so no single
   member leaving takes it down.
 - **Ownership transfer** moves a subtree between drives (a person → a group, or to another
   person): ciphertext chunks are copied, the subtree root key is re-sealed, shares are
@@ -446,7 +446,7 @@ enforces the `append` or `create` role, caps and proof-of-work, and never reads 
 
 ### Apps and storage access
 
-Apps run as static code on a sandboxed origin (COM-4); the host frame holds keys and hands
+Apps run as static code on a sandboxed origin; the host frame holds keys and hands
 the app a **scoped drive handle**: the folder created for the app at install plus the nodes the
 user explicitly opens with it (a picker grant, like Google Drive's `drive.file` scope). Headless
 agents and tests use the same scoped handle from the SDK. There is no reserved `/apps` root.
@@ -541,7 +541,7 @@ wrong bytes is rejected by the store.
 - [x] Uncommitted chunks expire (24 h); GC marks from live + retained versions and never
       deletes a chunk referenced by an in-flight commit (one GC process per drive; see
       E20-T17 for multi-instance)
-- [x] Quota = unique chunk bytes per drive; `507` on overflow; plans hook for COM-1
+- [x] Quota = unique chunk bytes per drive; `507` on overflow; hook for external plan enforcement
 - [x] Append positions (total order per node) returned on commit and exposed to readers
 - [x] Prefix trim before a snapshot position (owner/`admin` only); trimmed record chunks are
       released
@@ -665,7 +665,7 @@ store never contain the key or password.
 - [x] Chunk cache: a directory under the CLI home; IndexedDB in web/shell — immutable, never revalidated
 - [x] Streaming decrypt with range reads for large files and media
 - [x] **Scoped drive handles:** a client restricted to a folder plus picked nodes, used by the
-      COM-4 bridge, agents and the EPIC-026 headless apps
+      app bridge, agents and the EPIC-026 headless apps
 - [x] **Event-log helper:** `open(log, reducer)` → fold snapshot + tail, subscribe, append with
       per-author sequence, write snapshots, trim; Go and TS
 - [x] **CLI:** `poweur drive ls|put|get|mv|rm|history|append|tail --from|trim|watch`,
@@ -816,7 +816,7 @@ share is revoked.
 
 - [ ] Per-identity leases with conditional writes; request routing to the owning instance;
       lease takeover on failure
-- [ ] Deployment profile for COM-3
+- [ ] Deployment profile for multi-instance operators
 
 **Acceptance:** killing the owning instance moves the identity to another within the lease
 timeout without losing an acknowledged commit.
@@ -829,7 +829,7 @@ timeout without losing an acknowledged commit.
 - Server-side merging; the relay never interprets file formats
 - Recovering files for someone who loses their seed and every device (EPIC-011 owns recovery)
 - DRM-style "view but not copy"
-- App backends: apps that need a neutral authority use COM-2, not the relay
+- App backends: apps that need a neutral authority run their own backend, not the relay
 
 ## Superseded task IDs (the pre-2026-09-25 plan)
 

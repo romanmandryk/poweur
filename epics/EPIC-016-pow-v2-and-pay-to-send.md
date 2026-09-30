@@ -1,7 +1,7 @@
 # EPIC-016 — Sender-challenge v2: pluggable, memory-hard PoW & pay-to-send
 
 - **Status:** proposed
-- **Priority:** P2 (hardening + monetization pass over the EPIC-014 challenge ladder; not
+- **Priority:** P2 (hardening + pay-to-send pass over the EPIC-014 challenge ladder; not
   blocking, but the PoW fairness bug below is a correctness issue once anon ingress sees real
   spam)
 - **Depends on:** EPIC-014 (challenge ladder, `inbox-policy.json` `anonymous` block, the
@@ -10,9 +10,8 @@
   (`payments.json` handles, LNURL/x402 relay endpoints), coordinates with EPIC-013 (metrics)
 - **Unlocks:** anon/stranger ingress that a phone can actually satisfy without a GPU farm
   out-spamming it 10⁴×; a recipient-priced **pay-to-send** fast-lane (crypto + fiat) that
-  monetizes willingness-to-pay and gives hosted Poweur a revenue line, without taxing
-  self-hosters
-- **Shared gateway:** the payment gateway, settlement callback and cut accounting built here are reused by COM-5 for paid grants and subscriptions — one gateway, not two. An active paid entitlement may lower (never bypass abuse controls on) registration/anon PoW difficulty.
+  lets recipients price their own attention, without taxing self-hosters
+- **Shared gateway:** the payment gateway, settlement callback and cut accounting built here are reusable for other paid grants and subscriptions — one gateway, not two. An active paid entitlement may lower (never bypass abuse controls on) registration/anon PoW difficulty.
 
 ## Progress
 

@@ -8,8 +8,6 @@ links 404 unless you copy `apps/docs/build` to `apps/site/docs` (gitignore it).
 python3 -m http.server 4321 --directory apps/site
 ```
 
-(or the `site` entry in `.claude/launch.json`).
-
 | File | What |
 |------|------|
 | `index.html` | Landing page: hero, protocols strip, three primitives, pyramid, comparison, use cases, apps, agents, hosting, CTA |

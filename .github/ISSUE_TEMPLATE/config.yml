@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/romanmandryk/poweur/security/advisories/new
+    about: Report vulnerabilities privately (or email info@poweur.org). Please do not open a public issue.
+  - name: Question or idea
+    url: https://github.com/romanmandryk/poweur/discussions
+    about: Ask how something works, or float an idea, in Discussions.

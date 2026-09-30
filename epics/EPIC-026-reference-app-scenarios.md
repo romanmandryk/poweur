@@ -7,7 +7,7 @@
   (intent types, typed routing, shared inboxes, follow feeds), EPIC-014 (anonymous messages,
   proof-of-work), EPIC-024 (group identity as host of shared state)
 - **Also exercises:** EPIC-027 (community boards, listings, following) in E26-T9
-- **Unlocks:** COM-4 templates (each headless app becomes a UI later without protocol
+- **Unlocks:** app templates (each headless app becomes a UI later without protocol
   work), EPIC-025 (the Markdown and whiteboard scenarios are its starting point)
 
 ## Progress
@@ -39,7 +39,7 @@ worked around in the app.
 
 - **Headless apps are real code, not test fixtures.** Go versions live in
   `apps/integration/refapps/<app>/`; TypeScript versions in `packages/refapps/` (on
-  `@poweur/client`), which later seed COM-4's templates. An app module is its folder layout,
+  `@poweur/client`), which can later seed app templates. An app module is its folder layout,
   record types, reducer and a thin API ("create board", "move card") over the SDK's scoped drive
   handle, event-log helper and typed messages.
 - **Every user action has a CLI path.** Each scenario document carries a table
@@ -268,6 +268,6 @@ deletes a listing (tombstone); the board is transferred to a second moderator.
 
 ## Non-goals
 
-- UI of any kind (COM-4 templates and the web app build on these modules later)
+- UI of any kind (app templates and the web app build on these modules later)
 - Email delivery (EPIC-023), live cursors/presence and text CRDTs (EPIC-025)
 - App-specific servers — if a scenario seems to need one, that is a protocol gap to fix

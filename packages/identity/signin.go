@@ -68,7 +68,7 @@ const (
 
 // Scope vocabulary (EPIC-008 E08-T4). Storage v1's `dav:` path scopes are
 // gone with WebDAV; app storage access returns as scoped drive handles
-// (EPIC-020, COM-4).
+// (EPIC-020).
 const (
 	ScopeProfileRead  = "profile:read"
 	ScopeMessagesSend = "messages:send"

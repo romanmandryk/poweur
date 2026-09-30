@@ -80,3 +80,8 @@ apps/docs/.docusaurus/
 
 # Local copy of the docs build for previewing the site (deploy-web.yml assembles it in CI)
 apps/site/docs/
+
+# Local agent tooling
+.claude/
+.codex/
+.t3/

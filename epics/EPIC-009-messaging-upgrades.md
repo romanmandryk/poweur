@@ -14,7 +14,7 @@
 > conversation — is [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T11. Do not add paging or
 > compaction to the v1 layout. E20-T11 also closes E09-T4's gap: attachment bytes are stored in
 > plaintext today (only the caption is encrypted).
-- **Plans note (COM-1):** 1:1 and small-group messaging stay unmetered fair use — never a pricing lever. Large 1 → many *broadcast channels* are a separate, metered shape owned by COM5-T5.
+- **Plans note:** plan enforcement is external to the protocol. Large 1 → many *broadcast channels* are a separate shape from 1:1 and small-group messaging.
 
 ## Goal
 
@@ -273,8 +273,8 @@ down, returning at a new address, and receiving the queued message.
 
 Working through the [EPIC-026](EPIC-026-reference-app-scenarios.md) reference apps (site
 contact + newsletter, forms, board, CRM, whiteboard) showed four gaps. Storage-side needs are
-in [EPIC-020](EPIC-020-storage-protocol-v2.md); app permissions are in
-COM-4.
+in [EPIC-020](EPIC-020-storage-protocol-v2.md); app permissions are scoped
+drive handles, also in EPIC-020.
 
 ### E09-T7 — Well-known intent types
 
@@ -288,7 +288,7 @@ vocabulary, every app invents its own and inbox policy cannot reason about any o
       - `sys.list.subscribe` / `sys.list.unsubscribe` — join or leave a named list
         (newsletter, updates) with an optional email for bridge delivery (EPIC-023)
       - `sys.app.invite` — "join me in this board/doc/game": app id, node reference, optional
-        share offer; builds on COM4-T6's `opened_with`
+        share offer; builds on the `opened_with` convention
       - `sys.app.notify` — a short notification from a share member ("assigned to you",
         "mentioned you"), carrying a node reference
       - social types (`sys.social.mention`, `sys.social.reply`, optional `sys.social.follow`)
@@ -309,7 +309,7 @@ chat, and a flood is stopped by proof-of-work and rate limits.
 
 - [ ] Inbox query by `type` / type prefix (the envelope `type` is already plaintext and signed),
       so an app reads only its own messages and the chat tray never shows them
-- [ ] Clients route non-chat types to the installed app that declares them (COM-4 manifest);
+- [ ] Clients route non-chat types to the installed app that declares them (the app manifest);
       unknown types keep the existing generic line
 - [ ] Per-type retention: app messages can be acked and dropped once the app has materialized
       them into its files (e.g. subscribers into a list file)
@@ -342,11 +342,11 @@ in [EPIC-027](EPIC-027-public-web-feeds-boards-indexers.md); this task delivers 
 mechanics they build on.
 
 - [ ] Convention for a feed folder (posts + `feed.json` index) published publicly or shared
-      with subscribers (paid tiers = subscriptions as renewing shares, COM-5)
+      with subscribers (subscriptions are renewing shares)
 - [ ] Following = subscribing to that folder's change events (E20-T5) plus a local follow
       list; the owner need not know public followers
 - [ ] `list.subscribe` (T7) remains for owners who want a subscriber list and for email
-      subscribers, who get pushed copies via EPIC-023; 1 → many push stays COM5-T5
+      subscribers, who get pushed copies via EPIC-023; 1 → many push is out of scope here
 - [ ] CLI `poweur follow|unfollow|feed`
 
 **Acceptance:** an owner publishes a post; followers on two relays receive it from the feed

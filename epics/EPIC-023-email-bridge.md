@@ -12,7 +12,7 @@
   pattern this service copies: separate origin, public-protocol-only coupling)
 - **Unlocks:** `john@poweur.net` for every hosted ID that opts in; email ↔ Poweur conversation
   upgrades; email-driven automations; masked aliases
-- **Plans note (COM-1):** receiving is free; outbound volume, masked aliases and custom-domain mail are the paid lines. Email is also a recipient channel for E05-T7 Send and COM-5 buyers.
+- **Plans note:** plan enforcement is external. Email is also a recipient channel for E05-T7 Send.
 
 ## Progress
 

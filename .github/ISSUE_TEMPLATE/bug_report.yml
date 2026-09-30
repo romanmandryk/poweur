@@ -1,0 +1,47 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping. Please do not paste private keys, recovery kits, session tokens or
+        message contents. For security problems use a private advisory instead of this form.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Web app (poweur.net/app)
+        - Mobile app
+        - Relay (self-hosted)
+        - Relay (poweur.net)
+        - OAuth / OIDC / IndieAuth bridge
+        - Go CLI
+        - "@poweur/client (SDK / JS CLI)"
+        - Docs or website
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → About in the app, `poweur version`, or `GET /` on your relay.
+  - type: input
+    id: env
+    attributes:
+      label: Browser / OS / device
+      description: Passkeys with PRF behave differently per browser, so please be specific.

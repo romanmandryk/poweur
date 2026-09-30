@@ -6,9 +6,9 @@
   EPIC-017 (`@poweur/client`); interacts with EPIC-024 (a group folder is where most team documents live)
 - **Interacts with:** EPIC-009 (typed messages/SSE), EPIC-011 (key epochs), EPIC-019 (mobile)
 - **Unlocks:** interoperable co-editing applications, whiteboards and live tools on Poweur;
-  the generic room transport that COM-4 apps and games build on
-- **Monetizes (hosted):** TURN relay bytes, room size and retained update history — through
-  COM-1 entitlements, never plan names in the protocol
+  the generic room transport that apps and games build on
+- **Operator limits:** TURN relay bytes, room size and retained update history are
+  entitlements, never plan names in the protocol
 
 ## Progress
 
@@ -21,7 +21,7 @@
 | E25-T5 Collaborative Markdown reference app | open | offline-first editor, comments, attachments and history |
 | E25-T6 Federation, conformance & performance | open | multi-relay convergence, reconnect, load and abuse limits |
 | E25-T7 General-purpose rooms API for non-document apps | open | the T3 transport exposed for games/tools; `@poweur/live` SDK |
-| E25-T8 TURN fallback & metering | open | ephemeral per-identity TURN credentials; bytes metered via COM-1 |
+| E25-T8 TURN fallback & metering | open | ephemeral per-identity TURN credentials; bytes metered per identity |
 
 ## Goal
 
@@ -146,7 +146,7 @@ groups.
 ### E25-T7 — General-purpose rooms API for non-document apps
 
 T3's session transport is useful beyond documents: game moves, shared pointers, live polls, a
-"who is looking at this file" indicator. Expose it once, generically, instead of every COM-4
+"who is looking at this file" indicator. Expose it once, generically, instead of every
 app inventing a side channel.
 
 - [ ] Room reference `room:<host-id>/<room-id>` with three binding kinds: `document` (T3/T4
@@ -173,7 +173,7 @@ Peer-to-peer is free to operate; relayed media/data is the real cost line of liv
 
 - [ ] coturn profile in `deploy/`; relay mints short-lived TURN credentials (REST-style shared
       secret) bound to an authenticated identity and room.
-- [ ] Per-identity TURN byte meter feeding the COM-1 usage ledger; entitlement resource
+- [ ] Per-identity TURN byte meter feeding an external usage ledger; entitlement resource
       `turn_bytes_monthly`; behaviour at the limit is "relay fallback only", never a dropped
       document update.
 - [ ] Self-host documentation: run your own TURN, point at a third-party one, or disable it.
@@ -187,6 +187,6 @@ allowance exhausted the session degrades to relay fallback and durable edits sti
 - A Figma-compatible design model, office-file engine or game-state protocol.
 - Voice/video calls and SFU media relay (a later epic once rooms and TURN exist; 1:1 calls are
   the obvious first consumer).
-- Matchmaking and game rules — COM-4's game kit builds on the T7 rooms API.
+- Matchmaking and game rules — a game kit can build on the T7 rooms API.
 - Hiding membership from the collaboration peers who must exchange keys and updates.
 

@@ -209,7 +209,7 @@ web-exposed (ID-auth still required).
 
 > The trusted generated page at the identity root is **not** this task — see
 > [EPIC-012](EPIC-012-identity-websites.md). Arbitrary HTML remains inert here; app/static
-> bundle hosting belongs to COM-4.
+> bundle hosting is out of scope here.
 
 ### E03-T7 — Design doc: relay-blind (E2EE) storage option
 
