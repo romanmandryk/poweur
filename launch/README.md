@@ -39,8 +39,10 @@ polish, not new epics**.
       Grafana Faro sends anonymous page views, errors and web vitals first-party to Alloy/Loki
       (dashboard "Poweur Web: analytics & errors"); the ID is attached only after Settings →
       Diagnostics → "Include my ID")*
-- [ ] **Legal pages on poweur.org, linked from the footer and the claim screen:** *Drafted
-      at `apps/site/legal/` (overview/contact, privacy, terms + acceptable use) and linked
+- [x] **Legal pages on poweur.org, linked from the footer and the claim screen:** *Done 30 Sep:
+      every detail is filled in (operator, Ericeira address, NIF, `info@poweur.org`, 7-day
+      backup retention, deletion by message or email); read it once more before publishing.
+      Drafted at `apps/site/legal/` (overview/contact, privacy, terms + acceptable use) and linked
       from the site footer, the app's landing, the claim boxes and Settings → About. Before
       publishing, fill in every highlighted `[…]` detail (operator, address, emails, country,
       backup retention, how to delete an ID).* Originally: privacy
@@ -48,8 +50,9 @@ polish, not new epics**.
       message contents), terms of service + acceptable use (spam, abuse, illegal content,
       name squatting), and an imprint/contact page if you're operating from the EU
 - [ ] **Security contact:** `SECURITY.md` + `/.well-known/security.txt` on poweur.org and
-      poweur.net. *Drafted for poweur.org; needs the security email. poweur.net (the relay)
-      doesn't serve one yet.* Be honest in the docs that the external security review (E11-T7) is still
+      poweur.net. *Done in the repo with `info@poweur.org`: poweur.org's file, and Caddy now
+      answers it on poweur.net, relay.poweur.net and oauth.poweur.org. Tick this once the
+      Caddyfile is deployed and `curl https://poweur.net/.well-known/security.txt` returns it.* Be honest in the docs that the external security review (E11-T7) is still
       outstanding
 - [ ] **Abuse path:** reports go to `info@poweur.org` (see operational accounts below), a runbook for suspending a hosted name (who, how, how
       fast), and a list of reserved names checked for obvious impersonation (brands, `admin`,
