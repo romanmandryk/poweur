@@ -2,7 +2,7 @@
 #   docker build -f apps/api/Dockerfile \
 #     --build-arg VERSION_HASH=$(git rev-parse HEAD) \
 #     --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) .
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/api ./apps/api
