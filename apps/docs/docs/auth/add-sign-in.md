@@ -12,7 +12,7 @@ anybody. If you are used to OAuth, the surprising part is how much is missing.
 
 The [protocol spec](./sign-in.md) is normative; this page is the shortest path to a working
 login. The OAuth bridge uses the shared verifier in `packages/identity/signin`.
-The v1 Guestbook example was removed; its v2 replacement is tracked in EPIC-031.
+The v1 Guestbook example was removed; its v2 replacement is tracked in EPIC-026.
 
 ## 0. What you are about to build
 

@@ -23,23 +23,29 @@ export interface InboxPolicy {
 }
 
 /** Plain language for each mode — the relay's rules, not a paraphrase. */
-export const INBOX_MODES: { id: InboxMode; label: string; detail: string }[] = [
+export const INBOX_MODES: { id: InboxMode; label: string; detail: string; warning?: string }[] = [
   {
     id: "open",
     label: "Anyone",
-    detail: "Any Poweur ID can message you. Contact requests still wait in Requests. Simple, and the default for identities that never set a policy.",
-  },
-  {
-    id: "contacts_only",
-    label: "Contacts only",
-    detail: "Only people you have accepted. Everyone else is refused — including contact requests, so nobody can ask.",
+    detail:
+      "Any Poweur ID can message you, so a first message from a friend or a demo like hello.poweur.net arrives straight away. Contact requests still wait in Requests. Recommended to start.",
   },
   {
     id: "contacts_and_requests",
     label: "Contacts, and requests from others",
-    detail: "Contacts message you normally; a stranger gets one contact request, which waits in your Requests tray. Recommended.",
+    detail:
+      "Contacts message you normally; a stranger gets one contact request, which waits in your Requests tray. Good once strangers start to bother you.",
+  },
+  {
+    id: "contacts_only",
+    label: "Contacts only",
+    detail: "Only people you have accepted. Everyone else is refused, including contact requests, so nobody can ask.",
+    warning: "Not for new IDs: nobody new can reach you, even to say hello. Use it once your contacts are added and you are swamped by unwanted requests.",
   },
 ];
+
+/** What a brand-new ID is offered: the strict mode is deliberately not among them. */
+export const ONBOARDING_MODES: InboxMode[] = ["open", "contacts_and_requests"];
 
 /**
  * What a difficulty costs *the sender's browser*, which is who pays it.

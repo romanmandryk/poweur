@@ -38,9 +38,6 @@ export type KeystoreKind =
   | "recovery-kit"
   | "native";
 
-/** Whether the blob holds a master seed or a pre-seed identity's two keys. */
-export type KeystorePayload = "seed" | "legacy-keypair";
-
 /** Opaque ciphertext. The relay never interprets this. */
 export interface WrappedBlob {
   iv: string;
@@ -53,7 +50,6 @@ export interface KeystoreEntry {
   enrollment_id: string;
   kind: KeystoreKind;
   wrap: KeystoreWrap;
-  payload: KeystorePayload;
   credential_id?: string;
   credential_public_key?: string;
   credential_alg?: number;
@@ -74,7 +70,6 @@ export interface KeystoreSummary {
   enrollment_id: string;
   kind: KeystoreKind;
   wrap: KeystoreWrap;
-  payload: KeystorePayload;
   label?: string;
   role?: "device" | "recovery-master";
   has_passkey: boolean;
@@ -95,7 +90,6 @@ export interface EnrollOptions {
   kind: KeystoreKind;
   wrap: KeystoreWrap;
   wrapped: WrappedBlob;
-  payload?: KeystorePayload;
   /** Required together: a passkey enrollment that cannot be verified is useless. */
   credentialId?: string;
   /** SPKI DER (base64url) from WebAuthn's `getPublicKey()`. */
@@ -169,7 +163,6 @@ export class KeystoreApi {
         enrollment_id: options.enrollmentId,
         kind: options.kind,
         wrap: options.wrap,
-        payload: options.payload ?? "seed",
         ...(options.credentialId ? { credential_id: options.credentialId } : {}),
         ...(options.credentialPublicKey
           ? { credential_public_key: options.credentialPublicKey }

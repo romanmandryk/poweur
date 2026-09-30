@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +28,10 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	publish := fs.Bool("public", false, "mkdir: a public folder at the top of the drive, readable by anyone at https://<id>/pub/<name>/")
 	offset := fs.Int64("offset", 0, "plaintext byte offset for get")
 	length := fs.Int64("length", -1, "plaintext byte count for get; default is the rest of the file")
+	baseVersion := fs.String("base", "", "put: the version this edit started from; if the file changed since, exit 3 (conflict) without writing")
+	version := fs.String("version", "", "get: an earlier version (from drive history) instead of the latest")
+	var groups pathList
+	fs.Var(&groups, "group", "open a drive shared with this group you are in (repeatable)")
 	if fs.Parse(normalizeArgs(args[1:], map[string]bool{"--json": true, "--public": true, "--force": true})) != nil {
 		return 1
 	}
@@ -37,11 +43,11 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		count = 0
 	}
 	if fs.NArg() != count {
-		fmt.Fprintln(stderr, "usage: poweur drive mkdir|rm|list <remote-path>; put <local-file> <remote-path>; get <remote-path> <local-file>; mv <remote-path> <remote-path>; shared --drive <identity>; every command takes --drive <identity> to work in a drive shared with you [--json]")
+		fmt.Fprintln(stderr, "usage: poweur drive mkdir|rm|list <remote-path>; put <local-file> <remote-path> [--base <version>]; get <remote-path> <local-file> [--version <version>]; mv <remote-path> <remote-path>; shared --drive <identity>; every command takes --drive <identity> to work in a drive shared with you [--json]")
 		return 1
 	}
 	files, ok := openDriveFiles(*use, *target, stderr)
-	if !ok {
+	if !ok || !joinGroups(files, *use, groups, stderr) {
 		return 1
 	}
 	ctx := context.Background()
@@ -61,6 +67,7 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 	}
 	var result any
 	var err error
+	var conflict *driveConflict
 	run := func() error {
 		switch args[0] {
 		case "shared":
@@ -127,10 +134,25 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 					break
 				}
 			}
+			if *baseVersion != "" && (target == nil || target.Manifest.Version != *baseVersion) {
+				head := ""
+				if target != nil {
+					head = target.Manifest.Version
+				}
+				conflict = &driveConflict{Path: fs.Arg(1), Base: *baseVersion, Head: head}
+				return conflict
+			}
 			if target == nil {
 				target, e = files.Create(ctx, folder, base, protocol.KindFile, input)
 			} else {
 				e = files.Replace(ctx, target, input)
+			}
+			// The relay refuses a replace whose parent is no longer the head:
+			// someone committed between our read and our write.
+			var driveErr *driveclient.Error
+			if *baseVersion != "" && errors.As(e, &driveErr) && driveErr.Status == 409 {
+				conflict = &driveConflict{Path: fs.Arg(1), Base: *baseVersion}
+				return conflict
 			}
 			if e != nil {
 				return e
@@ -147,7 +169,12 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 			}
 			defer os.Remove(output.Name())
 			defer output.Close()
-			if *offset != 0 || *length >= 0 {
+			if *version != "" {
+				if *offset != 0 || *length >= 0 {
+					return errors.New("--version cannot be combined with --offset or --length")
+				}
+				e = files.ReadVersion(ctx, file, *version, output)
+			} else if *offset != 0 || *length >= 0 {
 				e = files.ReadRange(ctx, file, *offset, *length, output)
 			} else {
 				e = files.Read(ctx, file, output)
@@ -191,6 +218,13 @@ func runDriveFiles(args []string, stdout, stderr io.Writer) int {
 		return nil
 	}
 	if err = run(); err != nil {
+		if conflict != nil {
+			if *jsonOut {
+				_ = writeOutput(stdout, true, conflict, "")
+			}
+			fmt.Fprintln(stderr, conflict)
+			return exitConflict
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -233,13 +267,8 @@ func openDriveFiles(use, target string, stderr io.Writer) (*driveclient.Files, b
 		}
 		return idpkg.ParseEd25519PublicKey(res.Document.PublicKey)
 	}
-	files.EncryptionKeys = func(ctx context.Context, member string) ([]byte, error) {
-		res, err := identity.ResolveIdentity(ctx, member)
-		if err != nil {
-			return nil, err
-		}
-		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
-	}
+	// Re-issued shares seal to the member's key, or a group's current key.
+	files.EncryptionKeys = shareRecipientKey
 	// Versions written by a group's members are checked against the group's
 	// roster, which the caller can read only if they are in the group.
 	files.GroupMembers = func(ctx context.Context, group string) ([]string, error) {
@@ -270,4 +299,29 @@ func identityRelayURL(ctx context.Context, cfg config.Config, id string) (string
 		relay = schemeFromConfig(cfg) + "://" + relay
 	}
 	return relay, nil
+}
+
+// exitConflict is `drive put --base`'s exit code when the file moved on:
+// read the new head, merge, and put again with it as the base.
+const exitConflict = 3
+
+type driveConflict struct {
+	Path string `json:"path"`
+	Base string `json:"base"`
+	Head string `json:"head,omitempty"`
+}
+
+func (c *driveConflict) MarshalJSON() ([]byte, error) {
+	type plain driveConflict
+	return json.Marshal(struct {
+		Error string `json:"error"`
+		*plain
+	}{"conflict", (*plain)(c)})
+}
+
+func (c *driveConflict) Error() string {
+	if c.Head != "" {
+		return fmt.Sprintf("conflict: %s changed since %s (now %s)", c.Path, c.Base, c.Head)
+	}
+	return fmt.Sprintf("conflict: %s changed since %s", c.Path, c.Base)
 }

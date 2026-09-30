@@ -4,7 +4,7 @@
 - **Priority:** P1
 - **Depends on:** EPIC-002; instruments the relay features added by other epics
 - **Unlocks:** reliable releases, searchable errors, private analytics and public growth
-- **Billing note:** metrics here stay "not a billing ledger"; EPIC-026-T4 owns the idempotent usage ledger. Add per-plan cost dashboards (bytes, egress, TURN, email, compute) so plan unit economics are visible.
+- **Billing note:** metrics here are operational, not a billing ledger.
 
 ## Progress
 
@@ -17,6 +17,7 @@
 | E13-T5 Federated ecosystem metrics | deferred | Aggregate reporting from other operators, after the basic setup |
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 | E13-T7 Lively public Growth dashboard | done | Message kind `detail`, `settings.change` field events, `adopt_*` adoption gauges, redesigned Growth board (relay 0.1.6) |
+| E13-T8 Operator holds: suspend, delete and release a hosted ID | done | `poweur-relay identities suspend\|unsuspend\|delete\|release` edits `relay/suspended-identities.json`; the relay re-reads it every 15 s and answers 410 (resource or host) or 403 (caller) for a held ID, refuses its messages, sessions and re-registration, and `delete` also erases its ID document, key backups, inbox and drive and keeps the name held (relay 0.2.12). |
 | Optional third-party overlay | trial | Dual OTLP sink + optional browser RUM/uptime heartbeat, currently Better Stack. Grafana remains canonical; unset env to remove. |
 | Browser telemetry (Grafana Faro) | done | Replaces the Better Stack browser tag on every frontend (web app, mobile shell, OAuth bridge UI, website, docs). `@poweur/faro` sends first-party to `/faro/collect` → Caddy → Alloy `faro.receiver` → Loki `{source="faro"}`; anonymous by default (IDs, domains, emails, URL queries/fragments and the user-agent scrubbed in the browser, nothing stored, Alloy redacts again), ID attached only with the per-identity consent. Dashboard `poweur-web`. Relay `FARO_COLLECT_URL`, bridge `OAUTH_FARO_URL` |
 
@@ -212,7 +213,7 @@ nor IP. All current action families have coverage; logs contain no content or cr
       reload, so GitHub stayed green while prod froze on 66e969ba / relay 0.1.2.)
 - [x] Build the web app + docs artifacts in CI if/when they gain a build step (today
       `apps/web` is static — volume-mounted; keep that, but note it in the ops doc)
-- [x] `deploy/README.md` (or extend `BACKUP.md` into `deploy/OPS.md`): the full runbook —
+- [x] `deploy/README.md` : the full runbook —
       bootstrap, deploy, rollback, backup/restore, where secrets live (Ansible vars +
       GitHub secrets), metrics/dashboards URLs
 
@@ -295,7 +296,7 @@ Run relay unit tests and `apps/integration` for implementation changes, includin
 collector and a collector-outage scenario. Consent changes touching clients require the usual
 web tests, client tests/build/typecheck, canonical specs/vectors when needed, and re-vendoring.
 Implementation is complete for T1–T4. Production rollout is an operator step: follow
-`deploy/OPS.md` to import existing database secrets, retire the old systemd units, then
+`deploy/README.md` to import existing database secrets, retire the old systemd units, then
 run Deploy (manual). Configure SMTP, GitHub failure notifications and the public Growth
 share link manually.
 

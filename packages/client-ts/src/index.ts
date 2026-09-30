@@ -12,9 +12,9 @@
  * it via the vectors in `test/conformance.test.ts`.
  */
 
-export const SDK_VERSION = "0.2.9";
+export const SDK_VERSION = "0.2.11";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
-export const SDK_BUILD_TIME = "2026-09-29 23:12";
+export const SDK_BUILD_TIME = "2026-09-30 17:05";
 
 export * from "./types.js";
 export * from "./errors.js";
@@ -50,6 +50,7 @@ export {
   LocalSigner,
   MemoryKeyStore,
   generateIdentityKeys,
+  generateSeedIdentity,
   identityKeysFromSeed,
   signerFor,
   requireKeys,
@@ -61,3 +62,4 @@ export {
 } from "./crypto/keys.js";
 
 export * from "./analytics.js";
+export * from "./groupkeys.js";

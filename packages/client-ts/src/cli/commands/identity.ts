@@ -4,14 +4,9 @@ import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { promises as dns } from "node:dns";
 
 import { canonicalIdentityRotation } from "../../canonical.js";
-import {
-  ed25519PublicKey,
-  generateEncryptionKeypair,
-  generateSigningKeypair,
-  signBytes,
-  x25519PublicKey,
-} from "../../crypto/index.js";
-import { LocalSigner } from "../../crypto/keys.js";
+import { ed25519PublicKey, newSeed, signBytes, x25519PublicKey } from "../../crypto/index.js";
+import { identityKeysFromSeed, LocalSigner } from "../../crypto/keys.js";
+import { newRecoveryKit, parseSeedOrMnemonic } from "../../kit.js";
 import { newDocument, signDocumentWithKey } from "../../document.js";
 import { rfc3339, toBase64Std, toBase64url } from "../../encoding.js";
 import { newNonce } from "../../ids.js";
@@ -55,15 +50,14 @@ export async function identityCreate(argv: string[], streams: Streams): Promise<
   const keysDir = config.keys_dir || defaultKeysDir();
   const keyStore = new FileKeyStore(keysDir);
 
-  // Keys are generated and saved even without a relay, so `identity create`
-  // offline still leaves usable material (the Go CLI does the same).
-  const signing = generateSigningKeypair();
-  const encryption = generateEncryptionKeypair();
-  const keys = {
-    identity,
-    signingPrivateKey: signing.privateKey,
-    encryptionPrivateKey: encryption.privateKey,
-  };
+  // Every identity is seed-based: keys come from --seed, or from a new seed
+  // shown once below. They are generated and saved even without a relay, so
+  // `identity create` offline still leaves usable material (the Go CLI does
+  // the same).
+  const seedFlag = flagString(args, "seed");
+  const generated = !seedFlag;
+  const seed = seedFlag ? parseSeedOrMnemonic(seedFlag) : newSeed();
+  const keys = identityKeysFromSeed(identity, seed);
 
   let registered = false;
   let response: unknown = null;
@@ -93,14 +87,15 @@ export async function identityCreate(argv: string[], streams: Streams): Promise<
 
   const payload = {
     identity,
-    public_key: toBase64url(signing.publicKey),
-    encryption_public_key: toBase64url(encryption.publicKey),
+    public_key: toBase64url(ed25519PublicKey(keys.signingPrivateKey)),
+    encryption_public_key: toBase64url(x25519PublicKey(keys.encryptionPrivateKey!)),
     key_path: signingKeyPath(keysDir, identity),
     encryption_key_path: encryptionKeyPath(keysDir, identity),
     relay: relayUrl,
     registered,
     hosted,
     response,
+    ...(generated ? seedFields(identity, seed, streams, flagBool(args, "json")) : {}),
   };
   const mode = hosted ? "hosted registration" : "registered with relay";
   const message = registered
@@ -244,64 +239,6 @@ export async function identityDns(argv: string[], streams: Streams): Promise<num
   return 0;
 }
 
-/**
- * `identity add-encryption-key` — mint an X25519 keypair for an identity that
- * has none (or rotate an existing one) and publish the public half to DNS.
- */
-export async function identityAddEncryptionKey(argv: string[], streams: Streams): Promise<number> {
-  const config = loadConfig();
-  const args = parseArgs(argv, {
-    bool: [...COMMON_BOOL, "rotate"],
-    defaults: { relay: config.relay_url },
-  });
-  const identity = args.positional[0] || activeIdentity(args, config.identity);
-  if (!identity) throw new UsageError("identity not configured");
-  const relayUrl = flagString(args, "relay");
-  if (!relayUrl) throw new UsageError("relay url not configured");
-
-  const keyStore = new FileKeyStore(config.keys_dir);
-  const keys = await keyStore.load(identity);
-  if (!keys) throw new UsageError(`signing key not found for ${identity}`);
-  const rotate = flagBool(args, "rotate");
-  if (keys.encryptionPrivateKey && !rotate) {
-    // Overwriting silently would strand every ciphertext sent to the old key.
-    throw new UsageError(
-      `encryption key already exists at ${encryptionKeyPath(config.keys_dir, identity)}; pass --rotate to overwrite`,
-    );
-  }
-
-  const dnsToken = resolveDnsToken(args);
-  if (!dnsToken) {
-    throw new UsageError(
-      "dns token is required (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)",
-    );
-  }
-
-  const encryption = generateEncryptionKeypair();
-  const api = new IdentityApi(new RelayClient(relayUrl));
-  await api.health();
-  const signer = new LocalSigner(identity, keys.signingPrivateKey);
-  const result = await api.publishEncryptionKey(signer, toBase64url(encryption.publicKey), {
-    dnsProvider: flagString(args, "dns-provider") || process.env["DNS_PROVIDER"] || "cloudflare",
-    dnsToken,
-  });
-  await keyStore.save({ ...keys, encryptionPrivateKey: encryption.privateKey });
-
-  return write(
-    streams,
-    flagBool(args, "json"),
-    {
-      identity,
-      encryption_public_key: result.encryption_public_key,
-      encryption_key_path: encryptionKeyPath(config.keys_dir, identity),
-      relay: relayUrl,
-      updated_at: result.updated_at,
-      rotated: rotate,
-    },
-    `${rotate ? "rotated" : "added"} encryption key for ${identity} (published to DNS)\n`,
-  );
-}
-
 export async function identityExport(argv: string[], streams: Streams): Promise<number> {
   const config = loadConfig();
   const args = parseArgs(argv, { bool: COMMON_BOOL });
@@ -320,9 +257,24 @@ export async function identityExport(argv: string[], streams: Streams): Promise<
 }
 
 /**
- * `key rotate` — mint a new signing key, publish a document that lists the old
- * one under `previous_keys` for the grace period, and keep a backup of the old
- * key file. Contacts who pinned the old key see a covered rotation rather than
+ * The recovery kit for a seed this command just generated: in the JSON output,
+ * and on stderr in human mode. It is the user's only copy.
+ */
+function seedFields(identity: string, seed: Uint8Array, streams: Streams, json: boolean) {
+  const kit = newRecoveryKit(identity, "", seed);
+  if (!json) {
+    streams.stderr(
+      `recovery kit for ${identity} — store this; it is the only way back\n` +
+        `  seed:     ${kit.seed}\n  mnemonic: ${kit.mnemonic}\n`,
+    );
+  }
+  return { seed: kit.seed, mnemonic: kit.mnemonic };
+}
+
+/**
+ * `key rotate` — move the identity onto a new seed (new signing and encryption
+ * keys), publish a document that lists the old signing key under
+ * `previous_keys` for the grace period, and keep a backup of the old key files. Contacts who pinned the old key see a covered rotation rather than
  * a mismatch.
  */
 export async function keyRotate(argv: string[], streams: Streams): Promise<number> {
@@ -336,11 +288,12 @@ export async function keyRotate(argv: string[], streams: Streams): Promise<numbe
   if (!keys) throw new UsageError(`no key found for ${identity}`);
 
   const oldPublic = toBase64url(ed25519PublicKey(keys.signingPrivateKey));
-  const fresh = generateSigningKeypair();
-  const newPublic = toBase64url(fresh.publicKey);
-  const encryptionPublic = keys.encryptionPrivateKey
-    ? toBase64url(x25519PublicKey(keys.encryptionPrivateKey))
-    : "";
+  // Rotation moves the identity onto a new master seed: both long-lived keys
+  // change together, so a recovery kit always covers everything.
+  const seed = newSeed();
+  const fresh = identityKeysFromSeed(identity, seed);
+  const newPublic = toBase64url(ed25519PublicKey(fresh.signingPrivateKey));
+  const encryptionPublic = toBase64url(x25519PublicKey(fresh.encryptionPrivateKey!));
 
   const issuedAt = rfc3339();
   const nonce = newNonce();
@@ -355,7 +308,7 @@ export async function keyRotate(argv: string[], streams: Streams): Promise<numbe
     updatedAt: issuedAt,
   });
   document.previous_keys = [{ public_key: `ed25519:${oldPublic}`, valid_until: validUntil }];
-  document = signDocumentWithKey(document, fresh.privateKey);
+  document = signDocumentWithKey(document, fresh.signingPrivateKey);
 
   const client = new RelayClient(config.relay_url);
   const rotationSignature = toBase64Std(
@@ -379,11 +332,13 @@ export async function keyRotate(argv: string[], streams: Streams): Promise<numbe
     },
   });
 
-  // Back up the old key before overwriting: a rotation the relay accepted but
-  // whose new key never reached disk would lock the identity out.
-  const oldPath = signingKeyPath(config.keys_dir, identity);
-  if (existsSync(oldPath)) renameSync(oldPath, `${oldPath}.pre-rotate`);
-  await keyStore.save({ ...keys, signingPrivateKey: fresh.privateKey });
+  // Back up the old keys before overwriting: a rotation the relay accepted but
+  // whose new keys never reached disk would lock the identity out, and the old
+  // encryption key still opens mail sent to it.
+  for (const oldPath of [signingKeyPath(config.keys_dir, identity), encryptionKeyPath(config.keys_dir, identity)]) {
+    if (existsSync(oldPath)) renameSync(oldPath, `${oldPath}.pre-rotate`);
+  }
+  await keyStore.save(fresh);
 
   return write(
     streams,
@@ -393,8 +348,9 @@ export async function keyRotate(argv: string[], streams: Streams): Promise<numbe
       public_key: response.public_key,
       previous_key: oldPublic,
       valid_until: validUntil,
+      ...seedFields(identity, seed, streams, flagBool(args, "json")),
     },
-    `rotated signing key for ${identity} (old key valid until ${validUntil})\n`,
+    `rotated keys for ${identity} onto a new seed (old signing key valid until ${validUntil})\n`,
   );
 }
 
@@ -421,12 +377,11 @@ export async function identityCommand(argv: string[], streams: Streams): Promise
     case "dns": return identityDns(rest, streams);
     case "use": return identityUse(rest, streams);
     case "list": return identityList(rest, streams);
-    case "add-encryption-key": return identityAddEncryptionKey(rest, streams);
     case "lookup": return identityLookup(rest, streams);
     case "export": return identityExport(rest, streams);
     default:
       throw new UsageError(
-        "unknown identity subcommand (want create, show, dns, use, list, add-encryption-key, lookup, export)",
+        "unknown identity subcommand (want create, show, dns, use, list, lookup, export)",
       );
   }
 }

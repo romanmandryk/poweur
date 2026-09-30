@@ -99,56 +99,33 @@ validated to have none. So `{"group": "team"}` means alice's own `team` forever,
 `{"group": "team.acme.poweur.net"}` means the group identity — no lookup order, no
 shadowing, no ambiguity to resolve.
 
-## Addressing a group as a share audience
+## Sharing a folder with a group
 
-Nothing about the grant format changes. The owner names the group in the audience like any
-other subject:
+A group is a share member like a person (storage v2, EPIC-020 E20-T7): a share's `member` is the
+group's Poweur ID. Two things make it work:
 
-```json
-{
-  "share_id": "shr_1f2e3d4c5b6a7988",
-  "owner": "alice.poweur.net",
-  "path": "shared/crew-docs",
-  "audience": [{"group": "crew.acme.poweur.net"}],
-  "permissions": ["read"],
-  "created_at": "2026-07-17T10:00:00Z",
-  "signature": "<alice's key>"
-}
-```
+- **Access** — the relay holding the drive lets a caller in when they are in the group's
+  `members` or `admins`. For a group hosted on the same relay it reads the roster itself; for a
+  group hosted elsewhere the member presents the group's signed roster in
+  `X-Poweur-Group-Roster`, which the relay verifies with the group's key and checks against the
+  group relay's current epoch. When a newer roster drops someone, their access ends and every
+  node under a key-bearing share to the group becomes `rotate_required`.
+- **Keys** (EPIC-024 E24-T3) — a share seals the node key to one public key. For a group that
+  is the **group key**: one X25519 key per membership epoch, published at
+  `https://<group>/.well-known/poweur/group-key.json` (and `GET /groups/{group}/public-key` on the
+  group's relay) and sealed to every member, admin and the group itself in
+  `.poweur/relay/group-keys.json`. Each keyring also seals every earlier epoch's key to the
+  current one, so a current member opens shares made at any epoch — including a member added
+  later. A removed member gets no key for the new epoch; the sharer's next write rotates the
+  node keys and re-issues the share to the new group key.
 
-The relay evaluates it per request, in one snapshot:
+Members read the keyring through `GET /groups/{group}/keys` (members, admins and the group
+itself; everyone else gets the same `404` as "no such group"). The relay checks on every write
+that the keyring is signed by the group, issued at the roster's current epoch and sealed to
+exactly the group, its members and its admins; it never sees a group key in the clear.
 
-1. Load and verify alice's grants out of her tree with **alice's** key, as always.
-2. For every audience entry naming a group identity, resolve that group **out of its own
-   tree** and verify `self.json` with the **group's** key.
-3. A visitor matches the grant if they are in that group's `members`.
-
-Step 2 is the load-bearing one. The membership document is fetched from the group's tree,
-never from the owner's, so:
-
-- **Naming a group in a grant confers no power over that group.** A `self.json` alice signs
-  for a group she does not own grants nobody anything — it is not in that group's tree and
-  is not signed by that group's key.
-- **One group's membership cannot be served for another.** The resolved document must name
-  itself: `group` and `owner` must both equal the group being resolved.
-- **An owner-local document cannot masquerade as a group identity.** A `self.json` with no
-  `admins` list is refused at this path.
-- **Membership changes need no new grant.** Adding a member is one signed update to the
-  group; the next request by that member is allowed. Removing one revokes on the next
-  request, with no cache window — grants and groups are re-read per request, the same
-  immediate-revocation pattern app passwords use.
-
-Every refusal is logged by the relay with the reason and **denies**. A group that cannot
-be resolved never opens access.
-
-### Deferred: cross-relay group resolution
-
-v1 resolves only group identities hosted on the **same relay** as the grant's owner. A
-group hosted elsewhere fails closed, with a log line saying so, because the relay would
-have to fetch and verify another relay's membership document over the network on the
-permission path. That needs a membership-check endpoint with its own caching, rate limiting
-and privacy story (asking "is X in your group?" is an enumeration oracle), so it is a
-follow-up, not a v1 shortcut.
+The group's own drive is its **group folder**: `group create` issues the first key, and the
+group shares its folders with itself.
 
 ## Authority: who may change a group
 
@@ -204,18 +181,22 @@ poweur group add    crew.acme.poweur.net --member dave.example.org
 poweur group add    crew.acme.poweur.net --admin  carol.poweur.net
 poweur group remove crew.acme.poweur.net --member bob.example.org
 
-# Address the group in a share.
-poweur share add /shared/crew-docs --with-group crew.acme.poweur.net --perm read
+# Share a folder with the group (from any drive: the sharer need not be in it).
+poweur drive share add /Plans crew.acme.poweur.net --role write --no-offer
+
+# Members open it with the group key.
+poweur drive list /<shared-node-id> --drive <sharer> --group crew.acme.poweur.net
+poweur sync run ~/Crew --drive <sharer> --folder /<shared-node-id> --group crew.acme.poweur.net
 ```
 
-`group create` registers the group as an ordinary hosted identity, stores its key on the
-device that created it, writes the signed `self.json`, and then puts the **active identity
-back** — creating a group must not quietly change which identity the next command speaks
+`group create` registers the group as an ordinary hosted identity, stores its keys on the
+device that created it, writes the signed `group.json` and the first group key, and then puts
+the **active identity back** — creating a group must not quietly change which identity the next command speaks
 as. With no `--admin`, the creating identity is the sole admin; with no `--member`, it is
 also the sole member.
 
-Owner-local groups keep their own verbs — `poweur share group set|ls|remove` — and
-`poweur group create` refuses a name without a dot, pointing at them.
+Every `add` or `remove` that changes the membership also issues the next epoch's group key.
+`poweur group create` refuses a name without a dot.
 
 ## Limits and privacy
 
@@ -224,6 +205,7 @@ Owner-local groups keep their own verbs — `poweur share group set|ls|remove` �
 - Group membership is visible to the **relay hosting the group** — it must be, to enforce —
   and to anyone holding owner credentials for the group. It is not exposed to other
   users, and there is no endpoint that answers "is X in this group?"; that omission is
-  deliberate and is the same reason cross-relay resolution is deferred.
+  deliberate. The group key (`group-key.json`) is public: it reveals that an ID is a group and
+  its epoch, not its members.
 - A grant naming a group leaks the group's *name* to whoever can read the grant, which in
   practice is the owner's relay and the owner's own devices.

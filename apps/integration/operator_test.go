@@ -53,7 +53,7 @@ func TestINT_OPERATOR_01_ReservedNameCreatedAndMessaged(t *testing.T) {
 	support := t.TempDir()
 	out, _ := runCLI(t, support,
 		"identity", "create", "support.poweur.net",
-		"--hosted", "--from-seed", "--operator-token", integrationOperatorToken,
+		"--hosted", "--operator-token", integrationOperatorToken,
 		"--relay", relayURL, "--json",
 	)
 	var created map[string]any

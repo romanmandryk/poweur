@@ -39,9 +39,11 @@ you here.
 
 Then a three-step setup runs. Every step is skippable, and skipping writes nothing:
 
-1. **Who can message you** — the inbox policy. It opens on `contacts_and_requests`,
-   the [recommended human default](../trust/contacts.md), and can also turn on
-   anonymous messages.
+1. **Who can message you** — the inbox policy. It opens on `open` ("Anyone"), so a first
+   message from a friend, or from the `hello.poweur.net` demo, arrives straight away; the
+   alternative offered is `contacts_and_requests` once strangers start to bother you. The
+   strict `contacts_only` mode is not offered to a new ID (it is in Settings, with a warning).
+   The step can also turn on anonymous messages. See [contacts and trust](../trust/contacts.md).
 2. **How people see you** — display name, bio, avatar, one link →
    `.poweur/public/profile.json`.
 3. **You're set.**
@@ -104,8 +106,10 @@ at once. See [sharing](../files/storage-v2.md).
 
 ## Keys, devices and recovery
 
-**Settings → Keys & devices** lists every enrolled authenticator, marks this one, and
-can remove one (revoking its sessions). **Recovery kit** renders 24 words derived from
+**Settings → Keys & devices** lists every device using the identity — web, app and CLI —
+with its name, client, platform, when it was added and last used, and marks this one. Each
+row notes whether a passkey backup exists to restore it after a reinstall. You can remove
+one (ending its sessions). **Recovery kit** renders 24 words derived from
 the identity seed and checks them back. A device that holds no key can join an existing
 identity through the six-digit comparison ceremony — see
 [key management](../security/key-management.md).

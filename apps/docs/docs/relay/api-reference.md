@@ -53,7 +53,6 @@ keystore fetch, signed by a passkey, still uses it.
 | `POST /sessions` | owner-only / admin | Identity-signed |
 | `DELETE /sessions/:id` | owner-only / admin | Identity-signed |
 | `POST /identities` | owner-only / admin | DNS-token (self-hosted) or invite (hosted) + identity-signed |
-| `POST /identities/:identity/encryption-key` | owner-only / admin | DNS-token + identity-signed |
 | `POST /identities/:identity/export` | owner-only | identity-signed export envelope → `application/gzip` |
 | `POST /identities/:identity/rotate` | owner-only | old-key rotation signature + new signed document |
 | `PUT /identities/:identity/keystore` | owner-only | identity-signed enrollment |
@@ -544,80 +543,6 @@ refuses it (`reserved`, `too_short`, …).
 
 ---
 
-## POST /identities/:identity/encryption-key
-
-Add or replace the X25519 encryption public key for a locally hosted
-identity. This endpoint exists so identities registered before E2E
-encryption was mandatory can be retrofitted without re-registering.
-**Owner-only / admin endpoint:** the request must carry an identity-
-signed admin envelope verified against the registered identity's
-long-lived signing key. The DNS provider token is used for the one DNS
-write and discarded immediately.
-
-### Path parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `:identity` | Fully qualified identity subdomain hosted on this relay |
-
-### Request body
-
-```json
-{
-  "encryption_public_key": "<base64url-encoded X25519 public key>",
-  "dns_provider":          "cloudflare",
-  "dns_token":             "<scoped DNS provider API token>",
-  "issued_at":             "2026-03-28T12:00:00Z",
-  "nonce":                 "<base64url random nonce>",
-  "identity_signature":    "<base64 signature of canonical identity-encryption-key string>"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `encryption_public_key` | string | Base64url-encoded X25519 encryption public key (no padding) |
-| `dns_provider` | string | DNS provider to use — `cloudflare` or `hetzner` |
-| `dns_token` | string | Scoped API token for the target DNS zone |
-| `issued_at` | string | RFC3339 UTC timestamp; relay enforces a recency window |
-| `nonce` | string | Per-request nonce |
-| `identity_signature` | string | Base64-encoded Ed25519 signature over the canonical identity-encryption-key string, verified against the registered identity's signing key |
-
-The canonical identity-encryption-key string is:
-
-```
-identity-encryption-key
-<identity>
-<encryption_public_key>
-<issued_at>
-<nonce>
-```
-
-### DNS records written
-
-1. `TXT` at `_poweur-enc.<identity>` — `poweur-enckey=x25519:<encryption_public_key>` (created or updated)
-
-### Responses
-
-| Status | Meaning |
-|--------|---------|
-| `200 OK` | Encryption key written to DNS |
-| `400 Bad Request` | Malformed request, missing fields (including a missing admin envelope), or unsupported `dns_provider` value |
-| `401 Unauthorized` | `identity_signature` failed to verify against the registered signing key |
-| `404 Not Found` | Identity is not hosted on this relay |
-| `502 Bad Gateway` | DNS provider write failed |
-
-**200 response body:**
-```json
-{
-  "identity":              "alice.poweur.net",
-  "encryption_public_key": "<base64url-encoded encryption public key>"
-}
-```
-
-The equivalent CLI command is `poweur identity add-encryption-key`.
-
----
-
 ## GET /identities/:identity
 
 Look up the public key registered for an identity on this relay. Used by peer relays to fetch a sender's public key when a DNS `TXT` record lookup is unavailable or not yet propagated.
@@ -852,7 +777,6 @@ rejected.
   "enrollment_id":         "enr-001",
   "kind":                  "passkey",
   "wrap":                  "prf",
-  "payload":               "seed",
   "credential_id":         "<base64url>",
   "credential_public_key": "<SPKI DER, base64url>",
   "credential_alg":        -8,
@@ -869,7 +793,6 @@ rejected.
 |-------|--------|
 | `kind` | `passkey` \| `hardware-key` \| `cli-passphrase` \| `recovery-kit` \| `native` |
 | `wrap` | `prf` \| `passphrase` \| `native` |
-| `payload` | `seed` \| `legacy-keypair` (identities predating the seed model) |
 | `credential_alg` | COSE id: `-7` ES256, `-8` EdDSA, `-257` RS256 |
 | `role` | `device` (default) \| `recovery-master` |
 
@@ -925,7 +848,7 @@ to an unverified caller.
 Enumerate enrollments for the owner — the "Keys & devices" inventory. Signed with
 `keystore-list\n<identity>\n<issued_at>\n<nonce>`.
 
-Returns **metadata only**: `enrollment_id`, `kind`, `wrap`, `payload`, `label`, `role`,
+Returns **metadata only**: `enrollment_id`, `kind`, `wrap`, `label`, `role`,
 `has_passkey`, `created_at`, `last_used_at`. Listing your devices needs no access to the
 wrapped seed copies, so the ciphertext is not in the response at all.
 
@@ -966,6 +889,26 @@ attacker who already extracted the seed — that is what rotation is for.
 :::
 
 ---
+
+## Device registry
+
+`GET /devices/:identity` (owner-authenticated) lists the devices the relay has seen for an identity,
+and `POST /devices/:identity/revoke` with `{ "device_id": "dev_…" }` ends a device's sessions.
+Every client — web, native app, Go and TS CLI — announces itself with optional headers on the
+requests that open a session, and the relay records them on one row per device:
+
+| Header | Row field | Notes |
+|--------|-----------|-------|
+| `X-Poweur-Device` | `id` (hashed) | random per-install fingerprint; the relay keeps only `dev_` + a hash |
+| `X-Poweur-Device-Name` | `name` | hostname, or "Safari on Mac", "iPhone" (≤ 64 bytes) |
+| `X-Poweur-Device-Kind` | `kind` | `laptop`, `phone`, `browser`, `agent`, … |
+| `X-Poweur-Device-Client` | `client` | `app`, `web` or `cli`; anything else is dropped |
+| `X-Poweur-Device-Platform` | `platform` | "macOS", "iOS", … (≤ 32 bytes) |
+| `X-Poweur-Device-Browser` | `browser` | web clients only (≤ 32 bytes) |
+| `X-Poweur-Device-Enrollment` | `enrollment_id` | the device's keystore enrollment, when it has one |
+
+All are self-reported labels, never credentials. A later request that omits a header leaves the
+stored value alone. Rows also carry `added_at` and `last_seen`.
 
 ## Device pairing (EPIC-011 E11-T8)
 

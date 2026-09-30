@@ -10,6 +10,7 @@ import { PoweurError } from "../errors.js";
 import type { ResolveOptions } from "../resolve.js";
 import { loadConfig, type PoweurConfig } from "./config.js";
 import { dialFetch } from "./dialfetch.js";
+import { deviceHeaders } from "./device.js";
 import { nodeTxtResolver } from "./dns.js";
 import { FileKeyStore } from "./keystore.js";
 import { FileSessionStore } from "./sessionstore.js";
@@ -76,6 +77,7 @@ export async function openClient(options: OpenOptions = {}): Promise<OpenedClien
     signer,
     decryptor,
     sessionStore: new FileSessionStore(),
+    headers: deviceHeaders(),
     resolve: nodeResolveOptions(options.resolve ?? {}),
   });
   return { client, config, keys, keyStore };

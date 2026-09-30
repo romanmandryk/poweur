@@ -232,8 +232,7 @@ func runGroupSend(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if len(encPub) != 32 {
-			fmt.Fprintf(stderr, "group member %s has no published encryption key; refusing to send in plaintext.\n"+
-				"Ask them to run `poweur identity add-encryption-key %s`.\n", member, member)
+			fmt.Fprintf(stderr, "group member %s has no published encryption key; refusing to send in plaintext.\n", member)
 			return 1
 		}
 		sealed, err := cryptoe2e.Encrypt(encPub, []byte(plaintext))

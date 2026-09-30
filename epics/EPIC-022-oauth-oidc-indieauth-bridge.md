@@ -9,7 +9,7 @@
   EPIC-019 (mobile app and background push), EPIC-009 (typed messages, optional push delivery)
 - **Unlocks:** INT-000's auth integration tier; Keycloak, Authentik, oauth2-proxy and other
   standard OIDC integrations; IndieAuth clients and personal-web applications
-- **Organizations:** E26-T7 adds an org-scoped issuer mode (members of `acme.com` sign into company tools with role-derived group claims).
+- **Organizations:** An org-scoped issuer mode is possible later (members of `acme.com` sign into company tools with role-derived group claims).
 
 ## Progress
 
@@ -409,7 +409,7 @@ browser/QR login is unchanged.
       change and verified by `versionHash` inside the container and through Cloudflare; Caddy
       route, Prometheus scrape + `blackbox-oauth` probe, Grafana alerts (`oauth-down`,
       `oauth-code-reuse`, `oauth-server-errors`), daily `poweur-oauth backup` cron; the relay
-      advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/OPS.md`
+      advertises it (`OAUTH_BRIDGE_URL`). Runbook: `deploy/README.md`
 - [ ] Contacts on `/abuse` and `/security` — wait on the email bridge (`<name>@poweur.net`
       mailboxes)
 - [x] Cross-relay journey in CI: RP → bridge → IDs on independent relays → RP (`TestINT_OAUTH_01`)

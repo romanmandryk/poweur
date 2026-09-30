@@ -15,7 +15,7 @@ import {
   x25519PublicKey,
 } from "./index.js";
 // Imported from the leaf module, not ./index.js, to keep this file acyclic.
-import { deriveEncryptionKey, deriveSigningKey } from "./seed.js";
+import { deriveEncryptionKey, deriveSigningKey, newSeed } from "./seed.js";
 
 /** Which base64 flavour a signature is rendered in. */
 export type SignatureEncoding = "base64url" | "base64std";
@@ -132,15 +132,15 @@ export class MemoryKeyStore implements KeyStore {
   }
 }
 
-/** Fresh signing + encryption keys for a new identity. */
+/** Fresh keys for a new identity, derived from a new seed the caller must keep. */
+export function generateSeedIdentity(identity: string): { keys: StoredIdentityKeys; seed: Uint8Array } {
+  const seed = newSeed();
+  return { keys: identityKeysFromSeed(identity, seed), seed };
+}
+
+/** Fresh keys for a new identity (seed-derived; use `generateSeedIdentity` to get the seed too). */
 export function generateIdentityKeys(identity: string): StoredIdentityKeys {
-  const signing = generateSigningKeypair();
-  const encryption = generateEncryptionKeypair();
-  return {
-    identity,
-    signingPrivateKey: signing.privateKey,
-    encryptionPrivateKey: encryption.privateKey,
-  };
+  return generateSeedIdentity(identity).keys;
 }
 
 /**

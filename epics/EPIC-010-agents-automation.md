@@ -4,7 +4,7 @@
 - **Priority:** P2 (the payoff layer — start once the substrate is usable)
 - **Depends on:** EPIC-004 (sync/changes feed), EPIC-005 (sharing), EPIC-008 (scoped grants), EPIC-009 (typed messages, push)
 - **Unlocks:** the end-state vision — agents and apps collaborating through identity, messaging and files without custom integrations
-- **Hosted execution:** the E10-T3 "relay-hosted runner" go/no-go is now [EPIC-027](EPIC-027-hosted-agent-runtime.md); room-bound app/game authorities are E27-T7. Validate the local runner first.
+- **Hosted execution:** the E10-T3 "relay-hosted runner" go/no-go is out of scope for this repository. Validate the local runner first.
 
 ## Goal
 
@@ -17,7 +17,7 @@ the substrate (IDs + files + messages + conventions) is shared.
 
 ## Background
 
-- Bots/agents are already in the identity model (`requirements.md`: "bots and automated agents
+- Bots/agents are already in the identity model (the original MVP requirements: "bots and automated agents
   manage their own key pairs programmatically"; CLI supports `--sign-with=identity` headless
   signing). What's missing is the *platform* around them: scoped capabilities, event sources,
   lifecycle and discovery.

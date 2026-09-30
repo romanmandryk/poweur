@@ -227,21 +227,14 @@ Both formats stay readable — an encrypted file is JSON and begins with `{`, pl
 base64 — so detection is by shape and migration needs no rename, no flag and no config change.
 Existing installs keep working and can opt in when they choose.
 
+The CLI also keeps the master seed beside the keys (`<identity>.seed`, same format, same `0600` mode,
+wrapped by `key protect` too), which is what lets `key approve` add a device without a recovery kit,
+as the app does. The seed derives both keys, so it grants nothing the key files do not already.
+Identities created before this change have no seed file until `poweur key recover <identity> --seed …`
+runs once.
+
 The passphrase protects the key *file*, not the identity: losing it is equivalent to losing the
 device, and the answer is the same — recover from the seed or another enrolled device.
-
-## Identities created before the seed model
-
-Identities registered before this design have **two independent keys** that are not derived from
-any seed, so they cannot produce a recovery kit. They are not stranded and are not forced to
-change:
-
-- Every flow except the recovery kit works unchanged.
-- `poweur key rotate` can move an identity onto a seed, publishing a rotation statement so
-  contacts follow the new key instead of warning about it.
-
-`poweur identity create` without `--seed` or `--from-seed` still generates two independent
-random keys, so nothing changes for existing scripts.
 
 ## Related
 

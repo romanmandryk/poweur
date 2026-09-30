@@ -9,14 +9,14 @@
  */
 import { createIdentity, rfc3339 } from "@poweur/client";
 
-import { generateIdentityJwks, keyBytesFromJwks, wrapKeysAES } from "../../src/lib/vault.js";
+import { generateSeedIdentityJwks, keyBytesFromJwks, wrapKeysAES } from "../../src/lib/vault.js";
 import { identityApiFor } from "../../src/lib/client.js";
 import { saveIdentityRecord, setActiveIdentity, setUnlockedKeys } from "../../src/lib/storage.js";
 
 export async function createWebIdentity(relayUrl, identity) {
-  const { signingJWK, encJWK, publicKey, encPublicKey } = await generateIdentityJwks();
+  const { signingJWK, encJWK, publicKey, encPublicKey, seed } = await generateSeedIdentityJwks();
   const wrapSecret = crypto.getRandomValues(new Uint8Array(32));
-  const encryptedKeys = { ...(await wrapKeysAES(wrapSecret, signingJWK, encJWK)), kdf: "prf" };
+  const encryptedKeys = { ...(await wrapKeysAES(wrapSecret, signingJWK, encJWK, seed)), kdf: "prf" };
 
   await createIdentity(identityApiFor(relayUrl), identity, {
     hosted: true,

@@ -145,7 +145,6 @@ func (f *keystoreFixture) enroll(t *testing.T, enrollmentID string, cred *testCr
 		EnrollmentID: enrollmentID,
 		Kind:         "passkey",
 		Wrap:         "prf",
-		Payload:      "seed",
 		Wrapped:      wrapped,
 		Label:        "Test device",
 		IssuedAt:     issuedAt,
@@ -192,7 +191,7 @@ func TestKeystore_EnrollRequiresValidSignature(t *testing.T) {
 	wrapped := json.RawMessage(`{"iv":"aXY","ciphertext":"Y3Q"}`)
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	req := KeystoreEnrollRequest{
-		EnrollmentID: "e2", Kind: "passkey", Wrap: "prf", Payload: "seed",
+		EnrollmentID: "e2", Kind: "passkey", Wrap: "prf",
 		Wrapped: wrapped, IssuedAt: issuedAt, Nonce: "n2",
 		IdentitySignature: b64(ed25519.Sign(wrongPriv, []byte("whatever"))),
 	}
@@ -211,7 +210,7 @@ func TestKeystore_EnrollBindsSignatureToCiphertext(t *testing.T) {
 		f.identity, "e1", "passkey", "", wrappedDigest(original), issuedAt, "n1")
 
 	req := KeystoreEnrollRequest{
-		EnrollmentID: "e1", Kind: "passkey", Wrap: "prf", Payload: "seed",
+		EnrollmentID: "e1", Kind: "passkey", Wrap: "prf",
 		Wrapped:           json.RawMessage(`{"iv":"aXY","ciphertext":"c3dhcHBlZA"}`),
 		IssuedAt:          issuedAt,
 		Nonce:             "n1",
@@ -229,7 +228,7 @@ func TestKeystore_PasskeyEnrollmentNeedsUsablePublicKey(t *testing.T) {
 	canonical := crypto.CanonicalKeystoreEnroll(
 		f.identity, "e1", "passkey", "cred-1", wrappedDigest(wrapped), issuedAt, "n1")
 	req := KeystoreEnrollRequest{
-		EnrollmentID: "e1", Kind: "passkey", Wrap: "prf", Payload: "seed",
+		EnrollmentID: "e1", Kind: "passkey", Wrap: "prf",
 		CredentialID: "cred-1", // no public key
 		Wrapped:      wrapped, IssuedAt: issuedAt, Nonce: "n1",
 		IdentitySignature: b64(ed25519.Sign(f.priv, []byte(canonical))),
@@ -245,7 +244,7 @@ func TestKeystore_RejectsPinWrap(t *testing.T) {
 	wrapped := json.RawMessage(`{"iv":"aXY","ciphertext":"Y3Q"}`)
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	req := KeystoreEnrollRequest{
-		EnrollmentID: "e-pin", Kind: "passkey", Wrap: "pin", Payload: "seed",
+		EnrollmentID: "e-pin", Kind: "passkey", Wrap: "pin",
 		Wrapped: wrapped, IssuedAt: issuedAt, Nonce: "n-pin",
 		IdentitySignature: "dGVzdA",
 	}
@@ -452,7 +451,7 @@ func (f *keystoreFixture) enrollWithRole(t *testing.T, enrollmentID, role string
 	canonical := crypto.CanonicalKeystoreEnroll(
 		f.identity, enrollmentID, "hardware-key", cred.id, wrappedDigest(wrapped), issuedAt, nonce)
 	req := KeystoreEnrollRequest{
-		EnrollmentID: enrollmentID, Kind: "hardware-key", Wrap: "prf", Payload: "seed",
+		EnrollmentID: enrollmentID, Kind: "hardware-key", Wrap: "prf",
 		CredentialID: cred.id, CredentialPublicKey: cred.spki, CredentialAlg: cred.alg,
 		Wrapped: wrapped, Role: role, IssuedAt: issuedAt, Nonce: nonce,
 		IdentitySignature: b64(ed25519.Sign(f.priv, []byte(canonical))),

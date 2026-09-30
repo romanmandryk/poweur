@@ -188,14 +188,6 @@ func TestVectors_CanonicalStrings(t *testing.T) {
 			Canonical: CanonicalIdentityRotation("alice.poweur.net", pubStr, encStr, vectorTime, nonce),
 		},
 		{
-			Name: "identity-encryption-key",
-			Inputs: map[string]any{
-				"identity": "alice.poweur.net", "encryption_public_key": encStr,
-				"issued_at": vectorTime, "nonce": nonce,
-			},
-			Canonical: CanonicalEncryptionKeyUpdate("alice.poweur.net", encStr, vectorTime, nonce),
-		},
-		{
 			Name: "keystore-enroll",
 			Inputs: map[string]any{
 				"identity": "alice.poweur.net", "enrollment_id": "enr-001",

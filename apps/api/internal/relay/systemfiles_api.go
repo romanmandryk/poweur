@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -214,6 +215,11 @@ func (s *Server) sysWriteRule(identity, path string) (int, func([]byte) error, e
 		return 0, nil, errors.New("id.json changes through registration and key rotation")
 	case path == groupRosterPath:
 		return maxSysDocBytes, func(b []byte) error { return s.validateOwnGroupRoster(identity, b) }, nil
+	case path == idpkg.GroupKeysDoc:
+		// One sealed key per member (up to 1000) plus earlier epochs.
+		return maxGroupKeysBytes, func(b []byte) error { return s.validateOwnGroupKeyring(context.Background(), identity, b) }, nil
+	case path == idpkg.GroupPublicKeyDoc:
+		return maxSysDocBytes, func(b []byte) error { return s.validateOwnGroupPublicKey(context.Background(), identity, b) }, nil
 	}
 	if v, ok := sysValidators[path]; ok {
 		return maxSysDocBytes, v, nil

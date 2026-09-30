@@ -130,7 +130,7 @@ The relay HTTP API is split into two classes (see
   reject path cheap. The relay also enforces an
   [at-least-one-local rule](/relay/api-reference#at-least-one-local-rule)
   so it cannot be abused as an open forwarder for the world.
-- **Owner-only / admin** — `POST /identities`, `POST /identities/:identity/encryption-key`, `DELETE /sessions/:id`, `POST /sessions`, `GET /messages/:identity`. Each requires either challenge-response (`GET /messages/:identity`) or an identity-signed admin envelope verified against the long-lived signing key for the identity in question. The DNS-token check on `POST /identities` is necessary but no longer sufficient on its own; the request must also carry a signature verified against the body's `public_key`, so a hostile DNS-token holder cannot register an arbitrary public key.
+- **Owner-only / admin** — `POST /identities`, `DELETE /sessions/:id`, `POST /sessions`, `GET /messages/:identity`. Each requires either challenge-response (`GET /messages/:identity`) or an identity-signed admin envelope verified against the long-lived signing key for the identity in question. The DNS-token check on `POST /identities` is necessary but no longer sufficient on its own; the request must also carry a signature verified against the body's `public_key`, so a hostile DNS-token holder cannot register an arbitrary public key.
 
 ## Send Path Metadata Trade-off
 
@@ -155,7 +155,7 @@ accepts a message where neither party is locally hosted.
 
 - **Metadata is visible to the relay.** Sender, recipient, timestamp, and message size are not hidden from the relay. Which relay sees the sender's IP depends on the chosen send path (default direct-to-recipient vs. `--via-home-relay`); see above.
 - **Forward secrecy is partial.** Each message uses a fresh ephemeral X25519 key, so compromising a recipient's long-lived encryption key does not reveal past messages once the ephemeral key is deleted. A dedicated double-ratchet session scheme (Signal-style) is a future improvement.
-- **No plaintext fallback.** Encryption is mandatory end-to-end: CLI and mobile both refuse to send to a recipient without a published `_poweur-enc.<identity>` record, and relays reject any `POST /messages` lacking encryption metadata with `400 encryption_required`. A recipient without an encryption key simply cannot receive messages until they publish one (via `poweur identity add-encryption-key` or the mobile equivalent).
+- **No plaintext fallback.** Encryption is mandatory end-to-end: CLI and mobile both refuse to send to a recipient without a published `_poweur-enc.<identity>` record, and relays reject any `POST /messages` lacking encryption metadata with `400 encryption_required`. Every identity is created with an encryption key derived from its seed, so this only matters for a record that has gone missing.
 - **Session keys are relay-local.** A relay seeing only an unfamiliar `session_id` cannot verify a forwarded message unless the envelope also carries `session_proof` (which the sending relay attaches automatically when forwarding).
 
 ## Related

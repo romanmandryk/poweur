@@ -112,8 +112,7 @@ describe("journey: mutual contact handshake", () => {
     const answers = await bob.client.requests();
     expect(answers.map((r) => r.type)).toContain(MSG_TYPE_CONTACT_ACCEPT);
 
-    // Completing the handshake is the client's job on this side.
-    await (await bob.client.contacts()).set(alice.identity, CONTACT_ACCEPTED, {});
+    // Reading the answer completes the handshake without a second approval.
     expect(await contactState(bob, alice.identity)).toBe(CONTACT_ACCEPTED);
 
     // Mutual: both directions carry against two closed policies.

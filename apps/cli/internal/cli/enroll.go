@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ type newDevicePairing struct {
 	Commitment  string `json:"commitment"`
 	ExpiresAt   string `json:"expires_at"`
 	Revealed    bool   `json:"revealed,omitempty"`
+	// Label is what the user called this machine at `key enroll --label`.
+	// Kept so `key claim` (a later command) can still name the device.
+	Label string `json:"label,omitempty"`
 }
 
 // approverPairing is the approving side's state: its nonce must stay the same
@@ -237,6 +241,7 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 	}
 	p := newDevicePairing{
 		Identity:   identityValue,
+		Label:      strings.TrimSpace(*label),
 		Relay:      strings.TrimRight(*relayURL, "/"),
 		PublicKey:  base64.RawURLEncoding.EncodeToString(ephPub),
 		PrivateKey: base64.RawURLEncoding.EncodeToString(ephPriv),
@@ -268,7 +273,7 @@ func runKeyEnroll(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Approve on a device that already has %s.\n\nPoweur app — scan with the phone's camera:\n\n", identityValue)
 		terminalQR(stdout, appLink)
 		fmt.Fprintf(stdout, "\nBrowser — open:    %s\n", p.Link)
-		fmt.Fprintf(stdout, "Terminal — run:    poweur key approve '%s' --seed …\n", p.Link)
+		fmt.Fprintf(stdout, "Terminal — run:    poweur key approve '%s'\n", p.Link)
 		fmt.Fprintf(stdout, "Or enter the code %s there (Settings → Keys & devices → Add a device).\n\n",
 			idpkg.FormatShortCode(p.Code))
 	}
@@ -344,8 +349,54 @@ func stepNewDevice(p *newDevicePairing) (status, sas string, seed []byte, err er
 // adoptSeed saves the keys a delivered seed derives — only if they are the
 // identity's published keys, so a seed that is not this identity's is never
 // adopted.
+// registerEnrolledDevice makes the freshly enrolled machine show up in the
+// owner's "Keys & devices" list right away. The relay only learns a device
+// from an authenticated request carrying the device headers, and enrolling
+// makes none, so without this the machine stays invisible until its first
+// `poweur inbox`. Best effort: the keys are already saved, so a failure is a
+// warning, never an error.
+func registerEnrolledDevice(p newDevicePairing, priv ed25519.PrivateKey, stderr io.Writer) bool {
+	d, err := loadDevice()
+	if err == nil {
+		d.Name = enrolledDeviceName(p.Label, d.Name)
+		err = saveDevice(d)
+	}
+	if err == nil {
+		_, err = ensureSession(context.Background(), p.Relay, p.Identity, priv)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "enrolled, but could not register this device with the relay yet (%v); it will appear after its first command\n", err)
+		return false
+	}
+	return true
+}
+
+// enrolledDeviceName is what the owner sees as the device's name: the label
+// they gave, else the hostname. The platform and client type travel as their
+// own fields, so they are not folded into the name.
+func enrolledDeviceName(label, hostname string) string {
+	base := strings.TrimSpace(label)
+	if base == "" {
+		base = hostname
+	}
+	return idpkg.SanitizeDeviceName(base)
+}
+
+func platformName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macOS"
+	case "linux":
+		return "Linux"
+	case "windows":
+		return "Windows"
+	default:
+		return runtime.GOOS
+	}
+}
+
 func adoptSeed(cfg config.Config, p newDevicePairing, seed []byte, stdout, stderr io.Writer, jsonOut bool) int {
-	pub, _, err := identity.KeypairFromSeed(seed)
+	pub, priv, err := identity.KeypairFromSeed(seed)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -375,8 +426,10 @@ func adoptSeed(cfg config.Config, p newDevicePairing, seed []byte, stdout, stder
 		return 1
 	}
 	dropPairing("new", p.Identity, p.Code)
+	registered := registerEnrolledDevice(p, priv, stderr)
 	return writeOutput(stdout, jsonOut, map[string]any{
 		"identity": p.Identity, "key_path": keyPath, "encryption_key_path": encKeyPath, "enrolled": true,
+		"device_registered": registered,
 	}, fmt.Sprintf("enrolled %s on this device\n", p.Identity))
 }
 
@@ -449,6 +502,32 @@ func openSealedSeed(sealed string, ephPriv []byte) ([]byte, error) {
 
 var errPairingMismatch = errors.New("pairing mismatch")
 
+// approverSeed is the master seed to seal to the new device: --seed when given,
+// otherwise the one this device stored when it created or recovered the
+// identity, so approving needs no recovery kit. Identities set up before seeds
+// were stored (or with the seed file removed) still need --seed.
+func approverSeed(cfg config.Config, identityValue, seedFlag string) ([]byte, error) {
+	if seedFlag != "" {
+		return identity.ParseSeed(seedFlag)
+	}
+	keysDir := cfg.KeysDir
+	if keysDir == "" {
+		var err error
+		if keysDir, err = config.KeysDir(); err != nil {
+			return nil, err
+		}
+	}
+	seed, err := identity.LoadSeed(identity.SeedPath(keysDir, identityValue))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("this device has no stored seed for %s: pass --seed <recovery kit seed or mnemonic>, "+
+			"or run `poweur key recover %s --seed …` once to store it", identityValue, identityValue)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not read the stored seed for %s: %w", identityValue, err)
+	}
+	return seed, nil
+}
+
 // runKeyApprove approves a waiting device and seals the seed to it.
 func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 	cfg, err := config.Load()
@@ -460,7 +539,7 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "identity to enroll the device into")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
-	seedFlag := fs.String("seed", "", "master seed (base64url or mnemonic)")
+	seedFlag := fs.String("seed", "", "master seed (base64url or mnemonic); default: the seed stored on this device")
 	expectSAS := fs.String("sas", "", "the six digits the new device shows (typed code only)")
 	noWait := fs.Bool("no-wait", false, "return at once if the new device has not answered yet")
 	jsonOut := fs.Bool("json", false, "output json")
@@ -471,16 +550,21 @@ func runKeyApprove(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: poweur key approve <pairing-link | code> [--sas 123456]")
 		return 1
 	}
-	identityValue := strings.ToLower(resolveIdentity(*useIdentity, cfg.Identity))
+	identityValue := strings.ToLower(resolveIdentity(*useIdentity, ""))
+	if identityValue == "" {
+		// A pairing link names its identity, so it decides which one to approve
+		// for; only a bare code falls back to the configured default.
+		if link, perr := idpkg.ParsePairingLink(fs.Arg(0)); perr == nil && link.Identity != "" {
+			identityValue = strings.ToLower(link.Identity)
+		} else {
+			identityValue = strings.ToLower(cfg.Identity)
+		}
+	}
 	if identityValue == "" || *relayURL == "" {
 		fmt.Fprintln(stderr, "identity and relay url required")
 		return 1
 	}
-	if *seedFlag == "" {
-		fmt.Fprintln(stderr, "--seed is required: the seed lives only on your devices, never on the relay")
-		return 1
-	}
-	seed, err := identity.ParseSeed(*seedFlag)
+	seed, err := approverSeed(cfg, identityValue, *seedFlag)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

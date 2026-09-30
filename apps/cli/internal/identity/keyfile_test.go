@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -206,5 +207,64 @@ func TestPassphrase_PrefersExplicitOverEnvironment(t *testing.T) {
 	}
 	if got := Passphrase(""); got != "from-env" {
 		t.Fatalf("want env fallback, got %q", got)
+	}
+}
+
+// A stored seed is read back exactly, is written 0600, and follows the same
+// `key protect` envelope as the keys it derives.
+func TestSeed_SaveLoadAndProtect(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	seed, err := NewSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := SaveSeed("alice.poweur.net", seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := SeedPath(filepath.Join(home, ".poweur", "keys"), "alice.poweur.net"); path != want {
+		t.Fatalf("path = %s, want %s", path, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("seed file mode = %v, %v", info, err)
+	}
+	got, err := LoadSeed(path)
+	if err != nil || !bytes.Equal(got, seed) {
+		t.Fatalf("LoadSeed = %x, %v", got, err)
+	}
+
+	t.Setenv(EnvKeyPassphrase, "correct horse")
+	if did, err := ProtectKeyFile(path, "correct horse"); err != nil || !did {
+		t.Fatalf("protect = %v, %v", did, err)
+	}
+	if got, err := LoadSeed(path); err != nil || !bytes.Equal(got, seed) {
+		t.Fatalf("LoadSeed (protected) = %x, %v", got, err)
+	}
+	t.Setenv(EnvKeyPassphrase, "")
+	if _, err := LoadSeed(path); err == nil {
+		t.Fatal("a protected seed loaded without the passphrase")
+	}
+}
+
+func TestLoadSeed_MissingIsNotExist(t *testing.T) {
+	_, err := LoadSeed(filepath.Join(t.TempDir(), "nobody.seed"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Recovery from a seed stores the seed too, so the recovered device can approve.
+func TestSaveKeysFromSeed_StoresTheSeed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	seed, _ := NewSeed()
+	if _, _, err := SaveKeysFromSeed("alice.poweur.net", seed); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSeed(SeedPath(filepath.Join(home, ".poweur", "keys"), "alice.poweur.net"))
+	if err != nil || !bytes.Equal(got, seed) {
+		t.Fatalf("stored seed = %x, %v", got, err)
 	}
 }

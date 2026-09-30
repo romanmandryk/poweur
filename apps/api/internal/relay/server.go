@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -35,6 +36,7 @@ const (
 
 type Server struct {
 	quotas          *quotaOverrides
+	suspended       *suspensions
 	telemetry       *telemetry.Runtime
 	startupFailures []string
 	stop            chan struct{}
@@ -174,6 +176,10 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
 	}
+	s.suspended = newSuspensions(func(err error) {
+		s.event(context.Background(), "suspended.identities", "invalid")
+		log.Printf("suspended identities: %v (keeping the last good list)", err)
+	})
 	s.quotas = newQuotaOverrides(cfg.StorageQuotasFile, func(err error) {
 		s.event(context.Background(), "storage.quotas", "invalid")
 		logQuotaFileError(err)
@@ -181,6 +187,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 	s.driveErr = driveErr
 	if driveStore != nil {
 		s.quotas.store = driveStore
+		s.suspended.store = driveStore
 	}
 	s.sysFiles = newMemSystemFiles()
 	if driveStore != nil {
@@ -267,72 +274,74 @@ func (s *Server) pruneLocalityCache() {
 func (s *Server) Router() http.Handler {
 	s.pruneOnce.Do(func() { go s.runPruner() })
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.handleRoot)
+	handle := func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.guardSuspended(h)) }
+	handle("GET /", s.handleRoot)
 	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("POST /messages", s.handleMessagesPost)
-	mux.HandleFunc("GET /messages/{identity}", s.handleMessagesGet)
-	mux.HandleFunc("POST /messages/{identity}/consume", s.handleMessagesConsume)
-	mux.HandleFunc("GET /groups/{group}", s.handleGroupGet)
-	mux.HandleFunc("GET /groups/{group}/epoch", s.handleGroupEpoch)
-	mux.HandleFunc("POST /groups/{group}/messages", s.handleGroupMessagesPost)
-	mux.HandleFunc("GET /events/{identity}", s.handleEvents)
-	mux.HandleFunc("GET /requests/{identity}", s.handleRequestsGet)
-	mux.HandleFunc("GET /anon/{identity}", s.handleAnonGet)
-	mux.HandleFunc("POST /abuse", s.handleAbuseReport)
-	mux.HandleFunc("POST /acks", s.handleAcksPost)
-	mux.HandleFunc("GET /auth/challenge", s.handleAuthChallenge)
-	mux.HandleFunc("GET /auth/pow", s.handleAuthPow)
-	mux.HandleFunc("POST /identities", s.handleIdentitiesPost)
-	mux.HandleFunc("GET /identities/{identity}", s.handleIdentitiesGet)
-	mux.HandleFunc("GET /hosted/availability", s.handleHostedAvailability)
-	mux.HandleFunc("POST /identities/{identity}/encryption-key", s.handleIdentityEncryptionKeyPost)
-	mux.HandleFunc("POST /identities/{identity}/export", s.handleIdentityExport)
-	mux.HandleFunc("POST /identities/{identity}/rotate", s.handleIdentityRotate)
-	mux.HandleFunc("PUT /identities/{identity}/keystore", s.handleKeystorePut)
-	mux.HandleFunc("POST /identities/{identity}/keystore/list", s.handleKeystoreList)
-	mux.HandleFunc("POST /identities/{identity}/keystore/fetch", s.handleKeystoreFetch)
-	mux.HandleFunc("DELETE /identities/{identity}/keystore/{enrollment}", s.handleKeystoreDelete)
-	mux.HandleFunc("POST /identities/{identity}/enroll/offer", s.handleEnrollOffer)
-	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/fetch", s.handleEnrollFetch)
-	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/deliver", s.handleEnrollDeliver)
-	mux.HandleFunc("POST /identities/{identity}/enroll/{rendezvous}/reveal", s.handleEnrollReveal)
-	mux.HandleFunc("GET /identities/{identity}/enroll/{rendezvous}", s.handleEnrollPoll)
-	mux.HandleFunc("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
-	mux.HandleFunc("POST /sessions", s.handleSessionCreate)
-	mux.HandleFunc("DELETE /sessions/{id}", s.handleSessionDelete)
-	mux.HandleFunc("GET /identities/{identity}/system/{path...}", s.handleSystemFileGet)
-	mux.HandleFunc("PUT /identities/{identity}/system/{path...}", s.handleSystemFilePut)
-	mux.HandleFunc("DELETE /identities/{identity}/system/{path...}", s.handleSystemFileDelete)
-	mux.HandleFunc("GET /drive/{identity}", s.handleDriveGet)
-	mux.HandleFunc("POST /drive/{identity}/chunks/missing", s.handleDriveMissing)
-	mux.HandleFunc("PUT /drive/{identity}/chunks/{chunk}", s.handleDriveChunkPut)
-	mux.HandleFunc("POST /drive/{identity}/commit", s.handleDriveCommit)
-	mux.HandleFunc("GET /drive/{identity}/changes", s.handleDriveChanges)
-	mux.HandleFunc("GET /drive/{identity}/shares", s.handleDriveShares)
-	mux.HandleFunc("GET /drive/{identity}/events", s.handleDriveEvents)
-	mux.HandleFunc("GET /drive/{identity}/links/{link}", s.handleDriveLink)
-	mux.HandleFunc("GET /drive/{identity}/links/{link}/stats", s.handleDriveLinkStats)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/shares", s.handleDriveNodeShares)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/author-cursor", s.handleDriveAuthorCursor)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/listing", s.handleDriveListing)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/path", s.handleDrivePath)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
-	mux.HandleFunc("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
-	mux.HandleFunc("GET /devices/{identity}", s.handleDevicesGet)
-	mux.HandleFunc("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
-	mux.HandleFunc("GET /.well-known/did.json", s.handleDIDWeb)
-	mux.HandleFunc("GET /.well-known/poweur/{path...}", s.handleWellKnown)
-	mux.HandleFunc("GET /identity-page/assets/{file}", serveIdentityPageAsset)
-	mux.HandleFunc("GET /s/{link}", s.handleLinkViewer)
-	mux.HandleFunc("GET /pub", s.handlePublic)
-	mux.HandleFunc("GET /pub/{path...}", s.handlePublic)
-	mux.HandleFunc("GET /s/assets/{file}", s.handleLinkViewerAsset)
+	handle("POST /messages", s.handleMessagesPost)
+	handle("GET /messages/{identity}", s.handleMessagesGet)
+	handle("POST /messages/{identity}/consume", s.handleMessagesConsume)
+	handle("GET /groups/{group}", s.handleGroupGet)
+	handle("GET /groups/{group}/epoch", s.handleGroupEpoch)
+	handle("GET /groups/{group}/keys", s.handleGroupKeysGet)
+	handle("GET /groups/{group}/public-key", s.handleGroupPublicKey)
+	handle("POST /groups/{group}/messages", s.handleGroupMessagesPost)
+	handle("GET /events/{identity}", s.handleEvents)
+	handle("GET /requests/{identity}", s.handleRequestsGet)
+	handle("GET /anon/{identity}", s.handleAnonGet)
+	handle("POST /abuse", s.handleAbuseReport)
+	handle("POST /acks", s.handleAcksPost)
+	handle("GET /auth/challenge", s.handleAuthChallenge)
+	handle("GET /auth/pow", s.handleAuthPow)
+	handle("POST /identities", s.handleIdentitiesPost)
+	handle("GET /identities/{identity}", s.handleIdentitiesGet)
+	handle("GET /hosted/availability", s.handleHostedAvailability)
+	handle("POST /identities/{identity}/export", s.handleIdentityExport)
+	handle("POST /identities/{identity}/rotate", s.handleIdentityRotate)
+	handle("PUT /identities/{identity}/keystore", s.handleKeystorePut)
+	handle("POST /identities/{identity}/keystore/list", s.handleKeystoreList)
+	handle("POST /identities/{identity}/keystore/fetch", s.handleKeystoreFetch)
+	handle("DELETE /identities/{identity}/keystore/{enrollment}", s.handleKeystoreDelete)
+	handle("POST /identities/{identity}/enroll/offer", s.handleEnrollOffer)
+	handle("POST /identities/{identity}/enroll/{rendezvous}/fetch", s.handleEnrollFetch)
+	handle("POST /identities/{identity}/enroll/{rendezvous}/deliver", s.handleEnrollDeliver)
+	handle("POST /identities/{identity}/enroll/{rendezvous}/reveal", s.handleEnrollReveal)
+	handle("GET /identities/{identity}/enroll/{rendezvous}", s.handleEnrollPoll)
+	handle("DELETE /identities/{identity}/enroll/{rendezvous}", s.handleEnrollCancel)
+	handle("POST /sessions", s.handleSessionCreate)
+	handle("DELETE /sessions/{id}", s.handleSessionDelete)
+	handle("GET /identities/{identity}/system/{path...}", s.handleSystemFileGet)
+	handle("PUT /identities/{identity}/system/{path...}", s.handleSystemFilePut)
+	handle("DELETE /identities/{identity}/system/{path...}", s.handleSystemFileDelete)
+	handle("GET /drive/{identity}", s.handleDriveGet)
+	handle("POST /drive/{identity}/chunks/missing", s.handleDriveMissing)
+	handle("PUT /drive/{identity}/chunks/{chunk}", s.handleDriveChunkPut)
+	handle("POST /drive/{identity}/commit", s.handleDriveCommit)
+	handle("GET /drive/{identity}/changes", s.handleDriveChanges)
+	handle("GET /drive/{identity}/shares", s.handleDriveShares)
+	handle("GET /drive/{identity}/events", s.handleDriveEvents)
+	handle("GET /drive/{identity}/links/{link}", s.handleDriveLink)
+	handle("GET /drive/{identity}/links/{link}/stats", s.handleDriveLinkStats)
+	handle("GET /drive/{identity}/nodes/{node}", s.handleDriveNode)
+	handle("GET /drive/{identity}/nodes/{node}/children", s.handleDriveChildren)
+	handle("GET /drive/{identity}/nodes/{node}/history", s.handleDriveHistory)
+	handle("GET /drive/{identity}/nodes/{node}/shares", s.handleDriveNodeShares)
+	handle("GET /drive/{identity}/nodes/{node}/records", s.handleDriveRecords)
+	handle("GET /drive/{identity}/nodes/{node}/author-cursor", s.handleDriveAuthorCursor)
+	handle("GET /drive/{identity}/nodes/{node}/chunks/{chunk}", s.handleDriveChunk)
+	handle("GET /drive/{identity}/nodes/{node}/versions/{version}", s.handleDriveVersion)
+	handle("GET /drive/{identity}/nodes/{node}/listing", s.handleDriveListing)
+	handle("GET /drive/{identity}/nodes/{node}/path", s.handleDrivePath)
+	handle("GET /drive/{identity}/nodes/{node}/versions/{version}/pages/{page}", s.handleDrivePage)
+	handle("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
+	handle("GET /devices/{identity}", s.handleDevicesGet)
+	handle("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
+	handle("GET /.well-known/did.json", s.handleDIDWeb)
+	handle("GET /.well-known/poweur/{path...}", s.handleWellKnown)
+	handle("GET /identity-page/assets/{file}", serveIdentityPageAsset)
+	handle("GET /s/{link}", s.handleLinkViewer)
+	handle("GET /pub", s.handlePublic)
+	handle("GET /pub/{path...}", s.handlePublic)
+	handle("GET /s/assets/{file}", s.handleLinkViewerAsset)
 	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
 	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(hashSignedBodies(mux)))
@@ -544,6 +553,10 @@ func (s *Server) handleIdentitiesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "identity_exists", "identity already registered")
 		return
 	}
+	if _, held := s.held(req.Identity); held {
+		writeError(w, http.StatusConflict, "name_held", "this name is held by the relay operator")
+		return
+	}
 
 	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -666,75 +679,6 @@ func mustDecodeB64(s string) []byte {
 		b, _ = base64.StdEncoding.DecodeString(s)
 	}
 	return b
-}
-
-// handleIdentityEncryptionKeyPost publishes (or rotates) the X25519
-// `_poweur-enc.<identity>` TXT record for an already-registered identity.
-// Owner-only: caller must sign the canonical encryption-key-update string
-// with the long-lived identity key (verified via DNS or local store).
-//
-// This endpoint exists because early identities were minted before E2E
-// encryption landed, so they have a signing record in DNS but no encryption
-// record. A separate endpoint (instead of POST /identities with upsert
-// semantics) keeps the primary registration flow strict — "create once" —
-// and makes the "retro-fit an existing identity" flow explicit and auditable.
-func (s *Server) handleIdentityEncryptionKeyPost(w http.ResponseWriter, r *http.Request) {
-	identityValue := r.PathValue("identity")
-	if identityValue == "" {
-		writeError(w, http.StatusBadRequest, "invalid_identity", "missing identity")
-		return
-	}
-	var req EncryptionKeyRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		return
-	}
-	if req.EncryptionPublicKey == "" || req.DNSProvider == "" || req.DNSToken == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "missing required fields")
-		return
-	}
-	if req.IssuedAt == "" || req.Nonce == "" || req.IdentitySignature == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "missing identity-signed admin envelope (issued_at, nonce, identity_signature)")
-		return
-	}
-	if err := requireRecentTimestamp(req.IssuedAt); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-
-	normalizedEnc, _, err := crypto.NormalizeX25519PublicKey(req.EncryptionPublicKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_encryption_key", err.Error())
-		return
-	}
-
-	identityPub, err := s.resolveIdentityPublicKey(r.Context(), identityValue)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "cannot resolve identity public key: "+err.Error())
-		return
-	}
-	canonical := crypto.CanonicalEncryptionKeyUpdate(identityValue, normalizedEnc, req.IssuedAt, req.Nonce)
-	if err := crypto.VerifySignature(identityPub, canonical, req.IdentitySignature); err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "identity signature invalid")
-		return
-	}
-	verifiedActor(r, identityValue)
-
-	provider, err := s.providers.Provider(req.DNSProvider)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "unsupported_dns_provider", err.Error())
-		return
-	}
-
-	if err := provider.WriteEncryptionKey(r.Context(), req.DNSToken, identityValue, normalizedEnc); err != nil {
-		writeError(w, http.StatusBadGateway, "dns_write_failed", err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, EncryptionKeyResponse{
-		Identity:            identityValue,
-		EncryptionPublicKey: normalizedEnc,
-		UpdatedAt:           time.Now().UTC().Format(time.RFC3339),
-	})
 }
 
 // requireRecentTimestamp parses an RFC3339 timestamp and rejects it if it
@@ -878,6 +822,9 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.rejectHeld(w, msg.Sender, msg.Recipient) {
+		return
+	}
 	publicKey, source, err := s.resolveSigningKey(r.Context(), msg.Sender, msg.SessionID, msg.SessionProof)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
@@ -1329,9 +1276,11 @@ func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) 
 
 // virtualHostClient dials this relay's address while preserving the request Host,
 // so well-known fetches work in tests (and any setup) where the identity FQDN
-// is not in system DNS but is Host-routed on this relay.
+// is not in system DNS but is Host-routed on this relay. When the resolver maps
+// the host to a host:port (several relays in one test), that relay is dialed.
 func (s *Server) virtualHostClient() *http.Client {
 	dialAddr := s.cfg.RelayAddress
+	resolver := s.resolver
 	return &http.Client{
 		Timeout: idpkg.DefaultTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -1339,7 +1288,15 @@ func (s *Server) virtualHostClient() *http.Client {
 		},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, dialAddr)
+				target := dialAddr
+				if host, _, err := net.SplitHostPort(addr); err == nil && resolver != nil {
+					if hosts, err := resolver.LookupHost(ctx, host); err == nil && len(hosts) > 0 {
+						if _, _, err := net.SplitHostPort(hosts[0]); err == nil {
+							target = hosts[0]
+						}
+					}
+				}
+				return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, target)
 			},
 		},
 	}

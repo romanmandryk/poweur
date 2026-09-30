@@ -12,7 +12,7 @@
   pattern this service copies: separate origin, public-protocol-only coupling)
 - **Unlocks:** `john@poweur.net` for every hosted ID that opts in; email ↔ Poweur conversation
   upgrades; email-driven automations; masked aliases
-- **Plans note (EPIC-026):** receiving is free; outbound volume, masked aliases and custom-domain mail are the paid lines. Email is also a recipient channel for E05-T7 Send and EPIC-030 buyers.
+- **Plans note:** plan enforcement is external. Email is also a recipient channel for E05-T7 Send.
 
 ## Progress
 
@@ -454,7 +454,7 @@ never adds it.
       MTA-STS, TLS-RPT, PTR/FCrDNS) for each served domain
 - [ ] Choose the public outbound provider (AUP allows free-sign-up person-to-person mail; custom
       MAIL FROM; bounce/complaint webhooks; EU region preferred) and document the choice
-- [ ] `deploy/OPS.md`: rollout order (reserve names → DNS at `p=none` + MTA-STS `testing` → enable
+- [ ] `deploy/README.md`: rollout order (reserve names → DNS at `p=none` + MTA-STS `testing` → enable
       MX → watch DMARC/TLS-RPT → tighten), backups (`EMAIL_DATA`: spool, suppression list, footer
       ledger), privacy and abuse-contact pages, Grafana dashboard
 - [ ] Better Stack / blackbox probes: SMTP banner + STARTTLS on :25, `/health`

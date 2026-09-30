@@ -3,8 +3,6 @@ const LINKS = {
   docs: "/docs", // the Docusaurus build, served under the website (apps/docs, baseUrl /docs/)
   github: "https://github.com/romanmandryk/poweur",
   app: "https://poweur.net/app/",
-  x: "#", // not online yet
-  linkedin: "#", // not online yet
 };
 
 const root = document.documentElement.dataset.root || "";
@@ -73,8 +71,6 @@ if (footer) {
           <li><a href="${root}legal/#security">Security</a></li>
         </ul></div>
         <div><h4>Community</h4><ul>
-          <li><a href="${LINKS.x}">X / Twitter<span class="soon">soon</span></a></li>
-          <li><a href="${LINKS.linkedin}">LinkedIn<span class="soon">soon</span></a></li>
           <li><a href="${LINKS.github}/discussions">Discussions</a></li>
         </ul></div>
       </div>
@@ -84,6 +80,17 @@ if (footer) {
       </div>
     </div>`;
 }
+
+// The claim box hands the typed name to the app, which pre-fills it (?handle=).
+document.querySelectorAll("form.claim").forEach((form) => {
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const handle = (new FormData(form).get("handle") || "").toString().trim().toLowerCase();
+    const url = new URL(LINKS.app);
+    if (/^[a-z0-9][a-z0-9-]{0,62}$/.test(handle)) url.searchParams.set("handle", handle);
+    location.href = url.toString();
+  });
+});
 
 // Duplicate marquee content so the loop is seamless.
 document.querySelectorAll(".marquee-track").forEach((t) => (t.innerHTML += t.innerHTML));

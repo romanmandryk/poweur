@@ -81,9 +81,9 @@ the relay hosting it, and posts the batch there. That relay reads
 `.poweur/relay/group.json` out of the group's own tree and verifies it with the
 group's own key.
 
-This sidesteps the deferral in
-[group identities](../files/group-identities.md#deferred-cross-relay-group-resolution)
-rather than violating it. No relay is ever asked to resolve a group hosted somewhere else:
+No relay is ever asked to look up a group hosted somewhere else (see
+[sharing a folder with a group](../files/group-identities.md#sharing-a-folder-with-a-group),
+where members present the signed roster instead):
 the group's membership is only ever read by the group's own relay, on its own disk. The
 *members* may be anywhere — a member on another relay is reached over the ordinary
 privacy-proxy forward path, which already exists and is already tested.
@@ -111,8 +111,8 @@ conflate: **for messaging, `members` is the list, alone, in both directions.**
 To encrypt per member, a sender needs the membership. `GET /groups/{group}` returns the signed
 membership document to a caller who proves they are in `members` or `admins`; everyone else
 gets `404 not_found` — the same answer as a group that does not exist, because a
-distinguishable rejection turns "is X in this group?" into the enumeration oracle that
-[cross-relay group resolution was deferred to avoid](../files/group-identities.md#deferred-cross-relay-group-resolution).
+distinguishable rejection turns "is X in this group?" into an enumeration oracle
+([limits and privacy](../files/group-identities.md#limits-and-privacy)).
 
 The response is the document as signed, so the client verifies the group's own signature
 itself rather than trusting the relay's rendering of it. Member encryption keys are **not** in

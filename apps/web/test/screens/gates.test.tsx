@@ -153,11 +153,13 @@ describe("Onboarding (E15-T5)", () => {
   it("walks policy → profile → done, saving only what was chosen", async () => {
     render(<App />);
     expect($(".onboard-title")!.textContent).toBe("Who can message you?");
-    expect($(".policy-mode.selected")!.dataset.mode).toBe("contacts_and_requests");
+    expect($(".policy-mode.selected")!.dataset.mode).toBe("open");
+    // A new ID is not offered the strict mode.
+    expect([...document.querySelectorAll(".policy-mode")].map((el) => (el as HTMLElement).dataset.mode)).toEqual(["open", "contacts_and_requests"]);
 
     fireEvent.click($("#btn-onboard-next")!);
     await waitFor(() => expect($(".onboard-title")!.textContent).toBe("How should people see you?"));
-    expect(fake.client.setPolicy).toHaveBeenCalledWith("contacts_and_requests", undefined, { enabled: true, disabled_for: [] });
+    expect(fake.client.setPolicy).toHaveBeenCalledWith("open", undefined, { enabled: true, disabled_for: [] });
 
     // Nothing typed: nothing written.
     fireEvent.click($("#btn-onboard-next")!);

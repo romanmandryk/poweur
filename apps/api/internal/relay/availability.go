@@ -77,6 +77,10 @@ func (s *Server) handleHostedAvailability(w http.ResponseWriter, r *http.Request
 		respond(idpkg.ReasonTaken, "That name is already taken.")
 		return
 	}
+	if _, held := s.held(handle + "." + domain); held {
+		respond(idpkg.ReasonReserved, availabilityMessage(idpkg.ReasonReserved, ""))
+		return
+	}
 	if err := policy.ValidateHandleLabel(handle); err != nil {
 		respond(idpkg.ReasonOf(err), availabilityMessage(idpkg.ReasonOf(err), err.Error()))
 		return

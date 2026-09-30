@@ -90,10 +90,10 @@ Each is opt-in per ID (profile setting), written as a PCP so self-hosted relays 
 |-----|-------------|-------------|
 | Send fork (`timvisee/send`) and PrivateBin (`PrivateBin/PrivateBin`) | sign in with Poweur; "send this link to a Poweur ID" as an encrypted message | both already keep the key in the URL fragment, like E20-T7 links |
 | listmonk (`knadh/listmonk`) — newsletters | messenger plugin delivering campaigns as Poweur messages; import `sys.list.subscribe` requests as subscribers | a self-hosted newsletter that reaches Poweur IDs without email |
-| Formbricks (`formbricks/formbricks`), OpnForm (`JhumanJ/OpnForm`) — forms | webhook → responses appended to a CSV in the owner's drive; "verified respondent" = signed Poweur ID, one response per ID | E31-T4's model inside a popular form builder |
+| Formbricks (`formbricks/formbricks`), OpnForm (`JhumanJ/OpnForm`) — forms | webhook → responses appended to a CSV in the owner's drive; "verified respondent" = signed Poweur ID, one response per ID | E26-T4's model inside a popular form builder |
 | Cal.com (`calcom/cal.com`) — scheduling | app-store app: booking confirmations and changes as Poweur messages; attendee verified by ID | spam bookings die at the identity layer |
 | Rallly (`lukevella/rallly`) — group polls | verified participants; results posted to a group | no duplicate or fake votes |
-| Twenty (`twentyhq/twenty`) — CRM | Poweur ID as a contact field with pinned key; a messaging channel next to email | E31-T6's CRM model inside an existing CRM |
+| Twenty (`twentyhq/twenty`) — CRM | Poweur ID as a contact field with pinned key; a messaging channel next to email | E26-T6's CRM model inside an existing CRM |
 | Monica (`monicahq/monica`) — personal CRM | contacts as Poweur IDs; reminders as messages | the address book already is the social graph |
 | Remark42 (`umputun/remark42`) — comments | Poweur as a login provider (Go) | comments without CAPTCHAs or big-tech logins |
 | Excalidraw, CryptPad | already INT-004-T7 | — |
@@ -127,7 +127,7 @@ Each is opt-in per ID (profile setting), written as a PCP so self-hosted relays 
 - [ ] **INT-006-T9** Cal.com app and Rallly verified participants
 - [ ] **INT-006-T10** Twenty and Monica: Poweur ID contacts + messaging channel
 - [ ] **INT-006-T11** Remark42 provider PR
-- [ ] **INT-006-T12** Static-site deploy recipes (Atom/RSS output for feeds moved to EPIC-032 E32-T1)
+- [ ] **INT-006-T12** Static-site deploy recipes (Atom/RSS output for feeds moved to EPIC-027 E27-T1)
 
 **Acceptance:** the supported-apps page lists at least 15 apps with green compatibility tests,
 at least one upstream PR is merged, and each listed app has a recipe a new user can follow in

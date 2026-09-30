@@ -32,16 +32,6 @@ func (p *MemoryProvider) WriteIdentityRecords(ctx context.Context, token, identi
 	return nil
 }
 
-func (p *MemoryProvider) WriteEncryptionKey(ctx context.Context, token, identity, encryptionPublicKey string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if encryptionPublicKey == "" {
-		return fmt.Errorf("missing encryption public key")
-	}
-	p.records[fmt.Sprintf("_poweur-enc.%s", identity)] = fmt.Sprintf("poweur-enckey=x25519:%s", encryptionPublicKey)
-	return nil
-}
-
 func (p *MemoryProvider) Record(name string) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

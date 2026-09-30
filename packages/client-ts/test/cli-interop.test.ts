@@ -122,6 +122,25 @@ describe("Go CLI ↔ TypeScript client", () => {
     }
   });
 
+  it("one Go approval completes the TypeScript CLI requester and clears both queues", async () => {
+    expect((await tsCli(["contacts", "request", goIdentity, "let us connect", "--use-identity", tsIdentity])).code).toBe(0);
+    await goCli(["requests", "--use-identity", goIdentity]);
+    // The test identities share this local relay; route the reply through it.
+    const config = loadConfig();
+    saveConfig({ ...config, via_home_relay: true });
+    let approval;
+    try { approval = await goCli(["contacts", "accept", tsIdentity, "--use-identity", goIdentity]); }
+    finally { saveConfig(config); }
+    expect(approval.stderr).not.toContain("could not be sent");
+    const answer = await tsCli(["requests", "--use-identity", tsIdentity]);
+    expect(answer.code, answer.stderr).toBe(0);
+    expect(answer.stdout).not.toContain("accept with");
+    const contacts = await tsCli(["contacts", "ls", "--json", "--use-identity", tsIdentity]);
+    expect(JSON.parse(contacts.stdout).contacts).toContainEqual(expect.objectContaining({ identity: goIdentity, state: "accepted" }));
+    expect((await tsCli(["requests", "--use-identity", tsIdentity])).stdout).toContain("no pending requests");
+    expect((await goCli(["requests", "--use-identity", goIdentity])).stdout).toContain("no pending requests");
+  });
+
   it("shares the config file the Go CLI wrote", () => {
     const config = loadConfig();
     expect(config.identity).toBe(goIdentity);
@@ -137,6 +156,26 @@ describe("Go CLI ↔ TypeScript client", () => {
     expect(keys?.signingPrivateKey).toHaveLength(64);
     expect(keys?.encryptionPrivateKey).toHaveLength(32);
     expect(existsSync(join(poweurHome, "keys", `${goIdentity}.key`))).toBe(true);
+  });
+
+  it("creates identities from a seed, and the Go CLI derives the same keys from it", async () => {
+    // A separate tree, so the shared config's active identity is untouched.
+    const alt = mkdtempSync(join(tmpdir(), "ts-seed-"));
+    const previous = process.env["POWEUR_HOME"];
+    process.env["POWEUR_HOME"] = alt;
+    try {
+      const identity = uniqueIdentity("tsseed");
+      const created = await tsCli(["identity", "create", identity, "--hosted", "--relay", relay.baseUrl, "--json"]);
+      expect(created.code).toBe(0);
+      const out = JSON.parse(created.stdout) as { seed: string; mnemonic: string; public_key: string };
+      expect(out.seed).toBeTruthy();
+      expect(out.mnemonic.split(" ")).toHaveLength(24);
+      const derived = JSON.parse((await goCli(["key", "derive", "--seed", out.seed, "--json"])).stdout) as { public_key: string };
+      expect(derived.public_key.replace(/^ed25519:/, "")).toBe(out.public_key);
+    } finally {
+      process.env["POWEUR_HOME"] = previous;
+      rmSync(alt, { recursive: true, force: true });
+    }
   });
 
   it("lists both identities from the shared tree", async () => {
@@ -238,7 +277,7 @@ describe("Go CLI ↔ TypeScript client", () => {
     const identity = uniqueIdentity("goenroll");
     const created = await goCli([
       "identity", "create", identity,
-      "--hosted", "--from-seed", "--relay", relay.baseUrl, "--json",
+      "--hosted", "--relay", relay.baseUrl, "--json",
     ]);
     const { seed } = JSON.parse(created.stdout) as { seed: string };
     expect(seed).toBeTruthy();
@@ -290,7 +329,7 @@ describe("Go CLI ↔ TypeScript client", () => {
     const identity = uniqueIdentity("clienroll");
     const created = await goCli([
       "identity", "create", identity,
-      "--hosted", "--from-seed", "--relay", relay.baseUrl, "--json",
+      "--hosted", "--relay", relay.baseUrl, "--json",
     ]);
     const { seed } = JSON.parse(created.stdout) as { seed: string };
 

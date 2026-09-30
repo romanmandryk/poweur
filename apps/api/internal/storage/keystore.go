@@ -34,8 +34,6 @@ type KeystoreEntry struct {
 	Kind string `json:"kind"`
 	// Wrap: prf | passphrase | native.
 	Wrap string `json:"wrap"`
-	// Payload: seed | legacy-keypair. Legacy identities predate the seed model.
-	Payload string `json:"payload"`
 	// CredentialID is the WebAuthn credential, for passkey-backed enrollments.
 	CredentialID string `json:"credential_id,omitempty"`
 	// CredentialPublicKey is SPKI DER (base64url) as returned by WebAuthn's

@@ -88,6 +88,27 @@ test.describe("contacts, requests and key pinning", () => {
     }, aliceId);
     expect(pinned).toMatch(/^ed25519:/);
 
+    // One approval completes the requester's side too, before either sends chat.
+    await alicePage.click('.nav-tab[data-page="contacts"]');
+    await expect(alicePage.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 30_000 });
+    for (const page of [alicePage, bobPage]) {
+      await expect(page.locator('.nav-tab[data-page="contacts"] .nav-badge')).toHaveCount(0);
+      await page.click('.nav-tab[data-page="messages"]');
+      await page.click('.tray-tab[data-tray="requests"]');
+      await expect(page.locator('[data-accept-contact]')).toHaveCount(0);
+      // A real reload restores archived requests; they must stay answered.
+      await page.reload();
+      await page.click("#btn-unlock-main");
+      await page.locator("#btn-do-unlock").click({ timeout: 30_000 });
+      await page.click('.nav-tab[data-page="messages"]');
+      await page.click('.tray-tab[data-tray="requests"]');
+      await expect(page.locator(".empty-state-title")).toHaveText("No contact requests", { timeout: 30_000 });
+      await expect(page.locator('.tray-tab[data-tray="requests"] .tray-badge')).toHaveCount(0);
+      await page.click('.nav-tab[data-page="contacts"]');
+      await expect(page.locator(".contact-row .chip")).toHaveText("Contact", { timeout: 30_000 });
+      await expect(page.locator('.nav-tab[data-page="contacts"] .nav-badge')).toHaveCount(0);
+    }
+
     // Bob replies through the UI; Alice reads it.
     await bobPage.click("[data-contact-open]");
     await expect(bobPage.locator(".thread-view")).toBeVisible();

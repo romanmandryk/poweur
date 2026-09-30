@@ -1,3 +1,19 @@
+/* Self-hosted fonts (SIL Open Font License 1.1, see fonts/LICENSE-*.txt). Latin subset from Fontsource. */
+@font-face { font-family: "Sora"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/sora-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Sora"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/sora-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+
 /* poweur.org marketing site — dark-first, glass, brand tokens from design/brand/tokens.css */
 :root {
   --violet-200: #DBD5FF; --violet-300: #C3B7FF; --violet-400: #A890FE; --violet-500: #8B6BE9;
@@ -250,22 +266,13 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
   .showcase.hero-layout .dev-phone { width: 28%; }
 }
 
-/* ---------- Placeholders (swap for real art later) ---------- */
-.ph {
-  position: relative; border-radius: 14px; overflow: hidden;
-  background:
-    radial-gradient(80% 80% at 20% 0%, rgba(114,76,207,.35), transparent 60%),
-    radial-gradient(60% 60% at 100% 100%, rgba(59,74,164,.35), transparent 60%),
-    repeating-linear-gradient(45deg, rgba(255,255,255,.025) 0 10px, transparent 10px 20px),
-    var(--bg-2);
-  border: 1px solid var(--line);
-  display: grid; place-items: center; color: var(--faint);
-  font: 500 12px/1.4 var(--mono); text-align: center; letter-spacing: .04em;
+.icon {
+  width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex: none;
+  color: var(--violet-300); border: 1px solid var(--line-2);
+  background: radial-gradient(90% 90% at 20% 0%, rgba(114,76,207,.32), transparent 65%), var(--panel-2);
 }
-.ph span { padding: 6px 10px; border: 1px dashed var(--line-2); border-radius: 8px; background: rgba(0,0,0,.35); max-width: 80%; }
-.ph-hero { aspect-ratio: 16 / 9; }
-.ph-icon { width: 44px; height: 44px; border-radius: 12px; font-size: 0; }
-.ph-icon::after { content: ""; width: 18px; height: 18px; border-radius: 6px; border: 1.5px solid var(--violet-300); opacity: .7; }
+.icon svg { width: 22px; height: 22px; }
+.cards-3 .card > .icon { margin-bottom: 18px; }
 
 /* ---------- Protocol strip ---------- */
 .strip { padding: 40px 0 20px; }
@@ -561,7 +568,6 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
 /* ---------- Blog ---------- */
 .posts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .post { display: flex; flex-direction: column; }
-.post .ph { aspect-ratio: 16/10; margin-bottom: 18px; }
 .post .meta { font: 12px var(--mono); color: var(--faint); margin-bottom: 8px; }
 .post h3 { font-size: 18px; line-height: 1.35; }
 .post p { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; }

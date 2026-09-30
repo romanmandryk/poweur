@@ -144,7 +144,7 @@ relative; `pnpm web-next:test` runs green on an empty smoke test.
       `WEB_NEXT_STATIC_DIR: /web-next` in `docker-compose.prod.yml`. Legacy
       `./apps/web:/web:ro` mount stays until T14. CI gains a `web-next` job.
 - [x] Web test helper `startRelay()` also sets `WEB_NEXT_STATIC_DIR` to `apps/web-next/dist`
-- [x] `deploy/OPS.md`: note that `/newapp/` is the preview build
+- [x] `deploy/README.md`: note that `/newapp/` is the preview build
 - [x] `.claude/launch.json` → `relay-web-next`: local relay on :8088 serving both apps
 - [x] Verify on production after the first deploy: `https://poweur.net/newapp/` and
       `https://<handle>.poweur.net/newapp/` load
@@ -470,7 +470,7 @@ Only after T12 is fully green and a manual side-by-side pass on production.
 - [x] Mobile: `pnpm run stage` builds `apps/web` and stages `dist/` (no source maps, no
       `WEB_SOURCE`); mobile 0.1.2
 - [x] `web:vendor` scripts, `scripts/vendor.mjs` and `apps/web/vendor/` removed; AGENTS.md (web
-      tests, vendor rule, version table, map), README, `apps/api/README.md`, OPS.md, EPIC-019 and
+      tests, vendor rule, version table, map), README, `apps/api/README.md`, deploy/README.md, EPIC-019 and
       the comments that named `apps/web/js/*` updated. CLAUDE.md had nothing web-specific
 - [x] E2E: `POWEUR_APP_PATH` and the `/newapp/` CI run are gone; one Web CI job typechecks,
       unit-tests, builds and runs Playwright against `/app/`. The apex-redirect test runs again

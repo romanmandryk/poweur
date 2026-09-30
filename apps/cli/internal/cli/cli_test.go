@@ -242,7 +242,7 @@ func TestSendMessageUsesSessionAndRetainsPayload(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	_, priv, _ := identity.GenerateKeypair()
+	_, priv, _ := ed25519.GenerateKey(nil)
 	keyPath, err := identity.SavePrivateKey("alice.poweur.net", priv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)
@@ -352,7 +352,7 @@ func TestSendMessageWithSignWithIdentity(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	idPub, idPriv, _ := identity.GenerateKeypair()
+	idPub, idPriv, _ := ed25519.GenerateKey(nil)
 	keyPath, err := identity.SavePrivateKey("alice.poweur.net", idPriv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)
@@ -438,7 +438,7 @@ func TestSendMessageRejectsInvalidSignWith(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	_, priv, _ := identity.GenerateKeypair()
+	_, priv, _ := ed25519.GenerateKey(nil)
 	keyPath, err := identity.SavePrivateKey("alice.poweur.net", priv)
 	if err != nil {
 		t.Fatalf("save key: %v", err)

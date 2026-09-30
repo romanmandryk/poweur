@@ -20,6 +20,11 @@ Coding agents should follow [`AGENTS.md`](AGENTS.md). Summary:
 ## PRs
 
 - Prefer small PRs mapped to an epic task ID (`E02-T2: …`).
+- Three kinds of PR, each with its own template in `.github/PULL_REQUEST_TEMPLATE/`:
+  - **Spec** (`spec.md`): markdown in `epics/` (and `apps/docs/docs/` for protocol changes). It merges before any implementation of that task starts.
+  - **Implementation** (`implementation.md`): code for a task that a merged spec defines.
+  - **Bugfix** (`bugfix.md`): fixes an existing issue and links it with `Fixes #n`.
+- Choose a template with `gh pr create --template spec.md`, or add `?template=spec.md` to the compare URL.
 - Do not commit `.env`, DNS tokens, or private keys.
 
 ## Licensing of contributions

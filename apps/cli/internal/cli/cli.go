@@ -41,6 +41,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	}
+	if code, handled := routeHelp(args, stdout, stderr); handled {
+		return code
+	}
 
 	switch args[0] {
 	case "identity":
@@ -55,6 +58,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runOutbox(args[1:], stdout, stderr)
 	case "drive":
 		return runDrive(args[1:], stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
 	case "devices":
 		return runDevices(args[1:], stdout, stderr)
 	case "history":
@@ -94,7 +99,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		printHelp(stdout)
 		return 0
 	default:
-		fmt.Fprintln(stderr, "unknown command")
+		fmt.Fprintf(stderr, "poweur: unknown command %q\n\n", args[0])
 		printHelp(stderr)
 		return 1
 	}
@@ -116,8 +121,6 @@ func runIdentity(args []string, stdout, stderr io.Writer) int {
 		return runIdentityUse(args[1:], stdout, stderr)
 	case "list":
 		return runIdentityList(args[1:], stdout, stderr)
-	case "add-encryption-key":
-		return runIdentityAddEncryptionKey(args[1:], stdout, stderr)
 	case "lookup":
 		return runIdentityLookup(args[1:], stdout, stderr)
 	case "export":
@@ -144,14 +147,9 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	parentDomain := fs.String("parent-domain", cfg.ParentDomain, "parent domain for identity handle")
 	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
-	seedFlag := fs.String("seed", "", "derive keys from this base64url master seed (EPIC-011)")
-	fromSeed := fs.Bool("from-seed", false, "generate a master seed and derive keys from it")
+	seedFlag := fs.String("seed", "", "derive keys from this base64url master seed (default: generate one)")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true, "--from-seed": true})); err != nil {
-		return 1
-	}
-	if *seedFlag != "" && *fromSeed {
-		fmt.Fprintln(stderr, "use either --seed or --from-seed, not both")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--hosted": true})); err != nil {
 		return 1
 	}
 	_ = useIdentity
@@ -170,46 +168,28 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// EPIC-011: one master seed derives both long-lived keys, so a recovery
-	// kit is 32 bytes rather than two independent keys. Without --seed or
-	// --from-seed the legacy path (independent random keys) is unchanged.
+	// kit is 32 bytes. Every identity is seed-based: without --seed one is
+	// generated and shown once below.
+	generated := *seedFlag == ""
 	var seed []byte
-	switch {
-	case *seedFlag != "":
-		if seed, err = identity.ParseSeed(*seedFlag); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-	case *fromSeed:
-		if seed, err = identity.NewSeed(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-	}
-
-	var (
-		pub     ed25519.PublicKey
-		priv    ed25519.PrivateKey
-		encPub  []byte
-		encPriv []byte
-	)
-	if seed != nil {
-		if pub, priv, err = identity.KeypairFromSeed(seed); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if encPub, encPriv, err = identity.EncryptionKeypairFromSeed(seed); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
+	if generated {
+		seed, err = identity.NewSeed()
 	} else {
-		if pub, priv, err = identity.GenerateKeypair(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if encPub, encPriv, err = identity.GenerateEncryptionKeypair(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
+		seed, err = identity.ParseSeed(*seedFlag)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	pub, priv, err := identity.KeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	encPub, encPriv, err := identity.EncryptionKeypairFromSeed(seed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	keysDir, err := config.KeysDir()
@@ -235,6 +215,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	seedPath, err := identity.SaveSeed(identityValue, seed)
+	if err != nil {
+		identity.RemoveKeyFiles(keyPath, encKeyPath)
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 
 	publicKey := identity.PublicKeyString(pub)
 	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
@@ -246,7 +232,7 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		keepKeys := false
 		defer func() {
 			if !keepKeys {
-				identity.RemoveKeyFiles(keyPath, encKeyPath)
+				identity.RemoveKeyFiles(keyPath, encKeyPath, seedPath)
 			}
 		}()
 		if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
@@ -334,28 +320,12 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		"relay":                 *relayURL,
 		"registered":            registered,
 		"hosted":                *hosted,
-		"seed_derived":          seed != nil,
 	}
 	// Echo the seed only when we generated it: with --seed the caller already
 	// has it, and reprinting secrets into shell history buys nothing. This is
 	// the user's only copy, so it also goes to stderr in human mode.
-	if *fromSeed {
-		output["seed"] = identity.FormatSeed(seed)
-		// The mnemonic ships alongside the raw seed: same 32 bytes, but
-		// checksummed and safe to copy by hand. Which one a user keeps is
-		// their choice; withholding either would make that choice for them.
-		if mnemonic, mErr := identity.SeedToMnemonic(seed); mErr == nil {
-			output["mnemonic"] = mnemonic
-			if !*jsonOut {
-				fmt.Fprintf(stderr,
-					"recovery kit for %s — store this; it is the only way back\n"+
-						"  seed:     %s\n  mnemonic: %s\n",
-					identityValue, identity.FormatSeed(seed), mnemonic)
-			}
-		} else if !*jsonOut {
-			fmt.Fprintf(stderr, "master seed (store this — it is the only way to recover %s):\n  %s\n",
-				identityValue, identity.FormatSeed(seed))
-		}
+	if generated {
+		announceSeed(output, seed, identityValue, *jsonOut, stderr)
 	}
 	if registered {
 		mode := "registered with relay"
@@ -365,6 +335,27 @@ func runIdentityCreate(args []string, stdout, stderr io.Writer) int {
 		return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (%s, e2e encryption enabled)\n", identityValue, mode))
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("created identity %s (local only; relay not configured)\n", identityValue))
+}
+
+// announceSeed adds a freshly generated seed to a command's output and, in
+// human mode, prints it to stderr. It is the user's only copy. The mnemonic
+// ships alongside the raw seed: same 32 bytes, but checksummed and safe to
+// copy by hand. Which one a user keeps is their choice; withholding either
+// would make that choice for them.
+func announceSeed(output map[string]any, seed []byte, identityValue string, jsonOut bool, stderr io.Writer) {
+	output["seed"] = identity.FormatSeed(seed)
+	if mnemonic, err := identity.SeedToMnemonic(seed); err == nil {
+		output["mnemonic"] = mnemonic
+		if !jsonOut {
+			fmt.Fprintf(stderr,
+				"recovery kit for %s — store this; it is the only way back\n"+
+					"  seed:     %s\n  mnemonic: %s\n",
+				identityValue, identity.FormatSeed(seed), mnemonic)
+		}
+	} else if !jsonOut {
+		fmt.Fprintf(stderr, "master seed (store this — it is the only way to recover %s):\n  %s\n",
+			identityValue, identity.FormatSeed(seed))
+	}
 }
 
 func runIdentityShow(args []string, stdout, stderr io.Writer) int {
@@ -543,120 +534,6 @@ func runIdentityList(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runIdentityAddEncryptionKey generates a fresh X25519 keypair for an
-// already-registered identity, saves the private half locally, and asks the
-// relay to publish the public half to DNS under `_poweur-enc.<identity>`.
-//
-// Modes:
-//   - no existing .enc file: a new keypair is minted (the normal "retro-fit"
-//     path for identities created before E2E support landed).
-//   - existing .enc file and --rotate: the local file is overwritten and the
-//     DNS record is rewritten (useful after suspected compromise).
-//   - existing .enc file without --rotate: command aborts to avoid silently
-//     invalidating ciphertext that was encrypted to the old key.
-func runIdentityAddEncryptionKey(args []string, stdout, stderr io.Writer) int {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	fs := flag.NewFlagSet("identity add-encryption-key", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	dnsProvider := fs.String("dns-provider", "", "dns provider (cloudflare, hetzner)")
-	dnsToken := fs.String("dns-token", "", "dns provider api token")
-	relayURL := fs.String("relay", cfg.RelayURL, "relay base url")
-	useIdentity := fs.String("use-identity", "", "override identity for this command")
-	rotate := fs.Bool("rotate", false, "overwrite an existing encryption key")
-	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--rotate": true})); err != nil {
-		return 1
-	}
-
-	identityValue := fs.Arg(0)
-	if identityValue == "" {
-		identityValue = resolveIdentity(*useIdentity, cfg.Identity)
-	}
-	if identityValue == "" || cfg.KeysDir == "" {
-		fmt.Fprintln(stderr, "identity not configured (pass <identity> or run `poweur identity use <identity>` first)")
-		return 1
-	}
-	if *relayURL == "" {
-		fmt.Fprintln(stderr, "relay url not configured")
-		return 1
-	}
-
-	signingKeyPath := identity.KeyPath(cfg.KeysDir, identityValue)
-	if _, err := os.Stat(signingKeyPath); err != nil {
-		fmt.Fprintf(stderr, "signing key not found for %s at %s\n", identityValue, signingKeyPath)
-		return 1
-	}
-
-	encKeyPath := identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
-	if _, err := os.Stat(encKeyPath); err == nil && !*rotate {
-		fmt.Fprintf(stderr, "encryption key already exists at %s; pass --rotate to overwrite\n", encKeyPath)
-		return 1
-	}
-
-	provider := resolveDNSProvider(*dnsProvider)
-	token := resolveDNSToken(provider, *dnsToken)
-	if token == "" {
-		fmt.Fprintln(stderr, "dns token is required (set --dns-token or CLOUDFLARE_API_TOKEN/HETZNER_API_TOKEN)")
-		return 1
-	}
-
-	if err := CheckRelayHealth(context.Background(), *relayURL); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	encPub, encPriv, err := identity.GenerateEncryptionKeypair()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	savedPath, err := identity.SaveEncryptionPrivateKey(identityValue, encPriv)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	encPublicKey := cryptoe2e.EncodePublicKey(encPub)
-	identityPriv, err := identity.LoadPrivateKey(signingKeyPath)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	issuedAt := time.Now().UTC().Format(time.RFC3339)
-	nonce := newAdminNonce()
-	publishReq := EncryptionKeyPublishRequest{
-		EncryptionPublicKey: encPublicKey,
-		DNSProvider:         provider,
-		DNSToken:            token,
-		IssuedAt:            issuedAt,
-		Nonce:               nonce,
-		IdentitySignature:   signEncryptionKeyUpdate(identityPriv, identityValue, encPublicKey, issuedAt, nonce),
-	}
-	resp, err := PublishEncryptionKey(context.Background(), *relayURL, identityValue, publishReq)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	output := map[string]any{
-		"identity":              identityValue,
-		"encryption_public_key": resp.EncryptionPublicKey,
-		"encryption_key_path":   savedPath,
-		"relay":                 *relayURL,
-		"updated_at":            resp.UpdatedAt,
-		"rotated":               *rotate,
-	}
-	verb := "added encryption key"
-	if *rotate {
-		verb = "rotated encryption key"
-	}
-	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("%s for %s (published to DNS)\n", verb, identityValue))
-}
-
 // runSend posts an encrypted, signed message envelope to the recipient's
 // relay. Routing is two-mode:
 //
@@ -759,9 +636,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if len(recipientEncPub) != 32 {
-		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n"+
-			"Ask them to run `poweur identity add-encryption-key %s` to publish one.\n",
-			recipient, recipient)
+		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n", recipient)
 		return 1
 	}
 	if *attachPath != "" {
@@ -1947,22 +1822,6 @@ func relayAddressFromURL(relayURL string) string {
 	return trimmed
 }
 
-// signEncryptionKeyUpdate matches crypto.CanonicalEncryptionKeyUpdate on
-// the relay; covers both initial publish and rotation flows since the
-// payload shape is identical.
-func signEncryptionKeyUpdate(priv ed25519.PrivateKey, identityValue, encPublicKey, issuedAt, nonce string) string {
-	parts := []string{
-		"identity-encryption-key",
-		identityValue,
-		encPublicKey,
-		issuedAt,
-		nonce,
-	}
-	canonical := strings.Join(parts, "\n")
-	sig := ed25519.Sign(priv, []byte(canonical))
-	return base64.StdEncoding.EncodeToString(sig)
-}
-
 // signSessionRevocation matches crypto.CanonicalSessionRevocation on the
 // relay. Used by the (admin-only) DELETE /sessions/:id call.
 func signSessionRevocation(priv ed25519.PrivateKey, identityValue, sessionID, issuedAt, nonce string) string {
@@ -2053,55 +1912,6 @@ func writeOutput(w io.Writer, jsonOut bool, payload any, message string) int {
 	}
 	fmt.Fprint(w, message)
 	return 0
-}
-
-func printHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage:
-  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--seed=<b64url>|--from-seed] [--operator-token=...] [--json]
-  poweur key recover <identity> --seed <base64url|mnemonic> [--relay=...] [--parent-domain=...] [--json]
-  poweur key derive --seed <base64url|mnemonic> [--json]
-  poweur key kit --seed <base64url|mnemonic> [--use-identity=...] [--json]
-  poweur key ls [--use-identity=...] [--relay=...] [--json]
-  poweur key enroll <identity> [--relay=...] [--label=...] [--wait]   (shows a QR and a code)
-  poweur key approve <pairing-link | code> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--no-wait] [--json]
-  poweur key claim <identity> <code> [--json]                       (next step of a pairing started without --wait)
-  poweur key protect|unprotect [--use-identity=...] [--passphrase=...] [--json]
-  poweur identity show [--use-identity=...] [--json]
-  poweur identity dns <identity> [--use-identity=...] [--json]
-  poweur identity use <identity> [--json]
-  poweur identity list [--json]
-  poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--relay=...] [--json]
-  poweur send <to> <message> [--attach=<file>] [--sign-with=session|identity] [--use-identity=...] [--request-on-reject] [--json]
-  poweur attach save <peer> --id=<message-id> --out=<file> [--json]
-  poweur inbox [--use-identity=...] [--json]
-  poweur listen [--use-identity=...] [--json] [--once]
-  poweur outbox [list|retry]
-  poweur drive <info|node|ls|changes|records|history|append|tail|trim|watch|share|link|transfer> [--json]
-  poweur devices show|name <name>|list|revoke <dev_...> [--use-identity=...] [--relay=...] [--json]
-  poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
-  poweur session status [--use-identity=...] [--json]
-  poweur session refresh [--use-identity=...] [--json]
-  poweur session revoke [--use-identity=...] [--json]
-  poweur relay status [--json]
-  poweur group create <group-id> [--admin=<id> ...] [--member=<id> ...] [--json]
-  poweur group show <group-id> [--json]
-  poweur group add <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
-  poweur group remove <group-id> [--member=<id> ...] [--admin=<id> ...] [--json]
-  poweur contacts <ls|add|request|accept|block|rm> [<identity>] [--petname=...] [--use-identity=...]
-  poweur requests [--use-identity=...] [--json]
-  poweur analytics <show|on|off> [--use-identity=...] [--json]
-  poweur blocks export [--name=...] [--out=<file>] [--no-publish] [--use-identity=...] [--json]
-  poweur blocks import <publisher>|--file=<path> [--path=...] [--force] [--dry-run] [--use-identity=...]
-  poweur report <identity> [--reason=spam|harassment|phishing|malware|impersonation|other] [--note=...] [--message-ids=id,id]
-  poweur policy <show|set open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--trusted-auth=<bridge id>|none] [--use-identity=...]
-  poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
-  poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
-  poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver] [--json]
-      (--code: the number shown by the screen that started the sign-in, when approving from another device)
-  poweur auth inspect <request-file-or-url> [--json]
-  poweur auth sign <request-file-or-url> [--use-identity=...] [--json]
-  poweur version
-`)
 }
 
 func resolveIdentity(flagValue string, fallback string) string {
@@ -2329,7 +2139,7 @@ func runKeyProtect(args []string, stdout, stderr io.Writer, protect bool) int {
 		}
 	}
 	changed := map[string]bool{}
-	for _, suffix := range []string{".key", ".enc"} {
+	for _, suffix := range []string{".key", ".enc", ".seed"} {
 		path := filepath.Join(keysDir, identityValue+suffix)
 		if _, statErr := os.Stat(path); statErr != nil {
 			continue
@@ -2633,29 +2443,32 @@ func runKeyRotate(args []string, stdout, stderr io.Writer) int {
 	oldPub := oldPriv.Public().(ed25519.PublicKey)
 	oldPubStr := identity.PublicKeyString(oldPub)
 
-	newPub, newPriv, err := identity.GenerateKeypair()
+	// Rotation moves the identity onto a new master seed: both long-lived
+	// keys change together, so a recovery kit always covers everything.
+	newSeed, err := identity.NewSeed()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	newPub, newPriv, err := identity.KeypairFromSeed(newSeed)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	newEncPub, newEncPriv, err := identity.EncryptionKeypairFromSeed(newSeed)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	newPubStr := identity.PublicKeyString(newPub)
-	encPubStr := ""
-	if encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue)); err == nil {
-		if encPub, err := publicFromPrivateX25519(encPriv); err == nil {
-			encPubStr = cryptoe2e.EncodePublicKey(encPub)
-		}
-	}
+	encPubStr := cryptoe2e.EncodePublicKey(newEncPub)
 
 	issuedAt := time.Now().UTC().Format(time.RFC3339)
 	nonce := newAdminNonce()
 	relayAddr := relayAddressFromURL(cfg.RelayURL)
 	validUntil := time.Now().UTC().Add(*grace).Format(time.RFC3339)
 
-	encFmt := ""
-	if encPubStr != "" {
-		encFmt = "x25519:" + encPubStr
-	}
-	doc := idpkg.NewDocument(identityValue, "ed25519:"+newPubStr, encFmt, relayAddr, nil)
+	doc := idpkg.NewDocument(identityValue, "ed25519:"+newPubStr, "x25519:"+encPubStr, relayAddr, nil)
 	doc.UpdatedAt = issuedAt
 	doc.PreviousKeys = []idpkg.PreviousKey{{
 		PublicKey:  "ed25519:" + oldPubStr,
@@ -2689,10 +2502,23 @@ func runKeyRotate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Backup old key, then overwrite with new key material.
+	// Back up the old keys (the old encryption key still opens mail sent to
+	// it), then overwrite with the new key material.
 	oldPath := identity.KeyPath(cfg.KeysDir, identityValue)
 	_ = os.Rename(oldPath, oldPath+".pre-rotate")
+	oldEncPath := identity.EncryptionKeyPath(cfg.KeysDir, identityValue)
+	_ = os.Rename(oldEncPath, oldEncPath+".pre-rotate")
+	oldSeedPath := identity.SeedPath(cfg.KeysDir, identityValue)
+	_ = os.Rename(oldSeedPath, oldSeedPath+".pre-rotate")
 	if _, err := identity.SavePrivateKey(identityValue, newPriv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if _, err := identity.SaveEncryptionPrivateKey(identityValue, newEncPriv); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if _, err := identity.SaveSeed(identityValue, newSeed); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -2702,5 +2528,6 @@ func runKeyRotate(args []string, stdout, stderr io.Writer) int {
 		"previous_key": oldPubStr,
 		"valid_until":  validUntil,
 	}
-	return writeOutput(stdout, *jsonOut, out, fmt.Sprintf("rotated signing key for %s (old key valid until %s)\n", identityValue, validUntil))
+	announceSeed(out, newSeed, identityValue, *jsonOut, stderr)
+	return writeOutput(stdout, *jsonOut, out, fmt.Sprintf("rotated keys for %s onto a new seed (old signing key valid until %s)\n", identityValue, validUntil))
 }

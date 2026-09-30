@@ -32,6 +32,9 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.rejectHeld(w, req.Identity) {
+		return
+	}
 	issuedAt, err := time.Parse(time.RFC3339, req.IssuedAt)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "issued_at must be RFC3339")

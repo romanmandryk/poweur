@@ -131,7 +131,9 @@ func (s *Server) handleGroupGet(w http.ResponseWriter, r *http.Request) {
 	// and an admin needs it to administer a group they may not be in. This
 	// is the one place the two lists are deliberately unioned, and it is
 	// about reading the document, never about who receives a message.
-	if !group.HasMember(caller) && !group.HasAdmin(caller) {
+	// The group itself reads its roster too: its own drive checks the
+	// versions members write against it.
+	if !group.HasMember(caller) && !group.HasAdmin(caller) && !strings.EqualFold(caller, name) {
 		// Same answer as "no such group": otherwise this endpoint tells a
 		// stranger that a group exists and that they are not in it, which is
 		// half of a membership oracle.
@@ -227,6 +229,9 @@ func (s *Server) handleGroupMessagesPost(w http.ResponseWriter, r *http.Request)
 	}
 
 	sender := strings.ToLower(strings.TrimSpace(req.Envelopes[0].Sender))
+	if s.rejectHeld(w, sender) {
+		return
+	}
 	if !group.HasMember(sender) {
 		// `members` is the access list. An admin who is not a member
 		// administers the roster and has no seat in the conversation.

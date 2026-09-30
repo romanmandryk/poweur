@@ -73,6 +73,7 @@ Tag every integration with the depth it needs — small tiers first, deep tiers 
 | INT-004 | Collaboration, productivity & federation tools | [INT-004-collaboration-tools.md](INT-004-collaboration-tools.md) |
 | INT-005 | Agent control planes (OpenClaw, Hermes) | [INT-005-agent-control-planes.md](INT-005-agent-control-planes.md) |
 | INT-006 | Quick-win apps & the supported-apps list | [INT-006-quick-win-apps.md](INT-006-quick-win-apps.md) |
+| INT-007 | App suite: data-handling labels, connect flow & candidate apps | [INT-007-app-suite.md](INT-007-app-suite.md) |
 
 ## Cross-cutting prerequisite tasks (Poweur side)
 
@@ -98,7 +99,7 @@ OIDC surface is usable and turns that generic service into upstream adoption:
 
 ### INT-000-T3 — Reference WebDAV/storage recipes
 - [ ] Cookbook: "store your app's per-user data in the user's Poweur drive" for the T3 tier —
-      scoped drive handles, the app-folder convention (EPIC-029), event logs and merge
+      scoped drive handles, the app-folder convention, event logs and merge
       guidance (EPIC-020), with runnable samples in Go/TS/Python; plus `rclone serve` recipes
       for desktop tools
 - [ ] The public supported-apps list and its compatibility CI live in INT-006

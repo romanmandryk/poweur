@@ -1,0 +1,37 @@
+# Handles containing any of these terms can't be claimed on poweur.net
+# (NAME_BLOCKED_FILE, NAME_BLOCK_MODE=substring: "paypal-help" and "mypaypal" are
+# both refused). One term per line, lowercase, `#` for comments.
+#
+# Keep this list to distinctive brand names that nobody has an innocent reason
+# to embed in a handle. Short or common words belong in NAME_RESERVED
+# (docker-compose.prod.yml), which matches a whole handle only: substring-blocking
+# "apple" would refuse "pineapple". Adding a term never affects an ID that
+# already exists; use `poweur-relay identities suspend` (apps/docs/docs/relay/configuration.md).
+#
+# Handles are ASCII a-z, 0-9 and hyphen only, so look-alikes from other alphabets
+# are already refused; digit swaps such as "paypa1" are not, so add them when seen.
+
+# Ourselves
+poweur
+
+# Payments and crypto: the usual impersonation targets
+paypal
+paypa1
+stripe-
+coinbase
+binance
+metamask
+ledger-support
+trustwallet
+
+# Big platforms
+microsoft
+facebook
+instagram
+whatsapp
+youtube
+linkedin
+github-
+anthropic
+openai
+chatgpt

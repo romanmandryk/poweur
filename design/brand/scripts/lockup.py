@@ -9,7 +9,7 @@ from blackglass import black_glass
 from pgeo3 import paths, C, RD
 
 D = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(D, "..", "..", "claude", "lockups")
+OUT = os.environ.get("LOCKUP_OUT", os.path.join(D, "..", "out", "lockups"))
 FONT = os.environ.get("SORA_TTF", os.path.join(D, "Sora[wght].ttf"))  # google/fonts ofl/sora, not committed
 WEIGHT = 600
 S = json.load(open(os.path.join(D, "..", "tokens.json")))["scales"]

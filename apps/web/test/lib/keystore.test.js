@@ -12,7 +12,7 @@ import { crypto as sdk, toBase64url } from "@poweur/client";
 
 import "../helpers/browser-globals.mjs";
 import {
-  buildRecoveryKit, verifyRecoveryKit, recoveryKitEligibility,
+  buildRecoveryKit, verifyRecoveryKit, 
   keysFromMnemonic, deviceLabel, rewrap, restoreLocalRecord,
 } from "../../src/lib/keystore.js";
 import { saveIdentityRecord, loadIdentityRecord } from "../../src/lib/storage.js";
@@ -36,7 +36,7 @@ beforeEach(() => localStorage.clear());
 
 describe("recovery kit", () => {
   it("renders the seed as 24 words that decode back to it", () => {
-    record({ seedDerived: true });
+    record({});
     const seed = sdk.newSeed();
     const kit = buildRecoveryKit(IDENTITY, toBase64url(seed));
 
@@ -81,23 +81,6 @@ describe("recovery kit", () => {
 
   it("refuses to build a kit with no seed", () => {
     expect(() => buildRecoveryKit(IDENTITY, null)).toThrow(/no master seed/i);
-  });
-});
-
-describe("recovery kit eligibility", () => {
-  it("is available for seed-derived identities", () => {
-    record({ seedDerived: true });
-    expect(recoveryKitEligibility(IDENTITY)).toEqual({ eligible: true, reason: null });
-  });
-
-  it("is refused for identities created from two independent keys", () => {
-    record({ seedDerived: false });
-    expect(recoveryKitEligibility(IDENTITY)).toEqual({ eligible: false, reason: "legacy-keypair" });
-  });
-
-  it("is refused for an identity this device does not hold", () => {
-    expect(recoveryKitEligibility("stranger.poweur.net"))
-      .toEqual({ eligible: false, reason: "unknown-identity" });
   });
 });
 
@@ -149,7 +132,6 @@ describe("restoreLocalRecord", () => {
       credentialPublicKey: "spki",
       credentialAlg: -8,
       supportsPRF: true,
-      seedDerived: true,
     });
     expect(record.encryptedKeys.kdf).toBe("prf");
     expect(record.encryptedKeys.ciphertext).toBe(wrapped.ciphertext);

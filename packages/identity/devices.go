@@ -47,7 +47,23 @@ var DeviceKinds = []string{
 	DeviceKindTablet, DeviceKindBrowser, DeviceKindAgent, DeviceKindUnknown,
 }
 
+// Device clients say what kind of software is talking: the Poweur app (the
+// native shell), the web app in a browser, or a command-line client.
 const (
+	DeviceClientApp = "app"
+	DeviceClientWeb = "web"
+	DeviceClientCLI = "cli"
+)
+
+// DeviceClients is every accepted client type. Unlike kind there is no
+// "unknown" member: an unrecognised or absent client is simply left empty.
+var DeviceClients = []string{DeviceClientApp, DeviceClientWeb, DeviceClientCLI}
+
+const (
+	// MaxDeviceFieldLen caps the free-text platform/browser labels.
+	MaxDeviceFieldLen = 32
+	// MaxEnrollmentIDLen caps the keystore enrollment id a device links to.
+	MaxEnrollmentIDLen = 64
 	// deviceIDChars is the length of the base32 body of a device id.
 	deviceIDChars = 16
 	// DeviceIDPrefix marks a device id apart from a session id.
@@ -128,11 +144,61 @@ func SanitizeDeviceName(name string) string {
 	return cleaned
 }
 
+// NormalizeDeviceClient maps a client-supplied client type onto the accepted
+// set, returning "" for anything else (the row keeps no client rather than a
+// made-up one).
+func NormalizeDeviceClient(client string) string {
+	c := strings.ToLower(strings.TrimSpace(client))
+	for _, known := range DeviceClients {
+		if c == known {
+			return known
+		}
+	}
+	return ""
+}
+
+// SanitizeDeviceField trims a short free-text label (platform, browser) the
+// same way SanitizeDeviceName does, with the smaller cap.
+func SanitizeDeviceField(value string) string {
+	cleaned := SanitizeDeviceName(value)
+	if len(cleaned) > MaxDeviceFieldLen {
+		cleaned = strings.TrimSpace(cleaned[:MaxDeviceFieldLen])
+	}
+	return cleaned
+}
+
+// SanitizeEnrollmentID keeps a keystore enrollment id to the characters the
+// keystore itself produces (base64url), and drops anything else.
+func SanitizeEnrollmentID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) > MaxEnrollmentIDLen {
+		return ""
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return ""
+		}
+	}
+	return id
+}
+
 // Device is one row of devices.json.
 type Device struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 	Kind string `json:"kind,omitempty"`
+
+	// Client is what is talking — app, web or cli — and Platform the OS it
+	// runs on ("macOS", "iOS"). Browser names the browser for web clients.
+	// All three are self-reported labels, like Name.
+	Client   string `json:"client,omitempty"`
+	Platform string `json:"platform,omitempty"`
+	Browser  string `json:"browser,omitempty"`
+	// EnrollmentID links the row to this device's keystore enrollment (a
+	// passkey- or OS-keystore-wrapped copy of the seed), when it has one, so
+	// one list can show both. Devices that hold their key only locally, like
+	// the CLI, have none.
+	EnrollmentID string `json:"enrollment_id,omitempty"`
 
 	AddedAt  string `json:"added_at,omitempty"`
 	LastSeen string `json:"last_seen,omitempty"`
@@ -181,6 +247,15 @@ func (d Device) Validate() error {
 	}
 	if d.Kind != "" && NormalizeDeviceKind(d.Kind) != d.Kind {
 		return fmt.Errorf("device %s: invalid kind %q (want one of %s)", d.ID, d.Kind, strings.Join(DeviceKinds, ", "))
+	}
+	if d.Client != "" && NormalizeDeviceClient(d.Client) != d.Client {
+		return fmt.Errorf("device %s: invalid client %q (want one of %s)", d.ID, d.Client, strings.Join(DeviceClients, ", "))
+	}
+	if d.Platform != SanitizeDeviceField(d.Platform) || d.Browser != SanitizeDeviceField(d.Browser) {
+		return fmt.Errorf("device %s: platform and browser must be printable and at most %d bytes", d.ID, MaxDeviceFieldLen)
+	}
+	if d.EnrollmentID != SanitizeEnrollmentID(d.EnrollmentID) {
+		return fmt.Errorf("device %s: invalid enrollment_id", d.ID)
 	}
 	for _, ts := range []struct{ field, value string }{
 		{"added_at", d.AddedAt},

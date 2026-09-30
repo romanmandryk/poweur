@@ -51,6 +51,10 @@ apps/cli/poweur
 
 # Ansible secrets (never commit)
 deploy/ansible/secrets.yml
+deploy/ansible/inventory.yml
+
+# Generated logo renders (design/brand/scripts/lockup.py)
+design/brand/out/
 
 # OS
 .DS_Store
@@ -76,3 +80,8 @@ apps/docs/.docusaurus/
 
 # Local copy of the docs build for previewing the site (deploy-web.yml assembles it in CI)
 apps/site/docs/
+
+# Local agent tooling
+.claude/
+.codex/
+.t3/

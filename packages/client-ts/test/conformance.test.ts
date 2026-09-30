@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalAck,
-  canonicalEncryptionKeyUpdate,
   canonicalIdentityExport,
   canonicalIdentityRegistration,
   canonicalIdentityRotation,
@@ -129,11 +128,6 @@ describe("canonical signing strings match Go", () => {
       case "identity-rotation":
         return canonicalIdentityRotation(
           string(i, "identity"), string(i, "old_public_key"), string(i, "new_public_key"),
-          string(i, "issued_at"), string(i, "nonce"),
-        );
-      case "identity-encryption-key":
-        return canonicalEncryptionKeyUpdate(
-          string(i, "identity"), string(i, "encryption_public_key"),
           string(i, "issued_at"), string(i, "nonce"),
         );
       case "keystore-enroll":

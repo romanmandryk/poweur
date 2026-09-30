@@ -489,6 +489,14 @@ export interface DeviceEntry {
   name?: string;
   /** laptop | desktop | phone | tablet | browser | agent | unknown. */
   kind?: string;
+  /** What is talking: app | web | cli. Absent on rows from older clients. */
+  client?: string;
+  /** Operating system the client reports ("macOS", "iOS", ...). */
+  platform?: string;
+  /** Browser name, for web clients. */
+  browser?: string;
+  /** The device's keystore enrollment, when it has one. */
+  enrollment_id?: string;
   added_at?: string;
   last_seen?: string;
   /** Tree prefixes this device syncs; empty means the whole tree. */

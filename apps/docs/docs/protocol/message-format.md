@@ -242,7 +242,7 @@ The encryption suite:
 - **Cipher:** ChaCha20-Poly1305 with a random 12-byte nonce and additional authenticated data `"poweur/msg/v1\n" || ephemeral_public_key || recipient_public_key`.
 - **Envelope:** ciphertext (base64url) in `payload`; `ephemeral_public_key` and `nonce` (base64url) in `encryption`; `alg` is the fixed string `x25519-chacha20-poly1305`.
 
-There is no plaintext fallback. When the recipient's `_poweur-enc.<identity>` TXT record is missing, clients abort with an error that points the user at `poweur identity add-encryption-key <recipient>` (or the mobile equivalent). Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected with `400 encryption_required` before signature verification or rate-limiting runs.
+There is no plaintext fallback. When the recipient's `_poweur-enc.<identity>` TXT record is missing, clients abort with an error. Relays additionally enforce this on the server side: `POST /messages` without `encryption.alg`, `encryption.ephemeral_public_key`, and `encryption.nonce` is rejected with `400 encryption_required` before signature verification or rate-limiting runs.
 
 Future versions may replace `x25519-chacha20-poly1305` with a stronger suite. The `alg` string is the version marker; clients must reject envelopes whose `alg` they do not implement.
 

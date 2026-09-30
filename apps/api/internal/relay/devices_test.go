@@ -339,3 +339,50 @@ func TestSameStringsAndContainsFold(t *testing.T) {
 		t.Fatal("containsFold matched in an empty list")
 	}
 }
+
+// Client, platform, browser and the keystore link arrive as optional headers
+// and are recorded, sanitized, on the same row the name and kind land in. A
+// later observation that omits them leaves them alone.
+func TestDeviceRegistryClientMetadata(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "devmeta.poweur.net")
+
+	observe := func(headers map[string]string) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Poweur-Device", testFingerprint)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		server.touchDevice(context.Background(), alice.name, deviceFromRequest(req))
+	}
+	observe(map[string]string{
+		"X-Poweur-Device-Name":       "Safari on Mac",
+		"X-Poweur-Device-Client":     "WEB",
+		"X-Poweur-Device-Platform":   "macOS",
+		"X-Poweur-Device-Browser":    "Safari",
+		"X-Poweur-Device-Enrollment": "abc_DEF-123",
+	})
+	observe(nil)
+	devices := listDevices(t, ts, alice)
+	if len(devices) != 1 {
+		t.Fatalf("want one device: %+v", devices)
+	}
+	d := devices[0]
+	if d.Client != idpkg.DeviceClientWeb || d.Platform != "macOS" || d.Browser != "Safari" || d.EnrollmentID != "abc_DEF-123" {
+		t.Fatalf("metadata not recorded or lost on a bare observation: %+v", d)
+	}
+
+	// Junk is dropped rather than stored, and never fails the request.
+	observe(map[string]string{
+		"X-Poweur-Device-Client":     "toaster",
+		"X-Poweur-Device-Enrollment": "not valid!",
+		"X-Poweur-Device-Platform":   strings.Repeat("p", 500),
+	})
+	d = listDevices(t, ts, alice)[0]
+	if d.Client != idpkg.DeviceClientWeb || d.EnrollmentID != "abc_DEF-123" || len(d.Platform) > idpkg.MaxDeviceFieldLen {
+		t.Fatalf("junk overwrote or bypassed the caps: %+v", d)
+	}
+	if err := server.readDevices(context.Background(), alice.name).Validate(); err != nil {
+		t.Fatalf("registry no longer validates: %v", err)
+	}
+}

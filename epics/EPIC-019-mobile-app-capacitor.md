@@ -3,8 +3,8 @@
 - **Status:** in progress — T1 and T2 done and **verified on an iOS simulator**, T6 and T7 done; the Android project is generated and builds
 - **Priority:** P2 (after EPIC-015 makes the web app worth wrapping; the decision itself is P1 because it constrains E15)
 - **Depends on:** [EPIC-015](EPIC-015-web-app-ux.md) (the UI being wrapped), [EPIC-017](EPIC-017-typescript-client-sdk.md) (`@poweur/client`), [EPIC-018](EPIC-018-identity-onboarding-naming.md) (onboarding + credential scope), [EPIC-011](EPIC-011-key-management-recovery.md) (T8 key transfer)
-- **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), `requirements.md`'s mobile-app requirements
-- **Plans note (EPIC-026):** store builds show plan state and link out to web checkout; no in-app purchase (reader-app / DMA link-out rules; the platform cut would erase the margin).
+- **Unlocks:** EPIC-008 (the app is the consent surface for sign-in), EPIC-009 (push), the original MVP requirements' mobile-app section
+- **Plans note:** plan enforcement is external. Store builds sell nothing in-app (no in-app purchase; link-out rules apply).
 
 ## Progress
 
@@ -99,7 +99,7 @@ This is why E19-T2 is the load-bearing task, not E19-T3.
   or doesn't based on the layout it wraps. E19 must not become the place where responsive
   bugs are fixed.
 - **Multiple identities across multiple relays** is a first-class case in the shell (the
-  active-identity selector from `requirements.md`), unlocked by the single-origin property.
+  active-identity selector from the original MVP requirements), unlocked by the single-origin property.
 
 ## Tasks
 

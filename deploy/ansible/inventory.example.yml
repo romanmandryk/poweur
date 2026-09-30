@@ -1,0 +1,6 @@
+all:
+  hosts:
+    poweur:
+      ansible_host: "203.0.113.10"     # your server IP or hostname
+      ansible_user: root               # or a sudo-capable user
+      # ansible_ssh_private_key_file: ~/.ssh/id_ed25519

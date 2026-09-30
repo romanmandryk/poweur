@@ -11,7 +11,6 @@ func entry(id string) KeystoreEntry {
 		EnrollmentID: id,
 		Kind:         "passkey",
 		Wrap:         "prf",
-		Payload:      "seed",
 		CredentialID: "cred-" + id,
 		Wrapped:      json.RawMessage(`{"iv":"aXY","ciphertext":"Y3Q"}`),
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),

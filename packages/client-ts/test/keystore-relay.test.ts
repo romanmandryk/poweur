@@ -143,7 +143,6 @@ describe("keystore ↔ real relay", () => {
       enrollment_id: "enr-1",
       kind: "passkey",
       wrap: "prf",
-      payload: "seed",
       label: "Laptop",
       has_passkey: true,
     });

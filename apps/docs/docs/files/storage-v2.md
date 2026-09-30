@@ -213,6 +213,13 @@ pages and may replace only the last partial page, not the preceding history.
 Manifest canonicalization and its vectors are specified below and pinned in
 `drive-manifests.json`.
 
+A replace commit names the version it replaces as its parent; the relay refuses (`409`) a
+parent that is no longer the head. Editors use this for optimistic saves: `poweur drive put
+--base <version>` exits 3 with `{"error":"conflict","head":…}` when someone saved first, and
+`poweur drive get --version <version>` reads the common base for a three-way merge (see the
+Markdown reference app, EPIC-026 E26-T2). `poweur drive link get <url> <file> [--path]
+[--password]` opens a key-in-fragment link without a Poweur ID, like the web viewer.
+
 Replace commits compare `base_version` to the current head and return `409` with
 the head on mismatch. Creating a node requires a nonexistent ID and an unused
 sibling name hash. A move verifies the destination is not a descendant and changes
@@ -479,7 +486,7 @@ and can neither list the folder nor read any submission — including their own.
 
 **Implemented groups as members.** A share may name a group identity hosted on the same
 relay; its signed, verified roster (`.poweur/relay/group.json`) decides who the share
-reaches — members and admins alike. On a group identity's own drive (a Space), roster admins
+reaches — members and admins alike. On a group identity's own drive (the group folder), roster admins
 act with `admin` everywhere and a share may name the group itself to reach every member. The
 engine reads rosters from a relay cache that never touches a drive (warmed at start-up and on
 first use, replaced when the relay accepts a new roster). A roster update that drops anyone
@@ -528,6 +535,26 @@ An agent editing contacts validates and uploads the plaintext system document.
 The relay publishes its commit and applies the policy before acknowledging. Cold
 start rebuilds that same policy from the provider, including when every local
 cache has been deleted.
+
+## Sync client
+
+`poweur sync` keeps a local directory and a drive folder in step (your own drive, or
+`--drive <owner> --folder /<node>` for a folder shared with you):
+
+```bash
+poweur sync run ~/Poweur            # pull, merge, push until both sides agree
+poweur sync watch ~/Poweur          # keep doing it: change stream + local polling
+poweur sync status ~/Poweur         # pending local changes, remote changes, conflicts
+poweur sync service ~/Poweur --launchd   # or --systemd: run watch at login
+```
+
+The client merges; the relay only refuses a stale write (`409`). Markdown and text files merge
+line by line against the last synced version; JSON merges by top-level key; `.jsonl`, `.log` and
+`.csv` files are created as append files, so each machine's new lines become records in the
+relay's order; anything else keeps the losing side as `name (conflicted copy <device> <time>)`.
+Remote deletes move local files to `.poweur-trash/<date>/`. `.poweurignore` and `--path` limit
+what syncs; `.poweur` system files are excluded by default. Each sync reports its position, so
+`devices.json` shows when every device last synced.
 
 ## Threat model and privacy inventory
 

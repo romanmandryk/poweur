@@ -9,7 +9,7 @@
  * half EPIC-007 actually specifies.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PoweurError } from "../src/errors.js";
 import {
@@ -70,6 +70,10 @@ describe("contact requests ↔ real relay", () => {
       ),
     ).toBe(true);
 
+    expect((await (await alice.client.contacts()).load()).contacts.find((c) => c.identity === bob.identity)?.state).toBe(CONTACT_ACCEPTED);
+    expect(await alice.client.requests()).toEqual([]);
+    expect(await bob.client.requests()).toEqual([]);
+
     // Both pins agree with what resolves now.
     expect((await (await bob.client.contacts()).checkPin(alice.identity)).status).toBe("ok");
     expect((await (await alice.client.contacts()).checkPin(bob.identity)).status).toBe("ok");
@@ -112,6 +116,23 @@ describe("contact requests ↔ real relay", () => {
     await expect(erin.client.send(dave.identity, "thanks")).resolves.toBeTruthy();
 
     await dave.client.setPolicy(INBOX_OPEN);
+  });
+
+  it("keeps a drained answer in history when promotion fails, then replays it", async () => {
+    const requester = await createTestIdentity(relay.baseUrl, "creqretrya");
+    const accepter = await createTestIdentity(relay.baseUrl, "creqretryb");
+    await requester.client.requestContact(accepter.identity);
+    await accepter.client.requests();
+    await accepter.client.acceptContact(requester.identity);
+    const process = vi.spyOn(requester.client, "processContactAccepts").mockRejectedValueOnce(new Error("contact write failed"));
+    const drained = await requester.client.requestsAndArchive();
+    expect(drained.archived).toBe(1);
+    expect(drained.lost).toBe(0);
+    process.mockRestore();
+    const records = await (await requester.client.history()).load();
+    expect(await requester.client.processContactAccepts(records)).toEqual([accepter.identity]);
+    expect((await (await requester.client.contacts()).load()).contacts[0]?.state).toBe(CONTACT_ACCEPTED);
+    expect(await requester.client.requests()).toEqual([]);
   });
 
   it("blocks without telling the blocked sender", async () => {

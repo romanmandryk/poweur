@@ -3,7 +3,7 @@ name: External relay health
 # rounds up to 1 minute, which is more than the free private-repo quota by itself.
 # Run by hand: Actions → External relay health → Run workflow.
 # Restore the probe by uncommenting the schedule. Same-VM Grafana cannot see a
-# total VM outage; Better Stack uptime (deploy/betterstack/uptime.json) can.
+# total VM outage; an external uptime monitor (for example Better Stack) can.
 on:
   workflow_dispatch:
   # schedule:

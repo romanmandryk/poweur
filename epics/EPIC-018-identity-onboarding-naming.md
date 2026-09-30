@@ -4,7 +4,7 @@
 - **Priority:** P1 (the front door for every new user; blocks any public launch of a hosted domain)
 - **Depends on:** EPIC-002 (hosted registration), EPIC-001 (identity documents), EPIC-014 (registration PoW gate)
 - **Unlocks:** [EPIC-019](EPIC-019-mobile-app-capacitor.md) (mobile shell reuses the same onboarding), [EPIC-015](EPIC-015-web-app-ux.md) first-run flow, public availability of `*.poweur.net`
-- **Plans note:** the "no paid premium names" non-goal stands under EPIC-026. Monetize custom domains instead via an optional registrar referral that auto-configures `.well-known`.
+- **Plans note:** the "no paid premium names" non-goal stands. Custom domains can be offered via an optional registrar referral that auto-configures `.well-known`.
 
 ## Progress
 
@@ -49,7 +49,7 @@ Two things stand between the current code and that flow:
 
   This is an impersonation vector *and* a correctness bug: a raw UTF-8 label is not a valid
   DNS label and is not covered by the `*.poweur.net` wildcard certificate
-  (`requirements.md`, wildcard certificate strategy).
+  (`apps/docs/docs/relay/self-hosting.md`, wildcard certificate strategy).
 - There is **no availability check**. The web app's only client-side rule is
   `handle.length < 3`; a taken handle is discovered by a failed `POST /identities` after the
   user has already created a passkey.

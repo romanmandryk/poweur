@@ -116,7 +116,7 @@ register against the relay and exchange E2E-encrypted messages; integration test
 
 ### E02-T5 — Operational hardening for stateful relays — DONE
 
-- [x] Backup/restore: [`deploy/BACKUP.md`](../deploy/BACKUP.md); `TestINT_OPS_01_RestoreDataDir`
+- [x] Backup/restore: [`deploy/backup/README.md`](../deploy/backup/README.md); `TestINT_OPS_01_RestoreDataDir`
 - [x] Quota scaffolding: `MAX_IDENTITY_BYTES` (enforce in EPIC-003)
 - [x] `docker-compose.prod.yml` mounts `poweur_data` → `POWEUR_DATA=/data`
 - [x] `/health` reports `storage` (writable, free_bytes)

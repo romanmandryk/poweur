@@ -135,7 +135,7 @@ built output imports cleanly from a plain `<script type="module">` page and from
       normalization, key pinning, SSRF guards (no redirects, size/time caps, private IPs gated by an
       explicit test flag), fail-closed on mismatch
 - [x] Identity lifecycle: create, hosted registration (signed `identity_document`, no DNS token),
-      encryption-key publish, export, rotate — one function per relay endpoint that exists today
+      export, rotate — one function per relay endpoint that exists today
 - [x] Unit tests for happy path + failure modes per AGENTS.md (table-driven where it fits)
 
 **Acceptance:** a Node script creates a hosted identity against a local relay and resolves it back;
@@ -231,7 +231,7 @@ installing Go or hand-rolling a CLI. `npx @poweur/client` closes that, and shari
 state directory means the two are interchangeable rather than merely similar.
 
 - [x] `poweur` bin (`npx @poweur/client …`), dependency-free arg parsing, `--json` on every command
-- [x] Every Go command: `identity` (create/show/dns/use/list/add-encryption-key/lookup/export),
+- [x] Every Go command: `identity` (create/show/dns/use/list/lookup/export),
       `key rotate`, `send` (session/identity/anon, `--via-home-relay`, `--type`, `--accept-new-key`),
       `inbox`, `messages status`, `anon`, `session`, `relay`, `dav` (token/mount/password),
       `sync`, `share`, `contacts`, `requests`, `policy`, `auth`

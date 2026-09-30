@@ -45,6 +45,9 @@ func TestPreflightAllowsEveryProtocolHeader(t *testing.T) {
 	// The set a client actually sends: challenge-signed reads carry all four.
 	for _, header := range []string{
 		"x-poweur-identity", "x-poweur-challenge", "x-poweur-signature", "x-poweur-session-id",
+		// Browser clients register themselves in the device registry.
+		"x-poweur-device", "x-poweur-device-name", "x-poweur-device-kind", "x-poweur-device-client",
+		"x-poweur-device-platform", "x-poweur-device-browser", "x-poweur-device-enrollment",
 	} {
 		if !strings.Contains(allowed, header) {
 			t.Errorf("preflight does not allow %s (allowed: %s)", header, allowed)

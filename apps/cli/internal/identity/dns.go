@@ -211,7 +211,16 @@ var (
 	resolveAllowPrivate bool
 	resolveHTTPClient   *http.Client
 	resolveDialAddr     string
+	// resolveDialHost, when set, picks the address per host (tests with
+	// several relays); an empty answer falls back to resolveDialAddr.
+	resolveDialHost func(host string) string
 )
+
+// ConfigureResolverHosts is ConfigureResolver with a per-host dial address.
+func ConfigureResolverHosts(scheme string, allowPrivate bool, dialHost func(host string) string) {
+	ConfigureResolver(scheme, allowPrivate, "", nil)
+	resolveDialHost = dialHost
+}
 
 // ConfigureResolver sets web-first resolve options (used by CLI entrypoint and tests).
 func ConfigureResolver(scheme string, allowPrivate bool, dialAddr string, client *http.Client) {
@@ -220,6 +229,7 @@ func ConfigureResolver(scheme string, allowPrivate bool, dialAddr string, client
 	}
 	resolveAllowPrivate = allowPrivate
 	resolveDialAddr = dialAddr
+	resolveDialHost = nil
 	resolveHTTPClient = client
 }
 
@@ -229,7 +239,8 @@ func resolveOptions() idpkg.ResolveOptions {
 		AllowPrivate: resolveAllowPrivate,
 		HTTPClient:   resolveHTTPClient,
 	}
-	if resolveDialAddr != "" && opts.HTTPClient == nil {
+	if (resolveDialAddr != "" || resolveDialHost != nil) && opts.HTTPClient == nil {
+		fixed, perHost := resolveDialAddr, resolveDialHost
 		opts.HTTPClient = &http.Client{
 			Timeout: idpkg.DefaultTimeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -237,10 +248,29 @@ func resolveOptions() idpkg.ResolveOptions {
 			},
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, resolveDialAddr)
+					target := fixed
+					if perHost != nil {
+						host, _, err := net.SplitHostPort(addr)
+						if err != nil {
+							host = addr
+						}
+						if picked := perHost(host); picked != "" {
+							target = picked
+						}
+					}
+					if target == "" {
+						target = addr
+					}
+					return (&net.Dialer{Timeout: idpkg.DefaultTimeout}).DialContext(ctx, network, target)
 				},
 			},
 		}
 	}
 	return opts
+}
+
+// FetchGroupPublicKey reads a group identity's current public key (EPIC-024
+// E24-T3), verified against the group's own signing key.
+func FetchGroupPublicKey(ctx context.Context, group string) (idpkg.GroupPublicKey, error) {
+	return idpkg.FetchGroupPublicKey(ctx, group, resolveOptions())
 }

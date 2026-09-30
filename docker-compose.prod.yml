@@ -24,7 +24,17 @@ services:
       FARO_COLLECT_URL: ${FARO_COLLECT_URL:-/faro/collect}
       SENTRY_DSN: ${SENTRY_DSN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      NAME_RESERVED: "ingest,metrics,grafana,stats,${NAME_RESERVED:-}"
+      # Whole handles nobody can claim, on top of the built-in list in
+      # packages/identity/names.go: our own hosts, roles, and big brands
+      # (substring terms live in deploy/relay/blocked-terms.txt). Anything in
+      # NAME_RESERVED on the host is appended.
+      NAME_RESERVED: >-
+        ingest,metrics,grafana,stats,
+        hello,feedback,info,sales,press,jobs,careers,hr,ceo,founder,owner,operator,
+        administrator,sysadmin,moderator,mod,trust,safety,ops,devops,webmaster,
+        google,apple,microsoft,amazon,meta,facebook,instagram,whatsapp,twitter,
+        github,gitlab,paypal,stripe,anthropic,openai,claude,chatgpt,
+        ${NAME_RESERVED:-}
       # The web client is built into the image at /web and served at /app/.
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
@@ -49,15 +59,43 @@ services:
       # bucket, picked up within a minute), and QUOTA_CONTACT is the ID an
       # over-quota upload is told to message.
       MAX_IDENTITY_BYTES: "209715200"
-      QUOTA_CONTACT: ${QUOTA_CONTACT:-}
-      # NAME_RESERVED: extra names, CSV — adds to the built-in list
-      # NAME_BLOCKED_FILE: /data/blocked-terms.txt (one term per line)
-      # NAME_BLOCK_MODE: substring | exact
+      QUOTA_CONTACT: ${QUOTA_CONTACT:-support.poweur.net}
+      # Terms that can't appear anywhere in a handle (deploy/relay/blocked-terms.txt).
+      NAME_BLOCKED_FILE: /etc/poweur/blocked-terms.txt
+      NAME_BLOCK_MODE: substring
     volumes:
       - poweur_data:/data
+      - ./deploy/relay/blocked-terms.txt:/etc/poweur/blocked-terms.txt:ro
     networks:
       - poweur_net
       - infra_net
+
+  # hello.poweur.net, the demo bot (apps/cli/pkg/hello): answers any message with a
+  # fixed reply. The same image as the relay, a different binary. Its ID's key
+  # files live on the host in /opt/apps/poweur-hello/keys (hello.poweur.net.key
+  # and .enc, mode 600, never in git); nothing else about it is persistent.
+  hello:
+    image: ${RELAY_IMAGE:?Set RELAY_IMAGE to a GHCR digest}
+    container_name: poweur-hello
+    restart: unless-stopped
+    entrypoint: ["/hello-bot"]
+    environment:
+      IDENTITY: hello.poweur.net
+      RELAY_URL: https://relay.poweur.net
+      KEYS_DIR: /keys
+      HOME: /home/bot
+      HELLO_DEMO_URL: ${HELLO_DEMO_URL:-}
+    volumes:
+      - /opt/apps/poweur-hello/keys:/keys:ro
+    # Sessions and the CLI's bookkeeping are throwaway: memory only, bounded.
+    tmpfs:
+      - /home/bot:size=64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - poweur_net
 
 volumes:
   poweur_data:

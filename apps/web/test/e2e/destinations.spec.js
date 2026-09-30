@@ -174,6 +174,8 @@ test.describe("five destinations at 375px", () => {
     // the relay rather than from anything held locally.
     await expect(panel.locator(".enrollment-row")).toHaveCount(1);
     await expect(panel).toContainText("this device");
+    // The restorability note sits behind a tap-to-open tip.
+    for (const tip of await panel.locator(".info-tip button").all()) await tip.click();
     await expect(panel).toContainText("passkey (PRF)");
     // You cannot evict the device you are on.
     await expect(panel.locator("[data-remove-enrollment]")).toBeDisabled();

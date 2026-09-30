@@ -5,9 +5,13 @@ The brand in one line: **a black glass P on violet night**. The mark is always b
 
 - Tokens: [`tokens.css`](tokens.css) (CSS custom properties) and [`tokens.json`](tokens.json)
 - Generator: [`palette.py`](palette.py) (`python3 palette.py` prints every scale and the contrast checks)
-- Logo files: [`../claude/black-glass/`](../claude/black-glass/) (glass), [`../claude/flat/`](../claude/flat/) (flat)
-  and [`../claude/lockups/`](../claude/lockups/) (the P with the Sora wordmark, outlined)
-- Design canvas (every round, the palette board): https://claude.ai/artifact/LycyzYUHnXZdhWobPdgURL
+- Logo files: only the ones in use are kept, next to where they are used: the website in
+  [`apps/site/assets/brand/`](../../apps/site/assets/brand/) (glass P, white P, horizontal lockups
+  for dark grounds), the web app in [`apps/web/src/assets/brand/`](../../apps/web/src/assets/brand/)
+  (flat and glass P, black and white lockups) and the docs in
+  [`apps/docs/static/img/`](../../apps/docs/static/img/) (logo, favicon, social card). Icons, splash
+  screens and social images are in [`assets/`](assets/). Regenerate any of them with
+  [`scripts/`](scripts/)
 
 ## The mark
 
@@ -169,12 +173,13 @@ Proportions of the P inside each icon:
 
 - UI: the system stack already in the app (`-apple-system, BlinkMacSystemFont, "Segoe UI", …`). Keep it:
   it is fast and native in the Capacitor shell.
-- Display and wordmark: **Sora** SemiBold (600), from Google Fonts under the SIL Open Font License.
+- Display and wordmark: **Sora** SemiBold (600), under the SIL Open Font License (self-hosted on the site in `apps/site/assets/fonts/`).
   Use it for headings on marketing pages and for the wordmark. Self-host it (no CDN, per E15-T6).
 
 ## Lockups
 
-The files are in [`../claude/lockups/`](../claude/lockups/). The wordmark is Sora 600, kerned by the
+The files (`scripts/lockup.py` writes them to `design/brand/out/lockups/`; the ones in use are
+copied into the apps, see the top of this page). The wordmark is Sora 600, kerned by the
 font, with tracking −0.02 em, and **converted to outlines**. No font is needed to render these files.
 
 - **Proportions:** the P is 1.45 times the height of the capital letters. The horizontal gap between

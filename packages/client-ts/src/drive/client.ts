@@ -62,6 +62,9 @@ export class DriveClient {
   /** Authenticate as a link holder instead of an identity; the signer is then
    * only a guest key (see guestAuthor). */
   link?: { id: string; verifier?: Uint8Array };
+  /** A signed group roster (base64url) presented to a relay that does not
+   * host the group, when reading a drive shared with that group (E24-T3). */
+  groupRoster?: string;
   constructor(readonly relay: RelayClient, readonly signer: Signer, readonly drive = signer.identity,
     readonly cache?: ChunkCache, readonly sessionId?: string) {}
 
@@ -71,7 +74,8 @@ export class DriveClient {
     if (this.link) {
       return { headers: { ...headers, "X-Poweur-Link": this.link.id, ...(this.link.verifier ? { "X-Poweur-Link-Verifier": toBase64url(this.link.verifier) } : {}) } };
     }
-    return { headers, sign: { signer: this.signer, ...(this.sessionId ? { sessionId: this.sessionId } : {}) } };
+    const withRoster = this.groupRoster ? { ...headers, "X-Poweur-Group-Roster": this.groupRoster } : headers;
+    return { headers: withRoster, sign: { signer: this.signer, ...(this.sessionId ? { sessionId: this.sessionId } : {}) } };
   }
   private path(suffix: string): string { return `/drive/${segment(this.drive)}${suffix}`; }
   private async request<T>(method: string, suffix: string, body?: unknown, headers?: Record<string, string>): Promise<T> {

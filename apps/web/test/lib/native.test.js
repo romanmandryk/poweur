@@ -14,7 +14,7 @@ import {
   hasNativeKeystore, isNativeShell, wrapKeysNative, unwrapKeysNative,
   forgetNativeSecret, biometricAvailability, GATE_BIOMETRIC, GATE_DEVICE,
 } from "../../src/lib/native.js";
-import { generateIdentityJwks } from "../../src/lib/vault.js";
+import { generateSeedIdentityJwks } from "../../src/lib/vault.js";
 
 /** A plugin that behaves like the real one, without Keychain or Keystore. */
 function fakePlugin({ invalidated = false } = {}) {
@@ -47,7 +47,7 @@ describe("in a plain browser", () => {
   it("reports no native custody and refuses to pretend", async () => {
     expect(hasNativeKeystore()).toBe(false);
     expect(isNativeShell()).toBe(false);
-    await expect(wrapKeysNative("alice.poweur.net", {}, {})).rejects.toThrow(/not available/);
+    await expect(wrapKeysNative("alice.poweur.net", {}, {}, "seed")).rejects.toThrow(/not available/);
     expect(await biometricAvailability()).toEqual({
       available: false, reason: "no_native_keystore",
     });
@@ -58,7 +58,7 @@ describe("in a shell with a keystore", () => {
   let keys;
 
   beforeEach(async () => {
-    keys = await generateIdentityJwks();
+    keys = await generateSeedIdentityJwks();
   });
 
   it("round-trips keys through a hardware-held secret", async () => {
@@ -66,7 +66,7 @@ describe("in a shell with a keystore", () => {
     install(plugin);
 
     const wrapped = await wrapKeysNative(
-      "alice.poweur.net", keys.signingJWK, keys.encJWK, "seedbytes",
+      "alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed,
     );
     // The record is the same shape as prf — only `kdf` differs, which
     // is what lets the rest of the app stay ignorant of custody.
@@ -80,21 +80,21 @@ describe("in a shell with a keystore", () => {
     const opened = await unwrapKeysNative("alice.poweur.net", wrapped);
     expect(opened.signingJWK).toEqual(keys.signingJWK);
     expect(opened.encJWK).toEqual(keys.encJWK);
-    expect(opened.seed).toBe("seedbytes");
+    expect(opened.seed).toBe(keys.seed);
   });
 
   it("gates on biometrics by default and says what is being authorised", async () => {
     const plugin = fakePlugin();
     install(plugin);
 
-    const wrapped = await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK);
+    const wrapped = await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed);
     expect(wrapped.gate).toBe(GATE_BIOMETRIC);
     await unwrapKeysNative("alice.poweur.net", wrapped, { reason: "Send a message as alice" });
     expect(plugin.prompts).toContain("Send a message as alice");
 
     // Device-gated storage exists only for the background path that cannot prompt.
     const background = await wrapKeysNative(
-      "alice.poweur.net", keys.signingJWK, keys.encJWK, null, { gate: GATE_DEVICE },
+      "alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed, { gate: GATE_DEVICE },
     );
     expect(background.gate).toBe(GATE_DEVICE);
   });
@@ -102,8 +102,8 @@ describe("in a shell with a keystore", () => {
   it("keeps one secret per identity", async () => {
     const plugin = fakePlugin();
     install(plugin);
-    await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK);
-    await wrapKeysNative("bob.poweur.net", keys.signingJWK, keys.encJWK);
+    await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed);
+    await wrapKeysNative("bob.poweur.net", keys.signingJWK, keys.encJWK, keys.seed);
     expect(plugin.secrets.size).toBe(2);
 
     // Removing one identity must not lock the others out.
@@ -114,7 +114,7 @@ describe("in a shell with a keystore", () => {
 
   it("explains an OS-invalidated key instead of reporting a failed unlock", async () => {
     install(fakePlugin());
-    const wrapped = await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK);
+    const wrapped = await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed);
 
     // What a changed fingerprint enrolment, or a restore onto a new device,
     // looks like from here: the entry is simply gone.
@@ -129,12 +129,12 @@ describe("in a shell with a keystore", () => {
     // Android's Keystore gates the key rather than the direction, so writing
     // under a biometric gate raises a prompt. Without a reason the user is
     // asked to authenticate for no stated purpose.
-    await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, null, {
+    await wrapKeysNative("alice.poweur.net", keys.signingJWK, keys.encJWK, keys.seed, {
       reason: "Protect alice",
     });
     expect(plugin.prompts).toContain("Protect alice");
 
-    await wrapKeysNative("bob.poweur.net", keys.signingJWK, keys.encJWK);
+    await wrapKeysNative("bob.poweur.net", keys.signingJWK, keys.encJWK, keys.seed);
     expect(plugin.prompts.filter(Boolean).every((reason) => reason.length > 0)).toBe(true);
   });
 

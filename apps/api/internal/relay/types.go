@@ -151,18 +151,6 @@ type RotateRequest struct {
 	RotationSignature string `json:"rotation_signature"`
 }
 
-type EncryptionKeyRequest struct {
-	EncryptionPublicKey string `json:"encryption_public_key"`
-	DNSProvider         string `json:"dns_provider"`
-	DNSToken            string `json:"dns_token"`
-
-	// Identity-signed admin envelope. Verified against the long-lived
-	// signing key registered for `:identity`.
-	IssuedAt          string `json:"issued_at"`
-	Nonce             string `json:"nonce"`
-	IdentitySignature string `json:"identity_signature"`
-}
-
 // SessionRevokeRequest is the body of DELETE /sessions/:id. The relay
 // resolves the session by id, then verifies IdentitySignature against the
 // session's owning identity (via the long-lived signing key).
@@ -171,12 +159,6 @@ type SessionRevokeRequest struct {
 	IssuedAt          string `json:"issued_at"`
 	Nonce             string `json:"nonce"`
 	IdentitySignature string `json:"identity_signature"`
-}
-
-type EncryptionKeyResponse struct {
-	Identity            string `json:"identity"`
-	EncryptionPublicKey string `json:"encryption_public_key"`
-	UpdatedAt           string `json:"updated_at"`
 }
 
 type IdentityResponse struct {

@@ -26,7 +26,7 @@ vi.mock("../../src/lib/keystore.js", async (importOriginal) => ({
   listEnrollments: vi.fn(() =>
     Promise.resolve([
       { enrollment_id: "e1", kind: "native", wrap: "native", current: true, label: "This phone" },
-      { enrollment_id: "e2", kind: "passkey", wrap: "prf", current: false, label: "Laptop" },
+      { enrollment_id: "e2", kind: "passkey", wrap: "prf", has_passkey: true, current: false, label: "Laptop" },
     ]),
   ),
   removeEnrollment: vi.fn(() => Promise.resolve()),
@@ -91,7 +91,6 @@ beforeEach(() => {
     relay: "http://127.0.0.1:8080",
     createdAt: "2026-09-15T10:00:00Z",
     encryptedKeys: { kdf: "native" },
-    seedDerived: true,
     hosted: true,
   });
   // storage.js types `seed = null`; it takes a base64url seed.
@@ -107,13 +106,12 @@ describe("Settings destination (E21-T11)", () => {
     render(<App />);
     expect($(".settings-id-name")!.textContent).toBe("alice");
     expect($(".settings-id-card .chip")!.textContent).toBe("Device keystore");
-    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-rotate-enc", "row-remove-id"]) {
+    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-remove-id"]) {
       expect($(`#${id}`), id).toBeTruthy();
     }
     // A hosted identity has no DNS credentials to configure (E15-T10).
     expect($("#row-dns")).toBeNull();
     expect($("#row-session .settings-row-value")!.textContent).toBe("None");
-    expect($("#row-recovery-kit .settings-row-value")!.textContent).toBe("Available");
     await waitFor(() => expect($("#row-profile .settings-row-value")!.textContent).toBe("Not set"));
     await waitFor(() => expect($("#about-relay-version")!.textContent).toBe("0.1.7"));
     expect($("#about-app-version")!.textContent).toMatch(/^\d+\.\d+\.\d+$/);
@@ -204,6 +202,8 @@ describe("Settings destination (E21-T11)", () => {
     fireEvent.click($("#row-keys-devices")!);
     await waitFor(() => expect(document.querySelectorAll("#panel-root .enrollment-row")).toHaveLength(3));
     const panel = $("#panel-root")!;
+    // The restorability notes sit behind a tap-to-open tip.
+    panel.querySelectorAll<HTMLButtonElement>(".info-tip button").forEach((tip) => fireEvent.click(tip));
     expect(panel.textContent).toContain("this device");
     expect(panel.textContent).toContain("the OS keystore");
     expect(panel.textContent).toContain("CLI on server");
@@ -215,6 +215,43 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect($("#dialog-confirm")).toBeTruthy());
     fireEvent.click($("#dialog-confirm")!);
     await waitFor(() => expect(removeEnrollment).toHaveBeenCalledWith(holder.client, ME, "e2"));
+  });
+
+  it("keys & devices is one list: a device joins its keystore entry, shows client, platform and last use", async () => {
+    const revoke = vi.fn(() => Promise.resolve({ device_id: "d2", sessions_revoked: 2 }));
+    holder.client.devices = vi.fn(() => ({
+      list: async () => ({
+        devices: [
+          { id: "d2", name: "Chrome on Mac", client: "web", platform: "macOS", browser: "Chrome", enrollment_id: "e2", added_at: "2026-09-01T10:00:00Z", last_seen: "2026-09-30T09:00:00Z" },
+          { id: "d3", name: "MBP4.local", client: "cli", platform: "macOS", added_at: "2026-09-30T08:00:00Z", last_seen: "2026-09-30T09:44:22Z" },
+        ],
+      }),
+      revoke,
+    }));
+    render(<App />);
+    fireEvent.click($("#row-keys-devices")!);
+    // e1 (this phone, no device row), d2 joined to e2, and the CLI machine.
+    await waitFor(() => expect(document.querySelectorAll("#panel-root .enrollment-row")).toHaveLength(3));
+    const panel = $("#panel-root")!;
+    panel.querySelectorAll<HTMLButtonElement>(".info-tip button").forEach((tip) => fireEvent.click(tip));
+    expect(panel.textContent).toContain("Chrome on Mac");
+    expect(panel.textContent).toContain("Web · macOS · Chrome");
+    expect(panel.textContent).toContain("CLI · macOS");
+    expect(panel.textContent).toContain("last used");
+    expect(panel.textContent).toContain("Passkey backup");
+    expect(panel.textContent).toContain("Keeps its keys on this machine only");
+    expect(panel.textContent).not.toContain("Devices using this identity");
+    // One verb for every row, with the honest caveat behind a tip.
+    expect(panel.textContent).not.toContain("Revoke");
+    expect(panel.textContent).toContain("What removing means");
+    expect(panel.textContent).toContain("does not change your key");
+
+    // Removing the joined row drops its keystore copy and ends its sessions.
+    fireEvent.click($('[data-remove-enrollment="e2"]')!);
+    await waitFor(() => expect($("#dialog-confirm")).toBeTruthy());
+    fireEvent.click($("#dialog-confirm")!);
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("d2"));
+    expect(removeEnrollment).toHaveBeenCalledWith(holder.client, ME, "e2");
   });
 
   it("a typed code approves a new device only after the digits are compared", async () => {

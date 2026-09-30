@@ -40,6 +40,29 @@
               "unknown"
             ]
           },
+          "client": {
+            "enum": [
+              "app",
+              "web",
+              "cli"
+            ],
+            "description": "what is talking: the native app, the web app or a command-line client"
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "operating system the client runs on, self-reported (macOS, iOS, ...)"
+          },
+          "browser": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "browser name, for web clients"
+          },
+          "enrollment_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "description": "the device's keystore enrollment, when it has one"
+          },
           "added_at": {
             "type": "string",
             "format": "date-time"

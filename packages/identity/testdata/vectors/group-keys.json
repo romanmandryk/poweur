@@ -1,0 +1,58 @@
+[
+  {
+    "name": "two-epochs",
+    "keyring": {
+      "version": 1,
+      "group": "atlas.poweur.net",
+      "epoch": 2,
+      "public": "WdkiVHNFHv_-azbbyu_b97GJXeYghFCaf1tYvwHQZBg",
+      "sealed": {
+        "atlas.poweur.net": {
+          "ciphertext": "Hc5fUzkwSDe7jge08HeIN-r95oFtEMkcoXwBQErH4UM8Waw9FltdqO30ZGTQ7N_s",
+          "ephemeral_public_key": "xD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I",
+          "nonce": "WqU8w1qlPMNapTzD"
+        },
+        "bob.poweur.net": {
+          "ciphertext": "6z5FIFj3Tx6chfnNMUmMTzEnjiXSEHqbbZID8xWwtQ2S6ETioeWUgRg4te4fwqbV",
+          "ephemeral_public_key": "xD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I",
+          "nonce": "WqU8w1qlPMNapTzD"
+        }
+      },
+      "previous": [
+        {
+          "epoch": 1,
+          "public": "BPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo",
+          "sealed": {
+            "ciphertext": "j80ktqhlpH5NYjExtOqSE1jDJrAU3wWRFZH1LDcsLyXkSp8neMzrVIpX7B0bagBb",
+            "ephemeral_public_key": "xD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I",
+            "nonce": "WqU8w1qlPMNapTzD"
+          }
+        }
+      ],
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "wlRKYdhpbh64DoMB7lYBsntOLEnPxpQ3poMQIpvT1KGFjOtgUdBs3YSPZNEq20QprtuFlMlW76qay1KqujSQDA"
+    },
+    "canonical": "poweur-group-keys\n1\natlas.poweur.net\n2\nWdkiVHNFHv_-azbbyu_b97GJXeYghFCaf1tYvwHQZBg\n2\natlas.poweur.net\tHc5fUzkwSDe7jge08HeIN-r95oFtEMkcoXwBQErH4UM8Waw9FltdqO30ZGTQ7N_s\txD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I\tWqU8w1qlPMNapTzD\nbob.poweur.net\t6z5FIFj3Tx6chfnNMUmMTzEnjiXSEHqbbZID8xWwtQ2S6ETioeWUgRg4te4fwqbV\txD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I\tWqU8w1qlPMNapTzD\n1\n1\tBPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo\tj80ktqhlpH5NYjExtOqSE1jDJrAU3wWRFZH1LDcsLyXkSp8neMzrVIpX7B0bagBb\txD5w0comrg7OvdwbUJeqOS_MbWSCqUuSlRMKECstZ0I\tWqU8w1qlPMNapTzD\n2026-01-15T09:30:00Z",
+    "public": {
+      "version": 1,
+      "group": "atlas.poweur.net",
+      "epoch": 2,
+      "public": "WdkiVHNFHv_-azbbyu_b97GJXeYghFCaf1tYvwHQZBg",
+      "updated_at": "2026-01-15T09:30:00Z",
+      "signature": "HuCvNwph7nzwg-8mCtP07_ywTUrPHzjc4oLjyZQviGTVuE4QpsM1GLRgzc_B6yFW1RBqTcgRMvOXB-zd2kChAg"
+    },
+    "public_canonical": "poweur-group-key\n1\natlas.poweur.net\n2\nWdkiVHNFHv_-azbbyu_b97GJXeYghFCaf1tYvwHQZBg\n2026-01-15T09:30:00Z",
+    "member": "bob.poweur.net",
+    "member_private": "ERERERERERERERERERERERERERERERERERERERERERE",
+    "opened": [
+      {
+        "epoch": 2,
+        "private": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI"
+      },
+      {
+        "epoch": 1,
+        "private": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE"
+      }
+    ]
+  }
+]

@@ -30,12 +30,11 @@ import {
 } from "./commands/social.js";
 
 export const HELP = `Usage:
-  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--hosted] [--json]
+  poweur identity create <name> [--dns-provider=cloudflare|hetzner] [--dns-token=...] [--parent-domain=...] [--relay=...] [--hosted] [--seed=<b64url|mnemonic>] [--json]
   poweur identity show [--use-identity=...] [--json]
   poweur identity dns <identity> [--json]
   poweur identity use <identity> [--json]
   poweur identity list [--json]
-  poweur identity add-encryption-key [<identity>] [--rotate] [--dns-provider=...] [--dns-token=...] [--relay=...] [--json]
   poweur identity lookup <identity> [--json]
   poweur identity export [--use-identity=...] [--out=<file.tar.gz>]
   poweur key rotate [--use-identity=...] [--grace=168h] [--json]

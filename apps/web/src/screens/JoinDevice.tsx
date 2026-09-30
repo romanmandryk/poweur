@@ -91,7 +91,7 @@ function OfferedCode({ phase, identity }: { phase: { code: string; link: string;
       /* remembered for this visit only */
     }
   };
-  const command = `poweur key approve '${phase.link}' --seed …`;
+  const command = `poweur key approve '${phase.link}'`;
   return (
     <>
       <p className="mb-2 text-[13px] text-muted">Approve with</p>

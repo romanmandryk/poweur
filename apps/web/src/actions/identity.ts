@@ -21,7 +21,7 @@ import {
   GATE_BIOMETRIC,
   hasNativeKeystore,
   unwrapKeysNative,
-  wrapKeysNative as wrapKeysNativeJs,
+  wrapKeysNative,
 } from "../lib/native.js";
 import {
   authenticatePasskey,
@@ -29,7 +29,7 @@ import {
   createPasskey,
   PRF_UNAVAILABLE_MESSAGE,
   unwrapKeysWithPRF,
-  wrapKeysWithPRF as wrapKeysWithPRFJs,
+  wrapKeysWithPRF,
 } from "../lib/passkey.js";
 import {
   clearUnlockedKeys,
@@ -42,22 +42,9 @@ import {
   rpIdFor,
   saveConfig,
   saveIdentityRecord,
-  setUnlockedKeys as setUnlockedKeysJs,
+  setUnlockedKeys,
 } from "../lib/storage.js";
 
-// The carried modules default `seed = null`, which TypeScript reads as "seed is
-// always null". They take a base64url seed; say so here rather than editing
-// files the freeze guard keeps byte-identical to apps/web.
-type Seed = string | null | undefined;
-const setUnlockedKeys = setUnlockedKeysJs as (identity: string, signingJWK: unknown, encJWK: unknown, seed?: Seed) => void;
-const wrapKeysNative = wrapKeysNativeJs as (
-  identity: string,
-  signingJWK: unknown,
-  encJWK: unknown,
-  seed?: Seed,
-  options?: { gate?: string; reason?: string },
-) => Promise<unknown>;
-const wrapKeysWithPRF = wrapKeysWithPRFJs as (prfOutput: unknown, signingJWK: unknown, encJWK: unknown, seed?: Seed) => Promise<unknown>;
 import { generateSeedIdentityJwks, keyBytesFromJwks, publicKeyFromJwk, toBase64url } from "../lib/vault.js";
 import { identityAppUrl, type CustodyChoice } from "../lib/claim";
 import { chatTargetQuery } from "../lib/visit";
@@ -140,7 +127,7 @@ export async function unlock() {
       throw new Error(PRF_UNAVAILABLE_MESSAGE);
     }
 
-    setUnlockedKeys(identity, opened.signingJWK, opened.encJWK, opened.seed ?? null);
+    setUnlockedKeys(identity, opened.signingJWK, opened.encJWK, opened.seed);
     if (!isSessionValid(loadSessionRecord(identity))) {
       setLoading(true, "Creating session…");
       await ensureSession(identity);
@@ -251,7 +238,6 @@ export async function adoptIdentity({
     userId,
     createdAt: new Date().toISOString(),
     supportsPRF,
-    seedDerived: Boolean(seed),
     // A fresh passkey is a fresh enrollment.
     enrollmentId: null,
   });
@@ -442,7 +428,6 @@ export async function createIdentity(intent: ClaimIntent, { onNameRefused }: { o
       userId,
       createdAt: registered.document.updated_at,
       supportsPRF,
-      seedDerived: true,
     });
     saveConfig({ ...getConfig(), relayUrl, parentDomain: domain, dnsProvider: provider });
 

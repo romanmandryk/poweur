@@ -30,6 +30,8 @@
 
 ## Progress
 
+Contact-approval regression (2026-09-30): archived requests now have durable answered watermarks, automatic acceptance is replayed after history restore, and overlapping refreshes wait for the contact write. E15-T2/T3 browser coverage checks both contacts and empty trays/badges across reloads; tracked with E07-T3.
+
 | Task | Status | Notes |
 |------|--------|-------|
 | E15-T1 Information architecture & shared components | **done** | five destinations, IdentityInput / AudiencePicker / ProfileCard, relay URL off `location.origin` |

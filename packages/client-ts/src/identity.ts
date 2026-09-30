@@ -8,12 +8,11 @@
  */
 
 import {
-  canonicalEncryptionKeyUpdate,
   canonicalIdentityExport,
   canonicalIdentityRegistration,
   canonicalIdentityRotation,
 } from "./canonical.js";
-import { generateIdentityKeys, signerFor, type Signer, type StoredIdentityKeys } from "./crypto/keys.js";
+import { generateSeedIdentity, signerFor, type Signer, type StoredIdentityKeys } from "./crypto/keys.js";
 import { x25519PublicKey, ed25519PublicKey } from "./crypto/index.js";
 import { newDocument, signDocument } from "./document.js";
 import { rfc3339, stripKeyPrefix, toBase64url } from "./encoding.js";
@@ -138,33 +137,6 @@ export class IdentityApi {
     return { token: challenge.token, solution };
   }
 
-  /** Publish or rotate an identity's X25519 encryption key. */
-  async publishEncryptionKey(
-    signer: Signer,
-    encryptionPublicKey: string,
-    options: { dnsProvider?: string; dnsToken?: string } = {},
-  ): Promise<{ identity: string; encryption_public_key: string; updated_at: string }> {
-    const issuedAt = rfc3339();
-    const nonce = newNonce();
-    const key = stripKeyPrefix(encryptionPublicKey);
-    const signature = await signer.sign(
-      canonicalEncryptionKeyUpdate(signer.identity, key, issuedAt, nonce),
-      "base64std",
-    );
-    return this.client.request({
-      method: "POST",
-      path: `/identities/${encodeURIComponent(signer.identity)}/encryption-key`,
-      body: {
-        encryption_public_key: key,
-        ...(options.dnsProvider ? { dns_provider: options.dnsProvider } : {}),
-        ...(options.dnsToken ? { dns_token: options.dnsToken } : {}),
-        issued_at: issuedAt,
-        nonce,
-        identity_signature: signature,
-      },
-    });
-  }
-
   /** Owner-authorized full export; returns the raw .tar.gz bytes. */
   async export(signer: Signer): Promise<Uint8Array> {
     const issuedAt = rfc3339();
@@ -244,6 +216,8 @@ export interface CreateIdentityOptions {
 export interface CreatedIdentity {
   identity: string;
   keys: StoredIdentityKeys;
+  /** The master seed, present when `createIdentity` generated the keys. */
+  seed?: Uint8Array;
   publicKey: string;
   encryptionPublicKey: string;
   document: IdentityDocument;
@@ -259,7 +233,10 @@ export async function createIdentity(
   identity: string,
   options: CreateIdentityOptions = {},
 ): Promise<CreatedIdentity> {
-  const keys = options.keys ?? generateIdentityKeys(identity);
+  // Without supplied keys a new seed is generated; it comes back on the
+  // result and is the only copy.
+  const generated = options.keys ? undefined : generateSeedIdentity(identity);
+  const keys = options.keys ?? generated!.keys;
   const { signer } = signerFor(keys);
   const publicKey = toBase64url(ed25519PublicKey(keys.signingPrivateKey));
   const encryptionPublicKey = keys.encryptionPrivateKey
@@ -332,5 +309,13 @@ export async function createIdentity(
     response = await api.register({ ...request, pow_token: token, pow_solution: solution });
   }
 
-  return { identity, keys, publicKey, encryptionPublicKey, document, response };
+  return {
+    identity,
+    keys,
+    ...(generated ? { seed: generated.seed } : {}),
+    publicKey,
+    encryptionPublicKey,
+    document,
+    response,
+  };
 }

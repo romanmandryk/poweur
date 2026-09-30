@@ -12,11 +12,12 @@
  *    not key material.
  */
 
-import { PoweurClient, IdentityApi, ResolveCache, resolveIdentity } from "@poweur/client";
+import { PoweurClient, IdentityApi, ResolveCache, resolveIdentity, toBase64url } from "@poweur/client";
 import { dohTxtResolver } from "@poweur/client/browser";
 
+import { describeThisDevice, deviceHeadersFor } from "./devices.js";
 import {
-  BrowserSessionStore, getUnlockedKeys, relayUrlFor, resolveOptionsFor,
+  BrowserSessionStore, getUnlockedKeys, isShellRuntime, loadIdentityRecord, relayUrlFor, resolveOptionsFor,
 } from "./storage.js";
 import { JwkDecryptor, WebCryptoSigner } from "./vault.js";
 
@@ -40,6 +41,33 @@ export function signerFor(identity) {
   };
 }
 
+const DEVICE_FINGERPRINT_KEY = "poweur.device.fingerprint";
+
+/** A random id for this browser or app install; the relay stores only its hash. */
+function deviceFingerprint() {
+  try {
+    let fingerprint = localStorage.getItem(DEVICE_FINGERPRINT_KEY);
+    if (!fingerprint) {
+      fingerprint = toBase64url(crypto.getRandomValues(new Uint8Array(24)));
+      localStorage.setItem(DEVICE_FINGERPRINT_KEY, fingerprint);
+    }
+    return fingerprint;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Who this is in the owner's "Keys & devices" list. Optional and never fatal:
+ * without storage the client is simply anonymous to the registry.
+ */
+function deviceHeaders(enrollmentId) {
+  const fingerprint = deviceFingerprint();
+  if (!fingerprint) return {};
+  const info = describeThisDevice(globalThis.navigator?.userAgent ?? "", { native: isShellRuntime() });
+  return deviceHeadersFor(fingerprint, info, enrollmentId);
+}
+
 /**
  * A client for the unlocked identity. Returns null when locked — callers ask
  * the user to unlock rather than silently doing nothing.
@@ -51,15 +79,19 @@ export function clientFor(identity) {
   const relayUrl = relayUrlFor(identity);
   // One client per unlocked identity: it keeps what it has read (message
   // history position, decrypted folders) between refreshes.
-  if (cachedClient && cachedClient.keys === keys && cachedClient.identity === identity && cachedClient.relayUrl === relayUrl) return cachedClient.client;
+  // The enrollment id joins this device's registry row to its keystore
+  // entry; it appears once the device is backed up, so it is part of the key.
+  const enrollmentId = loadIdentityRecord(identity)?.enrollmentId ?? "";
+  if (cachedClient && cachedClient.keys === keys && cachedClient.identity === identity && cachedClient.relayUrl === relayUrl && cachedClient.enrollmentId === enrollmentId) return cachedClient.client;
   const client = new PoweurClient({
     relayUrl,
+    headers: deviceHeaders(enrollmentId),
     signer: keyPair.signer,
     decryptor: keyPair.decryptor,
     sessionStore: new BrowserSessionStore(),
     resolve: resolveOptions(relayUrl),
   });
-  cachedClient = { keys, identity, relayUrl, client };
+  cachedClient = { keys, identity, relayUrl, enrollmentId, client };
   return client;
 }
 let cachedClient = null;

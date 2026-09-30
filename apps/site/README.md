@@ -1,14 +1,12 @@
 # poweur.org — marketing site
 
 Static HTML/CSS/JS, no build step. In production the docs (`apps/docs`) are built into this
-tree at `/docs` by `.github/workflows/deploy-web.yml` (see `deploy/OPS.md`); locally, `/docs`
+tree at `/docs` by `.github/workflows/deploy-web.yml` (see `deploy/README.md`); locally, `/docs`
 links 404 unless you copy `apps/docs/build` to `apps/site/docs` (gitignore it).
 
 ```bash
 python3 -m http.server 4321 --directory apps/site
 ```
-
-(or the `site` entry in `.claude/launch.json`).
 
 | File | What |
 |------|------|
@@ -46,4 +44,4 @@ HTML scenes (`.art-*` in `site.css`) styled like the app. The terminal window is
 - Hero video: drop an original or licensed loop at `assets/hero.mp4` and uncomment the `<video>` in `index.html`.
 - X / LinkedIn links in `assets/site.js` (`#` until the accounts exist).
 - The SDK snippet in the Apps section shows the intended API shape, not the current `@poweur/client` surface.
-- Fonts load from Google Fonts; self-host Sora/Inter per `design/brand/README.md`.
+- Fonts are self-hosted in `assets/fonts/` (Sora, Inter, JetBrains Mono, Latin subsets from Fontsource, SIL OFL 1.1; licences alongside). The site makes no third-party requests.

@@ -246,6 +246,16 @@ func TestINT_JOURNEY_02_MutualContactHandshake(t *testing.T) {
 		t.Fatalf("bob's request queue did not clear after the handshake:\n%s", stdout)
 	}
 
+	// The recipient also stays clear on subsequent reads; no second approval.
+	for _, home := range []string{aliceHome, bobHome} {
+		for range 2 {
+			out, _ := runCLI(t, home, "requests")
+			if !strings.Contains(out, "no pending requests") {
+				t.Fatalf("answered request still pending: %s", out)
+			}
+		}
+	}
+
 	// Mutual means both directions carry, against two closed policies.
 	runCLI(t, aliceHome, "send", bob, "glad we connected")
 	bobInbox, _ := runCLI(t, bobHome, "inbox")

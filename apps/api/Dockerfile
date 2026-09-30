@@ -6,8 +6,13 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/api ./apps/api
+COPY apps/cli ./apps/cli
 WORKDIR /src/apps/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /relay .
+# The hello.poweur.net demo bot (apps/cli/pkg/hello) rides in the same image,
+# so the compose `hello` service needs no pipeline of its own.
+WORKDIR /src/apps/cli
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /hello-bot ./cmd/hello-bot
 
 # The web client (apps/web), served at /app/. Built here rather than committed,
 # because prod has no Node toolchain — the deploy only pulls this image.
@@ -28,6 +33,7 @@ ENV VERSION_HASH=${VERSION_HASH}
 ENV BUILD_TIME=${BUILD_TIME}
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /relay /relay
+COPY --from=builder /hello-bot /hello-bot
 COPY --from=web /src/apps/web/dist /web
 # Anyone running the released image gets the same app at /app/.
 ENV WEB_STATIC_DIR=/web
