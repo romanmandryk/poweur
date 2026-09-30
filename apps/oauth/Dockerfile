@@ -12,7 +12,7 @@ COPY apps/oauth/ui ./apps/oauth/ui
 RUN pnpm install --frozen-lockfile --filter @poweur/oauth-ui...
 RUN pnpm --filter @poweur/oauth-ui build
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/oauth ./apps/oauth
