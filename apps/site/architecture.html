@@ -56,7 +56,7 @@
           <g font-size="13" fill="#DBD5FF">
             <rect x="350" y="188" width="300" height="42" rx="10" fill="rgba(0,0,0,.3)" stroke="rgba(255,255,255,.1)"/><text x="366" y="214">Identity host · alice, bob · wildcard names</text>
             <rect x="350" y="238" width="300" height="42" rx="10" fill="rgba(0,0,0,.3)" stroke="rgba(255,255,255,.1)"/><text x="366" y="264">Verify · route · inbox spool · SSE push</text>
-            <rect x="350" y="288" width="300" height="42" rx="10" fill="rgba(0,0,0,.3)" stroke="rgba(255,255,255,.1)"/><text x="366" y="314">File homes · WebDAV · sync · share grants</text>
+            <rect x="350" y="288" width="300" height="42" rx="10" fill="rgba(0,0,0,.3)" stroke="rgba(255,255,255,.1)"/><text x="366" y="314">File homes · sync · share grants</text>
             <rect x="350" y="338" width="300" height="42" rx="10" fill="rgba(0,0,0,.3)" stroke="rgba(255,255,255,.1)"/><text x="366" y="364">Sign-in · OAuth / OIDC bridge</text>
           </g>
 
@@ -278,7 +278,7 @@
     {"from":"a","to":"r","label":"Sign grant","sub":"/shared/trip-2026 → bob: write"},
     {"from":"a","to":"r","label":"Sign grant","sub":"/shared/trip-2026 → agent: read, 7d","tone":"teal"},
     {"from":"a","to":"b","label":"share.offer message","sub":"typed, E2EE"},
-    {"from":"b","to":"r","label":"Mount + write flights.pdf","sub":"WebDAV, grant checked"},
+    {"from":"b","to":"r","label":"Mount + write flights.pdf","sub":"grant checked"},
     {"from":"r","to":"g","label":"change event","sub":"journal cursor","tone":"teal","dashed":true},
     {"from":"g","to":"r","label":"Read + summarise","sub":"read-only","tone":"teal"},
     {"from":"g","to":"a","label":"message: itinerary draft","tone":"teal"},

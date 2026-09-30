@@ -87,7 +87,7 @@
     <div class="marquee"><div class="marquee-track">
       <span class="chip">DNS</span><span class="chip">HTTPS <em>/.well-known</em></span><span class="chip">Ed25519</span>
       <span class="chip">X25519</span><span class="chip">ChaCha20-Poly1305</span><span class="chip">Passkeys / WebAuthn</span>
-      <span class="chip">WebDAV</span><span class="chip">OAuth 2.0</span><span class="chip">OpenID Connect</span>
+      <span class="chip">OAuth 2.0</span><span class="chip">OpenID Connect</span>
       <span class="chip">IndieAuth</span><span class="chip">did:web</span><span class="chip">Server-Sent Events</span>
       <span class="chip">BIP39 recovery</span><span class="chip">MLS <em>planned</em></span><span class="chip">SMTP bridge <em>planned</em></span>
     </div></div>
@@ -108,18 +108,18 @@
         <h2 class="h2">ID, messaging, data. <span class="muted">Cleverly stitched together.</span></h2>
         <p class="lede" style="margin-top:18px">Almost everything you do online is someone proving who they are, talking to someone, and working on some shared data. Poweur makes those three things open, interoperable and yours — so you can live most of your online life without renting it from big tech.</p>
         <div class="prim-list" style="margin-top:32px">
-          <div class="prim"><div class="ph ph-icon">id</div><div>
+          <div class="prim"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="11" r="2.2"/><path d="M5.8 16c.6-1.6 1.9-2.4 3.2-2.4s2.6.8 3.2 2.4"/><path d="M14.5 10h3.5M14.5 13.5h2.5"/></svg></div><div>
             <h3>Poweur ID</h3>
-            <p>A human-readable internet name backed by keys only your devices hold. Bring your own domain or pick a name on a hosted relay.</p>
+            <p>A human-readable internet name backed by keys only your devices hold. Pick a name on a hosted relay, or use your own domain on a relay you run.</p>
             <small>alice.poweur.net · carl.example.com</small></div></div>
-          <div class="prim"><div class="ph ph-icon">msg</div><div>
+          <div class="prim"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5a2.5 2.5 0 0 1-2.5 2.5H9l-4.5 3.5V7.5A2.5 2.5 0 0 1 7 5h10.5A2.5 2.5 0 0 1 20 7.5z"/><path d="M8.5 9.5h7M8.5 12.5h4"/></svg></div><div>
             <h3>Messaging</h3>
             <p>Signed, end-to-end encrypted messages between any two IDs on any relay — plain chat for people, typed messages for apps and agents.</p>
             <small>E2EE · groups · receipts · typed</small></div></div>
-          <div class="prim"><div class="ph ph-icon">files</div><div>
+          <div class="prim"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l2 2.3H18A2.5 2.5 0 0 1 20.5 9.8v7.7A2.5 2.5 0 0 1 18 20H6a2.5 2.5 0 0 1-2.5-2.5z"/></svg></div><div>
             <h3>Data sharing</h3>
             <p>Every ID has a syncable home. Share any folder with any other ID, group or agent — with granular, instantly revocable permissions.</p>
-            <small>WebDAV · sync · grants · links</small></div></div>
+            <small>E2EE · sync · grants · links</small></div></div>
         </div>
       </div>
     </div>
@@ -234,7 +234,7 @@
           </div></div>
         <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Message</div><h3>Private messaging</h3><p>E2EE chats and groups between IDs on any relay, with contacts-first spam control.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-chat-crop.png" alt="" loading="lazy"></div></div>
         <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Share data</div><h3>Share with any ID</h3><p>Folders, files and links with read/write grants and instant revocation.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-share-crop.png" alt="" loading="lazy"></div></div>
-        <div class="card c2 reveal"><span class="status wip">In progress</span><div class="kicker">Co-work &amp; play</div><h3>Co-work and play with people &amp; agents</h3><p>Shared spaces, real-time documents and games. Friends and agents join with their own IDs, across relays, with no game server.</p><div class="art art-collab" aria-hidden="true">
+        <div class="card c2 reveal"><span class="status next">Roadmap</span><div class="kicker">Co-work &amp; play</div><h3>Co-work and play with people &amp; agents</h3><p>Shared spaces, real-time documents and games. Friends and agents join with their own IDs, across relays, with no game server.</p><div class="art art-collab" aria-hidden="true">
             <div class="doc"><b>Day 3 — Machu Picchu</b><p class="l w90"></p><p class="l w70"><span class="cur c-bob"><i>bob</i></span></p><p class="l w80"></p><p class="l w50 hl"><span class="cur c-agent"><i>agent.carl.example.com</i></span></p></div>
             <div class="faces"><em class="a1">A</em><em class="a2">B</em><em class="a3">🤖</em></div>
             <div class="mini-board"><i class="x">✕</i><i></i><i class="o">◯</i><i></i><i class="x">✕</i><i class="o">◯</i><i></i><i></i><i class="x">✕</i></div>
@@ -285,7 +285,7 @@
         </ul>
         <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
           <a class="btn btn-primary" href="/docs/clients/js-sdk">SDK docs</a>
-          <a class="btn btn-ghost" href="/docs/conventions/app-data">App-data conventions</a>
+          <a class="btn btn-ghost" href="/docs/files/storage-v2">App-data conventions</a>
         </div>
       </div>
       <!-- Illustrative API shape; align with @poweur/client before launch -->
@@ -324,9 +324,9 @@
         <p class="lede">An agent with its own Poweur ID can be messaged, trusted, granted a single folder and fired with one click. Messages and shared folders become the neutral handoff layer between people and AI — whatever model or vendor runs it.</p>
       </div>
       <div class="cards-3">
-        <div class="card reveal"><div class="ph ph-icon"></div><h3>Accountable</h3><p>Every agent ID names an operator. You see who acts on your data and revoke them instantly.</p></div>
-        <div class="card reveal"><div class="ph ph-icon"></div><h3>Scoped</h3><p>Grant one folder, read-only or read-write, for an hour or forever — never your whole account.</p></div>
-        <div class="card reveal"><div class="ph ph-icon"></div><h3>Ready for your tools</h3><p>Coding agents like Claude Code or Codex use the <code>poweur</code> CLI directly, with JSON output. MCP, n8n and LangChain plug in through the SDK.</p></div>
+        <div class="card reveal"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 6v5.3c0 4.2-2.8 7.3-7 9.2-4.2-1.9-7-5-7-9.2V6z"/><path d="m9 12 2.2 2.2L15.2 10"/></svg></div><h3>Accountable</h3><p>Every agent ID names an operator. You see who acts on your data and revoke them instantly.</p></div>
+        <div class="card reveal"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l2 2.3H18A2.5 2.5 0 0 1 20.5 9.8V12"/><rect x="11.5" y="13" width="9" height="7" rx="1.8"/><path d="M13.5 13v-1.2a2.5 2.5 0 0 1 5 0V13"/><path d="M3.5 7.5v10A2.5 2.5 0 0 0 6 20h3"/></svg></div><h3>Scoped</h3><p>Grant one folder, read-only or read-write, for an hour or forever — never your whole account.</p></div>
+        <div class="card reveal"><div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="m7.5 9.5 3 2.5-3 2.5M12.5 15h4"/></svg></div><h3>Ready for your tools</h3><p>Coding agents like Claude Code or Codex use the <code>poweur</code> CLI directly, with JSON output. MCP, n8n and LangChain plug in through the SDK.</p></div>
       </div>
     </div>
   </section>
@@ -338,12 +338,12 @@
     <div class="wrap">
       <div class="section-head reveal">
         <div class="eyebrow">Hosting is a choice</div>
-        <h2 class="h2">Start hosted. Bring your domain. <span class="muted">Or run the whole thing.</span></h2>
+        <h2 class="h2">Start hosted. Run your own. <span class="muted">Your domain, hosted by us, is coming soon.</span></h2>
         <p class="lede">The same protocol everywhere. Move between options without changing your ID or losing a message.</p>
       </div>
       <div class="cards-3">
         <div class="card reveal"><div class="kicker">Easiest</div><h3>Hosted name</h3><div class="id">alice<i>.poweur.net</i></div><p class="muted" style="margin-top:12px">Pick a name in seconds. Keys are created on your device; the relay never sees them.</p><a class="btn btn-sm btn-ghost" href="https://poweur.net/app/">Claim a name</a></div>
-        <div class="card reveal"><div class="kicker">Your brand</div><h3>Your own domain</h3><div class="id">carl<i>.example.com</i></div><p class="muted" style="margin-top:12px">Publish one <code>/.well-known</code> file or DNS record and your domain is your ID, on any relay.</p><a class="btn btn-sm btn-ghost" href="/docs/protocol/web-identity">How it works</a></div>
+        <div class="card reveal"><div class="kicker">Your brand · hosted by us soon</div><h3>Your own domain</h3><div class="id">carl<i>.example.com</i></div><p class="muted" style="margin-top:12px">Use a name you own as your ID, on a relay you run today. We'll host it for you with your own domain soon.</p><a class="btn btn-sm btn-ghost" href="/docs/relay/self-hosting">Self-host guide</a></div>
         <div class="card reveal"><div class="kicker">Full sovereignty</div><h3>Your own relay</h3><div class="id">relay<i>.yourcompany.com</i></div><p class="muted" style="margin-top:12px">One Go binary or container. Host your team's IDs, messages and files on your own hardware.</p><a class="btn btn-sm btn-ghost" href="/docs/relay/self-hosting">Self-host guide</a></div>
       </div>
     </div>
@@ -354,10 +354,10 @@
     <div class="wrap">
       <div class="cta-box reveal">
         <h2 class="h2">Claim your name on the open internet.</h2>
-        <p class="lede">Free hosted IDs on poweur.net. Bring your own domain any time.</p>
-        <form class="claim" action="https://poweur.net/app/" method="get" onsubmit="return false">
-          <input aria-label="Choose a name" placeholder="yourname" autocomplete="off"><span>.poweur.net</span>
-          <button class="btn btn-primary" type="button" onclick="location.href='https://poweur.net/app/'">Claim</button>
+        <p class="lede">Free hosted IDs on poweur.net. Your own domain: run a relay today, hosted by us soon.</p>
+        <form class="claim" action="https://poweur.net/app/" method="get">
+          <input name="handle" aria-label="Choose a name" placeholder="yourname" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="63" pattern="[A-Za-z0-9\-]*"><span>.poweur.net</span>
+          <button class="btn btn-primary" type="submit">Claim</button>
         </form>
         <div class="ctas">
           <a class="btn btn-ghost" href="https://github.com/romanmandryk/poweur">★ Star on GitHub</a>
