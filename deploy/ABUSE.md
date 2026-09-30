@@ -33,27 +33,33 @@ choose to share.
 
 ## Stopping an ID
 
-The relay has **no suspend or delete command yet**. `abuse.go` only counts reports, and the
-identity store has no remove call, so the terms' promise to "suspend the hosting of your ID"
-and the privacy policy's deletion within 30 days are both manual today. What exists:
+Commands run on the VM, inside the relay container, like `quotas`: there is no admin token.
 
-1. **Block the name from being re-claimed** (above), so removing it isn't undone.
-2. **Stop uploads:** `docker exec poweur-relay /relay quotas set <id> 1B`.
-3. **Block it in your own app** and tell the reporter you've acted.
-4. **Remove it for real** (spam run, illegal content): stop the relay, delete
-   `relay/identities/<id>.json` (the signed ID document) and, to free the data,
-   `drives/<id>/` from the Hetzner bucket `poweur1`, then start the relay: the identity index
-   is read only at start-up. There is no S3 tool on the VM; use the Hetzner console or an
-   S3 client on your laptop with the bucket keys from `.env.prod`. This takes the relay
-   down for a minute, so do it in a quiet moment unless the content is severe. The owner
-   still holds their keys and can publish the same name on another relay they choose.
+```bash
+docker exec poweur-relay /relay identities                          # list holds
+docker exec poweur-relay /relay identities suspend <id> <reason>    # block it now
+docker exec poweur-relay /relay identities unsuspend <id>           # undo a suspension
+docker exec poweur-relay /relay identities delete <id> --yes        # erase it (no undo)
+docker exec poweur-relay /relay identities release <id>             # free a deleted name
+```
 
-Order for a serious case: 1 → 4, then write to the owner. Order for a first spam report:
-message the owner, then 1 and 2.
+The relay picks a change up within **15 seconds**, without a restart. A held ID can't send,
+receive, sign in or use its drive, nothing can resolve it (410), and its name can't be claimed
+again. Suspension is reversible; `delete` also erases its ID document, key backups, inbox and
+drive, keeps the name held, and leaves the running relay with a dead entry until the next restart
+(harmless: it stays suspended). It does not reach other IDs' copies of anything they already
+received. The owner still holds their keys and could publish the same name on another relay.
 
-**Build this properly** before a real abuse wave: `relay identities suspend|unsuspend|delete
-<id>` beside `quotas`, enforced on send, resolve, drive and sign-in, with the reason kept in
-the store. It is tracked on the launch checklist.
+1. **First spam or harassment report:** message the owner from `support.poweur.net`, then
+   `suspend` if it continues.
+2. **Illegal content, child safety, credible threat, impersonation of a real person:** `suspend`
+   at once, keep the evidence (the log lines and the report), decide within 24 hours, and
+   `delete` only when you are sure. Take advice before passing anything to the authorities.
+3. **Deletion requested by the owner** (privacy policy: within 30 days): confirm control of the
+   ID or the email, `delete --yes`, then `release` so they or anyone can use the name again.
+   Backups age out after 7 days, as the policy says.
+4. Add the name to the reserved lists above if it was an impersonation, so `release` later
+   doesn't reopen it.
 
 ## Afterwards
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +32,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "quotas" {
 		os.Exit(quotas(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "identities" {
+		os.Exit(identities(os.Args[2:]))
 	}
 	os.Exit(run())
 }
@@ -79,6 +83,121 @@ func quotas(args []string) int {
 		})
 	}
 	fmt.Fprintln(os.Stderr, "usage: poweur-relay quotas [set <identity> <size> | unset <identity>]")
+	return 2
+}
+
+// identities lists and edits the operator's holds on hosted identities (the
+// relay's relay/suspended-identities.json). The relay picks a change up within
+// 15 seconds, without a restart. Run it with docker exec, like quotas: having
+// the relay's environment is the authority, so there is no admin token.
+//
+//	poweur-relay identities                       list holds
+//	poweur-relay identities suspend <id> <reason> block the ID and its name
+//	poweur-relay identities unsuspend <id>        lift a suspension
+//	poweur-relay identities delete <id> --yes     suspend, then erase its data
+//	poweur-relay identities release <id>          let a deleted name be claimed again
+func identities(args []string) int {
+	cfg := config.FromEnv()
+	store, err := drive.Open(cfg)
+	if err != nil || store == nil {
+		fmt.Fprintln(os.Stderr, "identities: no store configured (set POWEUR_DATA or STORAGE_PROVIDER=s3 and S3_*)", err)
+		return 1
+	}
+	ctx := context.Background()
+	show := func(doc map[string]relay.Suspension) int {
+		ids := make([]string, 0, len(doc))
+		for id := range doc {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			sp := doc[id]
+			state := "suspended"
+			if sp.Deleted {
+				state = "deleted"
+			}
+			fmt.Printf("%-9s %s  %s  %s\n", state, id, sp.At, sp.Reason)
+		}
+		if len(ids) == 0 {
+			fmt.Println("no identities are suspended or deleted")
+		}
+		return 0
+	}
+	edit := func(fn func(map[string]relay.Suspension) error) int {
+		doc, err := relay.EditSuspensions(ctx, store, fn)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "identities:", err)
+			return 1
+		}
+		return show(doc)
+	}
+	name := func(i int) string { return strings.ToLower(strings.TrimSpace(args[i])) }
+	now := func() string { return time.Now().UTC().Format(time.RFC3339) }
+	switch {
+	case len(args) == 0:
+		return edit(func(map[string]relay.Suspension) error { return nil })
+	case len(args) >= 3 && args[0] == "suspend":
+		reason := strings.TrimSpace(strings.Join(args[2:], " "))
+		return edit(func(doc map[string]relay.Suspension) error {
+			if prev, ok := doc[name(1)]; ok && prev.Deleted {
+				return errors.New(name(1) + " is already deleted")
+			}
+			doc[name(1)] = relay.Suspension{Reason: reason, At: now()}
+			return nil
+		})
+	case len(args) == 2 && args[0] == "unsuspend":
+		return edit(func(doc map[string]relay.Suspension) error {
+			sp, ok := doc[name(1)]
+			switch {
+			case !ok:
+				return errors.New(name(1) + " is not suspended")
+			case sp.Deleted:
+				return errors.New(name(1) + " is deleted: its data is gone; use `release` to free the name")
+			}
+			delete(doc, name(1))
+			return nil
+		})
+	case len(args) >= 2 && args[0] == "delete":
+		confirmed := len(args) == 3 && args[2] == "--yes"
+		if !confirmed {
+			fmt.Fprintf(os.Stderr, "identities: this erases %s's ID document, keys backup, messages and whole drive from the store, permanently.\n"+
+				"Backups aside, there is no undo. Run again with --yes once you are sure.\n", name(1))
+			return 2
+		}
+		// Hold the name first: the ID is unusable within 15 seconds and stays
+		// unclaimable even after its data is gone.
+		if code := edit(func(doc map[string]relay.Suspension) error {
+			sp := doc[name(1)]
+			if sp.At == "" {
+				sp.At = now()
+			}
+			if sp.Reason == "" {
+				sp.Reason = "deleted by the operator"
+			}
+			sp.Deleted = true
+			doc[name(1)] = sp
+			return nil
+		}); code != 0 {
+			return code
+		}
+		removed, err := relay.DeleteIdentityData(ctx, store, name(1))
+		fmt.Printf("erased %d objects for %s\n", removed, name(1))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "identities: stopped part-way (run the same command again to finish):", err)
+			return 1
+		}
+		fmt.Println("the relay keeps the ID in memory until it restarts; the hold keeps it unusable until then")
+		return 0
+	case len(args) == 2 && args[0] == "release":
+		return edit(func(doc map[string]relay.Suspension) error {
+			if _, ok := doc[name(1)]; !ok {
+				return errors.New(name(1) + " has no hold")
+			}
+			delete(doc, name(1))
+			return nil
+		})
+	}
+	fmt.Fprintln(os.Stderr, "usage: poweur-relay identities [suspend <id> <reason> | unsuspend <id> | delete <id> --yes | release <id>]")
 	return 2
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 // Version is the relay semver. Bump the patch when shipping apps/api changes.
-var Version = "0.2.11"
+var Version = "0.2.12"
 
 // Time is a build timestamp (RFC3339 or "2006-01-02 15:04"). Hash is a git
 // revision. Both may be empty in a stripped test binary.

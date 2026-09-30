@@ -141,6 +141,36 @@ Logs, metrics, error tracking and the browser analytics tag are configured with 
 `OTEL_*`, `TELEMETRY_*`, `SENTRY_DSN`, `FARO_COLLECT_URL` and `LOG_LEVEL` variables,
 described in [Observability](/relay/observability). All are off when unset.
 
+## Suspending and deleting a hosted ID
+
+An operator can hold or remove an ID hosted on their relay. The commands run inside the relay
+container (`docker exec poweur-relay /relay identities …`), so having the relay's environment is the
+authority: there is no admin token or endpoint.
+
+```bash
+poweur-relay identities                        # list holds
+poweur-relay identities suspend <id> <reason>  # block the ID and its name
+poweur-relay identities unsuspend <id>         # lift it
+poweur-relay identities delete <id> --yes      # suspend, then erase its data
+poweur-relay identities release <id>           # let a deleted name be claimed again
+```
+
+The list is one document in the relay's store (`relay/suspended-identities.json`). Every relay
+process re-reads it within 15 seconds and a broken edit keeps the last good list, so no restart is
+needed. While an ID is held, the relay:
+
+- answers `410 identity_suspended` for requests about it (its ID document, inbox, drive, keystore,
+  devices) and for its own host (its page and app), and `403` for requests made as it;
+- refuses messages to or from it, group messages from it and new sessions for it;
+- refuses to register the name again (`409 name_held`) and reports it `reserved` in the availability
+  endpoint.
+
+`delete` also erases the ID document, key backups, waiting messages, acknowledgements, the whole drive
+and any quota override, then keeps the name held until `release`. It does not touch what other IDs
+hold about this one, and the running relay keeps the ID in memory until it restarts; the hold keeps
+it unusable until then. Suspension only affects IDs hosted on this relay: the owner still holds their
+keys and can publish the same name elsewhere.
+
 ## Example `.env` File
 
 A hosted relay for `example.com` behind a TLS reverse proxy:

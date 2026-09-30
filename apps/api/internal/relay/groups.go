@@ -229,6 +229,9 @@ func (s *Server) handleGroupMessagesPost(w http.ResponseWriter, r *http.Request)
 	}
 
 	sender := strings.ToLower(strings.TrimSpace(req.Envelopes[0].Sender))
+	if s.rejectHeld(w, sender) {
+		return
+	}
 	if !group.HasMember(sender) {
 		// `members` is the access list. An admin who is not a member
 		// administers the roster and has no seat in the conversation.
