@@ -1,20 +1,63 @@
 /** Approve a "Sign in with Poweur ID" request (EPIC-008), from app.js. */
 import { useRef, useState } from "react";
 import { normalizeMatchCode, SIGNIN_MATCH_CODE_DIGITS } from "@poweur/client";
-import { CircleCheck } from "lucide-react";
+import { CircleCheck, LockOpen } from "lucide-react";
+import { unlock } from "../actions/identity";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
+import { CUSTODY_COPY, custodyOf } from "../lib/custody";
+import { cn } from "../lib/cn";
+import { handleOf } from "../lib/identity";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
-import { useSession } from "../state/session";
+import { switchIdentity, useSession } from "../state/session";
 import { toast } from "../state/ui";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Display";
-import { Input, Note, Textarea } from "../ui/Field";
-import { isShellRuntime } from "../lib/storage.js";
+import { Avatar } from "../ui/Avatar";
+import { Input, inputClass, Note, Textarea } from "../ui/Field";
+import { isShellRuntime, listIdentities, loadIdentityRecord } from "../lib/storage.js";
 import { SubPage } from "../ui/Layout";
 
 function ErrorLine({ error }: { error: string }) {
   return error ? <p className="compose-status err mt-2 min-h-5 text-sm text-danger">{error}</p> : null;
+}
+
+/** Which of this browser's IDs signs in. Switching locks the previous one. */
+function IdentityPicker() {
+  const identity = useSession((state) => state.identity);
+  const identities: string[] = listIdentities();
+  if (!identities.length) {
+    return <p className="mt-4 text-sm text-muted">There is no Poweur ID on this device yet.</p>;
+  }
+  return (
+    <div className="mt-4">
+      <label htmlFor="auth-identity" className="mb-1.5 block text-sm font-semibold">
+        Sign in as
+      </label>
+      <div className="flex items-center gap-3">
+        <Avatar identity={identity || identities[0]} size="md" />
+        {identities.length > 1 ? (
+          <select
+            id="auth-identity"
+            className={cn(inputClass, "min-w-0 flex-1")}
+            value={identity ?? ""}
+            onChange={(e) => switchIdentity(e.currentTarget.value)}
+          >
+            {!identity && <option value="" disabled>Choose an ID</option>}
+            {identities.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div id="auth-identity" className="min-w-0 flex-1 truncate text-[15px] font-semibold">
+            {identities[0]}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function SignInApproval() {
@@ -30,6 +73,8 @@ export function SignInApproval() {
   // In the shell the app being signed in to is never in this browser, so a
   // same-device finish is impossible and the code is required.
   const shell = isShellRuntime() || auth.requireCode;
+  const record = identity ? loadIdentityRecord(identity) : null;
+  const unlockAction = CUSTODY_COPY[custodyOf(record)].action;
 
   if (auth.loading) {
     return (
@@ -121,54 +166,61 @@ export function SignInApproval() {
       ) : (
         <p className="text-muted">This app requests sign-in only, with no home access.</p>
       )}
-      <Note className="text-[13px]">
-        Signing as <strong>{identity || "no identity selected"}</strong>.
-      </Note>
-      {auth.request.response_uri && (
-        <div className="mt-4">
-          {auth.context && (
-            <p id="auth-context" className="mb-2 text-sm">
-              {auth.context}
-            </p>
-          )}
-          <label htmlFor="auth-match" className="mb-1 block text-sm font-semibold">
-            {shell ? "Code shown by the app you are signing in to" : "Started on another screen? Enter the code it shows"}
-          </label>
-          <Input
-            ref={matchRef}
-            id="auth-match"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={8}
-            placeholder={shell ? "Required" : "Leave empty if you started in this browser"}
-            onChange={(e) => setMatch(e.currentTarget.value)}
-          />
-          <p className="mt-1 text-[13px] text-muted">
-            Only enter a code that is on a screen in front of you. If someone sent you this link or a code, cancel.
-          </p>
-        </div>
+      {auth.request.response_uri && auth.context && (
+        <p id="auth-context" className="mt-4 text-sm">
+          {auth.context}
+        </p>
       )}
+      <IdentityPicker />
       <ErrorLine error={auth.error || localError} />
-      {unlocked ? (
-        <Button
-          id="btn-auth-approve"
-          className="mt-4"
-          onClick={() => {
-            const code = normalizeMatchCode(match);
-            if (auth.request.response_uri && (shell || code) && code.length !== SIGNIN_MATCH_CODE_DIGITS) {
-              setLocalError(`Enter the ${SIGNIN_MATCH_CODE_DIGITS}-digit code from the screen where you started.`);
-              matchRef.current?.focus();
-              return;
-            }
-            setLocalError("");
-            void approveSignIn(code);
-          }}
-        >
-          Approve
-        </Button>
+      {unlocked && identity ? (
+        <>
+          {auth.request.response_uri && (
+            <div className="mt-4">
+              <label htmlFor="auth-match" className="mb-1 block text-sm font-semibold">
+                {shell ? "Code shown by the app you are signing in to" : "Started on another screen? Enter the code it shows"}
+              </label>
+              <Input
+                ref={matchRef}
+                id="auth-match"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={8}
+                placeholder={shell ? "Required" : "Leave empty if you started in this browser"}
+                onChange={(e) => setMatch(e.currentTarget.value)}
+              />
+              <p className="mt-1 text-[13px] text-muted">
+                Only enter a code that is on a screen in front of you. If someone sent you this link or a code, cancel.
+              </p>
+            </div>
+          )}
+          <Button
+            id="btn-auth-approve"
+            className="mt-4"
+            onClick={() => {
+              const code = normalizeMatchCode(match);
+              if (auth.request.response_uri && (shell || code) && code.length !== SIGNIN_MATCH_CODE_DIGITS) {
+                setLocalError(`Enter the ${SIGNIN_MATCH_CODE_DIGITS}-digit code from the screen where you started.`);
+                matchRef.current?.focus();
+                return;
+              }
+              setLocalError("");
+              void approveSignIn(code);
+            }}
+          >
+            Approve as {handleOf(identity)}
+          </Button>
+        </>
+      ) : identity ? (
+        <>
+          <Button id="btn-auth-unlock" variant="passkey" className="mt-4" onClick={() => void unlock({ inPlace: true })}>
+            <LockOpen className="size-5" aria-hidden="true" /> {unlockAction}
+          </Button>
+          <Note className="mt-2">{CUSTODY_COPY[custodyOf(record)].note}. Then approve right here.</Note>
+        </>
       ) : (
-        <Button id="btn-auth-unlock" variant="passkey" className="mt-4" onClick={() => push("unlock", { returnTo: "auth" })}>
-          Unlock to approve
+        <Button id="btn-auth-add" variant="ghost" className="mt-4" onClick={() => push("add-id")}>
+          Add a Poweur ID to this device
         </Button>
       )}
     </SubPage>

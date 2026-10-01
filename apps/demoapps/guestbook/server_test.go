@@ -773,6 +773,20 @@ func TestIndexRenders(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in with Poweur ID") {
 		t.Fatalf("index = %d: %s", rec.Code, rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "Leave a message for others.") {
+		t.Fatalf("index is missing the short invitation: %s", rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "Sign the guestbook") || !strings.Contains(body, "Leave message") {
+		t.Fatalf("the button should say Leave message: %s", body)
+	}
+	// The approval link must leave this page open: it holds the code.
+	if !strings.Contains(body, `id="approve"`) || !strings.Contains(body, `target="_blank"`) {
+		t.Fatalf("the approval link does not open a new tab: %s", body)
+	}
+	if !strings.Contains(body, `id="load-more"`) {
+		t.Fatal("the page cannot load older messages")
+	}
 	if rec := get(t, srv, "/nope"); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown path = %d", rec.Code)
 	}

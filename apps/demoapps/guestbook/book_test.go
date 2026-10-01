@@ -230,8 +230,107 @@ func TestOnlyTheNewestPagesAreKept(t *testing.T) {
 	if n := len(b.srv.pages); n != cachedPages {
 		t.Fatalf("%d pages cached, want %d", n, cachedPages)
 	}
-	if got := messages(b.list(t)); len(got) != cachedPages || got[0] != "entry "+strconv.Itoa(cachedPages+3) {
+	// The rest is still in the book: older files are read from the store.
+	if got := messages(b.list(t)); len(got) != cachedPages+3 || got[0] != "entry "+strconv.Itoa(cachedPages+3) || got[len(got)-1] != "entry 1" {
 		t.Fatalf("book = %q", got)
+	}
+}
+
+type listing struct {
+	Entries []map[string]any `json:"entries"`
+	Next    string           `json:"next"`
+}
+
+func (b *book) page(t *testing.T, query string) (int, listing) {
+	t.Helper()
+	rec := get(t, b.srv, "/api/entries"+query)
+	var out listing
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
+func TestListingWalksTheWholeBookInPieces(t *testing.T) {
+	alice := newUser(t, who)
+	b := newBook(t, nil, func(c *Config) { c.PageEntries = 3; c.MinInterval = -1 }, alice)
+	const total = 20
+	for i := 1; i <= total; i++ {
+		b.post(t, who, "entry "+strconv.Itoa(i))
+	}
+
+	var seen []string
+	query := "?limit=7"
+	for pieces := 0; ; pieces++ {
+		if pieces > total {
+			t.Fatal("the cursor never ran out")
+		}
+		code, got := b.page(t, query)
+		if code != http.StatusOK {
+			t.Fatalf("%s = %d", query, code)
+		}
+		if len(got.Entries) > 7 {
+			t.Fatalf("%s returned %d entries", query, len(got.Entries))
+		}
+		seen = append(seen, messages(got.Entries)...)
+		if got.Next == "" {
+			if pieces != 2 {
+				t.Fatalf("book ended after %d pieces, want 3", pieces+1)
+			}
+			break
+		}
+		if len(got.Entries) != 7 {
+			t.Fatalf("a piece with more to come held %d entries", len(got.Entries))
+		}
+		query = "?limit=7&before=" + got.Next
+	}
+	for i, m := range seen {
+		if want := "entry " + strconv.Itoa(total-i); m != want {
+			t.Fatalf("entry %d = %q, want %q (all: %q)", i, m, want, seen)
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("saw %d entries, want %d", len(seen), total)
+	}
+}
+
+func TestListingIsPagedByDefaultAndCapped(t *testing.T) {
+	alice := newUser(t, who)
+	b := newBook(t, nil, func(c *Config) { c.MinInterval = -1 }, alice)
+	for i := 0; i < listEntries+maxListEntries; i++ {
+		b.post(t, who, "entry "+strconv.Itoa(i))
+	}
+	_, first := b.page(t, "")
+	if len(first.Entries) != listEntries || first.Next == "" {
+		t.Fatalf("default listing = %d entries, next %q", len(first.Entries), first.Next)
+	}
+	_, big := b.page(t, "?limit=100000")
+	if len(big.Entries) != maxListEntries {
+		t.Fatalf("limit is not capped: %d entries", len(big.Entries))
+	}
+}
+
+func TestListingRefusesBadQueries(t *testing.T) {
+	b := newBook(t, nil, nil)
+	for _, query := range []string{"?limit=0", "?limit=-3", "?limit=lots", "?before=banana", "?before=0", "?before=2.x", "?before=-1.2"} {
+		if code, _ := b.page(t, query); code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", query, code)
+		}
+	}
+	// A cursor past the end of the book is an empty piece, not an error.
+	if code, got := b.page(t, "?before=99"); code != http.StatusOK || len(got.Entries) != 0 || got.Next != "" {
+		t.Errorf("a cursor past the end = %d %+v", code, got)
+	}
+}
+
+func TestListingReportsAnUnreadableOlderPage(t *testing.T) {
+	alice := newUser(t, who)
+	store := &failingStore{Store: NewMemStore()}
+	b := newBook(t, store, func(c *Config) { c.PageEntries = 1; c.MinInterval = -1 }, alice)
+	for i := 1; i <= cachedPages+2; i++ {
+		b.post(t, who, "entry "+strconv.Itoa(i))
+	}
+	store.failReads = true
+	if code, _ := b.page(t, "?limit=50"); code != http.StatusBadGateway {
+		t.Fatalf("listing with an unreadable page = %d", code)
 	}
 }
 
@@ -489,9 +588,11 @@ func TestEveryResponseCarriesTheSecurityHeaders(t *testing.T) {
 func TestPageServesItsAssets(t *testing.T) {
 	b := newBook(t, nil, nil)
 	for path, want := range map[string]string{
-		"/assets/page.js":       "text/javascript",
-		"/assets/editor.js":     "text/javascript",
-		"/assets/guestbook.css": "text/css",
+		"/assets/page.js":         "text/javascript",
+		"/assets/editor.js":       "text/javascript",
+		"/assets/guestbook.css":   "text/css",
+		"/assets/poweur-mark.svg": "image/svg+xml",
+		"/assets/favicon.svg":     "image/svg+xml",
 	} {
 		rec := get(t, b.srv, path)
 		if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), want) || rec.Body.Len() == 0 {

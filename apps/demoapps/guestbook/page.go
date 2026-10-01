@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// The whole front end: one page and three files in assets/, no build step and
+// The whole front end: one page and a few files in assets/, no build step and
 // no framework. A reference RP that needed a toolchain would be teaching the
 // wrong lesson.
 //
@@ -28,6 +28,7 @@ var assets embed.FS
 var assetTypes = map[string]string{
 	".js":  "text/javascript; charset=utf-8",
 	".css": "text/css; charset=utf-8",
+	".svg": "image/svg+xml",
 }
 
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
@@ -52,30 +53,55 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Name}}</title>
-<meta name="description" content="A guestbook you sign with a Poweur ID. The entries are a public Markdown file.">
+<meta name="description" content="A guestbook you sign with a Poweur ID. The messages are a public Markdown file.">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/guestbook.css">
 <main>
-  <header>
-    <h1>{{.Name}}</h1>
-    <p class="lede">Leave a note for whoever comes next. Sign in with a Poweur ID: no account, no password,
-       and this site never learns anything but your ID.</p>
+  <nav class="topbar">
+    <a class="brand" href="/"><span class="mark"><img src="/assets/poweur-mark.svg" alt="" width="19" height="24"></span>
+      <span>{{.Name}}</span></a>
+    <span id="who-chip" class="who-chip" hidden>Signed in as <strong id="who"></strong>
+      <button id="logout" class="link" type="button">Sign out</button></span>
+  </nav>
+
+  <header class="hero">
+    <p class="eyebrow">An open book on a Poweur drive</p>
+    <h1>Sign in with a Poweur ID</h1>
+    <p class="lede">Leave a message for others.</p>
   </header>
 
   <section id="auth" class="card">
-    <button id="signin" class="primary" type="button">Sign in with Poweur ID</button>
-    <div id="pending" hidden>
-      <p id="consent"></p>
-      <p>Approve on this device, or open this link on your phone:</p>
-      <p id="approve"></p>
-      <p>Approving on another device? It will ask for this code:
-         <strong id="match" class="match"></strong></p>
-      <p id="status" role="status">Waiting…</p>
-    </div>
+    <h2>Write a message</h2>
+    <p class="muted">Sign in first, so every message comes from a real ID.</p>
+    <button id="signin" class="primary big" type="button"><img src="/assets/poweur-mark.svg" alt="" width="19" height="24">Sign in with Poweur ID</button>
+    <ol id="pending" class="steps" hidden>
+      <li class="step"><span class="n">1</span>
+        <div>
+          <strong>Approve it with your ID</strong>
+          <p id="consent"></p>
+          <a id="approve" class="cta big" href="#" target="_blank" rel="noopener">Open the approval page in a new tab</a>
+          <p class="hint">It opens in a new tab so this page, and the code below, stay here. On your phone?
+            <button id="copy" class="link" type="button">Copy the link</button> and open it there.</p>
+          <span id="approve-url" class="url"></span>
+        </div>
+      </li>
+      <li class="step"><span class="n">2</span>
+        <div>
+          <strong>If it asks for a code, type this one</strong>
+          <div id="match" class="match" aria-label="Your code"></div>
+          <p class="hint">Only enter it on a screen you opened yourself.</p>
+        </div>
+      </li>
+      <li class="step"><span class="n">3</span>
+        <div><p id="status" class="status" role="status">Waiting…</p>
+          <p class="hint">Keep this page open. It finishes by itself once you approve.</p></div>
+      </li>
+    </ol>
   </section>
 
   <section id="compose" class="card" hidden>
-    <p class="signedin">Signed in as <strong id="who"></strong>
-      <button id="logout" class="link" type="button">Sign out</button></p>
+    <h2>Write a message</h2>
+    <p class="muted">Short and kind is best. It is added to the book for everyone to read.</p>
     <div id="toolbar" class="toolbar" role="toolbar" aria-label="Formatting">
       <button type="button" data-cmd="bold" title="Bold (Ctrl/Cmd+B)" aria-label="Bold" aria-pressed="false"><b>B</b></button>
       <button type="button" data-cmd="italic" title="Italic (Ctrl/Cmd+I)" aria-label="Italic" aria-pressed="false"><i>I</i></button>
@@ -90,15 +116,20 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
     <div class="composer-foot">
       <span id="count">0 / 1000</span>
       <span id="notice" role="status"></span>
-      <button id="send" class="primary" type="button" disabled>Sign the guestbook</button>
+      <button id="send" class="primary" type="button" disabled>Leave message</button>
     </div>
   </section>
 
-  <section id="entries" aria-label="Entries"></section>
+  <section aria-label="Messages">
+    <div class="entries-head"><h2>Messages</h2></div>
+    <div id="entries"></div>
+    <div id="more" class="more" hidden><button id="load-more" type="button">Show older messages</button></div>
+  </section>
 
   <footer>
-    Every entry is stored as Markdown in this guestbook's own Poweur drive.
-    <a id="archive" href="#" hidden>Read the whole book as plain files</a>
+    <span class="mark"><img src="/assets/poweur-mark.svg" alt="" width="19" height="24"></span>
+    <span>Every message is stored as Markdown in this guestbook's own Poweur drive.
+    <a id="archive" href="#" hidden>Read the whole book as plain files</a></span>
   </footer>
 </main>
 <script type="module" src="/assets/page.js"></script>
