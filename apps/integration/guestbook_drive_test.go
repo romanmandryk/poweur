@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	clipkg "github.com/poweur/cli/pkg/cli"
+	"github.com/poweur/demoapps/appmetrics"
 	"github.com/poweur/demoapps/guestbook"
 )
 
@@ -42,10 +43,12 @@ func TestINT_GUESTBOOK_01_BookLivesInItsOwnPublicDrive(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
+	var metrics *appmetrics.Registry
 	serve := func() (*guestbook.Server, string, func()) {
 		stub := httptest.NewUnstartedServer(nil)
 		origin := "http://" + stub.Listener.Addr().String()
-		srv, err := guestbook.New(guestbook.Config{Origin: origin, Store: store, Resolver: fixedSignInResolver{doc: aliceDoc}})
+		metrics = appmetrics.New("poweur_guestbook")
+		srv, err := guestbook.New(guestbook.Config{Origin: origin, Store: store, Resolver: fixedSignInResolver{doc: aliceDoc}, Metrics: metrics})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,6 +85,30 @@ func TestINT_GUESTBOOK_01_BookLivesInItsOwnPublicDrive(t *testing.T) {
 	// Five seconds between posts, per identity.
 	if status, body := post("again at once"); status != http.StatusTooManyRequests || body["retry_after"] == nil {
 		t.Fatalf("second post = %d %v, want 429", status, body)
+	}
+
+	// What Prometheus would scrape: the sign-in, the post that landed and the
+	// one that was held back, counted by outcome and route, naming nobody.
+	var scraped strings.Builder
+	metrics.Write(&scraped)
+	for _, want := range []string{
+		`poweur_guestbook_signins_total{result="started"} 1`,
+		`poweur_guestbook_signins_total{result="approved"} 1`,
+		`poweur_guestbook_signins_total{result="completed"} 1`,
+		`poweur_guestbook_posts_total{result="created"} 1`,
+		`poweur_guestbook_posts_total{result="rate_limited"} 1`,
+		`poweur_guestbook_errors_total{kind="store_write"} 0`,
+		`poweur_guestbook_http_requests_total{route="POST /api/entries",code="2xx"} 1`,
+		`poweur_guestbook_http_requests_total{route="POST /api/entries",code="4xx"} 1`,
+	} {
+		if !strings.Contains(scraped.String(), want+"\n") {
+			t.Errorf("metrics lack %q:\n%s", want, scraped.String())
+		}
+	}
+	for _, leak := range []string{alice, "world", "again at once"} {
+		if strings.Contains(scraped.String(), leak) {
+			t.Errorf("metrics leak %q:\n%s", leak, scraped.String())
+		}
 	}
 
 	// The book is a public file on the relay: anyone can read it.

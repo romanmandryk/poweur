@@ -85,6 +85,10 @@ services:
       KEYS_DIR: /keys
       HOME: /home/bot
       HELLO_DEMO_URL: ${HELLO_DEMO_URL:-}
+      # Counts of messages, replies per keyword and errors, scraped by
+      # infra-prometheus over infra_net (job poweur-hello). Nothing publishes
+      # this port.
+      METRICS_ADDR: ":9464"
     volumes:
       - /opt/apps/poweur-hello/keys:/keys:ro
     # Sessions and the CLI's bookkeeping are throwaway: memory only, bounded.
@@ -96,6 +100,7 @@ services:
       - no-new-privileges:true
     networks:
       - poweur_net
+      - infra_net
 
   # guestbook.poweur.net (apps/demoapps/guestbook): the "Sign in with Poweur ID" demo and a
   # public guestbook. The same image as the relay, a different binary. The guestbook is itself
@@ -117,6 +122,10 @@ services:
       KEYS_DIR: /keys
       HOME: /home/bot
       LISTEN: ":8080"
+      # Requests by route, posts and sign-ins by outcome, errors; scraped by
+      # infra-prometheus over infra_net (job poweur-guestbook). Caddy proxies
+      # only :8080, so this port is never public.
+      METRICS_ADDR: ":9464"
     volumes:
       - /opt/apps/poweur-guestbook/keys:/keys:ro
     # The CLI's sessions and chunk cache, and the files it reads and writes the log

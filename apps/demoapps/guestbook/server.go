@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/poweur/demoapps/appmetrics"
 	"github.com/poweur/identity"
 	"github.com/poweur/identity/signin"
 )
@@ -53,8 +54,16 @@ const (
 	maxPending = 5000
 	// maxWaiting bounds posts queued for the one writer; more get a "busy".
 	maxWaiting = 32
-	// recentEntries is how many entries the page lists.
-	recentEntries = 100
+	// listEntries is how many entries one listing returns unless asked for
+	// fewer or more, up to maxListEntries. The page asks for more as the
+	// visitor scrolls, so no response grows with the book.
+	listEntries    = 25
+	maxListEntries = 50
+	// olderPagesKept bounds the parsed old log files remembered after a
+	// visitor read back to them, and olderPageTTL how long one is trusted
+	// (an operator may edit an old file by hand).
+	olderPagesKept = 16
+	olderPageTTL   = time.Minute
 	// cachedPages is how many of the newest log files are kept in memory.
 	cachedPages = 4
 )
@@ -88,6 +97,9 @@ type Config struct {
 	Resolver signin.Resolver
 	// ResolveOptions is passed to the default resolver.
 	ResolveOptions identity.ResolveOptions
+	// Metrics receives the guestbook's counters and request metrics; the
+	// caller serves them. Nil records nothing.
+	Metrics *appmetrics.Registry
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -97,8 +109,10 @@ type Server struct {
 	cfg      Config
 	verifier *signin.Verifier
 	mux      *http.ServeMux
+	handler  http.Handler // mux, counted by route when there are metrics
 	store    Store
 	spacer   *spacer
+	m        *metrics
 
 	mu sync.Mutex
 	// pending maps a request_id to the cross-device login waiting on it. The
@@ -111,6 +125,8 @@ type Server struct {
 	// pages holds the newest log files, parsed, by page number.
 	pages map[int][]Entry
 	last  int // the newest page number there is
+	// older holds log files past the newest ones, read on demand.
+	older map[int]olderPage
 
 	// writeMu serializes writers, and waiting bounds how many queue for it.
 	writeMu sync.Mutex
@@ -197,6 +213,7 @@ func New(cfg Config) (*Server, error) {
 		verifier: v,
 		store:    cfg.Store,
 		spacer:   newSpacer(cfg.MinInterval),
+		m:        newMetrics(cfg.Metrics),
 		pending:  make(map[string]*pendingLogin),
 		sessions: make(map[string]*Session),
 		pages:    make(map[int][]Entry),
@@ -206,6 +223,7 @@ func New(cfg Config) (*Server, error) {
 		s.store = NewMemStore()
 	}
 	s.routes()
+	s.handler = cfg.Metrics.Instrument(s.mux)
 	return s, nil
 }
 
@@ -255,7 +273,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Security-Policy", contentSecurityPolicy)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 // --- Relying-party metadata --------------------------------------------------
@@ -323,10 +341,17 @@ const (
 // resumeWindow is how long a same-device approval waits for its browser.
 const resumeWindow = time.Minute
 
+// internalError answers a 500 for something the app could not build itself,
+// and counts it.
+func (s *Server) internalError(w http.ResponseWriter, err error) {
+	s.m.errors.Inc(errInternal)
+	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
 func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	binding, err := s.browserBinding(w, r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	req, err := s.verifier.NewRequest(signin.RequestOptions{
@@ -335,29 +360,29 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		Scopes:      s.cfg.Scopes,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	encoded, err := identity.EncodeSignInRequest(req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	pollSecret, err := signin.NewSecret()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	match, err := signin.NewMatchCode()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 	deep, _ := identity.SignInDeepLink(req)
 	web, _ := identity.SignInWebLink(signerBase(r), req)
 	code, err := identity.NewShortCode()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.internalError(w, err)
 		return
 	}
 
@@ -366,6 +391,7 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	s.prunePendingLocked()
 	if len(s.pending) >= maxPending {
 		s.mu.Unlock()
+		s.m.signins.Inc(signinBusy)
 		writeError(w, http.StatusServiceUnavailable, "too many sign-ins are in progress; try again in a minute")
 		return
 	}
@@ -382,6 +408,7 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		signer:      signerBase(r),
 	}
 	s.mu.Unlock()
+	s.m.signins.Inc(signinStarted)
 
 	writeJSON(w, http.StatusOK, StartResponse{
 		RequestID:   req.RequestID,
@@ -496,6 +523,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if crossDevice && !signin.MatchCodesEqual(p.match, d.Match) {
 		p.err = signin.ErrMatchCode.Error()
 		s.mu.Unlock()
+		s.m.signins.Inc(signinMatchFailed)
 		writeError(w, http.StatusForbidden, p.err)
 		return
 	}
@@ -503,16 +531,18 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	session, err := s.completeSignIn(r.Context(), d.Response)
 	if err != nil {
+		s.m.signins.Inc(signinFailed)
 		s.failPending(requestID, err.Error())
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
+	s.m.signins.Inc(signinApproved)
 
 	receipt := signin.DeliveryReceipt{Status: "ok", Identity: session.Identity}
 	var resumeCode string
 	if !crossDevice {
 		if resumeCode, err = signin.NewSecret(); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.internalError(w, err)
 			return
 		}
 		receipt.ResumeURI = s.cfg.Origin + "/auth/resume?code=" + url.QueryEscape(resumeCode)
@@ -588,6 +618,7 @@ func (s *Server) handleAuthResume(w http.ResponseWriter, r *http.Request) {
 	p.resumed = true
 	s.mu.Unlock()
 
+	s.m.signins.Inc(signinCompleted)
 	s.setCookie(w, token)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -671,6 +702,7 @@ func (s *Server) handleAuthPoll(w http.ResponseWriter, r *http.Request) {
 	case p.finish == finishCrossDevice:
 		out = map[string]any{"status": "complete", "identity": p.identity}
 		// One-shot: the poll hands the cookie over exactly once.
+		s.m.signins.Inc(signinCompleted)
 		s.setCookie(w, p.token)
 		delete(s.pending, requestID)
 	case p.finish == finishSameDevice && p.resumed:
@@ -838,6 +870,7 @@ func (s *Server) Refresh(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 			if err := s.Load(ctx); err != nil && ctx.Err() == nil {
+				s.m.errors.Inc(errLogRefresh)
 				fmt.Fprintf(s.cfg.Log, "guestbook: refresh failed, keeping what it has: %v\n", err)
 			}
 		}
@@ -881,6 +914,105 @@ func (s *Server) reload(ctx context.Context) error {
 	return nil
 }
 
+type olderPage struct {
+	entries []Entry
+	at      time.Time
+}
+
+// pageEntries returns the entries of log file n, oldest first: from the
+// cache for a recent file, otherwise read from the store.
+func (s *Server) pageEntries(ctx context.Context, n int) ([]Entry, error) {
+	s.mu.Lock()
+	if page, ok := s.pages[n]; ok {
+		s.mu.Unlock()
+		return page, nil
+	}
+	if old, ok := s.older[n]; ok && s.now().Sub(old.at) < olderPageTTL {
+		s.mu.Unlock()
+		return old.entries, nil
+	}
+	s.mu.Unlock()
+	data, err := s.store.Read(ctx, pageName(n))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	entries := parseLog(data)
+	s.mu.Lock()
+	if s.older == nil || len(s.older) >= olderPagesKept {
+		s.older = map[int]olderPage{}
+	}
+	s.older[n] = olderPage{entries: entries, at: s.now()}
+	s.mu.Unlock()
+	return entries, nil
+}
+
+// A cursor says where the next listing starts: "N" is the whole of log file N
+// and "N.K" its first K entries, both read backwards. Listing newest first
+// with a cursor is how the page walks a book of any size.
+func parseCursor(c string) (page, upto int, ok bool) {
+	if c == "" {
+		return 0, 0, false
+	}
+	head, tail, hasTail := strings.Cut(c, ".")
+	n, err := strconv.Atoi(head)
+	if err != nil || n < 1 {
+		return 0, 0, false
+	}
+	upto = -1
+	if hasTail {
+		k, err := strconv.Atoi(tail)
+		if err != nil || k < 0 {
+			return 0, 0, false
+		}
+		upto = k
+	}
+	return n, upto, true
+}
+
+func formatCursor(page, upto int) string {
+	if upto < 0 {
+		return strconv.Itoa(page)
+	}
+	return fmt.Sprintf("%d.%d", page, upto)
+}
+
+// listFrom returns up to limit entries newest first, starting at cursor (the
+// newest entry when empty), and the cursor for the entries after those; empty
+// when there are no older ones.
+func (s *Server) listFrom(ctx context.Context, cursor string, limit int) ([]Entry, string, error) {
+	page, upto, ok := parseCursor(cursor)
+	if !ok {
+		page, upto = s.lastPage(), -1
+	}
+	out := []Entry{}
+	for page >= 1 && len(out) < limit {
+		entries, err := s.pageEntries(ctx, page)
+		if err != nil {
+			return nil, "", err
+		}
+		end := len(entries)
+		if upto >= 0 && upto < end {
+			end = upto
+		}
+		for end > 0 && len(out) < limit {
+			end--
+			out = append(out, entries[end])
+		}
+		if end == 0 {
+			page, upto = page-1, -1
+		} else {
+			upto = end
+		}
+	}
+	if page < 1 {
+		return out, "", nil
+	}
+	return out, formatCursor(page, upto), nil
+}
+
 // recent lists the newest entries, newest first.
 func (s *Server) recent(limit int) []Entry {
 	s.mu.Lock()
@@ -901,12 +1033,33 @@ func (s *Server) recent(limit int) []Entry {
 }
 
 func (s *Server) handleEntriesGet(w http.ResponseWriter, r *http.Request) {
-	entries := append([]Entry{}, s.recent(recentEntries)...)
+	limit := listEntries
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive number")
+			return
+		}
+		limit = min(n, maxListEntries)
+	}
+	cursor := r.URL.Query().Get("before")
+	if _, _, ok := parseCursor(cursor); cursor != "" && !ok {
+		writeError(w, http.StatusBadRequest, "before is not a cursor this guestbook gave out")
+		return
+	}
+	entries, next, err := s.listFrom(r.Context(), cursor, limit)
+	if err != nil {
+		s.m.errors.Inc(errStoreRead)
+		fmt.Fprintf(s.cfg.Log, "guestbook: could not read older entries: %v\n", err)
+		writeError(w, http.StatusBadGateway, "the guestbook could not read those entries; try again")
+		return
+	}
 	for i := range entries {
 		entries[i].HTML = renderHTML(entries[i].Message)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries":      entries,
+		"next":         next,
 		"max_message":  s.cfg.MaxMessage,
 		"min_interval": s.cfg.MinInterval.Seconds(),
 		"archive":      s.cfg.ArchiveURL,
@@ -916,6 +1069,7 @@ func (s *Server) handleEntriesGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessionFor(r)
 	if !ok {
+		s.m.posts.Inc(postUnauthorized)
 		writeError(w, http.StatusUnauthorized, "sign in first")
 		return
 	}
@@ -924,11 +1078,13 @@ func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	}
 	// Four bytes a character, plus the JSON around it.
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, int64(s.cfg.MaxMessage)*4+1024)).Decode(&body); err != nil {
+		s.m.posts.Inc(postInvalid)
 		writeError(w, http.StatusBadRequest, "body must be JSON with a message of at most "+strconv.Itoa(s.cfg.MaxMessage)+" characters")
 		return
 	}
 	message, err := cleanMessage(body.Message, s.cfg.MaxMessage)
 	if err != nil {
+		s.m.posts.Inc(postInvalid)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -937,6 +1093,7 @@ func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	// not use up the visitor's turn.
 	prev, wait := s.spacer.reserve(sess.Identity, s.now())
 	if wait > 0 {
+		s.m.posts.Inc(postRateLimited)
 		secs := int((wait + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{
@@ -949,14 +1106,18 @@ func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.spacer.release(sess.Identity, prev)
 		if errors.Is(err, errBusy) {
+			s.m.posts.Inc(postBusy)
 			w.Header().Set("Retry-After", "5")
 			writeError(w, http.StatusServiceUnavailable, "the guestbook is busy; try again in a few seconds")
 			return
 		}
+		s.m.posts.Inc(postStoreError)
+		s.m.errors.Inc(errStoreWrite)
 		fmt.Fprintf(s.cfg.Log, "guestbook: could not store an entry from %s: %v\n", sess.Identity, err)
 		writeError(w, http.StatusBadGateway, "the guestbook could not save your message; try again")
 		return
 	}
+	s.m.posts.Inc(postCreated)
 	entry.HTML = renderHTML(entry.Message)
 	writeJSON(w, http.StatusCreated, entry)
 }

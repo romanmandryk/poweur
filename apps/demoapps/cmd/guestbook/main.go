@@ -9,6 +9,10 @@
 // address to serve on (default :8080). ARCHIVE_URL is where the log is public
 // (default ORIGIN/pub/guestbook/). GUESTBOOK_NAME titles the page.
 //
+// METRICS_ADDR, if set (":9464"), serves GET /metrics there for Prometheus:
+// requests by route, posts and sign-ins by outcome, and errors, never who or
+// what. It is not authenticated: keep it off the public network.
+//
 // With IDENTITY unset and GUESTBOOK_MEMORY=1 the log is kept in memory, for
 // trying the page out. Run one instance: two would overwrite each other.
 package main
@@ -24,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/poweur/demoapps/appmetrics"
 	"github.com/poweur/demoapps/guestbook"
 )
 
@@ -55,6 +60,15 @@ func run(ctx context.Context) error {
 		Name:       os.Getenv("GUESTBOOK_NAME"),
 		ArchiveURL: archive,
 		Log:        os.Stderr,
+	}
+	if addr := os.Getenv("METRICS_ADDR"); addr != "" {
+		reg := appmetrics.New("poweur_guestbook")
+		cfg.Metrics = reg
+		go func() {
+			if err := reg.Serve(ctx, addr); err != nil {
+				fmt.Fprintln(os.Stderr, "guestbook: metrics:", err)
+			}
+		}()
 	}
 	switch id := os.Getenv("IDENTITY"); {
 	case id != "":

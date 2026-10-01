@@ -18,6 +18,7 @@
 | E13-T6 Release versions on every surface | done | Patch bumps, `GET /` build metadata, CLI `--version`, Settings → About |
 | E13-T7 Lively public Growth dashboard | done | Message kind `detail`, `settings.change` field events, `adopt_*` adoption gauges, redesigned Growth board (relay 0.1.6) |
 | E13-T8 Operator holds: suspend, delete and release a hosted ID | done | `poweur-relay identities suspend\|unsuspend\|delete\|release` edits `relay/suspended-identities.json`; the relay re-reads it every 15 s and answers 410 (resource or host) or 403 (caller) for a held ID, refuses its messages, sessions and re-registration, and `delete` also erases its ID document, key backups, inbox and drive and keeps the name held (relay 0.2.12). |
+| E13-T9 Demo-app metrics (hello, guestbook) | done | `apps/demoapps/appmetrics`: bounded-label Prometheus counters on a private `METRICS_ADDR`, scraped as jobs `poweur-hello` / `poweur-guestbook`. Growth: messages, replies per keyword (`other` for unknown), guestbook entries. Ops: errors, outcomes, scrape health. No alert rules yet. |
 | Optional third-party overlay | trial | Dual OTLP sink + optional browser RUM/uptime heartbeat, currently Better Stack. Grafana remains canonical; unset env to remove. |
 | Browser telemetry (Grafana Faro) | done | Replaces the Better Stack browser tag on every frontend (web app, mobile shell, OAuth bridge UI, website, docs). `@poweur/faro` sends first-party to `/faro/collect` → Caddy → Alloy `faro.receiver` → Loki `{source="faro"}`; anonymous by default (IDs, domains, emails, URL queries/fragments and the user-agent scrubbed in the browser, nothing stored, Alloy redacts again), ID attached only with the per-identity consent. Dashboard `poweur-web`. Relay `FARO_COLLECT_URL`, bridge `OAUTH_FARO_URL` |
 
@@ -263,6 +264,28 @@ Theme and other browser-local preferences stay in `localStorage` and are invisib
 
 **Acceptance:** unit tests for kind bucketing, settings diff and adoption counting; a real DAV PUT
 emits exactly one `settings.change` per changed field and none for rewrites or rejected writes.
+
+### E13-T9 — Demo-app metrics (hello, guestbook)
+
+The two demo apps are their own processes, so the relay's OTLP export does not see them. They
+follow the OAuth bridge: a Prometheus text endpoint on a private listener, scraped by
+`infra-prometheus`.
+
+- [x] `apps/demoapps/appmetrics`: counters with one bounded label (values listed in code, anything
+      else folded into `other`, allowed values start at zero), per-route request counts and latency,
+      `METRICS_ADDR` listener. No identities, message text or addresses in any label.
+- [x] Hello counts messages by result, replies by keyword (`help`, `ping`, `whoami`, `docs`, `demo`,
+      `other`) and errors. Guestbook counts posts and sign-in steps by outcome, errors and requests
+      by route and status class.
+- [x] Compose: `METRICS_ADDR` on both, hello joins `infra_net`; Prometheus jobs carry
+      `deployment_environment_name="production"`.
+- [x] Growth board: `poweur_growth_hello_*` / `poweur_growth_guestbook_*` recording rules, KPI row,
+      keyword bar gauge and hourly pulse. Ops board: errors, outcomes, scrape health.
+- [ ] Alert rules for the demo apps (scrape down, sustained errors), like the bridge has.
+
+**Acceptance:** unit tests pin the label sets and that unknown keywords become `other`; the
+integration tests drive hello and the guestbook against a real relay and read the registry; the
+deploy tests pin the private port and the scrape jobs.
 
 ### E13-T5 — Federated ecosystem metrics — deferred
 
