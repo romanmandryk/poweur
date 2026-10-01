@@ -151,18 +151,23 @@ http://tmpwww.poweur.org tmpwww.poweur.org {
     }
 }
 # guestbook.poweur.net (apps/demoapps/guestbook) is a Poweur ID hosted on the relay AND a web
-# app. The relay keeps what it serves for every identity host: the public folder (the
-# guestbook's entries are Markdown files in /pub/guestbook/) and the identity documents.
-# The app takes the rest. HTTP as well as HTTPS for the same reason as grafana and oauth.
+# app. Like every hosted identity, its host also answers the relay API (messages, sessions,
+# events, drive, /pub, the identity documents): senders reach a hosted ID's relay through its own
+# host. So the relay keeps everything and the app takes only the paths it serves itself.
+# HTTP as well as HTTPS for the same reason as grafana and oauth.
 http://guestbook.poweur.net guestbook.poweur.net {
-    @identity path /pub /pub/* /.well-known/poweur/*
-    handle @identity {
-        reverse_proxy poweur-relay:8080 {
+    @app {
+        path / /healthz /assets/* /api/session /api/entries
+        path /auth/start /auth/callback /auth/resume /auth/poll /auth/context /auth/r/* /auth/logout
+        path /.well-known/poweur.json
+    }
+    handle @app {
+        reverse_proxy poweur-guestbook:8080 {
             header_up X-Forwarded-For {client_ip}
         }
     }
     handle {
-        reverse_proxy poweur-guestbook:8080 {
+        reverse_proxy poweur-relay:8080 {
             header_up X-Forwarded-For {client_ip}
         }
     }

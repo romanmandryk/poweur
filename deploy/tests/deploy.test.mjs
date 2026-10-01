@@ -137,7 +137,7 @@ test('website (with docs under /docs) is static files outside the relay checkout
   assert.doesNotMatch(web, /bash -s <</);
 });
 
-test('guestbook is its own container, and Caddy leaves the public drive and identity documents to the relay', () => {
+test('guestbook is its own container, and Caddy sends only the app\'s own paths to it', () => {
   const compose = readFileSync(new URL('../../docker-compose.prod.yml', import.meta.url), 'utf8');
   assert.match(compose, /container_name: poweur-guestbook/);
   assert.match(compose, /entrypoint: \["\/guestbook"\]/);
@@ -151,7 +151,13 @@ test('guestbook is its own container, and Caddy leaves the public drive and iden
 
   const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
   const site = caddy.match(/^http:\/\/guestbook\.poweur\.net guestbook\.poweur\.net \{[\s\S]*?^\}/m)?.[0] ?? '';
-  assert.match(site, /@identity path \/pub \/pub\/\* \/\.well-known\/poweur\/\*/);
-  assert.match(site, /handle @identity \{\s*reverse_proxy poweur-relay:8080/);
-  assert.match(site, /handle \{\s*reverse_proxy poweur-guestbook:8080/);
+  // The relay is the default: a hosted ID's host also answers messages, sessions, events and /pub.
+  assert.match(site, /handle \{\s*reverse_proxy poweur-relay:8080/);
+  assert.match(site, /@app \{[\s\S]*?path \/ \/healthz \/assets\/\*[\s\S]*?\}\s*handle @app \{\s*reverse_proxy poweur-guestbook:8080/);
+  for (const route of ['/auth/start', '/auth/poll', '/auth/callback', '/.well-known/poweur.json', '/api/entries']) {
+    assert.ok(site.includes(route), route);
+  }
+  for (const relayRoute of ['/messages', '/pub', '/events', '/sessions', '/auth/challenge']) {
+    assert.ok(!site.includes(relayRoute), `${relayRoute} must fall through to the relay`);
+  }
 });

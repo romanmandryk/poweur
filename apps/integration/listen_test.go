@@ -156,6 +156,36 @@ func TestINT_LISTEN_03_JSONDecrypt(t *testing.T) {
 	}
 }
 
+// TestINT_LISTEN_04_RecoversAfterRelayRestart: sessions live in the relay's
+// memory, so after a restart the session file on disk still looks valid and is
+// refused. A listener (the hello bot, the guestbook) must register a new one
+// instead of retrying the dead one forever.
+func TestINT_LISTEN_04_RecoversAfterRelayRestart(t *testing.T) {
+	zone := newZone(t)
+	dataDir := t.TempDir()
+	first, addr := newHostedRelay(t, zone, dataDir)
+	relayURL := first.URL
+	for _, id := range []string{"lsalice.poweur.net", "lsbob.poweur.net"} {
+		zone.SetHost(id, addr)
+	}
+	clipkg.ConfigureIdentityResolver("http", true, addr)
+	t.Cleanup(func() { clipkg.ConfigureIdentityResolver("https", false, "") })
+
+	aliceHome, bobHome := t.TempDir(), t.TempDir()
+	runCLI(t, aliceHome, "identity", "create", "lsalice.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, bobHome, "identity", "create", "lsbob.poweur.net", "--hosted", "--relay", relayURL, "--json")
+	runCLI(t, bobHome, "inbox") // bob now holds a session the relay is about to forget
+
+	first.Close()
+	startHostedRelayAt(t, zone, dataDir, addr)
+	runCLI(t, aliceHome, "send", "lsbob.poweur.net", "sent after the restart")
+
+	stdout, stderr := runListenOnce(t, bobHome, 30*time.Second, "--json", "--decrypt")
+	if !strings.Contains(stdout, "sent after the restart") {
+		t.Fatalf("listen stayed deaf after the relay restarted.\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+}
+
 // runListenOnce runs `poweur listen --once` and fails the test if it does
 // not exit within the deadline. A hung listen is a real failure — it means
 // the catch-up drain never fired — and it must not become a 15-minute

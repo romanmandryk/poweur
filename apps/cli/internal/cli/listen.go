@@ -161,7 +161,11 @@ func streamEvents(ctx context.Context, relayURL, identityValue string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return parseErrorResponse("event stream refused", resp)
+		refused := parseErrorResponse("event stream refused", resp)
+		if resp.StatusCode == http.StatusUnauthorized && strings.Contains(refused.Error(), "session_expired") {
+			return fmt.Errorf("%w: %v", ErrSessionExpired, refused)
+		}
+		return refused
 	}
 	if onOpen != nil {
 		onOpen()
@@ -291,8 +295,15 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "listening as %s (ctrl-c to stop)\n", identityValue)
 	streamLoop(ctx, listenBaseBackoff, listenMaxBackoff,
 		func(ctx context.Context, onOpen func()) error {
-			sess, _ := session.Load(identityValue)
-			return streamEvents(ctx, cfg.RelayURL, identityValue, sess, identityPriv,
+			// Sessions live in the relay's memory, so a relay restart leaves
+			// the one on disk looking valid and being refused. Forget it, and
+			// register a fresh one on the next attempt; otherwise a long
+			// running listener (a bot) stays deaf until someone restarts it.
+			sess, err := ensureSession(ctx, cfg.RelayURL, identityValue, identityPriv)
+			if err != nil {
+				return err
+			}
+			err = streamEvents(ctx, cfg.RelayURL, identityValue, sess, identityPriv,
 				func() {
 					onOpen()
 					retryOutboxForIdentity(ctx, identityValue, false, stdout, stderr)
@@ -314,6 +325,10 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 						stop()
 					}
 				})
+			if errors.Is(err, ErrSessionExpired) {
+				_ = session.Delete(identityValue)
+			}
+			return err
 		},
 		func(err error) {
 			fmt.Fprintf(stderr, "stream dropped, retrying: %v\n", err)
