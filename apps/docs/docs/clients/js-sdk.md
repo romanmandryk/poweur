@@ -177,6 +177,7 @@ Installed with the package (see the note at the top):
 npx poweur identity create myagent.poweur.net --hosted --relay https://poweur.net
 npx poweur send alice.poweur.net "hello"
 npx poweur inbox
+npx poweur inbox --json --decrypt   # for scripts: each message's text in "body"
 npx poweur share add shared/project-x --with alice.poweur.net --perm rw
 ```
 

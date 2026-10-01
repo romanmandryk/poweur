@@ -264,6 +264,67 @@ describe("Go CLI ↔ TypeScript client", () => {
     saveConfig(config);
   }, 180_000);
 
+  it("--json --decrypt gives a script the plaintext in the Go CLI's shape, and consumes the inbox", async () => {
+    await goCli(["send", tsIdentity, "plaintext for the script", "--via-home-relay"]);
+
+    const polled = await tsCli(["inbox", "--json", "--decrypt", "--use-identity", tsIdentity]);
+    expect(polled.code, polled.stderr).toBe(0);
+    const doc = JSON.parse(polled.stdout) as {
+      messages: Array<Record<string, unknown>>;
+      acks: unknown[];
+    };
+    expect(doc.messages).toHaveLength(1);
+    const [message] = doc.messages as [Record<string, unknown>];
+    expect(message).toMatchObject({ sender: goIdentity, body: "plaintext for the script", decrypted: true });
+    // The wire payload stays ciphertext, and the SDK's own field names are not leaked.
+    expect(message["payload"]).not.toBe("plaintext for the script");
+    expect(message["encryption"]).toBeTruthy();
+    expect(message).not.toHaveProperty("plaintext");
+    expect(message).not.toHaveProperty("decryptError");
+    expect(polled.stdout.trim().split("\n")).toHaveLength(1);
+
+    expect((await tsCli(["inbox", "--use-identity", tsIdentity])).stdout).toContain("no messages");
+  });
+
+  it("listen --once --json --decrypt waits for a message, prints it and exits", async () => {
+    await goCli(["send", tsIdentity, "heard by listen", "--via-home-relay"]);
+    const heard = await tsCli(["listen", "--once", "--json", "--decrypt", "--use-identity", tsIdentity]);
+    expect(heard.code, heard.stderr).toBe(0);
+    const docs = heard.stdout.trim().split("\n").map((line) => JSON.parse(line) as { messages: Array<{ body: string; decrypted: boolean }> });
+    const delivered = docs.flatMap((doc) => doc.messages);
+    expect(delivered).toEqual([expect.objectContaining({ body: "heard by listen", decrypted: true })]);
+    expect((await tsCli(["inbox", "--use-identity", tsIdentity])).stdout).toContain("no messages");
+  }, 60_000);
+
+  it("the Go CLI reads a TypeScript message the same way", async () => {
+    const sent = await tsCli(["send", goIdentity, "ts to go, decrypted by go", "--via-home-relay", "--use-identity", tsIdentity]);
+    expect(sent.code, sent.stderr).toBe(0);
+    const heard = await goCli(["listen", "--once", "--json", "--decrypt", "--use-identity", goIdentity]);
+    const doc = JSON.parse(heard.stdout.trim().split("\n").filter((line) => line.includes('"body"'))[0]!) as {
+      messages: Array<Record<string, unknown>>;
+    };
+    expect(doc.messages).toHaveLength(1);
+    const message = doc.messages[0]!;
+    expect(message).toMatchObject({ sender: tsIdentity, body: "ts to go, decrypted by go", decrypted: true });
+    // Both CLIs name the same fields, so a script is portable between them.
+    await goCli(["send", tsIdentity, "shape check", "--via-home-relay"]);
+    const viaTs = await tsCli(["inbox", "--json", "--decrypt", "--use-identity", tsIdentity]);
+    const tsFields = Object.keys((JSON.parse(viaTs.stdout) as { messages: Array<Record<string, unknown>> }).messages[0]!);
+    for (const field of ["body", "decrypted", "id", "payload", "sender", "timestamp", "encryption"]) {
+      expect(tsFields).toContain(field);
+      expect(Object.keys(message)).toContain(field);
+    }
+  }, 60_000);
+
+  it("refuses --decrypt without --json", async () => {
+    for (const command of ["inbox", "listen"]) {
+      const refused = await tsCli([command, "--decrypt", "--use-identity", tsIdentity]);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stdout).toBe("");
+      expect(refused.stderr).toContain("--json");
+    }
+  });
+
   it("agrees with the Go CLI on identity lookup", async () => {
     const ts = await tsCli(["identity", "lookup", goIdentity, "--json"]);
     const tsDoc = JSON.parse(ts.stdout) as { public_key: string; relay: string };

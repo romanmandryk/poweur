@@ -6,6 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/poweur/api v0.0.0
 	github.com/poweur/cli v0.0.0
+	github.com/poweur/demoapps v0.0.0
 	go.opentelemetry.io/proto/otlp v1.7.1
 	golang.org/x/oauth2 v0.32.0
 	google.golang.org/protobuf v1.36.8
@@ -23,6 +24,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/tyler-smith/go-bip39 v1.1.0 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.14.0 // indirect
@@ -56,6 +58,7 @@ require (
 replace (
 	github.com/poweur/api => ../api
 	github.com/poweur/cli => ../cli
+	github.com/poweur/demoapps => ../demoapps
 	github.com/poweur/identity => ../../packages/identity
 )
 

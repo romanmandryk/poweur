@@ -19,9 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/poweur/cli/internal/config"
-	cryptoe2e "github.com/poweur/cli/internal/crypto"
-	"github.com/poweur/cli/internal/identity"
 	"github.com/poweur/cli/pkg/cli"
 	idpkg "github.com/poweur/identity"
 )
@@ -84,17 +81,9 @@ func Serve(ctx context.Context, opt Options) error {
 	if opt.MaxPerDay == 0 {
 		opt.MaxPerDay = 500
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, opt.Identity))
-	if err != nil {
-		return fmt.Errorf("hello: no encryption key for %s in %s: %w", opt.Identity, cfg.KeysDir, err)
-	}
-	b := &bot{opt: opt, encPriv: encPriv, limiter: newLimiter(opt.Burst, opt.Refill, opt.MaxPerDay)}
+	b := &bot{opt: opt, limiter: newLimiter(opt.Burst, opt.Refill, opt.MaxPerDay)}
 
-	args := []string{"listen", "--json", "--use-identity", opt.Identity}
+	args := []string{"listen", "--json", "--decrypt", "--use-identity", opt.Identity}
 	if opt.Once {
 		args = append(args, "--once")
 	}
@@ -123,22 +112,22 @@ func Serve(ctx context.Context, opt Options) error {
 
 type bot struct {
 	opt     Options
-	encPriv []byte
 	limiter *limiter
 }
 
-// inboxPickup is the wire shape `poweur listen --json` prints for each pickup.
+// inboxPickup is the wire shape `poweur listen --json --decrypt` prints for
+// each pickup: the relay's inbox response plus, per message, the plaintext
+// the CLI opened with the identity's key. The bot never sees that key.
 type inboxPickup struct {
 	Messages []struct {
 		ID         string `json:"id"`
 		Sender     string `json:"sender"`
 		Timestamp  string `json:"timestamp"`
-		Payload    string `json:"payload"`
+		Body       string `json:"body"`
+		Decrypted  bool   `json:"decrypted"`
 		Type       string `json:"type,omitempty"`
 		Encryption *struct {
-			Alg                string `json:"alg"`
-			EphemeralPublicKey string `json:"ephemeral_public_key"`
-			Nonce              string `json:"nonce"`
+			Alg string `json:"alg"`
 		} `json:"encryption,omitempty"`
 	} `json:"messages"`
 }
@@ -156,19 +145,10 @@ func (b *bot) pickup(line []byte) {
 		if sender == "" || sender == b.opt.Identity || idpkg.ValidateIdentityName(sender) != nil {
 			continue
 		}
-		if m.Encryption == nil || m.Encryption.Alg == "" {
-			continue // the relay carries these end-to-end encrypted; plaintext is not ours to answer
+		if !m.Decrypted || m.Encryption == nil || m.Encryption.Alg == "" {
+			continue // the relay carries these end-to-end encrypted; what the CLI could not open is not ours to answer
 		}
-		plain, err := cryptoe2e.Decrypt(b.encPriv, cryptoe2e.EncryptedPayload{
-			Ciphertext:         m.Payload,
-			EphemeralPublicKey: m.Encryption.EphemeralPublicKey,
-			Nonce:              m.Encryption.Nonce,
-		})
-		if err != nil {
-			fmt.Fprintf(b.opt.Log, "hello: cannot open a message from %s: %v\n", sender, err)
-			continue
-		}
-		text := string(plain)
+		text := m.Body
 		if len(text) > maxText {
 			text = text[:maxText]
 		}

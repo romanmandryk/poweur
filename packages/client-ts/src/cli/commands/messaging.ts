@@ -4,6 +4,8 @@ import { rfc3339 } from "../../encoding.js";
 import { RelayClient } from "../../http.js";
 import { streamForever } from "../../events.js";
 import { sendAnonymous } from "../../messages.js";
+import type { PoweurClient } from "../../client.js";
+import type { Ack, InboxMessage } from "../../types.js";
 import {
   appendJournal,
   journalStatuses,
@@ -19,6 +21,61 @@ import { flagBool, flagString, parseArgs, requirePositional, UsageError } from "
 import { write, type Streams } from "../output.js";
 
 const COMMON_BOOL = ["json"];
+
+/** `--decrypt` hands a script the plaintext, so it never needs the message key. */
+function requireJsonForDecrypt(args: ReturnType<typeof parseArgs>): boolean {
+  const decrypt = flagBool(args, "decrypt");
+  if (decrypt && !flagBool(args, "json")) {
+    throw new UsageError("--decrypt only applies with --json (the default output is already decrypted)");
+  }
+  return decrypt;
+}
+
+/**
+ * The pickup behind `--json --decrypt`, shared by `inbox` and `listen` and
+ * identical in shape to the Go CLI's: the relay's inbox response, with each
+ * message gaining `decrypted` and `body`. A message that did not open keeps
+ * its ciphertext in `payload` and gets the failure text as `body`.
+ *
+ * It is a full pickup, not a print: delivery receipts, read receipts (per the
+ * inbox policy), the sender's journal, and history all happen as in a human
+ * pickup. Anything human-readable goes to stderr; stdout stays one document.
+ */
+async function decryptedPickup(
+  client: PoweurClient,
+  pickup: { messages: InboxMessage[]; acks: Ack[] },
+  streams: Streams,
+): Promise<string> {
+  for (const ack of pickup.acks) {
+    if (ack.state === STATE_DELIVERED_CLIENT && ack.message_id) {
+      appendJournal({
+        message_id: ack.message_id,
+        sender: client.identityName,
+        recipient: ack.sender,
+        timestamp: rfc3339(),
+        state: STATE_DELIVERED_CLIENT,
+        detail: `ack id=${ack.id}`,
+      });
+    }
+  }
+  const opened = pickup.messages.filter((m) => m.plaintext !== null && Boolean(m.encryption?.alg));
+  await client.ackDecrypted(opened);
+  await client.sendReadReceipts(opened);
+  const { lost } = await client.archiveInbound(opened);
+  if (lost > 0) streams.stderr(`warning: ${lost} message(s) could not be archived to history\n`);
+
+  const messages = pickup.messages.map((message) => {
+    const { plaintext, decryptError, ...wire } = message;
+    const decrypted = plaintext !== null && Boolean(message.encryption?.alg);
+    let body: string;
+    if (decrypted) body = plaintext as string;
+    else if (!message.encryption?.alg) body = message.payload;
+    else if (client.decryptor) body = `[decrypt failed: ${decryptError ?? "unknown"}]`;
+    else body = "[encrypted: no local encryption key]";
+    return { ...wire, decrypted, body };
+  });
+  return JSON.stringify({ messages, acks: pickup.acks });
+}
 
 export async function send(argv: string[], streams: Streams): Promise<number> {
   const args = parseArgs(argv, {
@@ -161,7 +218,9 @@ export async function send(argv: string[], streams: Streams): Promise<number> {
  * connection costs nothing — reconnecting picks up from the same cursor.
  */
 export async function listen(argv: string[], streams: Streams): Promise<number> {
-  const args = parseArgs(argv, { bool: COMMON_BOOL });
+  const args = parseArgs(argv, { bool: [...COMMON_BOOL, "once", "decrypt"] });
+  const decrypt = requireJsonForDecrypt(args);
+  const once = flagBool(args, "once");
   const { client } = await openClient({
     ...(flagString(args, "use-identity") ? { identity: flagString(args, "use-identity") } : {}),
   });
@@ -172,34 +231,55 @@ export async function listen(argv: string[], streams: Streams): Promise<number> 
   process.once("SIGTERM", stop);
 
   let cursor = "";
-  const drain = async () => {
+  // Reports whether anything arrived, which is what --once exits on.
+  const drain = async (): Promise<boolean> => {
     const { messages, acks, cursor: next } = await client.messages.inbox(
       client.signer, client.decryptor, { since: cursor },
     );
-    for (const message of messages) {
-      if (jsonOut) {
-        streams.stdout(JSON.stringify(message) + "\n");
-      } else {
-        streams.stdout(`${message.sender}: ${message.plaintext ?? "<could not decrypt>"}\n`);
+    if (decrypt) {
+      streams.stdout((await decryptedPickup(client, { messages, acks }, streams)) + "\n");
+    } else {
+      for (const message of messages) {
+        if (jsonOut) {
+          streams.stdout(JSON.stringify(message) + "\n");
+        } else {
+          streams.stdout(`${message.sender}: ${message.plaintext ?? "<could not decrypt>"}\n`);
+        }
+      }
+      for (const ack of acks) {
+        if (!jsonOut) streams.stdout(`ack ${ack.message_id} ${ack.state}\n`);
       }
     }
-    for (const ack of acks) {
-      if (!jsonOut) streams.stdout(`ack ${ack.message_id} ${ack.state}\n`);
-    }
-    if (next && (messages.length > 0 || acks.length > 0)) {
+    const delivered = messages.length > 0 || acks.length > 0;
+    if (next && delivered) {
       // Only forget once the messages have actually been printed.
       await client.messages.consume(client.signer, { through: next, ackThrough: next });
     }
     if (next) cursor = "";
+    return delivered;
+  };
+  // One pickup at a time. Opening the stream and every event it carries ask
+  // for a drain, and two overlapping reads would both see — and act on — a
+  // message that has not been consumed yet.
+  let queue: Promise<void> = Promise.resolve();
+  const pickup = () => {
+    queue = queue.then(async () => {
+      if (controller.signal.aborted) return;
+      try {
+        if ((await drain()) && once) stop();
+      } catch (error) {
+        streams.stderr(`pickup failed: ${String(error)}\n`);
+      }
+    });
   };
 
   streams.stderr(`listening as ${client.identityName} (ctrl-c to stop)\n`);
   await streamForever(client.relay, client.signer, {
     signal: controller.signal,
-    onOpen: () => { void drain(); },
+    onOpen: pickup,
     onEvent: (event) => {
       if (event.type === "ready") return; // the open handler already drained
-      void drain().catch((error) => streams.stderr(`pickup failed: ${String(error)}\n`));
+      pickup();
     },
     onError: (error) => streams.stderr(`stream dropped, retrying: ${String(error)}\n`),
   });
@@ -207,11 +287,17 @@ export async function listen(argv: string[], streams: Streams): Promise<number> 
 }
 
 export async function inbox(argv: string[], streams: Streams): Promise<number> {
-  const args = parseArgs(argv, { bool: COMMON_BOOL });
+  const args = parseArgs(argv, { bool: [...COMMON_BOOL, "decrypt"] });
+  const decrypt = requireJsonForDecrypt(args);
   const { client } = await openClient({
     ...(flagString(args, "use-identity") ? { identity: flagString(args, "use-identity") } : {}),
   });
   const { messages, acks } = await client.inbox();
+
+  if (decrypt) {
+    streams.stdout((await decryptedPickup(client, { messages, acks }, streams)) + "\n");
+    return 0;
+  }
 
   if (flagBool(args, "json")) {
     return write(streams, true, { messages, acks }, "");

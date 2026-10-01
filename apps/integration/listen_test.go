@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,72 @@ func TestINT_LISTEN_02_JSONOutput(t *testing.T) {
 	// cursor read, never from an event frame.
 	if strings.Contains(stdout, `"type":"ready"`) {
 		t.Fatalf("listen leaked stream frames into its output:\n%s", stdout)
+	}
+}
+
+// TestINT_LISTEN_03_JSONDecrypt: --json --decrypt is what a bot runs so it
+// never holds the identity's message key. stdout is the inbox wire shape plus
+// each message's plaintext as `body`, nothing else; the pickup is otherwise a
+// full one — consumed from the inbox (history archiving shares the human path's code) — and `inbox --json --decrypt`
+// speaks the same shape.
+func TestINT_LISTEN_03_JSONDecrypt(t *testing.T) {
+	zone := newZone(t)
+	_, relayAddr := newRelay(t, zone)
+	relayURL := "http://" + relayAddr
+
+	aliceHome := t.TempDir()
+	bobHome := t.TempDir()
+	for home, name := range map[string]string{aliceHome: "alice", bobHome: "bob"} {
+		runCLI(t, home, "identity", "create", name,
+			"--parent-domain", "poweur.net", "--relay", relayURL,
+			"--dns-provider", "mock", "--dns-token", "integration")
+	}
+
+	type pickup struct {
+		Messages []struct {
+			Sender    string `json:"sender"`
+			Payload   string `json:"payload"`
+			Body      string `json:"body"`
+			Decrypted bool   `json:"decrypted"`
+		} `json:"messages"`
+	}
+	decode := func(out string) pickup {
+		t.Helper()
+		var p pickup
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &p); err != nil {
+			t.Fatalf("stdout is not a single JSON document: %v\n%s", err, out)
+		}
+		return p
+	}
+
+	const msg = "decrypted for the script, not for the eye"
+	runCLI(t, aliceHome, "send", "bob.poweur.net", msg)
+
+	stdout, stderr := runListenOnce(t, bobHome, 30*time.Second, "--json", "--decrypt")
+	got := decode(stdout)
+	if len(got.Messages) != 1 || got.Messages[0].Body != msg || !got.Messages[0].Decrypted || got.Messages[0].Sender != "alice.poweur.net" {
+		t.Fatalf("listen --json --decrypt: %+v\nstdout: %s\nstderr: %s", got, stdout, stderr)
+	}
+	if got.Messages[0].Payload == msg || got.Messages[0].Payload == "" {
+		t.Fatalf("the wire payload must stay ciphertext, got %q", got.Messages[0].Payload)
+	}
+	if strings.Contains(stdout, "🔒") {
+		t.Fatalf("human rendering leaked into the JSON stream:\n%s", stdout)
+	}
+
+	inbox, _ := runCLI(t, bobHome, "inbox")
+	if !strings.Contains(inbox, "no messages") {
+		t.Fatalf("--decrypt left the message in the inbox:\n%s", inbox)
+	}
+
+	runCLI(t, aliceHome, "send", "bob.poweur.net", "second, by poll")
+	polled, _ := runCLI(t, bobHome, "inbox", "--json", "--decrypt")
+	if p := decode(polled); len(p.Messages) != 1 || p.Messages[0].Body != "second, by poll" {
+		t.Fatalf("inbox --json --decrypt: %s", polled)
+	}
+
+	if code, _, stderr := runCLIFull(t, bobHome, "inbox", "--decrypt"); code == 0 || !strings.Contains(stderr, "--json") {
+		t.Fatalf("--decrypt without --json should be refused, got %d: %s", code, stderr)
 	}
 }
 

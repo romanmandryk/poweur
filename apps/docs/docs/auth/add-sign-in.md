@@ -12,7 +12,8 @@ anybody. If you are used to OAuth, the surprising part is how much is missing.
 
 The [protocol spec](./sign-in.md) is normative; this page is the shortest path to a working
 login. The OAuth bridge uses the shared verifier in `packages/identity/signin`.
-The v1 Guestbook example was removed; its v2 replacement is tracked in EPIC-026.
+The reference site is the Poweur Guestbook ([`apps/demoapps/guestbook`](https://github.com/romanmandryk/poweur/tree/master/apps/demoapps/guestbook)),
+live at `guestbook.poweur.net`: about a page of sign-in code, and everything else it does is ordinary.
 
 ## 0. What you are about to build
 

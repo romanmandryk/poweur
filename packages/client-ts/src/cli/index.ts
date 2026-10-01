@@ -43,9 +43,9 @@ export const HELP = `Usage:
   poweur key claim <identity> <rendezvous-id> --ephemeral-key <b64url> [--relay=...] [--json]
   poweur send <to> <message> [--sign-with=session|identity] [--type=...] [--via-home-relay] [--accept-new-key] [--use-identity=...] [--json]
   poweur send <to> <message> --anon      (unsigned; recipient must allow anonymous senders)
-  poweur inbox [--use-identity=...] [--json]
+  poweur inbox [--use-identity=...] [--json [--decrypt]]      (--decrypt: add each message's plaintext as "body")
   poweur history [<peer>] [--limit=N] [--before=N] [--thread=...] [--keep-unread] [--use-identity=...] [--json]
-  poweur listen [--use-identity=...] [--json]
+  poweur listen [--once] [--use-identity=...] [--json [--decrypt]]
   poweur messages status [--id=<message-id>] [--use-identity=...] [--json]
   poweur anon [--use-identity=...] [--json]      (read your anonymous queue)
   poweur session <status|refresh|revoke> [--use-identity=...] [--json]

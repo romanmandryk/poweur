@@ -274,6 +274,7 @@ poweur inbox
 |------|-------------|
 | `--use-identity <identity>` | Fetch inbox for a specific identity |
 | `--json` | Raw JSON output (including undecrypted envelope) |
+| `--decrypt` | With `--json`: do the full pickup above and add `decrypted` and `body` (the plaintext) to each message. A script or bot gets readable text without holding the identity's message key. A message that could not be opened keeps its ciphertext in `payload`, with the failure text as `body` and `decrypted: false`. Anything meant for a person goes to stderr, so stdout is one JSON document. Refused without `--json`. `poweur listen` takes the same flag (plus `--once`) |
 
 ---
 

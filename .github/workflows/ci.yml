@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: |
             apps/api/go.sum
             apps/cli/go.sum
+            apps/demoapps/go.sum
             apps/integration/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
@@ -36,6 +37,7 @@ jobs:
           go test ./packages/identity/...
           go test ./apps/api/...
           go test ./apps/cli/...
+          go test ./apps/demoapps/...
           go test ./apps/oauth/...
 
       - name: Integration tests (real in-process relays)
@@ -115,6 +117,7 @@ jobs:
           cache-dependency-path: |
             apps/api/go.sum
             apps/cli/go.sum
+            apps/demoapps/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
       - uses: pnpm/action-setup@v4

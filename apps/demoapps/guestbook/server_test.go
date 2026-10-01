@@ -727,11 +727,11 @@ func TestEntriesRequireASession(t *testing.T) {
 			t.Fatalf("post %q = %d", body, rec.Code)
 		}
 	}
-	if rec := post(t, srv, "/api/entries", `{"message":"`+strings.Repeat("x", 900)+`"}`, cookie); rec.Code != http.StatusCreated {
-		t.Fatalf("long message = %d", rec.Code)
+	if rec := post(t, srv, "/api/entries", `{"message":"`+strings.Repeat("x", 1000)+`"}`, cookie); rec.Code != http.StatusCreated {
+		t.Fatalf("a message of exactly the limit = %d", rec.Code)
 	}
-	if got := len(srv.Entries()[0].Message); got != 500 {
-		t.Fatalf("message length = %d, want it truncated to 500", got)
+	if got := len(srv.Entries()[0].Message); got != 1000 {
+		t.Fatalf("message length = %d, want 1000", got)
 	}
 }
 

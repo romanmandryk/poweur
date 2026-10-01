@@ -82,8 +82,8 @@ var helpTree = []cmdHelp{
 	}},
 	{Name: "send", Usage: "<to> <message> [--attach=<file>] [--sign-with=session|identity] [--via-home-relay] [--request-on-reject] [--anon] " + "[--use-identity=<id>] [--json]",
 		Summary: "Send an encrypted message (or file) to an identity"},
-	{Name: "inbox", Usage: idFlags, Summary: "Read new messages"},
-	{Name: "listen", Usage: "[--once] " + idFlags, Summary: "Stream incoming messages as they arrive"},
+	{Name: "inbox", Usage: "[--decrypt] " + idFlags, Summary: "Read new messages (--json --decrypt: JSON with each message's plaintext as body)"},
+	{Name: "listen", Usage: "[--once] [--decrypt] " + idFlags, Summary: "Stream incoming messages as they arrive"},
 	{Name: "history", Usage: "[<peer>] [--limit=N] [--before=N] [--thread=<name>] [--keep-unread] " + idFlags, Summary: "Show past conversations"},
 	{Name: "outbox", Optional: true, Summary: "Messages waiting to be delivered", Subs: []subHelp{
 		{Name: "list", Usage: "[--json]", Summary: "Show queued messages (default)"},

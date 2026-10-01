@@ -1014,7 +1014,12 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
+	decrypt := fs.Bool("decrypt", false, "with --json: open each message with this identity's key and add its plaintext as \"body\"")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--decrypt": true})); err != nil {
+		return 1
+	}
+	if *decrypt && !*jsonOut {
+		fmt.Fprintln(stderr, "--decrypt only applies with --json (the default output is already decrypted)")
 		return 1
 	}
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
@@ -1057,6 +1062,7 @@ func runInbox(args []string, stdout, stderr io.Writer) int {
 		identityPriv: identityPriv,
 		session:      sess,
 		jsonOut:      *jsonOut,
+		decrypt:      *decrypt,
 	}, stdout, stderr)
 	return 0
 }

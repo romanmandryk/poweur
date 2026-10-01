@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/poweur/cli/pkg/hello"
+	"github.com/poweur/demoapps/hello"
 )
 
 // The hello.poweur.net demo bot against a real relay: a new ID writes to it,

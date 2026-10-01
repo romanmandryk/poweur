@@ -1,4 +1,4 @@
-// Command hello-bot runs the hello.poweur.net demo bot (see pkg/hello).
+// Command hello-bot runs the hello.poweur.net demo bot (see ../../hello).
 //
 //	IDENTITY=hello.poweur.net RELAY_URL=https://relay.poweur.net KEYS_DIR=/keys hello-bot
 //
@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/poweur/cli/pkg/hello"
+	"github.com/poweur/demoapps/hello"
 )
 
 func main() {

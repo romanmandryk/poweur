@@ -136,3 +136,22 @@ test('website (with docs under /docs) is static files outside the relay checkout
   assert.match(web, /cp -R apps\/docs\/build out\/docs/);
   assert.doesNotMatch(web, /bash -s <</);
 });
+
+test('guestbook is its own container, and Caddy leaves the public drive and identity documents to the relay', () => {
+  const compose = readFileSync(new URL('../../docker-compose.prod.yml', import.meta.url), 'utf8');
+  assert.match(compose, /container_name: poweur-guestbook/);
+  assert.match(compose, /entrypoint: \["\/guestbook"\]/);
+  assert.match(compose, /ORIGIN: https:\/\/guestbook\.poweur\.net/);
+  assert.match(compose, /IDENTITY: guestbook\.poweur\.net/);
+  assert.match(compose, /\/opt\/apps\/poweur-guestbook\/keys:\/keys:ro/);
+  assert.match(compose, /NAME_RESERVED: >-[\s\S]*?\bguestbook\b/);
+  const dockerfile = readFileSync(new URL('../../apps/api/Dockerfile', import.meta.url), 'utf8');
+  assert.match(dockerfile, /-o \/guestbook \.\/cmd\/guestbook/);
+  assert.match(dockerfile, /COPY --from=builder \/guestbook \/guestbook/);
+
+  const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
+  const site = caddy.match(/^http:\/\/guestbook\.poweur\.net guestbook\.poweur\.net \{[\s\S]*?^\}/m)?.[0] ?? '';
+  assert.match(site, /@identity path \/pub \/pub\/\* \/\.well-known\/poweur\/\*/);
+  assert.match(site, /handle @identity \{\s*reverse_proxy poweur-relay:8080/);
+  assert.match(site, /handle \{\s*reverse_proxy poweur-guestbook:8080/);
+});

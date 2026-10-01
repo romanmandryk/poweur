@@ -8,9 +8,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	cryptoe2e "github.com/poweur/cli/internal/crypto"
-	"github.com/poweur/cli/internal/identity"
 )
 
 func TestCommandAndReplyAreFixedText(t *testing.T) {
@@ -91,19 +88,8 @@ func TestLimiterBurstRefillAndDailyCap(t *testing.T) {
 // limits a repeat sender, all against a scripted CLI.
 func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	encPub, encPriv, err := cryptoe2e.GenerateX25519Keypair()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := identity.SaveEncryptionPrivateKey("hello.poweur.net", encPriv); err != nil {
-		t.Fatal(err)
-	}
 	seal := func(text string) map[string]any {
-		p, err := cryptoe2e.Encrypt(encPub, []byte(text))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return map[string]any{"payload": p.Ciphertext, "encryption": map[string]string{"alg": "x25519", "ephemeral_public_key": p.EphemeralPublicKey, "nonce": p.Nonce}}
+		return map[string]any{"payload": "ciphertext", "body": text, "decrypted": true, "encryption": map[string]string{"alg": "x25519"}}
 	}
 	msg := func(id, sender, typ string, enc map[string]any) map[string]any {
 		m := map[string]any{"id": id, "sender": sender, "timestamp": time.Now().UTC().Format(time.RFC3339), "type": typ}
@@ -114,9 +100,10 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 	}
 	pickup, _ := json.Marshal(map[string]any{"messages": []any{
 		msg("m1", "alice.poweur.net", "chat.text", seal("ping")),
-		msg("m2", "alice.poweur.net", "chat.text", seal("ping again")),                    // a quick follow-up still gets an answer
-		msg("m3", "bobby.poweur.net", "org.example.app", seal("hi")),                      // not chat text
-		msg("m4", "carol.poweur.net", "chat.text", map[string]any{"payload": "plain"}),    // not encrypted
+		msg("m2", "alice.poweur.net", "chat.text", seal("ping again")),                                                      // a quick follow-up still gets an answer
+		msg("m3", "bobby.poweur.net", "org.example.app", seal("hi")),                                                        // not chat text
+		msg("m4", "carol.poweur.net", "chat.text", map[string]any{"payload": "plain", "body": "plain", "decrypted": false}), // not encrypted
+		msg("m8", "erin.poweur.net", "chat.text", map[string]any{"payload": "ct", "body": "[decrypt failed: x]", "decrypted": false, "encryption": map[string]string{"alg": "x25519"}}), // could not be opened
 		msg("m5", "hello.poweur.net", "chat.text", seal("talking to myself")),             // itself
 		msg("m6", "not an id", "chat.text", seal("hi")),                                   // not an identity
 		msg("m7", "dave.poweur.net", "chat.text", seal("what "+strings.Repeat("x", 900))), // long text is fine
@@ -124,8 +111,10 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 
 	var mu sync.Mutex
 	var sent [][]string
+	var listenArgs []string
 	run := func(args []string, stdout, stderr io.Writer) int {
 		if args[0] == "listen" {
+			listenArgs = args
 			stdout.Write(append(pickup, '\n'))
 			return 0
 		}
@@ -134,9 +123,11 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 		mu.Unlock()
 		return 0
 	}
-	err = Serve(context.Background(), Options{Identity: "hello.poweur.net", Run: run, Once: true})
-	if err != nil {
+	if err := Serve(context.Background(), Options{Identity: "hello.poweur.net", Run: run, Once: true}); err != nil {
 		t.Fatal(err)
+	}
+	if !contains(listenArgs, "--decrypt") || !contains(listenArgs, "--json") {
+		t.Fatalf("the bot must have the CLI open messages, not do it itself: %v", listenArgs)
 	}
 	var to []string
 	for _, a := range sent {
@@ -153,13 +144,14 @@ func TestServeAnswersEncryptedTextOnly(t *testing.T) {
 	}
 }
 
-func TestServeNeedsAnIdentityAndKeys(t *testing.T) {
+func TestServeNeedsAnIdentityAndASuccessfulListen(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := Serve(context.Background(), Options{}); err == nil {
 		t.Fatal("no identity accepted")
 	}
-	if err := Serve(context.Background(), Options{Identity: "hello.poweur.net", Run: func([]string, io.Writer, io.Writer) int { return 0 }}); err == nil {
-		t.Fatal("missing keys accepted")
+	failing := func([]string, io.Writer, io.Writer) int { return 1 }
+	if err := Serve(context.Background(), Options{Identity: "hello.poweur.net", Run: failing}); err == nil {
+		t.Fatal("a failing listen (for instance missing keys) was reported as success")
 	}
 }
 

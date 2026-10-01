@@ -75,8 +75,8 @@ and report back as messages, all with keys that never leave your machine. Give t
 everything it does and can revoke it with `poweur share revoke`.
 
 ```bash
-poweur inbox --json                     # what arrived, as structured data
-poweur listen --json                    # stream new messages as they come
+poweur inbox --json --decrypt           # what arrived, as structured data, with each message's text in "body"
+poweur listen --json --decrypt          # stream new messages as they come
 poweur send alice.poweur.net "Tests pass on main ✅" --type=ci.status
 ```
 

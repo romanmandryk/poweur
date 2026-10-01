@@ -1,18 +1,24 @@
-// Package guestbook is the reference relying party for "Sign in with Poweur
-// ID" (EPIC-008 E08-T2), restored on storage v2 as an EPIC-026 headless app:
-// the API a site needs, driven end to end by the integration suite. v1 also
-// wrote entries into the user's home through a path grant; storage v2 has no
-// grants for sites, so the guestbook keeps its entries itself.
+// Package guestbook is the guestbook at guestbook.poweur.net: the reference
+// relying party for "Sign in with Poweur ID" (EPIC-008 E08-T2), and an
+// EPIC-026 app whose data lives in a Poweur drive.
+//
+// A visitor signs in with a Poweur ID, writes a short message in a rich text
+// box, and the page stores it as Markdown. The guestbook is itself a Poweur
+// ID. Its entries are a log in a public folder of its own drive, one Markdown
+// file per page of entries, so the book can be read at
+// https://guestbook.poweur.net/pub/guestbook/ with no help from this program,
+// and survives it. The log is also the moderation tool: delete an entry from
+// the file and it is gone from the page within a minute.
 //
 // It exists to make one claim checkable: a site accepts Poweur identities
 // with a verifier value and one Verify call, no account with anybody, no
-// registration, no shared secret. Everything below that is not sign-in is
-// deliberately boring — entries live in a map, the login session is a cookie.
-//
-// The whole protocol surface is these three moments:
+// registration, no shared secret. The sign-in is that call:
 //
 //	req  := srv.verifier.NewRequest(...)          // challenge
 //	res  := srv.verifier.Verify(ctx, encoded)     // approval → identity
+//
+// One guestbook process writes the log. Two would each add to a copy of the
+// file the other has since replaced.
 package guestbook
 
 import (
@@ -20,10 +26,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +42,22 @@ import (
 	"github.com/poweur/identity/signin"
 )
 
-// AppID is the tree namespace this RP owns in a user's home. It is derived
-// from the origin at runtime (identity.SignInAppID) — the constant here is
-// only the production value, for documentation and the deploy manifest.
+// AppID is the tree namespace this RP owns. It is derived from the origin at
+// runtime (identity.SignInAppID) — the constant here is only the production
+// value, for documentation and the deploy manifest.
 const AppID = "net.poweur.guestbook"
+
+const (
+	// maxPending bounds sign-ins in progress. /auth/start needs no session, so
+	// without a cap anyone could grow the table.
+	maxPending = 5000
+	// maxWaiting bounds posts queued for the one writer; more get a "busy".
+	maxWaiting = 32
+	// recentEntries is how many entries the page lists.
+	recentEntries = 100
+	// cachedPages is how many of the newest log files are kept in memory.
+	cachedPages = 4
+)
 
 // Config configures a Server.
 type Config struct {
@@ -45,27 +67,29 @@ type Config struct {
 	// Name is what a signer shows the user. Comes back out of
 	// /.well-known/poweur.json, which is the only string the signer trusts.
 	Name string
-	// Scopes requested at sign-in. Empty means login only. The worked
-	// example (E08-T4) asks for dav:rw:apps/<app id>, which is the whole
-	// point: the guestbook keeps its entries in the *user's* home.
+	// Scopes requested at sign-in. Empty means login only, which is all a
+	// guestbook needs.
 	Scopes []string
+	// Store holds the log. Nil keeps it in memory: nothing survives a restart.
+	Store Store
+	// ArchiveURL is where the log is public, shown on the page. Optional.
+	ArchiveURL string
+	// MaxMessage is the longest message in characters (default 1000).
+	MaxMessage int
+	// MinInterval is the least time between one identity's posts (default 5s).
+	// A negative value turns the limit off.
+	MinInterval time.Duration
+	// PageEntries is how many entries one log file holds (default 25).
+	PageEntries int
+	// Log receives operational messages; nil discards.
+	Log io.Writer
 	// Resolver overrides identity resolution. Tests inject a fake zone;
 	// production leaves it nil and gets the published resolver chain.
 	Resolver signin.Resolver
 	// ResolveOptions is passed to the default resolver.
 	ResolveOptions identity.ResolveOptions
-	// HTTPClient is used for the relay grant exchange. Tests inject one that
-	// reaches their in-process relay.
-	HTTPClient *http.Client
 	// Now is injectable for tests.
 	Now func() time.Time
-}
-
-// Entry is one signed line in the guestbook.
-type Entry struct {
-	Identity string `json:"identity"`
-	Message  string `json:"message"`
-	At       string `json:"at"`
 }
 
 // Server is the reference relying party.
@@ -73,16 +97,24 @@ type Server struct {
 	cfg      Config
 	verifier *signin.Verifier
 	mux      *http.ServeMux
+	store    Store
+	spacer   *spacer
 
 	mu sync.Mutex
 	// pending maps a request_id to the cross-device login waiting on it. The
 	// *protocol* is stateless for the verifier; a cross-device UX is not, and
-	// this is the only state the RP adds.
+	// this is the only sign-in state the RP adds.
 	pending map[string]*pendingLogin
 	// sessions are the RP's own login cookies. Nothing to do with Poweur
 	// session keys — this is an ordinary web session.
 	sessions map[string]*Session
-	entries  []Entry
+	// pages holds the newest log files, parsed, by page number.
+	pages map[int][]Entry
+	last  int // the newest page number there is
+
+	// writeMu serializes writers, and waiting bounds how many queue for it.
+	writeMu sync.Mutex
+	waiting chan struct{}
 }
 
 // Session is a signed-in browser at the RP.
@@ -118,7 +150,8 @@ type pendingLogin struct {
 }
 
 // New builds a Server. It fails rather than starting with an origin the
-// protocol cannot bind a response to.
+// protocol cannot bind a response to. It does no I/O: call Load to read the
+// log, and Refresh to keep it current.
 func New(cfg Config) (*Server, error) {
 	origin, err := identity.NormalizeOrigin(cfg.Origin)
 	if err != nil {
@@ -136,6 +169,18 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("guestbook: %w", err)
 	}
 	cfg.Scopes = scopes
+	if cfg.MaxMessage <= 0 {
+		cfg.MaxMessage = DefaultMaxMessage
+	}
+	if cfg.MinInterval == 0 {
+		cfg.MinInterval = DefaultMinInterval
+	}
+	if cfg.PageEntries <= 0 {
+		cfg.PageEntries = DefaultPageEntries
+	}
+	if cfg.Log == nil {
+		cfg.Log = io.Discard
+	}
 
 	v, err := signin.NewVerifier(origin)
 	if err != nil {
@@ -150,8 +195,15 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		cfg:      cfg,
 		verifier: v,
+		store:    cfg.Store,
+		spacer:   newSpacer(cfg.MinInterval),
 		pending:  make(map[string]*pendingLogin),
 		sessions: make(map[string]*Session),
+		pages:    make(map[int][]Entry),
+		waiting:  make(chan struct{}, maxWaiting),
+	}
+	if s.store == nil {
+		s.store = NewMemStore()
 	}
 	s.routes()
 	return s, nil
@@ -184,11 +236,27 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/entries", s.handleEntriesGet)
 	mux.HandleFunc("POST /api/entries", s.handleEntriesPost)
+	mux.HandleFunc("GET /assets/{file}", s.handleAsset)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
 	mux.HandleFunc("GET /", s.handleIndex)
 	s.mux = mux
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// Everything this site serves is its own: scripts and styles come from
+// /assets, so a message that slipped into the page as markup still could not
+// run or load anything.
+const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+	"connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", contentSecurityPolicy)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+	s.mux.ServeHTTP(w, r)
+}
 
 // --- Relying-party metadata --------------------------------------------------
 
@@ -295,6 +363,12 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 
 	expires, _ := time.Parse(time.RFC3339, req.ExpiresAt)
 	s.mu.Lock()
+	s.prunePendingLocked()
+	if len(s.pending) >= maxPending {
+		s.mu.Unlock()
+		writeError(w, http.StatusServiceUnavailable, "too many sign-ins are in progress; try again in a minute")
+		return
+	}
 	s.pending[req.RequestID] = &pendingLogin{
 		requestID:   req.RequestID,
 		expiresAt:   expires,
@@ -307,7 +381,6 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		encoded:     encoded,
 		signer:      signerBase(r),
 	}
-	s.prunePendingLocked()
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, StartResponse{
@@ -561,6 +634,11 @@ func (s *Server) completeSignIn(ctx context.Context, encoded string) (sessionWit
 		return sessionWithToken{}, err
 	}
 	s.mu.Lock()
+	for t, old := range s.sessions {
+		if s.now().After(old.ExpiresAt) {
+			delete(s.sessions, t)
+		}
+	}
 	s.sessions[token] = session
 	s.mu.Unlock()
 	return sessionWithToken{Session: session, token: token}, nil
@@ -740,12 +818,99 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // --- Entries -----------------------------------------------------------------
 
-func (s *Server) handleEntriesGet(w http.ResponseWriter, r *http.Request) {
+// Load reads the newest log files from the store. Call it once before serving,
+// and fail the start if it errors: a guestbook that cannot read its book would
+// show an empty one and then write over it.
+func (s *Server) Load(ctx context.Context) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.reload(ctx)
+}
+
+// Refresh calls Load every interval until ctx ends. It is how a hand edit of
+// the log, an entry removed by the operator, reaches the page.
+func (s *Server) Refresh(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := s.Load(ctx); err != nil && ctx.Err() == nil {
+				fmt.Fprintf(s.cfg.Log, "guestbook: refresh failed, keeping what it has: %v\n", err)
+			}
+		}
+	}
+}
+
+// reload replaces the cache with the store's newest pages. Caller holds writeMu.
+func (s *Server) reload(ctx context.Context) error {
+	names, err := s.store.List(ctx)
+	if err != nil {
+		return err
+	}
+	var numbers []int
+	for _, name := range names {
+		if n, ok := parsePageName(name); ok {
+			numbers = append(numbers, n)
+		}
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(numbers)))
+	if len(numbers) > cachedPages {
+		numbers = numbers[:cachedPages]
+	}
+	pages := make(map[int][]Entry, len(numbers))
+	for _, n := range numbers {
+		data, err := s.store.Read(ctx, pageName(n))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		pages[n] = parseLog(data)
+	}
+	last := 0
+	if len(numbers) > 0 {
+		last = numbers[0]
+	}
 	s.mu.Lock()
-	entries := append([]Entry(nil), s.entries...)
+	s.pages, s.last = pages, last
 	s.mu.Unlock()
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].At > entries[j].At })
-	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	return nil
+}
+
+// recent lists the newest entries, newest first.
+func (s *Server) recent(limit int) []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	numbers := make([]int, 0, len(s.pages))
+	for n := range s.pages {
+		numbers = append(numbers, n)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(numbers)))
+	var out []Entry
+	for _, n := range numbers {
+		page := s.pages[n]
+		for i := len(page) - 1; i >= 0 && len(out) < limit; i-- {
+			out = append(out, page[i])
+		}
+	}
+	return out
+}
+
+func (s *Server) handleEntriesGet(w http.ResponseWriter, r *http.Request) {
+	entries := append([]Entry{}, s.recent(recentEntries)...)
+	for i := range entries {
+		entries[i].HTML = renderHTML(entries[i].Message)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries":      entries,
+		"max_message":  s.cfg.MaxMessage,
+		"min_interval": s.cfg.MinInterval.Seconds(),
+		"archive":      s.cfg.ArchiveURL,
+	})
 }
 
 func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
@@ -757,31 +922,126 @@ func (s *Server) handleEntriesPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Message string `json:"message"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body must be JSON")
+	// Four bytes a character, plus the JSON around it.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, int64(s.cfg.MaxMessage)*4+1024)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body must be JSON with a message of at most "+strconv.Itoa(s.cfg.MaxMessage)+" characters")
 		return
 	}
-	message := strings.TrimSpace(body.Message)
-	if message == "" {
-		writeError(w, http.StatusBadRequest, "message is required")
+	message, err := cleanMessage(body.Message, s.cfg.MaxMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(message) > 500 {
-		message = message[:500]
-	}
-	entry := Entry{Identity: sess.Identity, Message: message, At: s.now().Format(time.RFC3339)}
 
-	s.mu.Lock()
-	s.entries = append(s.entries, entry)
-	s.mu.Unlock()
+	// The wait comes after validation, so a message that will be refused does
+	// not use up the visitor's turn.
+	prev, wait := s.spacer.reserve(sess.Identity, s.now())
+	if wait > 0 {
+		secs := int((wait + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error":       fmt.Sprintf("please wait %d more second%s before posting again", secs, plural(secs)),
+			"retry_after": secs,
+		})
+		return
+	}
+	entry, err := s.add(r.Context(), sess.Identity, message)
+	if err != nil {
+		s.spacer.release(sess.Identity, prev)
+		if errors.Is(err, errBusy) {
+			w.Header().Set("Retry-After", "5")
+			writeError(w, http.StatusServiceUnavailable, "the guestbook is busy; try again in a few seconds")
+			return
+		}
+		fmt.Fprintf(s.cfg.Log, "guestbook: could not store an entry from %s: %v\n", sess.Identity, err)
+		writeError(w, http.StatusBadGateway, "the guestbook could not save your message; try again")
+		return
+	}
+	entry.HTML = renderHTML(entry.Message)
 	writeJSON(w, http.StatusCreated, entry)
 }
 
-// Entries returns the guestbook's contents (tests, and the CLI demo).
-func (s *Server) Entries() []Entry {
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+var errBusy = errors.New("guestbook: too many writes waiting")
+
+// add appends an entry to the newest page of the log, or starts the next page
+// when that one is full. It reads the page back first rather than trusting the
+// cache, so an operator's hand edit is built on, not undone.
+func (s *Server) add(ctx context.Context, who, message string) (Entry, error) {
+	select {
+	case s.waiting <- struct{}{}:
+		defer func() { <-s.waiting }()
+	default:
+		return Entry{}, errBusy
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	id, err := newEntryID()
+	if err != nil {
+		return Entry{}, err
+	}
+	entry := Entry{ID: id, Identity: who, Message: message, At: s.now().Format(time.RFC3339)}
+
+	n := s.lastPage()
+	if n == 0 {
+		n = 1
+	}
+	data, err := s.store.Read(ctx, pageName(n))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Entry{}, err
+	}
+	if len(parseLog(data)) >= s.cfg.PageEntries {
+		n++
+		data = nil
+	}
+	if trimmed := strings.TrimRight(string(data), " \t\r\n"); trimmed != "" {
+		data = []byte(trimmed + "\n\n")
+	} else {
+		data = nil
+	}
+	data = append(data, formatEntry(entry)...)
+	if err := s.store.Write(ctx, pageName(n), data); err != nil {
+		return Entry{}, err
+	}
+	s.mu.Lock()
+	s.pages[n] = parseLog(data)
+	if n > s.last {
+		s.last = n
+	}
+	for len(s.pages) > cachedPages {
+		oldest := n
+		for k := range s.pages {
+			if k < oldest {
+				oldest = k
+			}
+		}
+		delete(s.pages, oldest)
+	}
+	s.mu.Unlock()
+	return entry, nil
+}
+
+func (s *Server) lastPage() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Entry(nil), s.entries...)
+	return s.last
+}
+
+// Entries returns the newest entries, oldest first (tests, and the CLI demo).
+func (s *Server) Entries() []Entry {
+	recent := s.recent(1 << 30)
+	out := make([]Entry, len(recent))
+	for i, e := range recent {
+		out[len(recent)-1-i] = e
+	}
+	return out
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -803,13 +1063,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
-}
-
-func joinURL(base, path string) string {
-	u, err := url.Parse(base)
-	if err != nil {
-		return strings.TrimRight(base, "/") + path
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + path
-	return u.String()
 }
