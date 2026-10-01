@@ -229,8 +229,53 @@ describe("Sign-in approval (EPIC-008)", () => {
     expect(screen.getByText("Origin verified")).toBeTruthy();
     expect(screen.getByText("This app requests sign-in only, with no home access.")).toBeTruthy();
 
+    // Locked: no code field and no approve button yet, just the unlock.
+    expect($("#auth-match")).toBeNull();
+    expect($("#btn-auth-approve")).toBeNull();
+
+    // Unlocking happens right here, with the passkey, and leaves the page alone.
     fireEvent.click($("#btn-auth-unlock")!);
-    expect(useRoute.getState()).toMatchObject({ sub: "unlock", params: { returnTo: "auth" } });
+    await waitFor(() => expect($("#btn-auth-approve")).toBeTruthy());
+    expect(authenticatePasskey).toHaveBeenCalled();
+    expect(useRoute.getState().sub).toBe("auth");
+    expect($("#btn-auth-unlock")).toBeNull();
+  });
+
+  it("lets you choose which of this browser's IDs signs in, and asks to unlock that one", async () => {
+    saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
+    saveIdentityRecord("bob.poweur.net", { identity: "bob.poweur.net", encryptedKeys: { kdf: "prf" } });
+    useSession.setState({ identity: IDENTITY, unlocked: true });
+    fake.consent.mockResolvedValueOnce({
+      request: { audience: "https://app.example", response_uri: "https://app.example/cb" },
+      metadata: { name: "Example App" },
+      headline: "Sign in to Example App",
+      scopes: [],
+    });
+    at("auth");
+    render(<App />);
+    fireEvent.click($("#btn-auth-load")!);
+    await waitFor(() => expect($("#auth-identity")).toBeTruthy());
+
+    const picker = $<HTMLSelectElement>("#auth-identity")!;
+    expect([...picker.options].map((option) => option.value).sort()).toEqual([IDENTITY, "bob.poweur.net"]);
+    expect($("#btn-auth-approve")!.textContent).toBe("Approve as alice");
+
+    fireEvent.change(picker, { target: { value: "bob.poweur.net" } });
+    expect(getActiveIdentity()).toBe("bob.poweur.net");
+    // Another ID is another key: it must be unlocked before it can approve.
+    expect($("#btn-auth-approve")).toBeNull();
+    expect($("#auth-match")).toBeNull();
+    expect($("#btn-auth-unlock")).toBeTruthy();
+    // The request being approved is still on screen.
+    expect(screen.getByText("Sign in to Example App")).toBeTruthy();
+    fireEvent.click($("#btn-auth-unlock")!);
+    await waitFor(() => expect($("#btn-auth-approve")!.textContent).toBe("Approve as bob"));
+  });
+
+  it("names the one ID it will sign in as when there is only one", async () => {
+    await openUnlocked();
+    expect($("#auth-identity")!.tagName).toBe("DIV");
+    expect($("#auth-identity")!.textContent).toBe(IDENTITY);
   });
 
   it("shows why a request was refused", async () => {
@@ -250,6 +295,7 @@ describe("Sign-in approval (EPIC-008)", () => {
   };
 
   async function openUnlocked() {
+    saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     useSession.setState({ identity: IDENTITY, unlocked: true });
     fake.consent.mockResolvedValueOnce(consent);
     at("auth");

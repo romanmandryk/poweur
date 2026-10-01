@@ -160,7 +160,7 @@ as the test reference; retain already ported temporary system-file tests as regr
       E20-T9 (restored: `TestINT_DEVICES_02_SyncCursorVisibleToOwner` in `sync_v2_test.go`).
       The full profile/web/cross-relay avatar acceptance remains below.
 - [x] SIGNIN_02 browser-bound completion returns with the EPIC-026 replacement RP
-      (`refapps/guestbook`, `signin_restore_test.go`, with SIGNIN_01's cross-device approval).
+      (`apps/demoapps/guestbook`, `signin_restore_test.go`, with SIGNIN_01's cross-device approval).
 - [x] Go/TS history cursors: relay author cursors, TS `older`/`before`/`hasOlder` paging.
 - [x] SDK history journeys (both sides, unread to zero and back, anonymous stays anonymous and
       persists, sealed on the relay) and the private sign-in consent log: it was being dropped on

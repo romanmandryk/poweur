@@ -7,8 +7,9 @@ title: Storage v2
 
 **Implementation status:** under construction on master (EPIC-020). Do not deploy
 this branch until the baseline and production migration are verified. WebDAV,
-path shares, app passwords, v1 sync, and the Tasks and Guestbook reference apps
-have been removed. Their replacements are not available yet.
+path shares, app passwords and v1 sync have been removed. The Tasks and Guestbook
+reference apps are back as EPIC-026 apps on drives: the Guestbook keeps its entries
+as Markdown in a public folder of its own drive.
 
 The current system-file API is a transitional adapter, not the drive engine:
 `GET|PUT|DELETE /identities/{identity}/system/{path}`. It stores public and

@@ -30,7 +30,7 @@ services:
       # NAME_RESERVED on the host is appended.
       NAME_RESERVED: >-
         ingest,metrics,grafana,stats,
-        hello,feedback,info,sales,press,jobs,careers,hr,ceo,founder,owner,operator,
+        hello,guestbook,feedback,info,sales,press,jobs,careers,hr,ceo,founder,owner,operator,
         administrator,sysadmin,moderator,mod,trust,safety,ops,devops,webmaster,
         google,apple,microsoft,amazon,meta,facebook,instagram,whatsapp,twitter,
         github,gitlab,paypal,stripe,anthropic,openai,claude,chatgpt,
@@ -70,7 +70,7 @@ services:
       - poweur_net
       - infra_net
 
-  # hello.poweur.net, the demo bot (apps/cli/pkg/hello): answers any message with a
+  # hello.poweur.net, the demo bot (apps/demoapps/hello): answers any message with a
   # fixed reply. The same image as the relay, a different binary. Its ID's key
   # files live on the host in /opt/apps/poweur-hello/keys (hello.poweur.net.key
   # and .enc, mode 600, never in git); nothing else about it is persistent.
@@ -85,6 +85,10 @@ services:
       KEYS_DIR: /keys
       HOME: /home/bot
       HELLO_DEMO_URL: ${HELLO_DEMO_URL:-}
+      # Counts of messages, replies per keyword and errors, scraped by
+      # infra-prometheus over infra_net (job poweur-hello). Nothing publishes
+      # this port.
+      METRICS_ADDR: ":9464"
     volumes:
       - /opt/apps/poweur-hello/keys:/keys:ro
     # Sessions and the CLI's bookkeeping are throwaway: memory only, bounded.
@@ -96,6 +100,46 @@ services:
       - no-new-privileges:true
     networks:
       - poweur_net
+      - infra_net
+
+  # guestbook.poweur.net (apps/demoapps/guestbook): the "Sign in with Poweur ID" demo and a
+  # public guestbook. The same image as the relay, a different binary. The guestbook is itself
+  # a Poweur ID: its entries are Markdown files in the public folder `guestbook` of that
+  # ID's own drive (https://guestbook.poweur.net/pub/guestbook/), so nothing here is
+  # persistent except the ID's key files in /opt/apps/poweur-guestbook/keys
+  # (guestbook.poweur.net.key and .enc, mode 600, never in git). Caddy sends the site's
+  # pages here and /pub and /.well-known/poweur to the relay. Run ONE instance: it is the
+  # only writer of the log.
+  guestbook:
+    image: ${RELAY_IMAGE:?Set RELAY_IMAGE to a GHCR digest}
+    container_name: poweur-guestbook
+    restart: unless-stopped
+    entrypoint: ["/guestbook"]
+    environment:
+      ORIGIN: https://guestbook.poweur.net
+      IDENTITY: guestbook.poweur.net
+      RELAY_URL: https://relay.poweur.net
+      KEYS_DIR: /keys
+      HOME: /home/bot
+      LISTEN: ":8080"
+      # Requests by route, posts and sign-ins by outcome, errors; scraped by
+      # infra-prometheus over infra_net (job poweur-guestbook). Caddy proxies
+      # only :8080, so this port is never public.
+      METRICS_ADDR: ":9464"
+    volumes:
+      - /opt/apps/poweur-guestbook/keys:/keys:ro
+    # The CLI's sessions and chunk cache, and the files it reads and writes the log
+    # through: throwaway, memory only, bounded.
+    tmpfs:
+      - /home/bot:size=64m
+      - /tmp:size=16m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - poweur_net
+      - infra_net
 
 volumes:
   poweur_data:

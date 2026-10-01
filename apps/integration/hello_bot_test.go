@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/poweur/cli/pkg/hello"
+	"github.com/poweur/demoapps/appmetrics"
+	"github.com/poweur/demoapps/hello"
 )
 
 // The hello.poweur.net demo bot against a real relay: a new ID writes to it,
@@ -36,11 +37,27 @@ func TestHelloBotAnswersANewID(t *testing.T) {
 			// Sequential on purpose: the CLI reads HOME on every call.
 			t.Setenv("HOME", botHome)
 			var logs strings.Builder
-			if err := hello.Serve(context.Background(), hello.Options{Identity: "hello.poweur.net", Once: true, Log: &logs}); err != nil {
+			metrics := appmetrics.New("poweur_hello")
+			if err := hello.Serve(context.Background(), hello.Options{Identity: "hello.poweur.net", Once: true, Log: &logs, Metrics: metrics}); err != nil {
 				t.Fatalf("serve: %v\n%s", err, logs.String())
 			}
 			if !strings.Contains(logs.String(), "replied to alice.poweur.net (ping)") {
 				t.Fatalf("bot log:\n%s", logs.String())
+			}
+			var scraped strings.Builder
+			metrics.Write(&scraped)
+			for _, want := range []string{
+				`poweur_hello_messages_total{result="replied"} 1`,
+				`poweur_hello_replies_total{keyword="ping"} 1`,
+				`poweur_hello_replies_total{keyword="other"} 0`,
+				`poweur_hello_errors_total{kind="reply_failed"} 0`,
+			} {
+				if !strings.Contains(scraped.String(), want+"\n") {
+					t.Errorf("metrics lack %q:\n%s", want, scraped.String())
+				}
+			}
+			if strings.Contains(scraped.String(), "alice") {
+				t.Errorf("metrics name the sender:\n%s", scraped.String())
 			}
 
 			inbox, _ := runCLI(t, aliceHome, "inbox", "--use-identity", "alice.poweur.net")

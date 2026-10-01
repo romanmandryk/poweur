@@ -15,14 +15,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/poweur/cli/internal/config"
-	cryptoe2e "github.com/poweur/cli/internal/crypto"
-	"github.com/poweur/cli/internal/identity"
 	"github.com/poweur/cli/pkg/cli"
+	"github.com/poweur/demoapps/appmetrics"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -45,6 +44,9 @@ type Options struct {
 	MaxPerDay int
 	// DemoURL is what the `demo` command links to; empty says "coming soon".
 	DemoURL string
+	// Metrics receives the bot's counters (see newMetrics); the caller serves
+	// them. Nil records nothing.
+	Metrics *appmetrics.Registry
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 }
@@ -84,17 +86,9 @@ func Serve(ctx context.Context, opt Options) error {
 	if opt.MaxPerDay == 0 {
 		opt.MaxPerDay = 500
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	encPriv, err := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, opt.Identity))
-	if err != nil {
-		return fmt.Errorf("hello: no encryption key for %s in %s: %w", opt.Identity, cfg.KeysDir, err)
-	}
-	b := &bot{opt: opt, encPriv: encPriv, limiter: newLimiter(opt.Burst, opt.Refill, opt.MaxPerDay)}
+	b := &bot{opt: opt, limiter: newLimiter(opt.Burst, opt.Refill, opt.MaxPerDay), m: newMetrics(opt.Metrics)}
 
-	args := []string{"listen", "--json", "--use-identity", opt.Identity}
+	args := []string{"listen", "--json", "--decrypt", "--use-identity", opt.Identity}
 	if opt.Once {
 		args = append(args, "--once")
 	}
@@ -123,22 +117,58 @@ func Serve(ctx context.Context, opt Options) error {
 
 type bot struct {
 	opt     Options
-	encPriv []byte
 	limiter *limiter
+	m       *metrics
 }
 
-// inboxPickup is the wire shape `poweur listen --json` prints for each pickup.
+// What happened to each message picked up. Bounded, so they can be metric
+// labels; none carries a sender or any text.
+const (
+	resultReplied     = "replied"
+	resultRateLimited = "rate_limited"
+	resultReplyFailed = "reply_failed"
+	resultUnreadable  = "unreadable" // not end-to-end encrypted, or the CLI could not open it
+	resultIgnored     = "ignored"    // not chat text, from itself, or not from an identity
+)
+
+const (
+	errReplyFailed = "reply_failed"
+	errBadPickup   = "bad_pickup"
+)
+
+// metrics are the bot's counters. keyword is the only label that comes from
+// what a sender wrote, and appmetrics folds anything outside keywords into
+// "other", so the series are bounded whatever people type.
+type metrics struct {
+	messages *appmetrics.Counter
+	replies  *appmetrics.Counter
+	errors   *appmetrics.Counter
+}
+
+func newMetrics(r *appmetrics.Registry) *metrics {
+	return &metrics{
+		messages: r.Counter("messages_total", "Messages picked up from the inbox, by what the bot did with them.", "result",
+			resultReplied, resultRateLimited, resultReplyFailed, resultUnreadable, resultIgnored),
+		replies: r.Counter("replies_total", "Replies sent, by the keyword the message started with (other if it was none of ours).", "keyword",
+			append(slices.Clone(keywords), appmetrics.Other)...),
+		errors: r.Counter("errors_total", "Failures: a reply that could not be sent, or a pickup that could not be read.", "kind",
+			errReplyFailed, errBadPickup),
+	}
+}
+
+// inboxPickup is the wire shape `poweur listen --json --decrypt` prints for
+// each pickup: the relay's inbox response plus, per message, the plaintext
+// the CLI opened with the identity's key. The bot never sees that key.
 type inboxPickup struct {
 	Messages []struct {
 		ID         string `json:"id"`
 		Sender     string `json:"sender"`
 		Timestamp  string `json:"timestamp"`
-		Payload    string `json:"payload"`
+		Body       string `json:"body"`
+		Decrypted  bool   `json:"decrypted"`
 		Type       string `json:"type,omitempty"`
 		Encryption *struct {
-			Alg                string `json:"alg"`
-			EphemeralPublicKey string `json:"ephemeral_public_key"`
-			Nonce              string `json:"nonce"`
+			Alg string `json:"alg"`
 		} `json:"encryption,omitempty"`
 	} `json:"messages"`
 }
@@ -146,43 +176,43 @@ type inboxPickup struct {
 func (b *bot) pickup(line []byte) {
 	var in inboxPickup
 	if err := json.Unmarshal(line, &in); err != nil {
+		b.m.errors.Inc(errBadPickup)
 		return
 	}
 	for _, m := range in.Messages {
 		if m.Type != "" && m.Type != idpkg.MsgTypeChatText {
+			b.m.messages.Inc(resultIgnored)
 			continue
 		}
 		sender := strings.ToLower(strings.TrimSpace(m.Sender))
 		if sender == "" || sender == b.opt.Identity || idpkg.ValidateIdentityName(sender) != nil {
+			b.m.messages.Inc(resultIgnored)
 			continue
 		}
-		if m.Encryption == nil || m.Encryption.Alg == "" {
-			continue // the relay carries these end-to-end encrypted; plaintext is not ours to answer
-		}
-		plain, err := cryptoe2e.Decrypt(b.encPriv, cryptoe2e.EncryptedPayload{
-			Ciphertext:         m.Payload,
-			EphemeralPublicKey: m.Encryption.EphemeralPublicKey,
-			Nonce:              m.Encryption.Nonce,
-		})
-		if err != nil {
-			fmt.Fprintf(b.opt.Log, "hello: cannot open a message from %s: %v\n", sender, err)
+		if !m.Decrypted || m.Encryption == nil || m.Encryption.Alg == "" {
+			b.m.messages.Inc(resultUnreadable) // the relay carries these end-to-end encrypted; what the CLI could not open is not ours to answer
 			continue
 		}
-		text := string(plain)
+		text := m.Body
 		if len(text) > maxText {
 			text = text[:maxText]
 		}
 		now := b.opt.Now()
 		if !b.limiter.allow(sender, now) {
+			b.m.messages.Inc(resultRateLimited)
 			fmt.Fprintf(b.opt.Log, "hello: %s is over its limit, no reply\n", sender)
 			continue
 		}
 		reply := Reply(Incoming{Sender: sender, Text: text, MessageID: m.ID, SentAt: m.Timestamp, Alg: m.Encryption.Alg}, now, b.opt.DemoURL)
 		var stderr strings.Builder
 		if code := b.opt.Run([]string{"send", sender, reply, "--use-identity", b.opt.Identity, "--request-on-reject"}, io.Discard, &stderr); code != 0 {
+			b.m.messages.Inc(resultReplyFailed)
+			b.m.errors.Inc(errReplyFailed)
 			fmt.Fprintf(b.opt.Log, "hello: reply to %s failed (%d): %s\n", sender, code, strings.TrimSpace(stderr.String()))
 			continue
 		}
+		b.m.messages.Inc(resultReplied)
+		b.m.replies.Inc(keyword(text))
 		fmt.Fprintf(b.opt.Log, "hello: replied to %s (%s)\n", sender, command(text))
 	}
 }
@@ -196,15 +226,27 @@ type Incoming struct {
 	Alg       string // the envelope's encryption algorithm
 }
 
-func command(text string) string {
+// keywords are the commands the bot understands. Anything else gets the
+// greeting and is counted as "other".
+var keywords = []string{"help", "ping", "whoami", "docs", "demo"}
+
+// keyword is the command a message starts with, or "other".
+func keyword(text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
-		return "hello"
+		return appmetrics.Other
 	}
 	word := strings.Trim(strings.ToLower(fields[0]), "/!.?,:;")
-	switch word {
-	case "help", "ping", "whoami", "docs", "demo":
+	if slices.Contains(keywords, word) {
 		return word
+	}
+	return appmetrics.Other
+}
+
+// command is which reply a message gets: its keyword, or the greeting.
+func command(text string) string {
+	if k := keyword(text); k != appmetrics.Other {
+		return k
 	}
 	return "hello"
 }

@@ -68,4 +68,24 @@ Every five minutes the relay also samples adoption across hosted identities into
 
 Metrics: `poweur_http_requests_total`, HTTP duration histogram, `poweur_actions_total` (labels `action`, `detail`, `outcome`), `poweur_state` (identities/inbox/storage/adoption), `poweur_telemetry_dropped`, and heartbeat timestamp. Counters/histograms have bounded labels only, with no identities/IPs/paths. Public recording rules compute increases per source series before summing, so process resets do not become growth. Public counts are estimates with possible export gaps.
 
+## Demo apps (hello and guestbook)
+
+`hello.poweur.net` and `guestbook.poweur.net` are separate processes, not the relay, so they report on their own, the way the OAuth bridge does: a Prometheus `GET /metrics` on a second listener, `METRICS_ADDR` (`:9464` in the production compose file). It is unauthenticated and never proxied by Caddy; `infra-prometheus` scrapes it over `infra_net` as jobs `poweur-hello` and `poweur-guestbook`. Unset `METRICS_ADDR` to turn it off.
+
+Every counter has one label whose values are fixed in code. A value outside the list is counted as `other`, so what a visitor types cannot create a series, and the metrics carry no identity, message text or address.
+
+| Metric | Label values |
+|---|---|
+| `poweur_hello_messages_total{result}` | `replied`, `rate_limited`, `reply_failed`, `unreadable` (not end-to-end encrypted, or the CLI could not open it), `ignored` (not chat text, from itself, not an identity). Every message picked up is in exactly one. |
+| `poweur_hello_replies_total{keyword}` | `help`, `ping`, `whoami`, `docs`, `demo`, `other` (anything that does not start with one of those words) |
+| `poweur_hello_errors_total{kind}` | `reply_failed`, `bad_pickup` |
+| `poweur_guestbook_posts_total{result}` | `created`, `unauthorized`, `invalid`, `rate_limited`, `busy`, `store_error` |
+| `poweur_guestbook_signins_total{result}` | `started`, `busy`, `approved`, `failed`, `match_failed`, `completed` |
+| `poweur_guestbook_errors_total{kind}` | `store_write`, `store_read`, `log_refresh`, `internal` |
+| `poweur_guestbook_http_requests_total{route,code}`, `poweur_guestbook_http_request_duration_seconds` | route is the mux pattern (`GET /api/entries`), code is the status class |
+
+Both also export `poweur_<app>_start_time_seconds`. Counters restart from zero with the process, which is why dashboards use `increase()`.
+
+The public **Growth** board shows the aggregates through `poweur_growth_hello_*` and `poweur_growth_guestbook_*` recording rules: messages to Hello and replies in the last 24 hours, replies per keyword over 7 days and hourly, and guestbook entries over 24 hours and 7 days. The private **Relay Ops** board shows the errors, the outcome breakdowns and whether each app is being scraped.
+
 For deployment, DNS, private/public sharing, retention and recovery, see the repository's `deploy/README.md` runbook.

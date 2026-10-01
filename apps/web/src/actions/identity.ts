@@ -102,8 +102,13 @@ export async function signInWithPasskey(identity: string) {
   useRoute.getState().push("unlock");
 }
 
-/** Open the active identity's keys with whatever custody holds them. */
-export async function unlock() {
+/**
+ * Open the active identity's keys with whatever custody holds them. A screen
+ * that unlocks beside its own content (the sign-in approval) passes `inPlace`
+ * and stays where it is; otherwise the route returns to where unlocking was
+ * asked from.
+ */
+export async function unlock({ inPlace = false }: { inPlace?: boolean } = {}) {
   const identity = useSession.getState().identity;
   const record: any = identity ? loadIdentityRecord(identity) : null;
   if (!identity || !record) {
@@ -135,8 +140,10 @@ export async function unlock() {
 
     setLoading(false);
     toast("Unlocked", "success");
-    const returnTo = useRoute.getState().params?.returnTo as SubPageId | undefined;
-    useRoute.setState({ sub: returnTo || null, params: {} });
+    if (!inPlace) {
+      const returnTo = useRoute.getState().params?.returnTo as SubPageId | undefined;
+      useRoute.setState({ sub: returnTo || null, params: {} });
+    }
     afterUnlock();
   } catch (error) {
     setLoading(false);

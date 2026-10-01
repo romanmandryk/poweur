@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -433,6 +434,60 @@ func TestDescribeSync(t *testing.T) {
 		got := describeSync(idpkg.Device{SyncedAt: tc.syncedAt}, now)
 		if got != tc.want {
 			t.Fatalf("%s: describeSync = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPrintDecryptedInboxAddsBodiesAndKeepsTheRest(t *testing.T) {
+	payload := []byte(`{"messages":[{"id":"m1","sender":"a.poweur.net","payload":"CT1","future_field":7},{"id":"m2","sender":"b.poweur.net","payload":"CT2"}],"acks":[{"message_id":"x"}]}`)
+	bodies := []map[string]any{
+		{"decrypted": true, "body": "hello"},
+		{"decrypted": false, "body": "[decrypt failed: boom]"},
+	}
+	var stdout, stderr strings.Builder
+	printDecryptedInbox(&stdout, &stderr, payload, bodies)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+	var got struct {
+		Messages []map[string]any `json:"messages"`
+		Acks     []map[string]any `json:"acks"`
+	}
+	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
+		t.Fatalf("not one JSON document: %v\n%s", err, stdout.String())
+	}
+	if strings.Count(strings.TrimSpace(stdout.String()), "\n") != 0 {
+		t.Fatalf("output must be a single line: %q", stdout.String())
+	}
+	if len(got.Messages) != 2 || len(got.Acks) != 1 {
+		t.Fatalf("shape changed: %+v", got)
+	}
+	first, second := got.Messages[0], got.Messages[1]
+	if first["body"] != "hello" || first["decrypted"] != true || first["payload"] != "CT1" || first["future_field"] != float64(7) {
+		t.Fatalf("first message: %+v", first)
+	}
+	if second["body"] != "[decrypt failed: boom]" || second["decrypted"] != false || second["payload"] != "CT2" {
+		t.Fatalf("a message that did not open must keep its ciphertext and say so: %+v", second)
+	}
+}
+
+func TestPrintDecryptedInboxReportsUnreadableResponse(t *testing.T) {
+	var stdout, stderr strings.Builder
+	printDecryptedInbox(&stdout, &stderr, []byte("not json"), nil)
+	if stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestDecryptNeedsJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, cmd := range []string{"listen", "inbox"} {
+		var stdout, stderr strings.Builder
+		if code := Run([]string{cmd, "--decrypt"}, &stdout, &stderr); code == 0 {
+			t.Fatalf("%s --decrypt without --json should fail", cmd)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%s wrote to stdout: %q", cmd, stdout.String())
 		}
 	}
 }

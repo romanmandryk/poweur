@@ -19,3 +19,18 @@ groups:
         expr: max by (state) (poweur_state{state=~"adopt_.+",deployment_environment_name="production"})
       - record: poweur_growth_hosted_identities
         expr: max(poweur_state{state="hosted_identities",deployment_environment_name="production"})
+      # The demo apps count themselves (apps/demoapps/appmetrics), scraped from
+      # poweur-hello and poweur-guestbook. Hello's keyword is bounded by its
+      # own code: the five commands it knows, otherwise "other".
+      - record: poweur_growth_hello_messages_24h
+        expr: sum(increase(poweur_hello_messages_total{deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_hello_replies_24h
+        expr: sum(increase(poweur_hello_replies_total{deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_hello_replies_1h
+        expr: sum by (keyword) (increase(poweur_hello_replies_total{deployment_environment_name="production"}[1h]))
+      - record: poweur_growth_hello_replies_7d
+        expr: sum by (keyword) (increase(poweur_hello_replies_total{deployment_environment_name="production"}[7d]))
+      - record: poweur_growth_guestbook_entries_24h
+        expr: sum(increase(poweur_guestbook_posts_total{result="created",deployment_environment_name="production"}[1d]))
+      - record: poweur_growth_guestbook_entries_7d
+        expr: sum(increase(poweur_guestbook_posts_total{result="created",deployment_environment_name="production"}[7d]))

@@ -7,12 +7,14 @@ WORKDIR /src
 COPY packages/identity ./packages/identity
 COPY apps/api ./apps/api
 COPY apps/cli ./apps/cli
+COPY apps/demoapps ./apps/demoapps
 WORKDIR /src/apps/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /relay .
-# The hello.poweur.net demo bot (apps/cli/pkg/hello) rides in the same image,
-# so the compose `hello` service needs no pipeline of its own.
-WORKDIR /src/apps/cli
+# The demo apps (apps/demoapps) ride in the same image, so the compose `hello` and
+# `guestbook` services need no pipeline of their own.
+WORKDIR /src/apps/demoapps
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /hello-bot ./cmd/hello-bot
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /guestbook ./cmd/guestbook
 
 # The web client (apps/web), served at /app/. Built here rather than committed,
 # because prod has no Node toolchain — the deploy only pulls this image.
@@ -34,6 +36,7 @@ ENV BUILD_TIME=${BUILD_TIME}
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /relay /relay
 COPY --from=builder /hello-bot /hello-bot
+COPY --from=builder /guestbook /guestbook
 COPY --from=web /src/apps/web/dist /web
 # Anyone running the released image gets the same app at /app/.
 ENV WEB_STATIC_DIR=/web

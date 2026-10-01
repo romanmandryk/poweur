@@ -727,11 +727,11 @@ func TestEntriesRequireASession(t *testing.T) {
 			t.Fatalf("post %q = %d", body, rec.Code)
 		}
 	}
-	if rec := post(t, srv, "/api/entries", `{"message":"`+strings.Repeat("x", 900)+`"}`, cookie); rec.Code != http.StatusCreated {
-		t.Fatalf("long message = %d", rec.Code)
+	if rec := post(t, srv, "/api/entries", `{"message":"`+strings.Repeat("x", 1000)+`"}`, cookie); rec.Code != http.StatusCreated {
+		t.Fatalf("a message of exactly the limit = %d", rec.Code)
 	}
-	if got := len(srv.Entries()[0].Message); got != 500 {
-		t.Fatalf("message length = %d, want it truncated to 500", got)
+	if got := len(srv.Entries()[0].Message); got != 1000 {
+		t.Fatalf("message length = %d, want 1000", got)
 	}
 }
 
@@ -772,6 +772,20 @@ func TestIndexRenders(t *testing.T) {
 	rec := get(t, srv, "/")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in with Poweur ID") {
 		t.Fatalf("index = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Leave a message for others.") {
+		t.Fatalf("index is missing the short invitation: %s", rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "Sign the guestbook") || !strings.Contains(body, "Leave message") {
+		t.Fatalf("the button should say Leave message: %s", body)
+	}
+	// The approval link must leave this page open: it holds the code.
+	if !strings.Contains(body, `id="approve"`) || !strings.Contains(body, `target="_blank"`) {
+		t.Fatalf("the approval link does not open a new tab: %s", body)
+	}
+	if !strings.Contains(body, `id="load-more"`) {
+		t.Fatal("the page cannot load older messages")
 	}
 	if rec := get(t, srv, "/nope"); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown path = %d", rec.Code)

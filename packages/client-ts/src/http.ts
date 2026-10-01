@@ -150,7 +150,9 @@ export class RelayClient {
       return response;
     } finally {
       if (timer !== null) clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abort);
+      // A stream outlives this call: its body is read after we return, and the
+      // caller's signal must still be able to end it.
+      if (!options.stream) options.signal?.removeEventListener("abort", abort);
     }
   }
 

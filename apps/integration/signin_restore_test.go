@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/poweur/demoapps/guestbook"
 	idpkg "github.com/poweur/identity"
-	"github.com/poweur/integration/refapps/guestbook"
 )
 
 type fixedSignInResolver struct{ doc idpkg.IdentityDocument }

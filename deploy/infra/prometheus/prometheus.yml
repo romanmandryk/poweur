@@ -18,6 +18,17 @@ scrape_configs:
   - job_name: poweur-oauth
     static_configs:
       - targets: [poweur-oauth:9464]
+  # The demo apps (apps/demoapps), each on a private :9464 listener. Labelled
+  # like the relay's OTLP series so the Growth recording rules select them
+  # with the same deployment_environment_name="production".
+  - job_name: poweur-hello
+    static_configs:
+      - targets: [poweur-hello:9464]
+        labels: {deployment_environment_name: production}
+  - job_name: poweur-guestbook
+    static_configs:
+      - targets: [poweur-guestbook:9464]
+        labels: {deployment_environment_name: production}
   - job_name: blackbox-oauth
     metrics_path: /probe
     params:

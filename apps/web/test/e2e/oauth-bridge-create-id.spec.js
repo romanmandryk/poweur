@@ -73,7 +73,6 @@ test.describe("OAuth bridge: create an ID mid-sign-in", () => {
     await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 45_000 });
     if (await page.locator("#btn-auth-unlock").count()) {
       await page.click("#btn-auth-unlock");
-      await page.click("#btn-do-unlock");
     }
     await page.click("#btn-auth-approve");
     await expect(page.locator("h1")).toHaveText("Allow E2E application?", { timeout: 45_000 });

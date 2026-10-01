@@ -28,6 +28,9 @@ go test ./apps/api/...
 # CLI
 go test ./apps/cli/...
 
+# Demo apps: hello bot and guestbook (own module, ship in the relay image)
+go test ./apps/demoapps/...
+
 # OAuth/OIDC bridge (EPIC-022). Its pages are React (apps/oauth/ui), embedded
 # at compile time; Go tests pass without them, e2e and the image build them.
 go test ./apps/oauth/...
@@ -178,6 +181,7 @@ the pushed commit's `versionHash`. Neither runs CI unless the dispatch checks
 apps/api          Go relay
 apps/cli          Go CLI
 apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
+apps/demoapps     hello.poweur.net bot + guestbook.poweur.net (Go, built on apps/cli/pkg/cli; ship in the relay image)
 apps/oauth        OAuth 2.0 / OIDC / IndieAuth bridge (EPIC-022), a separate service
 apps/oauth/ui     its pages: React + Tailwind (web app tokens), embedded into the Go binary
 apps/integration  In-process E2E tests

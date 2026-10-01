@@ -114,6 +114,12 @@ browser, after a reload each time — which is the failure people actually hit.
       only that device's `last_seen` in the owner's relay-managed document; no public presence
       endpoint exists
 - [x] Go CLI `poweur listen` subscribes with the same catch-up semantics as the TS CLI
+- [x] Go CLI `listen --json --decrypt` / `inbox --json --decrypt`: the wire shape plus each message's
+      plaintext as `body` (and acks, read receipts, journal as in a human pickup), so bots and agents
+      never need the identity's message key (hello bot, `TestINT_LISTEN_03`). The TS CLI has the same flag
+      and output (`cli-interop.test.ts` runs both against each other), plus `listen --once`; pickups
+      are serialized, and `RelayClient.raw` no longer drops the caller's abort signal once a stream
+      has connected (Ctrl-C used to leave `listen` hanging).
 - [x] **Deliberately deferred to EPIC-004 E04-T4:** the event-driven sync daemon does not yet
       exist; shipped sync remains one-shot/cron-driven, so there is no daemon subscription to wire
 

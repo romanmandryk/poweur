@@ -161,7 +161,11 @@ func streamEvents(ctx context.Context, relayURL, identityValue string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return parseErrorResponse("event stream refused", resp)
+		refused := parseErrorResponse("event stream refused", resp)
+		if resp.StatusCode == http.StatusUnauthorized && strings.Contains(refused.Error(), "session_expired") {
+			return fmt.Errorf("%w: %v", ErrSessionExpired, refused)
+		}
+		return refused
 	}
 	if onOpen != nil {
 		onOpen()
@@ -231,7 +235,12 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	jsonOut := fs.Bool("json", false, "output json")
 	once := fs.Bool("once", false, "exit after the first notification (for scripts and tests)")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--once": true})); err != nil {
+	decrypt := fs.Bool("decrypt", false, "with --json: open each message with this identity's key and add its plaintext as \"body\"")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--once": true, "--decrypt": true})); err != nil {
+		return 1
+	}
+	if *decrypt && !*jsonOut {
+		fmt.Fprintln(stderr, "--decrypt only applies with --json (the default output is already decrypted)")
 		return 1
 	}
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
@@ -275,6 +284,7 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 			identityPriv: identityPriv,
 			session:      sess,
 			jsonOut:      *jsonOut,
+			decrypt:      *decrypt,
 			// A quiet stream should stay quiet: printing "no messages" on
 			// every heartbeat-adjacent event would drown the real output.
 			quietWhenEmpty: true,
@@ -285,8 +295,15 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "listening as %s (ctrl-c to stop)\n", identityValue)
 	streamLoop(ctx, listenBaseBackoff, listenMaxBackoff,
 		func(ctx context.Context, onOpen func()) error {
-			sess, _ := session.Load(identityValue)
-			return streamEvents(ctx, cfg.RelayURL, identityValue, sess, identityPriv,
+			// Sessions live in the relay's memory, so a relay restart leaves
+			// the one on disk looking valid and being refused. Forget it, and
+			// register a fresh one on the next attempt; otherwise a long
+			// running listener (a bot) stays deaf until someone restarts it.
+			sess, err := ensureSession(ctx, cfg.RelayURL, identityValue, identityPriv)
+			if err != nil {
+				return err
+			}
+			err = streamEvents(ctx, cfg.RelayURL, identityValue, sess, identityPriv,
 				func() {
 					onOpen()
 					retryOutboxForIdentity(ctx, identityValue, false, stdout, stderr)
@@ -308,6 +325,10 @@ func runListen(args []string, stdout, stderr io.Writer) int {
 						stop()
 					}
 				})
+			if errors.Is(err, ErrSessionExpired) {
+				_ = session.Delete(identityValue)
+			}
+			return err
 		},
 		func(err error) {
 			fmt.Fprintf(stderr, "stream dropped, retrying: %v\n", err)
@@ -325,6 +346,10 @@ type inboxRender struct {
 	identityPriv ed25519.PrivateKey
 	session      session.Session
 	jsonOut      bool
+	// decrypt, with jsonOut, makes the JSON carry each message's plaintext
+	// (`body`) and does the rest of a human pickup: acks, read receipts,
+	// history. A script then never needs the identity's message key.
+	decrypt bool
 	// quietWhenEmpty suppresses the "no messages" line. `poweur inbox` wants
 	// it (a one-shot poll with no output looks broken); `poweur listen`
 	// does not.
@@ -368,11 +393,20 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 
 	// --json hands the raw response over untouched: a script asked for the
 	// wire shape, not for this function's rendering of it. The acks and
-	// history archiving below are the human path only.
-	if r.jsonOut {
+	// history archiving below are the human path only, unless --decrypt asked
+	// for them too.
+	if r.jsonOut && !r.decrypt {
 		fmt.Fprintln(stdout, string(payload))
 		return delivered
 	}
+	machine := r.jsonOut
+	// A machine reader owns stdout: anything the human path would print goes
+	// to stderr instead.
+	humanOut := stdout
+	if machine {
+		humanOut = stderr
+	}
+	var bodies []map[string]any
 
 	// An accept arrives in the requests queue in every inbox mode; older
 	// relays under `open` delivered it as ordinary inbox chat, so the inbox
@@ -384,7 +418,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			accepts = append(accepts, msg.Sender)
 		}
 	}
-	promoteAcceptedContacts(context.Background(), r.useIdentity, accepts, stdout, stderr)
+	promoteAcceptedContacts(context.Background(), r.useIdentity, accepts, humanOut, stderr)
 
 	// Surface delivery/read acks for previously-sent messages
 	// before printing inbound payloads. The ack stream is independent of
@@ -396,11 +430,13 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		if ack.State == AckStateRead {
 			ticks, verb = "✓✓✓", "read by"
 		}
-		fmt.Fprintf(stdout, "%s [%s] %s %s %s (msg %s)\n", ticks, ack.Timestamp, ack.State, verb, ack.Sender, ack.MessageID)
+		fmt.Fprintf(humanOut, "%s [%s] %s %s %s (msg %s)\n", ticks, ack.Timestamp, ack.State, verb, ack.Sender, ack.MessageID)
 	}
 
 	if !delivered {
-		if !r.quietWhenEmpty {
+		if machine {
+			fmt.Fprintln(stdout, string(payload))
+		} else if !r.quietWhenEmpty {
 			fmt.Fprintln(stdout, "no messages")
 		}
 		return false
@@ -454,8 +490,12 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 				}
 			}
 		}
-		fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
-			rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
+		if machine {
+			bodies = append(bodies, map[string]any{"decrypted": decrypted, "body": display})
+		} else {
+			fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
+				rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
+		}
 
 		// A sign-in prompt is a notification, not conversation: it is never
 		// archived into history (EPIC-022 E22-T7).
@@ -487,7 +527,38 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			}
 		}
 	}
+	if machine {
+		printDecryptedInbox(stdout, stderr, payload, bodies)
+	}
 	return true
+}
+
+// printDecryptedInbox prints the inbox response unchanged except that each
+// message gains `decrypted` and `body`. A message that did not open keeps its
+// ciphertext in `payload` and gets the failure text as `body`, with
+// `decrypted` false, so a script can tell the two apart.
+func printDecryptedInbox(stdout, stderr io.Writer, payload []byte, bodies []map[string]any) {
+	var doc map[string]any
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		fmt.Fprintln(stderr, err)
+		return
+	}
+	messages, _ := doc["messages"].([]any)
+	for i, m := range messages {
+		entry, ok := m.(map[string]any)
+		if !ok || i >= len(bodies) {
+			continue
+		}
+		for k, v := range bodies[i] {
+			entry[k] = v
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return
+	}
+	fmt.Fprintln(stdout, string(out))
 }
 
 func loadInboxPolicyForReceipts(ctx context.Context, cfg config.Config, identityValue string, priv ed25519.PrivateKey) (idpkg.InboxPolicy, bool) {

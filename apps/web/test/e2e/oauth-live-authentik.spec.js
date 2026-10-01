@@ -145,7 +145,6 @@ test.describe("Authentik through the bridge (live)", () => {
       await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 60_000 });
       if (await page.locator("#btn-auth-unlock").count()) {
         await page.click("#btn-auth-unlock");
-        await page.click("#btn-do-unlock");
       }
       await page.click("#btn-auth-approve");
       await expect(page.locator("h1")).toHaveText("Allow Authentik?", { timeout: 60_000 });

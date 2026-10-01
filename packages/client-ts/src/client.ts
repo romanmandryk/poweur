@@ -25,7 +25,7 @@ import { IdentityApi } from "./identity.js";
 import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
 import { Messaging, type SendOptions, type SendResult } from "./messages.js";
-import { readInboxPolicy, writeInboxPolicy } from "./policy.js";
+import { readInboxPolicy, sendsReadReceiptsTo, writeInboxPolicy } from "./policy.js";
 import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
 import type { ResolveOptions } from "./resolve.js";
@@ -43,6 +43,7 @@ import {
   CONTACT_REQUESTED,
   MSG_TYPE_CONTACT_ACCEPT,
   MSG_TYPE_CONTACT_REQUEST,
+  ACK_STATE_READ,
   type Ack,
   type AnonymousPolicy,
   type Contact,
@@ -209,9 +210,18 @@ export class PoweurClient {
     lost: number;
   }> {
     const { messages, acks, acked } = await this.inboxAndAck();
-    const { archived, lost } = await this.archive(
+    const { archived, lost } = await this.archiveInbound(messages);
+    return { messages, acks, acked, archived, lost };
+  }
+
+  /**
+   * Keep what just came off the inbox. A sign-in prompt is a notification,
+   * not conversation: never archived. Messages that did not decrypt have no
+   * body to keep and are skipped.
+   */
+  async archiveInbound(messages: InboxMessage[]): Promise<{ archived: number; lost: number }> {
+    return this.archive(
       messages
-        // A sign-in prompt is a notification, not conversation: never archived.
         .filter((m) => m.plaintext !== null && m.type !== MSG_TYPE_AUTH_REQUEST)
         .map((m) => ({
           id: m.id,
@@ -226,7 +236,53 @@ export class PoweurClient {
           body: m.plaintext ?? "",
         })),
     );
-    return { messages, acks, acked, archived, lost };
+  }
+
+  /**
+   * Tick-2 receipts for messages that decrypted. A failed receipt never loses
+   * the message the caller just read. Returns the ids acknowledged.
+   */
+  async ackDecrypted(messages: InboxMessage[]): Promise<string[]> {
+    const acked: string[] = [];
+    for (const message of messages) {
+      if (message.plaintext === null || !message.id || !message.sender) continue;
+      try {
+        await this.messages.ack(this.signer, {
+          id: message.id,
+          sender: message.sender,
+          ...(message.recipient ? { recipient: message.recipient } : {}),
+        });
+        acked.push(message.id);
+      } catch {
+        // A failed receipt must not lose the message the caller just read.
+      }
+    }
+    return acked;
+  }
+
+  /**
+   * Read receipts for messages that decrypted, to the senders the inbox
+   * policy allows. If the policy cannot be read nothing is disclosed.
+   */
+  async sendReadReceipts(messages: InboxMessage[]): Promise<string[]> {
+    let policy: InboxPolicy;
+    try {
+      ({ policy } = await this.policy());
+    } catch {
+      return [];
+    }
+    const sent: string[] = [];
+    for (const message of messages) {
+      if (message.plaintext === null || !message.id || !message.sender) continue;
+      if (!sendsReadReceiptsTo(policy, message.sender)) continue;
+      try {
+        await this.messages.ack(this.signer, message as { id: string; sender: string; recipient?: string }, { state: ACK_STATE_READ });
+        sent.push(message.id);
+      } catch {
+        // best effort
+      }
+    }
+    return sent;
   }
 
   /** Send, then keep our own copy — the relay never hands a sender one back. */
@@ -280,21 +336,7 @@ export class PoweurClient {
    */
   async inboxAndAck(): Promise<{ messages: InboxMessage[]; acks: Ack[]; acked: string[] }> {
     const { messages, acks } = await this.inbox();
-    const acked: string[] = [];
-    for (const message of messages) {
-      if (message.plaintext === null || !message.id || !message.sender) continue;
-      try {
-        await this.messages.ack(this.signer, {
-          id: message.id,
-          sender: message.sender,
-          ...(message.recipient ? { recipient: message.recipient } : {}),
-        });
-        acked.push(message.id);
-      } catch {
-        // A failed receipt must not lose the message the caller just read.
-      }
-    }
-    return { messages, acks, acked };
+    return { messages, acks, acked: await this.ackDecrypted(messages) };
   }
 
   /** Our own system files (.poweur/...): contacts, policy, profile, avatar. */

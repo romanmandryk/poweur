@@ -136,3 +136,42 @@ test('website (with docs under /docs) is static files outside the relay checkout
   assert.match(web, /cp -R apps\/docs\/build out\/docs/);
   assert.doesNotMatch(web, /bash -s <</);
 });
+
+test('guestbook is its own container, and Caddy sends only the app\'s own paths to it', () => {
+  const compose = readFileSync(new URL('../../docker-compose.prod.yml', import.meta.url), 'utf8');
+  assert.match(compose, /container_name: poweur-guestbook/);
+  assert.match(compose, /entrypoint: \["\/guestbook"\]/);
+  assert.match(compose, /ORIGIN: https:\/\/guestbook\.poweur\.net/);
+  assert.match(compose, /IDENTITY: guestbook\.poweur\.net/);
+  assert.match(compose, /\/opt\/apps\/poweur-guestbook\/keys:\/keys:ro/);
+  assert.match(compose, /NAME_RESERVED: >-[\s\S]*?\bguestbook\b/);
+  const dockerfile = readFileSync(new URL('../../apps/api/Dockerfile', import.meta.url), 'utf8');
+  assert.match(dockerfile, /-o \/guestbook \.\/cmd\/guestbook/);
+  assert.match(dockerfile, /COPY --from=builder \/guestbook \/guestbook/);
+
+  const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
+  const site = caddy.match(/^http:\/\/guestbook\.poweur\.net guestbook\.poweur\.net \{[\s\S]*?^\}/m)?.[0] ?? '';
+  // The relay is the default: a hosted ID's host also answers messages, sessions, events and /pub.
+  assert.match(site, /handle \{\s*reverse_proxy poweur-relay:8080/);
+  assert.match(site, /@app \{[\s\S]*?path \/ \/healthz \/assets\/\*[\s\S]*?\}\s*handle @app \{\s*reverse_proxy poweur-guestbook:8080/);
+  for (const route of ['/auth/start', '/auth/poll', '/auth/callback', '/.well-known/poweur.json', '/api/entries']) {
+    assert.ok(site.includes(route), route);
+  }
+  for (const relayRoute of ['/messages', '/pub', '/events', '/sessions', '/auth/challenge']) {
+    assert.ok(!site.includes(relayRoute), `${relayRoute} must fall through to the relay`);
+  }
+});
+
+test('hello and guestbook expose metrics on a private port that Prometheus scrapes and Caddy never proxies', () => {
+  const compose = readFileSync(new URL('../../docker-compose.prod.yml', import.meta.url), 'utf8');
+  const prom = readFileSync(new URL('../infra/prometheus/prometheus.yml', import.meta.url), 'utf8');
+  const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
+  for (const app of ['hello', 'guestbook']) {
+    const service = compose.match(new RegExp(`^  ${app}:\\n[\\s\\S]*?(?=^  \\S|^volumes:)`, 'm'))?.[0] ?? '';
+    assert.match(service, /METRICS_ADDR: ":9464"/, `${app} must serve metrics`);
+    assert.match(service, /^      - infra_net$/m, `${app} must be on infra_net for the scrape`);
+    assert.doesNotMatch(service, /^    ports:/m, `${app} must not publish a port`);
+    assert.match(prom, new RegExp(`job_name: poweur-${app}\\n\\s+static_configs:\\n\\s+- targets: \\[poweur-${app}:9464\\]\\n\\s+labels: \\{deployment_environment_name: production\\}`));
+  }
+  assert.doesNotMatch(caddy, /:9464/);
+});
