@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /guestbook ./cmd/guestbook
 
 # The web client (apps/web), served at /app/. Built here rather than committed,
 # because prod has no Node toolchain — the deploy only pulls this image.
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 RUN npm install -g pnpm@10
 WORKDIR /src
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
