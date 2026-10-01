@@ -3,7 +3,7 @@
 #   docker build -f apps/oauth/Dockerfile -t poweur-oauth .
 # The pages (apps/oauth/ui, React) are built first: the Go binary embeds
 # them. Production has no Node; it only pulls this image.
-FROM node:22-alpine AS ui
+FROM node:26-alpine AS ui
 RUN npm install -g pnpm@10
 WORKDIR /src
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
