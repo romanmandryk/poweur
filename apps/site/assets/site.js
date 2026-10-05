@@ -9,8 +9,8 @@ const root = document.documentElement.dataset.root || "";
 const here = location.pathname.replace(/index\.html$/, "");
 
 function navLink(href, label, extra = "") {
-  const url = href.startsWith("http") || href.startsWith("#") ? href : root + href;
-  const current = !href.startsWith("http") && here.endsWith(href.replace(/index\.html$/, "")) && href !== "index.html" ? ' aria-current="page"' : "";
+  const url = /^(https?:|#|\/)/.test(href) ? href : root + href;
+  const current = !href.startsWith("http") && here.endsWith(href.replace(/index\.html$/, "")) && href !== "index.html" && !href.startsWith("/") ? ' aria-current="page"' : "";
   return `<li><a href="${url}"${current} ${extra}>${label}</a></li>`;
 }
 
@@ -40,6 +40,18 @@ if (nav) {
   });
   nav.querySelectorAll("ul a").forEach((a) => a.addEventListener("click", () => nav.classList.remove("open")));
 }
+
+// The Blog link appears only when the site was built with a published post (blog/posts.json).
+fetch(root + "blog/posts.json")
+  .then((r) => (r.ok ? r.json() : []))
+  .then((posts) => {
+    if (!posts.length) return;
+    const list = document.querySelector("#nav ul");
+    if (list) list.insertAdjacentHTML("beforeend", navLink("blog/", "Blog"));
+    const project = [...document.querySelectorAll("#footer h3")].find((h) => h.textContent === "Project");
+    if (project) project.nextElementSibling.insertAdjacentHTML("afterbegin", `<li><a href="${root}blog/">Blog</a></li>`);
+  })
+  .catch(() => {});
 
 const footer = document.getElementById("footer");
 if (footer) {
