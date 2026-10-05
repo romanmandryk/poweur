@@ -19,6 +19,9 @@
     "client:test": "pnpm --filter @poweur/client test",
     "refapps:test": "make -C apps/integration refapps && pnpm --filter @poweur/client exec vitest run test/scenario-",
     "client:typecheck": "pnpm --filter @poweur/client typecheck",
+    "release:status": "node scripts/release.mjs status",
+    "release:bump": "node scripts/release.mjs bump",
+    "release:tag": "node scripts/release.mjs tag",
     "vectors": "cd packages/identity && go test ./... -run TestVectors && cd ../../apps/api && go test ./internal/crypto/... -run TestVectors && cd ../cli && go test ./internal/crypto/... -run TestVectors"
   },
   "devDependencies": {},

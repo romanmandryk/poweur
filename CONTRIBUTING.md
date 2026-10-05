@@ -27,6 +27,7 @@ Coding agents should follow [`AGENTS.md`](AGENTS.md). Summary:
   - **Bugfix** (`bugfix.md`): fixes an existing issue and links it with `Fixes #n`.
 - Choose a template with `gh pr create --template spec.md`, or add `?template=spec.md` to the compare URL.
 - A pull request must pass **CI result** before it can merge: Go unit and integration tests, the SDK, the web app's unit tests and a browser smoke set, the docs build and the deployment checks, each only when the files it covers changed. The whole browser suite runs nightly.
+- Changing shipped code means bumping that package's version in the same PR (`pnpm release:bump <package>`); CI's **Version bumps** check enforces it. How releases are cut: [`RELEASING.md`](RELEASING.md).
 - Do not commit `.env`, DNS tokens, or private keys.
 
 ## Licensing of contributions

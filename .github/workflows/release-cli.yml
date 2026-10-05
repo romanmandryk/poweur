@@ -1,0 +1,73 @@
+name: Release CLI
+
+# Builds the Go CLI (apps/cli) for Linux, macOS and Windows (amd64 and arm64) with GoReleaser
+# and attaches the archives and checksums.txt to a GitHub release. Push a tag
+# `cli-v<version>` that matches apps/cli/internal/buildinfo.Version (`pnpm release:tag cli`
+# does it), or run by hand with "Dry run" ticked to build without publishing.
+on:
+  push:
+    tags: ["cli-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and archive, but do not publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # the GitHub release
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/cli/go.sum
+            packages/identity/go.sum
+
+      - name: The tag and the CLI agree on one version
+        id: version
+        run: |
+          v="$(sed -n 's/^var Version = "\(.*\)"$/\1/p' apps/cli/internal/buildinfo/buildinfo.go)"
+          test -n "$v" || { echo "no version in buildinfo.go" >&2; exit 1; }
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "cli-v$v" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version $v" >&2; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - run: go test ./packages/identity/... ./apps/cli/...
+
+      # Our tags are cli-v<version>; GoReleaser wants a plain semver tag, so hand it one.
+      # It only builds and archives: the release itself is created below under our tag.
+      - name: Build the archives
+        uses: goreleaser/goreleaser-action@v6
+        env:
+          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
+        with:
+          version: "~> v2"
+          args: release --clean --skip=validate,publish
+
+      - name: Archives pass a smoke test
+        run: |
+          tar -xzf "dist/poweur_${{ steps.version.outputs.version }}_linux_amd64.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/poweur" version | tee "$RUNNER_TEMP/version.txt"
+          grep -q "poweur ${{ steps.version.outputs.version }}" "$RUNNER_TEMP/version.txt"
+          (cd dist && sha256sum --check --ignore-missing checksums.txt)
+
+      - name: GitHub release
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --title "CLI ${{ steps.version.outputs.version }}" --generate-notes
