@@ -81,8 +81,9 @@
       <h3 id="disappear">What happens if poweur.net disappears?</h3>
       <p>Your keys and a recovery kit are yours, so you can export your data and move. But a name under <code>poweur.net</code> belongs to the domain, so if we vanished, that name would go with the domain. A name on your own domain does not depend on us at all: you can point it at any relay, including one you run. If a name matters to you for the long term, use your own domain.</p>
 
-      <h3 id="prf">Why do I need a passkey with PRF?</h3>
-      <p>On the web, your keys are protected by a secret your authenticator derives (the WebAuthn <code>PRF</code> extension). That is what lets a browser protect a key without a password and lets the relay hold only ciphertext. Touch ID, Face ID, Windows Hello and security keys that implement PRF work, including Apple Passwords / iCloud Keychain and Google Password Manager. An authenticator that cannot produce the PRF secret is refused rather than silently weakened. If yours cannot, use the mobile app or the CLI. Tell us what fails on your browser and device in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
+      <h3 id="prf">Why do I need a passkey with PRF, and what works?</h3>
+      <p>On the web, your keys are protected by a secret your authenticator derives (the WebAuthn <code>PRF</code> extension). That is what lets a browser protect a key without a password and lets the relay hold only ciphertext. An authenticator that cannot produce the PRF secret is refused rather than silently weakened.</p>
+      <p><strong>Tested and working:</strong> Chrome, Firefox and Safari on macOS, using the built-in macOS passkey keystore (iCloud Keychain, with Touch ID). Security keys that implement PRF, and Google Password Manager passkeys, should work too. <strong>Does not work:</strong> Bitwarden's passkeys, because they do not provide PRF. If your authenticator cannot, use a platform passkey, the mobile app or the CLI. Tell us what works and what fails on your browser and device in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
 
       <h3 id="audit">Is it audited?</h3>
       <p>No. There has been no external security review yet. The cryptography uses standard primitives (Ed25519, X25519, ChaCha20-Poly1305, HKDF), the Go and TypeScript implementations are checked against shared test vectors, and everything is open source so you can read it. Please do not treat an unaudited pre-1.0 system as a vault for secrets that would be dangerous to lose. To report a vulnerability, use the <a href="https://github.com/romanmandryk/poweur/security/advisories/new">private advisory form</a> or <code>info@poweur.org</code>; see <a href="../legal/#security">security</a>.</p>
@@ -110,7 +111,7 @@
       <p>Poweur is open source and free to self-host, and hosted names on poweur.net are free. Running servers costs money, so the plan is optional paid plans for things like extra storage and hosting your own domain, plus sponsorship for people who just want to help. What stays free: the ID itself, recovery, end-to-end messaging, sign-in and exporting your data.</p>
 
       <h3 id="who">Who is behind it?</h3>
-      <p>Poweur is built and operated by Roman Mandryk, a sole trader in Portugal (<a href="../legal/">legal details</a>). Contributions are welcome through the <a href="https://github.com/romanmandryk/poweur">repository</a>.</p>
+      <p>Poweur is built and operated by Roman Mandryk (<a href="../legal/">legal details</a>). Contributions are welcome through the <a href="https://github.com/romanmandryk/poweur">repository</a>.</p>
 
       <h3 id="license">What is the licence?</h3>
       <p>The relay, web app and OAuth bridge are AGPL-3.0. The pieces others embed (the identity library, the TypeScript SDK, the CLI, the conventions and the documentation) are Apache-2.0. The names and logos are covered by a <a href="https://github.com/romanmandryk/poweur/blob/master/TRADEMARKS.md">trademark policy</a>.</p>
