@@ -159,7 +159,7 @@ function hostedParentOf(host, hostedDomains) {
  * new ID is the landing's job on the web and the shell's job in the app.
  *
  * @param {ModeInfo} info
- * @returns {{ passkey: boolean, join: boolean, create: boolean, joinSubject: string }}
+ * @returns {{ passkey: boolean, join: boolean, create: boolean, joinSubject: string, restore: boolean }}
  */
 export function addIdOptions(info) {
   const identityHost = info.mode === "identity" && Boolean(info.subject);
@@ -169,6 +169,8 @@ export function addIdOptions(info) {
     join: native || identityHost || info.mode === "unknown",
     create: native || info.mode === "unknown",
     joinSubject: identityHost ? info.subject : "",
+    // The kit is the one way back that needs no device and no passkey.
+    restore: true,
   };
 }
 

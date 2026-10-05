@@ -6,7 +6,8 @@ import { unlock } from "../actions/identity";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { cn } from "../lib/cn";
-import { handleOf } from "../lib/identity";
+import { identityAppUrl } from "../lib/claim";
+import { handleOf, isValidIdentity } from "../lib/identity";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
@@ -57,6 +58,59 @@ function IdentityPicker() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * An ID that is not in this browser's list — another host's, a self-hosted
+ * one, one made at its own address. Keys live per origin, so the way to use it
+ * is its own app with this same request; one already here is just switched to.
+ */
+function OtherIdentity() {
+  const input = useData((state) => state.auth.input);
+  const typed = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState("");
+  if (isShellRuntime()) return null;
+
+  const go = () => {
+    const id = (typed.current?.value ?? "").trim().toLowerCase();
+    if (!isValidIdentity(id)) {
+      setError("Enter an ID like alice.poweur.net");
+      return;
+    }
+    if ((listIdentities() as string[]).includes(id)) {
+      setError("");
+      switchIdentity(id);
+      return;
+    }
+    globalThis.location.assign(`${identityAppUrl(id)}?auth=${encodeURIComponent(input)}`);
+  };
+
+  return (
+    <details id="auth-other" className="mt-3">
+      <summary className="cursor-pointer text-sm font-semibold text-accent">Sign in as a different ID</summary>
+      <div className="mt-2 flex items-center gap-2.5">
+        <Input
+          ref={typed}
+          id="auth-other-input"
+          type="text"
+          placeholder="alice.poweur.net"
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          inputMode="url"
+          className="min-w-0 flex-1"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") go();
+          }}
+        />
+        <Button id="btn-auth-other" variant="ghost" className="w-auto shrink-0 px-5" onClick={go}>
+          Continue
+        </Button>
+      </div>
+      <ErrorLine error={error} />
+    </details>
   );
 }
 
@@ -172,6 +226,7 @@ export function SignInApproval() {
         </p>
       )}
       <IdentityPicker />
+      <OtherIdentity />
       <ErrorLine error={auth.error || localError} />
       {unlocked && identity ? (
         <>

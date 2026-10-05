@@ -313,6 +313,10 @@ recovery kit → inventory UI.
       and `poweur key kit` converts offline. No PDF generator — the carrier is not part of the
       spec Restore flow: mnemonic → seed → keys → new enrollment
       registered, sessions optionally revoked
+- [x] Web restore-from-kit: Add identity → "Restore from recovery kit" takes the identity and the 24
+      words, checks the rebuilt key against the identity's published key, then wraps it under a new
+      passkey and enrolls the browser (`restoreFromRecoveryPhrase`). Browser test:
+      `apps/web/test/e2e/restore-from-phrase.spec.js`
 - [x] Key inventory: `POST /identities/{id}/keystore/list` (identity-signed, **metadata only** —
       listing devices needs no access to the wrapped seeds) and `poweur key ls`. The web-app
       "Keys & devices" panel is left to EPIC-015, which owns `apps/web`

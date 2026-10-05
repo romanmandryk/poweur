@@ -13,8 +13,8 @@ import {
   RelayClient,
   resolveRecipientRelayUrl,
 } from "@poweur/client";
-import { clientFor, identityApiFor, resolveOptionsForRelay } from "../lib/client.js";
-import { enrollThisBrowser, recoverFromKeystore as recoverRecord, restoreLocalRecord, rewrap } from "../lib/keystore.js";
+import { clientFor, identityApiFor, lookup, resolveOptionsForRelay } from "../lib/client.js";
+import { enrollThisBrowser, keysFromMnemonic, recoverFromKeystore as recoverRecord, restoreLocalRecord, rewrap, validMnemonic } from "../lib/keystore.js";
 import { resolveMode } from "../lib/mode.js";
 import {
   biometricAvailability,
@@ -265,6 +265,54 @@ export async function adoptIdentity({
   setLoading(false);
   useRoute.setState({ page: "messages", sub: null, params: {} });
   afterUnlock();
+}
+
+/**
+ * Restore an identity from its 24-word recovery kit — the way back when every
+ * device and passkey is gone. The words rebuild the keys; the identity's
+ * published key must match them before anything is stored, so a wrong
+ * identity or a wrong kit changes nothing. Returns whether it was restored.
+ */
+export async function restoreFromRecoveryPhrase(identity: string, phrase: string): Promise<boolean> {
+  const fqdn = String(identity ?? "").trim().toLowerCase();
+  if (!fqdn) {
+    toast("Enter your identity (e.g. alice.poweur.net)", "warning");
+    return false;
+  }
+  if (!validMnemonic(phrase)) {
+    toast("That isn't a valid recovery kit. Check the 24 words, their spelling and their order.", "warning", 7000);
+    return false;
+  }
+
+  const relayUrl = defaultRelayUrl();
+  setLoading(true, "Checking your recovery kit…");
+  try {
+    const keys = keysFromMnemonic(phrase);
+    let published: string;
+    try {
+      const { document } = (await lookup(fqdn, relayUrl)) as { document: { public_key: string } };
+      published = String(document.public_key).replace(/^ed25519:/, "");
+    } catch {
+      throw new Error(`No Poweur ID named ${fqdn} could be found.`);
+    }
+    if (published !== keys.publicKey) {
+      throw new Error(`That recovery kit does not belong to ${fqdn}.`);
+    }
+    await adoptIdentity({
+      identity: fqdn,
+      relayUrl,
+      signingJWK: keys.signingJWK,
+      encJWK: keys.encJWK,
+      seed: keys.seed,
+      label: "Restored from recovery kit",
+    });
+    toast(`${fqdn} restored on this device`, "success", 5000);
+    return true;
+  } catch (error) {
+    setLoading(false);
+    toast(message(error), "error", 9000);
+    return false;
+  }
 }
 
 /** API base for an identity this device does not yet hold. */

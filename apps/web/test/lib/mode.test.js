@@ -151,10 +151,10 @@ describe("modeNow / resolveMode", () => {
 
 describe("addIdOptions", () => {
   const cases = [
-    ["shell",    { passkey: false, join: true,  create: true,  joinSubject: "" }],
-    ["unknown",  { passkey: true,  join: true,  create: true,  joinSubject: "" }],
-    ["launcher", { passkey: true,  join: false, create: false, joinSubject: "" }],
-    ["identity", { passkey: true,  join: true,  create: false, joinSubject: "bob.poweur.net" }],
+    ["shell",    { passkey: false, join: true,  create: true,  joinSubject: "", restore: true }],
+    ["unknown",  { passkey: true,  join: true,  create: true,  joinSubject: "", restore: true }],
+    ["launcher", { passkey: true,  join: false, create: false, joinSubject: "", restore: true }],
+    ["identity", { passkey: true,  join: true,  create: false, joinSubject: "bob.poweur.net", restore: true }],
   ];
 
   for (const [mode, expected] of cases) {
