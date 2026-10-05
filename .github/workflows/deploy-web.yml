@@ -43,6 +43,11 @@ jobs:
           mkdir out
           tar -cf - -C apps/site --exclude=./social --exclude=./scripts --exclude=./README.md --exclude=./product-shot.html --exclude='./assets/shots/*.png' . | tar -xf - -C out
           cp -R apps/docs/build out/docs
+          # The site's own CSS and JS keep their names, and Cloudflare holds them for a day;
+          # a version in the URL makes every deploy visible at once.
+          v="${GITHUB_SHA::8}"
+          find out -maxdepth 3 -name '*.html' -not -path 'out/docs/*' -exec \
+            sed -i -E "s#(assets/(site\.css|site\.js|seq\.js|faro\.js))\"#\1?v=$v\"#g" {} +
           tar -czf www.tgz -C out .
       - uses: actions/upload-artifact@v4
         with:
