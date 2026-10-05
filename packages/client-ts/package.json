@@ -1,7 +1,7 @@
 {
   "name": "@poweur/client",
   "version": "0.2.12",
-  "description": "Poweur protocol client \u2014 identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
+  "description": "Poweur protocol client - identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

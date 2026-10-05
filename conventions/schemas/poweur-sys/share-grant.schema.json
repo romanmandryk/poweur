@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/share-grant.schema.json",
-  "title": "share grant \u2014 poweur-sys/relay/shares/<share-id>.json (owner + relay; owner-signed)",
+  "title": "share grant - poweur-sys/relay/shares/<share-id>.json (owner + relay; owner-signed)",
   "type": "object",
   "required": [
     "share_id",

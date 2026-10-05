@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/capabilities.schema.json",
-  "title": "capabilities.json \u2014 poweur-sys/public/capabilities.json (world-readable)",
+  "title": "capabilities.json - poweur-sys/public/capabilities.json (world-readable)",
   "type": "object",
   "properties": {
     "version": {
