@@ -69,7 +69,7 @@ playbook.
 | [INT-003](integrations/INT-003-ai-agents.md) | AI tools & agent frameworks (MCP, Open WebUI, LangChain, n8n, OpenHands, …) | E04, E05, E09, E10 |
 | [INT-004](integrations/INT-004-collaboration-tools.md) | Collaboration & federation tools (Nextcloud, Matrix, Discourse, Joplin, Forgejo, …) | INT-000, E03, E05 |
 | [INT-005](integrations/INT-005-agent-control-planes.md) | Agent control planes (OpenClaw, Hermes & the gateway class) | E17, E09, E10, INT-000 |
-| [INT-006](integrations/INT-006-quick-win-apps.md) | Quick-win apps & the supported-apps list (OIDC recipes, Apprise/Shoutrrr, handles, Send/listmonk/forms/Cal.com/CRM plugins) | E22, E20, E09, INT-000 |
+| [INT-006](integrations/INT-006-quick-win-apps.md) | Quick-win apps & the supported-apps list (OIDC recipes, Apprise/Shoutrrr, handles, Send/listmonk/forms/Cal.com/CRM plugins), Solid WebID and Solid-OIDC | E22, E20, E09, INT-000 |
 | [INT-007](integrations/INT-007-app-suite.md) | Open-source app suite: data-handling labels, connect flow for storageless apps, candidate apps & gaps | E22, E20, E23, E25, INT-006 |
 
 ## Dependency graph
