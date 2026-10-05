@@ -199,7 +199,7 @@ export function renderPost(post) {
     <div class="wrap legal-wrap">
       <img class="post-cover" src="${cover}" alt="" width="1200" height="630">
     </div>
-    <div class="wrap legal-wrap prose">
+    <div class="wrap legal-wrap prose post-body">
 ${html}
       <div class="post-end">
         <p><strong>Poweur is open source and pre-1.0.</strong> Claim a name, try it, or read the code.</p>

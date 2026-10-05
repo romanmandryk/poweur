@@ -1,33 +1,24 @@
 ---
-title: "Introducing Poweur ID: your name, your inbox, your files"
-description: "An open identity for signing in, messaging and sharing data across providers, backed by keys you control."
+title: "Introducing Poweur ID: your name, your inbox, your data"
+description: "What if your internet ID was a domain name, and your apps and agents worked with data you own?"
 author: Roman Mandryk
-date: 2026-10-13
-draft: true
+date: 2026-10-05
 ---
 
-# Introducing Poweur ID: your name, your inbox, your files
+# Introducing Poweur ID: your name, your inbox, your data
 
-Every time we start using a new app, we repeat a familiar process: create an account, find the people we know, upload our files and set up permissions. Over time, our online lives become scattered across services that each hold a different part of who we are and what we do.
+Most of our lives online begin with an email address, a phone number or an account with a big tech company. We use them to sign in, find each other and share things, but each app builds its own little world around us. Our conversations, documents and relationships end up scattered across isolated services. We can often download a copy, yet we have surprisingly little control over how that data moves between the tools we use.
 
-I’m building Poweur because I think these everyday foundations should work across applications and providers. We should be able to try a better tool without asking everyone we work with to move there too.
+I started building Poweur ID around a simple question: domain names and URLs are already everywhere on the internet, so why don’t we use them as our internet identities? A name like `alice.poweur.net` is readable, easy to share and built on infrastructure the internet already understands. You can get a hosted name or use a domain you own, backed by cryptographic keys you control. With your own domain, you also control the name itself.
 
-A **Poweur ID** is a readable name, such as `alice.poweur.net` or a name on your own domain, backed by cryptographic keys you control. It gives you an identity for signing in, an inbox for messages and a home for files you want to keep or share.
+Connect that name to a small, standardized relay service, and it becomes an address where people can reach you, send messages and share files or other data. The relay handles delivery and storage; your devices hold your identity keys. People using different relays can still communicate, much as people using different email providers do. Your name, inbox and data become foundations that different applications can use, rather than things you rebuild every time you join another service.
 
-These three things belong together. When someone sends you a message, you want to know who sent it. When you share a document, you want to decide who can read or change it. When you open an app, you want it to recognise you and have access only to what it needs. Poweur brings those decisions around one identity.
+Once those foundations are in place, there is room for a different kind of app ecosystem. A notes app, a project planner or a shared household budget could keep its data as well-organized files in your own storage, with access for the people you choose. Many familiar apps could work this way without a central backend of their own, using the relay for storage and communication. Switching tools could mean opening the same data in a better interface, without moving everyone you collaborate with to another platform.
 
-Messages are signed and end-to-end encrypted, and they can travel between people using different Poweur relays. Files can be shared with other identities. Applications configured to accept Poweur can let you sign in with your ID. The aim is to make these familiar actions work without requiring everyone to have an account with the same company.
+Of course, some services need a wider view. Search engines, directories and marketplaces do useful work by indexing the internet and helping us discover people, products and information. I expect we’ll keep needing them. But once you find the person or business you need, much of what follows could happen privately between two Poweur IDs or within a small group. Conversations, orders, agreements and the exchange of files don’t all need to stay inside the service that introduced you. That is where I see the most interesting possibilities for collaboration between people and their agents.
 
-Email showed how valuable that can be: people using different providers can still reach one another. Poweur builds on that principle of interoperability, bringing cryptographic identity, messaging and shared data together through open protocols.
+This shared data also makes the handoff to AI agents much simpler. Today, an app may have a great web, mobile or desktop interface, yet be difficult for an agent to use unless its developers provide an API. With the Poweur CLI, an agent can work directly with accessible files in formats it understands. It could update a plan, organize records or prepare a draft, and you would see the result in the familiar app that reads those same files. People and agents can take turns working on the same material.
 
-You can use a hosted service or run your own relay. A hosted name still depends on the operator of its domain; using your own domain gives you more control over your address. Hosting remains a useful service, but open-source software and a shared protocol give you more choice about who provides it.
+Poweur ID is live in alpha, still pre-1.0. You can already [claim an ID for free at poweur.net](https://poweur.net/app/) or self-host a relay on your own domain. The CLI, web app and TypeScript SDK are available. Mobile apps can be built from source, and I’m working toward releases on the App Store and Google Play.
 
-This becomes especially interesting as agents take on more work alongside us. Imagine sharing a project brief and a price list with an assistant, then reviewing its draft in the editor you already use. Readable files and open formats give people and software a common place to work. The longer-term goal is for agents to participate through their own identities, with access limited to the job and a clear way to withdraw it.
-
-Poweur is still pre-1.0. The core identity, messaging, sharing and sign-in features exist; the broader agent experience and app ecosystem are still ahead. There is plenty to build, test and improve, and the code is open for anyone who wants to follow or contribute.
-
-The vision is an internet where more of our life and work can happen directly between people, communities and businesses, through services we choose. Directories and search services can help us find each other without becoming the owners of every relationship that follows.
-
-I want our names, relationships and work to remain ours as the tools around them change. Poweur is my attempt to make that practical.
-
-[Explore Poweur and follow development →](https://github.com/romanmandryk/poweur)
+My next goal is to bring Poweur ID to as many existing open-source applications as possible, so you can choose an open internet identity instead of a phone number or another platform account. I want it to fit into tools you already like, and let your data and relationships stay with you as those tools change.
