@@ -59,14 +59,27 @@ jobs:
           pnpm --filter poweur pack --pack-destination "$RUNNER_TEMP"
           ls -l "$RUNNER_TEMP"/*.tgz
 
+      # Each package is published only if that version is not on npm yet, so a rerun after a
+      # partial failure carries on where it stopped. The `poweur` alias needs npm to have
+      # approved the name (its typosquatting check flags it as close to "bower"); until then
+      # leave the repository variable PUBLISH_POWEUR_ALIAS unset. Set it to "true" afterwards.
       - name: Publish
         if: ${{ github.ref_type == 'tag' || inputs.dry_run == false }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PUBLISH_ALIAS: ${{ vars.PUBLISH_POWEUR_ALIAS }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           test -n "$NODE_AUTH_TOKEN" || { echo "NPM_TOKEN is not set" >&2; exit 1; }
-          pnpm --filter @poweur/client publish --access public --provenance --no-git-checks
-          pnpm --filter poweur publish --access public --provenance --no-git-checks
+          publish() {
+            if npm view "$1@$VERSION" version >/dev/null 2>&1; then
+              echo "$1@$VERSION is already on npm, skipping"
+            else
+              pnpm --filter "$1" publish --access public --provenance --no-git-checks
+            fi
+          }
+          publish @poweur/client
+          if [ "$PUBLISH_ALIAS" = true ]; then publish poweur; else echo "alias poweur not published (PUBLISH_POWEUR_ALIAS is not true)"; fi
 
       - name: GitHub release
         if: ${{ github.ref_type == 'tag' }}

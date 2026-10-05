@@ -54,6 +54,7 @@ Both workflows can be tried without publishing: Actions → *Release npm package
 - **npm:** the `@poweur` organization on npmjs.com and a granular access token with
   read/write on `@poweur/client` and `poweur`, stored as the repository secret `NPM_TOKEN`
   (`gh secret set NPM_TOKEN`). Rotate it before it expires.
+- **`poweur` alias:** npm blocks the unscoped name as too similar to `bower` until its support approves it. Until then the release publishes only `@poweur/client`. After approval, set the repository variable `PUBLISH_POWEUR_ALIAS` to `true` (`gh variable set PUBLISH_POWEUR_ALIAS --body true`) and rerun the release.
 - **CLI:** nothing. The release uses the workflow's own `GITHUB_TOKEN`.
 - **Label:** `no-version-bump` (created once with `gh label create no-version-bump`).
 
