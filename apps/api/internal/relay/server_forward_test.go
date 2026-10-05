@@ -51,7 +51,10 @@ func TestGETIdentitiesGet(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("got %d", resp.StatusCode)
 	}
-	resp2, _ := http.Get(ts.URL + "/identities/missing.poweur.net")
+	resp2, err := http.Get(ts.URL + "/identities/missing.poweur.net")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing: %d", resp2.StatusCode)
@@ -271,7 +274,10 @@ func TestNeitherLocalReturns403(t *testing.T) {
 	})
 	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(can)))
 	b, _ := json.Marshal(msg)
-	r, _ := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(b))
+	r, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", r.StatusCode)
@@ -321,7 +327,10 @@ func TestMessageAcceptedWhenRecipientLocalViaSharedIP(t *testing.T) {
 	})
 	msg.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(senderPriv, []byte(can)))
 	b, _ := json.Marshal(msg)
-	r, _ := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(b))
+	r, err := http.Post(ts.URL+"/messages", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", r.StatusCode)

@@ -66,7 +66,7 @@ test('setup refuses missing imports and invalid arguments without creating secre
   assert.notEqual(run('setup-observability.sh', ['--unknown']).status, 0);
 });
 
-test('deploys skip CI unless asked, so a master push only builds and ships', () => {
+test('deploys skip CI unless asked (pull requests already ran it), so a master push only builds and ships', () => {
   const relay = readFileSync(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
   const bridge = readFileSync(new URL('../../.github/workflows/deploy-oauth.yml', import.meta.url), 'utf8');
   const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -78,8 +78,13 @@ test('deploys skip CI unless asked, so a master push only builds and ships', () 
     assert.match(yml, /needs\.build\.result == 'success'/);
   }
   assert.match(ci, /workflow_dispatch:/);
+  assert.match(ci, /workflow_call:/);
+  // CI runs on pull requests and nightly. A push trigger would run it a second time beside Deploy.
+  assert.match(ci, /^ {2}pull_request:/m);
+  assert.match(ci, /^ {2}schedule:/m);
   assert.doesNotMatch(ci, /^ {2}push:/m);
-  assert.doesNotMatch(ci, /^ {2}pull_request:/m);
+  // The branch rule asks for this one status.
+  assert.match(ci, /^ {4}name: CI result$/m);
   assert.doesNotMatch(health, /^ {2}schedule:/m);
   assert.match(health, /workflow_dispatch:/);
 });
