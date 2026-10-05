@@ -47,6 +47,7 @@ import { getActiveIdentity, loadIdentityRecord, saveIdentityRecord, setUnlockedK
 import { toBase64url } from "../../src/lib/vault.js";
 import { App } from "../../src/shell/App";
 import { useRoute } from "../../src/state/route";
+import { useData } from "../../src/state/data";
 import { useSession } from "../../src/state/session";
 import { fakeClient } from "../helpers/fake-client";
 import { resetStores } from "../helpers/stores";
@@ -126,6 +127,13 @@ describe("Settings destination (E21-T11)", () => {
     expect($<HTMLAnchorElement>("#row-terms")!.href).toBe("https://poweur.org/legal/terms/");
     expect($<HTMLAnchorElement>("#row-legal")!.href).toBe("https://poweur.org/legal/");
     expect($<HTMLAnchorElement>("#row-terms")!.target).toBe("_blank");
+  });
+
+  it("Send feedback opens a conversation with the support ID", () => {
+    render(<App />);
+    fireEvent.click($("#row-feedback")!);
+    expect(useRoute.getState().sub).toBe("thread");
+    expect(useData.getState().thread?.peer).toBe("support.poweur.net");
   });
 
   it("while locked, identity settings wait behind unlock and device settings stay usable", async () => {
