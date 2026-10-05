@@ -316,6 +316,8 @@ jobs:
           (cd apps/oauth && go build -o /dev/null ./cmd/poweur-oauth)
           (cd apps/cli && go build -o /dev/null .)
       - run: pnpm --filter @poweur/oauth-ui build
+      # The specs sign in through the built web app the relay serves at /app/.
+      - run: pnpm --filter @poweur/web exec vite build
       - name: Pull the product image
         run: |
           case "${{ matrix.product }}" in
