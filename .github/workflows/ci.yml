@@ -272,7 +272,9 @@ jobs:
       # The OAuth bridge embeds its pages (apps/oauth/ui) at compile time; the
       # oauth-bridge specs `go run` it, so build the pages first.
       - run: pnpm --filter @poweur/oauth-ui build
-      - run: pnpm --filter @poweur/web test:e2e -- --shard=${{ matrix.shard }}/3
+      # Called directly: the package script's `--` would swallow the shard flag.
+      - run: pnpm --filter @poweur/web exec vite build
+      - run: pnpm --filter @poweur/web exec playwright test --shard=${{ matrix.shard }}/3
 
   docs:
     name: Docs and website build
