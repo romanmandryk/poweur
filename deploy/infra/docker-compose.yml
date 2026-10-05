@@ -83,7 +83,7 @@ services:
       GF_SMTP_USER: ${GRAFANA_SMTP_USER:-}
       GF_SMTP_PASSWORD: ${GRAFANA_SMTP_PASSWORD:-}
       GF_SMTP_FROM_ADDRESS: ${GRAFANA_SMTP_FROM_ADDRESS:-alerts@poweur.net}
-      ALERT_EMAIL: ${ALERT_EMAIL:-admin@poweur.net}
+      ALERT_EMAIL: ${ALERT_EMAIL:-info@poweur.org}
       GF_SERVER_ROOT_URL: https://grafana.poweur.net
       GF_DATABASE_TYPE: postgres
       GF_DATABASE_HOST: infra-postgres:5432

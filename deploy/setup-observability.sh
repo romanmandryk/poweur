@@ -47,7 +47,7 @@ append OTEL_EXPORTER_OTLP_HEADERS "Authorization=Basic $auth"
 append OTEL_EXPORTER_OTLP_ENDPOINT 'http://infra-alloy:4318'
 append TELEMETRY_ALLOW_HTTP 1
 append TELEMETRY_HASH_KEY "$(openssl rand -hex 32)"
-append ALERT_EMAIL admin@poweur.net
+append ALERT_EMAIL info@poweur.org
 append GRAFANA_SMTP_ENABLED false
 chmod 600 "$tmp"
 mv -f "$tmp" "$target"
