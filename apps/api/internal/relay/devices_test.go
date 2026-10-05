@@ -386,3 +386,26 @@ func TestDeviceRegistryClientMetadata(t *testing.T) {
 		t.Fatalf("registry no longer validates: %v", err)
 	}
 }
+
+// Listing devices is itself an observation of the caller: a device that enrolled a
+// keystore copy after it was first seen is joined to it by the very list it asks for.
+func TestDeviceListRecordsTheCaller(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+
+	hdr := ownerAuth(t, ts, alice)
+	hdr["X-Poweur-Device"] = "fingerprint-of-the-browser-0123456789"
+	hdr["X-Poweur-Device-Name"] = "Chrome on Mac"
+	hdr["X-Poweur-Device-Enrollment"] = "enr_abc123"
+	resp := httpReq(t, ts, http.MethodGet, "/devices/"+alice.name, "", nil, hdr)
+	defer resp.Body.Close()
+	var out struct {
+		Devices []idpkg.Device `json:"devices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Devices) != 1 || out.Devices[0].Name != "Chrome on Mac" || out.Devices[0].EnrollmentID != "enr_abc123" {
+		t.Fatalf("the caller was not in its own device list, or without its enrollment: %+v", out.Devices)
+	}
+}

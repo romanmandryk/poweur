@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_tests:
-        description: Run the full CI suite before building
+        description: Run the fast CI tier before building
         type: boolean
         default: false
   push:
@@ -19,9 +19,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Pull requests already ran the fast tier before they could merge, so a normal deploy does
+  # not repeat it. Tick "Run the full CI suite" (or set the RUN_CI variable) to run it here
+  # first; the nightly CI run covers the long suites.
   test:
     if: ${{ inputs.run_tests || vars.RUN_CI == 'true' }}
     uses: ./.github/workflows/ci.yml
+    with:
+      suite: fast
 
   build:
     needs: test

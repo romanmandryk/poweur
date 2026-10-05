@@ -165,9 +165,12 @@ change that alters what the relay, CLI or bridge does bumps each of them.
 web app, plus infra config) every time, and **Deploy OAuth bridge**
 (`.github/workflows/deploy-oauth.yml`) only when `apps/oauth/**`,
 `packages/identity/**` or `go.work` change. Both check that `/health` reports
-the pushed commit's `versionHash`. Neither runs CI unless the dispatch checks
-**Run tests** or the `RUN_CI` repository variable is `true`. Runbook:
-[`deploy/README.md`](deploy/README.md).
+the pushed commit's `versionHash`. Neither repeats the tests: a change reaches
+`master` through a pull request whose **CI result** check (the fast tier, about 4
+minutes) must pass, and a deploy runs them again only when its dispatch checks
+**Run tests** or the `RUN_CI` repository variable is `true`. The long suites (the
+whole browser suite and the Docker monitoring smoke test) run nightly and by hand
+(`Actions → CI → suite: full`). Runbook: [`deploy/README.md`](deploy/README.md).
 
 ## Style
 

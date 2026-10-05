@@ -307,6 +307,10 @@ func (s *Server) handleDevicesGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The caller is the device being asked about: record what it says about itself
+	// (name, kind, and the keystore enrollment it holds) before answering, so the list
+	// it is shown already joins this device to its backup instead of showing both.
+	s.touchDevice(r.Context(), owner, deviceFromRequest(r))
 	doc := s.readDevices(r.Context(), owner)
 	if doc.Devices == nil {
 		doc.Devices = []idpkg.Device{}
