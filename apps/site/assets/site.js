@@ -50,27 +50,27 @@ if (footer) {
           <img src="${root}assets/brand/poweur-horizontal-no-id-on-dark.svg" alt="Poweur" style="height:24px;width:auto">
           <p>One open ID for identity, messages and data. Open source, self-hostable, yours.</p>
         </div>
-        <div><h4>Product</h4><ul>
+        <div><h3>Product</h3><ul>
           <li><a href="${root}index.html#primitives">ID, messaging &amp; files</a></li>
           <li><a href="${root}index.html#use-cases">Use cases</a></li>
           <li><a href="${root}index.html#apps">Poweured apps</a></li>
           <li><a href="${root}index.html#hosting">Hosting options</a></li>
           <li><a href="${LINKS.app}">Web app</a></li>
         </ul></div>
-        <div><h4>Developers</h4><ul>
+        <div><h3>Developers</h3><ul>
           <li><a href="${LINKS.docs}">Documentation</a></li>
           <li><a href="${root}architecture.html">Architecture</a></li>
           <li><a href="${LINKS.docs}/clients/js-sdk">TypeScript SDK</a></li>
           <li><a href="${LINKS.docs}/clients/cli-reference">CLI</a></li>
           <li><a href="${LINKS.docs}/auth/add-sign-in">Sign in with Poweur</a></li>
         </ul></div>
-        <div><h4>Project</h4><ul>
+        <div><h3>Project</h3><ul>
           <li><a href="${LINKS.github}">GitHub</a></li>
           <li><a href="${LINKS.github}/tree/master/epics">Roadmap</a></li>
           <li><a href="${LINKS.github}/blob/master/CONTRIBUTING.md">Contributing</a></li>
           <li><a href="${root}legal/#security">Security</a></li>
         </ul></div>
-        <div><h4>Community</h4><ul>
+        <div><h3>Community</h3><ul>
           <li><a href="${LINKS.github}/discussions">Discussions</a></li>
         </ul></div>
       </div>
