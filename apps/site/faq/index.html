@@ -68,7 +68,12 @@
       <p>Bluesky shows that a domain name can be a handle, and that idea is in Poweur too. The AT Protocol is a public social network. Poweur is private by default: encrypted messages, files you share with chosen IDs, and sign-in for other apps. It is not trying to be a social feed.</p>
 
       <h3 id="solid">Why not Solid?</h3>
-      <p>Solid is Poweur's closest relative, and the two share a lot: you own your identity, your data lives in a store you control, and apps ask for access instead of keeping their own copy. They may turn out to be partly compatible. The difference is authentication, and who gets to read the data. Solid sign-in leans on an OpenID provider you choose, and a pod's server enforces access to data it can read. With Poweur, ID owners authenticate themselves with passkeys or device keystores and decrypt their own data with those same keys, so a relay only ever stores ciphertext. If Solid fits your project better, use it.</p>
+      <p>Solid is Poweur's closest relative, and the two share a lot: you own your identity, your data lives in a store you control, and apps ask for access instead of keeping their own copy. They may turn out to be partly compatible. Two differences matter.</p>
+      <ul>
+        <li><strong>Authentication.</strong> Solid sign-in leans on an OpenID provider you choose. With Poweur, ID owners authenticate themselves with passkeys or device keystores, and decrypt their own data with those same keys.</li>
+        <li><strong>Who can read your data.</strong> A Solid pod server has to read your data to enforce who may access it. A Poweur relay only sees metadata (who, when, how big, who a folder is shared with); file contents and names are encrypted on your device. That makes Poweur a better fit for private, personal data, where even the operator should not be able to read it.</li>
+      </ul>
+      <p>If Solid fits your project better, use it.</p>
 
       <h2 id="trust">Trust, keys and privacy</h2>
 
