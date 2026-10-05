@@ -2,6 +2,9 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://www.poweur.org/</loc></url>
   <url><loc>https://www.poweur.org/architecture.html</loc></url>
+  <url><loc>https://www.poweur.org/faq/</loc></url>
+  <url><loc>https://www.poweur.org/threat-model/</loc></url>
+  <url><loc>https://www.poweur.org/press/</loc></url>
   <url><loc>https://www.poweur.org/legal/</loc></url>
   <url><loc>https://www.poweur.org/legal/privacy/</loc></url>
   <url><loc>https://www.poweur.org/legal/terms/</loc></url>

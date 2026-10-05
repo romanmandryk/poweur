@@ -81,6 +81,9 @@ if (footer) {
           <li><a href="${LINKS.github}">GitHub</a></li>
           <li><a href="${LINKS.github}/tree/master/epics">Roadmap</a></li>
           <li><a href="${LINKS.github}/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="${root}faq/">FAQ</a></li>
+          <li><a href="${root}threat-model/">Threat model</a></li>
+          <li><a href="${root}press/">Press kit</a></li>
           <li><a href="${root}legal/#security">Security</a></li>
         </ul></div>
         <div><h3>Community</h3><ul>

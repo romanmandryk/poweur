@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-root="../">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Threat model · Poweur</title>
+  <meta name="description" content="What the relay, the storage, apps and observers can and cannot see in Poweur, where the trust assumptions are, and what Poweur does not claim.">
+  <meta name="theme-color" content="#07060B">
+  <link rel="canonical" href="https://www.poweur.org/threat-model/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Poweur">
+  <meta property="og:url" content="https://www.poweur.org/threat-model/">
+  <meta property="og:title" content="Threat model · Poweur">
+  <meta property="og:description" content="What the relay, the storage, apps and observers can and cannot see in Poweur, where the trust assumptions are, and what Poweur does not claim.">
+  <meta property="og:image" content="https://www.poweur.org/assets/brand/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="apple-touch-icon" href="../assets/brand/apple-touch-icon.png">
+  <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/faro.js" defer></script>
+</head>
+<body>
+<header id="nav"></header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap legal-wrap">
+      <div class="eyebrow">Security</div>
+      <h1 class="h2 gradient-text">Threat model</h1>
+      <p class="legal-meta">What Poweur protects, what it does not, and who you have to trust. Updated 5 October 2026.</p>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap legal-wrap prose">
+      <div class="summary">
+        <p><strong>The short version</strong></p>
+        <ul>
+          <li>Private keys stay on your devices. The relay and the storage bucket never hold them, so a hacked or nosy server cannot forge your messages or read their contents.</li>
+          <li>The server still sees <em>metadata</em>: who talks to whom, when, how big, and how files are organised and shared. Poweur does not hide it, and says so.</li>
+          <li>For a hosted name, the operator of the domain controls where the name points. That is a real trust assumption, and the reason to use your own domain for anything long-lived.</li>
+          <li>This has not had an external security review.</li>
+        </ul>
+      </div>
+
+      <p>This page describes the model for the hosted service at poweur.net and for the software in general. It is a summary; the full security model is in the <a href="/docs/security/model">documentation</a>, and the file-storage details are in <a href="/docs/files/storage-v2">the storage design</a>.</p>
+
+      <h2 id="parties">Who can see and do what</h2>
+
+      <table>
+        <thead><tr><th>Who</th><th>Can see or do</th><th>Cannot</th></tr></thead>
+        <tbody>
+          <tr><td><strong>The relay (poweur.net)</strong></td><td>Which IDs exist and their public keys; message routing metadata (sender, recipient, time, approximate size); file tree shape, padded sizes, timestamps, versions, authors and who a folder is shared with; your contacts and inbox policy; public folders; IP addresses and access patterns. It can drop or delay messages.</td><td>Read message contents or private file names and contents; forge a message from you; hold your identity private key.</td></tr>
+          <tr><td><strong>Whoever controls the bucket or backups</strong></td><td>The same stored metadata as the relay, and ciphertext.</td><td>Decrypt private files or names.</td></tr>
+          <tr><td><strong>A network observer</strong></td><td>That a connection to the relay happened, and its timing and volume (TLS hides the rest).</td><td>Read contents, which are end-to-end encrypted, or forge messages.</td></tr>
+          <tr><td><strong>An app you sign in to</strong></td><td>Your ID, and your name and photo if you allow it.</td><td>Your messages or files; it never receives a password.</td></tr>
+          <tr><td><strong>The sign-in bridge (oauth.poweur.org)</strong></td><td>Which applications you sign in to, and when, in its audit log.</td><td>Your messages or files.</td></tr>
+          <tr><td><strong>Another person you share with</strong></td><td>What you shared with them, including anything they cached. Revoking a share cannot erase copies or keys they already have.</td><td>Anything you did not share.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="keys">Keys and devices</h2>
+      <ul>
+        <li>Each ID has a long-lived signing key and encryption key, created on your device. They are wrapped by a secret only your passkey (or the phone's secure storage) can produce. The relay keeps an opaque encrypted copy so another device can be added or a cleared browser restored; it cannot open it.</li>
+        <li>Messages use fresh ephemeral keys for each message (X25519, HKDF-SHA256, ChaCha20-Poly1305), so a later key compromise does not expose past messages whose ephemeral keys are gone. This is partial forward secrecy, not a full double ratchet.</li>
+        <li>A recovery kit rebuilds your keys without any server. Whoever holds the kit is you. Store it like a password.</li>
+        <li>A compromised, unlocked device can disclose keys and plaintext. Poweur cannot protect you from that.</li>
+      </ul>
+
+      <h2 id="names">The name is a trust assumption</h2>
+      <p>Your keys are published in an identity document served from the name's own domain, and other people check messages against it. So whoever controls a domain's web server or DNS can change which keys a name points to.</p>
+      <ul>
+        <li><strong>A name under poweur.net</strong> relies on the operator of poweur.net (today, one person). A compromised or dishonest operator could point a hosted name at different keys.</li>
+        <li><strong>A name on your own domain</strong> relies on you and your DNS provider. Enable DNSSEC and two-factor authentication on that account.</li>
+        <li>Clients pin the key they first saw for a contact and warn when it changes, and the app shows a safety number you can compare out of band. That turns a silent swap into a visible one.</li>
+      </ul>
+
+      <h2 id="drive">Files</h2>
+      <p>Private file names, contents and the keys to them are encrypted on your device. The server sees the shape of what you store (see the table above). Signatures and authenticated encryption detect tampering and wrong authors. A malicious relay could still try to roll you back to an older state or show different devices different histories; clients keep the last version they saw and warn on regressions, but a brand-new device needs an independently trusted checkpoint to rule it out. Folders marked public are readable by anyone. Share links keep their key in the part of the address the server never receives; a link can still leak through browser history or copy-paste.</p>
+
+      <h2 id="not">What Poweur does not claim</h2>
+      <ul>
+        <li><strong>No metadata privacy.</strong> Who talks to whom, and when, is visible to the relay. Hiding that would need mixnets or onion routing, which Poweur does not do. Sending through your home relay (CLI option <code>--via-home-relay</code>) keeps your IP from the recipient's relay at the cost of an extra hop.</li>
+        <li><strong>No proof of a legal identity.</strong> A Poweur ID proves control of a name and its keys, not that a person is who they say.</li>
+        <li><strong>No anonymity.</strong> Your IP address is visible to the relay you connect to.</li>
+        <li><strong>No guarantee of delivery.</strong> A relay can drop or delay messages; there is no proof of delivery beyond the recipient's read receipts.</li>
+        <li><strong>No audit yet.</strong> The design and the code are open for review. An independent review is planned but has not happened.</li>
+      </ul>
+
+      <h2 id="analytics">Telemetry</h2>
+      <p>The website and the web app send anonymous page views, errors and speed measurements to our own servers (no third-party analytics). Your ID is attached only if you tick <em>Include my ID</em> in Settings → Diagnostics. The <a href="../legal/privacy/">privacy policy</a> has the full list.</p>
+
+      <h2 id="report">Report a problem</h2>
+      <p>Use GitHub's <a href="https://github.com/romanmandryk/poweur/security/advisories/new">private vulnerability reporting</a> or write to <a href="mailto:info@poweur.org">info@poweur.org</a>. The <a href="https://github.com/romanmandryk/poweur/blob/master/SECURITY.md">security policy</a> says what to expect.</p>
+
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+<script src="../assets/site.js"></script>
+</body>
+</html>
