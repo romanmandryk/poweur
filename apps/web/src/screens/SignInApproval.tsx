@@ -6,7 +6,7 @@ import { unlock } from "../actions/identity";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { cn } from "../lib/cn";
-import { identityAppUrl } from "../lib/claim";
+import { identityAppUrl, joinIdentityFor } from "../lib/claim";
 import { handleOf, isValidIdentity } from "../lib/identity";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
@@ -66,14 +66,15 @@ function IdentityPicker() {
  * one, one made at its own address. Keys live per origin, so the way to use it
  * is its own app with this same request; one already here is just switched to.
  */
-function OtherIdentity() {
+function OtherIdentity({ primary = false }: { primary?: boolean }) {
+  const mode = useSession((state) => state.mode);
   const input = useData((state) => state.auth.input);
   const typed = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   if (isShellRuntime()) return null;
 
   const go = () => {
-    const id = (typed.current?.value ?? "").trim().toLowerCase();
+    const id = joinIdentityFor(typed.current?.value ?? "", mode as any);
     if (!isValidIdentity(id)) {
       setError("Enter an ID like alice.poweur.net");
       return;
@@ -86,9 +87,8 @@ function OtherIdentity() {
     globalThis.location.assign(`${identityAppUrl(id)}?auth=${encodeURIComponent(input)}`);
   };
 
-  return (
-    <details id="auth-other" className="mt-3">
-      <summary className="cursor-pointer text-sm font-semibold text-accent">Sign in as a different ID</summary>
+  const fields = (
+    <>
       <div className="mt-2 flex items-center gap-2.5">
         <Input
           ref={typed}
@@ -110,6 +110,23 @@ function OtherIdentity() {
         </Button>
       </div>
       <ErrorLine error={error} />
+    </>
+  );
+  if (primary) {
+    return (
+      <div id="auth-other" className="mt-4">
+        <label htmlFor="auth-other-input" className="block text-sm font-semibold">
+          Which Poweur ID are you signing in with?
+        </label>
+        <p className="mt-1 text-[13px] text-muted">Your keys live on your ID's own address. We'll take you there to approve.</p>
+        {fields}
+      </div>
+    );
+  }
+  return (
+    <details id="auth-other" className="mt-3">
+      <summary className="cursor-pointer text-sm font-semibold text-accent">Sign in as a different ID</summary>
+      {fields}
     </details>
   );
 }
@@ -128,6 +145,7 @@ export function SignInApproval() {
   // same-device finish is impossible and the code is required.
   const shell = isShellRuntime() || auth.requireCode;
   const record = identity ? loadIdentityRecord(identity) : null;
+  const mode: any = useSession((state) => state.mode);
   const unlockAction = CUSTODY_COPY[custodyOf(record)].action;
 
   if (auth.loading) {
@@ -199,6 +217,7 @@ export function SignInApproval() {
   }
 
   const scopes: string[] = auth.scopes ?? [];
+  const launcher = mode?.mode === "launcher";
   return (
     <SubPage title="Approve sign-in" onBack={pop}>
       <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
@@ -225,10 +244,10 @@ export function SignInApproval() {
           {auth.context}
         </p>
       )}
-      <IdentityPicker />
-      <OtherIdentity />
+      {launcher ? <OtherIdentity primary /> : <IdentityPicker />}
+      {!launcher && <OtherIdentity />}
       <ErrorLine error={auth.error || localError} />
-      {unlocked && identity ? (
+      {launcher ? null : unlocked && identity ? (
         <>
           {auth.request.response_uri && (
             <div className="mt-4">

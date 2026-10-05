@@ -41,6 +41,7 @@ import {
   removeIdentity,
   rpIdFor,
   saveConfig,
+  scrubIdentityState,
   saveIdentityRecord,
   setUnlockedKeys,
 } from "../lib/storage.js";
@@ -379,6 +380,7 @@ export async function handOffToIdentityOrigin(identity: string): Promise<boolean
   // The record travels in the fragment. Leaving it on this origin made the
   // next visit to the public launcher offer to open that identity.
   removeIdentity(identity);
+  scrubIdentityState();
   clearUnlockedKeys();
   refreshSession();
   setLoading(true, `Taking you to ${identity}…`);

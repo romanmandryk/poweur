@@ -39,17 +39,18 @@ export function Landing() {
   const chatTarget = info.mode === "launcher" ? pendingChatTarget() : "";
 
   return (
-    <DoorPage id="landing">
-      <div className="landing-hero flex flex-col items-center pt-4 text-center landscape:max-h-[500px]:pt-0">
-        <BrandMark className="landing-icon mb-6 landscape:max-h-[500px]:hidden" height={84} />
+    <DoorPage id="landing" wide>
+      <div className="landing-main flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-center lg:gap-16 landscape:max-h-[500px]:gap-3.5">
+      <div className="landing-hero flex flex-col items-center pt-4 text-center lg:items-start lg:pt-0 lg:text-left landscape:max-h-[500px]:pt-0">
+        <BrandMark className="landing-icon mb-6 lg:mb-8 landscape:max-h-[500px]:hidden" height={84} />
         <div className="landing-eyebrow mb-3 inline-flex items-center gap-2 font-mono text-[12px] font-medium tracking-[.08em] text-violet-600 uppercase dark:text-violet-300">
           <span aria-hidden="true" className="size-1.5 rounded-full bg-violet-400 shadow-[0_0_12px_var(--color-violet-400)]" />
           One open ID
         </div>
-        <h1 className="landing-title animate-fade-in-up text-brand-gradient text-[34px] leading-[1.06] font-semibold tracking-[-1px] text-balance landscape:max-h-[500px]:text-[24px]">
+        <h1 className="landing-title animate-fade-in-up text-brand-gradient text-[34px] leading-[1.06] font-semibold tracking-[-1px] text-balance md:text-[44px] lg:max-w-[560px] lg:text-[56px] lg:tracking-[-1.6px] landscape:max-h-[500px]:text-[24px]">
           Your name. Your inbox. Your files.
         </h1>
-        <p className="landing-sub mt-3 max-w-[360px] animate-fade-in-up text-base leading-normal text-muted">
+        <p className="landing-sub mt-3 max-w-[360px] animate-fade-in-up text-base lg:mt-5 lg:max-w-[480px] lg:text-lg leading-normal text-muted">
           Claim an identity you own, and take it everywhere.
         </p>
         {chatTarget && (
@@ -58,6 +59,7 @@ export function Landing() {
           </p>
         )}
       </div>
+      <div className="landing-actions flex flex-col gap-6">
       {prompt && (
         <div className={`landing-card ${cardClass}`}>
           <RelayPrompt className="mb-0 p-0" />
@@ -73,7 +75,9 @@ export function Landing() {
           </LinkButton>
         </div>
       )}
-      <ol className={cn("landing-steps flex list-none flex-col gap-4", cardClass, "landscape:max-h-[500px]:hidden")}>
+      </div>
+      </div>
+      <ol className={cn("landing-steps flex list-none flex-col gap-4 lg:grid lg:grid-cols-3 lg:gap-8", cardClass, "landscape:max-h-[500px]:hidden")}>
         {HOW_IT_WORKS.map(([Icon, title, body]) => (
           <li key={title} className="landing-step flex items-start gap-3.5">
             <span

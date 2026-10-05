@@ -89,6 +89,8 @@ function PrivateApp() {
         id="app"
         className={cn(
           "relative mx-auto flex h-dvh max-w-[480px] flex-col overflow-hidden bg-bg",
+          // Doors and gates centre their own column; only the phone-width app caps the page.
+          (frontDoor || gate) && "md:max-w-none",
           shell && "md:grid md:max-w-none md:grid-cols-[80px_minmax(0,1fr)] md:grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]",
           shell && detail && "lg:grid-cols-[240px_minmax(0,1fr)_minmax(0,420px)]",
         )}

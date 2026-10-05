@@ -30,6 +30,8 @@
 
 ## Progress
 
+The launcher (poweur.net) is neutral (2026-10-05): it scrubs identity state from its storage on load and a sign-in opened there asks for the exact ID and hands the request to that ID's own host.
+
 Contact-approval regression (2026-09-30): archived requests now have durable answered watermarks, automatic acceptance is replayed after history restore, and overlapping refreshes wait for the contact write. E15-T2/T3 browser coverage checks both contacts and empty trays/badges across reloads; tracked with E07-T3.
 
 | Task | Status | Notes |
@@ -46,7 +48,7 @@ Contact-approval regression (2026-09-30): archived requests now have durable ans
 | **E15-T8 The parent-domain landing** | **open** | how-it-works + `[handle].poweur.net` claim field. **Web 0.1.36:** poweur.org's look (glass P on its glow, night ground, the site's "Claim your name on the open internet" box as the claim); "I already have an ID" checks the name and redirects to its door; the DNS "Use my own domain" form is replaced by a link to the self-hosting guide |
 | **E15-T9 The identity host: sign in, or claim this name** | **open** | claimed door + join skips the name; passkey is web-only (shell uses join / create) |
 | **E15-T10 Stop asking what the relay already knows** | **open** | the hosted checkbox, the domain field, the DNS rows |
-| **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav |
+| **E15-T11 Desktop & tablet layout** | **open** | the 768px breakpoint currently only moves the nav. Launcher landing done (2026-10-05): two columns at ≥1024px, pitch beside the claim card; `launcher-neutral.spec.js` |
 | **E15-T12 Onboarding failure states & polish** | **open** | policy-driven validation, taken-on-submit, offline, titles |
 | **E15-T14 Brand rollout: glass P logo & violet palette** | **partial** | brand defined in [`design/brand/`](../design/brand/README.md). **Shipped (web 0.1.31):** logo in the header, front doors and welcome gate; favicon, touch icon, manifest and share image. **Web 0.1.36:** the header wordmark is poweur.org's horizontal lockup, and the app-icon tile on the front doors is replaced by the glass P on its glow. **Open:** the token remap to violet, avatar contrast, the contrast test, and docs / bridge alignment |
 | **E15-T13 Conversation view & paged history** | **partial** | conversation view shipped: newest 10 bubbles, contextual "Load more", ticks, attachments, expiry, inline reply, live updates (`test/e2e/conversation.spec.js`). "Load more" pages what the archive already loaded at unlock; download paging waits for [EPIC-020](EPIC-020-storage-protocol-v2.md) E20-T11 history v2 |

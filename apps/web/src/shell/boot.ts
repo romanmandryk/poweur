@@ -10,6 +10,7 @@ import {
   loadIdentityRecord,
   loadSessionRecord,
   saveIdentityRecord,
+  scrubIdentityState,
   setActiveIdentity,
 } from "../lib/storage.js";
 import { fromBase64url } from "../lib/vault.js";
@@ -19,7 +20,7 @@ import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { isPublicAnonymousRoute } from "../screens/PublicAnonymous";
-import { refreshSession, useSession, type ModeInfo } from "../state/session";
+import { refreshSession, switchIdentity, useSession, type ModeInfo } from "../state/session";
 import { rememberIdHint, takeChatTarget } from "../lib/visit";
 
 interface CapacitorAppPlugin {
@@ -237,6 +238,12 @@ function startBoot(launchUrl: string): Promise<void> {
     // offer to message from it.
     if (info.mode === "identity" && info.subject && loadIdentityRecord(info.subject)) {
       rememberIdHint(info.subject, info.domain);
+    }
+    if (info.mode === "launcher" && !handedOver) {
+      // Neutral ground: nothing is remembered here, whatever an older
+      // version or a claim left behind.
+      scrubIdentityState();
+      if (useSession.getState().identity) switchIdentity(null);
     }
     if (authInput || protectAuthRoute || handedOver || publicAnonymous) return;
     if (info.mode === "launcher") {
