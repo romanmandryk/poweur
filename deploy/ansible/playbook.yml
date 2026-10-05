@@ -253,6 +253,47 @@
       community.general.ufw:
         state: enabled
 
+    # ── 10a. Daily growth digest (ntfy push, 08:00 Lisbon) ──────────────────────
+    # Needs ntfy_topic in secrets.yml; skipped until it is set. deploy/digest/.
+
+    - name: Digest config directory
+      ansible.builtin.file:
+        path: /etc/poweur-digest
+        state: directory
+        mode: '0700'
+      when: ntfy_topic is defined
+
+    - name: Digest settings (the ntfy topic is the only secret)
+      ansible.builtin.template:
+        src: templates/digest.env.j2
+        dest: /etc/poweur-digest/digest.env
+        mode: '0600'
+      no_log: true
+      when: ntfy_topic is defined
+
+    - name: Install the digest script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../digest/poweur-digest.sh"
+        dest: /usr/local/sbin/poweur-digest
+        mode: '0750'
+      when: ntfy_topic is defined
+
+    - name: Install the digest service and timer
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../digest/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        mode: '0644'
+      loop: [poweur-digest.service, poweur-digest.timer]
+      when: ntfy_topic is defined
+
+    - name: Enable the daily digest timer
+      ansible.builtin.systemd_service:
+        name: poweur-digest.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: ntfy_topic is defined
+
     # ── 10b. Backups (restic → Hetzner Storage Box) ─────────────────────────────
     # Needs storage_box_user, storage_box_host and restic_password in secrets.yml;
     # skipped until they are set. Runbook: deploy/backup/README.md.
