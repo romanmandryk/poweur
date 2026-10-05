@@ -17,7 +17,6 @@ const SERVICE_HOSTS = new Set([
   "poweur.net",
   "poweur.org",
   "www.poweur.org",
-  "tmpwww.poweur.org",
   "oauth.poweur.org",
   "relay.poweur.net",
   "id.poweur.net",

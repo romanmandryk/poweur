@@ -2,7 +2,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
-const siteUrl = process.env.SITE_URL || 'https://poweur.org';
+const siteUrl = process.env.SITE_URL || 'https://www.poweur.org';
 
 const config: Config = {
   title: 'Poweur docs',
@@ -10,7 +10,6 @@ const config: Config = {
   favicon: 'img/favicon.svg',
 
   // The docs live under the website at /docs. SITE_URL overrides the host
-  // (https://tmpwww.poweur.org while the site is new).
   url: siteUrl,
   baseUrl: '/docs/',
 

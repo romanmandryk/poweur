@@ -117,28 +117,42 @@ http://oauth.poweur.org oauth.poweur.org {
         }
     }
 }
-# poweur.org website (apps/site) with the docs (apps/docs, Docusaurus) under /docs,
+# The poweur.org website (apps/site) with the docs (apps/docs, Docusaurus) under /docs,
 # static files published by .github/workflows/deploy-web.yml into
-# /opt/apps/poweur-web/www. A temporary host while the site is new, so it asks
-# search engines not to index it. HTTP as well as HTTPS for the same reason as
-# grafana and oauth.
-http://tmpwww.poweur.org tmpwww.poweur.org {
+# /opt/apps/poweur-web/www. www.poweur.org is the site and poweur.org redirects to it.
+# HTTP as well as HTTPS for the same reason as grafana and oauth: Cloudflare may deliver
+# to origin over HTTP.
+(website) {
     import faro
     root * /srv/web/www
     encode zstd gzip
     header {
-        X-Robots-Tag "noindex, nofollow"
         X-Content-Type-Options nosniff
         Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
-    header /assets/* Cache-Control "public, max-age=3600"
-    # Docusaurus fingerprints its bundles.
-    header /docs/assets/* Cache-Control "public, max-age=31536000, immutable"
+    # Cache policy by kind, with disjoint matchers so no rule overrides another. The
+    # site's own files keep their names, so a day is the longest safe lifetime; fonts
+    # never change; Docusaurus fingerprints its bundles.
+    @fonts path /assets/fonts/*
+    @assets {
+        path /assets/*
+        not path /assets/fonts/*
+    }
+    @docs_assets path /docs/assets/*
+    @pages {
+        not path /assets/* /docs/assets/*
+    }
+    header @fonts Cache-Control "public, max-age=31536000, immutable"
+    header @assets Cache-Control "public, max-age=86400"
+    header @docs_assets Cache-Control "public, max-age=31536000, immutable"
+    header @pages Cache-Control "public, max-age=300, must-revalidate"
     redir /docs /docs/ 308
     # Docusaurus writes /docs/page/index.html; the site has /architecture.html.
     try_files {path} {path}/index.html {path}.html
     file_server
+    # Real 404s (not a redirect to the home page, which search engines read as a soft 404).
     handle_errors 404 {
         @docs path /docs/*
         handle @docs {
@@ -146,9 +160,16 @@ http://tmpwww.poweur.org tmpwww.poweur.org {
             file_server
         }
         handle {
-            redir * / 302
+            rewrite * /404.html
+            file_server
         }
     }
+}
+http://www.poweur.org www.poweur.org {
+    import website
+}
+http://poweur.org poweur.org {
+    redir https://www.poweur.org{uri} 301
 }
 # guestbook.poweur.net (apps/demoapps/guestbook) is a Poweur ID hosted on the relay AND a web
 # app. Like every hosted identity, its host also answers the relay API (messages, sessions,

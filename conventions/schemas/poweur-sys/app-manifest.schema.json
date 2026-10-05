@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/app-manifest.schema.json",
-  "title": "manifest.json \u2014 /apps/<app-id>/manifest.json (app self-description)",
+  "title": "manifest.json - /apps/<app-id>/manifest.json (app self-description)",
   "type": "object",
   "required": [
     "app_id",

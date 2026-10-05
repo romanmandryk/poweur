@@ -75,7 +75,8 @@ func (s *Server) checkURLClientID(id string) (*url.URL, error) {
 
 // fetchURLClient builds a Client from a URL client_id, fetching its metadata.
 // A client whose document cannot be fetched may still sign in, but only to
-// redirect URIs on its own origin, and is named by its host.
+// redirect URIs on its own origin, and is named by its host. A fetched
+// document may also list redirect URIs on other origins.
 func (s *Server) fetchURLClient(ctx context.Context, id string) (*Client, error) {
 	u, err := s.checkURLClientID(id)
 	if err != nil {
@@ -117,11 +118,12 @@ func (s *Server) fetchURLClient(ctx context.Context, id string) (*Client, error)
 			if doc.ClientURI != "" && identity.SameOrigin(origin, doc.ClientURI) {
 				c.ClientURI = doc.ClientURI
 			}
+			// IndieAuth lets a client name redirect URIs on other origins in its own
+			// metadata (an app served from one host that signs in on another); the
+			// consent page names the host the browser will actually be sent to.
 			for _, r := range doc.RedirectURIs {
 				if clean, rerr := checkRedirectURI(r, !s.secure); rerr == nil {
-					if identity.SameOrigin(origin, clean) || isLoopbackRedirect(clean) {
-						c.RedirectURIs = append(c.RedirectURIs, clean)
-					}
+					c.RedirectURIs = append(c.RedirectURIs, clean)
 				}
 			}
 			switch doc.TokenEndpointAuthMethod {
@@ -204,7 +206,33 @@ func (s *Server) handleIndieAuthRedeem(w http.ResponseWriter, r *http.Request) {
 // response is the canonical `me` (and profile) and nothing that grants access
 // to anything.
 func (s *Server) finishIndieAuthToken(w http.ResponseWriter, r *http.Request, c *Client, grant *CodeGrant) {
-	s.writeIndieAuthProfile(w, grant, nil)
+	// A code issued for scopes is an access grant: the token endpoint hands out
+	// the token (for `profile`, one that reads the profile at /userinfo). A
+	// login-only code (no scope) stays `me`, as at the authorization endpoint.
+	if len(grant.Scopes) == 0 {
+		s.writeIndieAuthProfile(w, grant, nil)
+		return
+	}
+	ctx := r.Context()
+	now := s.now()
+	access, err := randomToken(32)
+	if err == nil {
+		err = s.store.PutAccessToken(ctx, signin.HashSecret(access), signin.HashSecret(r.PostForm.Get("code")), AccessGrant{
+			ClientID: c.ID, Identity: grant.Identity, Subject: s.subject(c, grant.Identity),
+			Scopes: grant.Scopes, Claims: grant.Claims, IssuedAt: now,
+		}, now.Add(accessTokenTTL))
+	}
+	if err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue a token")
+		return
+	}
+	s.audit(ctx, "token.issued", map[string]any{"client_id": c.ID})
+	s.writeIndieAuthProfile(w, grant, map[string]any{
+		"access_token": access,
+		"token_type":   "Bearer",
+		"expires_in":   int(accessTokenTTL / time.Second),
+		"scope":        strings.Join(grant.Scopes, " "),
+	})
 }
 
 func (s *Server) writeIndieAuthProfile(w http.ResponseWriter, grant *CodeGrant, extra map[string]any) {

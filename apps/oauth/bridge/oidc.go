@@ -608,7 +608,12 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", err.Error())
 		return
 	}
-	if gt := r.PostForm.Get("grant_type"); gt != "authorization_code" {
+	switch gt := r.PostForm.Get("grant_type"); gt {
+	case "authorization_code":
+	case "":
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "grant_type is required")
+		return
+	default:
 		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code is supported")
 		return
 	}
@@ -735,6 +740,14 @@ func (s *Server) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"sub": g.Subject}
 	addClaims(out, g.Claims)
+	// An IndieAuth client (a URL client_id) reads the profile in IndieAuth's own
+	// words, the same fields the token response carried.
+	if strings.HasPrefix(g.ClientID, "http") && slices.Contains(g.Scopes, ScopeProfile) {
+		out["url"] = identity.IndieAuthProfileURL(g.Identity)
+		if g.Claims.Picture != "" {
+			out["photo"] = g.Claims.Picture
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -744,6 +757,19 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
+		return
+	}
+	// A request that names no client and carries no credentials is a public
+	// revocation (IndieAuth, RFC 7009 §2.1): holding the token is the proof.
+	// The answer is 200 whether or not the token existed.
+	if r.PostForm.Get("client_id") == "" && r.Header.Get("Authorization") == "" && r.PostForm.Get("client_assertion") == "" {
+		if tok := r.PostForm.Get("token"); tok != "" {
+			if err := s.store.RevokeAccessTokenByHash(r.Context(), signin.HashSecret(tok)); err != nil {
+				writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke")
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	c, err := s.authenticateClient(r, surfaceForClientID(r.PostForm.Get("client_id")))

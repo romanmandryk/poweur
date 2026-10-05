@@ -1,0 +1,36 @@
+{
+  "name": "poweur",
+  "version": "0.2.12",
+  "description": "The poweur command line: identity, messaging and files from the terminal. A thin alias for @poweur/client, so `npx poweur …` works.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "poweur": "./bin.js"
+  },
+  "files": [
+    "bin.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@poweur/client": "workspace:*"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "poweur",
+    "identity",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romanmandryk/poweur.git",
+    "directory": "packages/poweur"
+  },
+  "homepage": "https://www.poweur.org",
+  "bugs": "https://github.com/romanmandryk/poweur/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

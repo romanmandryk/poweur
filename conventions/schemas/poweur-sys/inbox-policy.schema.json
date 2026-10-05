@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/inbox-policy.schema.json",
-  "title": "inbox-policy.json \u2014 poweur-sys/relay/inbox-policy.json (owner + relay)",
+  "title": "inbox-policy.json - poweur-sys/relay/inbox-policy.json (owner + relay)",
   "type": "object",
   "required": [
     "mode"

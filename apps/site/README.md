@@ -16,12 +16,18 @@ python3 -m http.server 4321 --directory apps/site
 | `assets/seq.js` | Renders sequence diagrams from inline JSON (`<figure data-seq>`) |
 | `assets/brand/` | Copied from `design/` — regenerate there, not here |
 | `product-shot.html` | 1920×1080 canvas of the hero composition, for social/press |
-| `assets/shots/` | Real web-app screenshots + exported `product-shot-1920x1080.png` |
-| `social/memes.md` | Social copy and meme drafts (not linked from the site) |
+| `assets/shots/` | Real web-app screenshots (WebP for the site, PNG sources) + exported `product-shot-1920x1080.png` |
+| `404.html`, `robots.txt`, `sitemap.xml` | Served as-is; `404.html` is what Caddy returns for unknown paths |
 
-## Placeholders to replace before launch
+## Performance and SEO
 
-- Anything with class `ph` (striped box with a label): the icons in the primitives and agents sections.
+- Screenshots are served as WebP (`assets/shots/*.webp`, made from the PNG sources with
+  `magick in.png -resize 1600x -strip -quality 80 -define webp:method=6 out.webp`); the PNGs stay in
+  the repo as sources and are left out of the deploy. Give every `<img>` its `width` and `height`.
+- Fonts are self-hosted and cached for a year; the HTML for five minutes (see the `website`
+  snippet in `deploy/infra/caddy/Caddyfile`).
+- Every page carries a canonical URL, Open Graph and Twitter tags; `robots.txt` and `sitemap.xml`
+  list the pages (the docs ship their own sitemap). Add a new page to `sitemap.xml`.
 
 ## Regenerating the screenshots
 

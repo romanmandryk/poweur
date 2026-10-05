@@ -10,8 +10,9 @@ title: OAuth 2.0 / OIDC bridge
 > the developer console, `/account`, IndieAuth and the QR/code journey are built and tested
 > against real relays with `go-oidc` as the relying party (`apps/integration`, `TestINT_OAUTH_*`).
 > Recipes are verified against live oauth2-proxy, Keycloak and Authentik containers, and the
-> hosted bridge runs at `https://oauth.poweur.org`. Still open: third-party IndieAuth clients and
-> the conformance suite (E22-T8), and a phone camera for the QR code (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/romanmandryk/poweur/blob/master/apps/oauth/README.md).
+> hosted bridge runs at `https://oauth.poweur.org`. IndieAuth passes the first rounds of
+> the [indieauth.rocks](https://indieauth.rocks) server suite. Still open: more third-party IndieAuth
+> clients and the OIDC conformance suite (E22-T8), and a phone camera for the QR code (EPIC-019). Operator guide: [`apps/oauth/README.md`](https://github.com/romanmandryk/poweur/blob/master/apps/oauth/README.md).
 
 Native [Sign in with Poweur ID](./sign-in.md) needs no issuer: a relying party verifies the
 user's signature itself. Most existing software cannot do that — Keycloak, Authentik,
@@ -439,11 +440,15 @@ Where accepted, the rules are strict:
 - Fetched with resolver-grade rules: HTTPS only, no redirects, no private addresses, 16 KiB
   cap, 5 s timeout; cached per HTTP cache headers, clamped to 5 minutes – 24 hours.
 - `client_id` inside the document must equal the URL it was fetched from.
-- `redirect_uris` must be same-origin with the `client_id`, or loopback.
+- `redirect_uris` are what the client lists in its own document (HTTPS, or loopback HTTP), including
+  other origins, as IndieAuth allows. A request must return to one of them (or to the `client_id`'s own
+  origin when no document is published). When the browser will be sent to another origin than the
+  client's, the consent page names that host, unverified.
 - `none` (public, PKCE) or `private_key_jwt` with a same-origin `jwks_uri`. `client_secret_*` is
   refused — there is nowhere to have agreed a secret.
 - `logo_uri` must be same-origin, loaded under the consent page's CSP or not at all.
-- Consent shows the name **and the verified host**: "Example Notes — notes.example.com".
+- Consent shows the name **and the host**: "Example Notes — notes.example.com", marked verified when it
+  is the client's own host.
 
 Redirect URIs travel with the client rather than living in the registry, but they are
 authenticated by the client's own TLS-served document: dynamic and authenticated, not dynamic
@@ -569,5 +574,6 @@ revokes every token the first redemption issued.
   bridge hosting user content.
 - **CIMD is an IETF draft.** Track it; the fields above are the stable core shared with
   IndieAuth, so drift should be small.
-- **Minimal IndieAuth response**: whether a profile-only IndieAuth exchange needs any token
-  (E22-T6).
+- **IndieAuth tokens**: a login-only code (no scope) redeems to `me`; a code issued for scopes
+  (for example `profile`) redeems at `/token` to an access token as well, which reads `/userinfo` and
+  can be revoked at `/revoke` without client authentication (E22-T6).

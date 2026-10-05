@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poweur.net/schemas/poweur-sys/profile.schema.json",
-  "title": "profile.json \u2014 poweur-sys/public/profile.json (world-readable)",
+  "title": "profile.json - poweur-sys/public/profile.json (world-readable)",
   "type": "object",
   "properties": {
     "version": {

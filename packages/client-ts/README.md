@@ -8,7 +8,7 @@ npm install @poweur/client
 ```
 
 The Go implementation stays canonical. This package conforms to it through
-shared conformance vectors — see [E17-T5](../../epics/EPIC-017-typescript-client-sdk.md).
+shared conformance vectors — see [E17-T5](https://github.com/romanmandryk/poweur/blob/master/epics/EPIC-017-typescript-client-sdk.md).
 
 ## Library
 
@@ -49,4 +49,4 @@ It reads and writes the same `~/.poweur` tree as the Go CLI — config, keys,
 sessions and the delivery journal — so the two are interchangeable against one
 identity.
 
-Full documentation: [`apps/docs/docs/clients/js-sdk.md`](../../apps/docs/docs/clients/js-sdk.md).
+Full documentation: [`apps/docs/docs/clients/js-sdk.md`](https://www.poweur.org/docs/clients/js-sdk).

@@ -30,7 +30,7 @@
   --line-2: rgba(255, 255, 255, 0.14);
   --fg: #F4F3F8;
   --muted: #A4A4A8;
-  --faint: #6C6B6F;
+  --faint: #8E8D92;
   --accent: var(--violet-400);
   --ok: #58CD78;
   --warn: #FFB346;
@@ -352,12 +352,13 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
 /* ---------- Compare table ---------- */
 .compare { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 15px; }
 .compare-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.compare tbody th { font-weight: 400; }
 .compare th, .compare td { padding: 16px 18px; border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
-.compare th:first-child, .compare td:first-child { text-align: left; white-space: normal; min-width: 240px; color: var(--ink-300); }
+.compare th:first-child, .compare td:first-child, .compare tbody th { text-align: left; white-space: normal; min-width: 240px; color: var(--ink-300); }
 .compare thead th { font: 600 14px var(--display); color: var(--muted); background: rgba(255,255,255,.02); }
 .compare thead th.us { color: #fff; }
 .compare td.us, .compare th.us { background: linear-gradient(180deg, rgba(114,76,207,.18), rgba(114,76,207,.08)); }
-.compare tr:last-child td { border-bottom: 0; }
+.compare tr:last-child td, .compare tr:last-child th { border-bottom: 0; }
 .y { color: var(--ok); } .n { color: #FA6863; } .p { color: var(--warn); }
 .cards-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
 .card {
@@ -592,7 +593,7 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
 /* ---------- Footer ---------- */
 footer { border-top: 1px solid var(--line); padding: 64px 0 40px; margin-top: 80px; font-size: 14px; }
 .foot { display: grid; grid-template-columns: 1.6fr repeat(4, 1fr); gap: 32px; }
-.foot h4 { font: 500 13px var(--body); color: var(--fg); margin-bottom: 14px; letter-spacing: 0; }
+.foot h3 { font: 500 13px var(--body); color: var(--fg); margin-bottom: 14px; letter-spacing: 0; }
 .foot ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .foot a { color: var(--muted); } .foot a:hover { color: var(--fg); }
 .foot .brand p { color: var(--faint); max-width: 280px; margin: 16px 0 0; }
@@ -671,4 +672,6 @@ footer { border-top: 1px solid var(--line); padding: 64px 0 40px; margin-top: 80
 /* Details the operator has to fill in before publishing. */
 .fill { background: rgba(213, 151, 64, .18); color: var(--amber-300); border: 1px dashed rgba(213, 151, 64, .6); border-radius: 5px; padding: 0 5px; font-family: var(--mono); font-size: .88em; }
 @media (max-width: 640px) { .prose table { display: block; overflow-x: auto; } }
-.foot-bottom a { color: var(--muted); } .foot-bottom a:hover { color: var(--fg); }
+.foot-bottom a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; } .foot-bottom a:hover { color: var(--fg); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

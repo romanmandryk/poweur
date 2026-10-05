@@ -22,6 +22,29 @@ function start() {
     if (location.pathname !== before) view();
   };
   addEventListener("popstate", view);
+
+  // Which calls to action get used. Only the kind of destination and the page it was on,
+  // never the link itself and never anything typed (the claim box's name stays unrecorded).
+  addEventListener("click", (e) => {
+    const link = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!link) return;
+    let url: URL;
+    try {
+      url = new URL(link.href, location.href);
+    } catch {
+      return;
+    }
+    const target =
+      url.hostname === "poweur.net" ? "app" :
+      url.hostname === "github.com" ? "github" :
+      url.hostname === location.hostname && url.pathname.startsWith("/docs") ? "docs" :
+      url.hostname === location.hostname && url.pathname.startsWith("/legal") ? "legal" :
+      "";
+    if (target) t.event("cta_click", { target, from: location.pathname.replace(/index\.html$/, "") || "/" });
+  });
+  addEventListener("submit", (e) => {
+    if ((e.target as Element | null)?.matches?.("form.claim")) t.event("claim_submit", { from: location.pathname || "/" });
+  });
 }
 
 start();

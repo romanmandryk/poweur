@@ -123,7 +123,8 @@ test('caddy config is mounted as a directory so deploy reloads see new files', (
 
 test('website (with docs under /docs) is static files outside the relay checkout, served by Caddy', () => {
   const caddy = readFileSync(new URL('../infra/caddy/Caddyfile', import.meta.url), 'utf8');
-  assert.match(caddy, /tmpwww\.poweur\.org[\s\S]*?root \* \/srv\/web\/www/);
+  assert.match(caddy, /www\.poweur\.org[\s\S]*?root \* \/srv\/web\/www/);
+  assert.doesNotMatch(caddy, /tmpwww/);
   assert.match(caddy, /redir \/docs \/docs\/ 308/);
   assert.doesNotMatch(caddy, /tmpdocs/);
   const compose = readFileSync(new URL('../infra/docker-compose.yml', import.meta.url), 'utf8');
