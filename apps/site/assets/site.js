@@ -67,6 +67,7 @@ if (footer) {
           <li><a href="${root}index.html#use-cases">Use cases</a></li>
           <li><a href="${root}index.html#apps">Poweured apps</a></li>
           <li><a href="${root}index.html#hosting">Hosting options</a></li>
+          <li><a href="${root}index.html#try">Try it live</a></li>
           <li><a href="${LINKS.app}">Web app</a></li>
         </ul></div>
         <div><h3>Developers</h3><ul>

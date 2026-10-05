@@ -360,6 +360,7 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
 .compare td.us, .compare th.us { background: linear-gradient(180deg, rgba(114,76,207,.18), rgba(114,76,207,.08)); }
 .compare tr:last-child td, .compare tr:last-child th { border-bottom: 0; }
 .y { color: var(--ok); } .n { color: #FA6863; } .p { color: var(--warn); }
+.cards-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 24px; }
 .cards-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
 .card {
   border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 26px;
@@ -631,7 +632,7 @@ footer { border-top: 1px solid var(--line); padding: 64px 0 40px; margin-top: 80
 @media (max-width: 960px) {
   .primitives, .split { grid-template-columns: 1fr; gap: 40px; }
   .split.reverse > :first-child { order: 0; }
-  .cards-3, .roadmap, .posts { grid-template-columns: 1fr; }
+  .cards-2, .cards-3, .roadmap, .posts { grid-template-columns: 1fr; }
   .bento { grid-template-columns: 1fr 1fr; }
   .bento .c2, .bento .c3, .bento .c4 { grid-column: span 1; }
   .foot { grid-template-columns: 1fr 1fr; }
