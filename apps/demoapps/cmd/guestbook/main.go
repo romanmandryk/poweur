@@ -13,6 +13,13 @@
 // requests by route, posts and sign-ins by outcome, and errors, never who or
 // what. It is not authenticated: keep it off the public network.
 //
+// Moderation, on the host while the guestbook runs (same environment):
+//
+//	guestbook entries list
+//	guestbook entries remove <id> [--identity alice.poweur.net] [--at 2026-10-01T19:23] [--yes]
+//
+// remove only says what it would do until --yes is given.
+//
 // With IDENTITY unset and GUESTBOOK_MEMORY=1 the log is kept in memory, for
 // trying the page out. Run one instance: two would overwrite each other.
 package main
@@ -42,6 +49,9 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	if len(os.Args) > 1 && os.Args[1] == "entries" {
+		return admin(ctx, os.Args[2:])
+	}
 	origin := strings.TrimRight(os.Getenv("ORIGIN"), "/")
 	if origin == "" {
 		return errors.New("ORIGIN is required, e.g. https://guestbook.poweur.net")
@@ -111,4 +121,17 @@ func run(ctx context.Context) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdown)
 	}
+}
+
+// admin runs `guestbook entries …` against the same drive the server writes.
+func admin(ctx context.Context, args []string) error {
+	id := os.Getenv("IDENTITY")
+	if id == "" {
+		return errors.New("IDENTITY is required: the guestbook's own Poweur ID")
+	}
+	store := &guestbook.DriveStore{Identity: id}
+	if code := guestbook.RunAdmin(ctx, store, args, os.Stdout, os.Stderr); code != 0 {
+		os.Exit(code)
+	}
+	return nil
 }
