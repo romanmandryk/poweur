@@ -84,7 +84,7 @@ services:
       RELAY_URL: https://relay.poweur.net
       KEYS_DIR: /keys
       HOME: /home/bot
-      HELLO_DEMO_URL: ${HELLO_DEMO_URL:-}
+      HELLO_DEMO_URL: ${HELLO_DEMO_URL:-https://guestbook.poweur.net}
       # Counts of messages, replies per keyword and errors, scraped by
       # infra-prometheus over infra_net (job poweur-hello). Nothing publishes
       # this port.
