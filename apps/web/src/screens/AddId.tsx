@@ -4,7 +4,7 @@
  * no typed identity; in the shell, no passkey (a browser authenticator).
  */
 import { useRef, type ReactNode } from "react";
-import { ChevronRight, KeyRound, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
+import { ChevronRight, KeyRound, ScrollText, Smartphone, Sparkles, type LucideIcon } from "lucide-react";
 import { signInWithPasskey } from "../actions/identity";
 import { cn } from "../lib/cn";
 import { addIdOptions } from "../lib/mode.js";
@@ -17,6 +17,7 @@ import { SubPage } from "../ui/Layout";
 import { RelayPrompt } from "./doors/RelayPrompt";
 import { relayPromptVisible } from "./doors/RelayPrompt";
 import { openJoinDevicePanel } from "./JoinDevice";
+import { openRestoreFromPhrasePanel } from "./RestoreFromPhrase";
 
 const CARD = "option-card relative flex min-h-13 w-full items-center gap-4 rounded-card bg-surface px-4 py-[18px] text-left";
 
@@ -146,6 +147,16 @@ export function AddId() {
             title="Add new ID"
             description={isShellRuntime() ? "Create a fresh identity on this device" : "Create a fresh identity with a passkey"}
             onClick={() => push("claim")}
+          />
+        )}
+
+        {options.restore && (
+          <OptionButton
+            id="opt-restore-phrase"
+            icon={ScrollText}
+            title="Restore from recovery kit"
+            description="Lost every device? Type your 24 words"
+            onClick={() => openRestoreFromPhrasePanel(subject)}
           />
         )}
       </div>

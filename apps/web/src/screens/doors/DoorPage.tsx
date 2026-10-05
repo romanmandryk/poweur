@@ -8,7 +8,7 @@ import { Wordmark } from "../../ui/Logo";
  * destinations to reach until an identity exists (E15-T7). It stands on
  * poweur.org's ground: the night background and its drifting violet light.
  */
-export function DoorPage({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+export function DoorPage({ id, className, wide = false, children }: { id: string; className?: string; wide?: boolean; children: ReactNode }) {
   return (
     <div id={id} className={cn("landing relative isolate flex h-dvh flex-col overflow-y-auto bg-bg dark:bg-[#07060b]", className)}>
       <div className="brand-scene -z-10" aria-hidden="true">
@@ -17,11 +17,21 @@ export function DoorPage({ id, className, children }: { id: string; className?: 
         <i className="b3" />
         <span className="pane" />
       </div>
-      <header className="landing-bar flex h-header shrink-0 items-center justify-between px-4 pt-safe">
+      <header
+        className={cn(
+          "landing-bar mx-auto flex h-header w-full shrink-0 items-center justify-between px-4 pt-safe",
+          wide && "md:max-w-[1120px] md:px-8",
+        )}
+      >
         <Wordmark />
         <ThemeToggle />
       </header>
-      <div className="landing-body mx-auto flex w-full max-w-[480px] flex-1 flex-col gap-6 px-4 pt-2 pb-[calc(32px+env(safe-area-inset-bottom,0px))] landscape:max-h-[500px]:gap-3.5">
+      <div
+        className={cn(
+          "landing-body mx-auto flex w-full max-w-[480px] flex-1 flex-col gap-6 px-4 pt-2 pb-[calc(32px+env(safe-area-inset-bottom,0px))] landscape:max-h-[500px]:gap-3.5",
+          wide && "md:max-w-[640px] lg:max-w-[1120px] lg:gap-10 lg:px-8 lg:pt-8",
+        )}
+      >
         {children}
       </div>
     </div>

@@ -6,7 +6,8 @@ import { unlock } from "../actions/identity";
 import { approveSignIn, beginSignInApproval } from "../actions/signin";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { cn } from "../lib/cn";
-import { handleOf } from "../lib/identity";
+import { identityAppUrl, joinIdentityFor } from "../lib/claim";
+import { handleOf, isValidIdentity } from "../lib/identity";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
@@ -60,6 +61,76 @@ function IdentityPicker() {
   );
 }
 
+/**
+ * An ID that is not in this browser's list — another host's, a self-hosted
+ * one, one made at its own address. Keys live per origin, so the way to use it
+ * is its own app with this same request; one already here is just switched to.
+ */
+function OtherIdentity({ primary = false }: { primary?: boolean }) {
+  const mode = useSession((state) => state.mode);
+  const input = useData((state) => state.auth.input);
+  const typed = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState("");
+  if (isShellRuntime()) return null;
+
+  const go = () => {
+    const id = joinIdentityFor(typed.current?.value ?? "", mode as any);
+    if (!isValidIdentity(id)) {
+      setError("Enter an ID like alice.poweur.net");
+      return;
+    }
+    if ((listIdentities() as string[]).includes(id)) {
+      setError("");
+      switchIdentity(id);
+      return;
+    }
+    globalThis.location.assign(`${identityAppUrl(id)}?auth=${encodeURIComponent(input)}`);
+  };
+
+  const fields = (
+    <>
+      <div className="mt-2 flex items-center gap-2.5">
+        <Input
+          ref={typed}
+          id="auth-other-input"
+          type="text"
+          placeholder="alice.poweur.net"
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          inputMode="url"
+          className="min-w-0 flex-1"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") go();
+          }}
+        />
+        <Button id="btn-auth-other" variant="ghost" className="w-auto shrink-0 px-5" onClick={go}>
+          Continue
+        </Button>
+      </div>
+      <ErrorLine error={error} />
+    </>
+  );
+  if (primary) {
+    return (
+      <div id="auth-other" className="mt-4">
+        <label htmlFor="auth-other-input" className="block text-sm font-semibold">
+          Which Poweur ID are you signing in with?
+        </label>
+        <p className="mt-1 text-[13px] text-muted">Your keys live on your ID's own address. We'll take you there to approve.</p>
+        {fields}
+      </div>
+    );
+  }
+  return (
+    <details id="auth-other" className="mt-3">
+      <summary className="cursor-pointer text-sm font-semibold text-accent">Sign in as a different ID</summary>
+      {fields}
+    </details>
+  );
+}
+
 export function SignInApproval() {
   const auth = useData((state) => state.auth);
   const identity = useSession((state) => state.identity);
@@ -74,6 +145,7 @@ export function SignInApproval() {
   // same-device finish is impossible and the code is required.
   const shell = isShellRuntime() || auth.requireCode;
   const record = identity ? loadIdentityRecord(identity) : null;
+  const mode: any = useSession((state) => state.mode);
   const unlockAction = CUSTODY_COPY[custodyOf(record)].action;
 
   if (auth.loading) {
@@ -145,6 +217,7 @@ export function SignInApproval() {
   }
 
   const scopes: string[] = auth.scopes ?? [];
+  const launcher = mode?.mode === "launcher";
   return (
     <SubPage title="Approve sign-in" onBack={pop}>
       <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
@@ -171,9 +244,10 @@ export function SignInApproval() {
           {auth.context}
         </p>
       )}
-      <IdentityPicker />
+      {launcher ? <OtherIdentity primary /> : <IdentityPicker />}
+      {!launcher && <OtherIdentity />}
       <ErrorLine error={auth.error || localError} />
-      {unlocked && identity ? (
+      {launcher ? null : unlocked && identity ? (
         <>
           {auth.request.response_uri && (
             <div className="mt-4">

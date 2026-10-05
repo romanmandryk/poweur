@@ -288,6 +288,26 @@ export function removeIdentity(identity) {
   }
 }
 
+/**
+ * The launcher (poweur.net) is neutral: it never holds or remembers an
+ * identity — those live on their own hosts. Drops whatever a visit left here:
+ * records, the active pointer, local avatars and sessions. Settings (theme,
+ * relay config, device fingerprint) stay.
+ */
+export function scrubIdentityState() {
+  const prefixes = [IDENTITY_PREFIX, SESSION_PREFIX, "poweur:avatar:"];
+  for (const store of [globalThis.localStorage, globalThis.sessionStorage]) {
+    try {
+      if (!store) continue;
+      for (const key of Object.keys(store)) {
+        if (key === ACTIVE_KEY || prefixes.some((p) => key.startsWith(p))) store.removeItem(key);
+      }
+    } catch {
+      /* storage blocked: nothing was kept either */
+    }
+  }
+}
+
 // ─── Active Identity ──────────────────────────────────────────────────────────
 
 export function getActiveIdentity() {

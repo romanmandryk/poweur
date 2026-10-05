@@ -71,6 +71,46 @@ test.describe("Guestbook sign-in", () => {
     await expect(book.locator("#entries")).toContainText("Hello from the browser test");
   });
 
+  test("the approval screen can hand the request to a different ID", async ({ page, context }) => {
+    await stubPasskeys(page);
+    await registerIdentity(page, relay, "gbfirst");
+
+    const book = await context.newPage();
+    await book.goto(guestbook.origin);
+    await book.click("#signin");
+    await expect(book.locator("#pending")).toBeVisible();
+    const requestLink = (await book.locator("#approve-url").textContent()).trim();
+
+    const signer = await context.newPage();
+    await stubPasskeys(signer);
+    await signer.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(requestLink)}`);
+    await expect(signer.locator("text=Poweur Guestbook").first()).toBeVisible({ timeout: 45_000 });
+    await expect(signer.locator("#auth-other")).toBeVisible({ timeout: 45_000 });
+
+    // An ID that is not in this browser: its own app opens with the same request.
+    const handedOver = new Promise((resolve) => {
+      signer.route("**://someoneelse.poweur.net:*/**", (route) => {
+        resolve(route.request().url());
+        return route.fulfill({ status: 200, contentType: "text/html", body: "<title>other</title>" });
+      });
+    });
+    await signer.locator("#auth-other summary").click();
+    await signer.fill("#auth-other-input", "someoneelse.poweur.net");
+    await signer.click("#btn-auth-other");
+    const url = new URL(await handedOver);
+    expect(url.hostname).toBe("someoneelse.poweur.net");
+    expect(url.searchParams.get("auth")).toBe(requestLink);
+
+    // Not an ID at all: nothing happens but a hint.
+    const again = await context.newPage();
+    await stubPasskeys(again);
+    await again.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(requestLink)}`);
+    await again.locator("#auth-other summary").click();
+    await again.fill("#auth-other-input", "nonsense");
+    await again.click("#btn-auth-other");
+    await expect(again.locator("#auth-other")).toContainText("Enter an ID");
+  });
+
   test("a visitor who is not signed in cannot post", async ({ request }) => {
     const res = await request.post(`${guestbook.origin}/api/entries`, { data: { message: "sneaky" } });
     expect(res.status()).toBe(401);
