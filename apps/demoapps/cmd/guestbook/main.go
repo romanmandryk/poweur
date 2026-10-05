@@ -13,6 +13,10 @@
 // requests by route, posts and sign-ins by outcome, and errors, never who or
 // what. It is not authenticated: keep it off the public network.
 //
+// Local development only: POWEUR_RESOLVER_SCHEME=http, RESOLVER_ALLOW_PRIVATE=1 and
+// GUESTBOOK_RESOLVER_DIAL=host:port send every identity lookup to one local relay, as the
+// poweur CLI and the OAuth bridge do. Production sets none of them.
+//
 // With IDENTITY unset and GUESTBOOK_MEMORY=1 the log is kept in memory, for
 // trying the page out. Run one instance: two would overwrite each other.
 package main
@@ -21,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,6 +35,7 @@ import (
 
 	"github.com/poweur/demoapps/appmetrics"
 	"github.com/poweur/demoapps/guestbook"
+	"github.com/poweur/identity"
 )
 
 func main() {
@@ -61,6 +67,11 @@ func run(ctx context.Context) error {
 		ArchiveURL: archive,
 		Log:        os.Stderr,
 	}
+	resolve, err := resolveOptions()
+	if err != nil {
+		return err
+	}
+	cfg.ResolveOptions = resolve
 	if addr := os.Getenv("METRICS_ADDR"); addr != "" {
 		reg := appmetrics.New("poweur_guestbook")
 		cfg.Metrics = reg
@@ -111,4 +122,24 @@ func run(ctx context.Context) error {
 		defer cancel()
 		return httpSrv.Shutdown(shutdown)
 	}
+}
+
+// resolveOptions is the identity resolver's configuration: the published chain unless the
+// local development variables ask for one relay.
+func resolveOptions() (identity.ResolveOptions, error) {
+	opts := identity.ResolveOptions{Scheme: os.Getenv("POWEUR_RESOLVER_SCHEME"), AllowPrivate: os.Getenv("RESOLVER_ALLOW_PRIVATE") == "1"}
+	if dial := os.Getenv("GUESTBOOK_RESOLVER_DIAL"); dial != "" {
+		if !opts.AllowPrivate {
+			return opts, errors.New("GUESTBOOK_RESOLVER_DIAL is for local development and needs RESOLVER_ALLOW_PRIVATE=1")
+		}
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		opts.HTTPClient = &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, dial)
+			}},
+			CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirects are not followed") },
+		}
+	}
+	return opts, nil
 }

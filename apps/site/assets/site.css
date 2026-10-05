@@ -147,21 +147,23 @@ section { position: relative; padding: clamp(80px, 11vw, 140px) 0; }
 .rotator {
   display: block; height: 1.2em; overflow: hidden; position: relative;
 }
-.rotator ul { list-style: none; margin: 0; padding: 0; animation: rotate-words 17.5s cubic-bezier(.7,0,.3,1) infinite; }
+.rotator ul { list-style: none; margin: 0; padding: 0; animation: rotate-words 22s cubic-bezier(.7,0,.3,1) infinite; }
 .rotator li {
   height: 1.2em; line-height: 1.2em;
   background: linear-gradient(90deg, var(--violet-300), var(--indigo-400));
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 @keyframes rotate-words {
-  0%, 11%   { transform: translateY(-0.00em); }
-  14%, 25%  { transform: translateY(-1.20em); }
-  28%, 39%  { transform: translateY(-2.40em); }
-  42%, 53%  { transform: translateY(-3.60em); }
-  56%, 67%  { transform: translateY(-4.80em); }
-  70%, 81%  { transform: translateY(-6.00em); }
-  84%, 95%  { transform: translateY(-7.20em); }
-  100%      { transform: translateY(-8.40em); }
+  0%, 8.11% { transform: translateY(-0.00em); }
+  11.11%, 19.22% { transform: translateY(-1.20em); }
+  22.22%, 30.33% { transform: translateY(-2.40em); }
+  33.33%, 41.44% { transform: translateY(-3.60em); }
+  44.44%, 52.56% { transform: translateY(-4.80em); }
+  55.56%, 63.67% { transform: translateY(-6.00em); }
+  66.67%, 74.78% { transform: translateY(-7.20em); }
+  77.78%, 85.89% { transform: translateY(-8.40em); }
+  88.89%, 97.0% { transform: translateY(-9.60em); }
+  100% { transform: translateY(-10.80em); }
 }
 .hero .lede { margin: 28px auto 0; }
 .hero .ctas { display: flex; gap: 12px; justify-content: center; margin-top: 36px; flex-wrap: wrap; }
