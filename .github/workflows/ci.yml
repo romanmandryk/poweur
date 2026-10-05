@@ -7,7 +7,8 @@ name: CI
 #         covers changed. Unit and integration tests, the SDK, the web app's unit tests plus
 #         a Playwright smoke set, the docs build, the deploy configuration checks.
 #   full  nightly (02:17 UTC) and by hand: everything in fast plus the whole Playwright
-#         suite (sharded three ways) and the real ingest and dashboard smoke test, which
+#         suite (sharded three ways), the OAuth bridge against live oauth2-proxy, Keycloak
+#         and Authentik containers, and the real ingest and dashboard smoke test, which
 #         starts the monitoring stack in Docker.
 #
 # Run by hand: Actions → CI → Run workflow → suite: fast or full.
@@ -276,6 +277,59 @@ jobs:
       - run: pnpm --filter @poweur/web exec vite build
       - run: pnpm --filter @poweur/web exec playwright test --shard=${{ matrix.shard }}/3
 
+  # The bridge against real products, in Docker: an unmodified oauth2-proxy, Keycloak and
+  # Authentik take a Poweur ID through the web signer. Each pulls a large image (Authentik is
+  # a four-container stack), so they run nightly and by hand, one job each.
+  oauth-live:
+    name: "OAuth bridge live: ${{ matrix.product }}"
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        product: [oauth2-proxy, keycloak, authentik]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            apps/api/go.sum
+            apps/cli/go.sum
+            apps/oauth/go.sum
+            packages/identity/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @poweur/web exec playwright install chromium --with-deps
+      - run: pnpm client:build
+      - name: Warm the Go builds the specs start
+        run: |
+          (cd apps/api && go build -o /dev/null .)
+          (cd apps/oauth && go build -o /dev/null ./cmd/poweur-oauth)
+          (cd apps/cli && go build -o /dev/null .)
+      - run: pnpm --filter @poweur/oauth-ui build
+      # The specs sign in through the built web app the relay serves at /app/.
+      - run: pnpm --filter @poweur/web exec vite build
+      - name: Pull the product image
+        run: |
+          case "${{ matrix.product }}" in
+            oauth2-proxy) docker pull quay.io/oauth2-proxy/oauth2-proxy:v7.12.0 ;;
+            keycloak)     docker pull quay.io/keycloak/keycloak:26.3 ;;
+            authentik)    docker pull ghcr.io/goauthentik/server:2026.8.2 && docker pull postgres:16-alpine && docker pull redis:alpine ;;
+          esac
+      - name: Run the live spec
+        env:
+          POWEUR_LIVE_DOCKER: "1"
+        run: pnpm --filter @poweur/web exec playwright test test/e2e/oauth-live-${{ matrix.product }}.spec.js
+
   docs:
     name: Docs and website build
     needs: changes
@@ -327,7 +381,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changes, go-unit, go-integration, client-ts, web, web-e2e, docs, deploy-config, stack-smoke]
+    needs: [changes, go-unit, go-integration, client-ts, web, web-e2e, oauth-live, docs, deploy-config, stack-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that had to run passed
