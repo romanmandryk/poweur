@@ -23,8 +23,8 @@ if (nav) {
       <ul>
         ${navLink("index.html#primitives", "Product")}
         ${navLink("index.html#use-cases", "Use cases")}
-        ${navLink("index.html#apps", "Apps")}
         ${navLink("architecture.html", "Architecture")}
+        ${navLink("faq/", "FAQ")}
         ${navLink(LINKS.docs, "Docs", 'class="ext" target="_blank" rel="noopener"')}
         ${navLink(LINKS.github, "GitHub", 'class="ext" target="_blank" rel="noopener"')}
       </ul>
@@ -47,7 +47,10 @@ fetch(root + "blog/posts.json")
   .then((posts) => {
     if (!posts.length) return;
     const list = document.querySelector("#nav ul");
-    if (list) list.insertAdjacentHTML("beforeend", navLink("blog/", "Blog"));
+    // Blog sits right after Architecture, before FAQ.
+    const architecture = [...document.querySelectorAll("#nav ul a")].find((a) => /architecture\.html$/.test(a.getAttribute("href") || ""));
+    if (architecture) architecture.parentElement.insertAdjacentHTML("afterend", navLink("blog/", "Blog"));
+    else if (list) list.insertAdjacentHTML("beforeend", navLink("blog/", "Blog"));
     const project = [...document.querySelectorAll("#footer h3")].find((h) => h.textContent === "Project");
     if (project) project.nextElementSibling.insertAdjacentHTML("afterbegin", `<li><a href="${root}blog/">Blog</a></li>`);
   })
