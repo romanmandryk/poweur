@@ -17,6 +17,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       suite:
@@ -83,7 +84,22 @@ jobs:
           echo "ts=$(pick '^(packages/(client-ts|identity)|apps/(api|cli))/')" >> "$GITHUB_OUTPUT"
           echo "web=$(pick '^(apps/(web|api|oauth|mobile)|packages/(client-ts|faro|identity))/')" >> "$GITHUB_OUTPUT"
           echo "docs=$(pick '^(apps/(docs|site)|epics)/')" >> "$GITHUB_OUTPUT"
-          echo "deploy=$(pick '^(deploy|docker-compose\.prod\.yml|\.github/workflows)/?')" >> "$GITHUB_OUTPUT"
+          echo "deploy=$(pick '^(deploy|docker-compose\.prod\.yml|\.github/workflows|scripts)/?')" >> "$GITHUB_OUTPUT"
+
+  # A pull request that changes a package's shipped code has to bump its version (AGENTS.md →
+  # Version bumps). Label the PR `no-version-bump` when behaviour really is unchanged.
+  version-bump:
+    name: Version bumps
+    needs: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          SKIP_VERSION_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'no-version-bump') && '1' || '0' }}
+        run: node scripts/check-version-bumps.mjs "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
 
   go-unit:
     name: Go unit tests
@@ -381,7 +397,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changes, go-unit, go-integration, client-ts, web, web-e2e, oauth-live, docs, deploy-config, stack-smoke]
+    needs: [changes, version-bump, go-unit, go-integration, client-ts, web, web-e2e, oauth-live, docs, deploy-config, stack-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that had to run passed

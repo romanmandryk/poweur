@@ -1,0 +1,43 @@
+version: 2
+
+# Release builds of the Go CLI (apps/cli). Driven by .github/workflows/release-cli.yml, which
+# runs on a `cli-v<version>` tag, sets GORELEASER_CURRENT_TAG=v<version> and publishes the
+# archives itself with `gh release create`, so this file only builds, archives and checksums.
+project_name: poweur
+
+# apps/cli resolves packages/identity through a replace directive, so build from the checkout.
+builds:
+  - id: poweur
+    dir: apps/cli
+    main: .
+    binary: poweur
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/poweur/cli/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/poweur/cli/internal/buildinfo.Hash={{ .FullCommit }}
+      - -X github.com/poweur/cli/internal/buildinfo.Time={{ .CommitDate }}
+
+archives:
+  - id: poweur
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "poweur_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: apps/cli/LICENSE
+        strip_parent: true
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+release:
+  disable: true

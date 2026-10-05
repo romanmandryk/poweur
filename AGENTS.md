@@ -154,6 +154,8 @@ bump the `Version` constant instead.
 | OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | `VERSION_HASH` / `BUILD_TIME` baked into the image; `poweur-oauth version` and `GET /health` print them |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
 
+`pnpm release:bump <package>` edits every file a package's version lives in. CI's **Version bumps** check fails a pull request that changes shipped code without bumping (label `no-version-bump` to override). Releasing the SDK or CLI is `pnpm release:tag sdk|cli` from `master`: see [`RELEASING.md`](RELEASING.md).
+
 Default bump is **patch**. Minor/major is for breaking protocol or public API
 changes. `VERSION` on the relay is the semver override for tests — never pass a
 git sha as `VERSION` (that belongs in `VERSION_HASH`).
