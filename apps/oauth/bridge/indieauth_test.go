@@ -123,10 +123,13 @@ func TestIndieAuthRedirectRules(t *testing.T) {
 		t.Fatalf("scheme downgrade = %d", p.status)
 	}
 
-	// A document may list another origin, but only its own.
-	h.metadata["https://listed.example/c"] = `{"client_id":"https://listed.example/c","redirect_uris":["https://evil.example/cb"]}`
+	// A document may list redirect URIs on another origin; one it does not list is refused.
+	h.metadata["https://listed.example/c"] = `{"client_id":"https://listed.example/c","redirect_uris":["https://app.listed.example/cb"]}`
+	if p := b.get(indieAuthQuery("https://listed.example/c", "https://app.listed.example/cb", "")); p.status == http.StatusBadRequest {
+		t.Fatalf("a listed off-origin redirect was refused: %s", p.body)
+	}
 	if p := b.get(indieAuthQuery("https://listed.example/c", "https://evil.example/cb", "")); p.status != http.StatusBadRequest {
-		t.Fatalf("off-origin redirect from metadata = %d", p.status)
+		t.Fatalf("an unlisted off-origin redirect = %d", p.status)
 	}
 
 	// A document claiming another client_id is refused.
@@ -184,5 +187,68 @@ func TestURLClientsAreIndieAuthOnlyByDefault(t *testing.T) {
 	off.metadata[iaClient] = `{"client_id":"` + iaClient + `","redirect_uris":["` + iaRedirect + `"]}`
 	if p := off.browser().get(indieAuthQuery(iaClient, iaRedirect, "")); p.status != http.StatusBadRequest {
 		t.Fatalf("URL clients off = %d", p.status)
+	}
+}
+
+// With scopes granted, the token endpoint issues an access token that works
+// at /userinfo and can be revoked without any client authentication.
+func TestIndieAuthTokenEndpointIssuesAnAccessTokenForScopes(t *testing.T) {
+	h := newHarness(t)
+	h.metadata[iaClient] = `{"client_id":"` + iaClient + `","client_name":"Notes","redirect_uris":["` + iaRedirect + `"]}`
+	b := h.browser()
+	id, _ := b.signIn(indieAuthQuery(iaClient, iaRedirect, "profile", "me", "https://alice.poweur.net/"), h.users[alice])
+	code := h.codeFrom(b.consent(id, ScopeProfile), iaRedirect)
+	status, out := redeemAt(h, "/token", url.Values{
+		"grant_type": {"authorization_code"}, "code": {code}, "client_id": {iaClient},
+		"redirect_uri": {iaRedirect}, "code_verifier": {testVerifier},
+	})
+	token, _ := out["access_token"].(string)
+	if status != 200 || token == "" || out["token_type"] != "Bearer" || out["scope"] != "profile" || out["me"] != "https://alice.poweur.net/" {
+		t.Fatalf("token endpoint = %d %v", status, out)
+	}
+	if out["expires_in"] == nil {
+		t.Error("no expires_in")
+	}
+
+	req, _ := http.NewRequest("GET", h.issuer+"/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("userinfo with the token = %d", resp.StatusCode)
+	}
+
+	// Public revocation: no client_id, no credentials; unknown tokens still answer 200.
+	if status, _ := redeemAt(h, "/revoke", url.Values{"token": {"not-a-token"}}); status != 200 {
+		t.Fatalf("revoking an unknown token = %d", status)
+	}
+	if status, _ := redeemAt(h, "/revoke", url.Values{"token": {token}}); status != 200 {
+		t.Fatalf("revoking the token = %d", status)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == 200 {
+		t.Fatal("a revoked token still reads /userinfo")
+	}
+}
+
+// A request that returns to another origin is shown that origin, unverified.
+func TestIndieAuthConsentNamesAnOffOriginRedirectHost(t *testing.T) {
+	h := newHarness(t)
+	// Its own client_id: URL clients are cached process-wide, per client_id.
+	const client = "https://offorigin.example/client.json"
+	h.metadata[client] = `{"client_id":"` + client + `","client_name":"Notes","redirect_uris":["https://cb.elsewhere.example/done"]}`
+	b := h.browser()
+	_, p := b.signIn(indieAuthQuery(client, "https://cb.elsewhere.example/done", "profile", "me", "https://alice.poweur.net/"), h.users[alice])
+	var cp consentPage
+	p.data(t, &cp)
+	if cp.Client.Host != "cb.elsewhere.example" || cp.Client.VerifiedHost {
+		t.Errorf("consent host = %q verified=%v", cp.Client.Host, cp.Client.VerifiedHost)
 	}
 }

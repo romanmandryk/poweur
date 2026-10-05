@@ -315,7 +315,7 @@ func (s *Server) pageFor(name string, data any) any {
 	case consentView:
 		p := consentPage{
 			Txn: v.Txn.ID, Identity: v.Txn.Identity,
-			Client:    consentClient{Name: v.Client.Name, Host: v.Host, VerifiedHost: v.URLClient},
+			Client:    consentClient{Name: v.Client.Name, Host: v.Host, VerifiedHost: v.HostVerified},
 			Optional:  append([]string{}, v.Optional...),
 			IndieAuth: v.IndieAuth,
 		}

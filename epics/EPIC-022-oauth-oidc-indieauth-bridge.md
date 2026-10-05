@@ -401,7 +401,7 @@ browser/QR login is unchanged.
       written up in the design doc under *Conformance and external review*
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
 - [x] Live oauth2-proxy, Keycloak and **Authentik** runs (opt-in Playwright specs, Docker)
-- [ ] Two independent IndieAuth clients live — open. The well-known third-party checks
+- [ ] Two independent IndieAuth clients live — **one done, one open**: the indieauth.rocks server suite signed `johnjohn.poweur.net` in on 5 Oct 2026 (discovery 16/17, sign-in, denial, cross-origin redirect refusal); it found four gaps, fixed in bridge 0.2.1: access token at `/token` for scoped codes, public revocation, listed cross-origin redirect URIs, the consent host. The rest of the suite is being re-run. Still open: indielogin.com and a hosted Micropub client. The well-known third-party checks
       (indieauth.rocks, indielogin.com, hosted Micropub clients) fetch the client and the
       authorization server over the public internet; now possible against `oauth.poweur.org`
 - [x] Production at **`https://oauth.poweur.org`** (bridge 0.1.4): its own Compose project in

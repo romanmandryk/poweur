@@ -746,6 +746,19 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return
 	}
+	// A request that names no client and carries no credentials is a public
+	// revocation (IndieAuth, RFC 7009 §2.1): holding the token is the proof.
+	// The answer is 200 whether or not the token existed.
+	if r.PostForm.Get("client_id") == "" && r.Header.Get("Authorization") == "" && r.PostForm.Get("client_assertion") == "" {
+		if tok := r.PostForm.Get("token"); tok != "" {
+			if err := s.store.RevokeAccessTokenByHash(r.Context(), signin.HashSecret(tok)); err != nil {
+				writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke")
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	c, err := s.authenticateClient(r, surfaceForClientID(r.PostForm.Get("client_id")))
 	if err != nil {
 		writeOAuthError(w, http.StatusUnauthorized, "invalid_client", err.Error())

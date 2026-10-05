@@ -129,19 +129,31 @@ type consentView struct {
 	Previously []string
 	IndieAuth  bool
 	ProfileURL string
+	// HostVerified: the host named is the client's own (its client_id host). A URL
+	// client whose request returns to another origin is shown that origin instead,
+	// unverified, so the user sees where the browser will go.
+	HostVerified bool
 }
 
 func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, t *Txn, c *Client, prev *Consent) {
 	v := consentView{
-		Txn:        t,
-		Client:     c,
-		Request:    t.Authorize,
-		Host:       clientHost(c),
-		Registered: c.Source == ClientRegistered,
-		URLClient:  c.Source == ClientURL,
-		Optional:   t.Authorize.requestedOptional(),
-		IndieAuth:  t.Authorize.Surface == surfaceIndieAuth,
-		ProfileURL: identity.IndieAuthProfileURL(t.Identity),
+		Txn:          t,
+		Client:       c,
+		Request:      t.Authorize,
+		Host:         clientHost(c),
+		Registered:   c.Source == ClientRegistered,
+		URLClient:    c.Source == ClientURL,
+		Optional:     t.Authorize.requestedOptional(),
+		IndieAuth:    t.Authorize.Surface == surfaceIndieAuth,
+		ProfileURL:   identity.IndieAuthProfileURL(t.Identity),
+		HostVerified: c.Source == ClientURL,
+	}
+	if c.Source == ClientURL && t.Authorize != nil {
+		cu, cerr := url.Parse(c.ID)
+		ru, rerr := url.Parse(t.Authorize.RedirectURI)
+		if cerr == nil && rerr == nil && ru.Host != "" && !identity.SameOrigin(cu.Scheme+"://"+cu.Host, t.Authorize.RedirectURI) {
+			v.Host, v.HostVerified = ru.Hostname(), false
+		}
 	}
 	if prev != nil {
 		v.Previously = prev.Granted

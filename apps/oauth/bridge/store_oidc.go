@@ -179,6 +179,13 @@ func (s *Store) RevokeAccessToken(ctx context.Context, tokenHash, clientID strin
 	return err
 }
 
+// RevokeAccessTokenByHash revokes one token whoever presents it: possession is
+// the proof (public revocation).
+func (s *Store) RevokeAccessTokenByHash(ctx context.Context, tokenHash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE access_tokens SET revoked = 1 WHERE token_hash = ?`, tokenHash)
+	return err
+}
+
 // RevokeGrant revokes every token an identity holds for a client.
 func (s *Store) RevokeGrant(ctx context.Context, identity, clientID string) error {
 	_, err := s.db.ExecContext(ctx,
