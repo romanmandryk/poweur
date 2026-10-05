@@ -484,6 +484,142 @@
           "isPaused": false
         },
         {
+          "uid": "guestbook-down",
+          "title": "Guestbook health probe failed",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "(min(probe_success{job=\"blackbox-guestbook\"}) < bool 1) or absent(probe_success{job=\"blackbox-guestbook\"})",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "https://guestbook.poweur.net/healthz is failing: the \"Sign in with Poweur ID\" demo is down."
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "hello-down",
+          "title": "Hello bot is not reporting",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "expr": "(min(up{job=\"poweur-hello\"}) < bool 1) or absent(up{job=\"poweur-hello\"})",
+                "instant": true,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "type": "query",
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "A"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "2m",
+          "annotations": {
+            "summary": "hello.poweur.net (the demo bot) has stopped reporting metrics: it is probably down."
+          },
+          "labels": {
+            "service": "poweur"
+          },
+          "isPaused": false
+        },
+        {
           "uid": "oauth-code-reuse",
           "title": "OAuth authorization code reused",
           "condition": "B",
