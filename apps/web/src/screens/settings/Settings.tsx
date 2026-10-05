@@ -13,6 +13,7 @@ import {
   Laptop,
   Link,
   LockOpen,
+  MessageSquare,
   MonitorSmartphone,
   Package,
   Puzzle,
@@ -35,11 +36,12 @@ import { APP_BUILD_TIME, APP_VERSION } from "../../build-info";
 import { askConfirm } from "../../components/Dialogs";
 import { identityApiFor } from "../../lib/client.js";
 import { CUSTODY_COPY, custodyOf } from "../../lib/custody";
-import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
+import { FEEDBACK_ID, LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { domainOf, handleOf } from "../../lib/identity";
 import { defaultRelayUrl, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor } from "../../lib/storage.js";
 import { useData } from "../../state/data";
 import { formatBytes, loadStorageUsage } from "../../actions/files";
+import { openThread } from "../../actions/messages";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { Avatar } from "../../ui/Avatar";
@@ -235,6 +237,17 @@ export function Settings() {
           <SettingsRow id="row-relay" icon={Link} label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
           <SettingsRow id="row-lookup" icon={Search} label="Lookup identity" onClick={openLookupPanel} />
         </SettingsGroup>
+
+        {record && identity && showsPoweurLegal(mode.hostedDomains, identity) && (
+          <SettingsGroup label="Help">
+            <SettingsRow
+              id="row-feedback"
+              icon={MessageSquare}
+              label="Send feedback"
+              onClick={() => openThread(FEEDBACK_ID)}
+            />
+          </SettingsGroup>
+        )}
 
         <SettingsGroup label="About">
           <AboutRow icon={FileText} label="Protocol" value="Poweur ID v1" />
