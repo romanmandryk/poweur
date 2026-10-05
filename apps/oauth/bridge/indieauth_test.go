@@ -216,9 +216,14 @@ func TestIndieAuthTokenEndpointIssuesAnAccessTokenForScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var ui map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&ui)
 	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("userinfo with the token = %d", resp.StatusCode)
+	if resp.StatusCode != 200 || ui["url"] != "https://alice.poweur.net/" || ui["name"] != "Display "+alice {
+		t.Fatalf("userinfo with the token = %d %v", resp.StatusCode, ui)
+	}
+	if status, out := redeemAt(h, "/token", url.Values{"client_id": {iaClient}, "code": {"x"}}); status != 400 || out["error"] != "invalid_request" {
+		t.Errorf("missing grant_type = %d %v", status, out)
 	}
 
 	// Public revocation: no client_id, no credentials; unknown tokens still answer 200.
