@@ -16,6 +16,7 @@ Coding agents should follow [`AGENTS.md`](AGENTS.md). Summary:
 
 - Go ≥ 1.23 (see `go.work`), Node/pnpm for docs if needed.
 - From repo root: `go test ./packages/identity/... ./apps/api/... ./apps/cli/... ./apps/integration/...`
+- What CI runs, locally: `pnpm client:test`, `pnpm web:test` and `pnpm --filter @poweur/web test:e2e:smoke` (the fast tier), or `pnpm --filter @poweur/web test:e2e` for the whole browser suite (the nightly tier, about 5 minutes).
 
 ## PRs
 
