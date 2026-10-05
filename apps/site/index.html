@@ -3,16 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Poweur — Open-source ID, messaging and data sharing for an open internet</title>
-  <meta name="description" content="Poweur is an open-source identity, messaging and data-sharing layer. One ID to sign in, message, share, collaborate, play, prove and sign — on your domain or ours.">
-  <meta property="og:title" content="Poweur — Open-source ID, messaging and data sharing for an open internet">
+  <title>Poweur: one open ID for sign-in, messaging and files</title>
+  <meta name="description" content="Poweur is an open-source identity, messaging and file-sharing layer. One ID to sign in, message, share and collaborate, on our servers, your domain or your own relay.">
+  <link rel="canonical" href="https://www.poweur.org/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Poweur">
+  <meta property="og:url" content="https://www.poweur.org/">
+  <meta property="og:title" content="Poweur: one open ID for sign-in, messaging and files">
   <meta property="og:description" content="Identity, messaging and data sharing. Three open primitives, endless apps, no walled gardens.">
-  <meta property="og:image" content="assets/brand/og-image.png">
+  <meta property="og:image" content="https://www.poweur.org/assets/brand/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Poweur P: one open ID for sign-in, messaging and files">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Poweur: one open ID for sign-in, messaging and files">
+  <meta name="twitter:description" content="Identity, messaging and data sharing. Three open primitives, endless apps, no walled gardens.">
+  <meta name="twitter:image" content="https://www.poweur.org/assets/brand/og-image.jpg">
   <meta name="theme-color" content="#07060B">
-  <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
   <link rel="preload" href="assets/fonts/sora-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/site.css">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@graph":[
+    {"@type":"Organization","@id":"https://www.poweur.org/#org","name":"Poweur","url":"https://www.poweur.org/","logo":"https://www.poweur.org/assets/brand/apple-touch-icon.png","sameAs":["https://github.com/romanmandryk/poweur"]},
+    {"@type":"WebSite","@id":"https://www.poweur.org/#site","url":"https://www.poweur.org/","name":"Poweur","publisher":{"@id":"https://www.poweur.org/#org"}},
+    {"@type":"SoftwareApplication","name":"Poweur","applicationCategory":"CommunicationApplication","operatingSystem":"Web, iOS, Android, Linux, macOS, Windows","description":"Open-source identity, end-to-end encrypted messaging and file sharing.","url":"https://www.poweur.org/","license":"https://www.gnu.org/licenses/agpl-3.0.html","offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"}}
+  ]}
+  </script>
   <script src="assets/faro.js" defer></script>
 </head>
 <body>
@@ -22,9 +41,6 @@
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="hero-bg" aria-hidden="true">
-      <!-- Hero video slot. Drop an original/licensed glass loop at assets/hero.mp4 and uncomment:
-      <video autoplay muted loop playsinline poster="assets/hero-poster.jpg"><source src="assets/hero.mp4" type="video/mp4"></video>
-      The CSS scene below is the placeholder until then. -->
       <div class="glass-scene">
         <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
         <div class="pane p1"></div><div class="pane p2"></div><div class="pane p3"></div>
@@ -55,7 +71,7 @@
         <div class="showcase hero-layout">
           <div class="dev-browser">
             <div class="bar"><i></i><i></i><i></i><div class="url">alice.poweur.net/app</div></div>
-            <img src="assets/shots/desktop-thread-bob.png" alt="Poweur web app: Alice's inbox and her conversation with Bob" loading="eager">
+            <img src="assets/shots/desktop-thread-bob.webp" width="1600" height="1000" alt="Poweur web app: Alice's inbox and her conversation with Bob" fetchpriority="high" decoding="async">
           </div>
           <div class="dev-term" aria-label="Carl sending a message from the Poweur CLI">
             <div class="bar"><i></i><i></i><i></i><b>carl@shop — poweur</b></div>
@@ -71,7 +87,7 @@
           <div class="dev-phone">
             <div class="screen">
               <div class="sbar"><span>9:41</span><span><svg viewBox="0 0 68 12" aria-hidden="true"><g fill="#fff"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/><path d="M30 3.2a10 10 0 0 1 13 0l-1.4 1.5a8 8 0 0 0-10.2 0zM32.6 6a6 6 0 0 1 7.8 0L39 7.5a4 4 0 0 0-5 0zM36.5 11.5 34.6 9.4a2.8 2.8 0 0 1 3.8 0z"/><rect x="47" y="1" width="18" height="10" rx="3" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="49" y="3" width="13" height="6" rx="1.5"/><rect x="66" y="4" width="1.6" height="4" rx=".8" fill-opacity=".5"/></g></svg></span></div>
-              <img src="assets/shots/phone-bob-thread.png" alt="Bob's phone: the same conversation with Alice">
+              <img src="assets/shots/phone-bob-thread.webp" width="640" height="1385" alt="Bob's phone: the same conversation with Alice" decoding="async">
             </div>
           </div>
         </div>
@@ -205,12 +221,12 @@
       <div class="showcase share-layout reveal">
         <div class="dev-browser">
           <div class="bar"><i></i><i></i><i></i><div class="url">alice.poweur.net/app</div></div>
-          <img src="assets/shots/desktop-share-panel.png" alt="Sharing /shared/trip-2026 with bob.poweur.net and carl.example.com, read and write" loading="lazy">
+          <img src="assets/shots/desktop-share-panel.webp" width="1600" height="1000" alt="Sharing /shared/trip-2026 with bob.poweur.net and carl.example.com, read and write" loading="lazy" decoding="async">
         </div>
         <div class="dev-phone">
           <div class="screen">
             <div class="sbar"><span>9:41</span><span><svg viewBox="0 0 68 12" aria-hidden="true"><g fill="#fff"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/><path d="M30 3.2a10 10 0 0 1 13 0l-1.4 1.5a8 8 0 0 0-10.2 0zM32.6 6a6 6 0 0 1 7.8 0L39 7.5a4 4 0 0 0-5 0zM36.5 11.5 34.6 9.4a2.8 2.8 0 0 1 3.8 0z"/><rect x="47" y="1" width="18" height="10" rx="3" fill="none" stroke="#fff" stroke-opacity=".5"/><rect x="49" y="3" width="13" height="6" rx="1.5"/><rect x="66" y="4" width="1.6" height="4" rx=".8" fill-opacity=".5"/></g></svg></span></div>
-            <img src="assets/shots/phone-bob-offer.png" alt="Bob receives the shared folder offer" loading="lazy">
+            <img src="assets/shots/phone-bob-offer.webp" width="640" height="1385" alt="Bob receives the shared folder offer" loading="lazy" decoding="async">
           </div>
         </div>
       </div>
@@ -230,8 +246,8 @@
             <div class="si-flow"><i></i><span>challenge · signed</span><i></i></div>
             <div class="si-sheet"><small>Sign in to</small><b>guestbook.example</b><div class="si-as"><em>A</em>alice.poweur.net</div><div class="si-code">482 913</div><div class="si-actions"><span>Deny</span><span class="on">Approve</span></div></div>
           </div></div>
-        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Message</div><h3>Private messaging</h3><p>E2EE chats and groups between IDs on any relay, with contacts-first spam control.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-chat-crop.png" alt="" loading="lazy"></div></div>
-        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Share data</div><h3>Share with any ID</h3><p>Folders, files and links with read/write grants and instant revocation.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-share-crop.png" alt="" loading="lazy"></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Message</div><h3>Private messaging</h3><p>E2EE chats and groups between IDs on any relay, with contacts-first spam control.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-chat-crop.webp" width="900" height="846" alt="" loading="lazy" decoding="async"></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Share data</div><h3>Share with any ID</h3><p>Folders, files and links with read/write grants and instant revocation.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-share-crop.webp" width="620" height="600" alt="" loading="lazy" decoding="async"></div></div>
         <div class="card c2 reveal"><span class="status next">Roadmap</span><div class="kicker">Co-work &amp; play</div><h3>Co-work and play with people &amp; agents</h3><p>Shared spaces, real-time documents and games. Friends and agents join with their own IDs, across relays, with no game server.</p><div class="art art-collab" aria-hidden="true">
             <div class="doc"><b>Day 3 — Machu Picchu</b><p class="l w90"></p><p class="l w70"><span class="cur c-bob"><i>bob</i></span></p><p class="l w80"></p><p class="l w50 hl"><span class="cur c-agent"><i>agent.carl.example.com</i></span></p></div>
             <div class="faces"><em class="a1">A</em><em class="a2">B</em><em class="a3">🤖</em></div>
@@ -261,7 +277,7 @@
             <div class="mail-row"><em>✈</em><div><b>Boarding pass</b><span>New York → Tokyo · gate B12</span></div></div>
             <div class="mail-row dim"><em>@</em><div><b>Newsletter</b><span>Filtered · read later</span></div></div>
           </div></div>
-        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Recover</div><h3>Many devices, one ID</h3><p>Add a phone by scanning a code, remove a lost laptop, restore from a recovery kit.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-devices-crop.png" alt="" loading="lazy"></div></div>
+        <div class="card c2 reveal"><span class="status live">Available</span><div class="kicker">Recover</div><h3>Many devices, one ID</h3><p>Add a phone by scanning a code, remove a lost laptop, restore from a recovery kit.</p><div class="art art-shot" aria-hidden="true"><img src="assets/shots/card-devices-crop.webp" width="780" height="525" alt="" loading="lazy" decoding="async"></div></div>
       </div>
     </div>
   </section>
@@ -272,7 +288,7 @@
   <section id="apps">
     <div class="wrap split reverse">
       <div class="reveal">
-        <div class="eyebrow">Poweured apps</div>
+        <div class="eyebrow">Poweured apps · preview</div>
         <h2 class="h2">An app is just a folder. <span class="muted">Your data stays in yours.</span></h2>
         <p class="lede" style="margin-top:18px">Because every user already has an identity, an inbox and a drive, an app needs no backend of its own. It signs you in, asks for a scoped grant to <code>/apps/&lt;app&gt;/</code>, keeps state in your home or a shared group folder, and talks to other IDs with typed messages.</p>
         <ul class="checks">
@@ -281,34 +297,31 @@
           <li>Uninstall revokes the grant — the data stays with you</li>
           <li><code>@poweur/client</code> for browser, Node, Bun and Deno</li>
         </ul>
+        <p class="muted" style="margin-top:14px;font-size:14px">Today you can build on sign-in, messaging and the encrypted drive; the app-folder conventions are rolling out.</p>
         <div style="display:flex;gap:12px;margin-top:32px;flex-wrap:wrap">
           <a class="btn btn-primary" href="/docs/clients/js-sdk">SDK docs</a>
           <a class="btn btn-ghost" href="/docs/files/storage-v2">App-data conventions</a>
         </div>
       </div>
-      <!-- Illustrative API shape; align with @poweur/client before launch -->
       <div class="code reveal">
-        <div class="code-tabs"><span class="on">tasks-app.ts</span><span>agent.ts</span><span>app.json</span></div>
-<pre><span class="tok-k">import</span> { PoweurClient } <span class="tok-k">from</span> <span class="tok-s">"@poweur/client"</span>;
+        <div class="code-tabs"><span class="on">agent.ts</span></div>
+<pre><span class="tok-k">import</span> { PoweurClient, signerFor } <span class="tok-k">from</span> <span class="tok-s">"@poweur/client"</span>;
+<span class="tok-k">import</span> { FileKeyStore, FileSessionStore, nodeResolveOptions } <span class="tok-k">from</span> <span class="tok-s">"@poweur/client/node"</span>;
 
-<span class="tok-c">// 1. Sign in with the user's ID, ask for a scoped grant</span>
-<span class="tok-k">const</span> me = <span class="tok-k">await</span> PoweurClient.<span class="tok-f">signIn</span>({
-  app: <span class="tok-s">"tasks.example"</span>,
-  grant: <span class="tok-s">"/apps/tasks/"</span>,
+<span class="tok-c">// An agent with an ID of its own: messageable, accountable, revocable</span>
+<span class="tok-k">const</span> keys = <span class="tok-k">await</span> <span class="tok-k">new</span> <span class="tok-f">FileKeyStore</span>().<span class="tok-f">load</span>(<span class="tok-s">"myagent.poweur.net"</span>);
+<span class="tok-k">const</span> { signer, decryptor } = <span class="tok-f">signerFor</span>(keys!);
+<span class="tok-k">const</span> client = <span class="tok-k">new</span> <span class="tok-f">PoweurClient</span>({
+  relayUrl: <span class="tok-s">"https://poweur.net"</span>, signer, decryptor,
+  sessionStore: <span class="tok-k">new</span> <span class="tok-f">FileSessionStore</span>(), resolve: <span class="tok-f">nodeResolveOptions</span>(),
 });
 
-<span class="tok-c">// 2. State lives in the user's home, not on our server</span>
-<span class="tok-k">await</span> me.files.<span class="tok-f">put</span>(<span class="tok-s">"/apps/tasks/tokyo-trip.json"</span>, list);
+<span class="tok-c">// Signed, end-to-end encrypted, to any ID on any relay</span>
+<span class="tok-k">await</span> client.<span class="tok-f">send</span>(<span class="tok-s">"alice.poweur.net"</span>, <span class="tok-s">"Your report is ready."</span>);
 
-<span class="tok-c">// 3. Share it with a friend on any relay</span>
-<span class="tok-k">await</span> me.shares.<span class="tok-f">grant</span>(<span class="tok-s">"/apps/tasks/tokyo-trip.json"</span>, {
-  to: <span class="tok-s">"carl.example.com"</span>, access: <span class="tok-s">"write"</span>,
-});
-
-<span class="tok-c">// 4. Tell them — with a typed message their app understands</span>
-<span class="tok-k">await</span> me.<span class="tok-f">send</span>(<span class="tok-s">"carl.example.com"</span>, {
-  type: <span class="tok-s">"org.poweur.tasks.invite"</span>, path: <span class="tok-s">"/apps/tasks/tokyo-trip.json"</span>,
-});</pre>
+<span class="tok-c">// ...and read what comes back</span>
+<span class="tok-k">const</span> { messages } = <span class="tok-k">await</span> client.<span class="tok-f">inboxAndAck</span>();
+<span class="tok-k">for</span> (<span class="tok-k">const</span> m <span class="tok-k">of</span> messages) console.<span class="tok-f">log</span>(m.sender, m.plaintext);</pre>
       </div>
     </div>
   </section>

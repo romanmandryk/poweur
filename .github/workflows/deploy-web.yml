@@ -2,7 +2,7 @@ name: Deploy website and docs
 
 # The poweur.org website (apps/site, static) with the docs (apps/docs, Docusaurus)
 # under /docs, published as one tree into /opt/apps/poweur-web/www on the relay VM,
-# where infra Caddy serves it as tmpwww.poweur.org. The Caddy route and the mount
+# where infra Caddy serves it as www.poweur.org (and tmpwww.poweur.org, unindexed). The Caddy route and the mount
 # ship with the relay's Deploy workflow.
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       - .github/workflows/deploy-web.yml
 
 env:
-  SITE_URL: https://tmpwww.poweur.org
+  SITE_URL: https://www.poweur.org
 
 concurrency:
   group: poweur-web-deploy
@@ -41,7 +41,7 @@ jobs:
         run: |
           # Drafts and tooling stay out of the public site; the docs go in at /docs.
           mkdir out
-          tar -cf - -C apps/site --exclude=./social --exclude=./scripts --exclude=./README.md . | tar -xf - -C out
+          tar -cf - -C apps/site --exclude=./social --exclude=./scripts --exclude=./README.md --exclude=./product-shot.html --exclude='./assets/shots/*.png' . | tar -xf - -C out
           cp -R apps/docs/build out/docs
           tar -czf www.tgz -C out .
       - uses: actions/upload-artifact@v4

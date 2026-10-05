@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://www.poweur.org/sitemap.xml
+Sitemap: https://www.poweur.org/docs/sitemap.xml
