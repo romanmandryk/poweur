@@ -26,6 +26,6 @@ describe("legal links", () => {
 describe("feedback", () => {
   it("goes to a Poweur ID on the hosted domain", async () => {
     const { FEEDBACK_ID } = await import("../../src/lib/legal");
-    expect(FEEDBACK_ID).toBe("feedback.poweur.net");
+    expect(FEEDBACK_ID).toBe("support.poweur.net");
   });
 });

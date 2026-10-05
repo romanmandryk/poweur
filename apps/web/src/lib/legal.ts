@@ -26,4 +26,4 @@ export function showsPoweurLegal(hostedDomains: readonly string[] | undefined, i
  * Where hosted-service feedback goes: a Poweur ID, so people message us with the product itself.
  * It belongs to poweur.net's operator, so it is offered only where `showsPoweurLegal` is true.
  */
-export const FEEDBACK_ID = "feedback.poweur.net";
+export const FEEDBACK_ID = "support.poweur.net";

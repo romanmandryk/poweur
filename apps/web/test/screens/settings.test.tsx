@@ -129,11 +129,11 @@ describe("Settings destination (E21-T11)", () => {
     expect($<HTMLAnchorElement>("#row-terms")!.target).toBe("_blank");
   });
 
-  it("Send feedback opens a conversation with the feedback ID", () => {
+  it("Send feedback opens a conversation with the support ID", () => {
     render(<App />);
     fireEvent.click($("#row-feedback")!);
     expect(useRoute.getState().sub).toBe("thread");
-    expect(useData.getState().thread?.peer).toBe("feedback.poweur.net");
+    expect(useData.getState().thread?.peer).toBe("support.poweur.net");
   });
 
   it("while locked, identity settings wait behind unlock and device settings stay usable", async () => {
