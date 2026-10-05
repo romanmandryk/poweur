@@ -242,6 +242,12 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
+  packages/poweur:
+    dependencies:
+      '@poweur/client':
+        specifier: workspace:*
+        version: link:../client-ts
+
 packages:
 
   '@adobe/css-tools@4.5.0':

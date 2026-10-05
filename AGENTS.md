@@ -149,7 +149,7 @@ bump the `Version` constant instead.
 |---------|---------------|------------|
 | Relay (`apps/api`) | `apps/api/internal/buildinfo.Version` | `BUILD_TIME` / `VERSION_HASH` env or VCS info at build; `GET /` exposes them |
 | Go CLI (`apps/cli`) | `apps/cli/internal/buildinfo.Version` | same; printed by `poweur version` / `--version` / `-v` |
-| `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` | UTC `YYYY-MM-DD HH:MM` |
+| `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` (and `packages/poweur/package.json`, the `poweur` npm alias, which must carry the same version: the release workflow refuses a mismatch) | UTC `YYYY-MM-DD HH:MM` |
 | Web app | `apps/web/package.json` **and** `apps/web/src/build-info.ts` | `APP_VERSION` / `APP_BUILD_TIME` |
 | OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | `VERSION_HASH` / `BUILD_TIME` baked into the image; `poweur-oauth version` and `GET /health` print them |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |

@@ -1,0 +1,75 @@
+name: Release npm packages
+
+# Publishes @poweur/client (the TypeScript SDK and its CLI) and the `poweur` alias
+# package, which carry the same version. Push a tag `sdk-v<version>` that matches
+# packages/client-ts/package.json, or run it by hand with "Dry run" ticked to build
+# and pack without publishing. Needs the NPM_TOKEN repository secret (an npm
+# automation token for the @poweur org). Provenance needs a public repository.
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, test and pack, but do not publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # the GitHub release
+  id-token: write # npm provenance
+
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @poweur/client... --filter poweur...
+
+      - name: The tag, the SDK and the alias agree on one version
+        id: version
+        run: |
+          v="$(node -p "require('./packages/client-ts/package.json').version")"
+          alias="$(node -p "require('./packages/poweur/package.json').version")"
+          if [ "$alias" != "$v" ]; then echo "packages/poweur is $alias but @poweur/client is $v" >&2; exit 1; fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "sdk-v$v" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version $v" >&2; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm --filter @poweur/client build
+      - run: pnpm --filter @poweur/client typecheck
+      - run: pnpm --filter @poweur/client test
+
+      - name: Pack (shows exactly what would be published)
+        run: |
+          pnpm --filter @poweur/client pack --pack-destination "$RUNNER_TEMP"
+          pnpm --filter poweur pack --pack-destination "$RUNNER_TEMP"
+          ls -l "$RUNNER_TEMP"/*.tgz
+
+      - name: Publish
+        if: ${{ github.ref_type == 'tag' || inputs.dry_run == false }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN" || { echo "NPM_TOKEN is not set" >&2; exit 1; }
+          pnpm --filter @poweur/client publish --access public --provenance --no-git-checks
+          pnpm --filter poweur publish --access public --provenance --no-git-checks
+
+      - name: GitHub release
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "SDK ${{ steps.version.outputs.version }}" --generate-notes

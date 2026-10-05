@@ -1,8 +1,27 @@
 {
   "name": "@poweur/client",
   "version": "0.2.12",
-  "description": "Poweur protocol client — identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
+  "description": "Poweur protocol client \u2014 identity, messaging, contacts, system files and proof-of-work for browser, Node, Bun and Deno.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romanmandryk/poweur.git",
+    "directory": "packages/client-ts"
+  },
+  "homepage": "https://www.poweur.org/docs/clients/js-sdk",
+  "bugs": "https://github.com/romanmandryk/poweur/issues",
+  "keywords": [
+    "poweur",
+    "identity",
+    "did",
+    "ed25519",
+    "e2ee",
+    "end-to-end-encryption",
+    "messaging",
+    "sign-in",
+    "indieauth",
+    "oidc"
+  ],
   "type": "module",
   "bin": {
     "poweur": "./dist/cli/bin.js"
@@ -25,6 +44,7 @@
     "./pow": "./dist/pow.js",
     "./node": "./dist/node/index.js",
     "./browser": "./dist/browser/index.js",
+    "./cli": "./dist/cli/bin.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -53,13 +73,6 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": [
-    "poweur",
-    "identity",
-    "ed25519",
-    "e2ee",
-    "messaging"
-  ],
   "publishConfig": {
     "access": "public"
   }
