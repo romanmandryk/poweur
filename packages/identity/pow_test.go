@@ -47,8 +47,13 @@ func TestPowRejections(t *testing.T) {
 	if _, err := VerifyPowSolution([]byte("other-secret"), token, solution, "msg:alice.poweur.net"); err == nil {
 		t.Fatal("wrong secret must fail")
 	}
-	// Garbage solution.
-	if _, err := VerifyPowSolution(powSecret, token, "not-a-solution", "msg:alice.poweur.net"); err == nil {
+	// Garbage solution. At 8 bits an arbitrary string is valid once in 256 tries, which made this
+	// check flaky; at the maximum difficulty a string that was not solved for cannot pass.
+	hard, _, err := NewPowChallenge(powSecret, "msg:alice.poweur.net", PowMaxBits, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyPowSolution(powSecret, hard, "not-a-solution", "msg:alice.poweur.net"); err == nil {
 		t.Fatal("bad solution must fail")
 	}
 	// Tampered token payload (difficulty downgrade attempt).

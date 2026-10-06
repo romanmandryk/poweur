@@ -39,6 +39,9 @@ func TestCommandAndReplyAreFixedText(t *testing.T) {
 			t.Errorf("whoami lacks %q: %s", want, who)
 		}
 	}
+	if got := Reply(Incoming{Sender: in.Sender, Text: "good morning"}, now, ""); !strings.Contains(got, "help · ping · whoami · docs · demo") {
+		t.Errorf("the default reply should list every command: %q", got)
+	}
 	if got := Reply(Incoming{Sender: in.Sender, Text: "demo"}, now, ""); !strings.Contains(got, "coming soon") {
 		t.Errorf("demo without a URL = %q", got)
 	}

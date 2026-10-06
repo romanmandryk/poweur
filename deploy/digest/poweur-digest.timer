@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Poweur growth digest at 08:00 Lisbon time
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 Europe/Lisbon
+Persistent=true
+
+[Install]
+WantedBy=timers.target

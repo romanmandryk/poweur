@@ -245,7 +245,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
                       </div>
                     )}
                     <div className="bubble-text text-base leading-[1.35] whitespace-pre-wrap">
-                      <MessageText text={bodyFor(message)} />
+                      <MessageText text={bodyFor(message)} links />
                     </div>
                     {message.type === "chat.attachment" && message.metadata && (
                       <Button

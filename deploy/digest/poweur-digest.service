@@ -1,0 +1,9 @@
+[Unit]
+Description=Poweur daily growth digest (ntfy)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/poweur-digest
+TimeoutStartSec=2min

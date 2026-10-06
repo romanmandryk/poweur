@@ -276,7 +276,7 @@ func Reply(in Incoming, now time.Time, demoURL string) string {
 		return "Try \"Sign in with Poweur\": " + demoURL
 	}
 	return fmt.Sprintf("Hi %s 👋 That message reached me end-to-end encrypted and signed by your key. Nobody in between could read it.\n"+
-		"Try: help · ping · whoami · docs\nTell a friend to claim their own ID at %s, then message them the same way.", in.Sender, claimURL)
+		"Try: help · ping · whoami · docs · demo\nTell a friend to claim their own ID at %s, then message them the same way.", in.Sender, claimURL)
 }
 
 func latency(sentAt string, now time.Time) string {

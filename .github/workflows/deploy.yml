@@ -123,6 +123,10 @@ jobs:
           # so /faro/collect 502s until something starts Alloy.
           docker exec infra-caddy wget -qO- --post-data='' http://infra-alloy:12345/-/reload </dev/null \
             || echo "alloy reload failed (non-fatal)" >&2
+          # Same for Prometheus: new scrape jobs and recording rules in the mounted
+          # files are ignored until it re-reads them (SIGHUP reloads, nothing restarts).
+          docker kill -s HUP infra-prometheus </dev/null >/dev/null \
+            || echo "prometheus reload failed (non-fatal)" >&2
           if [ -f deploy/betterstack/.env ]; then
             docker compose --env-file deploy/betterstack/.env -f deploy/betterstack/docker-compose.yml up -d \
               || echo "betterstack collector failed (non-fatal)" >&2
