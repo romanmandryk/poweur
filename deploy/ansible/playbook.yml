@@ -253,6 +253,32 @@
       community.general.ufw:
         state: enabled
 
+    # ── 10-ssh. SSH: keys only ──────────────────────────────────────────────────
+    # The server address is public, and the log shows thousands of password guesses a day. No
+    # account here has a password, so this changes nothing for people who can log in today; it
+    # closes the door on guessing. Run it with a second SSH session open, as for any sshd change.
+
+    - name: SSH accepts keys only (no passwords, no X11, few tries)
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/10-poweur-hardening.conf
+        mode: "0644"
+        content: |
+          # Managed by deploy/ansible/playbook.yml
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin prohibit-password
+          PermitEmptyPasswords no
+          X11Forwarding no
+          MaxAuthTries 3
+        validate: /usr/sbin/sshd -t -f %s
+      register: sshd_hardening
+
+    - name: Reload sshd when its hardening changed
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+      when: sshd_hardening.changed
+
     # ── 10a. Daily growth digest (ntfy push, 08:00 Lisbon) ──────────────────────
     # Needs ntfy_topic in secrets.yml; skipped until it is set. deploy/digest/.
 

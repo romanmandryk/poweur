@@ -90,18 +90,21 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		"id_token_signing_alg_values_supported":            []string{"RS256"},
 		"token_endpoint_auth_methods_supported":            []string{AuthSecretBasic, AuthSecretPost, AuthPrivateJWT, AuthNone},
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "ES256", "EdDSA"},
-		"revocation_endpoint_auth_methods_supported":       []string{AuthSecretBasic, AuthSecretPost, AuthPrivateJWT, AuthNone},
-		"scopes_supported":                                 []string{ScopeOpenID, ScopePoweurID, ScopeProfile},
-		"claims_supported":                                 []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "poweur_id", "poweur_key_fingerprint", "poweur_id_url", "name", "picture", "profile"},
-		"code_challenge_methods_supported":                 []string{"S256"},
-		"prompt_values_supported":                          []string{"none", "login", "consent"},
-		"authorization_response_iss_parameter_supported":   true,
-		"claims_parameter_supported":                       false,
-		"request_parameter_supported":                      false,
-		"request_uri_parameter_supported":                  false,
-		"require_request_uri_registration":                 false,
-		"client_id_metadata_document_supported":            s.cfg.URLClients != URLClientsOff,
-		"service_documentation":                            iss + "/",
+		// Revocation needs no client authentication: holding the token is the proof (RFC 7009 §2.1,
+		// IndieAuth). A client that does authenticate is still served, but advertising only "none"
+		// tells every client they can revoke without credentials.
+		"revocation_endpoint_auth_methods_supported":     []string{AuthNone},
+		"scopes_supported":                               []string{ScopeOpenID, ScopePoweurID, ScopeProfile},
+		"claims_supported":                               []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "poweur_id", "poweur_key_fingerprint", "poweur_id_url", "name", "picture", "profile"},
+		"code_challenge_methods_supported":               []string{"S256"},
+		"prompt_values_supported":                        []string{"none", "login", "consent"},
+		"authorization_response_iss_parameter_supported": true,
+		"claims_parameter_supported":                     false,
+		"request_parameter_supported":                    false,
+		"request_uri_parameter_supported":                false,
+		"require_request_uri_registration":               false,
+		"client_id_metadata_document_supported":          s.cfg.URLClients != URLClientsOff,
+		"service_documentation":                          iss + "/",
 	}
 	doc["introspection_endpoint"] = iss + "/introspect"
 	doc["introspection_endpoint_auth_methods_supported"] = []string{AuthSecretBasic, AuthSecretPost, AuthPrivateJWT, AuthNone}

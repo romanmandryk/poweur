@@ -29,6 +29,9 @@ func TestDiscoveryAndJWKS(t *testing.T) {
 	if doc["authorization_response_iss_parameter_supported"] != true {
 		t.Fatal("RFC 9207 support must be advertised")
 	}
+	if got := doc["revocation_endpoint_auth_methods_supported"].([]any); len(got) != 1 || got[0] != "none" {
+		t.Fatalf("revocation auth methods = %v, want [none] (public revocation)", got)
+	}
 	if got := doc["code_challenge_methods_supported"].([]any); len(got) != 1 || got[0] != "S256" {
 		t.Fatalf("PKCE methods = %v", got)
 	}
