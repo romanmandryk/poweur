@@ -69,9 +69,10 @@ def render(svg, out, w=None, h=None, flatten=None):
 
 # ---- masters (1024 units; rendered at any size) -------------------------------------------------
 N = 1024
-def app_icon(scale=0.58, uid="a"):
-    """Glass P on the glow. Web install icons and social profiles; native launchers use flat_violet."""
-    return doc(N, N, f'<rect width="{N}" height="{N}" fill="url(#glowa)"/>' + mark("glass", N / 2, N / 2, scale * N, uid), glow("a"))
+def app_icon(scale=0.64, uid="a"):
+    """The app icon: the flat white P on violet-600, full bleed (the platform masks it). Web install
+    icons, the library and profile pictures; it is the same icon the native launchers use."""
+    return flat_violet(scale=scale, uid=uid)
 
 def app_icon_tinted():
     """iOS 18 tinted: a grayscale mark on black; the system applies the tint."""
@@ -103,8 +104,8 @@ def adaptive_mono():
     return doc(N, N, mark("flat", N / 2 + optical_dx(ANDROID_ADAPTIVE), N / 2, ANDROID_ADAPTIVE * N, "m", "#FFFFFF"))
 
 def maskable():
-    """PWA maskable: safe zone is the central 80% circle."""
-    return doc(N, N, f'<rect width="{N}" height="{N}" fill="url(#glowa)"/>' + mark("glass", N / 2, N / 2, 0.46 * N, "k"), glow("a"))
+    """PWA maskable: the app icon with the P inside the central 80% safe circle."""
+    return flat_violet(scale=ANDROID_ADAPTIVE, uid="k", dx=optical_dx(ANDROID_ADAPTIVE))
 
 def favicon_svg():
     """Violet tile + flat white P: legible at 16 px on light and dark tabs alike."""
@@ -145,7 +146,7 @@ def web():
     for s in (16, 32, 48):
         render(favicon_svg(), os.path.join(TMP, f"fav{s}.png"), s, s)
     subprocess.run(["magick", *[os.path.join(TMP, f"fav{s}.png") for s in (16, 32, 48)], os.path.join(pub, "favicon.ico")], check=True)
-    render(app_icon(), os.path.join(pub, "apple-touch-icon.png"), 180, 180, flatten=S["indigo"]["950"])
+    render(app_icon(), os.path.join(pub, "apple-touch-icon.png"), 180, 180, flatten=S["violet"]["600"])
     render(app_icon(), os.path.join(pub, "icon-192.png"), 192, 192)
     render(app_icon(), os.path.join(pub, "icon-512.png"), 512, 512)
     render(maskable(), os.path.join(pub, "icon-maskable-512.png"), 512, 512)

@@ -39,6 +39,8 @@ jobs:
           SITE_URL: ${{ env.SITE_URL }}
       - name: Build the blog (published posts only; drafts stay out)
         run: node apps/site/scripts/build-blog.mjs
+      - name: Prerender the header and footer into every page
+        run: node apps/site/scripts/prerender-chrome.mjs
       - name: Package
         run: |
           # Drafts and tooling stay out of the public site; the docs go in at /docs.
@@ -49,7 +51,7 @@ jobs:
           # a version in the URL makes every deploy visible at once.
           v="${GITHUB_SHA::8}"
           find out -maxdepth 3 -name '*.html' -not -path 'out/docs/*' -exec \
-            sed -i -E "s#(assets/(site\.css|site\.js|seq\.js|faro\.js))\"#\1?v=$v\"#g" {} +
+            sed -i -E "s#(assets/(site\.css|site\.js|chrome\.js|seq\.js|faro\.js))\"#\1?v=$v\"#g" {} +
           tar -czf www.tgz -C out .
       - uses: actions/upload-artifact@v4
         with:

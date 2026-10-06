@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-root="../">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ · Poweur</title>
+  <meta name="description" content="Honest answers about Poweur: how it compares with email, Matrix, Nostr, Bluesky and Solid, who holds the keys, what happens if poweur.net disappears, and how it makes money.">
+  <meta name="theme-color" content="#07060B">
+  <meta name="color-scheme" content="dark">
+  <style>html{background:#07060B;color:#F4F3F8}#nav:empty{min-height:65px}</style>
+  <link rel="canonical" href="https://www.poweur.org/faq/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Poweur">
+  <meta property="og:url" content="https://www.poweur.org/faq/">
+  <meta property="og:title" content="FAQ · Poweur">
+  <meta property="og:description" content="Honest answers about Poweur: how it compares with email, Matrix, Nostr, Bluesky and Solid, who holds the keys, what happens if poweur.net disappears, and how it makes money.">
+  <meta property="og:image" content="https://www.poweur.org/assets/brand/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="apple-touch-icon" href="../assets/brand/apple-touch-icon.png">
+  <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="../assets/fonts/sora-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="../assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/faro.js" defer></script>
+</head>
+<body>
+<header id="nav"></header>
+
+<main>
+  <section class="page-hero">
+    <div class="wrap legal-wrap">
+      <div class="eyebrow">Questions</div>
+      <h1 class="h2 gradient-text">FAQ</h1>
+      <p class="legal-meta">Answers to what people ask first. Updated 5 October 2026.</p>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap legal-wrap prose">
+      <div class="summary">
+        <p><strong>The short version</strong></p>
+        <ul>
+          <li>Poweur gives you one open ID, a readable name such as <code>alice.poweur.net</code> or a name on your own domain, backed by keys that stay on your devices. It signs you in to apps, carries end-to-end encrypted messages, and holds files you choose to share.</li>
+          <li>It is open source and pre-1.0. It works today, it has not had an external security review, and it is not a finished ecosystem.</li>
+          <li>A hosted name depends on the domain's operator. A name on your own domain is yours.</li>
+        </ul>
+      </div>
+
+      <h2 id="basics">The basics</h2>
+
+      <h3 id="what">What is Poweur?</h3>
+      <p>An open identity, messaging and data-sharing layer. A Poweur ID is a name that is at once an identity (keys that sign things), an address (people, apps and agents can send it end-to-end encrypted messages) and a home for files you can share with other IDs. Apps can accept it as a login. Anyone can run a relay, host IDs on their own domain, or build on the same pieces. The <a href="../blog/introducing-poweur-id/">introduction</a> tells the story; the <a href="/docs/">documentation</a> has the details.</p>
+
+      <h3 id="status">How finished is it?</h3>
+      <p>Pre-1.0. Identity, messaging, sharing and sign-in work end to end, with a web app, a CLI and a TypeScript SDK; mobile apps are in beta preparation. The broader app ecosystem, the email bridge and collaborative spaces are on the <a href="https://github.com/romanmandryk/poweur/tree/master/epics">roadmap</a>, not shipped. Expect rough edges and tell us about them in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
+
+      <h3 id="try">How do I try it?</h3>
+      <p>Claim a free name in the <a href="https://poweur.net/app/">web app</a>, then <a href="../#try">message the demo bot and sign the guestbook</a>. Developers can start with <code>npm i @poweur/client</code>.</p>
+
+      <h2 id="why">Why not something else?</h2>
+
+      <h3 id="email">Why not email?</h3>
+      <p>Email proved that people on different providers can reach each other, and Poweur borrows that idea. But an email address does not prove who sent a message, messages are not encrypted by default, spam is the default state, and the address is not a login or a place for files. A Poweur ID is built so that a sender is verifiable, content is encrypted end to end, and the same name also signs you in and holds data. An email bridge is planned, not built.</p>
+
+      <h3 id="matrix">Why not Matrix?</h3>
+      <p>Matrix is a federated chat network: you have an account on a homeserver and talk in rooms. Poweur is not a chat network; it is an identity first. The name and keys are what you own, messaging is one thing you can do with them, and sign-in and files use the same identity. They can coexist, and a Poweur ID could be used to sign in to a Matrix service.</p>
+
+      <h3 id="nostr">Why not Nostr?</h3>
+      <p>The philosophy overlaps: keys you control, relays you can choose. The differences are practical. A Poweur ID is a readable name backed by a domain rather than a raw public key, keys can be rotated and recovered, each device holds its own key, messages are end-to-end encrypted by default, and there is an encrypted drive and a sign-in protocol. Nostr is built around public notes; Poweur is built around private messages and shared files.</p>
+
+      <h3 id="bluesky">Why not Bluesky or the AT Protocol?</h3>
+      <p>Bluesky shows that a domain name can be a handle, and that idea is in Poweur too. The AT Protocol is a public social network. Poweur is private by default: encrypted messages, files you share with chosen IDs, and sign-in for other apps. It is not trying to be a social feed.</p>
+
+      <h3 id="solid">Why not Solid?</h3>
+      <p>Solid is Poweur's closest relative, and the two share a lot: you own your identity, your data lives in a store you control, and apps ask for access instead of keeping their own copy. They may turn out to be partly compatible. Two differences matter.</p>
+      <ul>
+        <li><strong>Authentication.</strong> Solid sign-in leans on an OpenID provider you choose. With Poweur, ID owners authenticate themselves with passkeys or device keystores, and decrypt their own data with those same keys.</li>
+        <li><strong>Who can read your data.</strong> A Solid pod server has to read your data to enforce who may access it. A Poweur relay only sees metadata (who, when, how big, who a folder is shared with); file contents and names are encrypted on your device. That makes Poweur a better fit for private, personal data, where even the operator should not be able to read it.</li>
+      </ul>
+      <p>If Solid fits your project better, use it.</p>
+
+      <h2 id="trust">Trust, keys and privacy</h2>
+
+      <h3 id="keys">Who holds the keys?</h3>
+      <p>You do. Your identity keys are created on your device and wrapped by a secret only your passkey (or the phone's secure storage) can produce. For convenience the relay keeps an encrypted copy of that wrapped key, which lets a new device or a cleared browser be restored, but it cannot open it. You can also keep a recovery kit that rebuilds the keys yourself. Poweur cannot reset your password, because there is none, and cannot recover an ID for which you hold neither a passkey nor a kit. See the <a href="/docs/security/key-management">key management</a> page.</p>
+
+      <h3 id="read">Can Poweur read my messages or files?</h3>
+      <p>Not the content. Messages are signed and end-to-end encrypted, and file contents and names in your private drive are encrypted on your device. The relay still sees metadata: who messages whom and when, message and file sizes, how folders nest, and who a folder is shared with. Folders you make public are readable by anyone with the address. The <a href="../threat-model/">threat model</a> lists exactly what each party can and cannot see.</p>
+
+      <h3 id="disappear">What happens if poweur.net disappears?</h3>
+      <p>Your keys and a recovery kit are yours, so you can export your data and move. But a name under <code>poweur.net</code> belongs to the domain, so if we vanished, that name would go with the domain. A name on your own domain does not depend on us at all: you can point it at any relay, including one you run. If a name matters to you for the long term, use your own domain.</p>
+
+      <h3 id="prf">Why do I need a passkey with PRF, and what works?</h3>
+      <p>On the web, your keys are protected by a secret your authenticator derives (the WebAuthn <code>PRF</code> extension). That is what lets a browser protect a key without a password and lets the relay hold only ciphertext. An authenticator that cannot produce the PRF secret is refused rather than silently weakened.</p>
+      <p><strong>Tested and working:</strong> Chrome, Firefox and Safari on macOS, using the built-in macOS passkey keystore (iCloud Keychain, with Touch ID). Security keys that implement PRF, and Google Password Manager passkeys, should work too. <strong>Does not work:</strong> Bitwarden's passkeys, because they do not provide PRF. If your authenticator cannot, use a platform passkey, the mobile app or the CLI. Tell us what works and what fails on your browser and device in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
+
+      <h3 id="audit">Is it audited?</h3>
+      <p>No. There has been no external security review yet. The cryptography uses standard primitives (Ed25519, X25519, ChaCha20-Poly1305, HKDF), the Go and TypeScript implementations are checked against shared test vectors, and everything is open source so you can read it. Please do not treat an unaudited pre-1.0 system as a vault for secrets that would be dangerous to lose. To report a vulnerability, use the <a href="https://github.com/romanmandryk/poweur/security/advisories/new">private advisory form</a> or <code>info@poweur.org</code>; see <a href="../legal/#security">security</a>.</p>
+
+      <h3 id="signin">What does an app learn when I sign in with my ID?</h3>
+      <p>Your ID, and your name and photo only if you allow it. No password and no access to your messages or files. Every request shows you which app is asking and what it would see, and you can revoke an app later. The <a href="https://guestbook.poweur.net/">guestbook</a> is a live example, and <a href="/docs/auth/add-sign-in">adding it to your own site</a> takes one verification call.</p>
+
+      <h3 id="spam">What about spam and abuse?</h3>
+      <p>Each ID sets who may message it: contacts only, contact requests, or open with proof of work for strangers. You can block people, relays rate-limit senders, and the operator of a relay can suspend IDs it hosts. Report abuse of poweur.net to <code>info@poweur.org</code>.</p>
+
+      <h2 id="running">Running it</h2>
+
+      <h3 id="own-domain">Can I use my own domain?</h3>
+      <p>Yes. Run a relay for your domain today, following the <a href="/docs/relay/self-hosting">self-hosting guide</a>. Hosting your own domain for you is planned, not available yet.</p>
+
+      <h3 id="relay">How do I run my own relay?</h3>
+      <p>One Go binary or container, with a domain and HTTPS. The <a href="/docs/relay/self-hosting">guide</a> walks through it. People on different relays can still message each other.</p>
+
+      <h3 id="agents">What about AI agents?</h3>
+      <p>An agent can have an ID of its own and work with files through the CLI or the SDK, with access limited to what you share. Today you can give an agent an ID, message it, and let it read and write shared files. Finer-grained grants and an app ecosystem built around them are still ahead. See <a href="../#agents">agents</a>.</p>
+
+      <h2 id="project">The project</h2>
+
+      <h3 id="money">How do you make money?</h3>
+      <p>Poweur is open source and free to self-host, and hosted names on poweur.net are free. Running servers costs money, so the plan is optional paid plans for things like extra storage and hosting your own domain, plus sponsorship for people who just want to help. What stays free: the ID itself, recovery, end-to-end messaging, sign-in and exporting your data.</p>
+
+      <h3 id="who">Who is behind it?</h3>
+      <p>Poweur is built and operated by Roman Mandryk (<a href="../legal/">legal details</a>). Contributions are welcome through the <a href="https://github.com/romanmandryk/poweur">repository</a>.</p>
+
+      <h3 id="license">What is the licence?</h3>
+      <p>The relay, web app and OAuth bridge are AGPL-3.0. The pieces others embed (the identity library, the TypeScript SDK, the CLI, the conventions and the documentation) are Apache-2.0. The names and logos are covered by a <a href="https://github.com/romanmandryk/poweur/blob/master/TRADEMARKS.md">trademark policy</a>.</p>
+
+      <h3 id="more">I have another question</h3>
+      <p>Ask in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>, or message <code>support.poweur.net</code> from the app, or write to <a href="mailto:info@poweur.org">info@poweur.org</a>.</p>
+
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+<script src="../assets/chrome.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

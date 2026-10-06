@@ -5,10 +5,11 @@
 //
 //   node apps/site/scripts/build-blog.mjs --drafts     # then serve apps/site, open /blog/
 //
-// Output: blog/index.html, blog/<slug>/index.html and cover.svg, blog/posts.json (the site's nav
-// shows a Blog link only when this file exists), blog/feed.xml, and, for published posts only,
-// the blog URLs in sitemap.xml. A build with no published post writes no blog at all.
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// Output: blog/index.html, blog/<slug>/index.html and cover.svg, blog/posts.json, blog/feed.xml,
+// and, for published posts only, the blog URLs in sitemap.xml. A build with no published post
+// writes no blog at all. The site's nav and footer link to /blog/ unconditionally (assets/site.js),
+// so keep at least one published post, or take those two links out (assets/chrome.js).
+import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -155,6 +156,8 @@ function page({ root, path, title, description, ogType, body, head = "" }) {
   <title>${escapeHtml(title)}</title>
   <meta name="description" content="${escapeHtml(description)}">
   <meta name="theme-color" content="#07060B">
+  <meta name="color-scheme" content="dark">
+  <style>html{background:#07060B;color:#F4F3F8}#nav:empty{min-height:65px}</style>
   <link rel="canonical" href="${url}">
   <meta property="og:type" content="${ogType}">
   <meta property="og:site_name" content="Poweur">
@@ -166,6 +169,8 @@ function page({ root, path, title, description, ogType, body, head = "" }) {
   <link rel="apple-touch-icon" href="${root}assets/brand/apple-touch-icon.png">
   <link rel="icon" href="${root}assets/brand/favicon.svg" type="image/svg+xml">
   <link rel="alternate" type="application/rss+xml" title="Poweur blog" href="${SITE_URL}/blog/feed.xml">
+  <link rel="preload" href="${root}assets/fonts/sora-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="${root}assets/fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="${root}assets/site.css">
 ${head}  <script src="${root}assets/faro.js" defer></script>
 </head>
@@ -177,6 +182,7 @@ ${body}
 </main>
 
 <footer id="footer"></footer>
+<script src="${root}assets/chrome.js"></script>
 <script src="${root}assets/site.js"></script>
 </body>
 </html>
@@ -273,7 +279,7 @@ export function loadPosts(dir, { drafts = false } = {}) {
     .sort((a, b) => String(b.meta.date).localeCompare(String(a.meta.date)));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const drafts = process.argv.includes("--drafts");
   const posts = loadPosts(join(site, "content", "blog"), { drafts });
   const outDir = join(site, "blog");

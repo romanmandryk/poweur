@@ -1,7 +1,7 @@
 # Poweur brand
 
-The brand in one line: **a black glass P on violet night**. The mark is always black
-(or white on dark). Colour comes from the ground it stands on, not from the mark itself.
+The brand in one line: **a black glass P on violet night**. The mark is black
+(or white on dark), and the app icon is the white P on violet. Colour comes from the ground it stands on, not from the mark itself.
 
 - Tokens: [`tokens.css`](tokens.css) (CSS custom properties) and [`tokens.json`](tokens.json)
 - Generator: [`palette.py`](palette.py) (`python3 palette.py` prints every scale and the contrast checks)
@@ -26,7 +26,8 @@ A **P** built from three pieces and a dot. Each piece is one pillar of Poweur:
 
 | Variant | File | Use |
 |---------|------|-----|
-| Black glass | `black-glass/p-black-glass.svg` | App icon, hero, splash, marketing: anywhere at 64 px or more |
+| **App icon** | `assets/icons/app-icon.svg` (full bleed) and `favicon.svg` (rounded) | The white flat P on violet-600. The icon everywhere something small and square is needed: web install icons, favicons, store listings, native launchers, avatars |
+| Black glass | `black-glass/p-black-glass.svg` | Hero, splash, marketing: anywhere at 64 px or more |
 | Black glass on glow | `black-glass/p-black-glass-on-glow.svg` | App icon tile, social cards |
 | Flat black | `flat/p-black.svg` | UI at small sizes (favicon, nav, 16–48 px), print, embossing |
 | Flat white | `flat/p-white.svg` | The same, on dark or brand-violet grounds |
