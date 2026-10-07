@@ -22,7 +22,7 @@
 | E22-T5 Cross-device QR journey | **done** | QR + match code + bound poll + initiator context; the QR is a short link (E08-T6) that a phone's own camera opens into a handoff page — no in-app scanner needed |
 | E22-T6 IndieAuth compatibility | **done** | URL clients, `me`, redeem at both endpoints, relay `Link` header; live third-party clients → T8 |
 | E22-T7 Optional push-to-approve delivery | **done** | `sys.auth.request` + `trusted_auth_services`; bridge sends via the CLI; Sign-in requests list in the app; background OS push waits on EPIC-019 |
-| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite, live IndieAuth clients, contacts open |
+| E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite (indieauth.rocks 72/0, indielogin.com passed), contacts open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 | E22-T10 Bridge UI: React, device-aware, fewer words | **done** | Go keeps routes and security; React renders each page's data; desktop leads with another device |
 
@@ -401,8 +401,7 @@ browser/QR login is unchanged.
       written up in the design doc under *Conformance and external review*
 - [x] Keycloak, Authentik, oauth2-proxy and Grafana recipes (untested against live products)
 - [x] Live oauth2-proxy, Keycloak and **Authentik** runs (opt-in Playwright specs, Docker)
-- [ ] Two independent IndieAuth clients live — **one done, one open**: the indieauth.rocks server suite signed `johnjohn.poweur.net` in on 5 Oct 2026 (discovery 16/17, sign-in, denial, cross-origin redirect refusal); it found four gaps, fixed in bridge 0.2.1: access token at `/token` for scoped codes, public revocation, listed cross-origin redirect URIs, the consent host. The rest of the suite is being re-run. Still open: indielogin.com and a hosted Micropub client. The well-known third-party checks
-      (indieauth.rocks, indielogin.com, hosted Micropub clients) fetch the client and the
+- [x] Two independent IndieAuth clients live (5 Oct 2026): the **indieauth.rocks** server suite signed `johnjohn.poweur.net` in and finished with **72 passed, 0 failed, 2 warnings, 10 skipped**. It found four gaps, fixed in bridge 0.2.1 (access token at `/token` for scoped codes, public revocation, listed cross-origin redirect URIs, the consent host). The warnings: S113 (revocation auth methods; fixed in 0.2.3: the metadata now lists only `none`) and S901 (the token endpoint answers plain HTTP: Cloudflare "Always Use HTTPS" for `oauth.poweur.org` is an operator setting). The skips: S209 (the suite's own `redirect.` host has an expired certificate), S421–S423 (the access token is opaque, not a JWT) and S501–S505, S603 (no refresh tokens are issued). **indielogin.com** signed `johnjohn.poweur.net` in the same day. Still open: a hosted Micropub client. The well-known third-party checks fetch the client and the
       authorization server over the public internet; now possible against `oauth.poweur.org`
 - [x] Production at **`https://oauth.poweur.org`** (bridge 0.1.4): its own Compose project in
       `/opt/apps/poweur-oauth`, deployed by `deploy-oauth.yml` only when the bridge's sources
