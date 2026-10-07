@@ -254,10 +254,7 @@
         state: enabled
 
     # ── 10-ssh. SSH: keys only ──────────────────────────────────────────────────
-    # The server address is public, and the log shows thousands of password guesses a day. No
-    # account here has a password, so this changes nothing for people who can log in today; it
-    # closes the door on guessing. Run it with a second SSH session open, as for any sshd change.
-
+    
     - name: SSH accepts keys only (no passwords, no X11, few tries)
       ansible.builtin.copy:
         dest: /etc/ssh/sshd_config.d/10-poweur-hardening.conf
