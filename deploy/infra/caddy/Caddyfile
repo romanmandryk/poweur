@@ -9,6 +9,11 @@
     }
 }
 
+# Sites of other stacks on this host. Each *.caddy file is one site block. No files means nothing is imported.
+# The owning stack validates its files with `caddy validate` before it reloads
+# Caddy, so a bad file there cannot break this config.
+import /etc/caddy-sites/*.caddy
+
 # RFC 9116 security contact for the hosted service, on the hosts people report
 # against (poweur.org serves the same file from apps/site/.well-known). Renew
 # Expires with the site's copy. Only the service's own names answer it, so an

@@ -18,6 +18,9 @@ services:
       # `git reset --hard`, and a single-file bind mount keeps showing the old
       # inode, so `caddy reload` silently kept the previous config.
       - ./caddy:/etc/caddy:ro
+      # Site blocks dropped here by other stacks on this host,
+      # imported by the Caddyfile. Outside ./caddy so `git reset --hard` ignores it.
+      - ${SITES_ROOT:-/opt/famooss/caddy}:/etc/caddy-sites:ro
       # Static website + docs, published by deploy-web.yml (outside the relay checkout,
       # so the relay deploy's `git reset --hard` never touches them).
       - ${WEB_ROOT:-/opt/apps/poweur-web}:/srv/web:ro
