@@ -36,18 +36,22 @@ type Event struct {
 	Action    string    `json:"action"`
 	// Detail refines an action with a value from a fixed, relay-defined set
 	// (message kind, settings field). Never derived from free-form input.
-	Detail       string     `json:"detail,omitempty"`
-	Outcome      string     `json:"outcome"`
-	ErrorCode    string     `json:"error_code,omitempty"`
-	Route        string     `json:"route,omitempty"`
-	Method       string     `json:"method,omitempty"`
-	Status       int        `json:"status,omitempty"`
-	DurationMS   float64    `json:"duration_ms,omitempty"`
-	ActorID      string     `json:"actor_id,omitempty"`
-	IdentityMode string     `json:"identity_mode,omitempty"`
-	ClientIP     string     `json:"client_ip,omitempty"`
-	Stack        string     `json:"stack,omitempty"`
-	Level        slog.Level `json:"-"`
+	Detail       string  `json:"detail,omitempty"`
+	Outcome      string  `json:"outcome"`
+	ErrorCode    string  `json:"error_code,omitempty"`
+	Route        string  `json:"route,omitempty"`
+	Method       string  `json:"method,omitempty"`
+	Status       int     `json:"status,omitempty"`
+	DurationMS   float64 `json:"duration_ms,omitempty"`
+	ActorID      string  `json:"actor_id,omitempty"`
+	IdentityMode string  `json:"identity_mode,omitempty"`
+	ClientIP     string  `json:"client_ip,omitempty"`
+	// UserAgent and SessionHash are like ClientIP: kept only for identities that
+	// granted analytics consent, dropped for everyone else.
+	UserAgent   string     `json:"user_agent,omitempty"`
+	SessionHash string     `json:"session_hash,omitempty"`
+	Stack       string     `json:"stack,omitempty"`
+	Level       slog.Level `json:"-"`
 }
 
 type Runtime struct {
@@ -231,9 +235,20 @@ func (t *Runtime) sanitize(e Event) Event {
 		e.ClientIP = ""
 	}
 	if e.IdentityMode != "raw" {
-		e.ClientIP = ""
+		e.ClientIP, e.UserAgent, e.SessionHash = "", "", ""
 	}
 	return e
+}
+
+// SessionHash is a short keyed hash of a session id: enough to tell sessions
+// apart in logs without making the id (a bearer credential) recoverable.
+func (t *Runtime) SessionHash(id string) string {
+	if t == nil || id == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(t.cfg.HashKey))
+	_, _ = mac.Write([]byte("session\x00" + id))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 func (t *Runtime) Record(ctx context.Context, e Event, actor, ip string) {

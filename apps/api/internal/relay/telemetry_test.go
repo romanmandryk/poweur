@@ -87,3 +87,12 @@ func TestTelemetryReportsStorageFallback(t *testing.T) {
 		t.Fatal("storage fallback missing or leaked path")
 	}
 }
+
+func TestUserAgentIsBounded(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("User-Agent", "evil\r\n{\"x\":1}"+strings.Repeat("a", 500)+"é")
+	got := userAgent(r)
+	if len(got) != 200 || strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("unbounded user agent: %q", got)
+	}
+}

@@ -178,3 +178,19 @@ func TestSessionStoreDeleteMatching(t *testing.T) {
 		t.Fatalf("unknown identity removed %d", n)
 	}
 }
+
+func TestSessionStoreLiveIdentities(t *testing.T) {
+	s := NewSessionStore()
+	pub, _, _ := ed25519.GenerateKey(nil)
+	now := time.Now().UTC()
+	put := func(id, identity string, exp time.Duration) {
+		s.Put(Session{ID: id, Identity: identity, PublicKey: "k", PublicKeyBytes: pub, IssuedAt: now, ExpiresAt: now.Add(exp)})
+	}
+	put("1", "a.test", time.Hour)
+	put("2", "A.test", time.Hour) // second device, other spelling
+	put("3", "b.test", time.Hour)
+	put("4", "c.test", -time.Minute) // expired
+	if got := s.LiveIdentities(); got != 2 {
+		t.Fatalf("live identities = %d, want 2", got)
+	}
+}

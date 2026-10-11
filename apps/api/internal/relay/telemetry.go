@@ -80,6 +80,8 @@ func (s *Server) Close(ctx context.Context) error {
 
 type requestTelemetry struct {
 	ip      string
+	ua      string
+	session string
 	actor   string
 	direct  bool
 	action  string
@@ -94,6 +96,31 @@ func verifiedActor(r *http.Request, actor string) {
 		st.direct = true
 	}
 }
+
+// sessionIssued records the new session id so the session.create event can
+// carry its hash. Like the IP, the hash only reaches telemetry for consented
+// identities.
+func (s *Server) sessionIssued(r *http.Request, id string) {
+	if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
+		st.session = s.telemetry.SessionHash(id)
+	}
+}
+
+// userAgent bounds the header to printable ASCII so a client cannot inject
+// log structure or bloat events.
+func userAgent(r *http.Request) string {
+	ua := strings.Map(func(c rune) rune {
+		if c < 0x20 || c > 0x7e {
+			return -1
+		}
+		return c
+	}, r.UserAgent())
+	if len(ua) > 200 {
+		ua = ua[:200]
+	}
+	return ua
+}
+
 func requestAction(r *http.Request, action string) {
 	if st, ok := r.Context().Value(telemetryKey{}).(*requestTelemetry); ok {
 		st.action = action
@@ -119,14 +146,17 @@ func (s *Server) event(ctx context.Context, action, outcome string) {
 	s.eventDetail(ctx, action, "", outcome)
 }
 func (s *Server) eventDetail(ctx context.Context, action, detail, outcome string) {
-	actor, ip := "", ""
+	actor, ip, ua, sess := "", "", "", ""
 	if st, ok := ctx.Value(telemetryKey{}).(*requestTelemetry); ok {
 		actor = st.actor
 		if st.direct {
-			ip = st.ip
+			ip, ua = st.ip, st.ua
+			if action == "session.create" {
+				sess = st.session
+			}
 		}
 	}
-	s.telemetry.Record(ctx, telemetry.Event{Kind: "action", Action: action, Detail: detail, Outcome: outcome}, actor, ip)
+	s.telemetry.Record(ctx, telemetry.Event{Kind: "action", Action: action, Detail: detail, Outcome: outcome, UserAgent: ua, SessionHash: sess}, actor, ip)
 	if outcome == "failure" {
 		s.telemetry.Record(ctx, telemetry.Event{Kind: "diagnostic", Action: action, Outcome: outcome, ErrorCode: "operation_failed", Level: slog.LevelWarn}, actor, ip)
 	}
@@ -179,7 +209,7 @@ func (s *Server) instrument(mux *http.ServeMux, next http.Handler) http.Handler 
 		default:
 			method = "OTHER"
 		}
-		st := &requestTelemetry{action: routeActions[route], ip: s.telemetry.ClientIP(r)}
+		st := &requestTelemetry{action: routeActions[route], ip: s.telemetry.ClientIP(r), ua: userAgent(r)}
 		r = r.WithContext(context.WithValue(r.Context(), telemetryKey{}, st))
 		rw := &responseTelemetry{ResponseWriter: w, state: st}
 		defer func() {
@@ -211,11 +241,11 @@ func (s *Server) instrument(mux *http.ServeMux, next http.Handler) http.Handler 
 			} else if rw.status >= 400 {
 				outcome = "rejected"
 			}
-			ip := ""
+			ip, ua := "", ""
 			if st.direct {
-				ip = s.telemetry.ClientIP(r)
+				ip, ua = s.telemetry.ClientIP(r), st.ua
 			}
-			s.telemetry.Record(context.Background(), telemetry.Event{Kind: "request", Action: "http.request", Outcome: outcome, Route: route, Method: method, Status: rw.status, ErrorCode: rw.code, DurationMS: float64(time.Since(start).Microseconds()) / 1000}, st.actor, ip)
+			s.telemetry.Record(context.Background(), telemetry.Event{Kind: "request", Action: "http.request", Outcome: outcome, Route: route, Method: method, Status: rw.status, ErrorCode: rw.code, DurationMS: float64(time.Since(start).Microseconds()) / 1000, UserAgent: ua}, st.actor, ip)
 			if st.action != "" {
 				s.eventDetail(r.Context(), st.action, st.detail, outcome)
 			}
@@ -243,6 +273,7 @@ func (s *Server) sampleTelemetry() {
 	ids := s.identities.Names()
 	s.telemetry.Gauge(context.Background(), "hosted_identities", int64(len(ids)))
 	s.telemetry.Gauge(context.Background(), "inbox_depth", s.inbox.Depth())
+	s.telemetry.Gauge(context.Background(), "signed_in_identities", int64(s.sessions.LiveIdentities()))
 	for state, n := range adoptionCounts(ids, s.readSysDoc) {
 		s.telemetry.Gauge(context.Background(), state, n)
 	}

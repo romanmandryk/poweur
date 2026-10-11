@@ -121,6 +121,22 @@ func (s *SessionStore) ListForIdentity(identity string) []Session {
 	return result
 }
 
+// LiveIdentities counts distinct identities (case-insensitively) holding at
+// least one unexpired session: who is signed in, however many devices or
+// renewals they have.
+func (s *SessionStore) LiveIdentities() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	seen := make(map[string]struct{})
+	for _, session := range s.sessions {
+		if !now.After(session.ExpiresAt) {
+			seen[strings.ToLower(session.Identity)] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
 func (s *SessionStore) Prune() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

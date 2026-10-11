@@ -27,7 +27,7 @@ under `apps/docs/docs/relay/`. The runbook for the hosted service at poweur.net 
 
 `digest/poweur-digest.sh` sends one [ntfy](https://ntfy.sh) push at 08:00 Lisbon time
 (`poweur-digest.timer`) with the total hosted IDs and what grew in the last 24h: new IDs,
-messages, relay sign-ins (CLI and web sessions together), OAuth sign-ins, guestbook sign-ins and
+messages, relay sign-ins (distinct IDs signed in, not session renewals, so they never trigger a push alone), OAuth sign-ins, guestbook sign-ins and
 entries, and hello-bot messages. It stays quiet on days nothing grew. Set `ntfy_topic` in
 `ansible/secrets.yml` (the topic name is the secret) and run the playbook, or install by hand:
 copy the script to `/usr/local/sbin/poweur-digest`, the unit files to `/etc/systemd/system/`, put

@@ -13,6 +13,7 @@ const dir = mkdtempSync(join(tmpdir(), 'digest-'));
 const prom = join(dir, 'prom.sh');
 writeFileSync(prom, `#!/usr/bin/env bash
 case "$1" in
+  *signed_in_identities*) v=\${SIGNED:-0} ;;
   *hosted_identities*) v=\${IDS:-0} ;;
   *registration.create*) v=\${NEW:-0} ;;
   *"[30d]"*) v=\${MONTH:-0} ;;
@@ -37,9 +38,16 @@ test('dry run lists every metric with totals and today', () => {
   const r = run({ IDS: '1204', NEW: '7', DAY: '3', MONTH: '12345' }, '--dry-run');
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^IDs: 1,204 total, \+7 today$/m);
-  for (const name of ['Messages', 'Relay sign-ins \\(CLI \\+ web\\)', 'OAuth sign-ins', 'Guestbook sign-ins', 'Guestbook entries', 'Hello bot messages']) {
+  for (const name of ['Messages', 'OAuth sign-ins', 'Guestbook sign-ins', 'Guestbook entries', 'Hello bot messages']) {
     assert.match(r.stdout, new RegExp(`^${name}: \\+3 today, 12,345 in 30d$`, 'm'));
   }
+});
+
+test('relay sign-ins are distinct IDs and renewals alone do not trigger a push', () => {
+  let r = run({ IDS: '12', SIGNED: '3' }, '--dry-run');
+  assert.match(r.stdout, /^Relay sign-ins \(distinct IDs\): 3 today, peak 3 in 30d$/m);
+  r = run({ IDS: '12', SIGNED: '3' });
+  assert.match(r.stdout, /nothing grew/);
 });
 
 test('stays quiet when nothing grew', () => {

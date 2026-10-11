@@ -155,7 +155,8 @@ rejections and unmatched routes. Add domain hooks for business outcomes and back
 
 Keep a short action inventory in the ops docs, extended when endpoints are added. Suggested
 record fields: `timestamp`, `kind`, `action`, `outcome`, `error_code`, `route`, `duration_ms`,
-`actor_id`, `identity_mode`, optional `client_ip`, and build version. Unknown names/reasons map
+`actor_id`, `identity_mode`, optional `client_ip`, `user_agent` and `session_hash` (the last three
+only for identities that granted analytics consent), and build version. Unknown names/reasons map
 to bounded values. Use static error code + sanitized stack frames to group errors by release.
 Expected policy/PoW/auth rejections are action outcomes, not automatic server errors.
 

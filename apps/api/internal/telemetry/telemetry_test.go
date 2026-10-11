@@ -337,3 +337,33 @@ func TestFromEnvReadsSentryDSN(t *testing.T) {
 		t.Fatal("SENTRY_DSN not loaded")
 	}
 }
+
+func TestUserAgentAndSessionHashOnlyForConsentedActors(t *testing.T) {
+	var consent atomic.Bool
+	var buf bytes.Buffer
+	r, err := New(context.Background(), Config{HashKey: strings.Repeat("k", 32)}, "test", func(string) bool { return consent.Load() }, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := r.SessionHash("sess_secret")
+	if len(hash) != 16 || strings.Contains(hash, "secret") || hash == r.SessionHash("sess_other") || r.SessionHash("") != "" {
+		t.Fatalf("bad session hash %q", hash)
+	}
+	e := Event{Kind: "action", Action: "session.create", Outcome: "success", UserAgent: "poweur-cli/1.0", SessionHash: hash}
+
+	consent.Store(true)
+	r.Record(context.Background(), e, "alice.example", "192.0.2.1")
+	line := buf.String()
+	if !strings.Contains(line, `"user_agent":"poweur-cli/1.0"`) || !strings.Contains(line, hash) {
+		t.Fatalf("consented event lost fields: %s", line)
+	}
+
+	buf.Reset()
+	consent.Store(false)
+	r.Record(context.Background(), e, "alice.example", "192.0.2.1")
+	r.Record(context.Background(), e, "", "")
+	line = buf.String()
+	if strings.Contains(line, "user_agent") || strings.Contains(line, "poweur-cli") || strings.Contains(line, hash) || strings.Contains(line, "session_hash") {
+		t.Fatalf("non-consented event leaked fields: %s", line)
+	}
+}

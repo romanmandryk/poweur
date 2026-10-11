@@ -124,6 +124,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		IdentitySignature: req.IdentitySignature,
 	}
 	s.sessions.Put(session)
+	s.sessionIssued(r, sessionID)
 
 	s.touchDevice(r.Context(), req.Identity, obs)
 

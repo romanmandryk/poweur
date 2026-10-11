@@ -57,7 +57,6 @@ ids_new=$(value "$(inc "poweur_actions_total{action=\"registration.create\",outc
 # as far back as Prometheus keeps data (counters restart at 0 with the apps).
 series=(
   "Messages|poweur_actions_total{action=~\"message.submit|message.anonymous\",outcome=\"success\",$prod}"
-  "Relay sign-ins (CLI + web)|poweur_actions_total{action=\"session.create\",outcome=\"success\",$prod}"
   "OAuth sign-ins|poweur_oauth_events_total{event=\"authorize.code_issued\"}"
   "Guestbook sign-ins|poweur_guestbook_signins_total{result=\"completed\",$prod}"
   "Guestbook entries|poweur_guestbook_posts_total{result=\"created\",$prod}"
@@ -74,6 +73,14 @@ for s in "${series[@]}"; do
   grew=$((grew + d))
   lines+=("$name: +$(commas "$d") today, $(commas "$m") in 30d")
 done
+
+# Relay sign-ins are session renewals (a session lasts at most 24h, and every
+# tab or device renews its own), so they say nothing about growth. Report how
+# many distinct IDs were signed in instead, from the relay's signed_in_identities
+# gauge, and keep it out of "grew" so renewals alone never trigger a push.
+signed_day=$(value "max_over_time(poweur_state{state=\"signed_in_identities\",$prod}[24h])")
+signed_peak=$(value "max_over_time(poweur_state{state=\"signed_in_identities\",$prod}[30d])")
+lines+=("Relay sign-ins (distinct IDs): $(commas "$signed_day") today, peak $(commas "$signed_peak") in 30d")
 
 msg=$(printf '%s\n' "${lines[@]}")
 
