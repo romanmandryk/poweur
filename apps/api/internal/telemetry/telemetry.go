@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/getsentry/sentry-go"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -69,7 +68,6 @@ type Runtime struct {
 	closed       bool
 	dropped      atomic.Int64
 	http         *http.Client
-	sentry       *sentry.Client
 	lp           *sdklog.LoggerProvider
 	mp           *sdkmetric.MeterProvider
 	logger       logapi.Logger
@@ -98,26 +96,12 @@ func New(ctx context.Context, c Config, version string, consent func(string) boo
 		t.cfg.HashKey = hex.EncodeToString(b)
 	}
 	sinks := c.otlpSinks()
-	sentryClient, err := initSentry(c, version)
-	if err != nil {
-		return nil, err
-	}
-	t.sentry = sentryClient
-	if len(sinks) == 0 && c.UptimeURL == "" && t.sentry == nil {
-		return t, nil
-	}
-	if c.UptimeURL == "" && len(sinks) == 0 {
+	if len(sinks) == 0 {
 		return t, nil
 	}
 	client := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	t.http = client
 	t.exportCtx, t.exportCancel = context.WithCancel(context.Background())
-	if c.UptimeURL != "" {
-		go t.uptimeLoop()
-	}
-	if len(sinks) == 0 {
-		return t, nil
-	}
 	var logExporters []sdklog.Exporter
 	var metricReaders []sdkmetric.Option
 	env := c.Environment
@@ -268,7 +252,6 @@ func (t *Runtime) Record(ctx context.Context, e Event, actor, ip string) {
 		}
 	}
 	e = t.sanitize(e)
-	t.reportError(e)
 	// The JSON event is the same privacy-filtered body in stdout and OTLP.
 	b, _ := json.Marshal(e)
 	if e.Kind == "action" || e.Kind == "request" {
@@ -381,40 +364,6 @@ func (t *Runtime) Gauge(ctx context.Context, name string, n int64) {
 	}
 }
 
-func (t *Runtime) uptimeLoop() {
-	t.pingUptime()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			t.pingUptime()
-		case <-t.exportCtx.Done():
-			return
-		}
-	}
-}
-
-func (t *Runtime) pingUptime() {
-	if t.http == nil || t.cfg.UptimeURL == "" {
-		return
-	}
-	req, err := http.NewRequestWithContext(t.exportCtx, http.MethodGet, t.cfg.UptimeURL, nil)
-	if err != nil {
-		return
-	}
-	resp, err := t.http.Do(req)
-	if err != nil {
-		t.local.Warn("uptime heartbeat failed", "error_code", "uptime_ping_failed")
-		return
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		t.local.Warn("uptime heartbeat failed", "error_code", "uptime_ping_failed")
-	}
-}
-
 func (t *Runtime) Shutdown(ctx context.Context) error {
 	if t == nil {
 		return nil
@@ -423,7 +372,6 @@ func (t *Runtime) Shutdown(ctx context.Context) error {
 		if t.exportCancel != nil {
 			t.exportCancel()
 		}
-		t.flushSentry()
 		return nil
 	}
 	t.once.Do(func() { t.mu.Lock(); t.closed = true; close(t.stop); t.mu.Unlock() })
@@ -432,11 +380,9 @@ func (t *Runtime) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		t.exportCancel()
 		<-t.done
-		t.flushSentry()
 		return errors.Join(ctx.Err(), t.lp.Shutdown(ctx), t.mp.Shutdown(ctx))
 	}
 	t.exportCancel()
-	t.flushSentry()
 	return errors.Join(t.lp.Shutdown(ctx), t.mp.Shutdown(ctx))
 }
 

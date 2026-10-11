@@ -10,46 +10,29 @@ import (
 	"net/url"
 	"os"
 	"strings"
-
-	"github.com/getsentry/sentry-go"
 )
 
 type Config struct {
 	Endpoint, Protocol, Headers, HashKey, Level, Environment string
-	// SecondaryEndpoint is an extra OTLP/HTTP sink (Grafana stays on Endpoint).
-	// Point it at any OTLP intake — Better Stack collector, another vendor, a
-	// second Alloy — and unset it to stop dual-export without code changes.
-	SecondaryEndpoint, SecondaryHeaders string
-	// UptimeURL is an optional GET heartbeat (Better Stack Heartbeat, or any
-	// URL). Empty disables it. Grafana blackbox remains the in-stack probe.
-	UptimeURL string
 	// BrowserFaroURL is where the web app sends Grafana Faro telemetry, usually
 	// the same-origin path "/faro/collect" that Caddy routes to Alloy. Empty
 	// keeps GET /app/observability.json at {"providers":[]}: the SPA sends
 	// nothing.
 	BrowserFaroURL string
-	// SentryDSN is a Sentry-compatible ingest URL (Better Stack Errors). Empty
-	// disables the SDK. The DSN includes a public key in the URL userinfo.
-	SentryDSN       string
-	TrustedProxies  []netip.Prefix
-	AllowHTTP       bool // explicit development/isolated Docker network override
-	sentryTransport sentry.Transport
+	TrustedProxies []netip.Prefix
+	AllowHTTP      bool // explicit development/isolated Docker network override
 }
 
 func FromEnv() Config {
 	return Config{
-		Endpoint:          os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		Protocol:          os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
-		Headers:           os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
-		SecondaryEndpoint: os.Getenv("TELEMETRY_OTLP_SECONDARY_ENDPOINT"),
-		SecondaryHeaders:  os.Getenv("TELEMETRY_OTLP_SECONDARY_HEADERS"),
-		UptimeURL:         strings.TrimSpace(os.Getenv("TELEMETRY_UPTIME_URL")),
-		BrowserFaroURL:    strings.TrimSpace(os.Getenv("FARO_COLLECT_URL")),
-		SentryDSN:         strings.TrimSpace(os.Getenv("SENTRY_DSN")),
-		HashKey:           os.Getenv("TELEMETRY_HASH_KEY"),
-		Level:             os.Getenv("LOG_LEVEL"),
-		Environment:       os.Getenv("TELEMETRY_ENVIRONMENT"),
-		AllowHTTP:         os.Getenv("TELEMETRY_ALLOW_HTTP") == "1",
+		Endpoint:       os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		Protocol:       os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
+		Headers:        os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
+		BrowserFaroURL: strings.TrimSpace(os.Getenv("FARO_COLLECT_URL")),
+		HashKey:        os.Getenv("TELEMETRY_HASH_KEY"),
+		Level:          os.Getenv("LOG_LEVEL"),
+		Environment:    os.Getenv("TELEMETRY_ENVIRONMENT"),
+		AllowHTTP:      os.Getenv("TELEMETRY_ALLOW_HTTP") == "1",
 	}
 }
 
@@ -61,9 +44,6 @@ func (c Config) otlpSinks() []otlpSink {
 	var sinks []otlpSink
 	if c.Endpoint != "" {
 		sinks = append(sinks, otlpSink{name: "otlp", endpoint: c.Endpoint, headers: c.Headers})
-	}
-	if c.SecondaryEndpoint != "" {
-		sinks = append(sinks, otlpSink{name: "otlp-secondary", endpoint: c.SecondaryEndpoint, headers: c.SecondaryHeaders})
 	}
 	return sinks
 }
@@ -120,27 +100,13 @@ func (c Config) Validate() error {
 	if err := validateOTLPEndpoint("OTEL_EXPORTER_OTLP_ENDPOINT", c.Endpoint, c.AllowHTTP); err != nil {
 		return err
 	}
-	if err := validateOTLPEndpoint("TELEMETRY_OTLP_SECONDARY_ENDPOINT", c.SecondaryEndpoint, c.AllowHTTP); err != nil {
-		return err
-	}
-	if c.UptimeURL != "" {
-		if err := validateUptimeURL(c.UptimeURL, c.AllowHTTP); err != nil {
-			return err
-		}
-	}
-	if err := validateSentryDSN(c.SentryDSN, c.AllowHTTP); err != nil {
-		return err
-	}
 	if c.Protocol != "" && c.Protocol != "http/protobuf" {
 		return fmt.Errorf("OTLP protocol must be http/protobuf")
 	}
 	if len(c.otlpSinks()) > 0 && len(c.HashKey) < 32 {
 		return fmt.Errorf("TELEMETRY_HASH_KEY must contain at least 32 bytes")
 	}
-	if _, err := parseHeaders(c.Headers); err != nil {
-		return err
-	}
-	_, err := parseHeaders(c.SecondaryHeaders)
+	_, err := parseHeaders(c.Headers)
 	return err
 }
 
@@ -151,25 +117,6 @@ func validateOTLPEndpoint(name, endpoint string, allowHTTP bool) error {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && allowHTTP)) {
 		return fmt.Errorf("invalid %s: HTTPS base URL required (TELEMETRY_ALLOW_HTTP=1 for isolated development)", name)
-	}
-	return nil
-}
-
-func validateUptimeURL(endpoint string, allowHTTP bool) error {
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && allowHTTP)) {
-		return fmt.Errorf("invalid TELEMETRY_UPTIME_URL")
-	}
-	return nil
-}
-
-func validateSentryDSN(dsn string, allowHTTP bool) error {
-	if dsn == "" {
-		return nil
-	}
-	u, err := url.Parse(dsn)
-	if err != nil || u.Host == "" || u.User == nil || u.User.Username() == "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && allowHTTP)) {
-		return fmt.Errorf("invalid SENTRY_DSN")
 	}
 	return nil
 }

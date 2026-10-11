@@ -48,7 +48,7 @@ sessions (memory-only by design). Never run `docker compose down -v` in producti
    sudo poweur-backup snapshots
    ```
 
-6. **Alerting:** create a heartbeat check (Better Stack Heartbeats, healthchecks.io, …)
+6. **Alerting:** create a heartbeat check (healthchecks.io or similar)
    that expects one ping a day with a few hours' grace, and put its URL in
    `backup_heartbeat_url`. Every successful night pings it and every failure pings
    `<url>/fail`, so both a failed and a missed night alert you. Logs:

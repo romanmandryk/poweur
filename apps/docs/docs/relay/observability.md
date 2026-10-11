@@ -9,22 +9,16 @@ The relay optionally pushes OTLP/HTTP protobuf logs and metrics to an independen
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | Primary OTLP sink (Grafana Alloy); base URL receiving `/v1/logs` and `/v1/metrics` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | Only supported protocol |
 | `OTEL_EXPORTER_OTLP_HEADERS` | empty | Comma-separated header=value pairs; percent-encode reserved characters |
-| `TELEMETRY_OTLP_SECONDARY_ENDPOINT` | empty | Optional second OTLP sink (Better Stack collector, another vendor). Same privacy filter as the primary. Unset to stop dual-export |
-| `TELEMETRY_OTLP_SECONDARY_HEADERS` | empty | Headers for the secondary sink |
-| `TELEMETRY_UPTIME_URL` | empty | Optional GET heartbeat (Better Stack Heartbeat URL, or any probe URL) |
 | `FARO_COLLECT_URL` | empty | Where the web app sends Grafana Faro telemetry, usually the same-origin path `/faro/collect` routed to Alloy's `faro.receiver`; served at `GET /app/observability.json`. Empty sends nothing |
-| `SENTRY_DSN` | empty | Sentry-compatible DSN for Better Stack Errors (`sentry-go`). Empty disables the SDK. Unset to stop Go error tracking |
 | `TELEMETRY_HASH_KEY` | empty | Required when exporting; at least 32 bytes, generated independently of identity keys |
 | `TELEMETRY_ALLOW_HTTP` | `0` | Explicit override for an isolated same-VM bridge or tests; use HTTPS remotely |
 | `TELEMETRY_TRUSTED_PROXIES` | empty | Comma-separated CIDRs; trust X-Forwarded-For only through these peers |
 | `TELEMETRY_ENVIRONMENT` | `production` | `production`, `development`, or `test`; public queries select production |
 | `LOG_LEVEL` | `info` | Diagnostic threshold; structured business events still export at higher levels |
 
-Empty primary and secondary endpoints disable outbound OTLP, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
+An empty endpoint disables outbound OTLP, including signal-specific SDK environment overrides. Local JSON logging remains. Without a configured hash key, local-only pseudonyms use a random process key. Never put credentials in the endpoint URL. Delivery is bounded and best effort; collector failure does not change request success. Queue overflow/export loss is counted. No tracing or user-level metrics labels are enabled.
 
 The web client (and the Capacitor shell wrapping the same bundle) reads `GET /app/observability.json` (no-store). A `faro` provider there turns on browser telemetry through `@poweur/faro`, a thin layer over the [Grafana Faro](https://grafana.com/oss/faro/) web SDK, sent first-party: to the page's own origin, or to the relay from the shell. It has two tiers, like the relay's logs. **Always:** screen names (never URLs: an identity host is itself an ID), named UI actions (`unlock`, `send`, `open-thread`, …), unhandled errors and web vitals, with every Poweur ID, domain and email replaced by `<id>` / `<email>`, URL queries and fragments removed, no user-agent string, and nothing stored in the browser (session tracking, user-action, navigation, resource-timing and console instrumentations are off). **After the unlocked identity opts in** (Settings → Diagnostics → "Include my ID", the same per-identity preference below): the signals carry the identity; queries and fragments are still removed. Opting out, locking or switching identity goes back to anonymous at once. Alloy redacts `*.poweur.net` again from entries without a `user_id`. Native iOS/Android process crashes are outside this. Unset `FARO_COLLECT_URL` to stop it.
-
-Relay panics and HTTP 5xx are also sent to Better Stack Errors through the [Sentry SDK](https://betterstack.com/docs/errors/collecting-errors/sentry-sdk/) (`SENTRY_DSN`). Events carry route templates and static error codes, not request bodies, identities or recovered panic values. Tracing is off (`TracesSampleRate` 0). Unset `SENTRY_DSN` to stop Go error ingest.
 
 ## Per-identity preference
 

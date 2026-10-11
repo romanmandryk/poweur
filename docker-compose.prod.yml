@@ -16,13 +16,9 @@ services:
       TELEMETRY_HASH_KEY: ${TELEMETRY_HASH_KEY:-}
       TELEMETRY_ALLOW_HTTP: ${TELEMETRY_ALLOW_HTTP:-0}
       TELEMETRY_TRUSTED_PROXIES: ${TELEMETRY_TRUSTED_PROXIES:-}
-      TELEMETRY_OTLP_SECONDARY_ENDPOINT: ${TELEMETRY_OTLP_SECONDARY_ENDPOINT:-}
-      TELEMETRY_OTLP_SECONDARY_HEADERS: ${TELEMETRY_OTLP_SECONDARY_HEADERS:-}
-      TELEMETRY_UPTIME_URL: ${TELEMETRY_UPTIME_URL:-}
       # Browser telemetry (Grafana Faro): the web app sends to this same-origin
       # path, which Caddy routes to Alloy (deploy/infra). Empty turns it off.
       FARO_COLLECT_URL: ${FARO_COLLECT_URL:-/faro/collect}
-      SENTRY_DSN: ${SENTRY_DSN:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Whole handles nobody can claim, on top of the built-in list in
       # packages/identity/names.go: our own hosts, roles, and big brands

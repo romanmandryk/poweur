@@ -457,7 +457,7 @@ never adds it.
 - [ ] `deploy/README.md`: rollout order (reserve names → DNS at `p=none` + MTA-STS `testing` → enable
       MX → watch DMARC/TLS-RPT → tighten), backups (`EMAIL_DATA`: spool, suppression list, footer
       ledger), privacy and abuse-contact pages, Grafana dashboard
-- [ ] Better Stack / blackbox probes: SMTP banner + STARTTLS on :25, `/health`
+- [ ] Blackbox probes: SMTP banner + STARTTLS on :25, `/health`
 
 **Acceptance:** live at `mx.poweur.org` / `email.poweur.org`; mail-tester.com (or equivalent) 10/10
 for an outbound message; inbound from Gmail and Outlook lands in the tray.

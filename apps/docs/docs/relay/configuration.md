@@ -138,7 +138,7 @@ contacts is never metered here. See
 ### Observability
 
 Logs, metrics, error tracking and the browser analytics tag are configured with the
-`OTEL_*`, `TELEMETRY_*`, `SENTRY_DSN`, `FARO_COLLECT_URL` and `LOG_LEVEL` variables,
+`OTEL_*`, `TELEMETRY_*`, `FARO_COLLECT_URL` and `LOG_LEVEL` variables,
 described in [Observability](/relay/observability). All are off when unset.
 
 ## Suspending and deleting a hosted ID
