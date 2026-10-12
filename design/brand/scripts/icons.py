@@ -103,6 +103,11 @@ def adaptive_bg():
 def adaptive_mono():
     return doc(N, N, mark("flat", N / 2 + optical_dx(ANDROID_ADAPTIVE), N / 2, ANDROID_ADAPTIVE * N, "m", "#FFFFFF"))
 
+def notification_badge():
+    """Android's status-bar notification icon: only the alpha channel is used, so an
+    opaque tile shows as a white square. The white P alone on transparent."""
+    return doc(N, N, mark("flat", N / 2 + optical_dx(0.80), N / 2, 0.80 * N, "n", "#FFFFFF"))
+
 def maskable():
     """PWA maskable: the app icon with the P inside the central 80% safe circle."""
     return flat_violet(scale=ANDROID_ADAPTIVE, uid="k", dx=optical_dx(ANDROID_ADAPTIVE))
@@ -150,6 +155,7 @@ def web():
     render(app_icon(), os.path.join(pub, "icon-192.png"), 192, 192)
     render(app_icon(), os.path.join(pub, "icon-512.png"), 512, 512)
     render(maskable(), os.path.join(pub, "icon-maskable-512.png"), 512, 512)
+    render(notification_badge(), os.path.join(pub, "notification-badge.png"), 96, 96)
     manifest = {
         "name": "Poweur ID", "short_name": "Poweur", "id": ".", "start_url": ".", "scope": ".",
         "display": "standalone", "background_color": "#FFFFFF", "theme_color": "#FFFFFF",

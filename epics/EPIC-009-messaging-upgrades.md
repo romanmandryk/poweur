@@ -460,6 +460,15 @@ a key behaves exactly as before.
       trust than two. Previews remain out of scope (same custody rule as E19-T2)
 - [x] **Badge in the foreground**: `BottomNav` syncs `setAppBadge` with the Messages + Contacts
       nav counts while unlocked (clears at zero); locked, it leaves the last pushed count
+- [x] **Android status-bar icon**: the notification `badge` is `notification-badge.png`, the white
+      P on transparent — Android uses only its alpha, so the opaque app icon showed as a white
+      square (found on a real phone, 2026-10-12)
+- **Android icon badge, as found on a device (2026-10-12):** Chrome on Android does not implement
+  `setAppBadge`, so there is no number from the web; the launcher shows a dot (a number on some
+  launchers, e.g. Samsung) while a notification is outstanding. And only Chrome (and Samsung
+  Internet) mint a WebAPK: an app added to the home screen from **Brave** is a shortcut, so its
+  notifications — and the dot — belong to Brave's icon. A per-app count on Android needs the
+  native shell (EPIC-019)
 - [x] **Enable flow**: Settings → This device → Notifications (state On / Off / Blocked /
       Install first / Not offered / Not supported), turn on from a tap, test, turn off. On iOS
       Safari it explains Add to Home Screen instead of asking. Enable state is per identity per

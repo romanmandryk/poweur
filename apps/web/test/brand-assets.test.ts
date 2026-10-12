@@ -33,6 +33,15 @@ describe("brand assets", () => {
     for (const [, href] of links) expect(existsSync(join(PUBLIC, href))).toBe(true);
   });
 
+  it("ships a transparent notification badge for Android's status bar", () => {
+    const path = join(PUBLIC, "notification-badge.png");
+    expect(pngSize(path)).toEqual([96, 96]);
+    // Colour type 6 (RGBA): Android uses only the alpha channel, so an opaque
+    // badge renders as a white square.
+    expect(readFileSync(path)[25]).toBe(6);
+    expect(readFileSync(join(PUBLIC, "sw.js"), "utf8")).toContain('badge: "notification-badge.png"');
+  });
+
   it("ships the touch icon at 180 px", () => {
     expect(pngSize(join(PUBLIC, "apple-touch-icon.png"))).toEqual([180, 180]);
   });
