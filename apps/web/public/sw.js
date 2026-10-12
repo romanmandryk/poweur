@@ -57,7 +57,9 @@ async function onPush(event) {
     tag: `poweur:${identity}`,
     renotify: kind !== "test",
     icon: "icon-192.png",
-    badge: "icon-192.png",
+    // Android draws the status-bar badge from the alpha channel only: an
+    // opaque icon is a white square. This one is the white P on transparent.
+    badge: "notification-badge.png",
     data: { kind, identity, page: pageFor(kind) },
   });
 }
