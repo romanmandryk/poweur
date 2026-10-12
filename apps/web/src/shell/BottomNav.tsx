@@ -1,6 +1,8 @@
 import { Files as FilesIcon, MessageCircle, Rocket, Settings, Users, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { useEffect } from "react";
 import { cn } from "../lib/cn";
+import { syncAppBadge } from "../lib/push";
 import { navBadges } from "../state/badges";
 import { useData } from "../state/data";
 import { useRoute, type Destination } from "../state/route";
@@ -34,6 +36,12 @@ export function BottomNav({ className }: { className?: string }) {
     })),
   );
   const badges = navBadges(badgeData, identity, unlocked);
+  // The home-screen icon shows what the tabs show (E09-T12). Locked, the app
+  // knows nothing, so it leaves the count the last push set.
+  const total = (badges.messages ?? 0) + (badges.contacts ?? 0);
+  useEffect(() => {
+    if (identity && unlocked) syncAppBadge(total);
+  }, [identity, unlocked, total]);
 
   return (
     <nav

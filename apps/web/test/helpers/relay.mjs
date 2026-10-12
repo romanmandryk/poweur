@@ -43,7 +43,7 @@ export async function waitForHealth(baseUrl, { timeoutMs = 30_000 } = {}) {
  * Start a real Go relay with POWEUR_DATA + HOSTED_DOMAINS + WEB_STATIC_DIR.
  * Returns { baseUrl, port, dataDir, stop }.
  */
-export async function startRelay({ hostedDomains = "poweur.net" } = {}) {
+export async function startRelay({ hostedDomains = "poweur.net", env = {} } = {}) {
   const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), "poweur-web-relay-"));
   const addr = `127.0.0.1:${port}`;
@@ -63,6 +63,7 @@ export async function startRelay({ hostedDomains = "poweur.net" } = {}) {
       RATE_LIMIT_MINUTE: "10000",
       RATE_LIMIT_HOUR: "100000",
       RATE_LIMIT_DAY: "1000000",
+      ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

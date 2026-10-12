@@ -245,6 +245,9 @@ device; a self-hosted identity shows no passkey UI and is fully usable.
 - [ ] APNs / FCM registration; token published to the relay as a device record
 - [ ] **Relay-side push requires EPIC-009.** Until it lands, ship the client hooks and a
       foreground polling path; do not add relay endpoints here (E15's non-goal applies)
+- [ ] Relay side is EPIC-009 **E09-T11** (push registration on the device record, transport-
+      agnostic): add `apns` / `fcm` as transports there rather than a parallel path. The PWA
+      gets Web Push + badges first (E09-T12) as the bridge until the store apps are public
 - [ ] Background sync of the changes feed (EPIC-004) within each platform's background
       execution limits
 - [ ] Notification payloads carry **no message content** — E2E encryption means the payload

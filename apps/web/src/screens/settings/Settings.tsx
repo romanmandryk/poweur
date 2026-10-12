@@ -16,6 +16,8 @@ import {
   MessageSquare,
   MonitorSmartphone,
   Package,
+  Bell,
+  Download,
   Puzzle,
   Scale,
   ScrollText,
@@ -54,13 +56,18 @@ import {
   openDnsPanel,
   openIdentityKeysPanel,
   openKeysAndDevicesPanel,
+  openInstallPanel,
   openLookupPanel,
+  openNotificationsPanel,
   openPolicyPanel,
   openProfilePanel,
   openRecoveryKitPanel,
   openRelayPanel,
   openSessionPanel,
+  pushStateLabel,
 } from "./panels";
+import { activeClient } from "../../actions/relay";
+import { installMode, onInstallAvailable, pushState, type PushState } from "../../lib/push";
 
 export function Settings() {
   const identity = useSession((state) => state.identity);
@@ -77,6 +84,18 @@ export function Settings() {
   const sessionOk = isSessionValid(session);
   const summary = policySummary(policy);
   const custody = CUSTODY_COPY[custodyOf(record)];
+
+  // Notifications and install, for this device (E09-T12).
+  const [pushStatus, setPushStatus] = useState<PushState | null>(null);
+  const [install, setInstall] = useState(installMode);
+  const refreshPush = () => {
+    const client = activeClient();
+    if (client && identity) void pushState(client, identity).then(setPushStatus, () => setPushStatus(null));
+  };
+  useEffect(() => {
+    if (unlocked) refreshPush();
+  }, [unlocked, identity]);
+  useEffect(() => onInstallAvailable(() => setInstall(installMode())), []);
 
   const usage = useData((state) => state.files.usage);
   useEffect(() => {
@@ -192,6 +211,22 @@ export function Settings() {
                 onClick={openPolicyPanel}
               />
             </SettingsGroup>
+
+            {!isShellRuntime() && (
+              <SettingsGroup label="This device">
+                <SettingsRow
+                  id="row-notifications"
+                  icon={Bell}
+                  label="Notifications"
+                  value={pushStateLabel(pushStatus)}
+                  valueTone={pushStatus === "on" ? "ok" : undefined}
+                  onClick={() => openNotificationsPanel(refreshPush)}
+                />
+                {install !== "installed" && install !== "none" && (
+                  <SettingsRow id="row-install" icon={Download} label="Install app" onClick={openInstallPanel} />
+                )}
+              </SettingsGroup>
+            )}
 
             <SettingsGroup label="Advanced">
               <SettingsRow

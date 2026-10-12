@@ -21,7 +21,13 @@
 import type { Signer } from "./crypto/keys.js";
 import { PoweurError, RelayError } from "./errors.js";
 import type { RelayClient, RequestSigning } from "./http.js";
-import type { DeviceListResponse, DeviceRevokeResponse } from "./types.js";
+import type {
+  DeviceListResponse,
+  DeviceRevokeResponse,
+  PushConfig,
+  PushRegistrationResponse,
+  WebPushSubscriptionJSON,
+} from "./types.js";
 
 export const SYS_PUBLIC_DIR = ".poweur/public";
 export const SYS_RELAY_DIR = ".poweur/relay";
@@ -159,6 +165,55 @@ export class DeviceRegistry {
       path: `/devices/${encodeURIComponent(this.#files.identity)}/revoke`,
       sign: this.#files.signing,
       body: { device_id: deviceId },
+    });
+  }
+}
+
+/**
+ * Background push for this device (EPIC-009 E09-T11). The relay keeps one
+ * registration per device row, so the client must send `X-Poweur-Device`
+ * (the web app does on every request). Owner-authenticated like the device
+ * registry.
+ */
+export class PushRegistry {
+  readonly #files: SystemFiles;
+
+  constructor(files: SystemFiles) {
+    this.#files = files;
+  }
+
+  /** Whether the relay sends background push, and the key to subscribe with. */
+  async config(): Promise<PushConfig> {
+    return this.#files.client.request<PushConfig>({ method: "GET", path: "/push/config" });
+  }
+
+  /** Register this device's Web Push subscription. */
+  async subscribe(subscription: WebPushSubscriptionJSON): Promise<PushRegistrationResponse> {
+    return this.#files.client.request<PushRegistrationResponse>({
+      method: "POST",
+      path: `/push/${encodeURIComponent(this.#files.identity)}/subscribe`,
+      sign: this.#files.signing,
+      body: { transport: "webpush", endpoint: subscription.endpoint, keys: subscription.keys },
+    });
+  }
+
+  /** Stop background pushes to this device. */
+  async unsubscribe(): Promise<PushRegistrationResponse> {
+    return this.#files.client.request<PushRegistrationResponse>({
+      method: "POST",
+      path: `/push/${encodeURIComponent(this.#files.identity)}/unsubscribe`,
+      sign: this.#files.signing,
+      body: {},
+    });
+  }
+
+  /** Ask the relay to push a test notification to this device now. */
+  async test(): Promise<{ sent: boolean }> {
+    return this.#files.client.request<{ sent: boolean }>({
+      method: "POST",
+      path: `/push/${encodeURIComponent(this.#files.identity)}/test`,
+      sign: this.#files.signing,
+      body: {},
     });
   }
 }

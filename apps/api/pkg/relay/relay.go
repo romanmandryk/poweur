@@ -6,6 +6,7 @@ package relay
 
 import (
 	"context"
+	"crypto/ecdh"
 	"errors"
 	"net/http"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/poweur/api/internal/drive/provider"
 	irelay "github.com/poweur/api/internal/relay"
 	"github.com/poweur/api/internal/telemetry"
+	"github.com/poweur/api/internal/webpush"
 )
 
 type (
@@ -92,4 +94,13 @@ func WalkStore(ctx context.Context, cfg Config, fn func(key string, data []byte)
 		}
 		cursor = page.Next
 	}
+}
+
+// GenerateVAPIDKey returns a fresh Web Push key for Config.PushVAPIDPrivateKey.
+func GenerateVAPIDKey() (string, error) { return webpush.GenerateVAPIDKey() }
+
+// DecryptWebPush opens a Web Push body as the browser would, so a test's
+// fake push service can assert what a device actually receives.
+func DecryptWebPush(body []byte, uaPrivate *ecdh.PrivateKey, authSecret []byte) ([]byte, error) {
+	return webpush.Decrypt(body, uaPrivate, authSecret)
 }

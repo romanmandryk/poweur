@@ -212,10 +212,73 @@ type Device struct {
 	// SyncedAt is when SyncCursor was last advanced.
 	SyncedAt string `json:"synced_at,omitempty"`
 
+	// Push is the device's background-push registration (EPIC-009
+	// E09-T11), when it asked for one. Revoking the device drops it.
+	Push *DevicePush `json:"push,omitempty"`
+
 	// Revoked keeps the row as an audit trail instead of deleting it: the
 	// owner should be able to see that a lost phone was cut off, and when.
 	Revoked   bool   `json:"revoked,omitempty"`
 	RevokedAt string `json:"revoked_at,omitempty"`
+}
+
+// Push transports. Web Push today; the native shell (EPIC-019 E19-T4) adds
+// apns and fcm as further transports on the same field.
+const (
+	PushTransportWebPush = "webpush"
+)
+
+const (
+	// MaxPushEndpointLen caps a push endpoint URL.
+	MaxPushEndpointLen = 1024
+	// MaxPushDevices caps how many devices of one identity hold a push
+	// registration, which also keeps devices.json under its 64 KB cap.
+	MaxPushDevices = 16
+)
+
+// DevicePush is where the relay delivers background pushes for a device.
+// For Web Push, P256dh and Auth are the subscription's keys: the payload is
+// encrypted to them, so the push service carries it without reading it.
+type DevicePush struct {
+	Transport string `json:"transport"`
+	Endpoint  string `json:"endpoint"`
+	P256dh    string `json:"p256dh,omitempty"`
+	Auth      string `json:"auth,omitempty"`
+	AddedAt   string `json:"added_at,omitempty"`
+}
+
+// Validate checks the shape; the relay separately decides which push
+// services it is willing to call.
+func (p DevicePush) Validate() error {
+	if p.Transport != PushTransportWebPush {
+		return fmt.Errorf("unsupported push transport %q", p.Transport)
+	}
+	if p.Endpoint == "" || len(p.Endpoint) > MaxPushEndpointLen {
+		return fmt.Errorf("push endpoint must be 1..%d bytes", MaxPushEndpointLen)
+	}
+	if !strings.HasPrefix(p.Endpoint, "https://") && !strings.HasPrefix(p.Endpoint, "http://") {
+		return fmt.Errorf("push endpoint must be an http(s) URL")
+	}
+	if p.P256dh == "" || p.Auth == "" || len(p.P256dh) > 128 || len(p.Auth) > 64 {
+		return fmt.Errorf("web push needs p256dh and auth keys")
+	}
+	if p.AddedAt != "" {
+		if _, err := time.Parse(time.RFC3339, p.AddedAt); err != nil {
+			return fmt.Errorf("push added_at must be RFC3339")
+		}
+	}
+	return nil
+}
+
+// PushCount is how many devices hold a push registration.
+func (f DevicesFile) PushCount() int {
+	n := 0
+	for _, d := range f.Devices {
+		if d.Push != nil {
+			n++
+		}
+	}
+	return n
 }
 
 // DevicesFile is the schema of .poweur/state/devices.json.
@@ -280,6 +343,14 @@ func (d Device) Validate() error {
 	}
 	if d.Revoked && d.RevokedAt == "" {
 		return fmt.Errorf("device %s: revoked device must carry revoked_at", d.ID)
+	}
+	if d.Push != nil {
+		if d.Revoked {
+			return fmt.Errorf("device %s: a revoked device cannot hold a push registration", d.ID)
+		}
+		if err := d.Push.Validate(); err != nil {
+			return fmt.Errorf("device %s: %w", d.ID, err)
+		}
 	}
 	return nil
 }
@@ -364,6 +435,8 @@ func (f *DevicesFile) Revoke(id string, now time.Time) bool {
 			return false
 		}
 		f.Devices[i].Revoked = true
+		// A lost phone must stop lighting up with notifications too.
+		f.Devices[i].Push = nil
 		f.Devices[i].RevokedAt = now.UTC().Format(time.RFC3339)
 		return true
 	}

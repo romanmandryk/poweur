@@ -10,6 +10,7 @@ import (
 
 	"github.com/poweur/api/internal/buildinfo"
 	"github.com/poweur/api/internal/telemetry"
+	"github.com/poweur/api/internal/webpush"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -187,6 +188,46 @@ type Config struct {
 	// and secret-free: hosted identities advertise it for IndieAuth discovery
 	// and in their capabilities; the relay never talks to it.
 	OAuthBridgeURL string
+
+	// PushVAPIDPrivateKey is the relay's Web Push identity (EPIC-009
+	// E09-T11): a raw P-256 private scalar, base64url. Empty disables
+	// background push — the relay advertises none and SSE is all there is.
+	// `poweur-relay vapid-keygen` prints a fresh one. Changing it orphans
+	// every existing subscription (browsers bind them to the public key).
+	PushVAPIDPrivateKey string
+	// PushVAPIDSubject is the contact push services see (mailto: or
+	// https:). Defaults to https://<LauncherHost>.
+	PushVAPIDSubject string
+	// PushEndpointHosts are the push-service hosts a subscription may point
+	// at, matched as a domain suffix. The relay POSTs to whatever endpoint a
+	// subscription names, so this list is what keeps that from being an
+	// owner-controlled request to anywhere.
+	PushEndpointHosts []string
+	// PushCoalesce is how long the relay gathers events for one identity
+	// before pushing, so a burst is one notification.
+	PushCoalesce time.Duration
+}
+
+// DefaultPushEndpointHosts are the browser vendors' push services.
+var DefaultPushEndpointHosts = []string{
+	"fcm.googleapis.com",        // Chrome, Edge on Android, most Chromium
+	"push.apple.com",            // Safari / iOS home-screen apps (web.push.apple.com)
+	"push.services.mozilla.com", // Firefox
+	"notify.windows.com",        // Edge on Windows (wns2-*.notify.windows.com)
+}
+
+// DefaultPushCoalesce is the burst window for background pushes.
+const DefaultPushCoalesce = 2 * time.Second
+
+// PushSubject is the VAPID subject, falling back to the launcher's origin.
+func (c Config) PushSubject() string {
+	if c.PushVAPIDSubject != "" {
+		return c.PushVAPIDSubject
+	}
+	if c.LauncherHost != "" {
+		return "https://" + c.LauncherHost
+	}
+	return "https://" + c.RelayAddress
 }
 
 func (c Config) validateStorage() error {
@@ -259,6 +300,14 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid OAUTH_BRIDGE_URL: %w", err)
 		}
 	}
+	if s := c.PushVAPIDSubject; s != "" && !strings.HasPrefix(s, "mailto:") && !strings.HasPrefix(s, "https://") {
+		return fmt.Errorf("invalid PUSH_VAPID_SUBJECT: %s (use mailto: or https:)", s)
+	}
+	if c.PushVAPIDPrivateKey != "" {
+		if _, err := webpush.VAPIDFromKey(c.PushVAPIDPrivateKey, c.PushSubject()); err != nil {
+			return fmt.Errorf("invalid PUSH_VAPID_PRIVATE_KEY: %w", err)
+		}
+	}
 	if len(missing) == 0 {
 		return nil
 	}
@@ -289,6 +338,10 @@ func FromEnv() Config {
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
 		OAuthBridgeURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
+		PushVAPIDPrivateKey:     strings.TrimSpace(os.Getenv("PUSH_VAPID_PRIVATE_KEY")),
+		PushVAPIDSubject:        strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
+		PushEndpointHosts:       pushEndpointHostsFromEnv(),
+		PushCoalesce:            getenvDuration("PUSH_COALESCE", DefaultPushCoalesce),
 		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
 		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
 		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),
@@ -364,6 +417,15 @@ func namePolicyFromEnv() idpkg.NamePolicy {
 		policy.Blocked = terms
 	}
 	return policy
+}
+
+// pushEndpointHostsFromEnv reads PUSH_ENDPOINT_HOSTS, defaulting to the
+// browser vendors' push services.
+func pushEndpointHostsFromEnv() []string {
+	if hosts := splitCSV(os.Getenv("PUSH_ENDPOINT_HOSTS")); len(hosts) > 0 {
+		return hosts
+	}
+	return append([]string(nil), DefaultPushEndpointHosts...)
 }
 
 // launcherHostFromEnv resolves LAUNCHER_HOST, defaulting to `id.<first hosted

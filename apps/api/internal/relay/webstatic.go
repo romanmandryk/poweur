@@ -38,8 +38,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // mountWebStatic serves the web client SPA from dir under prefix ("/app" →
 // GET /app/): real files as themselves, every other path as index.html so the
-// app's own routes survive a reload.
-func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte) {
+// app's own routes survive a reload. With pwa set, a hosted identity's host
+// gets its own app name and icon (pwa.go).
+func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte, pwa func(*http.Request) *pwaIdentity) {
 	if dir == "" {
 		return
 	}
@@ -62,8 +63,17 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte
 			return
 		}
 		if rel == "" {
-			http.ServeFile(w, r, filepath.Join(root, "index.html"))
+			serveAppPage(w, r, root, pwa)
 			return
+		}
+		if rel == "manifest.webmanifest" {
+			serveAppManifest(w, r, root, pwa)
+			return
+		}
+		if rel == "sw.js" {
+			// The browser re-checks the worker on navigation; never let a
+			// cache hand it a stale one, and keep its scope at /app/.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		candidate := filepath.Join(root, filepath.FromSlash(pathpkg.Clean("/"+rel)))
 		cleanCand := filepath.Clean(candidate)
@@ -72,7 +82,7 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte
 			return
 		}
 		if st, err := os.Stat(cleanCand); err != nil || st.IsDir() {
-			http.ServeFile(w, r, filepath.Join(root, "index.html"))
+			serveAppPage(w, r, root, pwa)
 			return
 		}
 		http.ServeFile(w, r, cleanCand)

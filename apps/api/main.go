@@ -21,6 +21,7 @@ import (
 	"github.com/poweur/api/internal/drive/provider/fs"
 	"github.com/poweur/api/internal/migrate"
 	"github.com/poweur/api/internal/relay"
+	"github.com/poweur/api/internal/webpush"
 )
 
 func main() {
@@ -36,7 +37,31 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "identities" {
 		os.Exit(identities(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "vapid-keygen" {
+		os.Exit(vapidKeygen())
+	}
 	os.Exit(run())
+}
+
+// vapidKeygen prints a fresh Web Push key pair (EPIC-009 E09-T11) in the
+// form PUSH_VAPID_PRIVATE_KEY reads. Generate it once per relay and keep it:
+// browsers bind every subscription to the public key, so a new key means
+// every device has to turn notifications on again.
+//
+//	poweur-relay vapid-keygen
+func vapidKeygen() int {
+	key, err := webpush.GenerateVAPIDKey()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "vapid-keygen:", err)
+		return 1
+	}
+	vapid, err := webpush.VAPIDFromKey(key, "mailto:unused@example.net")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "vapid-keygen:", err)
+		return 1
+	}
+	fmt.Printf("PUSH_VAPID_PRIVATE_KEY=%s\n# public key (served at GET /push/config): %s\n", key, vapid.PublicKey())
+	return 0
 }
 
 // quotas shows or edits the per-identity storage quota overrides the relay
@@ -277,6 +302,11 @@ func run() int {
 	if err := server.StartTelemetry(context.Background(), os.Stdout); err != nil {
 		logger.Error("telemetry initialization failed")
 		return 1
+	}
+	if cfg.PushVAPIDPrivateKey != "" {
+		logger.Info("background push enabled", "subject", cfg.PushSubject(), "endpoint_hosts", cfg.PushEndpointHosts)
+	} else {
+		logger.Info("background push disabled (set PUSH_VAPID_PRIVATE_KEY; see poweur-relay vapid-keygen)")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

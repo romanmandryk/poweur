@@ -66,7 +66,7 @@ func checkStatic(t *testing.T, ts *httptest.Server, cases []staticCase) {
 // index.html so the SPA's own routes survive a reload.
 func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), nil)
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
@@ -82,7 +82,7 @@ func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 
 func TestWebStaticUnsetDirMountsNothing(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", "", nil)
+	mountWebStatic(mux, "/app", "", nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	if status, _, _ := staticGet(t, ts, "/app/"); status != http.StatusNotFound {
@@ -104,7 +104,7 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", app, nil)
+	mountWebStatic(mux, "/app", app, nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	// ServeMux answers a dot-segment path with a redirect to the cleaned one,
@@ -202,7 +202,7 @@ func TestRootIconMissingIsNotTheServiceBanner(t *testing.T) {
 
 func TestWebStaticObservabilityJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"faro","url":"/faro/collect"}]}`))
+	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"faro","url":"/faro/collect"}]}`), nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	status, _, body := staticGet(t, ts, "/app/observability.json")

@@ -27,6 +27,7 @@ import { getConfig, getUnlockedKeys, isShellRuntime, loadIdentityRecord, loadSes
 import { useData } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { setAnalyticsConsent } from "../../lib/observability";
+import { disablePush, enablePush, installMode, promptInstall, pushState, testPush, type PushState } from "../../lib/push";
 import { refreshSession, useSession } from "../../state/session";
 import { closePanel, openPanel, setLoading, toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
@@ -751,6 +752,128 @@ function AnalyticsPanel({ close }: { close: () => void }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Notifications on this device (EPIC-009 E09-T12) ─────────────────────────
+
+const PUSH_STATE_LABEL: Record<PushState, string> = {
+  on: "On",
+  off: "Off",
+  denied: "Blocked",
+  "needs-install": "Install first",
+  "relay-disabled": "Not offered",
+  unsupported: "Not supported",
+};
+
+export const pushStateLabel = (state: PushState | null) => (state ? PUSH_STATE_LABEL[state] : "…");
+
+export function openNotificationsPanel(onChange?: () => void) {
+  if (!requireClient()) return;
+  openPanel("Notifications", () => <NotificationsPanel onChange={onChange} />);
+}
+
+function NotificationsPanel({ onChange }: { onChange?: () => void }) {
+  const identity = activeIdentity();
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () => {
+    const client = requireClient();
+    if (!client) return;
+    void pushState(client, identity).then(setState, () => setState("off"));
+  };
+  useEffect(refresh, []);
+
+  const run = async (action: () => Promise<void>, success: string) => {
+    setBusy(true);
+    try {
+      await action();
+      toast(success, "success");
+    } catch (error) {
+      toast(errorMessage(error), "error");
+    } finally {
+      setBusy(false);
+      refresh();
+      onChange?.();
+    }
+  };
+
+  if (!state) return <p className="text-muted">Loading…</p>;
+  return (
+    <div id="notifications-panel" data-state={state}>
+      <p className="mb-3">
+        Get a notification on this device when a message or contact request arrives for <strong>{identity}</strong>, even when the app is
+        closed. Notifications never include message text: your relay only says that something is waiting, and how much.
+      </p>
+      {state === "needs-install" && (
+        <Notice>
+          On iPhone and iPad, notifications work only for apps on the Home Screen. Tap <strong>Share</strong>, then{" "}
+          <strong>Add to Home Screen</strong>, open {identity} from there and come back here.
+        </Notice>
+      )}
+      {state === "denied" && <Notice tone="warn">Notifications are blocked for this site. Allow them in your browser or system settings, then try again.</Notice>}
+      {state === "relay-disabled" && <Notice>Your relay does not send notifications yet. New messages still arrive whenever the app is open.</Notice>}
+      {state === "unsupported" && <Notice>This browser cannot show notifications.</Notice>}
+      {state === "off" && (
+        <Button id="push-enable" disabled={busy} onClick={() => void run(() => enablePush(requireClient(), identity), "Notifications are on")}>
+          Turn on notifications
+        </Button>
+      )}
+      {state === "on" && (
+        <div className="flex flex-col gap-2">
+          <Button id="push-test" variant="secondary" disabled={busy} onClick={() => void run(() => testPush(requireClient()), "Test sent")}>
+            Send a test notification
+          </Button>
+          <Button id="push-disable" variant="danger" disabled={busy} onClick={() => void run(() => disablePush(requireClient(), identity), "Notifications are off")}>
+            Turn off on this device
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Install this app ────────────────────────────────────────────────────────
+
+export function openInstallPanel() {
+  openPanel("Install app", (close) => <InstallPanel close={close} />);
+}
+
+function InstallPanel({ close }: { close: () => void }) {
+  const identity = activeIdentity();
+  const mode = installMode();
+  const host = globalThis.location?.host ?? identity;
+  return (
+    <div id="install-panel" data-mode={mode}>
+      <p className="mb-3">
+        Install <strong>{host}</strong> as an app: it gets its own icon, opens straight into this ID and can show notifications and an unread
+        count. Each Poweur ID installs separately, so you can have several side by side.
+      </p>
+      {mode === "prompt" && (
+        <Button
+          id="install-prompt"
+          onClick={async () => {
+            if (await promptInstall()) close();
+          }}
+        >
+          Install
+        </Button>
+      )}
+      {mode === "ios" && (
+        <>
+          <Notice>
+            In Safari, tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
+          </Notice>
+          <p className="text-[13px] text-muted">
+            The installed app keeps its own storage, separate from Safari: open it from the Home Screen and unlock {identity} there once.
+            Then turn on notifications from its Settings.
+          </p>
+        </>
+      )}
+      {mode === "manual" && <Notice>Use your browser's menu: look for "Install app" or "Add to Home screen".</Notice>}
+      {mode === "installed" && <Notice>You are using the installed app.</Notice>}
     </div>
   );
 }

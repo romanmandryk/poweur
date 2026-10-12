@@ -350,3 +350,59 @@ func TestDeviceClientMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestDevicePushValidate(t *testing.T) {
+	good := DevicePush{
+		Transport: PushTransportWebPush,
+		Endpoint:  "https://web.push.apple.com/abc",
+		P256dh:    "BCVxsr7N_eNgVRqvHtD0zTZsEc6",
+		Auth:      "BTBZMqHH6r4Tts7J_aSIgg",
+		AddedAt:   "2026-10-12T10:00:00Z",
+	}
+	if err := good.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*DevicePush){
+		"transport":    func(p *DevicePush) { p.Transport = "sms" },
+		"no endpoint":  func(p *DevicePush) { p.Endpoint = "" },
+		"scheme":       func(p *DevicePush) { p.Endpoint = "ftp://x/y" },
+		"long":         func(p *DevicePush) { p.Endpoint = "https://x/" + strings.Repeat("a", MaxPushEndpointLen) },
+		"no keys":      func(p *DevicePush) { p.P256dh = "" },
+		"bad added_at": func(p *DevicePush) { p.AddedAt = "yesterday" },
+	}
+	for name, mutate := range cases {
+		p := good
+		mutate(&p)
+		if err := p.Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	id := DeviceIDFromFingerprint("phone")
+	device := Device{ID: id, Push: &good}
+	if err := device.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	device.Revoked, device.RevokedAt = true, "2026-10-12T10:00:00Z"
+	if err := device.Validate(); err == nil {
+		t.Fatal("revoked device with push accepted")
+	}
+}
+
+func TestDevicesFileRevokeDropsPush(t *testing.T) {
+	push := &DevicePush{Transport: PushTransportWebPush, Endpoint: "https://fcm.googleapis.com/x", P256dh: "k", Auth: "a"}
+	id := DeviceIDFromFingerprint("phone")
+	f := DevicesFile{Version: 1, Devices: []Device{{ID: id, Push: push}, {ID: DeviceIDFromFingerprint("laptop")}}}
+	if f.PushCount() != 1 {
+		t.Fatalf("push count %d", f.PushCount())
+	}
+	if !f.Revoke(id, time.Now()) {
+		t.Fatal("revoke failed")
+	}
+	if f.Devices[0].Push != nil || f.PushCount() != 0 {
+		t.Fatal("revoked device kept its push registration")
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

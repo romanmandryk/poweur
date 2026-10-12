@@ -81,6 +81,14 @@ func (s *RequestStore) Add(recipient, sender string, msg StoredMessage, cooldown
 
 // Drain returns and clears the recipient's pending requests (cooldown
 // bookkeeping is retained).
+// Pending counts the requests waiting for a recipient — what a background
+// push may say without reading any of them.
+func (s *RequestStore) Pending(recipient string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.pending[strings.ToLower(recipient)])
+}
+
 func (s *RequestStore) Drain(recipient string) []StoredMessage {
 	rk := strings.ToLower(recipient)
 	s.mu.Lock()

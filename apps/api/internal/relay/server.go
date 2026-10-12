@@ -88,6 +88,8 @@ type Server struct {
 
 	// hub fans delivery notifications out to open push streams (E09-T2).
 	hub *hub
+	// push sends background Web Push (E09-T11); nil without a VAPID key.
+	push *pusher
 	// deviceLocks serializes read-modify-write on each identity's
 	// device registry (.poweur/state/devices.json).
 	deviceLocks *deviceLocks
@@ -167,6 +169,7 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		client:            &http.Client{Timeout: 10 * time.Second},
 		idCache:           idpkg.NewCache(),
 		hub:               newHub(),
+		push:              newPusher(cfg.PushVAPIDPrivateKey, cfg.PushSubject(), cfg.PushEndpointHosts, cfg.PushCoalesce, cfg.ResolverAllowPrivate),
 		driveStreams:      newDriveStreams(),
 		linkUses:          newLinkLimiter(),
 		rosters:           newRosterCache(),
@@ -335,6 +338,10 @@ func (s *Server) Router() http.Handler {
 	handle("GET /drive/{identity}/nodes/{node}/versions/{version}/chunks/{chunk}", s.handleDriveChunk)
 	handle("GET /devices/{identity}", s.handleDevicesGet)
 	handle("POST /devices/{identity}/revoke", s.handleDevicesRevoke)
+	handle("GET /push/config", s.handlePushConfig)
+	handle("POST /push/{identity}/subscribe", s.handlePushSubscribe)
+	handle("POST /push/{identity}/unsubscribe", s.handlePushUnsubscribe)
+	handle("POST /push/{identity}/test", s.handlePushTest)
 	handle("GET /.well-known/did.json", s.handleDIDWeb)
 	handle("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	handle("GET /identity-page/assets/{file}", serveIdentityPageAsset)
@@ -342,7 +349,7 @@ func (s *Server) Router() http.Handler {
 	handle("GET /pub", s.handlePublic)
 	handle("GET /pub/{path...}", s.handlePublic)
 	handle("GET /s/assets/{file}", s.handleLinkViewerAsset)
-	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version))
+	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version), s.pwaIdentity)
 	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(hashSignedBodies(mux)))
 }

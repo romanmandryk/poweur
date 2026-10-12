@@ -1,9 +1,12 @@
 # EPIC-009 — Messaging upgrades: persistence, push, typed messages, attachments, groups
 
-- **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps)
+- **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps);
+  **T11 done, T12 shipped** (background Web Push + installable per-identity PWA with badges;
+  open: iOS onboarding hint, on-device checklist, approval pushes with EPIC-028)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
-- **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations)
+- **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations), EPIC-019 E19-T4
+  (relay side of native push), EPIC-028 (approval push without the store apps)
 
 > **Inbound from EPIC-002:** identity documents are durable under `POWEUR_DATA`; **inbox / acks /
 > sessions remain memory-only** until this epic (E09-T1). Do not re-implement inbox durability
@@ -357,3 +360,134 @@ mechanics they build on.
 
 **Acceptance:** an owner publishes a post; followers on two relays receive it from the feed
 without the owner sending anything per follower.
+
+## Background push & installable per-identity PWA (T11–T12)
+
+E09-T2's SSE stream only lives while a page is in the foreground; iOS cuts it the moment the app
+is backgrounded, so today nothing reaches a phone that is not looking. These two tasks add
+**background** push and make each hosted identity an installable app of its own, so the web
+client gets notifications and an icon badge **before** the EPIC-019 store apps are public. The
+Capacitor shell is not replaced: it stays the multi-identity app with hardware custody, and it
+reuses T11's relay side through its own transports (E19-T4).
+
+**One icon per identity is the point, not a workaround.** The web client is single-identity per
+origin (`localStorage` is per-origin — the limitation EPIC-019 exists to lift). Installed, that
+becomes the model: `alice.poweur.net` and `bob.poweur.net` are two home-screen apps, each opening
+only its own origin. The manifest already resolves `id`/`start_url`/`scope` relative to the
+origin's `/app/`, so separate installs work today — they are just all called "Poweur ID" with
+the same icon.
+
+**Platform facts the design rests on** (re-check at implementation time):
+
+| | iOS / iPadOS 16.4+ | Android Chrome | Desktop Chrome/Edge, macOS Safari |
+|---|---|---|---|
+| Web Push | **installed (home-screen) apps only**; permission from a user gesture | yes, installed or not | yes |
+| `setAppBadge(n)` | yes, after notification permission | **no number** — launcher dot from outstanding notifications | yes |
+| Silent push | **no** — every push must show a notification or the subscription is revoked | same (`userVisibleOnly`) | same |
+| Storage | installed app is **isolated from Safari** | shared with the browser | shared |
+| Links / QR | open **Safari**, not the installed app | link capturing can open the app | — |
+
+### E09-T11 — Background push: relay subscriptions + Web Push transport — **done** (approval pushes wait on EPIC-028)
+
+The relay half, shared by every client. Transport-agnostic so E19-T4's APNs/FCM plug in as two
+more transports rather than a second system.
+
+- [x] Push registration as part of the identity's **device record** (`devices.json`, the record
+      E09-T2 already updates for presence): `push: {transport: "webpush", endpoint, p256dh,
+      auth, added_at}` (`idpkg.DevicePush`), `apns` / `fcm` later. `POST /push/{id}/subscribe`
+      and `/unsubscribe` act on the calling device (`X-Poweur-Device` required); revoking the
+      device drops its push, and a revoked device cannot re-subscribe. At most 16 push devices
+      per identity, which also keeps `devices.json` under its 64 KB cap
+- [x] Relay VAPID keypair and Go RFC 8291 / RFC 8188 / RFC 8292 (`apps/api/internal/webpush`,
+      stdlib + the x/crypto HKDF the relay already had — no new dependency). **Changed from the
+      sketch:** the key is operator config (`PUSH_VAPID_PRIVATE_KEY`, printed by
+      `poweur-relay vapid-keygen`), not generated on first start — a key the relay invents and
+      stores is one an operator can lose by wiping a volume, and losing it silently orphans
+      every subscription. The public key is at `GET /push/config` rather than
+      `/.well-known/poweur`: it belongs to the relay, not to an identity
+- [x] Triggers: `notify` itself schedules the push, so SSE and push share one hook point —
+      `message` (including group fan-out), `request` (the queued contact request) and `anon`.
+      Acks deliberately do not push. Share offers ride `request`. **Open:** EPIC-028 approval
+      requests do not exist yet; they get a kind in `pushKinds` when E28 lands
+- [x] Payload carries **no content**: `{v, identity, kind, count, ts}`, with `count` =
+      unpicked spool + pending requests + anonymous mail. Web Push encrypts it to the device.
+      `Topic` per identity (a burst replaces rather than stacks), `TTL` 24 h, `Urgency: high`
+      for messages and requests
+- [x] Hygiene: `404`/`410` deletes the registration (only if the device still holds that
+      endpoint); per-identity coalescing (`PUSH_COALESCE`, 2 s); bounded concurrency; sends run
+      off the request path. A device with an **open stream is skipped** — it is in the
+      foreground, and iOS closes the stream the moment the app is backgrounded. Endpoints are
+      limited to the vendors' push services (`PUSH_ENDPOINT_HOSTS`): the relay POSTs to
+      whatever a subscription names, so this is its SSRF guard
+- [x] Relays without a key answer `GET /push/config` with `{enabled:false}` and `404
+      push_disabled` on the rest; the web app shows "Not offered" rather than a broken switch
+- [x] `POST /push/{id}/test` pushes to the calling device now and reports the push service's
+      answer — the "is this working on my phone?" button
+- [x] Unit: the RFC 8291 Appendix A vector byte for byte, decrypt round trip, VAPID JWT verified
+      as a push service would, status mapping (`webpush_test.go`); coalescing, kind ranking,
+      skip-while-listening, 410 cleanup, revoke, cross-identity refusal, SSRF allow-list
+      (`relay/push_test.go`); `DevicePush` validation (`packages/identity`). Integration:
+      `TestINT_WEBPUSH_01` — real CLIs send real mail, a fake push service decrypts each push
+      with the subscription key, asserts the count and that no content or sender is in it, then
+      answers `410` and the registration is gone. TS: `push-relay.test.ts` (config, subscribe,
+      test, unsubscribe, refused endpoint against a real relay)
+
+**Acceptance:** met for messages and contact requests; approval requests follow EPIC-028.
+With no stream open, each produces one push per registered device, decryptable only with that
+device's keys and containing no message content; a gone endpoint is cleaned up; a relay without
+a key behaves exactly as before.
+
+### E09-T12 — Installable per-identity PWA: name, service worker, notifications, badge — **shipped; device checklist open**
+
+- [x] **Per-host manifest.** On a hosted identity's host the relay serves
+      `/app/manifest.webmanifest` with `name` = the host and `short_name` = the host when it fits
+      12 characters, else the handle; `id`/`start_url`/`scope` stay origin-relative. `index.html`
+      gets `<title>` = the host and `apple-mobile-web-app-title` = the short name. The launcher,
+      unknown hosts and a plain static server get the build's files untouched (`relay/pwa.go`)
+- [x] **Per-identity icon — avatar only.** With a profile avatar, it becomes the manifest's only
+      icon and the `apple-touch-icon` (launchers prefer maskable/closest-size icons, so the brand
+      icons would otherwise win). **Deferred:** a generated monogram/colour icon for identities
+      without an avatar — drawing text in Go needs a font dependency; revisit if same-looking
+      icons turn out to confuse people (the label already differs)
+- [x] **Service worker** `public/sw.js` → `/app/sw.js`, scope `/app/`, served `no-cache`. `push`
+      → `setAppBadge(count)` + a notification (always — silent pushes get subscriptions
+      revoked), and a `poweur:push` message so an open page refreshes; `notificationclick`
+      focuses an open window or opens `./?open=messages|contacts`, applied once unlocked. No
+      fetch handler, no offline caching
+- [x] **Notification text without content**: "New message · alice.poweur.net", "New contact
+      request", "N new messages and requests are waiting". **Changed:** requests do not name the
+      sender either — the relay could, but one rule ("a push never names anyone") is easier to
+      trust than two. Previews remain out of scope (same custody rule as E19-T2)
+- [x] **Badge in the foreground**: `BottomNav` syncs `setAppBadge` with the Messages + Contacts
+      nav counts while unlocked (clears at zero); locked, it leaves the last pushed count
+- [x] **Enable flow**: Settings → This device → Notifications (state On / Off / Blocked /
+      Install first / Not offered / Not supported), turn on from a tap, test, turn off. On iOS
+      Safari it explains Add to Home Screen instead of asking. Enable state is per identity per
+      origin; turning off unregisters from the relay and keeps the browser subscription for any
+      other identity in the same origin (`lib/push.ts`)
+- [x] **Install UX**: Settings → Install app — the browser's prompt where `beforeinstallprompt`
+      fired, Share → Add to Home Screen instructions on iOS (including that the installed app has
+      its own storage and the ID is unlocked there once), a menu hint elsewhere; hidden when
+      already installed and in the native shell
+- [ ] **Onboarding on iOS Safari**: say "install first" *before* the user finishes claiming in
+      Safari, since the installed app will not see that storage. Today the hint lives only in
+      Settings → Install app
+- [x] **Known limitation, documented**: on iOS a scanned QR / tapped link opens Safari, not the
+      installed app, so EPIC-028 approvals should arrive by push to an installed PWA rather
+      than by QR. Universal links stay E28-T7 / Capacitor territory
+- [x] Tests: Go — per-host manifest and page, avatar icon, escaping, `sw.js` headers
+      (`relay/pwa_test.go`); web unit — state machine, enable/test/disable calls, permission
+      refusal, iOS gate, badge, install mode (`test/lib/push.test.ts`); Playwright —
+      `push.spec.js`: the worker registers at `/app/`, the row reads the relay's config and
+      offers the switch, and a relay without a key reads "Not offered". **Changed:** headless
+      Chromium has no push service, so delivery through a real browser cannot be asserted
+      there; it is covered by `TestINT_WEBPUSH_01` decrypting what a device receives
+- [ ] Manual checklist on devices, recorded here when run: iOS 16.4+ (install from Safari,
+      enable, close the app, message arrives as a notification, badge shows the count, tap
+      opens Messages, reading clears the badge) and Android Chrome (same; dot instead of a
+      number)
+
+**Acceptance:** on an iPhone and an Android phone, `alice.poweur.net` and `bob.poweur.net` are
+installed as two apps named after their hosts with distinct icons; with both apps closed, a
+message to alice notifies on alice's app only, tapping it opens alice's Messages, and alice's
+icon shows the pending count on iOS (dot on Android); reading the message clears it.
