@@ -504,8 +504,54 @@ export interface DeviceEntry {
   /** The last changes cursor the device acknowledged. */
   sync_cursor?: string;
   synced_at?: string;
+  /** Background-push registration (EPIC-009 E09-T11), when the device has one. */
+  push?: DevicePush;
   revoked?: boolean;
   revoked_at?: string;
+}
+
+/** Where the relay delivers a device's background pushes. */
+export interface DevicePush {
+  /** `webpush` today; the native shell adds `apns` / `fcm`. */
+  transport: string;
+  endpoint: string;
+  p256dh?: string;
+  auth?: string;
+  added_at?: string;
+}
+
+/** GET /push/config — whether this relay sends background push. */
+export interface PushConfig {
+  enabled: boolean;
+  /** The browser's `applicationServerKey` (base64url P-256 point). */
+  vapid_public_key?: string;
+  transports?: string[];
+}
+
+/** A browser `PushSubscription.toJSON()`. */
+export interface WebPushSubscriptionJSON {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+/** POST /push/{identity}/subscribe | unsubscribe. */
+export interface PushRegistrationResponse {
+  device_id: string;
+  enabled: boolean;
+}
+
+/**
+ * What a service worker receives in a push: the identity, what happened, and
+ * how much is waiting — never message content.
+ */
+export interface PushPayload {
+  v: number;
+  identity: string;
+  /** message | request | anon | test */
+  kind: string;
+  /** Unpicked messages + contact requests + anonymous mail on the relay. */
+  count: number;
+  ts: string;
 }
 
 /** GET /devices/{identity}. */

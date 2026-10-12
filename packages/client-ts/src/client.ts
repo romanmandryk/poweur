@@ -36,7 +36,7 @@ import { DriveJsonLog } from "./drive/jsonlog.js";
 
 /** Where the sign-in consent log lives (EPIC-008 E08-T3). */
 export const AUTH_LOG_PATH = ".poweur/private/logs/auth.log";
-import { DeviceRegistry, SystemFiles } from "./systemfiles.js";
+import { DeviceRegistry, PushRegistry, SystemFiles } from "./systemfiles.js";
 import {
   CONTACT_ACCEPTED,
   CONTACT_BLOCKED,
@@ -348,6 +348,11 @@ export class PoweurClient {
   /** Our device registry: list and revoke. */
   devices(): DeviceRegistry {
     return new DeviceRegistry(this.system());
+  }
+
+  /** Background push for this device: subscribe, unsubscribe, test. */
+  push(): PushRegistry {
+    return new PushRegistry(this.system());
   }
 
   async contacts(): Promise<Contacts> {

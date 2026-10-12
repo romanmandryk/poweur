@@ -95,6 +95,19 @@
             },
             "description": "names of app-passwords.json entries this device holds; deleted when the device is revoked"
           },
+          "push": {
+            "type": "object",
+            "description": "background-push registration (EPIC-009 E09-T11); dropped when the device is revoked",
+            "required": ["transport", "endpoint"],
+            "properties": {
+              "transport": { "type": "string", "enum": ["webpush"] },
+              "endpoint": { "type": "string", "maxLength": 1024 },
+              "p256dh": { "type": "string", "maxLength": 128 },
+              "auth": { "type": "string", "maxLength": 64 },
+              "added_at": { "type": "string", "format": "date-time" }
+            },
+            "additionalProperties": false
+          },
           "revoked": {
             "type": "boolean"
           },

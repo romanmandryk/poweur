@@ -47,10 +47,52 @@ type hub struct {
 	mu          sync.Mutex
 	subscribers map[string]map[int]chan streamEvent
 	nextID      int
+	// devices counts open streams per (identity, device id). A device with
+	// a live stream is in the foreground and already hears every event, so
+	// background push skips it (E09-T11) — iOS closes the stream the moment
+	// the app is backgrounded, which is exactly when push takes over.
+	devices map[string]map[string]int
 }
 
 func newHub() *hub {
-	return &hub{subscribers: make(map[string]map[int]chan streamEvent)}
+	return &hub{
+		subscribers: make(map[string]map[int]chan streamEvent),
+		devices:     make(map[string]map[string]int),
+	}
+}
+
+// attachDevice records that a device holds an open stream; the returned
+// func detaches it.
+func (h *hub) attachDevice(identity, deviceID string) func() {
+	if deviceID == "" {
+		return func() {}
+	}
+	key := strings.ToLower(identity)
+	h.mu.Lock()
+	if h.devices[key] == nil {
+		h.devices[key] = make(map[string]int)
+	}
+	h.devices[key][deviceID]++
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.devices[key][deviceID] <= 1 {
+			delete(h.devices[key], deviceID)
+			if len(h.devices[key]) == 0 {
+				delete(h.devices, key)
+			}
+			return
+		}
+		h.devices[key][deviceID]--
+	}
+}
+
+// deviceListening reports whether a device holds an open stream.
+func (h *hub) deviceListening(identity, deviceID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.devices[strings.ToLower(identity)][deviceID] > 0
 }
 
 // subscribe registers a listener, refusing when an identity already holds
@@ -143,7 +185,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// user-visible in v1, meaning no peer can learn it. There is no endpoint
 	// that reports another identity's presence, nothing lands in the public
 	// tree, and the row is readable only with owner credentials.
-	s.touchDevice(r.Context(), identity, deviceFromRequest(r))
+	deviceID := s.touchDevice(r.Context(), identity, deviceFromRequest(r))
+	defer s.hub.attachDevice(identity, deviceID)()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -216,7 +259,9 @@ func writeEvent(w http.ResponseWriter, flusher http.Flusher, event streamEvent) 
 	return true
 }
 
-// notify publishes a delivery notification, if anyone is listening.
+// notify publishes a delivery notification to open streams and, for the
+// kinds a person should hear about while the app is closed, schedules a
+// background push (E09-T11). One hook point, so SSE and push cannot drift.
 func (s *Server) notify(identity, kind, messageID string) {
 	if s.hub == nil {
 		return
@@ -227,4 +272,5 @@ func (s *Server) notify(identity, kind, messageID string) {
 		MessageID: messageID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
+	s.schedulePush(identity, kind)
 }

@@ -7,9 +7,12 @@ import { boot, whenFirstRouteChosen } from "./shell/boot";
 import { installTestSeam } from "./shell/testSeam";
 import { refreshAnalyticsConsent } from "./actions/analytics";
 import { startObservability, screenName, syncIdentifiedUser } from "./lib/observability";
-import { useRoute } from "./state/route";
+import { DESTINATIONS, useRoute, type Destination } from "./state/route";
 import { useSession } from "./state/session";
 import { ErrorBoundary } from "./shell/ErrorBoundary";
+import { installPushClient } from "./lib/push";
+import { loadInbox } from "./actions/messages";
+import { loadRequests } from "./actions/contacts";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root is missing from index.html");
@@ -41,6 +44,29 @@ void startObservability().then((obs) => {
     lastUnlocked = state.unlocked;
     sync();
   });
+});
+
+// Notifications and install (E09-T12). A tap on a notification names a
+// destination; a locked app goes there once it is unlocked.
+installPushClient({
+  onOpen: (page) => {
+    if (!(DESTINATIONS as readonly string[]).includes(page)) return;
+    const go = () => useRoute.getState().go(page as Destination);
+    if (useSession.getState().unlocked) {
+      go();
+      return;
+    }
+    const stop = useSession.subscribe((state) => {
+      if (!state.unlocked) return;
+      stop();
+      go();
+    });
+  },
+  onPush: () => {
+    if (!useSession.getState().unlocked) return;
+    void loadInbox({ force: true });
+    void loadRequests();
+  },
 });
 
 function render() {

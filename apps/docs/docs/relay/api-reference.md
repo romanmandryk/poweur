@@ -498,6 +498,51 @@ remains a complete fallback. `: keepalive` comment frames arrive every 25 s.
 
 ---
 
+## Background push {#background-push}
+
+The stream above lives only while an app is open. A relay with `PUSH_VAPID_PRIVATE_KEY` set also
+sends [Web Push](https://www.rfc-editor.org/rfc/rfc8030) (RFC 8291 encryption, RFC 8292 VAPID) to
+devices that registered for it, so an installed web app is told about mail while it is closed
+(EPIC-009 E09-T11).
+
+`GET /push/config` (public):
+
+```json
+{ "enabled": true, "vapid_public_key": "BP6udfvJ…", "transports": ["webpush"] }
+```
+
+A relay without a key answers `{ "enabled": false }` and the endpoints below return `404 push_disabled`.
+
+The owner endpoints are authenticated like the [device registry](#device-registry) and act on
+**the calling device**, so `X-Poweur-Device` is required (`400 device_required`):
+
+| Endpoint | Body | Effect |
+|----------|------|--------|
+| `POST /push/:identity/subscribe` | a browser `PushSubscription.toJSON()`: `{ "endpoint", "keys": { "p256dh", "auth" } }` | stores it on the device's row as `push` |
+| `POST /push/:identity/unsubscribe` | `{}` | removes it |
+| `POST /push/:identity/test` | `{}` | sends one push to this device now and reports what the push service said (`502 push_rejected`, `410 subscription_gone`) |
+
+Refusals: `403 endpoint_not_allowed` (not a host in `PUSH_ENDPOINT_HOSTS`), `403 device_revoked`,
+`409 too_many_push_devices` (16 per identity).
+
+**What a push carries.** The service worker receives, encrypted to the subscription's keys:
+
+```json
+{ "v": 1, "identity": "alice.poweur.net", "kind": "message", "count": 3, "ts": "2026-10-12T10:00:00Z" }
+```
+
+`kind` is `message`, `request`, `anon` or `test`; `count` is everything waiting on the relay
+(unpicked messages, contact requests, anonymous mail) and becomes the icon badge. **No message
+content, sender or subject** is ever in a push: the app picks up through the cursor as always.
+Acks do not push.
+
+**When.** The same events that reach the stream schedule a push, gathered for `PUSH_COALESCE`
+so a burst is one notification. A device that holds an open stream is skipped (it is in the
+foreground and already heard). A push service answering `404`/`410` deletes the registration,
+and revoking a device removes it too. Push never delays the request that caused it.
+
+---
+
 ## GET /hosted/availability {#get-hostedavailability}
 
 Is this handle claimable, and if not, why? Read-only, unauthenticated, and meant to be
@@ -908,7 +953,8 @@ requests that open a session, and the relay records them on one row per device:
 | `X-Poweur-Device-Enrollment` | `enrollment_id` | the device's keystore enrollment, when it has one |
 
 All are self-reported labels, never credentials. A later request that omits a header leaves the
-stored value alone. Rows also carry `added_at` and `last_seen`.
+stored value alone. Rows also carry `added_at` and `last_seen`, and `push` when the device
+registered for [background push](#background-push).
 
 ## Device pairing (EPIC-011 E11-T8)
 

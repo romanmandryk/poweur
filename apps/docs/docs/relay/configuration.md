@@ -56,6 +56,10 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
 | `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push (SSE) streams per identity; `0` = unlimited |
 | `STREAM_IDLE_TIMEOUT` | `1h` | Closes a push stream regardless of traffic; clients reconnect and catch up from their cursor |
+| `PUSH_VAPID_PRIVATE_KEY` | *(empty: off)* | Turns on background Web Push for installed web apps ([`/push`](/relay/api-reference#background-push)). A raw P-256 private key, base64url; generate one with `poweur-relay vapid-keygen` (in the image: `/relay vapid-keygen`). Keep it: browsers bind every subscription to its public key, so a new key means every device turns notifications on again |
+| `PUSH_VAPID_SUBJECT` | `https://<LAUNCHER_HOST>` | The contact push services see in the VAPID token: `mailto:` or `https:` |
+| `PUSH_ENDPOINT_HOSTS` | Google, Apple, Mozilla and Microsoft push services | Comma-separated domains a subscription's endpoint may point at (suffix match). The relay POSTs to that endpoint, so this list is its SSRF guard |
+| `PUSH_COALESCE` | `2s` | How long events for one identity are gathered into a single push |
 | `CHALLENGE_TTL` | `60s` | How long an authentication challenge stays valid |
 | `DNS_TTL` | `300s` | How long resolved identities and relay addresses are cached |
 
