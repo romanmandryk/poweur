@@ -2,7 +2,8 @@
 
 - **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps);
   **T11 done, T12 shipped** (background Web Push + installable per-identity PWA with badges;
-  open: iOS onboarding hint, on-device checklist, approval pushes with EPIC-028)
+  open: iOS onboarding hint, on-device checklist, approval pushes with EPIC-028);
+  **T13 open** (optional encrypted subject line; tray grouped by ID or by subject)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations), EPIC-019 E19-T4
@@ -500,3 +501,166 @@ a key behaves exactly as before.
 installed as two apps named after their hosts with distinct icons; with both apps closed, a
 message to alice notifies on alice's app only, tapping it opens alice's Messages, and alice's
 icon shows the pending count on iOS (dot on Android); reading the message clears it.
+
+## Subjects & email-style conversations (T13)
+
+### E09-T13 — Optional subject line; group the tray by ID or by subject — **open**
+
+Messages can carry an optional **subject**, and the client can show the tray either the way it
+does today — one row per ID — or like an email inbox, one row per subject. It is the missing half
+of E09-T3, whose deferred list says "starting a thread is a compose-screen affordance nobody has
+asked for yet": a thread you can name and find again is that affordance. It also gives EPIC-023
+(email bridge) a field that maps to `Subject:` and E09-T7's `sys.contact.message` the subject its
+description already assumes.
+
+**Design decisions (settle these in the PR's docs change before code):**
+
+1. **The subject is content, so it is encrypted.** It goes inside the E2E payload, never in
+   `thread_id` or `metadata` — those are plaintext to both relays (see *Typed Messages* in
+   `message-format.md`). The relay learns at most that *a* subject exists, not what it says.
+2. **Encoding: an email-style header block in the plaintext, flagged by signed metadata.** A
+   message with a subject has plaintext `Subject: <subject>\n\n<text>` and the signed metadata
+   entry `body_format: headers-v1`. Without the flag the plaintext is plain text, exactly as
+   today, so a body that happens to start with `Subject:` is never misread. An old client
+   ignores the metadata and shows `Subject: Q3 budget` above the text — readable, not JSON.
+   Parsing reads `Name: value` lines up to the first blank line; v1 defines only `Subject`,
+   unknown header names are ignored, and a flagged plaintext that does not parse renders whole
+   as the text with no subject (never drop content). Only `chat.text` carries a subject in v1;
+   an attachment sent inside a subject conversation joins it through `thread_id`.
+3. **Subject limits:** UTF-8, trimmed, no control characters, at most 256 bytes. An empty
+   subject means "no subject": the sender sets neither the header nor the flag, so a message
+   without a subject is byte-identical to today's.
+4. **`thread_id` is the grouping key; the subject is its label.** Starting a new subject mints
+   a fresh random `thread_id` (a ULID for 1:1, `GroupThreadID(group, <ulid>)` for groups) —
+   **never derived from the subject text**, since a hash of the subject in a plaintext field
+   could be guessed by dictionary. Replies keep the `thread_id`, so a reply from a client that
+   drops the subject still lands in the right conversation. A conversation's displayed subject
+   is the newest subject seen in it.
+5. **Fallback for messages with a subject but no `thread_id`** (email bridge, other
+   implementations): group by `(peer, normalized subject)`. Normalizing trims, collapses
+   whitespace, case-folds and strips repeated `Re:` / `Fwd:` / `Fw:` / `Aw:` / `Sv:` prefixes.
+   Clients do **not** add `Re:` themselves — the thread carries the link, not the subject.
+   Grouping key, in order: `thread_id` → `subj:<normalized subject>` → the default thread.
+6. **Changing the subject starts a new conversation.** On a reply, if the subject being sent
+   differs (after normalizing) from the current conversation's subject, the client mints a
+   new `thread_id`; clearing it sends to the default thread (`""` for 1:1, the group ID for a
+   group). The composer says so before sending: "This starts a new conversation".
+7. **Read state grows per-thread marks, additively.** Today's mark is per conversation (E09-T1),
+   which in the subject view would mark a whole contact read when one subject is opened.
+   `read-state.json` gains an optional top-level `threads: {<peer>: {<thread key>: mark}}`. A
+   message is unread unless **either** its peer mark **or** its thread mark covers it, so the
+   ID view (which advances the peer mark) and the subject view (which advances the thread mark)
+   never disagree. Advancing a peer mark prunes the thread marks it now covers. An older writer
+   that rewrites the file without `threads` only makes messages *more* unread, never hides one.
+8. **The view mode is a per-device preference** (`localStorage`, keyed per identity), default
+   **By ID**. It is a reading convenience, not account state.
+9. **Push notifications are unchanged** — they never name anyone or anything (E09-T12), so the
+   subject never appears in a push.
+
+**Tray views (web app, which the mobile shell reuses):**
+
+- **By ID (default).** One row per contact and per group. Threads no longer get rows of their
+  own here: the conversation is one chronological stream, and a subject divider ("Q3 budget")
+  appears above a message whose thread or subject differs from the previous one. Row preview:
+  `<subject> — <text>` when the newest message has a subject, otherwise the text. Badge: the
+  contact's unread count as today.
+- **By subject.** One row per `(peer, grouping key)`, newest activity first, like an inbox: the
+  subject as the title (`(no subject)` for the default thread, `#name` for a named thread
+  without a subject, e.g. one started with the CLI's `--thread`), the peer and a preview below,
+  bold with a count when it holds unread messages. Opening a row shows only that thread.
+- The switch is a two-way toggle in the Messages header and is remembered; the open
+  conversation, if any, stays open across a switch (in the subject view it becomes the thread of
+  its newest message).
+
+**Composer rules (one pure function both views use):**
+
+| Where the compose starts | Subject field | Prefilled with | Thread used |
+|---|---|---|---|
+| New message from By ID | collapsed ("+ Subject") | — | a new thread if a subject is typed, else default |
+| New conversation from By subject | expanded, focused | — | new thread if a subject is typed, else default |
+| Reply, newest message in the open conversation has a subject (either view) | expanded | that subject | that message's thread |
+| Reply in By ID, newest message has no subject | collapsed | — | that message's thread |
+| Reply in By subject, inside a thread | expanded | the thread's subject (empty for `(no subject)`) | that thread |
+
+- "Newest message" includes our own: if the last thing said in the conversation had a subject,
+  the reply carries it, whoever said it.
+- Collapsing the field clears it (one rule: what you can see is what gets sent). Editing or
+  clearing a prefilled subject shows "This starts a new conversation" under the field.
+- If a message arrives while composing, the prefill follows the new newest message **until the
+  user touches the field**; after that their text is never overwritten.
+
+**Subtasks:**
+
+- [ ] Docs first: `message-format.md` — *Subjects* section (encoding, flag, limits, encryption
+      rationale, grouping key, normalization); `group-messaging.md` — subject threads use
+      `GroupThreadID`; a short PCP in `conventions/` for `body_format: headers-v1` so other
+      implementations and the email bridge share it
+- [ ] Go canonical rules in `packages/identity` (`subject.go`): `FormatBody(subject, text)`,
+      `ParseBody(plaintext, metadata) (subject, text)`, `ValidateSubject`, `NormalizeSubject`,
+      `ConversationKey(msg)`; new conformance vector file `message-subject.json` (encode,
+      decode, malformed block, unknown header, flag absent with a `Subject:` body, limits,
+      normalization table, grouping keys)
+- [ ] History: `HistoryRecord.Subject` (`omitempty`, so existing records stay byte-identical)
+      and `Body` holds only the text; `ReadState.Threads` with validation and pruning; extend
+      `history-paths` / `history-read-state` vectors
+- [ ] `@poweur/client`: the same functions as the Go twin, driven by the same vectors;
+      `send` / `sendAndArchive` / `sendGroupAndArchive` take `{ subject }` and mint the thread;
+      `inboxAndArchive` and history return `subject` separately from `body`; per-thread read
+      marks in `MessageHistory`
+- [ ] Go CLI: `poweur send <to> <text> --subject "<s>"` (mints a thread unless `--thread` is
+      given) and the same on `group send`; `inbox` / `history` / `listen` show the subject;
+      `--json --decrypt` emits `subject` next to `body`; `history --by-subject` lists
+      conversations by subject. TS CLI: same flags and JSON
+- [ ] Web: `lib/threads.js` — `buildConversationRows(messages, self, { view })` for both views,
+      `composerSubject({ view, origin, conversation, touched })` returning `{ expanded, value,
+      threadId, startsNew }`, unread per row from peer + thread marks; Messages header toggle;
+      subject field in `Thread.tsx` and `NewChat.tsx`; subject dividers in the By-ID stream;
+      `actions/messages.ts` passes the subject through send, outbox retry and archive
+- [ ] E09-T7 / EPIC-023 hand-off notes: `sys.contact.message` reuses `headers-v1`; the bridge
+      maps `Subject:` both ways and links `In-Reply-To` to a `thread_id`
+
+**Tests:**
+
+- [ ] Go unit (`packages/identity`): every `message-subject.json` case; an unflagged body
+      starting with `Subject:` stays body; a malformed flagged body comes back whole; subject
+      over 256 bytes and with a newline refused; `ConversationKey` order (thread → normalized
+      subject → default); the thread minted for a group passes `ValidateGroupThreadID`; history
+      record without a subject marshals byte-identical to the pre-T13 form; read-state with and
+      without `threads` round-trips, prunes on peer-mark advance, and an unread check honours
+      either mark
+- [ ] TS unit: the same vectors through `@poweur/client`; `send` with a subject produces the
+      flag, a fresh ULID thread and a plaintext that decrypts to the header block, and without
+      one produces exactly today's envelope (canonical string compared to a pre-T13 fixture)
+- [ ] Web unit (`test/lib/threads.test.ts` and a new `composer-subject.test.ts`): both views'
+      rows from one fixture inbox (subject threads, a named thread, a no-subject stream, a group,
+      a subject-without-thread message, an old client's reply without a subject that still
+      groups by thread); every row of the composer table above; "touched" stops prefill
+      updates; edit and clear set `startsNew`; per-row unread with interleaved threads, where
+      reading one subject leaves the other unread
+- [ ] CLI unit: `--subject` validation, thread minting vs explicit `--thread`, JSON shape
+- [ ] Integration (`apps/integration`):
+      `TestINT_SUBJECT_01` — Go CLI on relay A sends with a subject to an identity on relay B;
+      the TS CLI's `inbox --json --decrypt` shows the subject and text apart; **the subject's
+      bytes appear nowhere in either relay's spool or logs**;
+      `TestINT_SUBJECT_02` — reply in the thread, then a reply with a changed subject, then the
+      history read by a second device after a relay restart groups into the same two threads;
+      `TestINT_SUBJECT_03` — a five-member group subject thread across two relays: every member
+      sees the subject, the thread has the group prefix, the relay accepts the fan-out;
+      `TestINT_SUBJECT_04` — compatibility: an envelope built without the flag whose text starts
+      with `Subject:` is delivered and shown verbatim, and a flagged message verifies against
+      the canonical string with the `meta:body_format:headers-v1` line written out longhand
+- [ ] Playwright (`apps/web/test/e2e/subjects.spec.js`): default view is By ID; new chat shows a
+      collapsed subject; switch to By subject, start "Q3 budget" (field expanded); the
+      recipient sees a "Q3 budget" row, opens it and the reply field is prefilled; changing the
+      subject shows the warning and makes a second row; By ID shows one row for the contact with
+      both subject dividers; the mode and grouping survive a reload; reading one subject row
+      leaves the other row's unread mark
+
+**Acceptance:** two people on different relays hold two subject conversations and one plain one
+at the same time; By subject shows three rows, By ID one row with dividers, both before and
+after a reload and on a second device; replies are prefilled with the right subject; neither
+relay ever stores or logs a subject in plaintext; a message without a subject is byte-identical
+on the wire to one sent before this task.
+
+**Out of scope:** subject search, per-attachment subjects, editing a sent subject, `Re:`
+prefixes, subjects on anonymous (E14) mail (revisit with E09-T7's `sys.contact.message`).
