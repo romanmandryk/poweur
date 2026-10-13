@@ -71,6 +71,7 @@
 | E11-T5 Social recovery | open | later | design doc gates implementation |
 | E11-T6 Poweur ID as recovery anchor | open | later | needs EPIC-008 |
 | E11-T7 Security review & drills | **partial** | v1 | 6 drills green in CI; external review outstanding |
+| Add device without the chooser (follow-up) | **done** → [EPIC-028](EPIC-028-one-tap-approvals.md) E28-T8 | v1.1 | One QR (`/id/approve#pair=`) for app, browser and CLI; typed-path compare digits stay |
 
 **v1 is complete.** T5/T6 are separate phases by design. The remaining v1 item is the external
 security review (T7), which is a human action, not code.

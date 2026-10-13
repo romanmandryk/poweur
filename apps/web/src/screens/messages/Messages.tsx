@@ -134,7 +134,15 @@ function expiresIn(timestamp: string, now = Date.now()): string {
 function AuthPrompts() {
   const messages = useData((state) => state.messages);
   const dismissed = useData((state) => state.dismissedPrompts);
+  const openNewest = useData((state) => state.openNewestPrompt);
   const prompts = pendingAuthPrompts(messages, dismissed);
+  // Arrived from a tapped sign-in notification: review the newest at once.
+  useEffect(() => {
+    if (!openNewest || !prompts.length) return;
+    useData.setState({ openNewestPrompt: false });
+    const newest = [...prompts].sort((a, b) => Date.parse(b.expiresAt) - Date.parse(a.expiresAt))[0]!;
+    openAuthPrompt(newest);
+  }, [openNewest, prompts]);
   if (!prompts.length) return null;
   return (
     <section id="auth-prompts" aria-label="Sign-in requests" className="mx-4 mb-3 flex flex-col gap-2">

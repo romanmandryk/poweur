@@ -54,7 +54,7 @@ export interface ExistingIdTarget {
 
 /**
  * What "I already have an ID" was given. A bare handle is completed with the
- * launcher's domain, and a pasted link (`https://alice.poweur.net/app/`) or
+ * launcher's domain, and a pasted link (`https://alice.poweur.net/id/`) or
  * `@alice` means the identity it names. Anything that is still not a name is
  * `null`.
  */
@@ -132,7 +132,7 @@ export function webCustodyBlocked(custody: CustodyChoice | null, passkey: Passke
 }
 
 /**
- * The directory this app is served from: `/app/` on a relay, `/` in the
+ * The directory this app is served from: `/id/` on a relay, `/` in the
  * shell. Links to another host keep it, so a hand-off lands in the same app.
  */
 export function appBasePath(pathname: string = globalThis.location?.pathname ?? "/"): string {

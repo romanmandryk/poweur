@@ -35,7 +35,7 @@ test("ships no source, test or tooling files to a device", { skip }, () => {
 
 test("the entry point resolves everything relatively", { skip }, () => {
   const html = readFileSync(join(www, "index.html"), "utf8");
-  // `capacitor://localhost/` has no /app/ prefix; an absolute path here loads
+  // `capacitor://localhost/` has no /id/ prefix; an absolute path here loads
   // in the browser and fails only once it is on a phone.
   const absolute = [...html.matchAll(/(?:src|href)\s*=\s*"(\/[^"]*)"/g)].map((m) => m[1]);
   assert.deepEqual(absolute, [], `absolute paths in index.html: ${absolute.join(", ")}`);

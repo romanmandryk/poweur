@@ -2,7 +2,7 @@
 
 - **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps);
   **T11 done, T12 shipped** (background Web Push + installable per-identity PWA with badges;
-  open: iOS onboarding hint, on-device checklist, approval pushes with EPIC-028)
+  open: iOS onboarding hint, on-device checklist; sign-in pushes shipped with EPIC-028)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations), EPIC-019 E19-T4
@@ -387,7 +387,7 @@ the same icon.
 | Storage | installed app is **isolated from Safari** | shared with the browser | shared |
 | Links / QR | open **Safari**, not the installed app | link capturing can open the app | — |
 
-### E09-T11 — Background push: relay subscriptions + Web Push transport — **done** (approval pushes wait on EPIC-028)
+### E09-T11 — Background push: relay subscriptions + Web Push transport — **done** (sign-in pushes added by EPIC-028 E28-T12)
 
 The relay half, shared by every client. Transport-agnostic so E19-T4's APNs/FCM plug in as two
 more transports rather than a second system.
@@ -407,8 +407,8 @@ more transports rather than a second system.
       `/.well-known/poweur`: it belongs to the relay, not to an identity
 - [x] Triggers: `notify` itself schedules the push, so SSE and push share one hook point —
       `message` (including group fan-out), `request` (the queued contact request) and `anon`.
-      Acks deliberately do not push. Share offers ride `request`. **Open:** EPIC-028 approval
-      requests do not exist yet; they get a kind in `pushKinds` when E28 lands
+      Acks deliberately do not push. Share offers ride `request`. Sign-in requests got the `auth`
+      kind in EPIC-028 E28-T12
 - [x] Payload carries **no content**: `{v, identity, kind, count, ts}`, with `count` =
       unpicked spool + pending requests + anonymous mail. Web Push encrypts it to the device.
       `Topic` per identity (a burst replaces rather than stacks), `TTL` 24 h, `Urgency: high`
@@ -432,7 +432,7 @@ more transports rather than a second system.
       answers `410` and the registration is gone. TS: `push-relay.test.ts` (config, subscribe,
       test, unsubscribe, refused endpoint against a real relay)
 
-**Acceptance:** met for messages and contact requests; approval requests follow EPIC-028.
+**Acceptance:** met for messages and contact requests; sign-in requests since EPIC-028 E28-T12.
 With no stream open, each produces one push per registered device, decryptable only with that
 device's keys and containing no message content; a gone endpoint is cleaned up; a relay without
 a key behaves exactly as before.

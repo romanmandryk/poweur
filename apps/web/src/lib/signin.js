@@ -1,6 +1,6 @@
 import {
   checkRequestAgainstMetadata, checkResumeUri, decodeSignInRequest, describeSignInContext,
-  fetchSignInContext, fetchSignInRequest, normalizeMatchCode, signInRequestUri,
+  fetchSignInContext, fetchSignInRequest, normalizeMatchCode, signInRequestUri, SIGNIN_FINISH_POLL,
   describeScopes, encodeSignInResponse, fetchRelyingPartyMetadata,
   normalizeSignInRequest, signInResponseCanonical, summarizeSignInRequest,
   validateSignInRequest,
@@ -40,16 +40,24 @@ export async function loadSignInConsent(input, options = {}) {
   const request = await resolveAuthInput(input, options);
   const metadata = await fetchRelyingPartyMetadata(request.audience, options);
   checkRequestAgainstMetadata(request, metadata);
-  // Where the sign-in was started, for someone approving from another device.
-  // Best effort: a missing or failing context never blocks an approval.
+  // Where the sign-in was started, for someone approving from another device,
+  // and — once it was pushed — the numbers to pick from (EPIC-028). Best
+  // effort: a missing or failing context never blocks an approval.
   let context = "";
+  let choices = null;
+  let pushUri = "";
   try {
-    context = describeSignInContext(await fetchSignInContext(metadata, request.request_id, options));
+    const ctx = await fetchSignInContext(metadata, request.request_id, options);
+    context = describeSignInContext(ctx);
+    choices = ctx?.match_choices ?? null;
+    pushUri = ctx?.push_uri ?? "";
   } catch { /* the RP may not publish one */ }
   return {
     request,
     metadata,
     context,
+    choices,
+    pushUri,
     headline: summarizeSignInRequest(request, metadata.name),
     scopes: describeScopes(request.scopes ?? [], metadata.name),
   };
@@ -102,31 +110,36 @@ export async function appendBrowserConsent(log, response, metadata) {
  * POST the approval to the request's callback and read the relying party's
  * receipt. Returns `{ delivered, resumeUri }`.
  *
- * `match` is the number the user copied from the screen that started the
- * sign-in; present only when approving from another device. Without it the
- * wire stays what it always was — the bare code as text/plain, a CORS-simple
- * request every existing RP accepts.
+ * `crossDevice` says the sign-in was started on another device: the starting
+ * page's poll finishes it (`finish: "poll"`). `match` is the number picked
+ * for a pushed sign-in (EPIC-028). With neither, the wire stays what it always
+ * was — the bare code as text/plain, a CORS-simple request every RP accepts.
  *
  * The approval never goes into a URL. A same-device RP answers with a
  * `resume_uri` instead, which finishes only in the browser that started.
  */
-export async function deliverBrowserApproval(request, encoded, fetchImpl = globalThis.fetch, match = "") {
+export async function deliverBrowserApproval(request, encoded, fetchImpl = globalThis.fetch, { crossDevice = false, match = "" } = {}) {
   if (!request.response_uri) return { delivered: false, resumeUri: "" };
   const code = normalizeMatchCode(match);
-  const response = await fetchImpl(request.response_uri, {
+  const envelope = crossDevice || code
+    ? JSON.stringify({ response: encoded, ...(crossDevice ? { finish: SIGNIN_FINISH_POLL } : {}), ...(code ? { match: code } : {}) })
+    : encoded;
+  const response = await (fetchImpl ?? globalThis.fetch)(request.response_uri, {
     method: "POST",
     // text/plain is a CORS-simple request; the RP accepts the portable code
     // directly, so QR/cross-device approval needs no preflight ceremony.
     headers: { "content-type": "text/plain;charset=UTF-8" },
-    body: code ? JSON.stringify({ response: encoded, match: code }) : encoded,
+    body: envelope,
     redirect: "error",
   });
   if (!response.ok) {
     let reason = "";
     try { reason = (await response.json())?.error ?? ""; } catch { /* not JSON */ }
-    throw new Error(reason
+    const error = new Error(reason
       ? `The app refused the approval: ${reason}`
       : `The relying party refused the approval (HTTP ${response.status}).`);
+    error.status = response.status;
+    throw error;
   }
   let receipt = {};
   try { receipt = (await response.json()) ?? {}; } catch { /* an RP that predates receipts */ }

@@ -29,7 +29,7 @@ can live on any existing relay: see [Web identity](/protocol/web-identity).
 ```text
                     ┌───────────────── your server ─────────────────┐
 alice.example.com ─▶│ Caddy (TLS) ──▶ relay :8080 ──▶ /data volume  │
-example.com/app/  ─▶│                 (serves the web app at /app/) │
+example.com/id/  ─▶│                 (serves the web app at /id/) │
                     └───────────────────────────────────────────────┘
 ```
 
@@ -43,7 +43,7 @@ Create two records pointing at your server:
 
 | Name | Type | Value | Why |
 |------|------|-------|-----|
-| `example.com` | A / AAAA | your server | The web app (`https://example.com/app/`) and sign-up |
+| `example.com` | A / AAAA | your server | The web app (`https://example.com/id/`) and sign-up |
 | `*.example.com` | A / AAAA | your server | Every hosted ID, e.g. `alice.example.com` |
 | `relay.example.com`, `id.example.com` | covered by the wildcard | | The relay's own name (written into identity documents) and the sign-up host |
 
@@ -149,7 +149,7 @@ docker compose up -d
 curl https://example.com/health     # {"status":"ok", …}
 ```
 
-Open `https://example.com/app/` and create the first ID. Confirm it resolves from outside:
+Open `https://example.com/id/` and create the first ID. Confirm it resolves from outside:
 
 ```bash
 curl https://alice.example.com/.well-known/poweur/id.json

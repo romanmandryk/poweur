@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -108,17 +109,20 @@ func startIn(t *testing.T, srv *Server, cookies ...*http.Cookie) (StartResponse,
 	if binding == nil {
 		t.Fatal("start set no binding cookie")
 	}
-	if out.PollSecret == "" || out.PollSecret == out.RequestID || len(out.MatchCode) != signin.MatchCodeDigits {
+	if out.PollSecret == "" || out.PollSecret == out.RequestID {
 		t.Fatalf("start = %+v", out)
 	}
 	return out, binding
 }
 
-// deliver POSTs an approval the way a signer does, optionally with the code a
-// cross-device user typed.
-func deliver(t *testing.T, srv *Server, encoded, match string) (*httptest.ResponseRecorder, signin.DeliveryReceipt) {
+// crossDevice, passed to deliver, marks the approval as made on another device.
+const crossDevice = signin.FinishPoll
+
+// deliver POSTs an approval the way a signer does: finish is "" for the
+// browser that started the sign-in, crossDevice for another device.
+func deliver(t *testing.T, srv *Server, encoded, finish string) (*httptest.ResponseRecorder, signin.DeliveryReceipt) {
 	t.Helper()
-	body, _ := json.Marshal(signin.Delivery{Response: encoded, Match: match})
+	body, _ := json.Marshal(signin.Delivery{Response: encoded, Finish: finish})
 	rec := post(t, srv, "/auth/callback", string(body))
 	var receipt signin.DeliveryReceipt
 	_ = json.Unmarshal(rec.Body.Bytes(), &receipt)
@@ -281,8 +285,8 @@ func TestSignInEndToEnd(t *testing.T) {
 		t.Fatalf("poll before approval = %q", got)
 	}
 
-	// The phone's user types the code shown on the screen and approves.
-	rec, receipt := deliver(t, srv, approve(t, alice, started.Request), started.MatchCode)
+	// The phone's user approves; no number is asked (EPIC-028).
+	rec, receipt := deliver(t, srv, approve(t, alice, started.Request), crossDevice)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("callback = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -431,7 +435,7 @@ func TestPollNeedsThePollSecret(t *testing.T) {
 	alice := newUser(t, who)
 	srv, _ := newServer(t, alice)
 	started := start(t, srv)
-	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), started.MatchCode); rec.Code != http.StatusOK {
+	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), crossDevice); rec.Code != http.StatusOK {
 		t.Fatalf("callback = %d: %s", rec.Code, rec.Body.String())
 	}
 
@@ -454,24 +458,18 @@ func TestPollNeedsThePollSecret(t *testing.T) {
 	}
 }
 
-func TestWrongMatchCodeEndsTheSignIn(t *testing.T) {
+// An older signer still sends the code it used to be shown; the guestbook
+// never asks for one, so it is ignored and the approval finishes on the poll.
+func TestOlderSignerCodeIsIgnored(t *testing.T) {
 	alice := newUser(t, who)
 	srv, _ := newServer(t, alice)
 	started := start(t, srv)
-	wrong := "00"
-	if started.MatchCode == wrong {
-		wrong = "01"
+	body, _ := json.Marshal(signin.Delivery{Response: approve(t, alice, started.Request), Match: "42"})
+	if rec := post(t, srv, "/auth/callback", string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("older cross-device delivery = %d %s", rec.Code, rec.Body.String())
 	}
-	encoded := approve(t, alice, started.Request)
-	if rec, _ := deliver(t, srv, encoded, wrong); rec.Code != http.StatusForbidden {
-		t.Fatalf("wrong code = %d, want 403", rec.Code)
-	}
-	// One attempt: the right code afterwards does not help.
-	if rec, _ := deliver(t, srv, encoded, started.MatchCode); rec.Code == http.StatusOK {
-		t.Fatal("a second guess at the match code was accepted")
-	}
-	if got := pollStatus(t, srv, started); got != "failed" {
-		t.Fatalf("poll after wrong code = %q, want failed", got)
+	if got := pollStatus(t, srv, started); got != "complete" {
+		t.Fatalf("poll = %q", got)
 	}
 }
 
@@ -481,11 +479,11 @@ func TestOnlyOneApprovalPerSignIn(t *testing.T) {
 	srv, _ := newServer(t, alice, bob)
 	started := start(t, srv)
 
-	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), started.MatchCode); rec.Code != http.StatusOK {
+	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), crossDevice); rec.Code != http.StatusOK {
 		t.Fatalf("first approval = %d", rec.Code)
 	}
 	// A different identity approving the same forwarded request.
-	if rec, _ := deliver(t, srv, approve(t, bob, started.Request), started.MatchCode); rec.Code != http.StatusConflict {
+	if rec, _ := deliver(t, srv, approve(t, bob, started.Request), crossDevice); rec.Code != http.StatusConflict {
 		t.Fatalf("second approval = %d, want 409", rec.Code)
 	}
 	pollRec := get(t, srv, pollPath(started))
@@ -702,7 +700,7 @@ func TestPollExpiry(t *testing.T) {
 		t.Fatalf("poll without request_id = %d", rec.Code)
 	}
 	// An approval arriving after expiry has nothing to complete.
-	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), started.MatchCode); rec.Code == http.StatusOK {
+	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), crossDevice); rec.Code == http.StatusOK {
 		t.Fatal("a late approval was accepted")
 	}
 }
@@ -869,7 +867,7 @@ func TestSignInContext(t *testing.T) {
 	if rec := get(t, srv, "/auth/context?request_id=req_nope"); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown = %d", rec.Code)
 	}
-	deliver(t, srv, approve(t, alice, started.Request), started.MatchCode)
+	deliver(t, srv, approve(t, alice, started.Request), crossDevice)
 	if rec := get(t, srv, "/auth/context?request_id="+url.QueryEscape(started.RequestID)); rec.Code != http.StatusNotFound {
 		t.Fatalf("answered request still has context: %d", rec.Code)
 	}
@@ -903,7 +901,7 @@ func TestRequestByReference(t *testing.T) {
 	// A browser is sent into the web signer carrying the short link.
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://poweur.net/app/?auth="+url.QueryEscape(started.RequestLink) {
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://poweur.net/id/?auth="+url.QueryEscape(started.RequestLink) {
 		t.Fatalf("browser = %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 
@@ -911,5 +909,45 @@ func TestRequestByReference(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/r/ZZZZZZZZ", nil))
 	if rec.Code != http.StatusGone {
 		t.Fatalf("unknown code = %d", rec.Code)
+	}
+}
+
+// After a sign-in the browser remembers the ID, and the next sign-in opens
+// that ID's own approve page instead of a chooser (EPIC-028).
+func TestRememberedIDGivesAnApproveLink(t *testing.T) {
+	alice := newUser(t, who)
+	srv, _ := newServer(t, alice)
+	srv.cfg.FetchCapabilities = func(_ context.Context, id string) (identity.Capabilities, error) {
+		if id != who {
+			return identity.Capabilities{}, errors.New("unknown")
+		}
+		return identity.Capabilities{Endpoints: map[string]string{"web_signer": "https://" + who + "/id/"}}, nil
+	}
+	started := start(t, srv)
+	if started.ApproveLink != "" || started.Identity != "" {
+		t.Fatalf("a fresh browser got %+v", started)
+	}
+	deliver(t, srv, approve(t, alice, started.Request), crossDevice)
+	rec := get(t, srv, pollPath(started))
+	var remembered *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == lastIDCookie {
+			remembered = c
+		}
+	}
+	if remembered == nil || remembered.Value != who || !remembered.HttpOnly {
+		t.Fatalf("remembered cookie = %+v", remembered)
+	}
+	next, _ := startIn(t, srv, remembered)
+	want := identity.ApproveLink("https://"+who+"/id/approve", next.RequestLink)
+	if next.Identity != who || next.ApproveLink != want {
+		t.Fatalf("start for a remembered ID = %+v, want link %s", next, want)
+	}
+	// Signing out forgets it.
+	out := post(t, srv, "/auth/logout", "")
+	for _, c := range out.Result().Cookies() {
+		if c.Name == lastIDCookie && c.MaxAge >= 0 {
+			t.Fatalf("logout kept the ID: %+v", c)
+		}
 	}
 }

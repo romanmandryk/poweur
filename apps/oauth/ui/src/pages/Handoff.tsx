@@ -5,9 +5,9 @@ import { Card, Chip } from "../ui/Display";
 import { Shell } from "../ui/Shell";
 
 /**
- * A phone's camera opened the QR on the screen that started a sign-in. Offer
- * the ways this phone can approve it; the code on that screen is asked for
- * next, which is what proves the person here is looking at it.
+ * A phone's camera opened a sign-in link the identity's own approve page
+ * could not carry (it names no signer of its own). Offer the ways this phone
+ * can approve it.
  */
 export function Handoff({ page }: { page: Page<HandoffData> }) {
   const d = page.data;
@@ -43,7 +43,7 @@ export function Handoff({ page }: { page: Page<HandoffData> }) {
           ))}
         </div>
         <p className="mt-5 text-[13px] text-muted">
-          You'll be asked for the 2-digit code on the screen you started from. Only approve a sign-in you started yourself.
+          Only approve a sign-in you just started yourself.
         </p>
       </Card>
     </Shell>

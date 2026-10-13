@@ -16,6 +16,7 @@
 | Completion binding (follow-up) | **done** | Found while designing EPIC-022: the guestbook handed its session to whoever polled with a `request_id`, so a forwarded sign-in link was an account takeover. Now a same-device approval finishes only at a single-use `resume_uri` in the browser holding the RP's binding cookie, and a cross-device one only with the match code the starting screen showed. Spec: "Who may complete a sign-in" in `auth/sign-in.md`; tracked under E22-T4 |
 | E08-T6 Short sign-in codes: request by reference | **done** | QR and copy carried the whole signed request (~600 characters) — a QR too dense for many cameras. They now carry a short `https://<rp>/r/<code>` link the signer fetches from the RP itself |
 | E08-T5 Interop bridges | **done** | Mechanical `did:web` projection at `/.well-known/did.json` with resolution coverage; OIDC bridge and SIOPv2/OpenID4VP decision record |
+| Fewer match codes (follow-up) | **done** → [EPIC-028](EPIC-028-one-tap-approvals.md) | No code for QR or links; pick one of three only for push; QR goes to the ID's own `/id/approve` link |
 
 ## Goal
 

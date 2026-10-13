@@ -147,11 +147,12 @@ type homeView struct {
 }
 
 type identifyPage struct {
-	Txn      string        `json:"txn"`
-	Client   *appRef       `json:"client,omitempty"`
-	Hint     string        `json:"hint,omitempty"`
-	Error    string        `json:"error,omitempty"`
-	Launcher *launcherView `json:"launcher,omitempty"`
+	Txn        string        `json:"txn"`
+	Client     *appRef       `json:"client,omitempty"`
+	Hint       string        `json:"hint,omitempty"`
+	Remembered bool          `json:"remembered,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	Launcher   *launcherView `json:"launcher,omitempty"`
 }
 
 type signerPage struct {
@@ -176,10 +177,15 @@ type awaitPage struct {
 	// Request is the short link to the request (E08-T6): what the QR shows
 	// and "copy" copies. The whole request stays in the deep link and the
 	// web signer links, which are clicked, not scanned.
-	Request string    `json:"request"`
-	Match   string    `json:"match"`
-	QR      string    `json:"qr"`
-	Push    *pushPage `json:"push,omitempty"`
+	Request string `json:"request"`
+	// Match is the number to pick on the phone, once the request was pushed
+	// (EPIC-028); empty before.
+	Match string `json:"match"`
+	// QRLink is what the QR encodes: the identity's approve page.
+	QRLink   string    `json:"qrLink"`
+	QR       string    `json:"qr"`
+	Push     *pushPage `json:"push,omitempty"`
+	AutoPush bool      `json:"autoPush,omitempty"`
 }
 
 type consentClient struct {
@@ -299,11 +305,12 @@ func (s *Server) pageFor(name string, data any) any {
 	case handoffPage:
 		return v
 	case identifyView:
-		return identifyPage{Txn: v.Txn.ID, Client: appRefOf(v.Client), Hint: v.Hint, Error: v.Error, Launcher: v.Launcher}
+		return identifyPage{Txn: v.Txn.ID, Client: appRefOf(v.Client), Hint: v.Hint, Remembered: v.Remembered, Error: v.Error, Launcher: v.Launcher}
 	case awaitView:
 		p := awaitPage{
 			Txn: v.Txn.ID, Identity: v.Txn.Identity, Client: appRefOf(v.Client),
-			Signers: []signerPage{}, DeepLink: string(v.DeepLink), Request: v.Request, Match: v.Match, QR: string(v.QR),
+			Signers: []signerPage{}, DeepLink: string(v.DeepLink), Request: v.Request, Match: v.Match, QRLink: v.QRLink, QR: string(v.QR),
+			AutoPush: v.AutoPush,
 		}
 		for _, sg := range v.Signers {
 			p.Signers = append(p.Signers, signerPage{Label: sg.Label, Href: sg.Href, Note: sg.Note, Own: !sg.Default})

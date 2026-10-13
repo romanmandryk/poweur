@@ -95,7 +95,7 @@ func TestIdentityPageEscapesFiltersAndAdvertisesAnonymous(t *testing.T) {
 			t.Fatalf("unsafe profile content reached HTML: %q in %s", unsafe, body)
 		}
 	}
-	for _, wanted := range []string{"&lt;script&gt;alert(1)&lt;/script&gt;", "https://example.org/path", "/app/?anonymous=1", "Write anonymously"} {
+	for _, wanted := range []string{"&lt;script&gt;alert(1)&lt;/script&gt;", "https://example.org/path", "/id/?anonymous=1", "Write anonymously"} {
 		if !strings.Contains(body, wanted) {
 			t.Fatalf("page missing %q: %s", wanted, body)
 		}
@@ -165,13 +165,13 @@ func TestIdentityPageOnlyOnExactRoot(t *testing.T) {
 		t.Fatalf("unknown path became the identity page: %d %s", unknownRec.Code, unknownRec.Body.String())
 	}
 
-	app := httptest.NewRequest(http.MethodGet, "https://"+pageIdentity+"/app/", nil)
+	app := httptest.NewRequest(http.MethodGet, "https://"+pageIdentity+"/id/", nil)
 	app.Host = pageIdentity
 	app.Header.Set("Accept", "text/html")
 	appRec := httptest.NewRecorder()
 	router.ServeHTTP(appRec, app)
 	if appRec.Code != http.StatusOK || !strings.Contains(appRec.Body.String(), "web-app-shell") || strings.Contains(appRec.Body.String(), "Copy ID") {
-		t.Fatalf("/app/ was not the web shell: %d %s", appRec.Code, appRec.Body.String())
+		t.Fatalf("/id/ was not the web shell: %d %s", appRec.Code, appRec.Body.String())
 	}
 }
 
@@ -245,7 +245,7 @@ func TestIdentityPageCallsToAction(t *testing.T) {
 	s.cfg.LauncherHost = "poweur.net"
 	body := pageRequest(t, s, "text/html").Body.String()
 	for _, wanted := range []string{
-		`href="https://poweur.net/app/?to=alice.poweur.net"`,
+		`href="https://poweur.net/id/?to=alice.poweur.net"`,
 		"Message Alice",
 		`id="btn-claim"`,
 		"What is a Poweur ID?",
@@ -261,5 +261,20 @@ func TestIdentityPageCallsToAction(t *testing.T) {
 	serveIdentityPageAsset(w, req)
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/svg+xml" || !strings.Contains(w.Body.String(), "<svg") {
 		t.Fatalf("logo asset: %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}
+
+// The owner on a browser that has never used the ID can get in from their own
+// page (EPIC-028): a plain link to the web app, there without scripts.
+func TestIdentityPageOffersSignInAsTheOwner(t *testing.T) {
+	s := newIdentityPageServer(t)
+	writePageProfile(t, s, `{"version":1,"display_name":"Alice Smith"}`)
+	if body := pageRequest(t, s, "text/html").Body.String(); strings.Contains(body, `id="btn-signin-as"`) {
+		t.Fatal("a relay without the web app offered to sign in to it")
+	}
+	s.cfg.WebStaticDir = t.TempDir()
+	body := pageRequest(t, s, "text/html").Body.String()
+	if !strings.Contains(body, `<a id="btn-signin-as" href="/id/">Sign in as alice.poweur.net</a>`) {
+		t.Fatalf("page missing the sign-in link: %s", body)
 	}
 }

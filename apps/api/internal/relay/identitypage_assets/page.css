@@ -152,6 +152,8 @@ h1 { margin: 0; font-size: clamp(1.7rem, 6vw, 2.2rem); line-height: 1.15; letter
 .secondary { background: var(--surface-2); color: var(--fg); }
 .identity-card > .also { margin-top: .75rem; }
 .also { margin: 0; color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
+.signin-as { margin-top: .75rem; text-align: center; }
+.signin-as a { color: var(--muted); font-weight: 600; }
 .copy-status:not(:empty) { margin-top: .6rem; }
 .copy-status { margin: 0; color: var(--muted); font-size: .82rem; }
 :focus-visible { outline: 3px solid var(--accent-2); outline-offset: 3px; }

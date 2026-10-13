@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal links for hosted identities (EPIC-028 E28-T7): a scanned
+	     https://<id>.poweur.net/id/approve#… opens this app straight on the
+	     approval screen. The relay's apple-app-site-association claims that
+	     one path only. Self-hosted identities keep poweur:// — the app must
+	     never depend on the operator's domain for them. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:*.poweur.net</string>
+		<string>applinks:poweur.net</string>
+	</array>
+</dict>
+</plist>

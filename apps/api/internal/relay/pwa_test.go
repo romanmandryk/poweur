@@ -60,7 +60,7 @@ func TestPWAManifestNamedAfterIdentity(t *testing.T) {
 	registerTestIdentity(t, server, ts, "alice.poweur.net")
 	registerTestIdentity(t, server, ts, "bob.poweur.net")
 
-	resp, body := hostGet(t, ts, "alice.poweur.net", "/app/manifest.webmanifest")
+	resp, body := hostGet(t, ts, "alice.poweur.net", "/id/manifest.webmanifest")
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/manifest+json") {
 		t.Fatalf("manifest: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
@@ -76,13 +76,13 @@ func TestPWAManifestNamedAfterIdentity(t *testing.T) {
 		t.Fatalf("manifest lost its origin-relative fields or icons: %s", body)
 	}
 
-	_, body = hostGet(t, ts, "bob.poweur.net", "/app/manifest.webmanifest")
+	_, body = hostGet(t, ts, "bob.poweur.net", "/id/manifest.webmanifest")
 	if !strings.Contains(body, `"name":"bob.poweur.net"`) {
 		t.Fatalf("bob's manifest: %s", body)
 	}
 
 	// The launcher and unknown hosts keep the build's manifest.
-	_, body = hostGet(t, ts, "id.poweur.net", "/app/manifest.webmanifest")
+	_, body = hostGet(t, ts, "id.poweur.net", "/id/manifest.webmanifest")
 	if !strings.Contains(body, `"name":"Poweur ID"`) {
 		t.Fatalf("launcher manifest: %s", body)
 	}
@@ -92,7 +92,7 @@ func TestPWAPageNamedAfterIdentity(t *testing.T) {
 	server, ts := pwaRelay(t)
 	registerTestIdentity(t, server, ts, "alice.poweur.net")
 
-	for _, path := range []string{"/app/", "/app/some/route"} {
+	for _, path := range []string{"/id/", "/id/some/route"} {
 		resp, body := hostGet(t, ts, "alice.poweur.net", path)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s: %d", path, resp.StatusCode)
@@ -106,11 +106,11 @@ func TestPWAPageNamedAfterIdentity(t *testing.T) {
 			t.Fatalf("%s: no avatar, so the brand icon must stay", path)
 		}
 	}
-	_, body := hostGet(t, ts, "id.poweur.net", "/app/")
+	_, body := hostGet(t, ts, "id.poweur.net", "/id/")
 	if !strings.Contains(body, "<title>Poweur ID</title>") {
 		t.Fatalf("launcher page changed: %s", body)
 	}
-	resp, _ := hostGet(t, ts, "alice.poweur.net", "/app/sw.js")
+	resp, _ := hostGet(t, ts, "alice.poweur.net", "/id/sw.js")
 	if resp.Header.Get("Cache-Control") != "no-cache" {
 		t.Fatalf("sw.js Cache-Control %q", resp.Header.Get("Cache-Control"))
 	}
@@ -121,11 +121,11 @@ func TestPWAUsesAvatarAsIcon(t *testing.T) {
 	registerTestIdentity(t, server, ts, "alice.poweur.net")
 	setSysFile(t, server, "alice.poweur.net", profilePath, `{"version":1,"avatar":"avatar-1a2b.jpg"}`)
 
-	_, body := hostGet(t, ts, "alice.poweur.net", "/app/")
+	_, body := hostGet(t, ts, "alice.poweur.net", "/id/")
 	if !strings.Contains(body, `<link rel="apple-touch-icon" href="/.well-known/poweur/avatar-1a2b.jpg" />`) {
 		t.Fatalf("apple-touch-icon not the avatar:\n%s", body)
 	}
-	_, body = hostGet(t, ts, "alice.poweur.net", "/app/manifest.webmanifest")
+	_, body = hostGet(t, ts, "alice.poweur.net", "/id/manifest.webmanifest")
 	var m struct {
 		Icons []map[string]string `json:"icons"`
 	}

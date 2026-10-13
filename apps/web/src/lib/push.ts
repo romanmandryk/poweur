@@ -1,7 +1,7 @@
 /**
  * Notifications, icon badge and install for the web app (EPIC-009 E09-T12).
  *
- * Each hosted identity's `/app/` installs as its own app (the relay names the
+ * Each hosted identity's `/id/` installs as its own app (the relay names the
  * manifest after the host). This module registers the service worker
  * (`public/sw.js`), subscribes this device to the relay's background push
  * (E09-T11), keeps the home-screen badge in step with what is unread, and
@@ -216,7 +216,7 @@ export function installMode(): "installed" | "prompt" | "ios" | "manual" | "none
  * the worker. `onOpen` moves the app to a destination (a notification tap);
  * `onPush` refreshes data while a page is open.
  */
-export function installPushClient(handlers: { onOpen: (page: string) => void; onPush: () => void }): void {
+export function installPushClient(handlers: { onOpen: (page: string) => void; onPush: () => void; onMoved?: () => void }): void {
   if (isShellRuntime() || typeof window === "undefined") return;
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -243,4 +243,16 @@ export function installPushClient(handlers: { onOpen: (page: string) => void; on
     history.replaceState(history.state, "", url.pathname + url.search + url.hash);
     handlers.onOpen(open);
   }
+}
+
+/**
+ * The retired /app/ worker sends an installed app's windows here with
+ * `?moved=1` (EPIC-028 E28-T13). Called once at boot, before any worker check.
+ */
+export function takeMovedNotice(): boolean {
+  const url = new URL(globalThis.location?.href ?? "http://localhost/");
+  if (url.searchParams.get("moved") !== "1") return false;
+  url.searchParams.delete("moved");
+  history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  return true;
 }

@@ -4,7 +4,7 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 
 // `base: "./"` keeps every asset reference relative, so one build works at
-// /app/ on a relay, at / on a static server, and at capacitor://localhost/
+// /id/ on a relay, at / on a static server, and at capacitor://localhost/
 // inside the EPIC-019 shell.
 export default defineConfig({
   base: "./",

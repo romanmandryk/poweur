@@ -79,7 +79,7 @@ func TestMetricsCountSignInSteps(t *testing.T) {
 
 	// Cross device: the waiting tab is handed its cookie by the poll, once.
 	started := start(t, srv)
-	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), started.MatchCode); rec.Code != http.StatusOK {
+	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), crossDevice); rec.Code != http.StatusOK {
 		t.Fatalf("callback = %d", rec.Code)
 	}
 	if got := pollStatus(t, srv, started); got != "complete" {
@@ -94,17 +94,8 @@ func TestMetricsCountSignInSteps(t *testing.T) {
 
 	// An approval that does not verify.
 	started = start(t, srv)
-	if rec, _ := deliver(t, srv, approve(t, mallory, started.Request), started.MatchCode); rec.Code != http.StatusUnauthorized {
+	if rec, _ := deliver(t, srv, approve(t, mallory, started.Request), crossDevice); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unverifiable approval = %d", rec.Code)
-	}
-	// A wrong match code.
-	started = start(t, srv)
-	wrong := "00"
-	if started.MatchCode == wrong {
-		wrong = "01"
-	}
-	if rec, _ := deliver(t, srv, approve(t, alice, started.Request), wrong); rec.Code != http.StatusForbidden {
-		t.Fatalf("wrong match code = %d", rec.Code)
 	}
 	// Approved for another browser than the one that started it: approved, never completed.
 	started, _ = startIn(t, srv)
@@ -114,10 +105,9 @@ func TestMetricsCountSignInSteps(t *testing.T) {
 	}
 
 	wantMetrics(t, reg,
-		`poweur_guestbook_signins_total{result="started"} 5`,
+		`poweur_guestbook_signins_total{result="started"} 4`,
 		`poweur_guestbook_signins_total{result="approved"} 3`,
 		`poweur_guestbook_signins_total{result="failed"} 1`,
-		`poweur_guestbook_signins_total{result="match_failed"} 1`,
 		`poweur_guestbook_signins_total{result="completed"} 2`,
 		`poweur_guestbook_signins_total{result="busy"} 0`,
 	)

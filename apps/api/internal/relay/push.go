@@ -35,11 +35,31 @@ var pushKinds = map[string]webpush.Urgency{
 	"message": webpush.UrgencyHigh,
 	"request": webpush.UrgencyHigh,
 	"anon":    webpush.UrgencyNormal,
+	// A sign-in prompt someone is waiting on at another screen (EPIC-028).
+	"auth": webpush.UrgencyHigh,
 }
 
 // pushRank orders kinds within one coalesced push: the notification names
-// the most important thing that happened.
+// the most important thing that happened. A sign-in prompt is pushed on its
+// own (separatePushKinds), so it has no rank here.
 var pushRank = map[string]int{"anon": 1, "message": 2, "request": 3}
+
+// separatePushKinds are never coalesced into the mail count: a sign-in prompt
+// must reach the phone at once and say what it is, whatever else is waiting,
+// and must not be replaced by a later "N new messages" under the same topic.
+var separatePushKinds = map[string]bool{"auth": true}
+
+// authPushTTL bounds how long a push service may hold a sign-in prompt: the
+// request behind it lives five minutes, so a later delivery is useless.
+const authPushTTL = 5 * time.Minute
+
+// notifyKind is the event and push kind for a message delivered to an inbox.
+func notifyKind(msgType string) string {
+	if idpkg.NormalizeMessageType(msgType) == idpkg.MsgTypeAuthRequest {
+		return "auth"
+	}
+	return "message"
+}
 
 const (
 	// pushTTL is how long a push service may hold a push for an offline
@@ -55,7 +75,7 @@ const (
 type PushPayload struct {
 	V        int    `json:"v"`
 	Identity string `json:"identity"`
-	// Kind is message | request | anon | test.
+	// Kind is message | request | anon | auth | test.
 	Kind string `json:"kind"`
 	// Count is everything waiting for the identity on this relay: unpicked
 	// messages, contact requests and anonymous mail. The icon badge.
@@ -136,6 +156,14 @@ func (s *Server) schedulePush(identity, kind string) {
 		return
 	}
 	key := strings.ToLower(identity)
+	if separatePushKinds[kind] {
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			s.flushPush(key, kind)
+		}()
+		return
+	}
 	p.mu.Lock()
 	if waiting, ok := p.pending[key]; ok {
 		if pushRank[kind] > pushRank[waiting] {
@@ -177,6 +205,10 @@ func (s *Server) flushPush(identity, kind string) {
 		return
 	}
 	opts := webpush.Options{TTL: pushTTL, Urgency: pushKinds[kind], Topic: webpush.Topic(identity)}
+	if separatePushKinds[kind] {
+		// Its own topic, so it neither replaces nor is replaced by the mail push.
+		opts.TTL, opts.Topic = authPushTTL, webpush.Topic(kind+":"+identity)
+	}
 	for _, device := range doc.Devices {
 		if device.Push == nil || device.Revoked {
 			continue

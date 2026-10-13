@@ -168,13 +168,14 @@ func enrollBase(relayURL, identityValue string) string {
 	return strings.TrimRight(relayURL, "/") + "/identities/" + url.PathEscape(identityValue) + "/enroll"
 }
 
-// pairingAppURL is where the approving person's web app lives: the identity's
-// own host for a relay on https, the relay itself in local development.
+// pairingAppURL is the approve page of the approving person's web app
+// (EPIC-028): the identity's own host for a relay on https, the relay itself
+// in local development.
 func pairingAppURL(relayURL, identityValue string) string {
 	if strings.HasPrefix(relayURL, "https://") {
-		return "https://" + strings.ToLower(identityValue) + "/app/"
+		return idpkg.ApproveURL("https", identityValue)
 	}
-	return strings.TrimRight(relayURL, "/") + "/app/"
+	return strings.TrimRight(relayURL, "/") + idpkg.ApprovePath
 }
 
 // terminalQR draws the link with half-block characters: two rows of modules

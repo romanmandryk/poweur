@@ -30,14 +30,14 @@ func TestConfirmSASNeedsTheDigits(t *testing.T) {
 }
 
 func TestPairingAppURLAndTerminalQR(t *testing.T) {
-	if got := pairingAppURL("https://poweur.net", "Alice.Poweur.net"); got != "https://alice.poweur.net/app/" {
+	if got := pairingAppURL("https://poweur.net", "Alice.Poweur.net"); got != "https://alice.poweur.net/id/approve" {
 		t.Fatal(got)
 	}
-	if got := pairingAppURL("http://127.0.0.1:8080/", "alice.poweur.net"); got != "http://127.0.0.1:8080/app/" {
+	if got := pairingAppURL("http://127.0.0.1:8080/", "alice.poweur.net"); got != "http://127.0.0.1:8080/id/approve" {
 		t.Fatal(got)
 	}
 	var buf bytes.Buffer
-	terminalQR(&buf, "https://alice.poweur.net/app/#pair=K7QM4XP2.AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA")
+	terminalQR(&buf, "https://alice.poweur.net/id/approve#pair=K7QM4XP2.AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA")
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	if len(lines) < 10 || len([]rune(lines[0])) != len([]rune(lines[len(lines)-1])) {
 		t.Fatalf("QR = %d lines", len(lines))

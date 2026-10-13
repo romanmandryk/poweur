@@ -21,6 +21,16 @@
       "ok": true
     },
     {
+      "input": "https://alice.poweur.net/id/approve#auth=eyJ4IjoxfQ",
+      "uri": "",
+      "ok": false
+    },
+    {
+      "input": "https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2",
+      "uri": "https://oauth.poweur.org/r/K7QM4XP2",
+      "ok": true
+    },
+    {
       "input": "https://oauth.poweur.org/r/K7QM4XP2",
       "uri": "https://oauth.poweur.org/r/K7QM4XP2",
       "ok": true

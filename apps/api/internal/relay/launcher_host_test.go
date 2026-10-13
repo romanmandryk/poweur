@@ -49,8 +49,8 @@ func TestRootRedirectsOnEveryLauncherHost(t *testing.T) {
 		if resp.StatusCode != http.StatusFound {
 			t.Errorf("%s: status = %d, want 302", host, resp.StatusCode)
 		}
-		if loc := resp.Header.Get("Location"); loc != "/app/" {
-			t.Errorf("%s: Location = %q, want /app/", host, loc)
+		if loc := resp.Header.Get("Location"); loc != "/id/" {
+			t.Errorf("%s: Location = %q, want /id/", host, loc)
 		}
 	}
 }
@@ -58,7 +58,7 @@ func TestRootRedirectsOnEveryLauncherHost(t *testing.T) {
 // The redirect must not eat the root document. `GET /` is where every client
 // learns the relay's address and which hosts are launchers, so a client that
 // asks for JSON gets JSON even on a launcher host — without this the web app
-// followed the redirect into `/app/`, failed to parse HTML, and resolved to no
+// followed the redirect into `/id/`, failed to parse HTML, and resolved to no
 // mode at all on the one host whose whole job is claiming a name.
 func TestRootServesDocumentToJSONClientsOnLauncherHost(t *testing.T) {
 	ts := httptest.NewServer(launcherTestServer(t, t.TempDir()).Router())

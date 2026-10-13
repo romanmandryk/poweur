@@ -10,7 +10,7 @@ function start() {
   const sent: ScrubbableItem[] = [];
   const fetchSpy = vi.fn();
   vi.stubGlobal("fetch", fetchSpy);
-  history.replaceState(null, "", "/app/?handle=alice#claim=secret");
+  history.replaceState(null, "", "/id/?handle=alice#claim=secret");
   const t = startFaro({ url: "/faro/collect", app: "poweur-test", version: "1.0.0", transport: (item) => sent.push(item) });
   return { t, sent, fetchSpy };
 }

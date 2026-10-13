@@ -62,7 +62,7 @@ export function relayPresetFor(url) {
  * The relay to register a *new* identity with, when the user has not named one.
  *
  * The only place in the app that reads the page's origin. A relay serves this
- * SPA under `/app/`, so its own origin is the sensible default for a fresh
+ * SPA under `/id/`, so its own origin is the sensible default for a fresh
  * registration — but the moment an identity exists, `relayUrlFor()` takes over
  * and the origin is never consulted again. `test/origin.test.js` enforces that.
  *

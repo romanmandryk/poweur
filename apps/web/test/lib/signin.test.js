@@ -28,7 +28,7 @@ class FakeFiles {
 describe("web Sign in with Poweur ID", () => {
   it("accepts portable codes, deep links and web handoff links", () => {
     const encoded = encodeSignInRequest(request());
-    for (const input of [encoded, signInDeepLink(request()), `https://poweur.net/app/?auth=${encoded}`]) {
+    for (const input of [encoded, signInDeepLink(request()), `https://poweur.net/id/?auth=${encoded}`]) {
       expect(decodeAuthInput(input).request_id).toBe("req_web");
     }
   });
@@ -36,7 +36,7 @@ describe("web Sign in with Poweur ID", () => {
   it("fetches a request passed by reference, only from its own audience", async () => {
     const serve = (audience) => async () => new Response(JSON.stringify({ request: encodeSignInRequest({ ...request(), audience }) }));
     const link = "https://tasks.example/r/K7QM4XP2";
-    for (const input of [link, `poweur://auth?request_uri=${encodeURIComponent(link)}`, `https://poweur.net/app/?auth=${encodeURIComponent(link)}`]) {
+    for (const input of [link, `poweur://auth?request_uri=${encodeURIComponent(link)}`, `https://poweur.net/id/?auth=${encodeURIComponent(link)}`]) {
       expect((await resolveAuthInput(input, { fetch: serve("https://tasks.example") })).request_id).toBe("req_web");
     }
     await expect(resolveAuthInput(link, { fetch: serve("https://bank.example") })).rejects.toThrow(/outside its audience/);
@@ -76,11 +76,13 @@ describe("web Sign in with Poweur ID", () => {
       .toEqual({ delivered: false, resumeUri: "" });
   });
 
-  it("sends a cross-device code in an envelope", async () => {
+  it("marks a cross-device approval for the poll, with the pick of a pushed one (EPIC-028)", async () => {
     let body = "";
     const fakeFetch = async (_url, init) => { body = init.body; return { ok: true, json: async () => ({}) }; };
-    await deliverBrowserApproval(request(), "encoded", fakeFetch, " 4-2 ");
-    expect(JSON.parse(body)).toEqual({ response: "encoded", match: "42" });
+    await deliverBrowserApproval(request(), "encoded", fakeFetch, { crossDevice: true });
+    expect(JSON.parse(body)).toEqual({ response: "encoded", finish: "poll" });
+    await deliverBrowserApproval(request(), "encoded", fakeFetch, { crossDevice: true, match: " 4-2 " });
+    expect(JSON.parse(body)).toEqual({ response: "encoded", finish: "poll", match: "42" });
   });
 
   it("returns a same-origin resume link and refuses any other", async () => {
@@ -104,7 +106,8 @@ describe("web Sign in with Poweur ID", () => {
     const legacy = async () => ({ ok: true, json: async () => { throw new Error("not json"); } });
     expect(await deliverBrowserApproval(request(), "encoded", legacy)).toEqual({ delivered: true, resumeUri: "" });
     const refused = async () => ({ ok: false, status: 403, json: async () => ({ error: "the code does not match" }) });
-    await expect(deliverBrowserApproval(request(), "encoded", refused, "11")).rejects.toThrow("the code does not match");
+    await expect(deliverBrowserApproval(request(), "encoded", refused, { crossDevice: true, match: "11" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("the code does not match"), status: 403 });
   });
 
   it("adds where the sign-in started when the app publishes it, and never fails on it", async () => {

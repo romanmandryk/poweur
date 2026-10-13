@@ -48,7 +48,7 @@ beforeEach(() => {
   relay.get.mockReset();
   saveConfig({ relayUrl: "http://127.0.0.1:8080", parentDomain: "poweur.net" });
   useSession.setState({ config: { relayUrl: "http://127.0.0.1:8080", parentDomain: "poweur.net" } });
-  history.replaceState(null, "", "/app/");
+  history.replaceState(null, "", "/id/");
 });
 
 describe("the launcher landing (E15-T8)", () => {
@@ -110,7 +110,7 @@ describe("the launcher landing (E15-T8)", () => {
   });
 
   it("a link from a sign-in page fills the name, checks it and says where to go back", async () => {
-    history.replaceState(null, "", "/app/?handle=Newbie&from=signin");
+    history.replaceState(null, "", "/id/?handle=Newbie&from=signin");
     useSession.setState({ mode: launcher });
     relay.availability.mockResolvedValue({ available: true, identity: "newbie.poweur.net", policy: null });
     render(<App />);
@@ -121,7 +121,7 @@ describe("the launcher landing (E15-T8)", () => {
   });
 
   it("an ordinary visit has no sign-in note and an empty name", () => {
-    history.replaceState(null, "", "/app/?handle=<b>x</b>");
+    history.replaceState(null, "", "/id/?handle=<b>x</b>");
     useSession.setState({ mode: launcher });
     render(<App />);
     expect($<HTMLInputElement>("#ni-handle").value).toBe("");
@@ -153,14 +153,14 @@ describe("the launcher landing (E15-T8)", () => {
     useSession.setState({ mode: launcher });
     relay.availability.mockResolvedValue({ available: false, reason: "taken" });
     const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign, protocol: "http:", port: "", pathname: "/app/", search: "" });
+    vi.stubGlobal("location", { ...window.location, assign, protocol: "http:", port: "", pathname: "/id/", search: "" });
     try {
       render(<App />);
       // No passkey question here: the keys live on the ID's own origin.
       expect(document.querySelector("#opt-have-id")).toBeNull();
       fireEvent.input($("#have-id-input"), { target: { value: "Bob" } });
       fireEvent.click($("#btn-have-id"));
-      await waitFor(() => expect(assign).toHaveBeenCalledWith("http://bob.poweur.net/app/"));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("http://bob.poweur.net/id/"));
       expect(relay.availability).toHaveBeenCalledWith("bob", "poweur.net");
       expect(useRoute.getState().sub).toBeNull();
     } finally {
@@ -256,7 +256,7 @@ describe("the identity host's door (E15-T9)", () => {
     expect(document.querySelector("#ni-handle")).toBeNull();
     expect(document.querySelector("#opt-create-new")).toBeNull();
     // The way out keeps the app it was opened in.
-    expect($<HTMLAnchorElement>("#door-launcher-link").href).toBe("http://id.poweur.net/app/");
+    expect($<HTMLAnchorElement>("#door-launcher-link").href).toBe("http://id.poweur.net/id/");
   });
 
   it("a reserved name offers no claim at all", async () => {

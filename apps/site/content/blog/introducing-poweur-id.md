@@ -19,6 +19,6 @@ Of course, some services need a wider view. Search engines, directories and mark
 
 This shared data also makes the handoff to AI agents much simpler. Today, an app may have a great web, mobile or desktop interface, yet be difficult for an agent to use unless its developers provide an API. With the Poweur CLI, an agent can work directly with accessible files in formats it understands. It could update a plan, organize records or prepare a draft, and you would see the result in the familiar app that reads those same files. People and agents can take turns working on the same material.
 
-Poweur ID is live in alpha, still pre-1.0. You can already [claim an ID for free at poweur.net](https://poweur.net/app/) or self-host a relay on your own domain. The CLI, web app and TypeScript SDK are available. Mobile apps can be built from source, and I’m working toward releases on the App Store and Google Play.
+Poweur ID is live in alpha, still pre-1.0. You can already [claim an ID for free at poweur.net](https://poweur.net/id/) or self-host a relay on your own domain. The CLI, web app and TypeScript SDK are available. Mobile apps can be built from source, and I’m working toward releases on the App Store and Google Play.
 
 My next goal is to bring Poweur ID to as many existing open-source applications as possible, so you can choose an open internet identity instead of a phone number or another platform account. I want it to fit into tools you already like, and let your data and relationships stay with you as those tools change.

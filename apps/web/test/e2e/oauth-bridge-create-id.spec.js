@@ -38,7 +38,7 @@ test.describe("OAuth bridge: create an ID mid-sign-in", () => {
     await expect(page.locator("#new-handle-status")).not.toHaveText(/available|Checking/, { timeout: 10_000 });
     await page.fill("#new-handle", "newcomer");
     await expect(page.locator("#new-handle-status")).toHaveText("newcomer.poweur.net is available", { timeout: 10_000 });
-    await expect(page.locator("#create-id")).toHaveAttribute("href", `${relay.baseUrl}/app/?from=signin&handle=newcomer`);
+    await expect(page.locator("#create-id")).toHaveAttribute("href", `${relay.baseUrl}/id/?from=signin&handle=newcomer`);
 
     const [launcher] = await Promise.all([context.waitForEvent("page"), page.click("#create-id")]);
     await stubPasskeys(launcher);
@@ -69,7 +69,7 @@ test.describe("OAuth bridge: create an ID mid-sign-in", () => {
 
     // The new ID approves in the launcher tab, where its keys are.
     await page.click(`a:has-text("Continue at ${relay.addr}")`);
-    await expect(page).toHaveURL(/\/app\/\?auth=/);
+    await expect(page).toHaveURL(/\/id\/\?auth=/);
     await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 45_000 });
     if (await page.locator("#btn-auth-unlock").count()) {
       await page.click("#btn-auth-unlock");

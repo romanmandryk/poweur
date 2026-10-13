@@ -80,14 +80,14 @@ describe("createIdentity", () => {
       hostname: "poweur.net",
       protocol: "https:",
       port: "",
-      pathname: "/app/",
+      pathname: "/id/",
     };
     Object.defineProperty(loc, "href", {
       set(value: string) {
         assigned.push(value);
       },
       get() {
-        return "https://poweur.net/app/";
+        return "https://poweur.net/id/";
       },
     });
     vi.stubGlobal("location", loc);
@@ -98,7 +98,7 @@ describe("createIdentity", () => {
     await expect(handOffToIdentityOrigin("alicee.poweur.net")).resolves.toBe(true);
     expect(loadIdentityRecord("alicee.poweur.net")).toBeNull();
     expect(localStorage.getItem("poweur:active")).toBeNull();
-    expect(assigned[0]).toContain("https://alicee.poweur.net/app/#claim=");
+    expect(assigned[0]).toContain("https://alicee.poweur.net/id/#claim=");
     vi.unstubAllGlobals();
   });
 });

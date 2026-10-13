@@ -68,7 +68,7 @@ describe("webCustodyBlocked", () => {
 describe("links stay in the app they were opened from (EPIC-021)", () => {
   it("finds the mount directory", () => {
     expect(appBasePath("/newapp/")).toBe("/newapp/");
-    expect(appBasePath("/app/")).toBe("/app/");
+    expect(appBasePath("/id/")).toBe("/id/");
     expect(appBasePath("/newapp/index.html")).toBe("/newapp/");
     expect(appBasePath("/")).toBe("/");
   });
@@ -77,8 +77,8 @@ describe("links stay in the app they were opened from (EPIC-021)", () => {
     expect(identityAppUrl("alice.poweur.net", { protocol: "https:", port: "", pathname: "/newapp/" })).toBe(
       "https://alice.poweur.net/newapp/",
     );
-    expect(identityAppUrl("alice.poweur.net", { protocol: "http:", port: "8088", pathname: "/app/" })).toBe(
-      "http://alice.poweur.net:8088/app/",
+    expect(identityAppUrl("alice.poweur.net", { protocol: "http:", port: "8088", pathname: "/id/" })).toBe(
+      "http://alice.poweur.net:8088/id/",
     );
   });
 
@@ -117,7 +117,7 @@ describe("existingIdFrom", () => {
   });
 
   it("takes a full ID, @handle or a pasted link to the ID's app", () => {
-    for (const raw of ["alice.poweur.net", "@alice", " https://alice.poweur.net/app/#x ", "alice.poweur.net."]) {
+    for (const raw of ["alice.poweur.net", "@alice", " https://alice.poweur.net/id/#x ", "alice.poweur.net."]) {
       expect(existingIdFrom(raw, hosted)?.identity, raw).toBe("alice.poweur.net");
     }
     expect(existingIdFrom("bob.example.org", hosted)).toMatchObject({ handle: "bob", domain: "example.org", hosted: true });

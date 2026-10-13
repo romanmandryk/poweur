@@ -39,6 +39,8 @@ export interface IdentifyData {
   txn: string;
   client?: AppRef;
   hint?: string;
+  /** `hint` is this browser's last signed-in ID: lead with "Continue as …". */
+  remembered?: boolean;
   error?: string;
   launcher?: Launcher;
 }
@@ -57,12 +59,17 @@ export interface AwaitData {
   client?: AppRef;
   signers: Signer[];
   deepLink?: string;
-  /** The short link to the request: what the QR shows and "copy" copies. */
+  /** The short link to the request, for `poweur auth approve`. */
   request: string;
+  /** The number to tap on the phone, once pushed; "" before. */
   match: string;
-  /** Server-drawn SVG of the deep link. */
+  /** What the QR encodes: the identity's own approve page (EPIC-028). */
+  qrLink?: string;
+  /** Server-drawn SVG of `qrLink`. */
   qr: string;
   push?: { from: string; sent: number; left: number };
+  /** This browser last signed in as this ID: push as the page opens. */
+  autoPush?: boolean;
 }
 
 /** A phone's camera opened the QR's short link (E08-T6). */

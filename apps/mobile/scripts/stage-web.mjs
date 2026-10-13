@@ -1,7 +1,7 @@
 /**
  * Stage the web client into the shell's www/ (EPIC-019 E19-T1).
  *
- * The shell wraps the *same* build the relay serves at /app/ — there is no
+ * The shell wraps the *same* build the relay serves at /id/ — there is no
  * mobile build of the UI and no fork of a screen. Copying rather than
  * symlinking is deliberate: `cap sync` follows this directory into the native
  * projects, and a symlink there produces a native bundle that works on the
@@ -35,7 +35,7 @@ for (const entry of await readdir(dist)) {
 }
 
 // Everything must resolve relative to the document: the same build works at
-// `/app/` on a relay and at `capacitor://localhost/` here. Fail loudly rather
+// `/id/` on a relay and at `capacitor://localhost/` here. Fail loudly rather
 // than shipping a bundle whose assets 404 on a device.
 const html = await readFile(join(www, "index.html"), "utf8");
 const absolute = [...html.matchAll(/(?:src|href)\s*=\s*"(\/[^"]*)"/g)].map((m) => m[1]);

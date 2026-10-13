@@ -12,7 +12,7 @@ scripts and projects use the CLI or the SDK.
 
 | Client | Path | For |
 |--------|------|-----|
-| Web app | `apps/web` | People, in any browser. Served by every relay at `/app/` |
+| Web app | `apps/web` | People, in any browser. Served by every relay at `/id/` |
 | iOS and Android apps | `apps/mobile` | People, with native key storage and several relays in one app |
 | Go CLI | `apps/cli` | You on your desktop, AI agents, projects and CI, operators |
 | TypeScript SDK and CLI | `packages/client-ts` | Apps and agents in the browser, Node, Bun and Deno |
@@ -20,8 +20,8 @@ scripts and projects use the CLI or the SDK.
 
 ## Web app
 
-The web app is the main client for people. It is served by every relay at `/app/`
-(`https://poweur.net/app/` for hosted poweur.net IDs) and has five areas: **Messages**,
+The web app is the main client for people. It is served by every relay at `/id/`
+(`https://poweur.net/id/` for hosted poweur.net IDs) and has five areas: **Messages**,
 **Contacts**, **Files**, **Apps** and **Settings**. See the [walkthrough](/web/walkthrough).
 
 - **Creating an ID.** Pick a name on the relay's domain; keys are generated in the browser and

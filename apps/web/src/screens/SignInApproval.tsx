@@ -1,9 +1,10 @@
-/** Approve a "Sign in with Poweur ID" request (EPIC-008), from app.js. */
-import { useRef, useState } from "react";
-import { normalizeMatchCode, SIGNIN_MATCH_CODE_DIGITS } from "@poweur/client";
-import { CircleCheck, LockOpen } from "lucide-react";
+/** Approve a "Sign in with Poweur" request (EPIC-008, EPIC-028). */
+import { useEffect, useRef, useState } from "react";
+import { signInRequestUri } from "@poweur/client";
+import { CircleCheck, LockOpen, Send, Smartphone } from "lucide-react";
 import { unlock } from "../actions/identity";
-import { approveSignIn, beginSignInApproval } from "../actions/signin";
+import { approveSignIn, sendSignInToApp } from "../actions/signin";
+import { androidIntentFor, appLinkFor, approveDevice, approvePageLink } from "../lib/approve";
 import { CUSTODY_COPY, custodyOf } from "../lib/custody";
 import { cn } from "../lib/cn";
 import { identityAppUrl, joinIdentityFor } from "../lib/claim";
@@ -12,7 +13,8 @@ import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
 import { toast } from "../state/ui";
-import { Button } from "../ui/Button";
+import { Button, buttonClass } from "../ui/Button";
+import { QRCode } from "../ui/QRCode";
 import { Chip } from "../ui/Display";
 import { Avatar } from "../ui/Avatar";
 import { Input, inputClass, Note, Textarea } from "../ui/Field";
@@ -131,26 +133,119 @@ function OtherIdentity({ primary = false }: { primary?: boolean }) {
   );
 }
 
+const TITLE = "Sign in with Poweur";
+
+const PUSH_NOTICES: Record<string, string> = {
+  sent: "Sent. Open your Poweur app from the home screen to approve it.",
+  "too-soon": "Already sent — give it a few seconds.",
+  "too-many": "Sent as many times as this sign-in allows.",
+  paused: "Sending is paused for a few minutes. Approve on the screen where you started.",
+  closed: "This sign-in is no longer waiting.",
+  failed: "It could not be sent to your app.",
+};
+
+/**
+ * This browser holds no Poweur ID, so approval happens elsewhere (EPIC-028).
+ * The device decides what leads: Android hands the request to the store app
+ * (or comes straight back if it is not installed), iOS offers the app and a
+ * push to the home-screen app — Safari cannot open an installed web app —
+ * and a desktop shows the same link as a QR for the phone.
+ */
+function ApproveElsewhere() {
+  const auth = useData((state) => state.auth);
+  const push = useRoute((state) => state.push);
+  const [device] = useState(() => approveDevice());
+  const [notice, setNotice] = useState("");
+  const requestLink = signInRequestUri(auth.input) ?? "";
+  const pageLink = requestLink ? approvePageLink(requestLink) : "";
+  const intent = device === "android" && requestLink ? androidIntentFor(requestLink, pageLink) : "";
+  const tried = useRef(false);
+  useEffect(() => {
+    if (!intent || auth.noApp || tried.current) return;
+    tried.current = true;
+    globalThis.location.assign(intent);
+  }, [intent, auth.noApp]);
+
+  if (device === "desktop") {
+    return (
+      <div id="auth-elsewhere" className="mt-5">
+        <h3 className="text-[17px] font-bold">Approve on your phone</h3>
+        <p className="mt-1 text-sm text-muted">Your keys aren't in this browser. Scan with your phone's camera.</p>
+        {pageLink && <QRCode value={pageLink} label="QR code to approve on your phone" className="mx-auto mt-4 w-48" />}
+        <Button id="btn-auth-add" variant="ghost" className="mt-4" onClick={() => push("add-id")}>
+          Add your Poweur ID to this browser
+        </Button>
+      </div>
+    );
+  }
+  const appLink = device === "android" ? intent : appLinkFor(auth.input);
+  return (
+    <div id="auth-elsewhere" className="mt-5 flex flex-col gap-2.5">
+      <p className="text-sm text-muted">Your keys aren't in this browser.</p>
+      {appLink && (
+        <a id="btn-auth-open-app" href={appLink} className={buttonClass("primary")}>
+          <Smartphone className="size-5" aria-hidden="true" /> Open in Poweur app
+        </a>
+      )}
+      {auth.pushUri && (
+        <>
+          <Button
+            id="btn-auth-send-app"
+            variant="ghost"
+            onClick={async () => setNotice(PUSH_NOTICES[await sendSignInToApp()] ?? PUSH_NOTICES.failed)}
+          >
+            <Send className="size-4" aria-hidden="true" /> Send to my home-screen app
+          </Button>
+          {notice && (
+            <p id="auth-send-notice" role="status" className="text-center text-[13px] text-muted">
+              {notice}
+            </p>
+          )}
+        </>
+      )}
+      <Button id="btn-auth-add" variant="ghost" onClick={() => push("add-id")}>
+        Use this browser instead
+      </Button>
+    </div>
+  );
+}
+
+/** A pushed sign-in: tap the number the starting screen shows. One try. */
+function PickNumber({ choices, onPick, disabled }: { choices: string[]; onPick: (n: string) => void; disabled: boolean }) {
+  return (
+    <div id="auth-pick" className="mt-5">
+      <p className="text-[15px] font-semibold">Tap the number shown where you started</p>
+      <p className="mt-1 text-[13px] text-muted">If you don't see a number there, you didn't start this sign-in — close this.</p>
+      <div className="mt-3 grid grid-cols-3 gap-2.5">
+        {choices.map((n) => (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            className="auth-pick-choice rounded-control border-[1.5px] border-sep bg-surface py-4 font-mono text-[28px] font-extrabold tracking-[.08em] hover:border-accent disabled:opacity-50"
+            onClick={() => onPick(n)}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function SignInApproval() {
   const auth = useData((state) => state.auth);
   const identity = useSession((state) => state.identity);
   const unlocked = useSession((state) => state.unlocked);
   const pop = useRoute((state) => state.pop);
   const push = useRoute((state) => state.push);
-  const pasted = useRef<HTMLTextAreaElement>(null);
-  const matchRef = useRef<HTMLInputElement>(null);
-  const [match, setMatch] = useState("");
-  const [localError, setLocalError] = useState("");
-  // In the shell the app being signed in to is never in this browser, so a
-  // same-device finish is impossible and the code is required.
-  const shell = isShellRuntime() || auth.requireCode;
   const record = identity ? loadIdentityRecord(identity) : null;
   const mode: any = useSession((state) => state.mode);
   const unlockAction = CUSTODY_COPY[custodyOf(record)].action;
 
-  if (auth.loading) {
+  if (auth.loading && !auth.request) {
     return (
-      <SubPage title="Sign in with Poweur ID">
+      <SubPage title={TITLE}>
         <p role="status">Verifying the app’s origin…</p>
       </SubPage>
     );
@@ -159,12 +254,12 @@ export function SignInApproval() {
   if (auth.result) {
     const { delivered, resumeUri } = auth.result;
     return (
-      <SubPage title="Approved">
+      <SubPage title={TITLE}>
         <div className="empty-icon flex justify-center text-success">
           <CircleCheck className="size-12" strokeWidth={1.6} aria-hidden="true" />
         </div>
         <h2 className="mb-2 text-center text-xl font-bold">{auth.metadata?.name || auth.request?.domain || "App"}</h2>
-        {resumeUri ? (
+        {resumeUri && !auth.crossDevice ? (
           <>
             <p id="auth-result-note" className="mb-3 text-muted">Approved. Taking you back to the app…</p>
             <a
@@ -182,7 +277,12 @@ export function SignInApproval() {
           </p>
         ) : (
           <>
-            <p id="auth-result-note" className="mb-3 text-muted">Copy this one-time response back to the app.</p>
+            <p id="auth-result-note" className="mb-1 text-muted">
+              This app can't receive approvals directly. Copy this approval and paste it into the app you're signing in to.
+            </p>
+            <p className="mb-3 text-[13px] text-danger">
+              Never paste it anywhere else — anyone holding it can sign in as you there for the next few minutes.
+            </p>
             <Textarea id="auth-response" readOnly rows={5} className="min-h-0" value={auth.result.encoded} />
             <Button
               id="btn-auth-copy"
@@ -190,10 +290,10 @@ export function SignInApproval() {
               className="mt-4"
               onClick={async () => {
                 await navigator.clipboard?.writeText(auth.result.encoded);
-                toast("Response copied", "success");
+                toast("Approval copied", "success");
               }}
             >
-              Copy response
+              Copy approval
             </Button>
           </>
         )}
@@ -203,23 +303,19 @@ export function SignInApproval() {
 
   if (!auth.request) {
     return (
-      <SubPage title="Approve sign-in" onBack={pop}>
-        <p className="mb-2 text-[13px] text-muted">
-          Paste the sign-in code shown by the app.
-        </p>
-        <Textarea key={auth.input} ref={pasted} id="auth-request-input" rows={7} className="min-h-0" placeholder="Paste sign-in code" defaultValue={auth.input} />
+      <SubPage title={TITLE} onBack={pop}>
+        <p className="text-muted">Open a sign-in link, or scan the QR code on the screen where you're signing in, to approve it here.</p>
         <ErrorLine error={auth.error} />
-        <Button id="btn-auth-load" className="mt-4" onClick={() => void beginSignInApproval(pasted.current?.value ?? "")}>
-          Check request
-        </Button>
       </SubPage>
     );
   }
 
   const scopes: string[] = auth.scopes ?? [];
   const launcher = mode?.mode === "launcher";
+  const hasIdentities = (listIdentities() as string[]).length > 0;
+  const elsewhere = !launcher && !hasIdentities && !isShellRuntime();
   return (
-    <SubPage title="Approve sign-in" onBack={pop}>
+    <SubPage title={TITLE} onBack={pop}>
       <div className="settings-id-card flex flex-col items-center gap-2.5 px-5 pt-8 pb-5 text-center">
         <div className="settings-id-name text-xl font-bold">{auth.metadata?.name}</div>
         <div className="settings-id-domain text-sm text-muted">{auth.request.audience}</div>
@@ -244,47 +340,28 @@ export function SignInApproval() {
           {auth.context}
         </p>
       )}
-      {launcher ? <OtherIdentity primary /> : <IdentityPicker />}
-      {!launcher && <OtherIdentity />}
-      <ErrorLine error={auth.error || localError} />
-      {launcher ? null : unlocked && identity ? (
+      {auth.crossDevice && (
+        <p id="auth-warning" className="mt-2 text-[13px] text-muted">
+          Only approve a sign-in you just started yourself.
+        </p>
+      )}
+      {elsewhere ? (
+        <ApproveElsewhere />
+      ) : (
         <>
-          {auth.request.response_uri && (
-            <div className="mt-4">
-              <label htmlFor="auth-match" className="mb-1 block text-sm font-semibold">
-                {shell ? "Code shown by the app you are signing in to" : "Started on another screen? Enter the code it shows"}
-              </label>
-              <Input
-                ref={matchRef}
-                id="auth-match"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={8}
-                placeholder={shell ? "Required" : "Leave empty if you started in this browser"}
-                onChange={(e) => setMatch(e.currentTarget.value)}
-              />
-              <p className="mt-1 text-[13px] text-muted">
-                Only enter a code that is on a screen in front of you. If someone sent you this link or a code, cancel.
-              </p>
-            </div>
-          )}
-          <Button
-            id="btn-auth-approve"
-            className="mt-4"
-            onClick={() => {
-              const code = normalizeMatchCode(match);
-              if (auth.request.response_uri && (shell || code) && code.length !== SIGNIN_MATCH_CODE_DIGITS) {
-                setLocalError(`Enter the ${SIGNIN_MATCH_CODE_DIGITS}-digit code from the screen where you started.`);
-                matchRef.current?.focus();
-                return;
-              }
-              setLocalError("");
-              void approveSignIn(code);
-            }}
-          >
+          {launcher ? <OtherIdentity primary /> : <IdentityPicker />}
+          {!launcher && <OtherIdentity />}
+        </>
+      )}
+      <ErrorLine error={auth.error} />
+      {elsewhere || launcher ? null : unlocked && identity ? (
+        auth.choices && auth.request.response_uri ? (
+          <PickNumber choices={auth.choices} disabled={auth.loading || Boolean(auth.error)} onPick={(n) => void approveSignIn(n)} />
+        ) : (
+          <Button id="btn-auth-approve" className="mt-4" disabled={auth.loading} onClick={() => void approveSignIn()}>
             Approve as {handleOf(identity)}
           </Button>
-        </>
+        )
       ) : identity ? (
         <>
           <Button id="btn-auth-unlock" variant="passkey" className="mt-4" onClick={() => void unlock({ inPlace: true })}>

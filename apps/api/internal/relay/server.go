@@ -343,13 +343,16 @@ func (s *Server) Router() http.Handler {
 	handle("POST /push/{identity}/unsubscribe", s.handlePushUnsubscribe)
 	handle("POST /push/{identity}/test", s.handlePushTest)
 	handle("GET /.well-known/did.json", s.handleDIDWeb)
+	handle("GET /.well-known/apple-app-site-association", s.handleAppleAppSiteAssociation)
+	handle("GET /.well-known/assetlinks.json", s.handleAssetLinks)
 	handle("GET /.well-known/poweur/{path...}", s.handleWellKnown)
 	handle("GET /identity-page/assets/{file}", serveIdentityPageAsset)
 	handle("GET /s/{link}", s.handleLinkViewer)
 	handle("GET /pub", s.handlePublic)
 	handle("GET /pub/{path...}", s.handlePublic)
 	handle("GET /s/assets/{file}", s.handleLinkViewerAsset)
-	mountWebStatic(mux, "/app", s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version), s.pwaIdentity)
+	mountWebStatic(mux, appPrefix, s.cfg.WebStaticDir, s.cfg.Telemetry.BrowserConfig(s.cfg.Version), s.pwaIdentity)
+	mountLegacyApp(mux, s.cfg.WebStaticDir)
 	mountRootIcons(mux, s.cfg.WebStaticDir)
 	return s.instrument(mux, corsMiddleware(hashSignedBodies(mux)))
 }
@@ -375,7 +378,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// Accept header.
 	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" && !wantsJSON(r) {
 		if s.cfg.IsLauncherHost(host) {
-			http.Redirect(w, r, "/app/", http.StatusFound)
+			http.Redirect(w, r, "/id/", http.StatusFound)
 			return
 		}
 	}
@@ -391,7 +394,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		// canonical one a hand-off targets.
 		"launcher_hosts": s.cfg.LauncherHosts,
 		"hosted_domains": s.cfg.HostedDomains,
-		"web_ui":         "GET /app/ (when WEB_STATIC_DIR is set)",
+		"web_ui":         "GET /id/ (when WEB_STATIC_DIR is set)",
 		"version":        version,
 		"buildTime":      buildTime,
 		"versionHash":    versionHash,
@@ -923,7 +926,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
 		s.event(r.Context(), "message.enqueue", "success")
-		s.notify(msg.Recipient, "message", msg.ID)
+		s.notify(msg.Recipient, notifyKind(msg.Type), msg.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
 	}

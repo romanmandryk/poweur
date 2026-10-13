@@ -263,7 +263,7 @@ func (s *Server) capabilityEndpoints(identity string) map[string]string {
 		if scheme == "" {
 			scheme = "https"
 		}
-		out["web_signer"] = scheme + "://" + identity + "/app/"
+		out["web_signer"] = scheme + "://" + identity + "/id/"
 	}
 	if s.cfg.OAuthBridgeURL != "" {
 		out["oauth_bridge"] = s.cfg.OAuthBridgeURL

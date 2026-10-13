@@ -19,6 +19,8 @@ import { toBase64url } from "../src/encoding.js";
 import {
   MemoryNonceCache,
   SIGNIN_MATCH_CODE_DIGITS,
+  approveLink,
+  approveUrl,
   SignInVerifier,
   checkResumeUri,
   checkSignInRequestUri,
@@ -863,5 +865,31 @@ describe("requests by reference (E08-T6) ↔ Go vectors", () => {
     await expect(fetchSignInRequest("https://rp.example/r/K7QM4XP2", { fetch: serve("https://bank.example") })).rejects.toThrow(/outside its audience/);
     const gone = (async () => new Response("", { status: 410 })) as typeof fetch;
     await expect(fetchSignInRequest("https://rp.example/r/K7QM4XP2", { fetch: gone })).rejects.toThrow(/expired/);
+  });
+});
+
+describe("one-tap approvals (EPIC-028)", () => {
+  it("builds approve links Go reads, and reads them back", () => {
+    expect(approveUrl("Alice.Poweur.net")).toBe("https://alice.poweur.net/id/approve");
+    expect(approveUrl("alice.localhost:8089", "http")).toBe("http://alice.localhost:8089/id/approve");
+    const link = approveLink(approveUrl("alice.poweur.net"), "https://oauth.poweur.org/r/K7QM4XP2");
+    expect(link).toBe("https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2");
+    expect(signInRequestUri(link)).toBe("https://oauth.poweur.org/r/K7QM4XP2");
+    expect(signInRequestUri("https://alice.poweur.net/id/approve#pair=K7QM4XP2.abc&id=alice.poweur.net")).toBeNull();
+  });
+
+  it("keeps well-formed match choices and a same-origin push_uri only", async () => {
+    const meta = { poweur_auth: "1", origin: "https://rp.example", name: "RP", context_uri: "https://rp.example/ctx" };
+    const serve = (extra: object) => (async () =>
+      new Response(JSON.stringify({ request_id: "req_1", started_at: "2026-09-17T12:00:00Z", ...extra }))) as unknown as typeof fetch;
+    const good = await fetchSignInContext(meta, "req_1", { fetch: serve({ match_choices: ["17", "42", "88"], push_uri: "https://rp.example/r/K/push" }) });
+    expect(good?.match_choices).toEqual(["17", "42", "88"]);
+    expect(good?.push_uri).toBe("https://rp.example/r/K/push");
+    for (const bad of [["17", "42"], ["17", "17", "42"], ["17", "4a", "88"], ["17", "420", "88"]]) {
+      const ctx = await fetchSignInContext(meta, "req_1", { fetch: serve({ match_choices: bad }) });
+      expect(ctx?.match_choices).toBeUndefined();
+    }
+    const off = await fetchSignInContext(meta, "req_1", { fetch: serve({ push_uri: "https://evil.example/push" }) });
+    expect(off?.push_uri).toBeUndefined();
   });
 });

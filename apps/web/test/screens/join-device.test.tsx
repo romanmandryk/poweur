@@ -55,20 +55,15 @@ describe("Add this device (E11-T8)", () => {
     act(() => openJoinDevicePanel("bob.poweur.net"));
 
     await waitFor(() => expect($(".rendezvous-code")!.textContent).toBe("K7QM-4XP2"));
-    // By default the QR opens the Poweur app: poweur://, which a phone camera
-    // hands to the app (an https link would open a website with no keys).
+    // One QR for every approver (EPIC-028): the identity's approve page. A
+    // phone camera opens it in the app when installed, else in the browser.
     const C = "AOEnF9JjCmt3HikT4gFtQDkhhSXV3KzkJ4Vy3xLAuOA";
-    expect($("svg[data-qr]")!.getAttribute("data-qr")).toBe(`poweur://pair?pair=K7QM4XP2.${C}&id=bob.poweur.net`);
-    // Approving from a browser: the web link.
-    fireEvent.click($("#pair-approver-browser")!);
-    expect($("svg[data-qr]")!.getAttribute("data-qr")).toBe(`http://127.0.0.1:8080/app/#pair=K7QM4XP2.${C}&id=bob.poweur.net`);
-    // From a terminal: a command to copy, no QR.
-    fireEvent.click($("#pair-approver-terminal")!);
-    expect($("svg[data-qr]")).toBeNull();
-    expect($("#pair-command")!.textContent).toContain(`poweur key approve 'http://127.0.0.1:8080/app/#pair=K7QM4XP2.${C}&id=bob.poweur.net'`);
-    // The choice is remembered for next time.
-    expect(localStorage.getItem("poweur:pair-approver")).toBe("terminal");
-    fireEvent.click($("#pair-approver-app")!);
+    const link = `http://127.0.0.1:8080/id/approve#pair=K7QM4XP2.${C}&id=bob.poweur.net`;
+    expect(document.querySelectorAll("svg[data-qr]").length).toBe(1);
+    expect($("svg[data-qr]")!.getAttribute("data-qr")).toBe(link);
+    expect($("[role=tablist]")).toBeNull();
+    // A terminal takes the same link.
+    expect($("#pair-command")!.textContent).toContain(`poweur key approve '${link}'`);
     // No digits until the other device answers.
     expect($(".sas-code")).toBeNull();
     expect($("#panel-root")!.textContent).toContain("bob.poweur.net");

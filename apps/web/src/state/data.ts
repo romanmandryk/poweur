@@ -84,6 +84,8 @@ export function freshData() {
     custody: null as any,
     /** Sign-in prompts the user dismissed this session. */
     dismissedPrompts: [] as string[],
+    /** A tapped sign-in notification: open the newest prompt once it is in (EPIC-028). */
+    openNewestPrompt: false,
     /** A pairing link opened on this device (#pair=…), waiting to be approved. */
     pairInput: "",
     auth: {
@@ -92,8 +94,18 @@ export function freshData() {
       metadata: null as any,
       headline: "",
       context: "",
-      /** Opened from a sign-in prompt: the page that started it is elsewhere. */
-      requireCode: false,
+      /**
+       * Approved on another device than the one that started it (a QR, a link
+       * by reference, a pushed prompt, the shell): it finishes on that page's
+       * poll, not here (EPIC-028).
+       */
+      crossDevice: false,
+      /** Set when the sign-in was pushed: pick the number the starting screen shows. */
+      choices: null as string[] | null,
+      /** The RP's "push this to my app" endpoint, for a browser without the keys. */
+      pushUri: "",
+      /** The approve page came back from an Android intent: the app is not installed. */
+      noApp: false,
       scopes: [] as any[],
       loading: false,
       error: "",

@@ -23,13 +23,26 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Same custom scheme as iOS Info.plist. https App Links stay out:
-                 a self-hosted identity must not depend on the operator's domain. -->
+            <!-- Same custom scheme as iOS Info.plist. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="@string/custom_url_scheme" />
+            </intent-filter>
+
+            <!-- App Links for hosted identities' approve page (EPIC-028 E28-T7):
+                 a scanned https://<id>.poweur.net/id/approve#… opens the app.
+                 The relay's assetlinks.json verifies it; nothing else on those
+                 hosts is claimed, and self-hosted identities keep poweur://. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="*.poweur.net" />
+                <data android:host="poweur.net" />
+                <data android:pathPrefix="/id/approve" />
             </intent-filter>
 
         </activity>

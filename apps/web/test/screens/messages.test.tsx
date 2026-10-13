@@ -222,7 +222,21 @@ describe("Conversation view (E15-T13)", () => {
     expect(useData.getState().thread).toBeNull();
   });
 
-  it("shows sign-in requests apart from conversations, and review requires the code", async () => {
+  it("a tapped sign-in notification opens the newest request for review (EPIC-028)", async () => {
+    const soon = new Date(Date.now() + 120_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const prompt = { ...promptMessage("p9"), recipient: ME };
+    const payload = JSON.parse(prompt.plaintext);
+    const req = { ...decodeSignInRequest(payload.request), issued_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), expires_at: soon };
+    prompt.plaintext = JSON.stringify({ ...payload, request: encodeSignInRequest(req as never), expires_at: soon });
+    holder.client.inboxAndArchive.mockResolvedValueOnce({ messages: [prompt], acks: [], acked: [], archived: 0, lost: 0 });
+    useData.setState({ openNewestPrompt: true });
+    render(<App />);
+    await waitFor(() => expect(useRoute.getState().sub).toBe("auth"));
+    expect(useData.getState().auth.crossDevice).toBe(true);
+    expect(useData.getState().openNewestPrompt).toBe(false);
+  });
+
+  it("shows sign-in requests apart from conversations, and review is a cross-device approval", async () => {
     const soon = new Date(Date.now() + 120_000).toISOString().replace(/\.\d{3}Z$/, "Z");
     const prompt = { ...promptMessage("p1"), recipient: ME };
     const payload = JSON.parse(prompt.plaintext);
@@ -237,7 +251,7 @@ describe("Conversation view (E15-T13)", () => {
     expect($(".empty-state-title")!.textContent).toBe("No messages yet");
 
     fireEvent.click($(".btn-prompt-review")!);
-    expect(useData.getState().auth.requireCode).toBe(true);
+    expect(useData.getState().auth.crossDevice).toBe(true);
     expect(useRoute.getState().sub).toBe("auth");
 
     act(() => useRoute.setState({ sub: null } as never));

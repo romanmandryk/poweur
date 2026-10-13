@@ -22,7 +22,7 @@ commit anything, and one passkey carries you from the signup host to your own.
    that implements the WebAuthn PRF extension (Apple Passwords / iCloud Keychain, or
    Google Password Manager). Password-manager passkeys that cannot emit PRF are
    refused — there is no PIN fallback. This is the only ceremony in the flow.
-4. **You land on your own address.** `alice.poweur.net/app/`, signed in, with the setup
+4. **You land on your own address.** `alice.poweur.net/id/`, signed in, with the setup
    flow ([walkthrough](/web/walkthrough#first-run)) waiting.
 
 Step 4 needs no second passkey: the credential is scoped to the domain the launcher and
@@ -48,14 +48,14 @@ The launcher is not a second application. It is the same static tree, served on 
 dedicated host so that someone with no identity has somewhere to land:
 
 - `LAUNCHER_HOST` (default `id.<first hosted domain>`) — the relay redirects `/` there to
-  `/app/`, and advertises the host at `GET /` so a client knows where it is running.
+  `/id/`, and advertises the host at `GET /` so a client knows where it is running.
 - `id` and `launcher` are reserved labels, so the launcher host can never collide with an
   identity somebody claimed.
 - Name rules — length, reserved names, a blocked-terms file — are
   [configuration](/relay/configuration#hosted-handle-policy). The character set is not:
   handles are ASCII `a-z 0-9 -` on every deployment, because a handle becomes a DNS label
   and a name under your wildcard certificate.
-- A **self-hoster needs none of this.** Their relay serves the app at `<identity>/app/`
+- A **self-hoster needs none of this.** Their relay serves the app at `<identity>/id/`
   from the released image; there is no fork to maintain and nothing to publish to an app
   store.
 

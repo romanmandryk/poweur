@@ -205,17 +205,19 @@ offline target. That keeps an unreviewed primitive out of every client's trusted
   refuses to deliver otherwise. A pairing link names its identity; approvers refuse one for
   another identity.
 
-The new device asks what will approve it, because a phone camera opens what the QR says:
+The new device shows **one QR** for every approver (EPIC-028): the identity's approve page,
+`https://<identity>/id/approve#pair=<code>.<commitment>&id=<identity>` — the values in the
+fragment, which browsers never send to a server. A phone's camera opens it in the Poweur app
+when it is installed and the identity is hosted (universal links / App Links claim
+`/id/approve`), otherwise in the browser, which approves if it holds the identity and offers
+**Open in the Poweur app** if it does not. A terminal takes the same link
+(`poweur key approve '<link>'`, behind *Use a terminal*). The app form,
+`poweur://pair?pair=…&id=…`, is still read wherever a pairing link is.
 
-- **Poweur app** (the default): `poweur://pair?pair=<code>.<commitment>&id=<identity>` — the
-  camera hands it to the app, which asks to unlock and approve. An https link would open a
-  website that holds no keys.
-- **Browser**: `https://<identity>/app/#pair=…&id=…` — the values in the fragment, which browsers
-  never send to a server. If that browser does not hold the identity, it offers **Open in the
-  Poweur app** with the app form of the same link.
-- **Terminal**: `poweur key approve '<link>'` to copy.
-
-The typed code works with all three.
+The typed code works everywhere. It is entered in eight cells with a dash drawn after the
+fourth; paste fills them with or without the dash, and Crockford's look-alikes are read for what
+they are (O → 0, I and L → 1). The six digits that follow are still compared, never typed: they
+are the check against a relay that swapped the new device's key, and EPIC-028 keeps them.
 
 ## Key files at rest (CLI)
 

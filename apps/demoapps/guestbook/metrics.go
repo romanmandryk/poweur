@@ -15,12 +15,11 @@ const (
 
 // Steps of a "Sign in with Poweur ID", counted once each per attempt.
 const (
-	signinStarted     = "started"      // the page asked for a request
-	signinBusy        = "busy"         // refused: too many sign-ins in progress
-	signinApproved    = "approved"     // a signer's approval verified
-	signinFailed      = "failed"       // an approval did not verify
-	signinMatchFailed = "match_failed" // a cross-device approval sent the wrong match code
-	signinCompleted   = "completed"    // a browser was handed its session
+	signinStarted   = "started"   // the page asked for a request
+	signinBusy      = "busy"      // refused: too many sign-ins in progress
+	signinApproved  = "approved"  // a signer's approval verified
+	signinFailed    = "failed"    // an approval did not verify
+	signinCompleted = "completed" // a browser was handed its session
 )
 
 // Server-side failures, whatever the visitor was told.
@@ -45,7 +44,7 @@ func newMetrics(r *appmetrics.Registry) *metrics {
 		posts: r.Counter("posts_total", "Attempts to sign the book, by outcome.", "result",
 			postCreated, postUnauthorized, postInvalid, postRateLimited, postBusy, postStoreError),
 		signins: r.Counter("signins_total", "Sign-in with Poweur ID, by step.", "result",
-			signinStarted, signinBusy, signinApproved, signinFailed, signinMatchFailed, signinCompleted),
+			signinStarted, signinBusy, signinApproved, signinFailed, signinCompleted),
 		errors: r.Counter("errors_total", "Server-side failures, by kind.", "kind",
 			errStoreWrite, errStoreRead, errLogRefresh, errInternal),
 	}

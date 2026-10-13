@@ -36,8 +36,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// mountWebStatic serves the web client SPA from dir under prefix ("/app" →
-// GET /app/): real files as themselves, every other path as index.html so the
+// mountWebStatic serves the web client SPA from dir under prefix ("/id" →
+// GET /id/): real files as themselves, every other path as index.html so the
 // app's own routes survive a reload. With pwa set, a hosted identity's host
 // gets its own app name and icon (pwa.go).
 func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte, pwa func(*http.Request) *pwaIdentity) {
@@ -72,7 +72,7 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte
 		}
 		if rel == "sw.js" {
 			// The browser re-checks the worker on navigation; never let a
-			// cache hand it a stale one, and keep its scope at /app/.
+			// cache hand it a stale one, and keep its scope at /id/.
 			w.Header().Set("Cache-Control", "no-cache")
 		}
 		candidate := filepath.Join(root, filepath.FromSlash(pathpkg.Clean("/"+rel)))
@@ -89,8 +89,66 @@ func mountWebStatic(mux *http.ServeMux, prefix, dir string, browserConfig []byte
 	})
 }
 
+// appPrefix is where the web client lives on every host (EPIC-028 E28-T13).
+const appPrefix = "/id"
+
+// legacyAppPrefix is where it lived until web 0.2.25.
+const legacyAppPrefix = "/app"
+
+// legacyServiceWorker replaces the worker an installed /app/ web app
+// registered. A browser re-checks its worker without following redirects, so
+// /app/sw.js must answer itself: this one drops its push subscription (the
+// relay then gets 410 and removes the registration), unregisters, and moves
+// any open window to /id/?moved=1, where the current worker takes over and
+// the app says the home-screen icon has to be added again.
+const legacyServiceWorker = `// Retired: the web app moved from /app/ to /id/.
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    try {
+      const sub = await self.registration.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+    } catch {}
+    await self.registration.unregister();
+    const windows = await self.clients.matchAll({ type: "window" });
+    for (const client of windows) {
+      const url = new URL(client.url);
+      if (!url.pathname.startsWith("/app/")) continue;
+      url.pathname = "/id/" + url.pathname.slice(5);
+      url.searchParams.set("moved", "1");
+      client.navigate(url.href);
+    }
+  })());
+});
+`
+
+// mountLegacyApp keeps old links working after the move: /app and /app/...
+// answer 308 to the same path under /id/, query included (browsers carry the
+// fragment across a redirect themselves, so #pair= links survive).
+func mountLegacyApp(mux *http.ServeMux, dir string) {
+	if dir == "" {
+		return
+	}
+	redirect := func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, legacyAppPrefix)
+		rest = strings.TrimPrefix(rest, "/")
+		target := appPrefix + "/" + rest
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+	}
+	mux.HandleFunc("GET "+legacyAppPrefix, redirect)
+	mux.HandleFunc("GET "+legacyAppPrefix+"/", redirect)
+	mux.HandleFunc("GET "+legacyAppPrefix+"/sw.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte(legacyServiceWorker))
+	})
+}
+
 // rootIcons are the brand icons a browser requests at the origin, not under
-// /app/. The SPA links them from its own HTML, which Vite rewrites to sit next
+// /id/. The SPA links them from its own HTML, which Vite rewrites to sit next
 // to the page; a tab on alice.poweur.net still asks for /favicon.ico on that
 // host, and GET / would otherwise answer with the JSON service banner. Every
 // host this process serves — launcher and identity — shares one router, so

@@ -39,17 +39,17 @@ func TestCapabilitiesAdvertiseSignerAndBridge(t *testing.T) {
 	server.cfg.OAuthBridgeURL = "https://oauth.poweur.org"
 	resp, caps := getWellKnown(t, capsURL, "alice.poweur.net")
 	endpoints, _ := caps["endpoints"].(map[string]any)
-	if resp.StatusCode != 200 || endpoints["web_signer"] != "http://alice.poweur.net/app/" || endpoints["oauth_bridge"] != "https://oauth.poweur.org" {
+	if resp.StatusCode != 200 || endpoints["web_signer"] != "http://alice.poweur.net/id/" || endpoints["oauth_bridge"] != "https://oauth.poweur.org" {
 		t.Fatalf("default capabilities = %d %v", resp.StatusCode, caps)
 	}
 
 	// The user's own document wins where it speaks, and keeps its features.
 	setSysFile(t, server, alice.name, capabilitiesPath,
-		`{"version":1,"features":{"messaging":"v1"},"endpoints":{"web_signer":"https://signer.example/app/"}}`)
+		`{"version":1,"features":{"messaging":"v1"},"endpoints":{"web_signer":"https://signer.example/id/"}}`)
 	_, caps = getWellKnown(t, capsURL, "alice.poweur.net")
 	endpoints, _ = caps["endpoints"].(map[string]any)
 	features, _ := caps["features"].(map[string]any)
-	if endpoints["web_signer"] != "https://signer.example/app/" || endpoints["oauth_bridge"] != "https://oauth.poweur.org" || features["messaging"] != "v1" {
+	if endpoints["web_signer"] != "https://signer.example/id/" || endpoints["oauth_bridge"] != "https://oauth.poweur.org" || features["messaging"] != "v1" {
 		t.Fatalf("merged capabilities = %v", caps)
 	}
 

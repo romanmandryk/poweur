@@ -17,7 +17,7 @@ so the package scripts run, not pnpm's own command.
 
 A Capacitor app runs on **one fixed origin** and talks to relays cross-origin, which the
 relay already permits. That is the property a browser app cannot have: `localStorage` is
-per-origin, so `alice.r1.com/app/` structurally cannot see an identity stored by
+per-origin, so `alice.r1.com/id/` structurally cannot see an identity stored by
 `alice.r2.com`. Many identities across many relays in one app is the reason to install
 anything at all, and it falls out of the shell's origin rather than being built.
 

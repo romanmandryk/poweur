@@ -57,7 +57,7 @@ func TestINT_IDENTITY_PAGE_01_HostRoutingNegotiationAndOptOuts(t *testing.T) {
 	conditional.Body.Close()
 
 	bob := identityPageRequest(t, relayURL, "pagebob.poweur.net", "text/html", "")
-	if body := readIdentityPage(t, bob); bob.StatusCode != http.StatusOK || !strings.Contains(body, "Bob Page") || strings.Contains(body, "Alice Page") || !strings.Contains(body, `href="/app/?anonymous=1"`) {
+	if body := readIdentityPage(t, bob); bob.StatusCode != http.StatusOK || !strings.Contains(body, "Bob Page") || strings.Contains(body, "Alice Page") || !strings.Contains(body, `href="/id/?anonymous=1"`) {
 		t.Fatalf("bob identity page: status=%d body=%s", bob.StatusCode, body)
 	}
 	if bob.Header.Get("X-Robots-Tag") != "noindex, nofollow" || bob.Header.Get("ETag") == etag {
@@ -92,9 +92,9 @@ func TestINT_IDENTITY_PAGE_01_HostRoutingNegotiationAndOptOuts(t *testing.T) {
 		t.Fatalf("well-known route changed: status=%d type=%q", wellKnown.StatusCode, wellKnown.Header.Get("Content-Type"))
 	}
 
-	app := identityPagePathRequest(t, relayURL, "pagealice.poweur.net", "/app/", "text/html")
+	app := identityPagePathRequest(t, relayURL, "pagealice.poweur.net", "/id/", "text/html")
 	if body := readIdentityPage(t, app); app.StatusCode != http.StatusOK || !strings.Contains(body, "web-app-shell") || strings.Contains(body, "Copy ID") {
-		t.Fatalf("/app/ was replaced by the identity page: status=%d body=%s", app.StatusCode, body)
+		t.Fatalf("/id/ was replaced by the identity page: status=%d body=%s", app.StatusCode, body)
 	}
 	unknown := identityPagePathRequest(t, relayURL, "pagebob.poweur.net", "/not-a-page", "text/html")
 	if body := readIdentityPage(t, unknown); strings.Contains(body, "Bob Page") || !strings.Contains(body, `"service":"poweur-relay"`) {

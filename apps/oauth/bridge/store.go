@@ -193,6 +193,31 @@ func (s *Store) Use(ctx context.Context, key string, expiresAt time.Time) (bool,
 	return n == 1, nil
 }
 
+// PausePushes stops pushes to identity until the given time (EPIC-028: a
+// wrong pick on a pushed prompt). An existing, longer pause stays.
+func (s *Store) PausePushes(ctx context.Context, identity string, until time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO nonces(key, expires_at) VALUES(?, ?)
+		 ON CONFLICT(key) DO UPDATE SET expires_at = MAX(expires_at, excluded.expires_at)`,
+		pushPauseKey(identity), unix(until))
+	return err
+}
+
+// PushesPaused reports whether pushes to identity are paused at now.
+func (s *Store) PushesPaused(ctx context.Context, identity string, now time.Time) (bool, error) {
+	var until int64
+	err := s.db.QueryRowContext(ctx, `SELECT expires_at FROM nonces WHERE key = ?`, pushPauseKey(identity)).Scan(&until)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return unix(now) < until, nil
+}
+
+func pushPauseKey(identity string) string { return "push-pause:" + strings.ToLower(identity) }
+
 // --- Transactions ------------------------------------------------------------
 
 // CreateTxn inserts a new transaction.

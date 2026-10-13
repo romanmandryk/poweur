@@ -17,7 +17,7 @@ const (
 // apps/docs/docs/auth/sign-in.md. The approval chooses, never the page.
 const (
 	FinishSameDevice  = "same-device"  // /poweur/resume + binding cookie
-	FinishCrossDevice = "cross-device" // match code, then the page's status poll
+	FinishCrossDevice = "cross-device" // another device approved; the page's status poll finishes
 )
 
 // Txn is one browser's journey through the bridge: from /authorize (or
@@ -48,7 +48,12 @@ type Txn struct {
 	RequestID      string    `json:"request_id,omitempty"`
 	Request        string    `json:"request,omitempty"`
 	RequestExpires time.Time `json:"request_expires,omitempty"`
-	Match          string    `json:"match,omitempty"`
+	// Match and MatchChoices are drawn on the first push (EPIC-028): the
+	// starting screen shows Match, the signer offers MatchChoices, and a
+	// cross-device approval of a pushed request must pick Match. A request
+	// that was only scanned or opened needs no number.
+	Match        string   `json:"match,omitempty"`
+	MatchChoices []string `json:"match_choices,omitempty"`
 	// RequestCode serves the request by reference at /r/{code} (E08-T6):
 	// what the QR and the copy link carry instead of the whole request.
 	RequestCode string    `json:"request_code,omitempty"`
@@ -92,6 +97,8 @@ type Status struct {
 	Status string `json:"status"` // identify | pending | approved | complete | failed | expired
 	Next   string `json:"next,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Match is the number to pick on the phone, once the request was pushed.
+	Match string `json:"match,omitempty"`
 }
 
 var (

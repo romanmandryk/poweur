@@ -21,7 +21,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `RELAY_SCHEME` | `https` | Scheme for relay-to-relay calls (`http` only for local tests) |
 | `POWEUR_DATA` | *(empty)* | Root of durable state: identity documents, inbox spool, and the filesystem drive store. Without it the relay cannot host identities. An S3 drive does not require it |
 | `HOSTED_DOMAINS` | *(empty)* | Comma-separated parents for hosted registration (e.g. `poweur.net` → `alice.poweur.net`) |
-| `WEB_STATIC_DIR` | *(empty; `/web` in the Docker image)* | Directory of the built web app (`apps/web/dist`), served at `/app/` |
+| `WEB_STATIC_DIR` | *(empty; `/web` in the Docker image)* | Directory of the built web app (`apps/web/dist`), served at `/id/` |
 | `LAUNCHER_HOST` | `id.<first hosted domain>` | The host that serves the "create an ID" flow |
 | `LAUNCHER_HOSTS` | `id.<domain>` and `<domain>` for each hosted domain | Comma-separated set of such hosts; wins over `LAUNCHER_HOST` |
 | `OAUTH_BRIDGE_URL` | *(empty)* | Public URL of an [OAuth/OIDC bridge](/auth/oauth-oidc-bridge). Hosted identities advertise it in `capabilities.json` and as IndieAuth metadata; the relay never calls it |
@@ -60,6 +60,9 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `PUSH_VAPID_SUBJECT` | `https://<LAUNCHER_HOST>` | The contact push services see in the VAPID token: `mailto:` or `https:` |
 | `PUSH_ENDPOINT_HOSTS` | Google, Apple, Mozilla and Microsoft push services | Comma-separated domains a subscription's endpoint may point at (suffix match). The relay POSTs to that endpoint, so this list is its SSRF guard |
 | `PUSH_COALESCE` | `2s` | How long events for one identity are gathered into a single push |
+| `APP_LINKS_IOS_APP_IDS` | unset | Comma-separated `<TeamID>.<bundle id>` of the store app. Set: `/.well-known/apple-app-site-association` claims `/id/approve` for it, so a scanned approve link opens the app (EPIC-028) |
+| `APP_LINKS_ANDROID_PACKAGE` | unset | The Android app's package (`net.poweur.app`) for `/.well-known/assetlinks.json` |
+| `APP_LINKS_ANDROID_SHA256` | unset | Comma-separated SHA-256 fingerprints of the app's signing certificate (`AB:CD:…`). Both Android values are needed to serve `assetlinks.json` |
 | `CHALLENGE_TTL` | `60s` | How long an authentication challenge stays valid |
 | `DNS_TTL` | `300s` | How long resolved identities and relay addresses are cached |
 

@@ -6,7 +6,7 @@ title: Web app walkthrough
 
 # Web app walkthrough
 
-The web client (`apps/web`, served at `/app/`) is the whole product without a
+The web client (`apps/web`, served at `/id/`) is the whole product without a
 terminal: identity, messages, contacts, files, sharing and inbox policy. This page
 follows a new user through it and says which document or endpoint each screen writes,
 so a behaviour you see here can be traced to the spec that defines it.

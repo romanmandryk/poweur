@@ -205,17 +205,6 @@ function setStatus(text, state = "") {
   el.className = "status" + (state ? " " + state : "");
 }
 
-function showMatch(code) {
-  $("match").replaceChildren(
-    ...[...code].map((digit) => {
-      const el = document.createElement("span");
-      el.className = "digit";
-      el.textContent = digit;
-      return el;
-    }),
-  );
-}
-
 async function signIn() {
   $("signin").disabled = true;
   let start;
@@ -230,12 +219,14 @@ async function signIn() {
     setStatus(start.error, "failed");
     return;
   }
-  // A new tab, so this page, its code and its poll all stay alive while the
-  // person approves. Following the link in this tab would throw them away.
-  $("approve").href = start.request_link;
-  $("approve-url").textContent = start.request_link;
-  copyLink = start.request_link;
-  showMatch(start.match_code);
+  // A new tab, so this page and its poll stay alive while the person
+  // approves. Following the link in this tab would throw them away. A
+  // remembered ID opens its own approve page; otherwise the short link
+  // offers the signers.
+  const link = start.approve_link || start.request_link;
+  $("approve").href = link;
+  $("approve-url").textContent = link;
+  copyLink = link;
   $("consent").replaceChildren();
   if (start.consent?.length) $("consent").textContent = start.consent.join(" ");
   setStatus("Waiting for your approval…");

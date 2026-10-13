@@ -9,7 +9,7 @@ your devices hold. It is your identity, your inbox and your drive in one, and yo
 our servers, on your own domain or on your own relay.
 
 - 🌐 **Website:** [poweur.org](https://www.poweur.org)
-- 🪪 **Claim your ID:** [poweur.net/app](https://poweur.net/app/)
+- 🪪 **Claim your ID:** [poweur.net/app](https://poweur.net/id/)
 - 📖 **Documentation:** [poweur.org/docs](https://www.poweur.org/docs/)
 - 🖥️ **Run your own relay:** the [self-hosting guide](apps/docs/docs/relay/self-hosting.md)
 - 🔐 **Report a vulnerability:** [SECURITY.md](SECURITY.md)
@@ -27,7 +27,7 @@ The rest of this page is for people who build, run or contribute to Poweur.
 | Path | What it is | License |
 |------|------------|---------|
 | [`apps/api`](apps/api) | The relay: a Go service that hosts IDs, verifies and routes messages, keeps encrypted drives and serves the web app | AGPL-3.0 |
-| [`apps/web`](apps/web) | The web app (React + Tailwind), served by the relay at `/app/` | AGPL-3.0 |
+| [`apps/web`](apps/web) | The web app (React + Tailwind), served by the relay at `/id/` | AGPL-3.0 |
 | [`apps/mobile`](apps/mobile) | iOS and Android shell (Capacitor) around the web app | AGPL-3.0 |
 | [`apps/oauth`](apps/oauth) | OAuth 2.0 / OpenID Connect / IndieAuth bridge: "Sign in with Poweur" for any app | AGPL-3.0 |
 | [`apps/cli`](apps/cli) | The `poweur` command line: scripting, bots, agents, operators | Apache-2.0 |
@@ -82,7 +82,7 @@ Run a relay (copy the settings from [`apps/api/README.md`](apps/api/README.md) i
 cd apps/api && go run .
 ```
 
-Build the web app and let the relay serve it at `/app/` by pointing `WEB_STATIC_DIR` at
+Build the web app and let the relay serve it at `/id/` by pointing `WEB_STATIC_DIR` at
 `apps/web/dist`, or run it with hot reload:
 
 ```bash

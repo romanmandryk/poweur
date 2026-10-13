@@ -80,19 +80,12 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
           <strong>Approve it with your ID</strong>
           <p id="consent"></p>
           <a id="approve" class="cta big" href="#" target="_blank" rel="noopener">Open the approval page in a new tab</a>
-          <p class="hint">It opens in a new tab so this page, and the code below, stay here. On your phone?
+          <p class="hint">It opens in a new tab so this page stays here. On your phone?
             <button id="copy" class="link" type="button">Copy the link</button> and open it there.</p>
           <span id="approve-url" class="url"></span>
         </div>
       </li>
       <li class="step"><span class="n">2</span>
-        <div>
-          <strong>If it asks for a code, type this one</strong>
-          <div id="match" class="match" aria-label="Your code"></div>
-          <p class="hint">Only enter it on a screen you opened yourself.</p>
-        </div>
-      </li>
-      <li class="step"><span class="n">3</span>
         <div><p id="status" class="status" role="status">Waiting…</p>
           <p class="hint">Keep this page open. It finishes by itself once you approve.</p></div>
       </li>

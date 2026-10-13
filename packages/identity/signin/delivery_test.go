@@ -132,3 +132,67 @@ func TestCheckResumeURI(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryFinishAndCrossDevice(t *testing.T) {
+	cases := map[string]struct {
+		body   string
+		finish string
+		match  string
+		cross  bool
+	}{
+		"bare response is same-device":   {`eyJ4IjoxfQ`, "", "", false},
+		"finish poll":                    {`{"response":"r","finish":"poll"}`, FinishPoll, "", true},
+		"finish is case-insensitive":     {`{"response":"r","finish":" POLL "}`, FinishPoll, "", true},
+		"unknown finish is same-device":  {`{"response":"r","finish":"teleport"}`, "", "", false},
+		"older signer: match alone":      {`{"response":"r","match":"42"}`, "", "42", true},
+		"pushed prompt: poll and a pick": {`{"response":"r","finish":"poll","match":"07"}`, FinishPoll, "07", true},
+	}
+	for name, tc := range cases {
+		d, err := ParseDeliveryBody(tc.body)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if d.Finish != tc.finish || d.Match != tc.match || d.CrossDevice() != tc.cross {
+			t.Errorf("%s: got %+v cross=%v", name, d, d.CrossDevice())
+		}
+	}
+	form := httptest.NewRequest(http.MethodPost, "/cb", strings.NewReader("response=r&finish=poll"))
+	form.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if d, err := ParseDelivery(form); err != nil || !d.CrossDevice() {
+		t.Fatalf("form delivery = %+v %v", d, err)
+	}
+}
+
+func TestNewMatchChoices(t *testing.T) {
+	positions := map[int]int{}
+	for i := 0; i < 300; i++ {
+		code, choices, err := NewMatchChoices()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(choices) != MatchChoiceCount {
+			t.Fatalf("choices = %v", choices)
+		}
+		seen := map[string]bool{}
+		at := -1
+		for j, c := range choices {
+			if len(c) != MatchCodeDigits || NormalizeMatchCode(c) != c || seen[c] {
+				t.Fatalf("bad choices %v", choices)
+			}
+			seen[c] = true
+			if c == code {
+				at = j
+			}
+		}
+		if at < 0 {
+			t.Fatalf("code %s not among %v", code, choices)
+		}
+		positions[at]++
+	}
+	// The right answer must not sit in a predictable place.
+	for p := 0; p < MatchChoiceCount; p++ {
+		if positions[p] < 50 {
+			t.Errorf("position %d chosen %d/300 times", p, positions[p])
+		}
+	}
+}

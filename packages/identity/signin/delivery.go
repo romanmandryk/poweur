@@ -19,14 +19,26 @@ import (
 
 // Delivery is what a signer POSTs to a request's response_uri.
 //
-// Response is the encoded, signed approval. Match is present only when the
-// user approved on a different device from the one that started the sign-in:
-// it is the number that device showed, typed into the signer. It is not part
-// of the signed bytes — it proves the approver was looking at the initiating
-// screen, not who the approver is.
+// Response is the encoded, signed approval. Finish is FinishPoll when the
+// user approved on a different device from the one that started the sign-in
+// (a QR, a link, a pushed prompt): the starting page's poll completes it.
+// Match is the number the user picked from MatchChoices when the sign-in was
+// pushed to them (EPIC-028). Neither is part of the signed bytes.
+//
+// Older signers sent a cross-device approval as a Match alone, with no
+// Finish; CrossDevice treats both forms alike.
 type Delivery struct {
 	Response string `json:"response"`
+	Finish   string `json:"finish,omitempty"`
 	Match    string `json:"match,omitempty"`
+}
+
+// FinishPoll marks a cross-device delivery.
+const FinishPoll = "poll"
+
+// CrossDevice reports whether the approval was made on another device.
+func (d Delivery) CrossDevice() bool {
+	return d.Finish == FinishPoll || d.Match != ""
 }
 
 // DeliveryReceipt is the relying party's answer to a Delivery.
@@ -45,11 +57,16 @@ type DeliveryReceipt struct {
 // well under 4 KiB.
 const MaxDeliveryBytes = 64 * 1024
 
-// MatchCodeDigits is the length of a cross-device match code. It is an
-// attention check, not a secret: a relying party allows exactly one attempt
-// per sign-in, so a guess succeeds with probability 1/100 and a miss kills
-// the transaction.
+// MatchCodeDigits is the length of a match code. It is an attention check,
+// not a secret, and since EPIC-028 it is asked only for a sign-in that was
+// pushed to the user's app: the approver picks it from MatchChoiceCount
+// numbers. A relying party allows exactly one pick per sign-in, so a guess
+// succeeds with probability 1/MatchChoiceCount and a miss kills the
+// transaction.
 const MatchCodeDigits = 2
+
+// MatchChoiceCount is how many numbers a pushed prompt offers.
+const MatchChoiceCount = 3
 
 // ErrMatchCode is returned when a cross-device delivery carries a code that
 // does not match the one the initiating screen showed.
@@ -67,6 +84,7 @@ func ParseDelivery(r *http.Request) (Delivery, error) {
 		}
 		d := Delivery{
 			Response: strings.TrimSpace(r.PostForm.Get("response")),
+			Finish:   normalizeFinish(r.PostForm.Get("finish")),
 			Match:    NormalizeMatchCode(r.PostForm.Get("match")),
 		}
 		if d.Response == "" {
@@ -95,13 +113,14 @@ func ParseDeliveryBody(body string) (Delivery, error) {
 	}
 	var envelope struct {
 		Response json.RawMessage `json:"response"`
+		Finish   string          `json:"finish"`
 		Match    json.RawMessage `json:"match"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil || len(envelope.Response) == 0 {
 		// A bare response object.
 		return Delivery{Response: raw}, nil
 	}
-	d := Delivery{}
+	d := Delivery{Finish: normalizeFinish(envelope.Finish)}
 	var asString string
 	if err := json.Unmarshal(envelope.Response, &asString); err == nil {
 		d.Response = strings.TrimSpace(asString)
@@ -119,6 +138,40 @@ func ParseDeliveryBody(body string) (Delivery, error) {
 		return Delivery{}, errors.New("missing response field")
 	}
 	return d, nil
+}
+
+// normalizeFinish keeps the one value a signer may send; anything else is the
+// same-device default.
+func normalizeFinish(s string) string {
+	if strings.EqualFold(strings.TrimSpace(s), FinishPoll) {
+		return FinishPoll
+	}
+	return ""
+}
+
+// NewMatchChoices returns a fresh match code and MatchChoiceCount distinct
+// codes that include it, in random order. The relying party shows the code on
+// the starting screen and gives the signer only the choices.
+func NewMatchChoices() (code string, choices []string, err error) {
+	seen := map[string]bool{}
+	for len(choices) < MatchChoiceCount {
+		c, err := NewMatchCode()
+		if err != nil {
+			return "", nil, err
+		}
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		choices = append(choices, c)
+	}
+	// choices are independent uniform draws, so any position is as good as a
+	// shuffle; pick which one is right uniformly too.
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(choices))))
+	if err != nil {
+		return "", nil, err
+	}
+	return choices[n.Int64()], choices, nil
 }
 
 // NewMatchCode returns a fresh MatchCodeDigits-digit code, zero-padded.

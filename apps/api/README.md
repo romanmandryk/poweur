@@ -32,7 +32,7 @@ Build the web UI once (outputs to `apps/web/dist`):
 pnpm --filter @poweur/web build
 ```
 
-Point the relay at that directory so it serves the app under **`/app/`**:
+Point the relay at that directory so it serves the app under **`/id/`**:
 
 ```bash
 WEB_STATIC_DIR=/absolute/path/to/poweur/apps/web/dist go run .

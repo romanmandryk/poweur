@@ -53,7 +53,7 @@ type Options struct {
 
 const (
 	docsURL  = "https://www.poweur.org/docs/"
-	claimURL = "https://poweur.net/app/"
+	claimURL = "https://poweur.net/id/"
 	// maxText bounds what is even looked at; replies never contain it.
 	maxText = 500
 )

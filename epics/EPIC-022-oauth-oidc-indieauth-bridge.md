@@ -25,6 +25,7 @@
 | E22-T8 Packaging, conformance, integrations & operations | **partial** | Image, compose example, operator CLI + `backup`, rate limits, real `/health`, `/metrics` + alert rules, privacy/security pages, live Authentik, CI, **live at oauth.poweur.org**; conformance suite (indieauth.rocks 72/0, indielogin.com passed), contacts open |
 | E22-T9 Client registry, developer console & user authorizations | **done** | Console, static and URL clients, `/account` |
 | E22-T10 Bridge UI: React, device-aware, fewer words | **done** | Go keeps routes and security; React renders each page's data; desktop leads with another device |
+| One-tap approvals (follow-up) | **done** → [EPIC-028](EPIC-028-one-tap-approvals.md) | No match code for QR; push asks to pick one of three; QR → `/id/approve` link; remembered ID |
 
 ## Goal
 

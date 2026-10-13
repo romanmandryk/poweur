@@ -62,30 +62,57 @@ func checkStatic(t *testing.T, ts *httptest.Server, cases []staticCase) {
 	}
 }
 
-// The built app is served at /app/, with every unknown path answered by
+// The built app is served at /id/, with every unknown path answered by
 // index.html so the SPA's own routes survive a reload.
 func TestWebStaticServesAppWithSPAFallback(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), nil, nil)
+	mountWebStatic(mux, "/id", writeStaticApp(t, "app"), nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	checkStatic(t, ts, []staticCase{
-		{"/app", http.StatusMovedPermanently, "/app/", ""},
-		{"/app/", http.StatusOK, "", "app"},
-		{"/app/assets/main.js", http.StatusOK, "", "// app"},
-		{"/app/some/deep/route", http.StatusOK, "", "<html>app"},
-		{"/app/assets", http.StatusOK, "", "<html>app"},
-		{"/app/observability.json", http.StatusOK, "", `"providers":[]`},
+		{"/id", http.StatusMovedPermanently, "/id/", ""},
+		{"/id/", http.StatusOK, "", "app"},
+		{"/id/assets/main.js", http.StatusOK, "", "// app"},
+		{"/id/some/deep/route", http.StatusOK, "", "<html>app"},
+		{"/id/assets", http.StatusOK, "", "<html>app"},
+		{"/id/observability.json", http.StatusOK, "", `"providers":[]`},
 	})
+}
+
+// Links from before the move to /id/ keep working, and an installed /app/
+// web app's worker is replaced by one that retires itself (EPIC-028 E28-T13).
+func TestLegacyAppPathRedirectsToID(t *testing.T) {
+	mux := http.NewServeMux()
+	dir := writeStaticApp(t, "app")
+	mountWebStatic(mux, appPrefix, dir, nil, nil)
+	mountLegacyApp(mux, dir)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	checkStatic(t, ts, []staticCase{
+		{"/app", http.StatusPermanentRedirect, "/id/", ""},
+		{"/app/", http.StatusPermanentRedirect, "/id/", ""},
+		{"/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2", http.StatusPermanentRedirect, "/id/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2", ""},
+		{"/app/manifest.webmanifest", http.StatusPermanentRedirect, "/id/manifest.webmanifest", ""},
+		{"/app/sw.js", http.StatusOK, "", "registration.unregister()"},
+	})
+	resp, err := http.Get(ts.URL + "/app/sw.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") || resp.Header.Get("Cache-Control") != "no-cache" {
+		t.Errorf("legacy worker headers: Content-Type %q, Cache-Control %q", ct, resp.Header.Get("Cache-Control"))
+	}
 }
 
 func TestWebStaticUnsetDirMountsNothing(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", "", nil, nil)
+	mountWebStatic(mux, "/id", "", nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
-	if status, _, _ := staticGet(t, ts, "/app/"); status != http.StatusNotFound {
+	if status, _, _ := staticGet(t, ts, "/id/"); status != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", status)
 	}
 }
@@ -104,12 +131,12 @@ func TestWebStaticRejectsTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", app, nil, nil)
+	mountWebStatic(mux, "/id", app, nil, nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	// ServeMux answers a dot-segment path with a redirect to the cleaned one,
 	// so the check is on the file's content, not on the path appearing anywhere.
-	for _, path := range []string{"/app/../secret.txt", "/app/%2e%2e/secret.txt", "/app/..%2fsecret.txt"} {
+	for _, path := range []string{"/id/../secret.txt", "/id/%2e%2e/secret.txt", "/id/..%2fsecret.txt"} {
 		_, _, body := staticGet(t, ts, path)
 		if strings.Contains(body, secret) {
 			t.Errorf("%s leaked a file outside the app dir", path)
@@ -148,7 +175,7 @@ func TestRootIconsOnLauncherAndIdentityHosts(t *testing.T) {
 			"/favicon.ico":          "ICO-BYTES",
 			"/favicon.svg":          "<svg>p</svg>",
 			"/apple-touch-icon.png": "PNG-BYTES",
-			"/app/favicon.ico":      "ICO-BYTES",
+			"/id/favicon.ico":      "ICO-BYTES",
 		} {
 			req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			if err != nil {
@@ -202,10 +229,10 @@ func TestRootIconMissingIsNotTheServiceBanner(t *testing.T) {
 
 func TestWebStaticObservabilityJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	mountWebStatic(mux, "/app", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"faro","url":"/faro/collect"}]}`), nil)
+	mountWebStatic(mux, "/id", writeStaticApp(t, "app"), []byte(`{"providers":[{"type":"faro","url":"/faro/collect"}]}`), nil)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
-	status, _, body := staticGet(t, ts, "/app/observability.json")
+	status, _, body := staticGet(t, ts, "/id/observability.json")
 	if status != http.StatusOK || !strings.Contains(body, `"type":"faro"`) || strings.Contains(body, "<html>") {
 		t.Fatalf("status=%d body=%q", status, body)
 	}

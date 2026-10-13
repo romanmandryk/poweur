@@ -18,6 +18,7 @@
 | E19-T6 Retire the native stubs | **done** | `apps/android` and `apps/ios` deleted; root scripts now point at `apps/mobile` |
 | E19-T7 Multi-identity across relays | **done** (in the code the shell wraps) | two relays, two identities, one origin — `apps/web/test/e2e/multi-relay.spec.js` |
 | E19-T8 Bringing an existing identity over | open | device-to-device; the relay cannot approve |
+| Universal links for hosted IDs | **done**, untested on a device → [EPIC-028](EPIC-028-one-tap-approvals.md) E28-T7 | `*.poweur.net/id/approve` opens the app; self-hosted IDs stay on `poweur://` |
 
 **The shell's front door is specified in [E15-T7](EPIC-015-web-app-ux.md).** The web app is
 getting host-aware modes — `launcher` on the parent domain, `identity` on `bob.poweur.net` — and

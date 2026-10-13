@@ -31,7 +31,7 @@ services:
         google,apple,microsoft,amazon,meta,facebook,instagram,whatsapp,twitter,
         github,gitlab,paypal,stripe,anthropic,openai,claude,chatgpt,
         ${NAME_RESERVED:-}
-      # The web client is built into the image at /web and served at /app/.
+      # The web client is built into the image at /web and served at /id/.
       WEB_STATIC_DIR: /web
       POWEUR_DATA: /data
       # Which domains this relay hosts names under. Without it `GET /` answers

@@ -55,7 +55,7 @@ func TestINT_PROFILE_01_LookupShowsProfileAndCapabilities(t *testing.T) {
 	putPublicDoc(t, relayURL, aliceHome, "pralice.poweur.net", "capabilities.json", map[string]any{
 		"version":   1,
 		"features":  map[string]string{"messaging": "v1", "files": "drive"},
-		"endpoints": map[string]string{"web_signer": "https://pralice.poweur.net/app/"},
+		"endpoints": map[string]string{"web_signer": "https://pralice.poweur.net/id/"},
 	})
 
 	// Bob — who has no credentials on alice's tree — now sees who she is.
@@ -68,7 +68,7 @@ func TestINT_PROFILE_01_LookupShowsProfileAndCapabilities(t *testing.T) {
 		"link: site — https://example.test",
 		"capability: files=drive",
 		"capability: messaging=v1",
-		"endpoint: web_signer=https://pralice.poweur.net/app/",
+		"endpoint: web_signer=https://pralice.poweur.net/id/",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("lookup missing %q:\n%s", want, stdout)

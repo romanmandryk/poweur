@@ -53,6 +53,7 @@ This folder tracks Poweur's evolution from its original DNS-identity messaging M
 | [EPIC-025](EPIC-025-realtime-collaboration.md) | Real-time collaboration protocol & collaborative Markdown reference editor | Collaboration / Protocol | proposed | E20, E24, E17 |
 | [EPIC-026](EPIC-026-reference-app-scenarios.md) | Headless reference apps: collaboration scenarios as the acceptance gate | Apps / Quality | in progress (T1 harness, T2 Markdown, Tasks, Guestbook done), **P0** (gates E20 waves 2–3 and E09-T7–T10) | E20, E09, E14, E24 |
 | [EPIC-027](EPIC-027-public-web-feeds-boards-indexers.md) | Public web: feeds, following, community boards & indexers | Social / Growth | proposed | E20, E09, E14, E24, E26 |
+| [EPIC-028](EPIC-028-one-tap-approvals.md) | One-tap approvals: one link, no codes where they buy nothing (sign-in, OAuth bridge, add device); web app moves `/app/` → `/id/` | Auth / UX | implemented (device checks and production app-link config open) | E08, E09, E11, E19, E22 |
 
 ## Integration epics (`integrations/`)
 
