@@ -1,0 +1,155 @@
+name: Deploy email bridge
+
+# Only when something the bridge is built from changes (EPIC-023). The relay's
+# Deploy workflow is independent; this one never touches its checkout.
+#
+# Pushes deploy only once the repository variable EMAIL_BRIDGE_DEPLOY is
+# "true" — set it after the VM has /opt/apps/poweur-email/.env.prod, the LMTP
+# certificate and the email.poweur.org DNS record (deploy/README.md). Until
+# then run it by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run bridge and identity tests before building
+        type: boolean
+        default: false
+  push:
+    branches: [master]
+    paths:
+      - apps/email/**
+      - packages/identity/**
+      - go.work
+      - .github/workflows/deploy-email.yml
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/poweur-email
+
+concurrency:
+  group: poweur-email-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: ${{ (vars.EMAIL_BRIDGE_DEPLOY == 'true' || github.event_name == 'workflow_dispatch') && (inputs.run_tests || vars.RUN_CI == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            apps/email/go.sum
+            apps/integration/go.sum
+            packages/identity/go.sum
+      - name: Bridge and identity unit tests
+        run: go test ./apps/email/... ./packages/identity/...
+      # RP → bridge → IDs on independent relays → RP, with go-oidc as the client.
+      - name: Bridge integration tests
+        working-directory: apps/integration
+        run: go test -run 'TestINT_EMAIL' ./...
+
+  build:
+    needs: test
+    if: ${{ !cancelled() && (vars.EMAIL_BRIDGE_DEPLOY == 'true' || github.event_name == 'workflow_dispatch') && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ env.IMAGE }}@${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build timestamp
+        id: stamp
+        run: echo "time=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/email/Dockerfile
+          push: true
+          build-args: |
+            VERSION_HASH=${{ github.sha }}
+            BUILD_TIME=${{ steps.stamp.outputs.time }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    needs: build
+    # success() is false when test was skipped, which would skip this job too.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Install pinned SSH host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "$KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Compose up the bridge
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh "poweur@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "poweur@$DEPLOY_HOST" "cat > /opt/apps/poweur-email/docker-compose.yml" < apps/email/deploy/docker-compose.prod.yml
+          # Same shape as the relay deploy: bake the values into a script file,
+          # because `ssh env VAR=… bash -c` loses both quoting and environment.
+          {
+            printf 'export RELEASE_SHA=%q\n' "$RELEASE_SHA"
+            printf 'export EMAIL_IMAGE=%q\n' "$RELEASE_IMAGE"
+            cat <<'EOF'
+          set -euo pipefail
+          cd /opt/apps/poweur-email
+          test -s .env.prod || { echo "/opt/apps/poweur-email/.env.prod is missing (see deploy/README.md)" >&2; exit 1; }
+          docker compose -p poweur-email -f docker-compose.yml up -d --pull always
+          for _ in $(seq 1 30); do
+            health="$(docker exec poweur-email wget -qO- http://127.0.0.1:8091/health || true)"
+            case "$health" in
+              *"\"versionHash\":\"$RELEASE_SHA\""*'"status":"ok"'*|*'"status":"ok"'*"\"versionHash\":\"$RELEASE_SHA\""*)
+                echo "Bridge /health ok: $health"; exit 0 ;;
+            esac
+            sleep 2
+          done
+          echo "Bridge did not report healthy with versionHash $RELEASE_SHA: ${health:-no answer}" >&2
+          docker logs --tail 40 poweur-email >&2 || true
+          exit 1
+          EOF
+          } | ssh "poweur@$DEPLOY_HOST" "cat > /tmp/poweur-email-release.sh && exec bash /tmp/poweur-email-release.sh"
+
+      - name: Public health through Cloudflare and Caddy
+        run: |
+          for _ in $(seq 1 20); do
+            if curl -fsS https://email.poweur.org/health | tee /dev/stderr | grep -q "\"versionHash\":\"$GITHUB_SHA\""; then exit 0; fi
+            sleep 3
+          done
+          echo "https://email.poweur.org/health does not answer with this release" >&2
+          exit 1

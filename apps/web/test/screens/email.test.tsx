@@ -153,3 +153,14 @@ describe("live mail", () => {
     await found(".mail-row");
   });
 });
+
+describe("onboarding", () => {
+  it("offers the address on the last step when the relay has a bridge", async () => {
+    holder.client.emailApi.offeredBridge.mockResolvedValue(BRIDGE);
+    useData.setState({ onboard: { step: 3 } });
+    useRoute.setState({ sub: "onboarding" });
+    render(<App />);
+    const offer = await found("#email-optin");
+    expect(offer.textContent).toContain("alice@poweur.net");
+  });
+});

@@ -1,0 +1,67 @@
+# Production: the email bridge for poweur.net (EPIC-023), at
+# https://email.poweur.org (RCPT hook, blobs, uploads, health) and LMTP :2525
+# for the mail server (Stalwart at mail.poweur.net, managed in famooss).
+#
+# Deployed by .github/workflows/deploy-email.yml, which copies this file to
+# /opt/apps/poweur-email/docker-compose.yml on the VM — its own directory, so
+# the relay's deploy never touches it. Secrets and per-operator values live
+# beside it in .env.prod (0600, never committed):
+#   EMAIL_BRIDGE_SEED          the bridge identity's seed (email.poweur.net)
+#   EMAIL_HOOK_SECRET          shared with Stalwart's MTA hook
+#   EMAIL_LMTP_PASSWORD        Stalwart's AUTH to the bridge's LMTP listener
+#   EMAIL_LMTP_ALLOW           Stalwart's public IP(s)
+#   EMAIL_SMTP_PASSWORD        the bridge's submission account on Stalwart
+# See apps/email/README.md and deploy/README.md.
+services:
+  email:
+    image: ${EMAIL_IMAGE:?Set EMAIL_IMAGE to a GHCR digest}
+    container_name: poweur-email
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+    env_file:
+      - .env.prod
+    environment:
+      EMAIL_BRIDGE_ID: email.poweur.net
+      EMAIL_RELAY_URL: https://relay.poweur.net
+      EMAIL_PUBLIC_URL: https://email.poweur.org
+      # poweur.org (and later other domains) route here once their MX points
+      # at the mail server: add `poweur.org=poweur.net`.
+      EMAIL_DOMAINS: ${EMAIL_DOMAINS:-poweur.net}
+      EMAIL_ALIASES: ${EMAIL_ALIASES:-}
+      EMAIL_LMTP_USERNAME: stalwart
+      # STARTTLS for the LMTP hop: a certificate for email.poweur.org, kept in
+      # ./certs (renewed on the host; see deploy/README.md).
+      EMAIL_LMTP_TLS_CERT_FILE: /certs/lmtp.crt
+      EMAIL_LMTP_TLS_KEY_FILE: /certs/lmtp.key
+      EMAIL_LMTP_HOSTNAME: email.poweur.org
+      EMAIL_AUTHSERV_ID: mail.poweur.net
+      EMAIL_TRANSPORT: smtp
+      EMAIL_SMTP_HOST: mail.poweur.net
+      EMAIL_SMTP_PORT: "587"
+      EMAIL_SMTP_TLS: starttls
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-poweur-bridge}
+      EMAIL_MESSAGE_ID_DOMAIN: poweur.net
+      EMAIL_FOOTER: first
+      EMAIL_SIGNUP_URL: https://poweur.net
+      EMAIL_DATA: /data
+    volumes:
+      - email_data:/data
+      - ./certs:/certs:ro
+    ports:
+      # LMTP from the mail server; HTTP goes through Caddy on infra_net.
+      - "2525:2525"
+    mem_limit: 768m
+    pids_limit: 256
+    networks:
+      - infra_net
+
+volumes:
+  email_data:
+    name: poweur_email_data
+
+networks:
+  infra_net:
+    name: infra_net
+    external: true

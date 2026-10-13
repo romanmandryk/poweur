@@ -1,6 +1,7 @@
 # EPIC-023 — Email bridge: a default inbox for every Poweur ID
 
-- **Status:** proposed
+- **Status:** in progress — bridge, protocol, CLI and web built (2026-10-13); launch waits on the
+  Stalwart routes and DNS (`deploy/README.md` → Email bridge)
 - **Priority:** P1 (growth: lets every Poweur ID reach, and be reached by, the whole email
   network, and gives each non-Poweur correspondent a reason to join)
 - **Depends on:** EPIC-001 (resolver chain), EPIC-006 (`poweur-sys` + PCP registry), EPIC-007
@@ -18,14 +19,14 @@
 
 | Task | Status | Notes |
 |------|--------|-------|
-| E23-T1 Spec, addressing & threat model | open | |
-| E23-T2 Bridge core + inbound SMTP | open | |
-| E23-T3 Outbound: pluggable transports, DKIM, bounces | open | |
-| E23-T4 Abuse controls & reputation | open | |
-| E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | open | |
-| E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | open | |
-| E23-T7 Growth footer | open | |
-| E23-T8 Packaging, DNS, deploy & operations | open | |
+| E23-T1 Spec, addressing & threat model | partial | docs page, PCP-0010, opt-in schema, vectors; payload JSON schemas and a written threat model open |
+| E23-T2 Bridge core + inbound SMTP | done | Behind Stalwart: RCPT hook + LMTP instead of a public :25 listener |
+| E23-T3 Outbound: pluggable transports, DKIM, bounces | mostly done | `smtp`/`log` transports, DSN-driven bounces + suppression; DKIM is Stalwart's; provider complaint webhooks open |
+| E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics; PoW gate, circuit breaker, alerts open |
+| E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | done | `support.poweur.net` already exists and is operator-owned |
+| E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | done | web 0.2.27 |
+| E23-T7 Growth footer | done | |
+| E23-T8 Packaging, DNS, deploy & operations | partial | image, compose, deploy workflow (gated), Caddy, Prometheus, runbook; Stalwart/DNS live in famooss; `check-dns` dropped (mail server's) |
 | E23-T9 Growth loops: invites, conversation upgrade, aliases, screener | open | |
 | E23-T10 Later: custom domains, forwarding-in, local IMAP bridge | open | |
 
@@ -321,39 +322,52 @@ no MX: addresses are `john@poweur.net`, not `…@john.poweur.net`.
 
 ### E23-T1 — Spec, addressing & threat model
 
-- [ ] `apps/docs/docs/email/bridge.md`: architecture above, addressing and subaddress rules, RCPT-time
+- [x] `apps/docs/docs/email/bridge.md`: architecture above, addressing and subaddress rules, RCPT-time
       acceptance, opt-in documents (public `email.json` + inbox-policy `email` block), trust rule
       for rendering, blob scheme, retention and the honest privacy statement
 - [ ] PCP entries (EPIC-006) + JSON schemas for `email.message`, `email.send`, `email.status`,
       `poweur-sys/public/email.json`, and the inbox-policy `email` block; conformance vectors in
       `packages/identity/testdata/vectors/` (`pnpm vectors`)
+      (done: PCP-0010, `email-optin.schema.json`, the inbox-policy `email` block, `email.json`
+      vectors; open: JSON schemas for the three payloads — Go `email.go` is the reference)
 - [ ] Threat model: open relay (must be impossible by construction), spoofed `From:` on inbound
       (show DMARC verdicts; never display "verified" without alignment), forged `email.message`
       from non-bridge IDs, outbound spam from free sign-ups, backscatter, MIME/zip/charset bombs,
       HTML/CSS exfiltration, tracking pixels, bridge compromise (what an attacker reads: mail in
       flight only), metadata the bridge logs (counters per EPIC-013 rules, no addresses in logs)
-- [ ] Confirm the separate-service decision and the bridge-as-identity transport (drain its inbox
+- [x] Confirm the separate-service decision and the bridge-as-identity transport (drain its inbox
       over SSE with the Go client code the CLI uses, as `apps/oauth` sends via the CLI)
+      (separate service, now *behind* a mail server — Stalwart at mail.poweur.net — over the
+      network: RCPT hook, LMTP, submission; the bridge speaks the relay protocol itself with
+      signed requests and the shared `CanonicalMessageEnvelope`, cursor pickup + local queue)
 
 **Acceptance:** spec + schemas merged; vectors regenerated; threat model reviewed.
 
 ### E23-T2 — Bridge core + inbound SMTP
 
-- [ ] `apps/email` module (`bridge.Version`, `poweur-email serve|version|check-dns`), config
-      loading/validation, `/health`, `/metrics`
-- [ ] SMTP server (e.g. `github.com/emersion/go-smtp`): STARTTLS, `SIZE`, connection/recipient/
-      time limits per IP, early-talker rejection, no AUTH on :25
-- [ ] RCPT-time routing: domain in `EMAIL_DOMAINS`, name policy normalization, resolve `local.D`,
+- [x] `apps/email` module (`bridge.Version`, `poweur-email serve|version|check-dns`), config
+      loading/validation, `/health`, `/metrics` (`check-config` instead of `check-dns`: DNS is the
+      mail server's)
+- [x] SMTP server (e.g. `github.com/emersion/go-smtp`): STARTTLS, `SIZE`, connection/recipient/
+      time limits per IP, early-talker rejection, no AUTH on :25 (the internet side is Stalwart;
+      the bridge runs an LMTP listener for it: STARTTLS, AUTH PLAIN, IP allowlist, size limit)
+- [x] RCPT-time routing: domain in `EMAIL_DOMAINS`, name policy normalization, resolve `local.D`,
       verify the signed `email.json` names this bridge, suspension list → `550 5.1.1` otherwise;
-      postmaster/abuse → `EMAIL_POSTMASTER_ID`
-- [ ] Authentication verdicts: SPF, DKIM (`go-msgauth`), DMARC, ARC; recorded in `auth`; DMARC
-      `p=reject` failures refused at DATA
-- [ ] MIME parse with caps (depth, part count, decoded size, charset conversion), text/HTML
+      postmaster/abuse → `EMAIL_POSTMASTER_ID` (Stalwart MTA hook at RCPT; domain aliases
+      `poweur.org=poweur.net`; `EMAIL_ALIASES` for role addresses; suspension is the relay's —
+      a suspended ID's documents stop resolving)
+- [x] Authentication verdicts: SPF, DKIM (`go-msgauth`), DMARC, ARC; recorded in `auth`; DMARC
+      `p=reject` failures refused at DATA (Stalwart checks and enforces; the bridge trusts only
+      its `Authentication-Results` and spam headers, by `EMAIL_AUTHSERV_ID`)
+- [x] MIME parse with caps (depth, part count, decoded size, charset conversion), text/HTML
       extraction, bluemonday sanitization, `cid:` mapping, `Message-ID`/`References` → `thread_id`
-- [ ] Encrypt to the recipient, deliver as `email.message`; blob path for oversized parts; durable
+      (threads by conversation root in the payload — no plaintext `thread_id` on the envelope)
+- [x] Encrypt to the recipient, deliver as `email.message`; blob path for oversized parts; durable
       spool with retry and a dead-letter after N hours (then a DSN to the sender — the only bounce
-      the bridge ever generates, and only for mail it accepted)
-- [ ] Unit tests (table-driven): routing, normalization, verdicts, MIME caps, sanitizer corpus
+      the bridge ever generates, and only for mail it accepted) (the spool is Stalwart's queue:
+      LMTP answers per recipient — 451 on a relay outage, 550 on a refusal — and retries are
+      deduplicated; the original is kept sealed for "Show original")
+- [x] Unit tests (table-driven): routing, normalization, verdicts, MIME caps, sanitizer corpus
       (XSS cheat-sheet + real newsletters); integration test `TestINT_EMAIL_01`: SMTP in →
       `email.message` in the recipient's inbox on a real relay, decryptable by the CLI
 
@@ -363,104 +377,120 @@ no MX: addresses are `john@poweur.net`, not `…@john.poweur.net`.
 ### E23-T3 — Outbound: pluggable transports, DKIM, bounces
 
 - [ ] `Transport` interface; `smtp`, `log` and `direct` implementations; one API transport
-      (whichever E23-T8 picks) with webhook ingestion
-- [ ] Consume `email.send`: verify sender signature + opt-in, idempotency on `send_id`, fetch
+      (whichever E23-T8 picks) with webhook ingestion (done: interface, `smtp` (submission to
+      Stalwart, which relays via Brevo), `log`; `direct` is unnecessary behind an MTA; open: Brevo
+      complaint/bounce webhooks)
+- [x] Consume `email.send`: verify sender signature + opt-in, idempotency on `send_id`, fetch
       E09-T4 attachment grants, re-sanitize HTML, build MIME (`From: john@poweur.net`,
       `Message-ID` on the bridge's domain, `In-Reply-To`/`References`), optional bridge DKIM
-- [ ] `email.status` back to the sender for every state change; suppression list fed by hard
-      bounces and complaints (sends to a suppressed address are refused with a reason)
-- [ ] Integration test with the `log` transport and a fake webhook: send → sent → bounced →
-      suppressed
+      (attachments: inline, or signed uploads sealed to the bridge; DKIM is Stalwart's)
+- [x] `email.status` back to the sender for every state change; suppression list fed by hard
+      bounces and complaints (sends to a suppressed address are refused with a reason) (bounces
+      from delivery reports matched by Message-ID; complaints wait on the webhooks above)
+- [x] Integration test with the `log` transport and a fake webhook: send → sent → bounced →
+      suppressed (send → sent in `TestINT_EMAIL_01`; bounced → suppressed with a DSN in the bridge's
+      unit tests)
 
 **Acceptance:** `poweur email send` produces a DKIM-valid message via the `smtp` transport against
 a local test MTA (e.g. mailpit); bounce webhooks update status and suppression.
 
 ### E23-T4 — Abuse controls & reputation
 
-- [ ] Outbound quotas per identity (daily messages, new recipients/day), relay-configurable;
+- [x] Outbound quotas per identity (daily messages, new recipients/day), relay-configurable;
       replies to someone who emailed you first are exempt from the new-recipient cap
 - [ ] First-send gate: PoW via the E14 primitive (`EMAIL_OUT_GATE=pow`), or minimum identity age;
-      EPIC-016 pay-to-send as the later fast lane for higher limits
+      EPIC-016 pay-to-send as the later fast lane for higher limits (done: `EMAIL_OUT_MIN_AGE`
+      waiting period from the first send attempt; PoW open)
 - [ ] Complaint/bounce-rate circuit breaker per identity and bridge-wide (auto-suspend sending,
       `email.status: refused` with an explanation; operator unsuspend via CLI)
 - [ ] Optional outbound spam scan (rspamd) before submission; inbound spam score → `auth.spam`
-      and a client-side "Spam" filter
-- [ ] Inbound flood protection: per-IP/ASN connection limits, greylisting (optional), per-recipient
-      daily cap mirroring the anon queue's `max_per_day`
+      and a client-side "Spam" filter (done: inbound verdict and score from Stalwart, a Spam chip in
+      the tray; outbound scanning is Stalwart's to add)
+- [x] Inbound flood protection: per-IP/ASN connection limits, greylisting (optional), per-recipient
+      daily cap mirroring the anon queue's `max_per_day` (per-IP is Stalwart's; the bridge caps
+      per recipient per day, refusing with 452 at RCPT)
 - [ ] Metrics + alerts (EPIC-013): `email_inbound_total{result}`, `email_outbound_total{state}`,
-      bounce and complaint rates, queue depth, suspended identities
+      bounce and complaint rates, queue depth, suspended identities (metrics and a scrape job +
+      health probe done; alert rules open)
 
 **Acceptance:** an integration test drives an identity past its quota and a simulated complaint
 spike, and sees refusal + suspension; alert rules committed.
 
 ### E23-T5 — Opt-in: relay policy, name reservations, SDK, CLI
 
-- [ ] Inbox-policy `email` block in `packages/identity/inboxpolicy.go` + relay admission of
+- [x] Inbox-policy `email` block in `packages/identity/inboxpolicy.go` + relay admission of
       `email.*` from the named bridge in every mode; TS client parity + vectors
-- [ ] `poweur-sys/public/email.json` write/remove in the Go client and `@poweur/client`
+- [x] `poweur-sys/public/email.json` write/remove in the Go client and `@poweur/client`
       (`enableEmail(bridge)`, `disableEmail()`, `sendEmail()`, `listEmails()`); relay advertises
       its default bridge in public capabilities so clients know what to offer (as E22 does for the
-      OAuth bridge)
-- [ ] Reserve names in `ReservedLabels`: `postmaster`, `abuse`, `hostmaster`, `webmaster`,
+      OAuth bridge) (`client.email()`: `enable`, `disable`, `state`, `send`, `upload`, `blob`;
+      `EMAIL_BRIDGE_ID` → `endpoints.email_bridge`)
+- [x] Reserve names in `ReservedLabels`: `postmaster`, `abuse`, `hostmaster`, `webmaster`,
       `mailer-daemon`, `noreply`, `no-reply`, `mta-sts`, `bounce`, `bounces`, `dmarc`, `email`,
       `security`, `support`; audit production for already-claimed ones before enabling the MX
       (all reserved, plus the mail DNS labels `mta-sts`, `autoconfig`, `autodiscover`, in relay
       0.2.18 / SDK 0.2.15. Audit 2026-10-13: every name 404s except `support.poweur.net`, a live
-      identity created 2026-09-30; confirm it is operator-owned before ticking)
-- [ ] CLI: `poweur email enable|disable|status`, `poweur email send`, `poweur email ls|read`
+      identity created 2026-09-30 — confirmed operator-owned, and meant to receive mail)
+- [x] CLI: `poweur email enable|disable|status`, `poweur email send`, `poweur email ls|read`
       (text render; `--html` writes the sanitized HTML to a file)
-- [ ] Version bumps: relay, CLI, `@poweur/client`
+- [x] Version bumps: relay, CLI, `@poweur/client` (relay 0.2.18, CLI 0.2.12, SDK 0.2.15)
 
 **Acceptance:** `TestINT_EMAIL_02`: CLI enables email, bridge accepts mail for it, CLI disables it,
 bridge refuses within the cache TTL.
 
 ### E23-T6 — Web app: opt-in, Emails tray, compose, safe HTML rendering
 
-- [ ] Onboarding step (EPIC-018 handoff) and Settings toggle next to anonymous messages:
+- [x] Onboarding step (EPIC-018 handoff) and Settings toggle next to anonymous messages:
       "Get john@poweur.net" — shows the address, what the bridge can see, footer notice; hidden
       when the relay advertises no bridge
-- [ ] **Emails** tray in Messages, shown only when opted in (same gating as `anonymous`), unread
+- [x] **Emails** tray in Messages, shown only when opted in (same gating as `anonymous`), unread
       badge, list with sender/subject/snippet, auth badge (verified / unverified / failed)
-- [ ] `EmailView`: DOMPurify → sandboxed `srcdoc` iframe with CSP meta and `<base
+- [x] `EmailView`: DOMPurify → sandboxed `srcdoc` iframe with CSP meta and `<base
       target="_blank">`, auto-height, light card in dark mode, remote images blocked with "Load
       images" (per message / per sender), plain-text toggle, "Show original", attachments list with
       import-to-files
-- [ ] Compose / reply / reply-all / forward (plain text + light formatting), delivery status from
+- [x] Compose / reply / reply-all / forward (plain text + light formatting), delivery status from
       `email.status`, quota and suspension messages
-- [ ] Tests: Vitest for the renderer (hostile corpus: scripts, event handlers, `<base>`, CSS
+- [x] Tests: Vitest for the renderer (hostile corpus: scripts, event handlers, `<base>`, CSS
       `@import`, `url()` beacons, `<meta refresh>`, SVG, forms) asserting nothing executes or
       loads; Playwright journey: opt in → receive via bridge `log`/SMTP fixture → read → reply
-- [ ] Web app version bump
+- [x] Web app version bump
 
 **Acceptance:** the hostile corpus renders with no script execution, no network request and no
 style leaking into the app; the Playwright journey passes.
 
 ### E23-T7 — Growth footer
 
-- [ ] `EMAIL_FOOTER=off|first|always`, `EMAIL_FOOTER_TEXT` template, text + HTML variants, placed
+- [x] `EMAIL_FOOTER=off|first|always`, `EMAIL_FOOTER_TEXT` template, text + HTML variants, placed
       above quoted reply text
-- [ ] HMAC ledger of (sender, recipient) pairs; rotation-safe; unit tests for once-per-recipient
-- [ ] Composer preview shows the footer when it will be added
+- [x] HMAC ledger of (sender, recipient) pairs; rotation-safe; unit tests for once-per-recipient
+      (keyed by a secret derived from the bridge seed)
+- [x] Composer preview shows the footer when it will be added (a note under the composer)
 
 **Acceptance:** first message to a new recipient carries the footer, the second does not; `off`
 never adds it.
 
 ### E23-T8 — Packaging, DNS, deploy & operations
 
-- [ ] Dockerfile + `compose.example.yml` (as `apps/oauth`), publishing :25 on the host; container
-      memory/CPU/pids limits
+- [x] Dockerfile + `compose.example.yml` (as `apps/oauth`), publishing :25 on the host; container
+      memory/CPU/pids limits (publishes LMTP :2525 for the mail server, not :25)
 - [ ] Ansible: `email.env.j2`, secrets in `secrets.yml` (provider credentials, DKIM key, bridge
       keys), `EMAIL_DOMAINS` defaulting to `hosted_domains`; Caddy blocks for `email.poweur.org`
       and `mta-sts.poweur.net`; STARTTLS certificate for `mx.poweur.org` (shared from Caddy's
-      storage or obtained by the bridge — decide here)
-- [ ] `poweur-email check-dns` validating every record in the DNS table (MX, SPF, DKIM, DMARC,
-      MTA-STS, TLS-RPT, PTR/FCrDNS) for each served domain
-- [ ] Choose the public outbound provider (AUP allows free-sign-up person-to-person mail; custom
-      MAIL FROM; bounce/complaint webhooks; EU region preferred) and document the choice
-- [ ] `deploy/README.md`: rollout order (reserve names → DNS at `p=none` + MTA-STS `testing` → enable
+      storage or obtained by the bridge — decide here) (done instead the OAuth-bridge way: own
+      Compose project, `.env.prod` on the VM, gated `deploy-email.yml`, Caddy block for
+      `email.poweur.org`; the LMTP certificate is a file in `./certs` — automating its renewal and
+      an Ansible template are open; MTA-STS is the mail server's)
+- [ ] ~~`poweur-email check-dns` validating every record in the DNS table (MX, SPF, DKIM, DMARC,
+      MTA-STS, TLS-RPT, PTR/FCrDNS) for each served domain~~ — dropped: the mail server owns the
+      records; check them where Stalwart is configured (famooss)
+- [x] Choose the public outbound provider (AUP allows free-sign-up person-to-person mail; custom
+      MAIL FROM; bounce/complaint webhooks; EU region preferred) and document the choice (Brevo,
+      as Stalwart's smarthost — confirm its plan's daily volume and AUP before opening sign-ups)
+- [x] `deploy/README.md`: rollout order (reserve names → DNS at `p=none` + MTA-STS `testing` → enable
       MX → watch DMARC/TLS-RPT → tighten), backups (`EMAIL_DATA`: spool, suppression list, footer
       ledger), privacy and abuse-contact pages, Grafana dashboard
-- [ ] Blackbox probes: SMTP banner + STARTTLS on :25, `/health`
+- [x] Blackbox probes: SMTP banner + STARTTLS on :25, `/health` (`/health` probe; SMTP is Stalwart's)
 
 **Acceptance:** live at `mx.poweur.org` / `email.poweur.org`; mail-tester.com (or equivalent) 10/10
 for an outbound message; inbound from Gmail and Outlook lands in the tray.

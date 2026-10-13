@@ -56,6 +56,12 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Email',
+      collapsed: true,
+      items: ['email/bridge'],
+    },
+    {
+      type: 'category',
       label: 'Protocol',
       collapsed: true,
       items: [

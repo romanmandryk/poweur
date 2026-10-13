@@ -4,9 +4,11 @@
  * never knowingly made. Continue saves a step's answers first; a step whose
  * save fails stays put with the error beside the field.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PartyPopper } from "lucide-react";
 import { savePolicy } from "../actions/account";
+import { loadEmail } from "../actions/email";
+import { EmailOptIn } from "./messages/Email";
 import { PolicyControls, type PolicyControlsHandle } from "../components/PolicyControls";
 import { ProfileEditor, type ProfileEditorHandle } from "../components/ProfileEditor";
 import { cn } from "../lib/cn";
@@ -34,6 +36,11 @@ export function Onboarding() {
   const policyControls = useRef<PolicyControlsHandle>(null);
   const profileEditor = useRef<ProfileEditorHandle>(null);
   const [busy, setBusy] = useState(false);
+  const email = useData((state) => state.email);
+  // The last step offers name@domain when the relay runs an email bridge (EPIC-023).
+  useEffect(() => {
+    if (unlocked) void loadEmail();
+  }, [unlocked]);
 
   const goTo = (next: number) => useData.setState({ onboard: { step: next } });
 
@@ -132,6 +139,14 @@ export function Onboarding() {
           <p className="text-muted">
             {identity} can send and receive encrypted messages, keep files, and share them. Add someone from Contacts to get started.
           </p>
+          {email.offered && !email.enabled && (
+            <div className="mt-5 text-left">
+              <EmailOptIn compact />
+            </div>
+          )}
+          {email.enabled && email.address && (
+            <p id="onboard-email" className="mt-4 text-sm text-success">Your email address is {email.address}.</p>
+          )}
         </div>
       )}
     </SubPage>
