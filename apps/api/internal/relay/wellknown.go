@@ -135,7 +135,13 @@ func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, iden
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	if name == "email.json" {
+		// Opting out of email must stop delivery within the bridge's own
+		// short cache, not wait out a long shared one.
+		w.Header().Set("Cache-Control", "public, max-age=60")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
 	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
@@ -267,6 +273,12 @@ func (s *Server) capabilityEndpoints(identity string) map[string]string {
 	}
 	if s.cfg.OAuthBridgeURL != "" {
 		out["oauth_bridge"] = s.cfg.OAuthBridgeURL
+	}
+	// Only identities that have an address to offer advertise the bridge.
+	if s.cfg.EmailBridgeID != "" && !strings.EqualFold(identity, s.cfg.EmailBridgeID) {
+		if _, err := idpkg.EmailAddressFor(identity); err == nil {
+			out["email_bridge"] = s.cfg.EmailBridgeID
+		}
 	}
 	return out
 }

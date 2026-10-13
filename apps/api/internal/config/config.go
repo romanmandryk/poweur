@@ -188,6 +188,12 @@ type Config struct {
 	// and secret-free: hosted identities advertise it for IndieAuth discovery
 	// and in their capabilities; the relay never talks to it.
 	OAuthBridgeURL string
+	// EmailBridgeID is the Poweur ID of the email bridge (EPIC-023) this
+	// operator runs, e.g. email.poweur.net. Optional and secret-free: hosted
+	// identities advertise it in their capabilities so clients can offer
+	// `name@domain`; the relay never talks to it, and admits its `email.*`
+	// messages only for users whose inbox policy names it.
+	EmailBridgeID string
 
 	// PushVAPIDPrivateKey is the relay's Web Push identity (EPIC-009
 	// E09-T11): a raw P-256 private scalar, base64url. Empty disables
@@ -311,6 +317,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid OAUTH_BRIDGE_URL: %w", err)
 		}
 	}
+	if c.EmailBridgeID != "" {
+		if err := idpkg.ValidateIdentityName(c.EmailBridgeID); err != nil {
+			return fmt.Errorf("invalid EMAIL_BRIDGE_ID: %w", err)
+		}
+	}
 	if s := c.PushVAPIDSubject; s != "" && !strings.HasPrefix(s, "mailto:") && !strings.HasPrefix(s, "https://") {
 		return fmt.Errorf("invalid PUSH_VAPID_SUBJECT: %s (use mailto: or https:)", s)
 	}
@@ -349,6 +360,7 @@ func FromEnv() Config {
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
 		OAuthBridgeURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
+		EmailBridgeID:           strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_BRIDGE_ID"))),
 		PushVAPIDPrivateKey:     strings.TrimSpace(os.Getenv("PUSH_VAPID_PRIVATE_KEY")),
 		PushVAPIDSubject:        strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
 		PushEndpointHosts:       pushEndpointHostsFromEnv(),

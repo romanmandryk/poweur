@@ -25,6 +25,7 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `LAUNCHER_HOST` | `id.<first hosted domain>` | The host that serves the "create an ID" flow |
 | `LAUNCHER_HOSTS` | `id.<domain>` and `<domain>` for each hosted domain | Comma-separated set of such hosts; wins over `LAUNCHER_HOST` |
 | `OAUTH_BRIDGE_URL` | *(empty)* | Public URL of an [OAuth/OIDC bridge](/auth/oauth-oidc-bridge). Hosted identities advertise it in `capabilities.json` and as IndieAuth metadata; the relay never calls it |
+| `EMAIL_BRIDGE_ID` | *(empty)* | Poweur ID of the operator's [email bridge](/email/bridge). Hosted identities advertise it as `endpoints.email_bridge`; the relay admits its `email.*` messages for users whose inbox policy names it, and never calls it |
 | `REGISTRATION_GATE` | `open` | `open`, or `invite` to require a code for hosted registration |
 | `REGISTRATION_INVITE_CODES` | *(empty)* | Comma-separated invite codes when the gate is `invite` |
 | `OPERATOR_TOKEN` | *(empty: off)* | Lets the operator register a hosted name the name policy holds back from everyone else (reserved like `support`, or shorter than `NAME_MIN_LEN`). The client sends it as `X-Poweur-Operator-Token` on `POST /identities` (`poweur identity create … --operator-token`); keys are still generated and held by the client, and the domain, signatures and name shape are still checked. A wrong token is refused with `401 invalid_operator_token`. Use a long random value and unset it when you're not creating names |

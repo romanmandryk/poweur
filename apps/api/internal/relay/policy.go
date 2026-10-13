@@ -86,6 +86,15 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 		return policyReject, rejectedDetail
 	}
 
+	// Mail (EPIC-023 E23-T5) is admitted from the one bridge the recipient
+	// opted into, in every inbox mode: the bridge relays strangers' email by
+	// design, and the user asked for exactly that. Any other sender's
+	// `email.*` gets no special treatment — clients show it as an untrusted
+	// app message, and a closed inbox refuses it below like any stranger.
+	if idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && policy.TrustsEmailBridge(msg.Sender) {
+		return policyAllow, ""
+	}
+
 	hookCtx := closedInboxCtx{
 		msg:          msg,
 		mode:         policy.Mode,
