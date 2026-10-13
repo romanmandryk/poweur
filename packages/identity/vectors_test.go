@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -711,4 +712,156 @@ func TestVectors_SignIn(t *testing.T) {
 		Now:          VectorTime,
 		Vectors:      vectors,
 	})
+}
+
+// Subjects (EPIC-009 E09-T13). One file pins encoding, decoding,
+// normalization and the grouping key, so `@poweur/client` and any other
+// implementation agree on every edge the spec names.
+type subjectFormatVector struct {
+	Name      string            `json:"name"`
+	Subject   string            `json:"subject"`
+	Text      string            `json:"text"`
+	Valid     bool              `json:"valid"`
+	Plaintext string            `json:"plaintext,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+type subjectParseVector struct {
+	Name      string            `json:"name"`
+	Plaintext string            `json:"plaintext"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Subject   string            `json:"subject"`
+	Text      string            `json:"text"`
+}
+
+type subjectNormalizeVector struct {
+	Subject    string `json:"subject"`
+	Normalized string `json:"normalized"`
+}
+
+type subjectKeyVector struct {
+	ThreadID string `json:"thread_id"`
+	Subject  string `json:"subject"`
+	Key      string `json:"key"`
+}
+
+type subjectVectors struct {
+	Format    []subjectFormatVector    `json:"format"`
+	Parse     []subjectParseVector     `json:"parse"`
+	Normalize []subjectNormalizeVector `json:"normalize"`
+	Keys      []subjectKeyVector       `json:"keys"`
+}
+
+func TestVectors_MessageSubject(t *testing.T) {
+	out := subjectVectors{}
+	for _, c := range []struct{ name, subject, text string }{
+		{"plain", "", "hello"},
+		{"subject", "Q3 budget", "numbers attached"},
+		{"trimmed", "  Q3 budget  ", "x"},
+		{"unicode", "Ünïcödé — тема 🚀", "y"},
+		{"empty-text", "Only a subject", ""},
+		{"text-with-blank-lines", "Notes", "a\n\nb\n"},
+		{"newline-refused", "two\nlines", "x"},
+		{"tab-refused", "tab\there", "x"},
+		{"too-long", strings.Repeat("a", MaxSubjectBytes+1), "x"},
+		{"max-length", strings.Repeat("é", MaxSubjectBytes/2), "x"},
+	} {
+		v := subjectFormatVector{Name: c.name, Subject: c.subject, Text: c.text}
+		plaintext, md, err := FormatBody(c.subject, c.text)
+		v.Valid = err == nil
+		if err == nil {
+			v.Plaintext, v.Metadata = plaintext, md
+		}
+		out.Format = append(out.Format, v)
+	}
+	flag := map[string]string{MetaBodyFormat: BodyFormatHeadersV1}
+	for _, c := range []struct {
+		name, plaintext string
+		md              map[string]string
+	}{
+		{"flagged", "Subject: Q3 budget\n\nnumbers", flag},
+		{"unflagged-subject-line-stays-text", "Subject: not a header\n\nbody", nil},
+		{"other-format-is-text", "Subject: x\n\ny", map[string]string{MetaBodyFormat: "headers-v9"}},
+		{"case-insensitive-name", "subject: lower\n\nbody", flag},
+		{"unknown-header-ignored", "X-Mood: calm\nSubject: s\n\nbody", flag},
+		{"only-unknown-header", "X-Mood: calm\n\nbody", flag},
+		{"no-blank-line-is-malformed", "Subject: s\nbody", flag},
+		{"bad-header-line-is-malformed", "Subject: s\nnot a header\n\nbody", flag},
+		{"space-in-name-is-malformed", "Sub ject: s\n\nbody", flag},
+		{"too-long-subject-is-malformed", "Subject: " + strings.Repeat("a", MaxSubjectBytes+1) + "\n\nbody", flag},
+		{"empty-text", "Subject: s\n\n", flag},
+		{"value-trimmed", "Subject:    spaced   \n\nbody", flag},
+		{"body-keeps-blank-lines", "Subject: s\n\na\n\nb", flag},
+	} {
+		subject, text := ParseBody(c.plaintext, c.md)
+		out.Parse = append(out.Parse, subjectParseVector{Name: c.name, Plaintext: c.plaintext, Metadata: c.md, Subject: subject, Text: text})
+	}
+	for _, s := range []string{
+		"Q3 budget", "  Q3   Budget ", "Re: Q3 budget", "RE: re: Fwd: Q3 budget", "Re[2]: Q3 budget",
+		"Fw: Aw: Sv: Q3 budget", "Re : spaced colon", "Reading list", "Re:", "Re: ", "Fwd:Re:x",
+		"ТЕМА письма", "Ünïcödé", "Re[x]: not a count", "",
+	} {
+		out.Normalize = append(out.Normalize, subjectNormalizeVector{Subject: s, Normalized: NormalizeSubject(s)})
+	}
+	for _, c := range []struct{ thread, subject string }{
+		{"01J9ZTHREAD", "Q3 budget"}, {"", "Re: Q3 Budget"}, {"", ""}, {"", "Re:"}, {"alice.example.org", ""},
+	} {
+		out.Keys = append(out.Keys, subjectKeyVector{ThreadID: c.thread, Subject: c.subject, Key: ConversationKey(c.thread, c.subject)})
+	}
+	WriteVectors(t, vectorsDir, "message-subject", out)
+}
+
+// Per-thread read marks (E09-T13): the records carry subjects and threads,
+// and each state shows which records stay unread and what marking a thread or
+// the whole conversation leaves behind.
+type historyThreadsVector struct {
+	Name        string                         `json:"name"`
+	Raw         json.RawMessage                `json:"raw"`
+	Valid       bool                           `json:"valid"`
+	Unread      map[string]int                 `json:"unread,omitempty"`
+	AfterThread map[string]map[string]ReadMark `json:"after_thread_mark,omitempty"`
+	AfterPeer   map[string]map[string]ReadMark `json:"after_peer_mark,omitempty"`
+}
+
+func TestVectors_HistoryThreads(t *testing.T) {
+	const owner = "alice.example.org"
+	const bob = "bob.example.org"
+	records := []HistoryRecord{
+		{Version: 1, ID: "t1", Sender: bob, Recipient: owner, Timestamp: "2026-02-01T09:00:00Z", ThreadID: "01J9ZA", Subject: "Q3 budget", Queue: HistoryQueueInbox, Body: "one"},
+		{Version: 1, ID: "t2", Sender: bob, Recipient: owner, Timestamp: "2026-02-01T09:05:00Z", ThreadID: "01J9ZB", Subject: "Offsite", Queue: HistoryQueueInbox, Body: "two"},
+		{Version: 1, ID: "t3", Sender: bob, Recipient: owner, Timestamp: "2026-02-01T09:10:00Z", ThreadID: "01J9ZA", Queue: HistoryQueueInbox, Body: "old client reply"},
+		{Version: 1, ID: "t4", Sender: bob, Recipient: owner, Timestamp: "2026-02-01T09:15:00Z", Subject: "Re: Mail subject", Queue: HistoryQueueInbox, Body: "no thread"},
+		{Version: 1, ID: "t5", Sender: bob, Recipient: owner, Timestamp: "2026-02-01T09:20:00Z", Queue: HistoryQueueInbox, Body: "plain"},
+	}
+	for _, r := range records {
+		if err := r.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vectors := struct {
+		Owner   string                 `json:"owner"`
+		Records []HistoryRecord        `json:"records"`
+		Keys    []string               `json:"thread_keys"`
+		States  []historyThreadsVector `json:"states"`
+	}{Owner: owner, Records: records}
+	for _, r := range records {
+		vectors.Keys = append(vectors.Keys, r.ThreadKey())
+	}
+	for _, entry := range []struct{ name, raw string }{
+		{"none", `{"version":1,"conversations":{}}`},
+		{"thread-a-read", `{"version":1,"conversations":{},"threads":{"bob.example.org":{"01J9ZA":{"timestamp":"2026-02-01T09:10:00Z","id":"t3"}}}}`},
+		{"peer-mark-and-thread", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"2026-02-01T09:05:00Z","id":"t2"}},"threads":{"bob.example.org":{"subj:mail subject":{"timestamp":"2026-02-01T09:15:00Z","id":"t4"}}}}`},
+		{"older-writer-without-threads", `{"version":1,"conversations":{"bob.example.org":{"timestamp":"2026-02-01T09:00:00Z","id":"t1"}}}`},
+		{"bad-thread-timestamp", `{"version":1,"conversations":{},"threads":{"bob.example.org":{"01J9ZA":{"timestamp":"soon"}}}}`},
+	} {
+		state, err := ParseReadState([]byte(entry.raw))
+		v := historyThreadsVector{Name: entry.name, Raw: json.RawMessage(entry.raw), Valid: err == nil}
+		if err == nil {
+			v.Unread = state.Unread(owner, records)
+			v.AfterThread = state.MarkThreadRead(bob, "01J9ZB", "2026-02-01T09:05:00Z", "t2").Threads
+			v.AfterPeer = state.MarkRead(bob, "2026-02-01T09:10:00Z", "t3").Threads
+		}
+		vectors.States = append(vectors.States, v)
+	}
+	WriteVectors(t, vectorsDir, "history-threads", vectors)
 }

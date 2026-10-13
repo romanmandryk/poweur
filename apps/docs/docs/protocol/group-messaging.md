@@ -210,6 +210,11 @@ payload.
   `crew.acme.poweur.net:design-review`. The relay enforces the prefix — a fan-out whose
   `thread_id` is neither the group ID nor `<group-id>:…` is refused.
 
+A **subject thread** (E09-T13) is a sub-thread whose suffix is a fresh ULID:
+`GroupThreadID(group, <ulid>)`. The subject itself travels encrypted in each member's payload
+(`body_format: headers-v1`, see [Message format](message-format.md#subjects)); the suffix says
+nothing about it.
+
 The prefix rule is doing real work. `thread_id` is opaque to the relay and chosen by clients,
 so without it a group thread and a 1:1 thread could collide, and a client would have no way to
 tell from a thread identifier which conversation it belongs to. With it, **`thread_id` alone

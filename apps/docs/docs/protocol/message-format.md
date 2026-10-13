@@ -210,6 +210,32 @@ Values are flat strings rather than arbitrary JSON on purpose. Two implementatio
 
 `metadata` is **plaintext**. It is addressing, not content.
 
+### Subjects
+
+A message may carry an optional **subject** (EPIC-009 E09-T13, [PCP-0009](https://github.com/romanmandryk/poweur/blob/master/conventions/pcp-0009-subject-lines.md)). The subject is content, so it lives **inside the encrypted payload** — never in `thread_id` or `metadata`, which both relays read. The relay learns at most that the sender flagged a structured body, not what the subject says.
+
+**Encoding.** A message with a subject has the plaintext
+
+```text
+Subject: Q3 budget
+
+the numbers are attached
+```
+
+and the signed metadata entry `body_format: headers-v1`. Without that flag the plaintext is plain text exactly as before, so a body that happens to start with `Subject:` is never misread and a message without a subject is byte-identical to one from a client that predates subjects. An older client ignores the metadata and shows the header line above the text.
+
+**Parsing.** Read `Name: value` lines (names `A–Z a–z 0–9 -`, case-insensitive) up to the first blank line (`\n\n`). v1 defines only `Subject`; unknown names are ignored. A flagged plaintext that does not parse — no blank line, a line without a colon, a subject over the limit — renders **whole** as the text with no subject. Content is never dropped.
+
+**Limits.** UTF-8, trimmed, no control characters (C0, C1, DEL, U+2028, U+2029), at most 256 bytes. An empty subject means "no subject": the sender sets neither the header nor the flag. Only `chat.text` carries a subject in v1.
+
+**Threads.** `thread_id` is the grouping key; the subject is its label. Starting a new subject mints a fresh random `thread_id` (a ULID for 1:1, `GroupThreadID(group, <ulid>)` for groups — see [Group messaging](group-messaging.md)) and is **never derived from the subject text**: a hash of the subject in a plaintext field could be guessed by dictionary. Replies keep the `thread_id`, so a reply from a client that drops the subject still lands in the right conversation. A conversation's displayed subject is the newest subject seen in it, and changing the subject on a reply starts a new thread.
+
+**Grouping key**, in order: `thread_id` → `subj:<normalized subject>` (for a message with a subject but no thread, e.g. from the email bridge) → the default thread `""`. Normalizing trims, collapses whitespace, lowercases rune by rune and strips repeated `Re:` / `Fwd:` / `Fw:` / `Aw:` / `Sv:` prefixes (also counted forms such as `Re[2]:`). Clients do not add `Re:` themselves.
+
+**Read state.** `read-state.json` gains an optional `threads: {<peer>: {<thread key>: mark}}`. A message is read when either its peer mark or its thread mark covers it; advancing a peer mark prunes the thread marks it covers. A writer that drops `threads` only makes messages more unread.
+
+Go (`packages/identity/subject.go`) is canonical; `@poweur/client` conforms through `testdata/vectors/message-subject.json` and `history-threads.json`.
+
 ### Attachments
 
 The v1 plaintext file/path-grant attachment format is retired. Attachment send/open

@@ -80,11 +80,19 @@ type HistoryRecord struct {
 	ExpiresAt string            `json:"expires_at,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Queue     string            `json:"queue"`
+	// Subject is the message's subject line (E09-T13), parsed out of a
+	// `headers-v1` plaintext; Body then holds only the text. `omitempty`
+	// keeps a record without one byte-identical to the earlier format.
+	Subject string `json:"subject,omitempty"`
 	// Body is the *decrypted* message text. History is the plaintext archive;
 	// keeping ciphertext would mean re-deriving a shared secret with an
 	// ephemeral key nobody kept.
 	Body string `json:"body"`
 }
+
+// ThreadKey is the record's grouping key inside its conversation
+// (ConversationKey).
+func (r HistoryRecord) ThreadKey() string { return ConversationKey(r.ThreadID, r.Subject) }
 
 // Peer is the other party in the conversation this record belongs to, from
 // the owner's point of view. Anonymous senders have no identity to group by,
@@ -126,6 +134,9 @@ func (r HistoryRecord) Validate() error {
 	case HistoryQueueInbox, HistoryQueueAnonymous, HistoryQueueRequests, HistoryQueueSent:
 	default:
 		return fmt.Errorf("history record: invalid queue %q", r.Queue)
+	}
+	if err := ValidateSubject(r.Subject); err != nil {
+		return fmt.Errorf("history record: %w", err)
 	}
 	if len(r.Body) > MaxHistoryBody {
 		return fmt.Errorf("history record: body exceeds %d bytes", MaxHistoryBody)
@@ -267,7 +278,17 @@ type ReadState struct {
 	Version int `json:"version"`
 	// Conversations maps a lowercased peer identity to a read position.
 	Conversations map[string]ReadMark `json:"conversations"`
+	// Threads holds per-thread marks (E09-T13): peer → thread key
+	// (ConversationKey) → position. A record is read when either its peer
+	// mark or its thread mark covers it, so the view that advances the peer
+	// mark (By ID) and the one that advances thread marks (By subject) never
+	// disagree. A writer that drops this field only makes messages more
+	// unread, never hides one.
+	Threads map[string]map[string]ReadMark `json:"threads,omitempty"`
 }
+
+// MaxThreadMarks caps the thread marks kept per peer.
+const MaxThreadMarks = 500
 
 // Validate checks the read-state document.
 func (s ReadState) Validate() error {
@@ -282,7 +303,87 @@ func (s ReadState) Validate() error {
 			return fmt.Errorf("read-state: %s: timestamp must be RFC3339: %w", peer, err)
 		}
 	}
+	for peer, marks := range s.Threads {
+		if strings.TrimSpace(peer) == "" {
+			return fmt.Errorf("read-state: empty peer in threads")
+		}
+		if len(marks) > MaxThreadMarks {
+			return fmt.Errorf("read-state: %s has too many thread marks (max %d)", peer, MaxThreadMarks)
+		}
+		for key, mark := range marks {
+			if _, err := time.Parse(time.RFC3339, mark.Timestamp); err != nil {
+				return fmt.Errorf("read-state: %s/%s: timestamp must be RFC3339: %w", peer, key, err)
+			}
+		}
+	}
 	return nil
+}
+
+func (s ReadState) clone() ReadState {
+	out := ReadState{Version: HistoryVersion, Conversations: map[string]ReadMark{}}
+	for k, v := range s.Conversations {
+		out.Conversations[k] = v
+	}
+	if len(s.Threads) > 0 {
+		out.Threads = map[string]map[string]ReadMark{}
+		for peer, marks := range s.Threads {
+			copied := make(map[string]ReadMark, len(marks))
+			for k, v := range marks {
+				copied[k] = v
+			}
+			out.Threads[peer] = copied
+		}
+	}
+	return out
+}
+
+// Covers reports whether the read state marks a record of peer as read: the
+// peer mark or the record's thread mark is at or past it.
+func (s ReadState) Covers(peer, threadKey, timestamp, id string) bool {
+	peer = strings.ToLower(strings.TrimSpace(peer))
+	if mark, ok := s.Conversations[peer]; ok && mark.After(timestamp, id) {
+		return true
+	}
+	if mark, ok := s.Threads[peer][threadKey]; ok && mark.After(timestamp, id) {
+		return true
+	}
+	return false
+}
+
+// MarkThreadRead advances one thread's mark inside a peer's conversation,
+// never rewinds it. A thread mark the peer mark already covers is not stored.
+func (s ReadState) MarkThreadRead(peer, threadKey, timestamp, id string) ReadState {
+	key := strings.ToLower(strings.TrimSpace(peer))
+	out := s.clone()
+	if key == "" || timestamp == "" {
+		return out
+	}
+	if mark, ok := out.Conversations[key]; ok && mark.After(timestamp, id) {
+		return out
+	}
+	if out.Threads == nil {
+		out.Threads = map[string]map[string]ReadMark{}
+	}
+	marks := out.Threads[key]
+	if marks == nil {
+		marks = map[string]ReadMark{}
+		out.Threads[key] = marks
+	}
+	if existing, ok := marks[threadKey]; !ok || existing.Before(timestamp, id) {
+		marks[threadKey] = ReadMark{Timestamp: timestamp, ID: id}
+	}
+	// Over the cap, the oldest marks go: forgetting one makes an old thread
+	// unread again, which is the safe way to be wrong.
+	for len(marks) > MaxThreadMarks {
+		oldest := ""
+		for k, m := range marks {
+			if oldest == "" || m.Before(marks[oldest].Timestamp, marks[oldest].ID) {
+				oldest = k
+			}
+		}
+		delete(marks, oldest)
+	}
+	return out
 }
 
 // ParseReadState decodes and validates read-state.json.
@@ -308,12 +409,22 @@ func (s ReadState) MarkRead(peer, timestamp, id string) ReadState {
 	if key == "" || timestamp == "" {
 		return s
 	}
-	out := ReadState{Version: HistoryVersion, Conversations: map[string]ReadMark{}}
-	for k, v := range s.Conversations {
-		out.Conversations[k] = v
-	}
+	out := s.clone()
 	if existing, ok := out.Conversations[key]; !ok || existing.Before(timestamp, id) {
 		out.Conversations[key] = ReadMark{Timestamp: timestamp, ID: id}
+	}
+	// Thread marks the new peer mark covers say nothing any more.
+	mark := out.Conversations[key]
+	for threadKey, threadMark := range out.Threads[key] {
+		if mark.After(threadMark.Timestamp, threadMark.ID) {
+			delete(out.Threads[key], threadKey)
+		}
+	}
+	if len(out.Threads[key]) == 0 {
+		delete(out.Threads, key)
+	}
+	if len(out.Threads) == 0 {
+		out.Threads = nil
 	}
 	return out
 }
@@ -327,7 +438,7 @@ func (s ReadState) Unread(owner string, records []HistoryRecord) map[string]int 
 			continue
 		}
 		peer := r.Peer(owner)
-		if mark, ok := s.Conversations[peer]; ok && mark.After(r.Timestamp, r.ID) {
+		if s.Covers(peer, r.ThreadKey(), r.Timestamp, r.ID) {
 			continue
 		}
 		counts[peer]++

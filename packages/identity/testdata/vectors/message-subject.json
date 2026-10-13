@@ -1,0 +1,294 @@
+{
+  "format": [
+    {
+      "name": "plain",
+      "subject": "",
+      "text": "hello",
+      "valid": true,
+      "plaintext": "hello"
+    },
+    {
+      "name": "subject",
+      "subject": "Q3 budget",
+      "text": "numbers attached",
+      "valid": true,
+      "plaintext": "Subject: Q3 budget\n\nnumbers attached",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    },
+    {
+      "name": "trimmed",
+      "subject": "  Q3 budget  ",
+      "text": "x",
+      "valid": true,
+      "plaintext": "Subject: Q3 budget\n\nx",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    },
+    {
+      "name": "unicode",
+      "subject": "Ünïcödé — тема 🚀",
+      "text": "y",
+      "valid": true,
+      "plaintext": "Subject: Ünïcödé — тема 🚀\n\ny",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    },
+    {
+      "name": "empty-text",
+      "subject": "Only a subject",
+      "text": "",
+      "valid": true,
+      "plaintext": "Subject: Only a subject\n\n",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    },
+    {
+      "name": "text-with-blank-lines",
+      "subject": "Notes",
+      "text": "a\n\nb\n",
+      "valid": true,
+      "plaintext": "Subject: Notes\n\na\n\nb\n",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    },
+    {
+      "name": "newline-refused",
+      "subject": "two\nlines",
+      "text": "x",
+      "valid": false
+    },
+    {
+      "name": "tab-refused",
+      "subject": "tab\there",
+      "text": "x",
+      "valid": false
+    },
+    {
+      "name": "too-long",
+      "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "text": "x",
+      "valid": false
+    },
+    {
+      "name": "max-length",
+      "subject": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "text": "x",
+      "valid": true,
+      "plaintext": "Subject: éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\n\nx",
+      "metadata": {
+        "body_format": "headers-v1"
+      }
+    }
+  ],
+  "parse": [
+    {
+      "name": "flagged",
+      "plaintext": "Subject: Q3 budget\n\nnumbers",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "Q3 budget",
+      "text": "numbers"
+    },
+    {
+      "name": "unflagged-subject-line-stays-text",
+      "plaintext": "Subject: not a header\n\nbody",
+      "subject": "",
+      "text": "Subject: not a header\n\nbody"
+    },
+    {
+      "name": "other-format-is-text",
+      "plaintext": "Subject: x\n\ny",
+      "metadata": {
+        "body_format": "headers-v9"
+      },
+      "subject": "",
+      "text": "Subject: x\n\ny"
+    },
+    {
+      "name": "case-insensitive-name",
+      "plaintext": "subject: lower\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "lower",
+      "text": "body"
+    },
+    {
+      "name": "unknown-header-ignored",
+      "plaintext": "X-Mood: calm\nSubject: s\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "s",
+      "text": "body"
+    },
+    {
+      "name": "only-unknown-header",
+      "plaintext": "X-Mood: calm\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "",
+      "text": "body"
+    },
+    {
+      "name": "no-blank-line-is-malformed",
+      "plaintext": "Subject: s\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "",
+      "text": "Subject: s\nbody"
+    },
+    {
+      "name": "bad-header-line-is-malformed",
+      "plaintext": "Subject: s\nnot a header\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "",
+      "text": "Subject: s\nnot a header\n\nbody"
+    },
+    {
+      "name": "space-in-name-is-malformed",
+      "plaintext": "Sub ject: s\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "",
+      "text": "Sub ject: s\n\nbody"
+    },
+    {
+      "name": "too-long-subject-is-malformed",
+      "plaintext": "Subject: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "",
+      "text": "Subject: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nbody"
+    },
+    {
+      "name": "empty-text",
+      "plaintext": "Subject: s\n\n",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "s",
+      "text": ""
+    },
+    {
+      "name": "value-trimmed",
+      "plaintext": "Subject:    spaced   \n\nbody",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "spaced",
+      "text": "body"
+    },
+    {
+      "name": "body-keeps-blank-lines",
+      "plaintext": "Subject: s\n\na\n\nb",
+      "metadata": {
+        "body_format": "headers-v1"
+      },
+      "subject": "s",
+      "text": "a\n\nb"
+    }
+  ],
+  "normalize": [
+    {
+      "subject": "Q3 budget",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "  Q3   Budget ",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "Re: Q3 budget",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "RE: re: Fwd: Q3 budget",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "Re[2]: Q3 budget",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "Fw: Aw: Sv: Q3 budget",
+      "normalized": "q3 budget"
+    },
+    {
+      "subject": "Re : spaced colon",
+      "normalized": "spaced colon"
+    },
+    {
+      "subject": "Reading list",
+      "normalized": "reading list"
+    },
+    {
+      "subject": "Re:",
+      "normalized": ""
+    },
+    {
+      "subject": "Re: ",
+      "normalized": ""
+    },
+    {
+      "subject": "Fwd:Re:x",
+      "normalized": "x"
+    },
+    {
+      "subject": "ТЕМА письма",
+      "normalized": "тема письма"
+    },
+    {
+      "subject": "Ünïcödé",
+      "normalized": "ünïcödé"
+    },
+    {
+      "subject": "Re[x]: not a count",
+      "normalized": "re[x]: not a count"
+    },
+    {
+      "subject": "",
+      "normalized": ""
+    }
+  ],
+  "keys": [
+    {
+      "thread_id": "01J9ZTHREAD",
+      "subject": "Q3 budget",
+      "key": "01J9ZTHREAD"
+    },
+    {
+      "thread_id": "",
+      "subject": "Re: Q3 Budget",
+      "key": "subj:q3 budget"
+    },
+    {
+      "thread_id": "",
+      "subject": "",
+      "key": ""
+    },
+    {
+      "thread_id": "",
+      "subject": "Re:",
+      "key": ""
+    },
+    {
+      "thread_id": "alice.example.org",
+      "subject": "",
+      "key": "alice.example.org"
+    }
+  ]
+}
