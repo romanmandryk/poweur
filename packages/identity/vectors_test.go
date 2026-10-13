@@ -865,3 +865,67 @@ func TestVectors_HistoryThreads(t *testing.T) {
 	}
 	WriteVectors(t, vectorsDir, "history-threads", vectors)
 }
+
+// Email bridge documents (EPIC-023). The opt-in canonical string and
+// signature, the address rules and the upload canonical are what a TS client
+// must reproduce byte for byte.
+type emailAddressVector struct {
+	Input  string `json:"input"`
+	Valid  bool   `json:"valid"`
+	Local  string `json:"local,omitempty"`
+	Tag    string `json:"tag,omitempty"`
+	Domain string `json:"domain,omitempty"`
+}
+
+type emailIdentityVector struct {
+	Identity string `json:"identity"`
+	Address  string `json:"address,omitempty"`
+	Valid    bool   `json:"valid"`
+}
+
+func TestVectors_Email(t *testing.T) {
+	priv := vectorKey()
+	pub := priv.Public().(ed25519.PublicKey)
+	optIn, err := NewEmailOptIn("john.poweur.net", "email.poweur.net", time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := optIn.Sign(priv); err != nil {
+		t.Fatal(err)
+	}
+	vectors := struct {
+		PublicKey       string                `json:"public_key"`
+		OptIn           EmailOptIn            `json:"optin"`
+		OptInCanonical  string                `json:"optin_canonical"`
+		Addresses       []emailAddressVector  `json:"addresses"`
+		Identities      []emailIdentityVector `json:"identities"`
+		UploadCanonical string                `json:"upload_canonical"`
+		BlobContext     string                `json:"blob_context"`
+		Roots           []map[string]any      `json:"roots"`
+	}{
+		PublicKey:       base64.RawURLEncoding.EncodeToString(pub),
+		OptIn:           optIn,
+		OptInCanonical:  optIn.Canonical(),
+		UploadCanonical: CanonicalEmailUpload("John.poweur.net", "01J9ZUPLOAD", "ABCDEF", 1234, "2026-10-13T12:00:00Z", "n1"),
+		BlobContext:     string(EmailBlobContext("01J9ZBLOB")),
+	}
+	for _, in := range []string{
+		"john@poweur.net", "John+News@Poweur.Net", "<john@poweur.net>", "john+@poweur.net",
+		"john.doe@poweur.net", "-john@poweur.net", "jöhn@poweur.net", "john+a b@poweur.net",
+		"john@localhost", "@poweur.net", "mailer-daemon@poweur.net", "a@b@poweur.net",
+	} {
+		r, err := ParseEmailAddress(in)
+		vectors.Addresses = append(vectors.Addresses, emailAddressVector{Input: in, Valid: err == nil, Local: r.Local, Tag: r.Tag, Domain: r.Domain})
+	}
+	for _, id := range []string{"john.poweur.net", "John.Poweur.NET", "a.b.example.org", "poweur.net"} {
+		addr, err := EmailAddressFor(id)
+		vectors.Identities = append(vectors.Identities, emailIdentityVector{Identity: id, Address: addr, Valid: err == nil})
+	}
+	for _, c := range []struct {
+		id, irt string
+		refs    []string
+	}{{"<c@x>", "<b@x>", []string{"<a@x>", "<b@x>"}}, {"<c@x>", "<b@x>", nil}, {"<c@x>", "", nil}, {"", "", nil}} {
+		vectors.Roots = append(vectors.Roots, map[string]any{"message_id": c.id, "in_reply_to": c.irt, "references": c.refs, "root": EmailConversationRoot(c.id, c.irt, c.refs)})
+	}
+	WriteVectors(t, vectorsDir, "email", vectors)
+}

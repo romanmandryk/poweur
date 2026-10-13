@@ -1,0 +1,125 @@
+{
+  "public_key": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+  "optin": {
+    "version": 1,
+    "identity": "john.poweur.net",
+    "address": "john@poweur.net",
+    "bridge": "email.poweur.net",
+    "created_at": "2026-10-13T12:00:00Z",
+    "signature": "XrVI1E96E8EDVIegJelQ4-BM6fTGm83l2uDHtmbxRStGy2fp1uR6idBHZOuUafCwquEPOr46A7FgI_394_rNBQ"
+  },
+  "optin_canonical": "poweur-email-optin\nv1\njohn.poweur.net\njohn@poweur.net\nemail.poweur.net\n2026-10-13T12:00:00Z",
+  "addresses": [
+    {
+      "input": "john@poweur.net",
+      "valid": true,
+      "local": "john",
+      "domain": "poweur.net"
+    },
+    {
+      "input": "John+News@Poweur.Net",
+      "valid": true,
+      "local": "john",
+      "tag": "news",
+      "domain": "poweur.net"
+    },
+    {
+      "input": "\u003cjohn@poweur.net\u003e",
+      "valid": true,
+      "local": "john",
+      "domain": "poweur.net"
+    },
+    {
+      "input": "john+@poweur.net",
+      "valid": true,
+      "local": "john",
+      "domain": "poweur.net"
+    },
+    {
+      "input": "john.doe@poweur.net",
+      "valid": false
+    },
+    {
+      "input": "-john@poweur.net",
+      "valid": false
+    },
+    {
+      "input": "jöhn@poweur.net",
+      "valid": false
+    },
+    {
+      "input": "john+a b@poweur.net",
+      "valid": false
+    },
+    {
+      "input": "john@localhost",
+      "valid": false
+    },
+    {
+      "input": "@poweur.net",
+      "valid": false
+    },
+    {
+      "input": "mailer-daemon@poweur.net",
+      "valid": true,
+      "local": "mailer-daemon",
+      "domain": "poweur.net"
+    },
+    {
+      "input": "a@b@poweur.net",
+      "valid": false
+    }
+  ],
+  "identities": [
+    {
+      "identity": "john.poweur.net",
+      "address": "john@poweur.net",
+      "valid": true
+    },
+    {
+      "identity": "John.Poweur.NET",
+      "address": "john@poweur.net",
+      "valid": true
+    },
+    {
+      "identity": "a.b.example.org",
+      "address": "a@b.example.org",
+      "valid": true
+    },
+    {
+      "identity": "poweur.net",
+      "valid": false
+    }
+  ],
+  "upload_canonical": "poweur-email-upload\njohn.poweur.net\n01J9ZUPLOAD\nabcdef\n1234\n2026-10-13T12:00:00Z\nn1",
+  "blob_context": "email-blob:01J9ZBLOB",
+  "roots": [
+    {
+      "in_reply_to": "\u003cb@x\u003e",
+      "message_id": "\u003cc@x\u003e",
+      "references": [
+        "\u003ca@x\u003e",
+        "\u003cb@x\u003e"
+      ],
+      "root": "\u003ca@x\u003e"
+    },
+    {
+      "in_reply_to": "\u003cb@x\u003e",
+      "message_id": "\u003cc@x\u003e",
+      "references": null,
+      "root": "\u003cb@x\u003e"
+    },
+    {
+      "in_reply_to": "",
+      "message_id": "\u003cc@x\u003e",
+      "references": null,
+      "root": "\u003cc@x\u003e"
+    },
+    {
+      "in_reply_to": "",
+      "message_id": "",
+      "references": null,
+      "root": ""
+    }
+  ]
+}

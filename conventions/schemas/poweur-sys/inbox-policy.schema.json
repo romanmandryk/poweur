@@ -57,15 +57,49 @@
       "type": "object",
       "description": "third-tick receipt policy; absent means enabled",
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "disabled_for": {
           "type": "array",
           "maxItems": 1000,
           "uniqueItems": true,
-          "items": { "type": "string", "format": "hostname" }
+          "items": {
+            "type": "string",
+            "format": "hostname"
+          }
         }
       },
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "trusted_auth_services": {
+      "type": "array",
+      "description": "Poweur IDs of OAuth bridges that may deliver sys.auth.request (EPIC-022)",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "hostname"
+      }
+    },
+    "email": {
+      "type": "object",
+      "description": "the email bridge whose email.* messages are admitted in every mode (EPIC-023, PCP-0010); absent = none",
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "bridge": {
+          "type": "string",
+          "format": "hostname"
+        }
+      },
+      "required": [
+        "allow"
+      ],
       "additionalProperties": false
     }
   },
