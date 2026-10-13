@@ -404,6 +404,9 @@ spike, and sees refusal + suspension; alert rules committed.
 - [ ] Reserve names in `ReservedLabels`: `postmaster`, `abuse`, `hostmaster`, `webmaster`,
       `mailer-daemon`, `noreply`, `no-reply`, `mta-sts`, `bounce`, `bounces`, `dmarc`, `email`,
       `security`, `support`; audit production for already-claimed ones before enabling the MX
+      (all reserved, plus the mail DNS labels `mta-sts`, `autoconfig`, `autodiscover`, in relay
+      0.2.18 / SDK 0.2.15. Audit 2026-10-13: every name 404s except `support.poweur.net`, a live
+      identity created 2026-09-30; confirm it is operator-owned before ticking)
 - [ ] CLI: `poweur email enable|disable|status`, `poweur email send`, `poweur email ls|read`
       (text render; `--html` writes the sanitized HTML to a file)
 - [ ] Version bumps: relay, CLI, `@poweur/client`

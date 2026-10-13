@@ -29,7 +29,8 @@ export const RESERVED_LABELS = new Set([
   "payments", "billing", "wallet", "invoice", "verify", "verified",
   "official", "team", "staff", "system", "bot", "test",
   "demo", "example", "oauth", "sso", "idp", "openid",
-  "indieauth",
+  "indieauth", "mta-sts", "autoconfig", "autodiscover", "mailer-daemon", "bounce",
+  "bounces", "dmarc", "email",
 ]);
 
 function looksLikeIpLiteral(value: string): boolean {

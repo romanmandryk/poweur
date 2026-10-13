@@ -313,6 +313,10 @@ func TestVectors_Names(t *testing.T) {
 		// Reserved names are valid (usable) but not claimable.
 		"support.poweur.net", "verify.poweur.net", "id.poweur.net",
 		"oauth.poweur.net", "indieauth.poweur.net",
+		// Mail DNS names and email role names (EPIC-023 E23-T5).
+		"mta-sts.poweur.net", "autoconfig.poweur.net", "autodiscover.poweur.net",
+		"mailer-daemon.poweur.net", "bounce.poweur.net", "bounces.poweur.net",
+		"dmarc.poweur.net", "email.poweur.net", "postmaster.poweur.net",
 	} {
 		vector := nameVector{
 			Identity:  name,
