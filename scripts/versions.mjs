@@ -25,6 +25,7 @@ export const PACKAGES = {
   },
   web: { label: "Web app", file: "apps/web/package.json", pattern: jsonVersion, paths: ["apps/web/"] },
   oauth: { label: "OAuth bridge", file: "apps/oauth/bridge/doc.go", pattern: goConst, paths: ["apps/oauth/"] },
+  email: { label: "Email bridge", file: "apps/email/bridge/doc.go", pattern: goConst, paths: ["apps/email/"] },
 };
 
 // Files that change without changing what ships: tests, fixtures, docs, lockfiles, dependency manifests.

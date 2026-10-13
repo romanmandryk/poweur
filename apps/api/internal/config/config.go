@@ -97,7 +97,11 @@ type Config struct {
 	// RequestRelayLimits caps contact-request admissions per *sending relay*
 	// (EPIC-007 E07-T5). Keyed on the relay accountable for the sender, not
 	// on the sender, because identities are cheap and relays are not.
-	RequestRelayLimits  RateLimits
+	RequestRelayLimits RateLimits
+	// EmailBridgeLimits replace RateLimits (and the global caps) for the
+	// EMAIL_BRIDGE_ID sender: it delivers every user's mail, so the
+	// per-person defaults would throttle the whole bridge.
+	EmailBridgeLimits   RateLimits
 	DNSProxyMode        string
 	MaxInboxPerIdentity int
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
@@ -415,6 +419,11 @@ func FromEnv() Config {
 			PerMinute: getenvInt("GLOBAL_RATE_LIMIT_MINUTE", DefaultGlobalMinuteLimit),
 			PerHour:   getenvInt("GLOBAL_RATE_LIMIT_HOUR", DefaultGlobalHourLimit),
 			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
+		},
+		EmailBridgeLimits: RateLimits{
+			PerMinute: getenvInt("EMAIL_BRIDGE_RATE_LIMIT_MINUTE", 600),
+			PerHour:   getenvInt("EMAIL_BRIDGE_RATE_LIMIT_HOUR", 20000),
+			PerDay:    getenvInt("EMAIL_BRIDGE_RATE_LIMIT_DAY", 200000),
 		},
 		RequestRelayLimits: RateLimits{
 			PerMinute: getenvInt("REQUEST_RELAY_LIMIT_MINUTE", DefaultRequestRelayMinuteLimit),

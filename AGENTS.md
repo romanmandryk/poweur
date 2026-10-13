@@ -31,6 +31,9 @@ go test ./apps/cli/...
 # Demo apps: hello bot and guestbook (own module, ship in the relay image)
 go test ./apps/demoapps/...
 
+# Email bridge (EPIC-023)
+go test ./apps/email/...
+
 # OAuth/OIDC bridge (EPIC-022). Its pages are React (apps/oauth/ui), embedded
 # at compile time; Go tests pass without them, e2e and the image build them.
 go test ./apps/oauth/...
@@ -152,6 +155,7 @@ bump the `Version` constant instead.
 | `@poweur/client` | `packages/client-ts/package.json` **and** `SDK_VERSION` / `SDK_BUILD_TIME` in `src/index.ts` (and `packages/poweur/package.json`, the `poweur` npm alias, which must carry the same version: the release workflow refuses a mismatch) | UTC `YYYY-MM-DD HH:MM` |
 | Web app | `apps/web/package.json` **and** `apps/web/src/build-info.ts` | `APP_VERSION` / `APP_BUILD_TIME` |
 | OAuth bridge (`apps/oauth`) | `apps/oauth/bridge.Version` (`bridge/doc.go`) | `VERSION_HASH` / `BUILD_TIME` baked into the image; `poweur-oauth version` and `GET /health` print them |
+| Email bridge (`apps/email`) | `apps/email/bridge.Version` (`bridge/doc.go`) | same as the OAuth bridge; `poweur-email version` and `GET /health` |
 | Mobile shell | `apps/mobile/package.json` | native store versions (Xcode / Gradle) only when the shell itself changed |
 
 `pnpm release:bump <package>` edits every file a package's version lives in. CI's **Version bumps** check fails a pull request that changes shipped code without bumping (label `no-version-bump` to override). Releasing the SDK or CLI is `pnpm release:tag sdk|cli` from `master`: see [`RELEASING.md`](RELEASING.md).

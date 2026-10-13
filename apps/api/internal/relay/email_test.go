@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poweur/api/internal/config"
+	"github.com/poweur/api/internal/ratelimit"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -135,5 +136,31 @@ func TestEmailBridgeIDValidated(t *testing.T) {
 	c.EmailBridgeID = "email.poweur.net"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The bridge delivers everyone's mail, so it has its own (larger) budget
+// instead of the per-person one.
+func TestEmailBridgeHasItsOwnRateLimit(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bridge := registerTestIdentity(t, server, ts, "mailbridge.poweur.net")
+	other := registerTestIdentity(t, server, ts, "other.poweur.net")
+	server.rateLimit = ratelimit.NewLimiter(config.RateLimits{PerMinute: 2, PerHour: 100, PerDay: 100}, config.GlobalRateLimits{PerMinute: 1000, PerHour: 1000, PerDay: 1000})
+	server.bridgeRateLimit = ratelimit.NewLimiter(config.RateLimits{PerMinute: 50, PerHour: 100, PerDay: 100}, config.GlobalRateLimits{PerMinute: 50, PerHour: 100, PerDay: 100})
+	server.cfg.EmailBridgeID = "mailbridge.poweur.net"
+	setSysFile(t, server, alice.name, inboxPolicyPath, `{"version":1,"mode":"open","email":{"allow":true,"bridge":"mailbridge.poweur.net"}}`)
+	for i := 0; i < 10; i++ {
+		resp, _ := postTypedMessage(t, ts, bridge, alice.name, idpkg.MsgTypeEmailMessage, "mail")
+		mustStatus(t, resp, http.StatusAccepted, "bridge send")
+	}
+	codes := []int{}
+	for i := 0; i < 3; i++ {
+		resp, _ := postTypedMessage(t, ts, other, alice.name, "", "hi")
+		codes = append(codes, resp.StatusCode)
+		resp.Body.Close()
+	}
+	if codes[2] != http.StatusTooManyRequests {
+		t.Fatalf("ordinary sender not limited: %v", codes)
 	}
 }

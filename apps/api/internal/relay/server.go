@@ -58,6 +58,7 @@ type Server struct {
 	rendezvous      *storage.RendezvousStore
 	sessions        *storage.SessionStore
 	rateLimit       *ratelimit.Limiter
+	bridgeRateLimit *ratelimit.Limiter
 	regGate         *RegistrationGate
 	client          *http.Client
 	idCache         *idpkg.Cache
@@ -146,23 +147,26 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		startupFailures = append(startupFailures, "ack_storage_open_failed")
 	}
 	s := &Server{
-		startupFailures:   startupFailures,
-		stop:              make(chan struct{}),
-		cfg:               cfg,
-		resolver:          resolver,
-		providers:         providers,
-		identities:        store,
-		inbox:             inbox,
-		requests:          storage.NewRequestStore(),
-		anonInbox:         storage.NewInboxStore(),
-		anon:              newAnonState(),
-		powSecret:         newPowSecret(),
-		acks:              acks,
-		challenges:        storage.NewChallengeStore(),
-		keystore:          keystore,
-		rendezvous:        storage.NewRendezvousStore(),
-		sessions:          storage.NewSessionStore(), // sessions remain memory-only by design
-		rateLimit:         ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		startupFailures: startupFailures,
+		stop:            make(chan struct{}),
+		cfg:             cfg,
+		resolver:        resolver,
+		providers:       providers,
+		identities:      store,
+		inbox:           inbox,
+		requests:        storage.NewRequestStore(),
+		anonInbox:       storage.NewInboxStore(),
+		anon:            newAnonState(),
+		powSecret:       newPowSecret(),
+		acks:            acks,
+		challenges:      storage.NewChallengeStore(),
+		keystore:        keystore,
+		rendezvous:      storage.NewRendezvousStore(),
+		sessions:        storage.NewSessionStore(), // sessions remain memory-only by design
+		rateLimit:       ratelimit.NewLimiter(cfg.RateLimits, cfg.GlobalRateLimits),
+		bridgeRateLimit: ratelimit.NewLimiter(cfg.EmailBridgeLimits, config.GlobalRateLimits{
+			PerMinute: cfg.EmailBridgeLimits.PerMinute, PerHour: cfg.EmailBridgeLimits.PerHour, PerDay: cfg.EmailBridgeLimits.PerDay,
+		}),
 		requestRelayLimit: ratelimit.NewPeerLimiter(cfg.RequestRelayLimits),
 		abuse:             newAbuseLog(),
 		regGate:           NewRegistrationGate(cfg.RegistrationGate, cfg.RegistrationInviteCodes),
@@ -869,7 +873,11 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 
 	// Rate limit by verified sender only — charging an unverified sender field
 	// before sig check would let any attacker exhaust another identity's quota.
-	decision := s.rateLimit.Allow(msg.Sender)
+	limiter := s.rateLimit
+	if s.cfg.EmailBridgeID != "" && strings.EqualFold(msg.Sender, s.cfg.EmailBridgeID) {
+		limiter = s.bridgeRateLimit
+	}
+	decision := limiter.Allow(msg.Sender)
 	if !decision.Allowed {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{
 			"error":    "rate_limit_exceeded",

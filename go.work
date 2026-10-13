@@ -4,6 +4,7 @@ use (
 	./apps/api
 	./apps/cli
 	./apps/demoapps
+	./apps/email
 	./apps/integration
 	./apps/oauth
 	./packages/identity
