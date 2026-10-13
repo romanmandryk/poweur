@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -135,4 +136,25 @@ func validateOutgoingEnvelope(msgType, threadID, expiresAt string, metadata map[
 			msgType, strings.Join(idpkg.SystemMessageTypes(), ", "))
 	}
 	return nil
+}
+
+// describeEmail is the inbox line for mail from the user's own bridge.
+func describeEmail(msgType, body string) string {
+	switch idpkg.NormalizeMessageType(msgType) {
+	case idpkg.MsgTypeEmailMessage:
+		var m idpkg.EmailMessage
+		if json.Unmarshal([]byte(body), &m) == nil {
+			return fmt.Sprintf("📧 email from %s: %s%s", m.From.String(), m.Subject, authNote(m.Auth))
+		}
+	case idpkg.MsgTypeEmailStatus:
+		var st idpkg.EmailStatus
+		if json.Unmarshal([]byte(body), &st) == nil {
+			line := fmt.Sprintf("📧 email %s %s", st.SendID, st.State)
+			if st.Reason != "" {
+				line += ": " + st.Reason
+			}
+			return line
+		}
+	}
+	return "📧 unreadable email"
 }

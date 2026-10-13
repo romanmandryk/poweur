@@ -432,6 +432,20 @@ func EmailConversationRoot(messageID, inReplyTo string, references []string) str
 	return strings.TrimSpace(messageID)
 }
 
+// EmailThreadKeyPrefix starts the read-state thread key of a mail thread.
+const EmailThreadKeyPrefix = "mail:"
+
+// EmailThreadKey is the read-state thread key (ReadState.Threads) of a mail
+// thread: its conversation root, or the archived message's own id when the
+// mail names none. Mail has no envelope thread — subjects and message ids are
+// content — so clients key mail read marks by this instead.
+func EmailThreadKey(m EmailMessage, recordID string) string {
+	if root := EmailConversationRoot(m.MessageID, m.InReplyTo, m.References); root != "" {
+		return EmailThreadKeyPrefix + root
+	}
+	return EmailThreadKeyPrefix + recordID
+}
+
 // EmailOutAttachment is one attachment of an `email.send`: inline Data
 // (base64) or an Upload the client sealed to the bridge beforehand.
 type EmailOutAttachment struct {

@@ -470,6 +470,12 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 				}
 			}
 		}
+		// A `headers-v1` body carries a subject (E09-T13): show and keep it
+		// apart from the text.
+		subject := ""
+		if decrypted {
+			subject, display = idpkg.ParseBody(display, msg.Metadata)
+		}
 		prefix := "  "
 		if decrypted {
 			prefix = "🔒"
@@ -478,6 +484,11 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		// line, because the CLI cannot present an application's payload and
 		// showing the raw plaintext would be showing someone else's JSON.
 		rendered := describeTypedMessage(msg.Sender, msg.Type, display, decrypted)
+		// Mail from the bridge this identity opted into reads as mail; the
+		// same type from anyone else stays an untrusted app message.
+		if decrypted && idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && readPolicyOK && readPolicy.TrustsEmailBridge(msg.Sender) {
+			rendered = describeEmail(msg.Type, display)
+		}
 		isPrompt := idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeAuthRequest
 		if isPrompt && decrypted {
 			rendered = describeAuthPrompt(msg.Sender, display)
@@ -491,8 +502,15 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 			}
 		}
 		if machine {
-			bodies = append(bodies, map[string]any{"decrypted": decrypted, "body": display})
+			entry := map[string]any{"decrypted": decrypted, "body": display}
+			if subject != "" {
+				entry["subject"] = subject
+			}
+			bodies = append(bodies, entry)
 		} else {
+			if subject != "" {
+				rendered = "[" + subject + "] " + rendered
+			}
 			fmt.Fprintf(stdout, "%s [%s] %s: %s%s%s\n", prefix, msg.Timestamp, msg.Sender,
 				rendered, threadSuffix(msg.ThreadID), expirySuffix(msg.ExpiresAt))
 		}
@@ -502,7 +520,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		if decrypted && !isPrompt {
 			record := historyRecordThreaded(identityValue, idpkg.HistoryQueueInbox,
 				msg.ID, msg.Sender, msg.Recipient, msg.Timestamp, msg.Type, msg.ThreadID, display)
-			record.ExpiresAt, record.Metadata = msg.ExpiresAt, msg.Metadata
+			record.ExpiresAt, record.Metadata, record.Subject = msg.ExpiresAt, msg.Metadata, subject
 			archive = append(archive, record)
 		}
 

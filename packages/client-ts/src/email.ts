@@ -284,6 +284,14 @@ export function emailConversationRoot(messageId?: string, inReplyTo?: string, re
   return (messageId ?? "").trim();
 }
 
+export const EMAIL_THREAD_KEY_PREFIX = "mail:";
+
+/** Read-state thread key of a mail thread (Go `EmailThreadKey`). */
+export function emailThreadKey(m: Pick<EmailMessage, "message_id" | "in_reply_to" | "references">, recordId: string): string {
+  const root = emailConversationRoot(m.message_id, m.in_reply_to, m.references);
+  return EMAIL_THREAD_KEY_PREFIX + (root || recordId);
+}
+
 /** Parse an `email.*` plaintext; null when it is not a version-1 object. */
 export function parseEmailPayload<T extends { version: number }>(plaintext: string | null | undefined): T | null {
   if (plaintext == null) return null;

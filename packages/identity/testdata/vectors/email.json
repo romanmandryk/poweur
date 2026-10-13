@@ -101,25 +101,29 @@
         "\u003ca@x\u003e",
         "\u003cb@x\u003e"
       ],
-      "root": "\u003ca@x\u003e"
+      "root": "\u003ca@x\u003e",
+      "thread_key": "mail:\u003ca@x\u003e"
     },
     {
       "in_reply_to": "\u003cb@x\u003e",
       "message_id": "\u003cc@x\u003e",
       "references": null,
-      "root": "\u003cb@x\u003e"
+      "root": "\u003cb@x\u003e",
+      "thread_key": "mail:\u003cb@x\u003e"
     },
     {
       "in_reply_to": "",
       "message_id": "\u003cc@x\u003e",
       "references": null,
-      "root": "\u003cc@x\u003e"
+      "root": "\u003cc@x\u003e",
+      "thread_key": "mail:\u003cc@x\u003e"
     },
     {
       "in_reply_to": "",
       "message_id": "",
       "references": null,
-      "root": ""
+      "root": "",
+      "thread_key": "mail:rec1"
     }
   ]
 }

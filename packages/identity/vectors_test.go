@@ -928,7 +928,8 @@ func TestVectors_Email(t *testing.T) {
 		id, irt string
 		refs    []string
 	}{{"<c@x>", "<b@x>", []string{"<a@x>", "<b@x>"}}, {"<c@x>", "<b@x>", nil}, {"<c@x>", "", nil}, {"", "", nil}} {
-		vectors.Roots = append(vectors.Roots, map[string]any{"message_id": c.id, "in_reply_to": c.irt, "references": c.refs, "root": EmailConversationRoot(c.id, c.irt, c.refs)})
+		vectors.Roots = append(vectors.Roots, map[string]any{"message_id": c.id, "in_reply_to": c.irt, "references": c.refs, "root": EmailConversationRoot(c.id, c.irt, c.refs),
+			"thread_key": EmailThreadKey(EmailMessage{MessageID: c.id, InReplyTo: c.irt, References: c.refs}, "rec1")})
 	}
 	WriteVectors(t, vectorsDir, "email", vectors)
 }

@@ -10,6 +10,7 @@ import {
   emailAddressFor,
   emailBlobContext,
   emailConversationRoot,
+  emailThreadKey,
   openEmailBlob,
   parseEmailAddress,
   sealEmailUpload,
@@ -110,7 +111,7 @@ interface EmailVectors {
   identities: { identity: string; address?: string; valid: boolean }[];
   upload_canonical: string;
   blob_context: string;
-  roots: { message_id: string; in_reply_to: string; references: string[] | null; root: string }[];
+  roots: { message_id: string; in_reply_to: string; references: string[] | null; root: string; thread_key: string }[];
 }
 
 describe("email documents match Go", () => {
@@ -146,7 +147,10 @@ describe("email documents match Go", () => {
   it("upload canonical, blob context, conversation root", () => {
     expect(canonicalEmailUpload("John.poweur.net", "01J9ZUPLOAD", "ABCDEF", 1234, "2026-10-13T12:00:00Z", "n1")).toBe(v.upload_canonical);
     expect(fromUtf8(emailBlobContext("01J9ZBLOB"))).toBe(v.blob_context);
-    for (const c of v.roots) expect(emailConversationRoot(c.message_id, c.in_reply_to, c.references)).toBe(c.root);
+    for (const c of v.roots) {
+      expect(emailConversationRoot(c.message_id, c.in_reply_to, c.references)).toBe(c.root);
+      expect(emailThreadKey({ message_id: c.message_id, in_reply_to: c.in_reply_to, references: c.references ?? [] }, "rec1")).toBe(c.thread_key);
+    }
   });
   it("trusts only the named bridge", () => {
     const policy = { version: 1, mode: "contacts_only" as const, email: { allow: true, bridge: "email.poweur.net" } };
