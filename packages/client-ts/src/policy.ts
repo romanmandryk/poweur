@@ -11,6 +11,7 @@
 import { PoweurError } from "./errors.js";
 import type { SystemFiles } from "./systemfiles.js";
 import { validateIdentityName } from "./names.js";
+import { validateEmailPolicy } from "./email.js";
 import {
   ANON_CHALLENGE_NONE,
   ANON_CHALLENGE_PAYMENT,
@@ -81,6 +82,7 @@ export function validateInboxPolicy(policy: InboxPolicy): void {
   }
   if (policy.anonymous) validateAnonymousPolicy(policy.anonymous);
   validateTrustedAuthServices(policy.trusted_auth_services);
+  validateEmailPolicy(policy.email);
   if (policy.read_receipts) {
     if (typeof policy.read_receipts.enabled !== "boolean") {
       throw new PoweurError("invalid_document", "read_receipts.enabled must be a boolean");
@@ -160,6 +162,7 @@ export async function writeInboxPolicy(
   anonymous?: AnonymousPolicy,
   readReceipts?: InboxPolicy["read_receipts"],
   trustedAuthServices?: string[],
+  email?: InboxPolicy["email"],
 ): Promise<InboxPolicy> {
   const policy: InboxPolicy = { version: 1, mode };
   if (anonymous) policy.anonymous = anonymous;
@@ -167,6 +170,7 @@ export async function writeInboxPolicy(
   if (trustedAuthServices?.length) {
     policy.trusted_auth_services = trustedAuthServices.map((s) => s.trim().toLowerCase());
   }
+  if (email) policy.email = { allow: email.allow, ...(email.bridge ? { bridge: email.bridge.trim().toLowerCase() } : {}) };
   validateInboxPolicy(policy);
   await files.writeJson(INBOX_POLICY_PATH, policy);
   return policy;

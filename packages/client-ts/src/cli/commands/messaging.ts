@@ -157,6 +157,8 @@ export async function send(argv: string[], streams: Streams): Promise<number> {
       signWith,
       viaHomeRelay,
       ...(flagString(args, "type") ? { type: flagString(args, "type") } : {}),
+      ...(flagString(args, "thread") ? { threadId: flagString(args, "thread") } : {}),
+      ...(flagString(args, "subject") ? { subject: flagString(args, "subject") } : {}),
     });
     messageId.current = result.message.id;
     // Journal both transitions so `messages status` can render ticks later,
@@ -243,7 +245,7 @@ export async function listen(argv: string[], streams: Streams): Promise<number> 
         if (jsonOut) {
           streams.stdout(JSON.stringify(message) + "\n");
         } else {
-          streams.stdout(`${message.sender}: ${message.plaintext ?? "<could not decrypt>"}\n`);
+          streams.stdout(`${message.sender}: ${message.subject ? `[${message.subject}] ` : ""}${message.plaintext ?? "<could not decrypt>"}\n`);
         }
       }
       for (const ack of acks) {
@@ -333,7 +335,8 @@ export async function inbox(argv: string[], streams: Streams): Promise<number> {
       (client.decryptor
         ? `[decrypt failed: ${message.decryptError ?? "unknown"}]`
         : "[encrypted: no local encryption key]");
-    streams.stdout(`${decrypted ? "🔒" : "  "} [${message.timestamp}] ${message.sender}: ${display}\n`);
+    const subject = message.subject ? `[${message.subject}] ` : "";
+    streams.stdout(`${decrypted ? "🔒" : "  "} [${message.timestamp}] ${message.sender}: ${subject}${display}\n`);
 
     // Tick 2 is emitted only for messages we actually decrypted — that is the
     // proof it reached a client rather than merely a relay.

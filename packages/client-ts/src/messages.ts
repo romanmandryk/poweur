@@ -24,6 +24,7 @@ import {
   validateEnvelopeExtensions,
 } from "./msgtypes.js";
 import { solvePow } from "./pow.js";
+import { formatBody, newThreadId, parseBody } from "./subject.js";
 import { resolveEncryptionKey, resolveIdentity, type ResolveOptions } from "./resolve.js";
 import {
   isSessionValid,
@@ -87,6 +88,11 @@ export interface SendOptions {
    * the path — addressing, not content.
    */
   metadata?: Record<string, string>;
+  /**
+   * Optional subject line (E09-T13). Sent inside the encrypted payload as a
+   * `headers-v1` block; without a `threadId`, a fresh thread is minted.
+   */
+  subject?: string;
 }
 
 export interface SendResult {
@@ -171,6 +177,15 @@ export class Messaging {
     options: SendOptions = {},
   ): Promise<SendResult> {
     const mode = assertSignWith(options.signWith ?? "session");
+    if (options.subject?.trim()) {
+      const body = formatBody(options.subject, plaintext);
+      plaintext = body.plaintext;
+      options = {
+        ...options,
+        metadata: { ...(options.metadata ?? {}), ...body.metadata },
+        threadId: options.threadId || newThreadId(),
+      };
+    }
     // Check the envelope before encrypting or resolving: the relay validates
     // these too, but a caller deserves the error before a round trip, and a
     // metadata value with a newline in it has no unambiguous signing input.
@@ -448,10 +463,10 @@ export async function decryptInbox(
   return messages.map((message) => {
     if (!message.encryption?.alg) return { ...message, plaintext: message.payload };
     try {
-      return {
-        ...message,
-        plaintext: decryptMessage(key, message.payload, message.encryption),
-      };
+      // A `headers-v1` body carries a subject (E09-T13): hand back the text
+      // and the subject apart, so nobody renders the header block as chat.
+      const { subject, text } = parseBody(decryptMessage(key, message.payload, message.encryption), message.metadata);
+      return { ...message, plaintext: text, ...(subject ? { subject } : {}) };
     } catch (error) {
       return {
         ...message,
