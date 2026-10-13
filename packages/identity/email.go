@@ -362,12 +362,12 @@ type EmailMessage struct {
 	ReplyTo    []EmailAddress `json:"reply_to,omitempty"`
 	// EnvelopeTo is the address the mail was delivered to, as the MTA saw
 	// it (shows which alias or subaddress was used).
-	EnvelopeTo string `json:"envelope_to,omitempty"`
-	Tag        string `json:"tag,omitempty"`
-	Subject    string `json:"subject,omitempty"`
-	Date       string `json:"date,omitempty"` // RFC3339, from the Date header
+	EnvelopeTo string    `json:"envelope_to,omitempty"`
+	Tag        string    `json:"tag,omitempty"`
+	Subject    string    `json:"subject,omitempty"`
+	Date       string    `json:"date,omitempty"` // RFC3339, from the Date header
 	Auth       EmailAuth `json:"auth"`
-	Text       string `json:"text,omitempty"`
+	Text       string    `json:"text,omitempty"`
 	// HTML is already sanitized by the bridge. Clients sanitize it again and
 	// render it isolated: the bridge is not trusted with the user's screen.
 	HTML        string            `json:"html,omitempty"`
@@ -383,11 +383,11 @@ type EmailMessage struct {
 
 // EmailBounce summarizes a delivery status notification.
 type EmailBounce struct {
-	SendID    string `json:"send_id,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	Recipient string `json:"recipient,omitempty"`
-	Action    string `json:"action,omitempty"` // failed | delayed | delivered
-	Status    string `json:"status,omitempty"` // e.g. 5.1.1
+	SendID     string `json:"send_id,omitempty"`
+	MessageID  string `json:"message_id,omitempty"`
+	Recipient  string `json:"recipient,omitempty"`
+	Action     string `json:"action,omitempty"` // failed | delayed | delivered
+	Status     string `json:"status,omitempty"` // e.g. 5.1.1
 	Diagnostic string `json:"diagnostic,omitempty"`
 }
 
