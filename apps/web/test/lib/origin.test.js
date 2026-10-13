@@ -22,6 +22,9 @@ const ALLOWED = new Map([
   ["lib/storage.js", "defaultRelayUrl()"],
   // Only ever served by the drive's own relay at https://<identity>/s/<link>.
   ["viewer/viewer.ts", "the link viewer's relay is its origin"],
+  // The approve page's own link, drawn as a QR only in a browser that holds
+  // no keys (never in the shell): the page is the link (EPIC-028).
+  ["lib/approve.ts", "the approve page re-shows its own address"],
 ]);
 
 function walk(dir) {

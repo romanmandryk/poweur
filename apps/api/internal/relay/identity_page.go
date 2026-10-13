@@ -47,6 +47,10 @@ type identityPageView struct {
 	HomeURL    string
 	MessageURL string
 	ClaimURL   string
+	// SignInURL is the identity's own web app, for its owner on a browser
+	// that has never used it (EPIC-028): unlock, add this device, or
+	// restore. Empty when this relay serves no web app.
+	SignInURL string
 }
 
 func requestHost(r *http.Request) string {
@@ -167,7 +171,7 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 	}
 	var homeURL, messageURL string
 	if launcher := strings.TrimSpace(s.cfg.LauncherHost); launcher != "" {
-		homeURL = "https://" + launcher + "/app/"
+		homeURL = "https://" + launcher + "/id/"
 		messageURL = homeURL + "?to=" + url.QueryEscape(identity)
 	}
 	view := identityPageView{
@@ -186,6 +190,9 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 		HomeURL:            homeURL,
 		MessageURL:         messageURL,
 		ClaimURL:           messageURL,
+	}
+	if s.cfg.WebStaticDir != "" {
+		view.SignInURL = appPrefix + "/"
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = identityPageTemplate.ExecuteTemplate(w, "page.html", view)

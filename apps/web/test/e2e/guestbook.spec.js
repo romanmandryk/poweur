@@ -33,8 +33,8 @@ test.describe("Guestbook sign-in", () => {
 
     await book.click("#signin");
     await expect(book.locator("#pending")).toBeVisible();
-    const match = ((await book.locator("#match").textContent()) ?? "").replace(/\s+/g, "");
-    expect(match).toMatch(/^\d{2,}$/);
+    // No code to copy (EPIC-028): a link from another screen needs none.
+    await expect(book.locator("#match")).toHaveCount(0);
     const requestLink = (await book.locator("#approve-url").textContent()).trim();
     expect(requestLink).toMatch(new RegExp(`^${guestbook.origin}/auth/r/`));
 
@@ -42,13 +42,12 @@ test.describe("Guestbook sign-in", () => {
     // production, the test relay's here); the signer shows what is being approved.
     const signer = await context.newPage();
     await stubPasskeys(signer);
-    await signer.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(requestLink)}`);
+    await signer.goto(`${relay.baseUrl}/id/?auth=${encodeURIComponent(requestLink)}`);
     await expect(signer.locator("text=Poweur Guestbook").first()).toBeVisible({ timeout: 45_000 });
     await expect(signer.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 45_000 });
     if (await signer.locator("#btn-auth-unlock").count()) await signer.click("#btn-auth-unlock");
     await expect(signer.locator("#btn-auth-approve")).toBeVisible({ timeout: 45_000 });
-    // The signer asks for the code shown on the screen that started the sign-in.
-    await signer.fill("#auth-match", match);
+    await expect(signer.locator("#auth-warning")).toBeVisible();
     await signer.click("#btn-auth-approve");
 
     // The starting page notices on its own and unlocks the message box.
@@ -83,7 +82,7 @@ test.describe("Guestbook sign-in", () => {
 
     const signer = await context.newPage();
     await stubPasskeys(signer);
-    await signer.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(requestLink)}`);
+    await signer.goto(`${relay.baseUrl}/id/?auth=${encodeURIComponent(requestLink)}`);
     await expect(signer.locator("text=Poweur Guestbook").first()).toBeVisible({ timeout: 45_000 });
     await expect(signer.locator("#auth-other")).toBeVisible({ timeout: 45_000 });
 
@@ -104,7 +103,7 @@ test.describe("Guestbook sign-in", () => {
     // Not an ID at all: nothing happens but a hint.
     const again = await context.newPage();
     await stubPasskeys(again);
-    await again.goto(`${relay.baseUrl}/app/?auth=${encodeURIComponent(requestLink)}`);
+    await again.goto(`${relay.baseUrl}/id/?auth=${encodeURIComponent(requestLink)}`);
     await again.locator("#auth-other summary").click();
     await again.fill("#auth-other-input", "nonsense");
     await again.click("#btn-auth-other");

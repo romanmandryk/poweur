@@ -6,11 +6,10 @@
  * panel frees the pairing, so the relay's per-identity cap does not fill.
  */
 import { useEffect, useRef, useState } from "react";
-import { formatShortCode, pairingAppLink, pairingLink, type EnrollStep } from "@poweur/client";
+import { APPROVE_PATH, formatShortCode, pairingAppLink, pairingLink, type EnrollStep } from "@poweur/client";
 import { Copy } from "lucide-react";
 import { adoptIdentity, enrollApiForJoin } from "../actions/identity";
 import { joinIdentityFor } from "../lib/claim";
-import { cn } from "../lib/cn";
 import { describeJoinError, startJoinPoll } from "../lib/enroll-wait.js";
 import { deviceLabel } from "../lib/keystore.js";
 import { getConfig, isShellRuntime } from "../lib/storage.js";
@@ -30,25 +29,6 @@ type Phase =
   | { kind: "opening" }
   | { kind: "waiting"; code: string; link: string; appLink: string }
   | { kind: "retry"; message: string };
-
-/** What will approve this device decides what the QR must open. */
-type Approver = "app" | "browser" | "terminal";
-const APPROVER_KEY = "poweur:pair-approver";
-
-function readApprover(): Approver {
-  try {
-    const v = localStorage.getItem(APPROVER_KEY);
-    return v === "browser" || v === "terminal" ? v : "app";
-  } catch {
-    return "app";
-  }
-}
-
-const APPROVERS: { id: Approver; label: string }[] = [
-  { id: "app", label: "Poweur app" },
-  { id: "browser", label: "Browser" },
-  { id: "terminal", label: "Terminal" },
-];
 
 function CopyCode({ id, value, shown, what }: { id?: string; value: string; shown?: string; what: string }) {
   return (
@@ -77,90 +57,49 @@ function CopyCode({ id, value, shown, what }: { id?: string; value: string; show
 }
 
 /**
- * The code, carried the way the approving side can open it: the app from a
- * phone camera needs poweur://, a browser the https link, a terminal a
- * command. The typed code works everywhere.
+ * One QR for every approver (EPIC-028): the identity's approve page. A phone
+ * camera opens it in the Poweur app when that is installed, otherwise in the
+ * browser, which approves if it holds the keys or offers the app. A terminal
+ * takes the same link; the typed code works everywhere.
  */
 function OfferedCode({ phase, identity }: { phase: { code: string; link: string; appLink: string }; identity: string }) {
-  const [approver, setApprover] = useState<Approver>(readApprover);
-  const choose = (next: Approver) => {
-    setApprover(next);
-    try {
-      localStorage.setItem(APPROVER_KEY, next);
-    } catch {
-      /* remembered for this visit only */
-    }
-  };
   const command = `poweur key approve '${phase.link}'`;
   return (
     <>
-      <p className="mb-2 text-[13px] text-muted">Approve with</p>
-      <div role="tablist" aria-label="Approve with" className="mx-auto mb-4 grid max-w-[340px] grid-cols-3 gap-1 rounded-control bg-surface-2 p-1">
-        {APPROVERS.map((a) => (
-          <button
-            key={a.id}
-            id={`pair-approver-${a.id}`}
-            type="button"
-            role="tab"
-            aria-selected={approver === a.id}
-            onClick={() => choose(a.id)}
-            className={cn(
-              "rounded-[8px] px-2 py-2 text-[13px] font-semibold text-muted",
-              approver === a.id && "bg-surface text-fg shadow-card",
-            )}
-          >
-            {a.label}
-          </button>
-        ))}
-      </div>
-      {approver === "app" && (
-        <>
-          <QRCode value={phase.appLink} label="Pairing code for the Poweur app" className="mx-auto w-[min(240px,70vw)]" />
-          <p className="mt-3 text-[15px] font-semibold">Scan with your phone's camera</p>
-          <p className="text-[13px] text-muted">It opens the Poweur app, which asks you to approve.</p>
-        </>
-      )}
-      {approver === "browser" && (
-        <>
-          <QRCode value={phase.link} label="Pairing link for a browser" className="mx-auto w-[min(240px,70vw)]" />
-          <p className="mt-3 text-[15px] font-semibold">Scan with the device where you use Poweur in a browser</p>
-          <p className="text-[13px] text-muted">It opens Poweur there, which asks you to approve.</p>
-        </>
-      )}
-      {approver === "terminal" && (
-        <div className="text-left">
-          <p className="mb-2 text-[13px] text-muted">On a machine that has {identity || "this identity"}, run:</p>
-          <div className="flex items-start gap-2 rounded-control bg-surface-2 p-3">
-            <code id="pair-command" className="min-w-0 flex-1 font-mono text-[12px] break-all">
-              {command}
-            </code>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Copy the command"
-              className="w-auto shrink-0"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(command);
-                  toast("Command copied", "success", 2000);
-                } catch {
-                  toast("Copy failed — select it and copy it manually", "warning");
-                }
-              }}
-            >
-              <Copy className="size-4" aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
-      )}
-      <p className="mt-5 mb-1.5 text-[13px] text-muted">{approver === "terminal" ? "or with the code" : "or enter this code there"}</p>
+      <QRCode value={phase.link} label="Pairing link" className="mx-auto w-[min(240px,70vw)]" />
+      <p className="mt-3 text-[15px] font-semibold">Scan with your phone's camera</p>
+      <p className="text-[13px] text-muted">It opens Poweur where {identity || "your ID"} lives, which asks you to approve.</p>
+      <p className="mt-5 mb-1.5 text-[13px] text-muted">or enter this code there</p>
       <CopyCode id="join-code" value={formatShortCode(phase.code)} what="code" />
-      {approver !== "terminal" && (
-        <p className="mt-2 text-[13px] text-muted">
-          Settings → Keys &amp; devices → <strong>Add a device</strong>
-        </p>
-      )}
-      {/* For tests and screen readers: every form of the link, whichever tab is open. */}
+      <p className="mt-2 text-[13px] text-muted">
+        Settings → Keys &amp; devices → <strong>Add a device</strong>
+      </p>
+      <details id="pair-terminal" className="mt-4 text-left">
+        <summary className="cursor-pointer text-center text-[13px] font-semibold text-accent">Use a terminal</summary>
+        <p className="mt-2 mb-2 text-[13px] text-muted">On a machine that has {identity || "this identity"}, run:</p>
+        <div className="flex items-start gap-2 rounded-control bg-surface-2 p-3">
+          <code id="pair-command" className="min-w-0 flex-1 font-mono text-[12px] break-all">
+            {command}
+          </code>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Copy the command"
+            className="w-auto shrink-0"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(command);
+                toast("Command copied", "success", 2000);
+              } catch {
+                toast("Copy failed — select it and copy it manually", "warning");
+              }
+            }}
+          >
+            <Copy className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </details>
+      {/* For tests and screen readers: every form of the link. */}
       <span hidden data-pair-link={phase.link} data-pair-app-link={phase.appLink} />
     </>
   );
@@ -216,7 +155,7 @@ export function JoinDevice({ knownIdentity = "" }: { knownIdentity?: string }) {
       // The link opens the app on the relay this pairing runs through — for a
       // hosted identity, its own host, where the other device keeps its keys.
       // Never this page's origin: in the shell that is capacitor://localhost.
-      const link = pairingLink(`${String(relayUrl).replace(/\/+$/, "")}/app/`, identity, session.rendezvousId, session.commitment);
+      const link = pairingLink(`${String(relayUrl).replace(/\/+$/, "")}${APPROVE_PATH}`, identity, session.rendezvousId, session.commitment);
       setPhase({
         kind: "waiting",
         code: session.rendezvousId,

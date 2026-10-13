@@ -16,7 +16,7 @@ WORKDIR /src/apps/demoapps
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /hello-bot ./cmd/hello-bot
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /guestbook ./cmd/guestbook
 
-# The web client (apps/web), served at /app/. Built here rather than committed,
+# The web client (apps/web), served at /id/. Built here rather than committed,
 # because prod has no Node toolchain — the deploy only pulls this image.
 FROM node:22-alpine AS web
 RUN npm install -g pnpm@10
@@ -38,7 +38,7 @@ COPY --from=builder /relay /relay
 COPY --from=builder /hello-bot /hello-bot
 COPY --from=builder /guestbook /guestbook
 COPY --from=web /src/apps/web/dist /web
-# Anyone running the released image gets the same app at /app/.
+# Anyone running the released image gets the same app at /id/.
 ENV WEB_STATIC_DIR=/web
 EXPOSE 8080
 CMD ["/relay"]

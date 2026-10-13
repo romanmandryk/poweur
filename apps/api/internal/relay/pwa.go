@@ -16,7 +16,7 @@ import (
 // Installable per-identity app (EPIC-009 E09-T12).
 //
 // The web client keeps its identity in per-origin storage, so each hosted
-// identity's /app/ is already a separate app to the browser. These helpers
+// identity's /id/ is already a separate app to the browser. These helpers
 // make it *look* like one: the manifest and the page carry the identity's
 // host as the app name, and its avatar as the icon when it has one, so
 // alice.poweur.net and bob.poweur.net install as two recognisable apps

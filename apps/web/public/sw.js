@@ -3,7 +3,7 @@
  * badge for an installed identity app.
  *
  * Plain JavaScript, copied to the build root untouched, so it is served at
- * /app/sw.js and its scope is /app/ — the same origin-and-path the manifest
+ * /id/sw.js and its scope is /id/ — the same origin-and-path the manifest
  * installs. It holds no keys and reads no messages: a push says which
  * identity, what kind of thing arrived and how much is waiting, and the app
  * fetches the rest when it opens.
@@ -17,10 +17,12 @@ const COPY = {
   request: { title: "New contact request", one: "Someone asked to be your contact.", many: (n) => `${n} new messages and requests are waiting.` },
   anon: { title: "New anonymous message", one: "You have a new anonymous message.", many: (n) => `${n} new messages and requests are waiting.` },
   test: { title: "Notifications are on", one: "This device will be told when something arrives.", many: () => "This device will be told when something arrives." },
+  // A sign-in someone started on another screen (EPIC-028). Never names the app.
+  auth: { title: "Sign-in request waiting", one: "Tap to review it. Approve only if you just started signing in.", many: () => "Tap to review it. Approve only if you just started signing in." },
 };
 
-/** Where a tap lands: requests live under Contacts, everything else in Messages. */
-const pageFor = (kind) => (kind === "request" ? "contacts" : "messages");
+/** Where a tap lands: requests live under Contacts, a sign-in prompt opens itself, everything else in Messages. */
+const pageFor = (kind) => (kind === "request" ? "contacts" : kind === "auth" ? "signin" : "messages");
 
 async function setBadge(count) {
   const nav = self.navigator;
@@ -43,7 +45,7 @@ async function onPush(event) {
   const count = Math.max(0, Number(payload.count) || 0);
   const identity = typeof payload.identity === "string" ? payload.identity : "";
 
-  if (kind !== "test") await setBadge(count);
+  if (kind !== "test" && kind !== "auth") await setBadge(count);
 
   // Open pages refresh at once instead of waiting for their stream.
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
@@ -54,7 +56,8 @@ async function onPush(event) {
   const copy = COPY[kind];
   await self.registration.showNotification(identity ? `${copy.title} · ${identity}` : copy.title, {
     body: count > 1 && kind !== "test" ? copy.many(count) : copy.one,
-    tag: `poweur:${identity}`,
+    // A prompt keeps its own notification: mail must not replace it.
+    tag: kind === "auth" ? `poweur:auth:${identity}` : `poweur:${identity}`,
     renotify: kind !== "test",
     icon: "icon-192.png",
     // Android draws the status-bar badge from the alpha channel only: an

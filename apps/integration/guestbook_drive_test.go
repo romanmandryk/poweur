@@ -200,7 +200,7 @@ func signInWithCLI(t *testing.T, origin, home string) *http.Cookie {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	runCLI(t, home, "auth", "approve", started.DeepLink, "--sign-with", "identity", "--code", started.MatchCode)
+	runCLI(t, home, "auth", "approve", started.RequestLink, "--sign-with", "identity")
 	poll, err := http.Get(origin + "/auth/poll?request_id=" + url.QueryEscape(started.RequestID) +
 		"&poll_secret=" + url.QueryEscape(started.PollSecret))
 	if err != nil {

@@ -128,6 +128,10 @@ export interface SignInContext {
   browser?: string;
   client?: string;
   client_host?: string;
+  /** Set once the sign-in was pushed: pick the number the starting screen shows. */
+  match_choices?: string[];
+  /** POST here to have the RP push this request to the user's app instead. */
+  push_uri?: string;
 }
 
 function fail(message: string): never {
@@ -184,8 +188,17 @@ export function sameOrigin(origin: string, rawUrl: string): boolean {
  */
 export interface SignInDelivery {
   response: string;
+  /** `"poll"` when approved on another device (QR, link, pushed prompt). */
+  finish?: typeof SIGNIN_FINISH_POLL;
+  /** The number picked from `match_choices`, for a sign-in pushed to the app. */
   match?: string;
 }
+
+/** Marks a cross-device delivery. Mirrors Go `signin.FinishPoll`. */
+export const SIGNIN_FINISH_POLL = "poll";
+
+/** How many numbers a pushed prompt offers. Mirrors Go `signin.MatchChoiceCount`. */
+export const SIGNIN_MATCH_CHOICES = 3;
 
 /** The relying party's answer to a delivery. Mirrors Go `signin.DeliveryReceipt`. */
 export interface SignInDeliveryReceipt {
@@ -762,6 +775,10 @@ export function signInRequestUri(input: string): string | null {
     return ref ? httpLink(ref) : null;
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  // An approve link carries the reference in its fragment (EPIC-028).
+  const fragment = new URLSearchParams(u.hash.replace(/^#/, ""));
+  if (fragment.get("auth")) return httpLink(fragment.get("auth") ?? "");
+  if (fragment.get("pair")) return null; // a pairing link on the same page
   if (u.searchParams.get("request")) return null;
   const inner = u.searchParams.get("auth") ?? u.searchParams.get("request_uri");
   if (inner) return httpLink(inner);
@@ -772,6 +789,22 @@ export function signInRequestUri(input: string): string | null {
 export function checkSignInRequestUri(requestUri: string, request: Pick<SignInRequest, "audience">): void {
   const origin = normalizeOrigin(request.audience);
   if (!sameOrigin(origin, requestUri)) fail(`the request was fetched from outside its audience ${origin}`);
+}
+
+/** Where an identity's web app approves sign-ins and new devices. Mirrors Go `identity.ApprovePath`. */
+export const APPROVE_PATH = "/id/approve";
+
+/** The approve page of an identity's own web app. Mirrors Go `identity.ApproveURL`. */
+export function approveUrl(identity: string, scheme = "https"): string {
+  return `${scheme || "https"}://${String(identity).toLowerCase()}${APPROVE_PATH}`;
+}
+
+/**
+ * A sign-in QR when the RP knows the identity: its approve page with the
+ * request link in the fragment. Mirrors Go `identity.ApproveLink`.
+ */
+export function approveLink(approvePageUrl: string, requestLink: string): string {
+  return `${approvePageUrl.replace(/#+$/, "")}#auth=${encodeURIComponent(requestLink)}`;
 }
 
 /** `poweur://auth?request_uri=…` for a request by reference. */
@@ -822,6 +855,17 @@ function displayLine(value: unknown, max: number): string {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max);
 }
 
+/** Exactly SIGNIN_MATCH_CHOICES distinct two-digit codes, or none. Mirrors Go `cleanChoices`. */
+function cleanChoices(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length !== SIGNIN_MATCH_CHOICES) return undefined;
+  const seen = new Set<string>();
+  for (const c of value) {
+    if (typeof c !== "string" || !/^\d{2}$/.test(c) || seen.has(c)) return undefined;
+    seen.add(c);
+  }
+  return [...seen];
+}
+
 /**
  * Fetch where a pending request was started, from the RP's `context_uri`.
  * Resolves to `null` when the RP publishes none. Mirrors Go `FetchContext`.
@@ -860,6 +904,8 @@ export async function fetchSignInContext(
       browser: displayLine(raw.browser, 60),
       client: displayLine(raw.client, 80),
       client_host: displayLine(raw.client_host, 253),
+      match_choices: cleanChoices(raw.match_choices),
+      push_uri: typeof raw.push_uri === "string" && sameOrigin(meta.origin, raw.push_uri) ? raw.push_uri : undefined,
     };
   } finally {
     clearTimeout(timer);

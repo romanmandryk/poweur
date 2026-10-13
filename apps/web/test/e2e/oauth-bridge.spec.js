@@ -7,8 +7,8 @@ import { authorizeURL, pkce, redeem, startBridge, startRP } from "../helpers/bri
  * EPIC-022: an OIDC application signs in a Poweur ID through the bridge, with
  * the real web client as the signer. Nothing signed ever travels in a URL:
  * the signer POSTs, then follows the bridge's resume link (same device), or
- * the starting page continues by itself once the approving device sent the
- * code it showed (another device).
+ * the starting page continues by itself once another device approved — with
+ * nothing to type after a scan, and a number to pick after a push (EPIC-028).
  */
 test.describe("OAuth bridge through the web signer", () => {
   let relay;
@@ -34,13 +34,12 @@ test.describe("OAuth bridge through the web signer", () => {
     await expect(page.locator("#approve-identity")).toHaveText(identity);
   }
 
-  async function unlockAndApprove(page, code = "") {
+  async function unlockAndApprove(page) {
     await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toBeVisible({ timeout: 45_000 });
     if (await page.locator("#btn-auth-unlock").count()) {
       await page.click("#btn-auth-unlock");
     }
     await expect(page.locator("#btn-auth-approve")).toBeVisible({ timeout: 45_000 });
-    if (code) await page.fill("#auth-match", code);
     await page.click("#btn-auth-approve");
   }
 
@@ -52,7 +51,7 @@ test.describe("OAuth bridge through the web signer", () => {
     await identifyAt(page, authorizeURL(bridge, rp, { challenge }), identity);
     // The browser holds its keys in the relay's web app, the operator default.
     await page.click(`a:has-text("Continue at ${relay.addr}")`);
-    await expect(page).toHaveURL(/\/app\/\?auth=/);
+    await expect(page).toHaveURL(/\/id\/\?auth=/);
     await expect(page.locator("text=Poweur OAuth bridge").first()).toBeVisible({ timeout: 45_000 });
     await unlockAndApprove(page);
 
@@ -72,7 +71,7 @@ test.describe("OAuth bridge through the web signer", () => {
     expect(claims.sub).not.toContain("oauthweb");
   });
 
-  test("another device: the code on the starting screen lets it continue", async ({ browser }) => {
+  test("another device: the QR opens the identity's approve page, nothing to type", async ({ browser }) => {
     const phone = await browser.newContext();
     const desktop = await browser.newContext();
     try {
@@ -83,21 +82,24 @@ test.describe("OAuth bridge through the web signer", () => {
       const screen = await desktop.newPage();
       const { verifier, challenge } = pkce();
       await identifyAt(screen, authorizeURL(bridge, rp, { challenge, state: "desk" }), identity);
-      // A desktop leads with the phone: the code to type and the request.
+      // A desktop leads with the phone: a QR, and no number before any push.
       await expect(screen.locator("h1")).toHaveText("Approve on your phone");
-      const match = (await screen.locator("#match-code").textContent()).trim();
-      // The QR carries a short link to the request, not the request itself.
-      const link = (await screen.locator("#request-code").textContent()).trim();
-      expect(link).toMatch(new RegExp(`^${bridge.issuer}/r/[0-9A-Z]{8}$`));
+      await expect(screen.locator("#match-code")).toHaveCount(0);
+      // The QR is the identity's own approve page, the request's short link in its fragment.
+      const qrLink = (await screen.locator("#request-code").textContent()).trim();
+      expect(qrLink).toMatch(new RegExp(`^http://${identity.replace(/\./g, "\\.")}/id/approve#auth=`));
+      const fragment = qrLink.slice(qrLink.indexOf("#"));
+      expect(decodeURIComponent(fragment.slice("#auth=".length))).toMatch(new RegExp(`^${bridge.issuer}/r/[0-9A-Z]{8}$`));
 
-      // The phone's camera opens it: a page offering this phone's signers.
-      await signer.goto(link);
-      await expect(signer.locator("h1")).toHaveText("Approve on this phone");
-      await signer.click(`a.handoff-signer:has-text("${relay.addr}")`);
+      // The phone's camera opens it. This browser cannot resolve the identity's host, and
+      // here the same app with the phone's keys lives at the relay's own origin.
+      await signer.goto(`${relay.baseUrl}/id/approve${fragment}`);
       await expect(signer.locator("#auth-context")).toContainText("to sign in to E2E application", { timeout: 45_000 });
-      await unlockAndApprove(signer, match);
+      await expect(signer.locator("#auth-warning")).toBeVisible();
+      expect(new URL(signer.url()).hash).toBe(""); // the request leaves the address bar
+      await unlockAndApprove(signer);
       await expect(signer.locator("#auth-result-note")).toContainText("Go back to the screen");
-      await expect(signer).toHaveURL(/\/app\//);
+      await expect(signer).toHaveURL(/\/id\/approve/);
 
       // The desktop page notices on its own.
       await expect(screen.locator("h1")).toHaveText("Allow E2E application?", { timeout: 30_000 });
@@ -113,7 +115,7 @@ test.describe("OAuth bridge through the web signer", () => {
     }
   });
 
-  test("pushed to the app: a trusted bridge's request, approved with the desktop's code", async ({ browser }) => {
+  test("pushed to the app: a trusted bridge's request, approved by picking the desktop's number", async ({ browser }) => {
     const phone = await browser.newContext();
     const desktop = await browser.newContext();
     try {
@@ -141,16 +143,15 @@ test.describe("OAuth bridge through the web signer", () => {
       await expect(app.locator("#auth-prompts")).toContainText(`via ${bridge.pushIdentity}`);
       await app.click(".btn-prompt-review");
       await expect(app.locator("#auth-context")).toContainText("to sign in to E2E application", { timeout: 45_000 });
-      // From a push, the code is required.
+      // From a push: three numbers in place of Approve, and the desktop's is one of them.
       if (await app.locator("#btn-auth-unlock").count()) {
         await app.click("#btn-auth-unlock");
         await app.click("#btn-do-unlock");
       }
-      await expect(app.locator("#btn-auth-approve")).toBeVisible({ timeout: 45_000 });
-      await app.click("#btn-auth-approve");
-      await expect(app.locator("text=Enter the 2-digit code")).toBeVisible();
-      await app.fill("#auth-match", match);
-      await app.click("#btn-auth-approve");
+      await expect(app.locator("#auth-pick")).toBeVisible({ timeout: 45_000 });
+      await expect(app.locator("#btn-auth-approve")).toHaveCount(0);
+      await expect(app.locator(".auth-pick-choice")).toHaveCount(3);
+      await app.locator(".auth-pick-choice", { hasText: match }).click();
       await expect(app.locator("#auth-result-note")).toContainText("Go back to the screen");
 
       await expect(screen.locator("h1")).toHaveText("Allow E2E application?", { timeout: 30_000 });

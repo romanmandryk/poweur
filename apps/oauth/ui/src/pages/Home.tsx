@@ -25,7 +25,7 @@ function SignedOut({ page }: { page: Page<HomeData> }) {
         {launcher && (
           <p className="mt-5 text-sm text-muted">
             New to Poweur?{" "}
-            <a href={`${launcher.url}/app/`} target="_blank" rel="noopener">
+            <a href={`${launcher.url}/id/`} target="_blank" rel="noopener">
               Create an ID
             </a>
           </p>

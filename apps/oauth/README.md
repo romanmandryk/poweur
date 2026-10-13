@@ -15,7 +15,7 @@ Roadmap: [EPIC-022](../../epics/EPIC-022-oauth-oidc-indieauth-bridge.md).
 go run ./cmd/poweur-oauth gen-key > oauth-kek.txt        # back this up
 export OAUTH_ISSUER=http://oauth.localhost:8090           # https in production; the host needs a dot
 export OAUTH_KEY_ENCRYPTION_KEY_FILE=$PWD/oauth-kek.txt
-export OAUTH_DEFAULT_SIGNER=http://localhost:8080/app/    # a web signer to offer
+export OAUTH_DEFAULT_SIGNER=http://localhost:8080/id/    # a web signer to offer
 export RESOLVER_ALLOW_PRIVATE=1 POWEUR_RESOLVER_SCHEME=http   # local relays only
 go run ./cmd/poweur-oauth
 ```

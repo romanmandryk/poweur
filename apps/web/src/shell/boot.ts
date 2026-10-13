@@ -17,6 +17,7 @@ import { fromBase64url } from "../lib/vault.js";
 import { modeNow, resolveMode } from "../lib/mode.js";
 import { beginSignInApproval } from "../actions/signin";
 import { pairLinkFromAppUrl, signInCodeFromAppUrl } from "../lib/app-link";
+import { takeApproveLink } from "../lib/approve";
 import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { isPublicAnonymousRoute } from "../screens/PublicAnonymous";
@@ -116,8 +117,8 @@ function presentPairLink(link: string) {
   useRoute.setState({ page: "settings", sub: "pair", params: {} });
 }
 
-/** Settings → Approve sign-in, with the request filled in and checked. */
-function presentSignInLink(input: string, requireCode = false) {
+/** The sign-in approval screen, with the request filled in and checked. */
+function presentSignInLink(input: string, crossDevice = false, noApp = false) {
   const value = input.trim();
   if (!value) return;
   protectAuthRoute = true;
@@ -126,7 +127,7 @@ function presentSignInLink(input: string, requireCode = false) {
   // Cold start can deliver the same link twice (launch URL and appUrlOpen).
   if (route.page === "settings" && route.sub === "auth" && auth.input === value && auth.loading) return;
   useRoute.setState({ page: "settings", sub: "auth", params: {} });
-  void beginSignInApproval(value, { requireCode });
+  void beginSignInApproval(value, { crossDevice, noApp });
 }
 
 function installAppUrlListener() {
@@ -197,8 +198,10 @@ function startBoot(launchUrl: string): Promise<void> {
   // page load carries either in its own address.
   const launchPair = pairLinkFromAppUrl(launchUrl);
   const fromLaunch = launchPair ? "" : (signInCodeFromAppUrl(launchUrl) ?? "");
-  const authInput = fromLaunch || locationAuthInput();
   const pairLink = launchPair || takePairLink();
+  // An approve page (/id/approve#auth=…) is a QR from another screen (EPIC-028).
+  const approve = launchUrl || pairLink ? { link: "", noApp: false } : takeApproveLink();
+  const authInput = fromLaunch || approve.link || locationAuthInput();
   const handedOver = adoptHandOff();
   refreshSession();
   const identity = getActiveIdentity();
@@ -211,7 +214,7 @@ function startBoot(launchUrl: string): Promise<void> {
   } else if (authInput) {
     // A QR open is always another device's screen. A `?auth=` page load is
     // the same browser that started the sign-in.
-    presentSignInLink(authInput, Boolean(fromLaunch));
+    presentSignInLink(authInput, Boolean(fromLaunch || approve.link), approve.noApp);
   } else if (publicAnonymous) {
     // Signed-out composer on the recipient host. Do not open or unlock an
     // identity left in this origin's storage.

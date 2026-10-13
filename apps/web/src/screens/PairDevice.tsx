@@ -18,7 +18,8 @@ import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
 import { toast } from "../state/ui";
 import { Button } from "../ui/Button";
-import { Input, Label, Note } from "../ui/Field";
+import { Note } from "../ui/Field";
+import { CodeInput } from "../ui/CodeInput";
 import { SubPage } from "../ui/Layout";
 
 type Phase =
@@ -36,7 +37,7 @@ export function PairDevice() {
   const pendingLink = useData((state) => state.pairInput);
   const push = useRoute((state) => state.push);
   const pop = useRoute((state) => state.pop);
-  const field = useRef<HTMLInputElement>(null);
+  const [typed, setTyped] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "input" });
   const live = useRef<{ enroll: any; timer: ReturnType<typeof setTimeout> | null; stopped: boolean }>({
     enroll: null,
@@ -157,22 +158,19 @@ export function PairDevice() {
             On the new device, choose <strong className="text-fg">Add this device</strong>. Scan its code with this phone's camera, or type the
             code it shows.
           </p>
-          <Label htmlFor="pair-code">Code from the new device</Label>
-          <Input
-            ref={field}
+          <p className="mb-2 text-center text-sm font-semibold">Code from the new device</p>
+          <CodeInput
             id="pair-code"
-            type="text"
-            placeholder="K7QM-4XP2"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-            className="text-center font-mono text-2xl tracking-[.12em] uppercase"
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void begin(field.current?.value ?? "");
+            label="Pairing code, 8 characters"
+            autoFocus
+            onEdit={() => setTyped("")}
+            onComplete={(code) => {
+              setTyped(code);
+              void begin(code);
             }}
+            onLink={(link) => void begin(link)}
           />
-          <Button id="btn-pair-continue" className="mt-4" onClick={() => void begin(field.current?.value ?? "")}>
+          <Button id="btn-pair-continue" className="mt-4" disabled={!typed} onClick={() => void begin(typed)}>
             Continue
           </Button>
         </>

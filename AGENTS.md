@@ -86,7 +86,7 @@ match Go, or reconsider the protocol change.
 
 ### Web client tests (Vitest + Playwright)
 
-`apps/web` is the React + Tailwind client (Vite, TypeScript), served by the relay at `/app/`
+`apps/web` is the React + Tailwind client (Vite, TypeScript), served by the relay at `/id/`
 and staged into the Capacitor shell. Its live-relay and e2e suites spawn a **real Go relay**
 (`go run` with `POWEUR_DATA` + `HOSTED_DOMAINS` + `WEB_STATIC_DIR=apps/web/dist`), same spirit
 as CLI integration tests.
@@ -97,7 +97,7 @@ pnpm --filter @poweur/web exec playwright install chromium   # once, for e2e
 pnpm web:typecheck
 pnpm web:test      # Vitest: screens, components, stores, lib + live-relay
 pnpm web           # vite build → apps/web/dist (what the relay and the shell serve)
-pnpm web:test:e2e  # builds, then Playwright against /app/ on a real relay
+pnpm web:test:e2e  # builds, then Playwright against /id/ on a real relay
 ```
 
 The app bundles `@poweur/client` from the workspace, so there is no vendored copy to refresh:
@@ -186,7 +186,7 @@ whole browser suite and the Docker monitoring smoke test) run nightly and by han
 ```
 apps/api          Go relay
 apps/cli          Go CLI
-apps/web          React + Tailwind client (served at /app/, wrapped by apps/mobile)
+apps/web          React + Tailwind client (served at /id/, wrapped by apps/mobile)
 apps/demoapps     hello.poweur.net bot + guestbook.poweur.net (Go, built on apps/cli/pkg/cli; ship in the relay image)
 apps/oauth        OAuth 2.0 / OIDC / IndieAuth bridge (EPIC-022), a separate service
 apps/oauth/ui     its pages: React + Tailwind (web app tokens), embedded into the Go binary

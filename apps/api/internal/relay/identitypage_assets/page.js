@@ -21,7 +21,7 @@ function idHints() {
 
 function appOn(host, query) {
   const port = location.port ? `:${location.port}` : "";
-  return `${location.protocol}//${host}${port}/app/${query}`;
+  return `${location.protocol}//${host}${port}/id/${query}`;
 }
 
 function link(className, href, text) {
@@ -38,13 +38,16 @@ function personalize() {
   if (!card || !actions) return;
   const identity = card.getAttribute("data-identity") || "";
   const hints = idHints();
+  // No hints: a visitor, or the owner on a browser that has never used this
+  // ID — the server-rendered "Sign in as …" stays for them.
   if (!hints.length) return;
   const primary = document.getElementById("btn-message");
   const also = document.getElementById("message-also");
 
   if (hints.includes(identity)) {
-    // The owner, on their own page.
-    const inbox = link("primary", "/app/", "Open your inbox");
+    // The owner, on their own page: "Open your inbox" says it all.
+    document.getElementById("btn-signin-as")?.closest("p")?.remove();
+    const inbox = link("primary", "/id/", "Open your inbox");
     inbox.id = "btn-inbox";
     if (primary) primary.replaceWith(inbox);
     else actions.prepend(inbox);

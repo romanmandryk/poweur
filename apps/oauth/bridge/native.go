@@ -54,7 +54,7 @@ func (s *Server) handleNativeContext(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusNotFound, "invalid_request", "no sign-in is waiting for this request")
 		return
 	}
-	c := signin.SignInContext{RequestID: requestID, StartedAt: t.CreatedAt, Browser: t.Browser}
+	c := signin.SignInContext{RequestID: requestID, StartedAt: t.CreatedAt, Browser: t.Browser, MatchChoices: t.MatchChoices, PushURI: s.pushURI(t)}
 	if t.Authorize != nil {
 		c.Client = t.Authorize.ClientName
 		if u, err := url.Parse(t.Authorize.RedirectURI); err == nil {
@@ -223,11 +223,6 @@ func (s *Server) handleIdentify(w http.ResponseWriter, r *http.Request) {
 		s.renderError(w, r, http.StatusInternalServerError, "Could not create the sign-in request.")
 		return
 	}
-	match, err := signin.NewMatchCode()
-	if err != nil {
-		s.renderError(w, r, http.StatusInternalServerError, "Could not create the sign-in request.")
-		return
-	}
 	expires, _ := time.Parse(time.RFC3339, req.ExpiresAt)
 	signers := s.discoverSigners(r.Context(), id, res)
 	code, err := s.store.NewRequestCode(r.Context(), t.ID, expires)
@@ -248,7 +243,7 @@ func (s *Server) handleIdentify(w http.ResponseWriter, r *http.Request) {
 		t.RequestID = req.RequestID
 		t.Request = encoded
 		t.RequestExpires = expires
-		t.Match = match
+		t.Match, t.MatchChoices, t.Pushes, t.LastPush = "", nil, 0, time.Time{}
 		t.RequestCode = code
 		t.Signers = signers
 		return nil
@@ -297,7 +292,7 @@ func (s *Server) discoverSigners(ctx context.Context, id string, res identity.Re
 		if scheme == "" {
 			scheme = "https"
 		}
-		add(Signer{Label: "Continue in your Poweur app", URL: scheme + "://" + id + "/app/"})
+		add(Signer{Label: "Continue in your Poweur app", URL: scheme + "://" + id + "/id/"})
 	}
 	if s.cfg.DefaultSigner != "" {
 		u, _ := url.Parse(s.cfg.DefaultSigner)
@@ -344,7 +339,8 @@ func (s *Server) handleNativeCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	crossDevice := d.Match != ""
+	crossDevice := d.CrossDevice()
+	pausedFor := ""
 
 	// Claim before verifying: one approval per transaction is ever processed.
 	t, err := s.store.UpdateTxn(ctx, id, func(t *Txn) error {
@@ -361,14 +357,22 @@ func (s *Server) handleNativeCallback(w http.ResponseWriter, r *http.Request) {
 			return errClaimed
 		}
 		t.Claimed = true
-		if crossDevice && !signin.MatchCodesEqual(t.Match, d.Match) {
-			t.Err = "The code entered on the approving device did not match this screen."
+		// A pushed request needs the number from this screen (EPIC-028); a
+		// scanned or opened one needs none, whatever an older signer sends.
+		if crossDevice && t.Match != "" && !signin.MatchCodesEqual(t.Match, d.Match) {
+			t.Err = "The number picked on the approving device was not the one on this screen."
+			pausedFor = t.Identity
 			return commitAnd(signin.ErrMatchCode)
 		}
 		return nil
 	})
 	switch {
 	case errors.Is(err, signin.ErrMatchCode):
+		if pausedFor != "" {
+			if perr := s.store.PausePushes(ctx, pausedFor, now.Add(pushPause)); perr != nil {
+				s.log.Warn("pause pushes", "err", perr)
+			}
+		}
 		s.audit(ctx, "native.match_failed", map[string]any{"txn": shortID(id)})
 		writeOAuthError(w, http.StatusForbidden, "access_denied", err.Error())
 		return
@@ -532,6 +536,9 @@ func (s *Server) handleTxnStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.Status == "complete" {
 		st.Next = "/t/" + t.ID + "/continue"
+	}
+	if st.Status == "pending" {
+		st.Match = t.Match // set once pushed, from here or from the phone
 	}
 	writeJSON(w, http.StatusOK, st)
 }

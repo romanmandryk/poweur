@@ -8,7 +8,7 @@ describe("signInCodeFromAppUrl", () => {
   });
 
   it("ignores other schemes, hosts, and links with no request", () => {
-    expect(signInCodeFromAppUrl("https://alice.poweur.net/app/?auth=abc")).toBeNull();
+    expect(signInCodeFromAppUrl("https://alice.poweur.net/id/?auth=abc")).toBeNull();
     expect(signInCodeFromAppUrl("poweur://other?request=abc")).toBeNull();
     expect(signInCodeFromAppUrl("poweur://auth")).toBeNull();
     expect(signInCodeFromAppUrl("not a url")).toBeNull();
@@ -36,7 +36,7 @@ describe("pairLinkFromAppUrl (E11-T8)", () => {
   it("takes the app form and the web form, whole", () => {
     const app = `poweur://pair?pair=K7QM4XP2.${C}&id=bob.poweur.net`;
     expect(pairLinkFromAppUrl(app)).toBe(app);
-    const web = `https://bob.poweur.net/app/#pair=K7QM4XP2.${C}&id=bob.poweur.net`;
+    const web = `https://bob.poweur.net/id/#pair=K7QM4XP2.${C}&id=bob.poweur.net`;
     expect(pairLinkFromAppUrl(web)).toBe(web);
   });
   it("leaves sign-in links and junk alone", () => {

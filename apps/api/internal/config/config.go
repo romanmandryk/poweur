@@ -81,7 +81,7 @@ type Config struct {
 	Telemetry           telemetry.Config
 	TelemetryProxyError error
 	ListenAddr          string
-	// WebStaticDir, when set, serves the bundled web client SPA under GET /app/.
+	// WebStaticDir, when set, serves the bundled web client SPA under GET /id/.
 	WebStaticDir string
 	RelayAddress string
 	RelayScheme  string
@@ -206,6 +206,17 @@ type Config struct {
 	// PushCoalesce is how long the relay gathers events for one identity
 	// before pushing, so a burst is one notification.
 	PushCoalesce time.Duration
+
+	// AppLinksIOSAppIDs are the store app's "<TeamID>.<bundle id>" values
+	// (APP_LINKS_IOS_APP_IDS). With them the relay serves
+	// /.well-known/apple-app-site-association so a scanned approve link
+	// (/id/approve, EPIC-028) opens the installed app. Empty: not served.
+	AppLinksIOSAppIDs []string
+	// AppLinksAndroidPackage and AppLinksAndroidSHA256 (APP_LINKS_ANDROID_*)
+	// are the Android app and its signing-certificate fingerprints for
+	// /.well-known/assetlinks.json. Both are needed to serve it.
+	AppLinksAndroidPackage string
+	AppLinksAndroidSHA256  []string
 }
 
 // DefaultPushEndpointHosts are the browser vendors' push services.
@@ -342,6 +353,9 @@ func FromEnv() Config {
 		PushVAPIDSubject:        strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
 		PushEndpointHosts:       pushEndpointHostsFromEnv(),
 		PushCoalesce:            getenvDuration("PUSH_COALESCE", DefaultPushCoalesce),
+		AppLinksIOSAppIDs:       splitList(os.Getenv("APP_LINKS_IOS_APP_IDS")),
+		AppLinksAndroidPackage:  strings.TrimSpace(os.Getenv("APP_LINKS_ANDROID_PACKAGE")),
+		AppLinksAndroidSHA256:   splitList(os.Getenv("APP_LINKS_ANDROID_SHA256")),
 		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
 		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
 		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),
@@ -513,6 +527,18 @@ func getenvBoolDefault(key string, fallback bool) bool {
 	default:
 		return false
 	}
+}
+
+// splitList is a comma-separated list kept as written: Apple Team IDs and
+// certificate fingerprints are upper case.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func splitCSV(s string) []string {

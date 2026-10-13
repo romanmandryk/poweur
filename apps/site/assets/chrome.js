@@ -5,7 +5,7 @@
   const LINKS = {
     docs: "/docs", // the Docusaurus build, served under the website (apps/docs, baseUrl /docs/)
     github: "https://github.com/romanmandryk/poweur",
-    app: "https://poweur.net/app/",
+    app: "https://poweur.net/id/",
   };
 
   function navLink(root, here, href, label, extra = "") {

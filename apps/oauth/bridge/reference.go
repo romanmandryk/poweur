@@ -47,19 +47,8 @@ func (s *Server) handleRequestByReference(w http.ResponseWriter, r *http.Request
 		}
 		s.renderError(w, r, http.StatusGone, "This sign-in code expired or was already used. Start again on the other screen.")
 	}
-	code, err := identity.NormalizeShortCode(r.PathValue("code"))
+	t, err := s.txnByRequestCode(r)
 	if err != nil {
-		gone()
-		return
-	}
-	id, err := s.store.TxnIDByRequestCode(r.Context(), code)
-	if err != nil {
-		gone()
-		return
-	}
-	t, err := s.store.GetTxn(r.Context(), id)
-	// Only the transaction's current request, and only while it waits.
-	if err != nil || t.RequestCode != code || t.usable() != nil || t.Claimed || t.Request == "" || s.now().After(t.RequestExpires) {
 		gone()
 		return
 	}
@@ -84,4 +73,22 @@ func (s *Server) handleRequestByReference(w http.ResponseWriter, r *http.Request
 		page.Signers = append(page.Signers, signerPage{Label: sg.Label, Href: base, Note: sg.Note, Own: !sg.Default})
 	}
 	s.render(w, r, http.StatusOK, "handoff", "Approve this sign-in", page)
+}
+
+// txnByRequestCode is the transaction whose current request /r/{code} names,
+// only while that request can still be approved.
+func (s *Server) txnByRequestCode(r *http.Request) (*Txn, error) {
+	code, err := identity.NormalizeShortCode(r.PathValue("code"))
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	id, err := s.store.TxnIDByRequestCode(r.Context(), code)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	t, err := s.store.GetTxn(r.Context(), id)
+	if err != nil || t.RequestCode != code || t.usable() != nil || t.Claimed || t.Request == "" || s.now().After(t.RequestExpires) {
+		return nil, ErrNotFound
+	}
+	return t, nil
 }

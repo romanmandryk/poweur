@@ -7,7 +7,7 @@ import { registerIdentity, stubPasskeys } from "../helpers/app-ui.mjs";
  * Notifications and install on the web (EPIC-009 E09-T12).
  *
  * Headless Chromium has no push service to subscribe to, so the browser half
- * stops at what it can prove: the service worker installs at /app/, the
+ * stops at what it can prove: the service worker installs at /id/, the
  * relay's push key reaches the Settings row, and the enable button is offered.
  * Delivery itself is covered by apps/integration TestINT_WEBPUSH_01 and the
  * relay's push tests, which decrypt what a device would receive.
@@ -34,8 +34,8 @@ test.describe("notifications on this device", () => {
     await registerIdentity(page, relay, `push${Date.now().toString(36)}`);
 
     const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
-    expect(new URL(scope).pathname).toBe("/app/");
-    const sw = await page.request.get(`${relay.baseUrl}/app/sw.js`);
+    expect(new URL(scope).pathname).toBe("/id/");
+    const sw = await page.request.get(`${relay.baseUrl}/id/sw.js`);
     expect(sw.ok()).toBeTruthy();
     expect(sw.headers()["cache-control"]).toBe("no-cache");
 

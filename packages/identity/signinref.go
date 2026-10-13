@@ -41,6 +41,15 @@ func SignInRequestURI(input string) (string, bool) {
 		}
 		return "", false
 	case "https", "http":
+		// An approve link carries the reference in its fragment (EPIC-028).
+		if frag, err := url.ParseQuery(u.EscapedFragment()); err == nil {
+			if frag.Get("auth") != "" {
+				return httpLink(frag.Get("auth"))
+			}
+			if frag.Get("pair") != "" {
+				return "", false // a pairing link on the same page
+			}
+		}
 		q := u.Query()
 		if q.Get("request") != "" {
 			return "", false // a web signer link carrying the request itself
@@ -54,6 +63,43 @@ func SignInRequestURI(input string) (string, bool) {
 		return httpLink(v)
 	}
 	return "", false
+}
+
+// ApprovePath is where an identity's web app approves sign-ins and new
+// devices (EPIC-028): https://<identity>/id/approve.
+const ApprovePath = "/id/approve"
+
+// ApproveURL is the approve page of identity's own web app. scheme is "https"
+// in production; a port, if any, belongs in identity's host.
+func ApproveURL(scheme, identity string) string {
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + strings.ToLower(identity) + ApprovePath
+}
+
+// ApprovePageForSigner is the approve page beside a web signer: "approve"
+// next to the app, so https://alice.poweur.net/id/ gives
+// https://alice.poweur.net/id/approve. "" for anything that is not an http(s)
+// URL with a host.
+func ApprovePageForSigner(signer string) string {
+	base, err := url.Parse(strings.TrimSpace(signer))
+	if err != nil || base.Host == "" || (base.Scheme != "https" && base.Scheme != "http") {
+		return ""
+	}
+	base.RawQuery, base.Fragment, base.User = "", "", nil
+	if !strings.HasSuffix(base.Path, "/") {
+		base.Path += "/"
+	}
+	return base.ResolveReference(&url.URL{Path: "approve"}).String()
+}
+
+// ApproveLink is what a sign-in QR carries when the relying party knows the
+// identity: that identity's approve page with the request link in the
+// fragment, so a phone's camera opens the place that holds the keys and no
+// server logs the request.
+func ApproveLink(approveURL, requestLink string) string {
+	return strings.TrimRight(approveURL, "#") + "#auth=" + url.QueryEscape(requestLink)
 }
 
 func httpLink(v string) (string, bool) {

@@ -1,6 +1,6 @@
 /**
  * Browser observability facade over @poweur/faro (Grafana Faro, first-party).
- * The relay says where to send it in GET /app/observability.json, so it can be
+ * The relay says where to send it in GET /id/observability.json, so it can be
  * turned off or moved without a rebuild; no Faro provider there loads nothing.
  *
  * Two tiers, as in the relay's own logs (EPIC-013):
@@ -72,11 +72,11 @@ export function screenName(page: string, sub: string | null): string {
   return sub ? `${page}/${sub}` : page;
 }
 
-/** Relative on /app/; absolute to the relay inside the Capacitor shell. */
+/** Relative on /id/; absolute to the relay inside the Capacitor shell. */
 export function observabilityConfigUrl(): string {
   if (!isShellRuntime()) return "observability.json";
   const relay = defaultRelayUrl().replace(/\/$/, "");
-  return relay ? `${relay}/app/observability.json` : "observability.json";
+  return relay ? `${relay}/id/observability.json` : "observability.json";
 }
 
 export function loadConfig(source: string | ObservabilityConfig): Promise<ObservabilityConfig> {

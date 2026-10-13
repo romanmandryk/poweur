@@ -201,16 +201,18 @@ func TestVectors_Pairing(t *testing.T) {
 }
 
 var signInReferenceCases = map[string]string{
-	"https://oauth.poweur.org/r/K7QM4XP2":                                        "https://oauth.poweur.org/r/K7QM4XP2",
-	"  https://oauth.poweur.org/r/K7QM4XP2 ":                                     "https://oauth.poweur.org/r/K7QM4XP2",
-	"poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2":    "https://oauth.poweur.org/r/K7QM4XP2",
-	"https://poweur.net/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2": "https://oauth.poweur.org/r/K7QM4XP2",
-	"http://oauth.localhost:8090/r/K7QM4XP2":                                     "http://oauth.localhost:8090/r/K7QM4XP2",
-	"poweur://auth?request=eyJ4IjoxfQ":                                           "",
-	"https://poweur.net/app/?auth=eyJ4IjoxfQ":                                    "",
-	"eyJwb3dldXJfYXV0aCI6IjEifQ":                                                 "",
-	"poweur://auth?request_uri=javascript%3Aalert(1)":                            "",
-	"ftp://oauth.poweur.org/r/K7QM4XP2":                                          "",
+	"https://oauth.poweur.org/r/K7QM4XP2":                                                    "https://oauth.poweur.org/r/K7QM4XP2",
+	"  https://oauth.poweur.org/r/K7QM4XP2 ":                                                 "https://oauth.poweur.org/r/K7QM4XP2",
+	"poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2":                "https://oauth.poweur.org/r/K7QM4XP2",
+	"https://poweur.net/app/?auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2":             "https://oauth.poweur.org/r/K7QM4XP2",
+	"http://oauth.localhost:8090/r/K7QM4XP2":                                                 "http://oauth.localhost:8090/r/K7QM4XP2",
+	"poweur://auth?request=eyJ4IjoxfQ":                                                       "",
+	"https://poweur.net/app/?auth=eyJ4IjoxfQ":                                                "",
+	"https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2": "https://oauth.poweur.org/r/K7QM4XP2",
+	"https://alice.poweur.net/id/approve#auth=eyJ4IjoxfQ":                                    "",
+	"eyJwb3dldXJfYXV0aCI6IjEifQ":                                                             "",
+	"poweur://auth?request_uri=javascript%3Aalert(1)":                                        "",
+	"ftp://oauth.poweur.org/r/K7QM4XP2":                                                      "",
 }
 
 var signInOriginCases = []struct {
@@ -297,5 +299,42 @@ func TestFetchSignInRequest(t *testing.T) {
 	}
 	if _, _, err := FetchSignInRequest(context.Background(), srv.Client(), srv.URL+"/r/JUNK"); !errors.Is(err, ErrSignInMalformed) {
 		t.Fatalf("junk = %v", err)
+	}
+}
+
+func TestApproveLink(t *testing.T) {
+	if got := ApproveURL("", "Alice.Poweur.net"); got != "https://alice.poweur.net/id/approve" {
+		t.Fatalf("ApproveURL = %q", got)
+	}
+	if got := ApproveURL("http", "alice.localhost:8089"); got != "http://alice.localhost:8089/id/approve" {
+		t.Fatalf("ApproveURL dev = %q", got)
+	}
+	for signer, want := range map[string]string{
+		"https://alice.poweur.net/id/":      "https://alice.poweur.net/id/approve",
+		"https://alice.poweur.net/id":       "https://alice.poweur.net/id/approve",
+		"https://alice.poweur.net/app/?x=1": "https://alice.poweur.net/app/approve",
+		"http://alice.localhost:8089/id/":   "http://alice.localhost:8089/id/approve",
+		"poweur://auth":                     "",
+		"not a url":                         "",
+	} {
+		if got := ApprovePageForSigner(signer); got != want {
+			t.Errorf("ApprovePageForSigner(%q) = %q, want %q", signer, got, want)
+		}
+	}
+	link := ApproveLink("https://alice.poweur.net/id/approve", "https://oauth.poweur.org/r/K7QM4XP2")
+	if link != "https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2" {
+		t.Fatalf("ApproveLink = %q", link)
+	}
+	if ref, ok := SignInRequestURI(link); !ok || ref != "https://oauth.poweur.org/r/K7QM4XP2" {
+		t.Fatalf("round trip = %q %v", ref, ok)
+	}
+	// The pairing form shares the page.
+	c := PairingCommitment("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+	pair := PairingLink(ApproveURL("", "alice.poweur.net"), "alice.poweur.net", "K7QM4XP2", c)
+	if parts, err := ParsePairingLink(pair); err != nil || parts.Code != "K7QM4XP2" || parts.Identity != "alice.poweur.net" {
+		t.Fatalf("pairing on the approve page = %+v %v", parts, err)
+	}
+	if _, ok := SignInRequestURI(pair); ok {
+		t.Fatal("a pairing link read as a sign-in reference")
 	}
 }

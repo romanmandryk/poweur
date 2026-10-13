@@ -43,7 +43,8 @@ export const PAIRING_SAS_DIGITS = 6;
 /** Characters in a short code (Crockford base32, 40 bits). */
 export const SHORT_CODE_LENGTH = 8;
 
-const SHORT_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/** Crockford base32: what a short code is made of. */
+export const SHORT_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /**
  * What a person typed → the canonical code, or null. Spaces and dashes

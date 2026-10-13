@@ -32,7 +32,7 @@ test.describe("Restore from recovery kit", () => {
     await expect(page.locator("#settings-identity #row-recovery-kit")).toHaveCount(0);
 
     // Nothing is left here but the way to add an identity.
-    await page.goto(`${relay.baseUrl}/app/`);
+    await page.goto(`${relay.baseUrl}/id/`);
     if (await page.locator("#btn-welcome-start").count()) await page.click("#btn-welcome-start");
     await page.click("#opt-restore-phrase");
 

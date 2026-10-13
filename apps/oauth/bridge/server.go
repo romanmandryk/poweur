@@ -26,7 +26,7 @@ type Config struct {
 	Store *Store
 
 	// DefaultSigner is the web signer offered when an identity advertises
-	// none, e.g. "https://poweur.net/app/". Optional.
+	// none, e.g. "https://poweur.net/id/". Optional.
 	DefaultSigner string
 	// LauncherURL is where someone without a Poweur ID creates one — a relay
 	// origin serving the web app's claim flow, e.g. "https://poweur.net".
@@ -332,6 +332,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("POST /t/{id}/push", s.handlePush)
 	mux.HandleFunc("POST /t/{id}/creating", s.handleCreating)
 	mux.HandleFunc("GET /r/{code}", s.handleRequestByReference)
+	mux.HandleFunc("POST /r/{code}/push", s.handleRequestPush)
 
 	// OIDC provider (E22-T3).
 	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)
@@ -410,7 +411,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 const (
 	bindingCookie = "poweur_bind"
 	sessionCookie = "poweur_session"
+	// lastIDCookie remembers the last Poweur ID that signed in in this
+	// browser (EPIC-028): the identify step offers "Continue as …" and the
+	// approve step pushes to that ID's app at once. Not a secret, and proof
+	// of nothing — an attacker can type anyone's ID.
+	lastIDCookie = "poweur_last_id"
+	lastIDTTL    = 180 * 24 * time.Hour
 )
+
+// rememberedID is this browser's last signed-in identity, or "".
+func (s *Server) rememberedID(r *http.Request) string {
+	id, err := identity.NormalizeIDInput(s.cookieValue(r, lastIDCookie), !s.secure)
+	if err != nil {
+		return ""
+	}
+	return id
+}
 
 // cookieName adds the __Host- prefix when the issuer is https. Browsers refuse
 // __Host- cookies without Secure, so a local http issuer uses the bare name.
@@ -518,6 +534,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, t *Txn) er
 		return err
 	}
 	s.setCookie(w, sessionCookie, v, s.cfg.SessionTTL)
+	s.setCookie(w, lastIDCookie, t.Identity, lastIDTTL)
 	return nil
 }
 
@@ -530,6 +547,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.DeleteSession(r.Context(), hash)
 	}
 	s.clearCookie(w, sessionCookie)
+	s.clearCookie(w, lastIDCookie) // signing out forgets this browser's ID
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

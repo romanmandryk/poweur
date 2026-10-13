@@ -28,6 +28,11 @@ export type ButtonProps = ComponentProps<"button"> & {
   size?: "md" | "sm";
 };
 
+/** A button's classes, for a link that must look like one (an app link). */
+export function buttonClass(variant: ButtonVariant = "primary", className?: string): string {
+  return cn(BASE, `btn-${variant}`, VARIANTS[variant], "no-underline", className);
+}
+
 export function Button({ variant = "primary", size = "md", type = "button", className, ...props }: ButtonProps) {
   return (
     <button

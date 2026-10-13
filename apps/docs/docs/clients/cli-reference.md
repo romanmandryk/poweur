@@ -500,7 +500,7 @@ its keys, as `~/.poweur/keys/<identity>.seed`), either **use the link** — noth
 device's commitment:
 
 ```bash
-poweur key approve 'https://alice.poweur.net/app/#pair=K7QM4XP2.…&id=alice.poweur.net'
+poweur key approve 'https://alice.poweur.net/id/#pair=K7QM4XP2.…&id=alice.poweur.net'
 ```
 
 — or **type the code**; both machines then show six digits, and this side delivers only once

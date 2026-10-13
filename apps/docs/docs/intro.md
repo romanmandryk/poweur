@@ -76,7 +76,7 @@ All in [one repository](https://github.com/romanmandryk/poweur):
 
 | Component | Path | What it is |
 |-----------|------|------------|
-| Relay | `apps/api` | Go server: identity hosting, message verification and routing, durable inbox, public/system files during the storage-v2 transition. Serves the web app at `/app/`. |
+| Relay | `apps/api` | Go server: identity hosting, message verification and routing, durable inbox, public/system files during the storage-v2 transition. Serves the web app at `/id/`. |
 | Web app | `apps/web` | React client for creating an ID, messaging, contacts, files, sharing, sign-in approval, devices and recovery. |
 | Mobile apps | `apps/mobile` | The web app in a Capacitor shell for iOS and Android, with native key storage. |
 | Go CLI | `apps/cli` | Your ID in the terminal: sync and share project folders, message from scripts, and let AI coding agents use Poweur. Also for CI, bots and operators. |

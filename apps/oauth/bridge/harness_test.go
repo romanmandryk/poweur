@@ -142,9 +142,9 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		Resolver:      h.zone,
 		Keys:          keys,
 		Now:           h.clock,
-		DefaultSigner: "https://poweur.net/app/",
+		DefaultSigner: "https://poweur.net/id/",
 		FetchCapabilities: func(_ context.Context, id string) (identity.Capabilities, error) {
-			return identity.Capabilities{Endpoints: map[string]string{"web_signer": "https://" + id + "/app/"}}, nil
+			return identity.Capabilities{Endpoints: map[string]string{"web_signer": "https://" + id + "/id/"}}, nil
 		},
 		FetchProfile: func(_ context.Context, id string) (identity.Profile, error) {
 			return identity.Profile{Version: 1, DisplayName: "Display " + id, Avatar: "avatar.png"}, nil
@@ -365,6 +365,21 @@ func (h *harness) approve(txnID string, u user) string {
 func (h *harness) deliver(encoded, match string) (int, signin.DeliveryReceipt) {
 	h.t.Helper()
 	body, _ := json.Marshal(signin.Delivery{Response: encoded, Match: match})
+	resp, err := http.Post(h.issuer+"/poweur/callback", "text/plain;charset=UTF-8", strings.NewReader(string(body)))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var receipt signin.DeliveryReceipt
+	_ = json.NewDecoder(resp.Body).Decode(&receipt)
+	return resp.StatusCode, receipt
+}
+
+// deliverPoll is a cross-device delivery (EPIC-028): finish=poll, with the
+// picked number when the sign-in was pushed.
+func (h *harness) deliverPoll(encoded, match string) (int, signin.DeliveryReceipt) {
+	h.t.Helper()
+	body, _ := json.Marshal(signin.Delivery{Response: encoded, Finish: signin.FinishPoll, Match: match})
 	resp, err := http.Post(h.issuer+"/poweur/callback", "text/plain;charset=UTF-8", strings.NewReader(string(body)))
 	if err != nil {
 		h.t.Fatal(err)

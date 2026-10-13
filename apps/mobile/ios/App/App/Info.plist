@@ -19,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<!-- Deep links (EPIC-019 E19-T1): sign-in approvals (EPIC-008) and share
-	     targets arrive as poweur:// URLs. Universal links for a hosted domain
-	     are E19-T3's associated-domains work and are deliberately not here —
-	     a self-hosted identity must never depend on the operator's domain. -->
+	     targets arrive as poweur:// URLs. Universal links for hosted
+	     identities' approve page (EPIC-028) are in App.entitlements; a
+	     self-hosted identity never depends on the operator's domain. -->
 	<!-- App Transport Security. Production relays are HTTPS and stay subject to
 	     ATS in full; the two exceptions below are loopback only, so a developer
 	     can point the shell at `go run .` on their own machine. Nothing off the

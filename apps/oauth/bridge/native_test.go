@@ -59,21 +59,27 @@ func TestAwaitPageOffersSignersCodeAndQR(t *testing.T) {
 		t.Fatalf("await page = %s %+v", p.shown().Page, ap)
 	}
 	if len(ap.Signers) != 2 ||
-		!strings.HasPrefix(ap.Signers[0].Href, "https://alice.poweur.net/app/?auth=") || !ap.Signers[0].Own || // the identity's own signer
-		!strings.HasPrefix(ap.Signers[1].Href, "https://poweur.net/app/?auth=") || ap.Signers[1].Own || // the operator default…
+		!strings.HasPrefix(ap.Signers[0].Href, "https://alice.poweur.net/id/?auth=") || !ap.Signers[0].Own || // the identity's own signer
+		!strings.HasPrefix(ap.Signers[1].Href, "https://poweur.net/id/?auth=") || ap.Signers[1].Own || // the operator default…
 		!strings.Contains(ap.Signers[1].Note, "Works only if this browser already holds") { // …labelled for what it is
 		t.Errorf("signers = %+v", ap.Signers)
 	}
+	link := h.issuer + "/r/" + txn.RequestCode
 	if !strings.HasPrefix(ap.DeepLink, "poweur://auth?request=") || !strings.HasPrefix(ap.QR, `<svg xmlns="http://www.w3.org/2000/svg"`) ||
-		ap.Match != txn.Match || ap.Request != h.issuer+"/r/"+txn.RequestCode || ap.Push != nil {
+		ap.Match != "" || ap.Request != link || ap.Push != nil || ap.AutoPush {
 		t.Errorf("await page = %+v", ap)
+	}
+	// The QR opens the identity's own approve page, request link in the fragment (EPIC-028).
+	if ap.QRLink != identity.ApproveLink("https://alice.poweur.net/id/approve", link) {
+		t.Errorf("QR link = %q", ap.QRLink)
 	}
 	// Nothing a page does not need: no binding or resume hashes.
 	if strings.Contains(p.body, txn.BindingHash) || strings.Contains(p.body, "binding") {
 		t.Error("await page carries the transaction's binding")
 	}
-	if len(txn.Match) != signin.MatchCodeDigits {
-		t.Fatalf("match = %q", txn.Match)
+	// No number until the request is pushed.
+	if txn.Match != "" || txn.MatchChoices != nil {
+		t.Fatalf("match before any push = %q %v", txn.Match, txn.MatchChoices)
 	}
 	if b.status(id).Status != "pending" {
 		t.Fatal("status before approval should be pending")
@@ -161,9 +167,9 @@ func TestCrossDeviceApprovalFinishesThroughThePoll(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
-	match := h.txn(id).Match
 
-	status, receipt := h.deliver(h.approve(id, h.users[alice]), " "+match+" ")
+	// A scanned QR needs no number (EPIC-028).
+	status, receipt := h.deliverPoll(h.approve(id, h.users[alice]), "")
 	if status != 200 || receipt.ResumeURI != "" || receipt.Identity != alice {
 		t.Fatalf("cross-device callback = %d %+v", status, receipt)
 	}
@@ -186,23 +192,87 @@ func TestCrossDeviceApprovalFinishesThroughThePoll(t *testing.T) {
 	}
 }
 
-func TestWrongMatchCodeEndsTheSignIn(t *testing.T) {
+// An older signer that still sends the code it was shown keeps working on a
+// sign-in that was never pushed: the code is ignored.
+func TestOlderSignerCodeIsIgnoredWhenNotPushed(t *testing.T) {
 	h := newHarness(t)
 	b := h.browser()
 	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
-	wrong := "00"
-	if h.txn(id).Match == wrong {
-		wrong = "01"
+	if status, receipt := h.deliver(h.approve(id, h.users[alice]), "42"); status != 200 || receipt.ResumeURI != "" {
+		t.Fatalf("older cross-device delivery = %d %+v", status, receipt)
+	}
+	if st := b.status(id); st.Status != "complete" {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+// A pushed sign-in needs the number from the starting screen; a wrong pick
+// ends it and stops pushes to that identity for a while (EPIC-028).
+func TestWrongPickEndsThePushedSignInAndPausesPushes(t *testing.T) {
+	rec := &pushRecorder{}
+	h := newHarness(t, func(c *Config) { c.Pusher = rec; c.PushIdentity = "bridge.poweur.org" })
+	b := h.browser()
+	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	var pushed struct{ Notice, Match string }
+	if b.fetchJSON("/t/"+id+"/push", &pushed); pushed.Notice != "sent" || len(pushed.Match) != signin.MatchCodeDigits {
+		t.Fatalf("push = %+v", pushed)
+	}
+	txn := h.txn(id)
+	if txn.Match != pushed.Match || len(txn.MatchChoices) != signin.MatchChoiceCount {
+		t.Fatalf("txn after push = %q %v", txn.Match, txn.MatchChoices)
+	}
+	if st := b.status(id); st.Status != "pending" || st.Match != txn.Match {
+		t.Fatalf("starting page status = %+v", st)
+	}
+	wrong := ""
+	for _, c := range txn.MatchChoices {
+		if c != txn.Match {
+			wrong = c
+			break
+		}
 	}
 	approval := h.approve(id, h.users[alice])
-	if status, _ := h.deliver(approval, wrong); status != http.StatusForbidden {
-		t.Fatalf("wrong code = %d", status)
-	}
-	if status, _ := h.deliver(approval, h.txn(id).Match); status == 200 {
-		t.Fatal("a second guess was accepted")
+	if status, _ := h.deliverPoll(approval, ""); status != http.StatusForbidden {
+		t.Fatalf("pushed sign-in approved without a pick = %d", status)
 	}
 	if st := b.status(id); st.Status != "failed" {
 		t.Fatalf("status = %+v", st)
+	}
+
+	// No pick is a wrong pick, so pushes are paused now.
+	h.advance(pushPause)
+
+	// A fresh sign-in: the wrong pick ends it and pauses pushes.
+	id = b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	if b.fetchJSON("/t/"+id+"/push", &pushed); pushed.Notice != "sent" {
+		t.Fatalf("second push = %+v", pushed)
+	}
+	txn = h.txn(id)
+	for _, c := range txn.MatchChoices {
+		if c != txn.Match {
+			wrong = c
+		}
+	}
+	approval = h.approve(id, h.users[alice])
+	if status, _ := h.deliverPoll(approval, wrong); status != http.StatusForbidden {
+		t.Fatalf("wrong pick = %d", status)
+	}
+	if status, _ := h.deliverPoll(approval, txn.Match); status == 200 {
+		t.Fatal("a second pick was accepted")
+	}
+	next := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	if b.fetchJSON("/t/"+next+"/push", &pushed); pushed.Notice != "paused" {
+		t.Fatalf("push after a wrong pick = %+v", pushed)
+	}
+	h.advance(pushPause)
+	next = b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	if b.fetchJSON("/t/"+next+"/push", &pushed); pushed.Notice != "sent" {
+		t.Fatalf("push after the pause = %+v", pushed)
+	}
+	// The right pick on a pushed sign-in completes it.
+	approval = h.approve(next, h.users[alice])
+	if status, _ := h.deliverPoll(approval, h.txn(next).Match); status != 200 {
+		t.Fatalf("right pick = %d", status)
 	}
 }
 
@@ -446,7 +516,7 @@ func TestNewRejectsBadConfig(t *testing.T) {
 		"bad signer":        func(c *Config) { c.DefaultSigner = "javascript:alert(1)" },
 		"bad static client": func(c *Config) { c.StaticClients = []Client{{ID: "x", Name: "X"}} },
 		"bad launcher":      func(c *Config) { c.LauncherURL = "ftp://poweur.net" },
-		"launcher path":     func(c *Config) { c.LauncherURL = "https://poweur.net/app/" },
+		"launcher path":     func(c *Config) { c.LauncherURL = "https://poweur.net/id/" },
 		"bad launcher zone": func(c *Config) { c.LauncherURL = "https://poweur.net"; c.LauncherDomain = "a/b" },
 		"url static client": func(c *Config) {
 			c.StaticClients = []Client{{ID: "c", Name: "C", RedirectURIs: []string{"http://example.com/cb"}}}

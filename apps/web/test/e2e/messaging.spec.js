@@ -43,8 +43,8 @@ test.describe("web ↔ relay messaging E2E", () => {
     const { messages } = await clientFor(bob.identity).inbox();
     expect(messages.some((m) => m.plaintext === secret)).toBeTruthy();
 
-    // SPA still serves under /app/
-    const res = await fetch(`${relay.baseUrl}/app/`);
+    // SPA still serves under /id/
+    const res = await fetch(`${relay.baseUrl}/id/`);
     expect(res.ok).toBeTruthy();
   });
 
@@ -55,7 +55,7 @@ test.describe("web ↔ relay messaging E2E", () => {
     });
 
     await installAppSeam(page);
-    await page.goto(`${relay.baseUrl}/app/`);
+    await page.goto(`${relay.baseUrl}/id/`);
     await expect(page.locator("body > div").first()).not.toBeEmpty();
 
     // Vite bundles @poweur/client into the app; the test seam hands out that copy.

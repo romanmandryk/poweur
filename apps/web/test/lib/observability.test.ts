@@ -56,7 +56,7 @@ describe("observability facade", () => {
   it("loads observability.json from the document on the web, and from the relay in the shell", () => {
     expect(observabilityConfigUrl()).toBe("observability.json");
     shell();
-    expect(observabilityConfigUrl()).toBe("https://poweur.net/app/observability.json");
+    expect(observabilityConfigUrl()).toBe("https://poweur.net/id/observability.json");
   });
 
   it("sends to the page's own origin on the web, and to the relay from the shell", () => {

@@ -30,7 +30,7 @@ services:
       dockerfile: apps/oauth/Dockerfile
     environment:
       OAUTH_ISSUER: https://auth.example.org
-      OAUTH_DEFAULT_SIGNER: https://id.poweur.example/app/
+      OAUTH_DEFAULT_SIGNER: https://id.poweur.example/id/
       OAUTH_KEY_ENCRYPTION_KEY_FILE: /run/secrets/oauth_kek
       # Any signed-in Poweur ID may register applications (the default).
       # A company bridge for its own tools: closed, with OAUTH_STATIC_CLIENTS;

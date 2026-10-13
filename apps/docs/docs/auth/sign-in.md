@@ -84,16 +84,44 @@ One encoded form serves every transport: compact JSON, `base64url` without paddi
 
 | Transport | Form |
 |-----------|------|
-| Deep link | `poweur://auth?request=<b64url>` |
-| QR, copied link | a **request by reference**: `https://<rp>/…/<code>` (below) |
-| Web signer handoff | `https://poweur.net/app/?auth=<b64url>` (URL-escaped), or `?auth=<reference>` |
+| Deep link | `poweur://auth?request=<b64url>`, or `poweur://auth?request_uri=<reference>` |
+| QR, copied link | the identity's **approve page** with a request by reference in its fragment, `https://<identity>/id/approve#auth=<reference>`, when the RP knows the identity; otherwise the reference itself, `https://<rp>/…/<code>` (below) |
+| Web signer handoff | `https://<identity>/id/?auth=<b64url>` (URL-escaped), or `?auth=<reference>` |
 | Redirect | RP navigates the browser to the signer with the same parameter |
-| Cross-device paste | the user copies the encoded **response** back into the RP |
-| Cross-device poll | the signer POSTs to `response_uri` with the match code; the starting page polls the RP's `poll_uri` with its poll secret |
+| Paste back | an RP with no `response_uri`: the user copies the encoded **response** into the RP |
+| Cross-device poll | the signer POSTs to `response_uri` with `"finish": "poll"`; the starting page polls the RP with its poll secret |
 | Same-device return | the signer POSTs to `response_uri`, then opens the `resume_uri` from the receipt |
 
 Decoders also accept raw JSON and padded base64url: a user pasting a code should not have
 to know which they copied.
+
+#### The approve page
+
+When the RP knows which identity is signing in — the OAuth bridge asks first; the guestbook
+remembers who last signed in — its QR is that identity's own **approve page**, carrying the
+request link in the fragment (EPIC-028):
+
+```text
+https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2
+```
+
+The page sits beside the identity's web signer (`endpoints.web_signer` + `approve`). The fragment
+keeps the request out of server logs; it is not a secret. A phone's camera opening it lands where
+the keys are with nothing to choose:
+
+1. **The store app, through universal links / App Links**, for hosted identities: the relay's
+   `apple-app-site-association` and `assetlinks.json` claim `/id/approve` and nothing else.
+2. **Otherwise the identity's web app,** which approves if this browser holds the keys. If it
+   does not: on Android it hands the request to the app (`intent://auth?request_uri=…` with
+   this page as the fallback); on iOS it offers *Open in Poweur app* and, when the RP publishes a
+   `push_uri`, *Send to my home-screen app* — Safari cannot open an installed web app, whose
+   storage it cannot see either; on a desktop it shows the same link as a QR.
+3. **The CLI** takes the same link: `poweur auth approve <link>`.
+
+The same page approves new devices: `#pair=<code>.<commitment>&id=<identity>` (see
+[key management](../security/key-management.md)). Helpers: Go `identity.ApprovePath`,
+`ApproveURL`, `ApprovePageForSigner`, `ApproveLink`; TS `APPROVE_PATH`, `approveUrl`,
+`approveLink`. `SignInRequestURI` / `signInRequestUri` read the fragment form.
 
 ### Requests by reference
 
@@ -103,8 +131,7 @@ a short link on its **own origin** — `https://oauth.poweur.org/r/K7QM4XP2` (an
 Crockford base32, living as long as the request) — and put that in the QR:
 
 - `GET <link>` with `Accept: application/json` answers `{"request": "<encoded request>"}`, with
-  `Access-Control-Allow-Origin: *` (nothing in a request is secret; the match code that completes a
-  cross-device sign-in is never served). Expired or used: `404`/`410`.
+  `Access-Control-Allow-Origin: *` (nothing in a request is secret). Expired or used: `404`/`410`.
 - A signer given the link — itself, `poweur://auth?request_uri=<link>`, or a web signer's
   `?auth=<link>` — fetches it without following redirects and **requires the link to be
   same-origin with the request's `audience`**. The request is then exactly as authentic as one the
@@ -112,8 +139,8 @@ Crockford base32, living as long as the request) — and put that in the QR:
 - The same link opened in a browser — a phone's camera app — is the RP's to answer with a page
   offering the signers (the OAuth bridge does), or a redirect into one (the guestbook does). No
   in-app scanner is needed.
-- A request by reference always comes from another screen, so signers **require the match
-  code** for it.
+- A request by reference always comes from another screen, so a signer approves it as a
+  **cross-device** sign-in (`"finish": "poll"`, below). No number is asked for it.
 
 Helpers: Go `identity.SignInRequestURI`, `CheckSignInRequestURI`, `FetchSignInRequest`,
 `SignInReferenceDeepLink`; TS `signInRequestUri`, `checkSignInRequestUri`, `fetchSignInRequest`.
@@ -359,7 +386,7 @@ the login simply does not complete — which is exactly the outcome wanted.
 ### The attack this closes
 
 An attacker starts a login at an RP, keeps the pending transaction, and sends the victim the
-signer link (`https://poweur.net/app/?auth=…`). The signer honestly displays the *real* RP's
+signer link (`https://poweur.net/id/?auth=…`). The signer honestly displays the *real* RP's
 name, because the request really is for that RP, so a victim expecting to sign in there may well
 approve.
 
@@ -379,58 +406,85 @@ The **approval** — not the page that started the sign-in — decides how it fi
 only the approval can say whether the approver was looking at the starting screen.
 
 When the RP creates a request it keeps a transaction holding: the hash of a binding cookie it
-sets on the starting browser, the hash of a poll secret it gives the starting page, and a
-two-digit match code that page displays.
+sets on the starting browser and the hash of a poll secret it gives the starting page. If it
+**pushes** the request to the user's app, it also draws a two-digit **match number** and two
+distinct decoys (EPIC-028).
 
 The signer POSTs a delivery to `response_uri`:
 
 ```json
-{ "response": "<encoded approval>", "match": "42" }
+{ "response": "<encoded approval>", "finish": "poll", "match": "42" }
 ```
 
-`match` is present only when the user says they started on another screen. A delivery without
-it may also be the bare encoded approval as the whole body (the original wire form). The RP
-processes **one** approval per transaction and then:
+`finish: "poll"` marks an approval made on another device: a QR, a link, a pushed prompt, or the
+app shell. `match` is the number picked from the choices of a pushed sign-in, and only then. A
+same-device delivery may be the bare encoded approval as the whole body (the original wire form).
+An older signer sends a cross-device delivery as `match` alone; the RP reads either as
+cross-device. The RP processes **one** approval per transaction and then:
 
 | Delivery | RP checks | Receipt | Finishes at |
 |----------|-----------|---------|-------------|
-| without `match` | signature | `{"status":"ok","resume_uri":"…?code=…"}` | `resume_uri`, only with the binding cookie |
-| with `match` | match code (one attempt), then signature | `{"status":"ok"}` | the starting page's poll, only with the poll secret |
+| same-device (no `finish`, no `match`) | signature | `{"status":"ok","resume_uri":"…?code=…"}` | `resume_uri`, only with the binding cookie |
+| cross-device, never pushed | signature (any `match` is ignored) | `{"status":"ok"}` | the starting page's poll, only with the poll secret |
+| cross-device, pushed | `match` equals the number (one attempt), then signature | `{"status":"ok"}` | the starting page's poll, only with the poll secret |
 
 - The resume code is ≥128 bits, single-use, and short-lived (the guestbook allows one minute).
 - The signer checks `resume_uri` is same-origin with the audience it verified, then navigates
   the same browser there. It **never** puts the approval itself in a URL, and an RP never
   accepts one there.
-- A wrong match code ends the transaction; the right code afterwards does not revive it.
+- A wrong or missing number on a pushed sign-in ends the transaction; the right one afterwards
+  does not revive it. The bridge also pauses pushes to that identity for 15 minutes: the pick is
+  the signal that someone else started the sign-in, so a wrong one costs them the channel.
 - A poll before a same-device approval is resumed reports `approved` and hands out nothing.
 
 This is additive to the signed protocol: the request object, canonical signing string,
 signature and test vectors are unchanged. It governs only how an already-signed approval is
-redeemed, so no conformance vector moves. `match` is deliberately outside the signed bytes —
-it proves where the approver was looking, not who they are.
+redeemed, so no conformance vector moves. `finish` and `match` are deliberately outside the
+signed bytes — they say where the approver was, not who they are.
+
+The RP's context document (`context_uri`) carries what a cross-device signer needs:
+
+| Field | Meaning |
+|-------|---------|
+| `match_choices` | three distinct two-digit numbers, once the sign-in was pushed; never which is right. The signer shows them in place of *Approve* |
+| `push_uri` | POST here (no body) to have the RP push this request to the user's app — for a phone that opened the QR in a browser without the keys. Same-origin with the RP; using it makes the sign-in a pushed one |
 
 ### Cross-device approval is weaker, and must say so
 
-When the approving device is not the browser being signed in — QR and poll transports — no
-completion secret can reach the initiating browser without also being available to whoever
-forwarded the request. This is the residual risk in every QR login, and it is handled with
-disclosure rather than cryptography:
+When the approving device is not the browser being signed in — QR, link and push transports —
+no completion secret can reach the initiating browser without also being available to whoever
+forwarded the request. This is the residual risk in every QR login.
+
+**Codes by channel (EPIC-028).** Until EPIC-028 every cross-device approval needed a two-digit
+code typed from the starting screen. It now depends on the channel:
+
+| Channel | Number | Why |
+|---------|--------|-----|
+| Same browser | none | binding cookie + single-use `resume_uri` |
+| QR scanned, link opened, CLI given a link | **none** | the attacker needs a channel to the victim, and on that channel — a message, or a phishing page showing the RP's live QR — the code can be shown too. It only stopped an attacker who forgot to send it |
+| Push to the app | **pick one of three** | unsolicited: anyone who knows an ID can trigger it, and one reflexive tap would be the account (push fatigue). The pick, the one attempt and the 15-minute pause after a miss stop that |
+
+**Accepted residual risk:** a forwarded QR or link is a one-tap takeover, as in WhatsApp,
+Discord and Steam QR login. It is handled with disclosure rather than cryptography:
 
 - The poll handle is a high-entropy secret bound to the initiating browser, **never**
   `request_id` (which the initiator hands out by construction). This stops a bystander who saw
   the QR from claiming the session; it does not stop a forwarded request.
-- The signer shows **number matching** against the initiating screen, plus the initiator context
-  the RP recorded: coarse location, browser and how long ago the login started.
-- The signer states plainly that the user is approving a sign-in *started somewhere else*, and
-  says to cancel unless the code is on a screen in front of them.
+- The signer shows the initiator context the RP recorded — which browser started the sign-in,
+  how long ago, and for which application — and says *Only approve a sign-in you just started
+  yourself*.
 - Short TTL, single use, and no silent re-issue of a request inside one transaction.
+
+The number can return per channel without a protocol change if abuse shows up.
 
 ### Where it is implemented
 
 | Component | Behaviour |
 |-----------|-----------|
-| Web signer (`apps/web`) | optional code field (required in the mobile shell); follows `resume_uri`; no approval in any URL |
-| Go CLI | `poweur auth approve --code <digits>`; prints the resume link for a same-device approval |
+| Web signer (`apps/web`) | sends `finish: "poll"` for a request by reference, an approve page, a pushed prompt and the app shell; three number buttons when the context has `match_choices`; follows `resume_uri` only for a same-device approval; no approval in any URL |
+| Go CLI | `poweur auth approve <link>` approves cross-device with nothing to type; for a pushed sign-in, `--code <number>`, which must be one of the choices (listed when it is missing); prints the resume link for a same-device approval |
+| OAuth bridge | QR = approve page; number drawn on the first push, shown on the starting page (`"match"` in the status poll); `push_uri` at `/r/{code}/push`; 15-minute push pause after a wrong pick; remembers the last signed-in ID and pushes to it as the page opens |
+| Guestbook | never pushes, so never asks for a number; remembers the last signed-in ID and opens its approve page |
 
 Initiator context is served by the guestbook and the OAuth bridge (`context_uri`) and shown by
 the web signer and `poweur auth approve`: which browser started the sign-in, how long ago, and —

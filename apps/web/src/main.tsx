@@ -9,8 +9,10 @@ import { refreshAnalyticsConsent } from "./actions/analytics";
 import { startObservability, screenName, syncIdentifiedUser } from "./lib/observability";
 import { DESTINATIONS, useRoute, type Destination } from "./state/route";
 import { useSession } from "./state/session";
+import { useData } from "./state/data";
 import { ErrorBoundary } from "./shell/ErrorBoundary";
-import { installPushClient } from "./lib/push";
+import { installPushClient, takeMovedNotice } from "./lib/push";
+import { toast } from "./state/ui";
 import { loadInbox } from "./actions/messages";
 import { loadRequests } from "./actions/contacts";
 
@@ -46,10 +48,21 @@ void startObservability().then((obs) => {
   });
 });
 
+// The app moved from /app/ to /id/ (EPIC-028); a home-screen install still
+// points at the old address and has to be added again.
+if (takeMovedNotice()) {
+  toast("Poweur moved to a new address. If you added it to your home screen, remove it and add it again from Settings → Install app.", "info", 12_000);
+}
+
 // Notifications and install (E09-T12). A tap on a notification names a
 // destination; a locked app goes there once it is unlocked.
 installPushClient({
   onOpen: (page) => {
+    // A sign-in prompt opens itself from the Messages list once the inbox is in.
+    if (page === "signin") {
+      useData.setState({ openNewestPrompt: true });
+      page = "messages";
+    }
     if (!(DESTINATIONS as readonly string[]).includes(page)) return;
     const go = () => useRoute.getState().go(page as Destination);
     if (useSession.getState().unlocked) {

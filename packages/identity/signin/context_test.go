@@ -90,3 +90,41 @@ func TestMetadataContextURIMustBeSameOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFetchContextChoicesAndPushURI(t *testing.T) {
+	var served SignInContext
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		served.RequestID = r.URL.Query().Get("request_id")
+		_ = json.NewEncoder(w).Encode(served)
+	}))
+	defer ts.Close()
+	meta := Metadata{Origin: ts.URL, ContextURI: ts.URL + "/ctx"}
+	fetch := func() SignInContext {
+		t.Helper()
+		c, err := FetchContext(context.Background(), meta, "req_1", FetchOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+
+	served = SignInContext{MatchChoices: []string{"17", "42", "88"}, PushURI: ts.URL + "/r/K7QM4XP2/push"}
+	if c := fetch(); len(c.MatchChoices) != 3 || c.PushURI == "" {
+		t.Fatalf("well-formed context lost fields: %+v", c)
+	}
+	for name, bad := range map[string][]string{
+		"two":        {"17", "42"},
+		"duplicate":  {"17", "17", "42"},
+		"not digits": {"17", "4a", "88"},
+		"too long":   {"17", "420", "88"},
+	} {
+		served = SignInContext{MatchChoices: bad}
+		if c := fetch(); c.MatchChoices != nil {
+			t.Errorf("%s choices kept: %v", name, c.MatchChoices)
+		}
+	}
+	served = SignInContext{PushURI: "https://evil.example/push"}
+	if c := fetch(); c.PushURI != "" {
+		t.Errorf("off-origin push_uri kept: %q", c.PushURI)
+	}
+}

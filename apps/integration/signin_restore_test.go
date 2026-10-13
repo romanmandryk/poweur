@@ -78,9 +78,9 @@ func TestINT_SIGNIN_01_CLIApprovesAndGuestbookSignsIn(t *testing.T) {
 		t.Fatalf("start = %#v", started)
 	}
 
-	// Approving from a terminal is approving from another device: the user
-	// types the code the browser shows, and the browser's poll finishes.
-	out, _ := runCLI(t, home, "auth", "approve", started.DeepLink, "--sign-with", "identity", "--code", started.MatchCode)
+	// Approving from a terminal given the link a QR carries is approving from
+	// another device: no number (EPIC-028), and the browser's poll finishes.
+	out, _ := runCLI(t, home, "auth", "approve", started.RequestLink, "--sign-with", "identity")
 	if !bytes.Contains([]byte(out), []byte("approved sign-in")) {
 		t.Fatalf("approve output: %s", out)
 	}

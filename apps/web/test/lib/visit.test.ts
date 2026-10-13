@@ -13,7 +13,7 @@ import {
 describe("chat target from an identity page", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    history.replaceState(null, "", "/app/");
+    history.replaceState(null, "", "/id/");
   });
 
   it("accepts identity hosts only", () => {
@@ -25,7 +25,7 @@ describe("chat target from an identity page", () => {
   });
 
   it("takes ?to= out of the address bar and keeps it for the tab", () => {
-    history.replaceState(null, "", "/app/?to=bob.poweur.net&handle=al#x");
+    history.replaceState(null, "", "/id/?to=bob.poweur.net&handle=al#x");
     expect(takeChatTarget()).toBe("bob.poweur.net");
     expect(location.search).toBe("?handle=al");
     expect(location.hash).toBe("#x");
@@ -38,7 +38,7 @@ describe("chat target from an identity page", () => {
   });
 
   it("drops an invalid target without keeping it", () => {
-    history.replaceState(null, "", "/app/?to=%3Cscript%3E");
+    history.replaceState(null, "", "/id/?to=%3Cscript%3E");
     expect(takeChatTarget()).toBe("");
     expect(location.search).toBe("");
     expect(pendingChatTarget()).toBe("");

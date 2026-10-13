@@ -147,15 +147,22 @@ After the user enters an ID (or `login_hint` supplies one), the bridge resolves 
 and picks where to send the browser:
 
 1. `endpoints.web_signer` from the identity's `/.well-known/poweur/capabilities.json`. A relay
-   that serves the web app fills in `https://<id>/app/` when the user's own file does not say
+   that serves the web app fills in `https://<id>/id/` when the user's own file does not say
    otherwise, and adds `endpoints.oauth_bridge` when its operator sets `OAUTH_BRIDGE_URL`.
-2. Failing that, `https://<id>/app/` when the identity resolved over HTTPS (its relay serves the
+2. Failing that, `https://<id>/id/` when the identity resolved over HTTPS (its relay serves the
    app beside the document).
 3. The operator's default web signer (`OAUTH_DEFAULT_SIGNER`), labelled plainly as "works only
    if this browser already holds your keys there"; the `poweur://` deep link; and, for another
-   device, a QR code of the request's short link (`/r/<code>`, a
-   [request by reference](./sign-in.md#requests-by-reference)) and the match code. A phone
-   camera opening that link lands on a page offering the app and the web signers.
+   device, a QR code of the identity's **approve page** carrying the request's short link
+   (`https://<id>/id/approve#auth=…/r/<code>`, see
+   [the approve page](./sign-in.md#the-approve-page)). A phone camera opening it lands in the
+   app (universal links) or the identity's web app — no chooser and no number. Without a
+   signer of the identity's own, the QR is the short link itself, whose page offers the app and
+   the web signers.
+
+The bridge remembers the last ID that signed in in a browser (`poweur_last_id`, not a secret;
+cleared on sign-out). The sign-in page then leads with **Continue as …**, and the waiting page
+sends the request to that ID's app as it opens.
 
 The bridge never embeds or frames a signer and never receives key material.
 
@@ -172,7 +179,7 @@ accepts an ID they do not have is a dead end. Under the ID field it offers to cr
   visitor's browser (CORS `*`), so the bridge neither proxies it nor learns what was typed
   before it is submitted. The launcher is `OAUTH_LAUNCHER_URL` (default `https://poweur.net`,
   `none` to hide the offer); it is the only other origin in the page's `connect-src`.
-- **Creation in a new tab**, at `<launcher>/app/?handle=<name>&from=signin`. The sign-in tab
+- **Creation in a new tab**, at `<launcher>/id/?handle=<name>&from=signin`. The sign-in tab
   stays where it is: it tells the bridge it is waiting (`POST /t/{id}/creating`, which extends
   the transaction to 30 minutes, capped at an hour from its start), and watches the name —
   every 20 seconds and whenever the tab regains focus, which is the moment that matters. When
@@ -462,12 +469,18 @@ user whose phone is not in front of the browser's QR code:
 1. The waiting page offers **Send to my Poweur app** (at most three times, 15 s apart).
 2. The bridge sends an encrypted `sys.auth.request` from its identity through its own relay.
    The body is the same public request the QR code shows, the application's name and host,
-   and the expiry — **never the match code**.
+   and the expiry — **never the match number**. The first push draws the number and two
+   decoys; the waiting page shows *On your phone, tap 42*.
 3. The user's relay drops it unless the user listed the bridge in `trusted_auth_services`
    (Settings → Sign-in services). Listing it admits prompts and nothing else.
-4. The app shows it under **Sign-in requests**, never in conversations or history. Review opens
-   the ordinary approval screen with the code field required: approving from a prompt is by
-   definition approving on another device.
+4. The app shows it under **Sign-in requests**, never in conversations or history, and the
+   relay sends a Web Push (`auth` kind) so a closed home-screen app hears of it. Review opens
+   the ordinary approval screen with three numbers in place of *Approve*: pick the one on the
+   starting screen. One try; a wrong pick ends the sign-in and pauses pushes to that ID for 15
+   minutes.
+5. A phone that opened the QR in a browser without the keys can ask for the same push from the
+   approve page (`push_uri`, `POST /r/<code>/push`) — the way to reach an iPhone home-screen app,
+   which no link opens.
 
 The prompt is only a notification. A compromised bridge could send prompts, but could not
 produce a user's signature, and each prompt still needs the code from the screen that started

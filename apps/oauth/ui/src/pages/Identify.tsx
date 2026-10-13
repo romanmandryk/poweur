@@ -12,6 +12,8 @@ export function Identify({ page }: { page: Page<IdentifyData> }) {
   const appName = d.client?.name;
   const idRef = useRef<HTMLInputElement>(null);
   const [ready, setReady] = useState("");
+  // This browser's last ID (EPIC-028): one button, the field behind "Use another ID".
+  const [typing, setTyping] = useState(!d.remembered || !d.hint);
 
   return (
     <Shell page={page} narrow>
@@ -23,7 +25,20 @@ export function Identify({ page }: { page: Page<IdentifyData> }) {
           </h1>
           <p className="mt-1 text-[15px] text-muted">with your Poweur ID</p>
         </div>
-        <form method="post" action={`/t/${d.txn}/identify`}>
+        {!typing && (
+          <form method="post" action={`/t/${d.txn}/identify`} id="remembered-form">
+            <input type="hidden" name="identity" value={d.hint} />
+            <Button type="submit" id="identify-remembered" autoFocus>
+              Continue as {d.hint}
+            </Button>
+            <p className="mt-3 text-center">
+              <button type="button" id="identify-other" onClick={() => setTyping(true)} className="text-sm font-medium text-accent">
+                Use another ID
+              </button>
+            </p>
+          </form>
+        )}
+        <form method="post" action={`/t/${d.txn}/identify`} hidden={!typing}>
           <label htmlFor="identity" className="sr-only">
             Poweur ID
           </label>
@@ -36,10 +51,10 @@ export function Identify({ page }: { page: Page<IdentifyData> }) {
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
-            required
-            autoFocus
+            required={typing}
+            autoFocus={typing}
             placeholder={`yourname.${d.launcher?.domain ?? "poweur.net"}`}
-            defaultValue={d.hint}
+            defaultValue={d.remembered ? "" : d.hint}
             className="text-center text-[17px]"
           />
           <ErrorLine className="text-center">{d.error}</ErrorLine>

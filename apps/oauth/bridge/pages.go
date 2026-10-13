@@ -51,18 +51,27 @@ func (s *Server) renderFailed(w http.ResponseWriter, r *http.Request, t *Txn) {
 }
 
 type identifyView struct {
-	Txn      *Txn
-	Hint     string
-	Error    string
-	Client   *AuthorizeRequest
-	Launcher *launcherView
+	Txn  *Txn
+	Hint string
+	// Remembered is set when Hint is this browser's last signed-in ID rather
+	// than the client's login_hint: the page leads with "Continue as …".
+	Remembered bool
+	Error      string
+	Client     *AuthorizeRequest
+	Launcher   *launcherView
 }
 
 func (s *Server) renderIdentify(w http.ResponseWriter, r *http.Request, t *Txn, message string, status int) {
-	s.render(w, r, status, "identify.html", "Sign in with your Poweur ID", identifyView{
+	v := identifyView{
 		Txn: t, Hint: t.LoginHint, Error: message, Client: t.Authorize,
 		Launcher: s.launcherView(),
-	})
+	}
+	if v.Hint == "" && message == "" {
+		if id := s.rememberedID(r); id != "" {
+			v.Hint, v.Remembered = id, true
+		}
+	}
+	s.render(w, r, status, "identify.html", "Sign in with your Poweur ID", v)
 }
 
 type signerLink struct {
@@ -85,6 +94,13 @@ type awaitView struct {
 	PushFrom   string
 	Pushed     bool
 	PushNotice string
+	// QRLink is what the QR carries: the identity's own approve page with the
+	// request link in its fragment (EPIC-028), or the request link itself when
+	// the identity names no signer of its own.
+	QRLink string
+	// AutoPush: this browser last signed in as this identity, so the page
+	// sends the request to the app as it opens.
+	AutoPush bool
 }
 
 func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
@@ -110,8 +126,13 @@ func (s *Server) renderAwait(w http.ResponseWriter, r *http.Request, t *Txn) {
 	if link := s.requestLink(t); link != "" {
 		v.Request = link
 	}
-	v.QR = qrSVG(v.Request)
+	v.QRLink = v.Request
+	if page := approvePageFor(t.Signers); page != "" && s.requestLink(t) != "" {
+		v.QRLink = identity.ApproveLink(page, s.requestLink(t))
+	}
+	v.QR = qrSVG(v.QRLink)
 	v.Push = s.cfg.Pusher != nil && t.Pushes < maxPushesPerTxn
+	v.AutoPush = v.Push && t.Pushes == 0 && s.rememberedID(r) == t.Identity
 	v.PushFrom = s.cfg.PushIdentity
 	v.Pushed = t.Pushes > 0
 	v.PushNotice = r.URL.Query().Get("push")
@@ -174,4 +195,18 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		v.CanRegister, _ = s.canRegister(sess.Identity)
 	}
 	s.render(w, r, http.StatusOK, "home.html", s.cfg.Name, v)
+}
+
+// approvePageFor is the approve page of the identity's own web signer (not the
+// operator's default), or "" when there is none.
+func approvePageFor(signers []Signer) string {
+	for _, sg := range signers {
+		if sg.Default {
+			continue
+		}
+		if page := identity.ApprovePageForSigner(sg.URL); page != "" {
+			return page
+		}
+	}
+	return ""
 }

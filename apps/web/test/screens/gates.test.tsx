@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const fake = vi.hoisted(() => ({
   client: {
@@ -37,7 +37,7 @@ import { authenticatePasskey } from "../../src/lib/passkey.js";
 import { getActiveIdentity, saveIdentityRecord } from "../../src/lib/storage.js";
 import { App } from "../../src/shell/App";
 import { useData } from "../../src/state/data";
-import { setContinueTo } from "../../src/actions/signin";
+import { beginSignInApproval, setContinueTo } from "../../src/actions/signin";
 import { useRoute } from "../../src/state/route";
 import { lockIdentity, useSession, type ModeInfo } from "../../src/state/session";
 import { resetStores } from "../helpers/stores";
@@ -208,8 +208,15 @@ describe("Onboarding (E15-T5)", () => {
   });
 });
 
-describe("Sign-in approval (EPIC-008)", () => {
-  it("checks a pasted request, then asks to unlock before approving", async () => {
+describe("Sign-in approval (EPIC-008, EPIC-028)", () => {
+  /** Open a request the way a link, QR or prompt does. */
+  async function openRequest(input = "abc123", options: { crossDevice?: boolean } = {}) {
+    at("auth");
+    render(<App />);
+    await act(() => beginSignInApproval(input, options));
+  }
+
+  it("checks a request from a link, then asks to unlock before approving", async () => {
     // Unlock redirects to add-id when this device holds no record for the identity.
     saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     useSession.setState({ identity: IDENTITY, unlocked: false });
@@ -219,18 +226,14 @@ describe("Sign-in approval (EPIC-008)", () => {
       headline: "Sign in to Example App",
       scopes: [],
     });
-    at("auth");
-    render(<App />);
-
-    fireEvent.change($("#auth-request-input")!, { target: { value: "poweur://auth?request=abc123" } });
-    fireEvent.click($("#btn-auth-load")!);
+    await openRequest("poweur://auth?request=abc123");
     await waitFor(() => expect(screen.getByText("Sign in to Example App")).toBeTruthy());
     expect(fake.consent).toHaveBeenCalledWith("abc123");
     expect(screen.getByText("Origin verified")).toBeTruthy();
     expect(screen.getByText("This app requests sign-in only, with no home access.")).toBeTruthy();
+    expect(screen.getAllByText("Sign in with Poweur").length).toBeGreaterThan(0);
 
-    // Locked: no code field and no approve button yet, just the unlock.
-    expect($("#auth-match")).toBeNull();
+    // Locked: no approve button yet, just the unlock.
     expect($("#btn-auth-approve")).toBeNull();
 
     // Unlocking happens right here, with the passkey, and leaves the page alone.
@@ -251,9 +254,7 @@ describe("Sign-in approval (EPIC-008)", () => {
       headline: "Sign in to Example App",
       scopes: [],
     });
-    at("auth");
-    render(<App />);
-    fireEvent.click($("#btn-auth-load")!);
+    await openRequest();
     await waitFor(() => expect($("#auth-identity")).toBeTruthy());
 
     const picker = $<HTMLSelectElement>("#auth-identity")!;
@@ -264,7 +265,6 @@ describe("Sign-in approval (EPIC-008)", () => {
     expect(getActiveIdentity()).toBe("bob.poweur.net");
     // Another ID is another key: it must be unlocked before it can approve.
     expect($("#btn-auth-approve")).toBeNull();
-    expect($("#auth-match")).toBeNull();
     expect($("#btn-auth-unlock")).toBeTruthy();
     // The request being approved is still on screen.
     expect(screen.getByText("Sign in to Example App")).toBeTruthy();
@@ -278,12 +278,11 @@ describe("Sign-in approval (EPIC-008)", () => {
     expect($("#auth-identity")!.textContent).toBe(IDENTITY);
   });
 
-  it("shows why a request was refused", async () => {
+  it("shows why a request was refused, and offers no paste box", async () => {
     fake.consent.mockRejectedValueOnce(new Error("origin does not match"));
-    at("auth");
-    render(<App />);
-    fireEvent.click($("#btn-auth-load")!);
+    await openRequest();
     await waitFor(() => expect(screen.getByText("origin does not match")).toBeTruthy());
+    expect($("textarea")).toBeNull();
   });
 
   const consent = {
@@ -291,17 +290,17 @@ describe("Sign-in approval (EPIC-008)", () => {
     metadata: { name: "Example App" },
     headline: "Sign in to Example App",
     context: "Started 12 seconds ago in Chrome on macOS.",
+    choices: null as string[] | null,
+    pushUri: "",
     scopes: [],
   };
 
-  async function openUnlocked() {
+  async function openUnlocked(options: { crossDevice?: boolean } = {}, extra: Partial<typeof consent> = {}) {
     saveIdentityRecord(IDENTITY, { identity: IDENTITY, encryptedKeys: { kdf: "prf" } });
     useSession.setState({ identity: IDENTITY, unlocked: true });
-    fake.consent.mockResolvedValueOnce(consent);
-    at("auth");
-    render(<App />);
-    fireEvent.click($("#btn-auth-load")!);
-    await waitFor(() => expect($("#btn-auth-approve")).toBeTruthy());
+    fake.consent.mockResolvedValueOnce({ ...consent, ...extra });
+    await openRequest("abc123", options);
+    await waitFor(() => expect($("#btn-auth-approve") ?? $("#auth-pick")).toBeTruthy());
   }
 
   it("finishes a same-device approval in this browser, with nothing in a URL", async () => {
@@ -311,31 +310,62 @@ describe("Sign-in approval (EPIC-008)", () => {
     await openUnlocked();
     fireEvent.click($("#btn-auth-approve")!);
     await waitFor(() => expect($("#btn-auth-continue")).toBeTruthy());
-    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, "");
+    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, { crossDevice: false, match: "" });
     expect(went).toEqual(["https://app.example/auth/resume?code=c"]);
     expect($<HTMLAnchorElement>("#btn-auth-continue")!.href).not.toContain("ENCODED");
     expect($("#auth-response")).toBeNull();
   });
 
-  it("sends the code for a cross-device approval and sends nobody anywhere", async () => {
+  it("approves a scanned sign-in with no number and sends nobody anywhere", async () => {
     const went: string[] = [];
     setContinueTo((url) => went.push(url));
     fake.deliver.mockResolvedValueOnce({ delivered: true, resumeUri: "" });
-    await openUnlocked();
+    await openUnlocked({ crossDevice: true });
     expect($("#auth-context")!.textContent).toBe("Started 12 seconds ago in Chrome on macOS.");
-    fireEvent.change($("#auth-match")!, { target: { value: "4 2" } });
+    expect($("#auth-warning")).toBeTruthy();
+    expect($("input[autocomplete=one-time-code]")).toBeNull();
     fireEvent.click($("#btn-auth-approve")!);
     await waitFor(() => expect($("#auth-result-note")!.textContent).toMatch(/Go back to the screen/));
-    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, "42");
+    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, { crossDevice: true, match: "" });
     expect(went).toEqual([]);
     expect($("#btn-auth-continue")).toBeNull();
   });
 
-  it("refuses a malformed code before signing anything", async () => {
-    await openUnlocked();
-    fireEvent.change($("#auth-match")!, { target: { value: "7" } });
-    fireEvent.click($("#btn-auth-approve")!);
-    await waitFor(() => expect(screen.getByText(/Enter the 2-digit code/)).toBeTruthy());
-    expect(fake.sign).not.toHaveBeenCalled();
+  it("a pushed sign-in asks to tap one of three numbers, once", async () => {
+    fake.deliver.mockResolvedValueOnce({ delivered: true, resumeUri: "" });
+    await openUnlocked({ crossDevice: true }, { choices: ["17", "42", "88"] });
+    expect($("#btn-auth-approve")).toBeNull();
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>(".auth-pick-choice")];
+    expect(buttons.map((b) => b.textContent)).toEqual(["17", "42", "88"]);
+    fireEvent.click(buttons[1]);
+    await waitFor(() => expect($("#auth-result-note")).toBeTruthy());
+    expect(fake.deliver).toHaveBeenCalledWith(consent.request, "ENCODED", undefined, { crossDevice: true, match: "42" });
+  });
+
+  it("a wrong pick says the sign-in was stopped", async () => {
+    fake.deliver.mockRejectedValueOnce(Object.assign(new Error("refused"), { status: 403 }));
+    await openUnlocked({ crossDevice: true }, { choices: ["17", "42", "88"] });
+    fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".auth-pick-choice")[0]);
+    await waitFor(() => expect(screen.getByText(/someone may be trying to sign in as you/)).toBeTruthy());
+    expect([...document.querySelectorAll<HTMLButtonElement>(".auth-pick-choice")].every((b) => b.disabled)).toBe(true);
+  });
+
+  it("a browser without keys on a desktop shows this page as a QR for the phone", async () => {
+    fake.consent.mockResolvedValueOnce({ ...consent });
+    await openRequest("https://oauth.poweur.org/r/K7QM4XP2", { crossDevice: true });
+    await waitFor(() => expect($("#auth-elsewhere")).toBeTruthy());
+    expect($("[data-qr]")!.getAttribute("data-qr")).toContain("#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2");
+    expect($("#btn-auth-approve")).toBeNull();
+  });
+
+  it("a phone without keys offers the app and a push to the home-screen app", async () => {
+    const ua = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)");
+    fake.consent.mockResolvedValueOnce({ ...consent, pushUri: "https://oauth.poweur.org/r/K7QM4XP2/push" });
+    await openRequest("https://oauth.poweur.org/r/K7QM4XP2", { crossDevice: true });
+    await waitFor(() => expect($("#auth-elsewhere")).toBeTruthy());
+    expect($<HTMLAnchorElement>("#btn-auth-open-app")!.href).toBe("poweur://auth?request_uri=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2");
+    expect($("#btn-auth-send-app")).toBeTruthy();
+    ua.mockRestore();
   });
 });
+

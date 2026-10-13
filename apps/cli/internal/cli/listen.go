@@ -595,6 +595,6 @@ func describeAuthPrompt(sender, body string) string {
 	if p.ClientHost != "" && !strings.EqualFold(p.ClientHost, app) {
 		app += " (" + p.ClientHost + ")"
 	}
-	return fmt.Sprintf("sign-in request for %s via %s — if you started it, run: poweur auth approve %s --code <the code on that screen>",
+	return fmt.Sprintf("sign-in request for %s via %s — if you started it, run: poweur auth approve %s --code <the number on that screen>",
 		app, sender, p.Request)
 }

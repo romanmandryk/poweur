@@ -28,6 +28,14 @@ type SignInContext struct {
 	// broker (the OAuth bridge) rather than the application itself.
 	Client     string `json:"client,omitempty"`
 	ClientHost string `json:"client_host,omitempty"`
+	// MatchChoices is set once the sign-in has been pushed to the user's app
+	// (EPIC-028): the approver must pick the number the starting screen
+	// shows. It never says which one that is.
+	MatchChoices []string `json:"match_choices,omitempty"`
+	// PushURI, when set, lets a signer that holds no keys ask the RP to push
+	// this request to the user's app instead (POST, no body). Same-origin with
+	// the RP. Using it makes the sign-in a pushed one.
+	PushURI string `json:"push_uri,omitempty"`
 }
 
 // MaxContextBytes caps a context document.
@@ -90,7 +98,27 @@ func FetchContext(ctx context.Context, meta Metadata, requestID string, opts Fet
 	c.Browser = displayLine(c.Browser, 60)
 	c.Client = displayLine(c.Client, 80)
 	c.ClientHost = displayLine(c.ClientHost, 253)
+	c.MatchChoices = cleanChoices(c.MatchChoices)
+	if c.PushURI != "" && !identity.SameOrigin(meta.Origin, c.PushURI) {
+		c.PushURI = ""
+	}
 	return c, nil
+}
+
+// cleanChoices keeps a well-formed set of match choices, or none: exactly
+// MatchChoiceCount distinct codes of MatchCodeDigits digits.
+func cleanChoices(in []string) []string {
+	if len(in) != MatchChoiceCount {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, c := range in {
+		if len(c) != MatchCodeDigits || NormalizeMatchCode(c) != c || seen[c] {
+			return nil
+		}
+		seen[c] = true
+	}
+	return in
 }
 
 // DescribeContext renders a context as the sentence a signer shows.

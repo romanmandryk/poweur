@@ -91,11 +91,12 @@ test.describe("OAuth bridge pages", () => {
       await expect(page.locator("h1")).toHaveText("Approve this sign-in");
       await expect(page.locator("#open-app")).toBeVisible();
       await expect(page.locator(".signer-link").first()).toBeVisible();
-      // The QR and code are there, folded away.
+      // The QR is there, folded away — and no number until a push (EPIC-028).
       await expect(page.locator("#other-device")).not.toHaveAttribute("open", "");
-      await expect(page.locator("#match-code")).toBeHidden();
+      await expect(page.locator("#phone-approval .qr")).toBeHidden();
       await page.click("#other-device summary");
-      await expect(page.locator("#match-code")).toBeVisible();
+      await expect(page.locator("#phone-approval .qr")).toBeVisible();
+      await expect(page.locator("#match-code")).toHaveCount(0);
     } finally {
       await phone.close();
     }
@@ -113,7 +114,8 @@ test.describe("OAuth bridge pages", () => {
     await page.fill("#identity", identity);
     await page.click("#identify-continue");
     await expect(page.locator("h1")).toHaveText("Approve on your phone");
-    await expect(page.locator("#match-code")).toBeVisible();
+    await expect(page.locator("#phone-approval .qr")).toBeVisible();
+    await expect(page.locator("#match-code")).toHaveCount(0);
     await expect(page.locator("#open-app")).toHaveCount(0);
     await expect(page.locator("#this-browser")).toContainText("Or approve in this browser");
   });

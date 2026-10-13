@@ -73,7 +73,7 @@ export async function startBridge({ relay, redirectUri, pushHandle = "", clients
       OAUTH_ADDR: `${listen}:${port}`,
       OAUTH_DATABASE: join(dir, "oauth.db"),
       OAUTH_KEY_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
-      OAUTH_DEFAULT_SIGNER: `${relay.baseUrl}/app/`,
+      OAUTH_DEFAULT_SIGNER: `${relay.baseUrl}/id/`,
       OAUTH_STATIC_CLIENTS: clientsFile,
       // The create-an-ID offer points at the test relay, or nowhere.
       OAUTH_LAUNCHER_URL: launcher ? relay.baseUrl : "none",

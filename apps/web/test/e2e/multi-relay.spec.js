@@ -6,7 +6,7 @@ import { openApp, stubPasskeys } from "../helpers/app-ui.mjs";
  * E19-T7: several identities, on several relays, in one client.
  *
  * This is the reason to install the shell at all. A browser app cannot do it —
- * `localStorage` is per-origin, so `alice.r1.com/app/` structurally cannot see
+ * `localStorage` is per-origin, so `alice.r1.com/id/` structurally cannot see
  * an identity stored by `alice.r2.com` — but the *code* can, and that is what
  * is asserted here: one origin holding two identities whose relays differ,
  * each talking to its own.

@@ -45,9 +45,10 @@ async function readJoin(phonePage) {
   const code = (await phonePage.locator("#join-code").innerText()).trim();
   const link = await phonePage.locator("[data-pair-link]").getAttribute("data-pair-link");
   expect(code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-  expect(link).toContain(`#pair=${code.replace("-", "")}.`);
-  // The QR on show opens the Poweur app unless another approver was chosen.
-  await expect(phonePage.locator("svg[data-qr]")).toHaveAttribute("data-qr", /^poweur:\/\/pair\?pair=/);
+  expect(link).toContain(`/id/approve#pair=${code.replace("-", "")}.`);
+  // One QR for every approver (EPIC-028): the identity's approve page, no chooser.
+  await expect(phonePage.locator("svg[data-qr]")).toHaveAttribute("data-qr", link);
+  await expect(phonePage.locator("[role=tablist]")).toHaveCount(0);
   // Nothing to compare until the other device answers.
   await expect(phonePage.locator("#join-sas")).toHaveCount(0);
   return { code, link };
@@ -57,8 +58,9 @@ async function typeCodeOn(laptopPage, code) {
   await laptopPage.click('.nav-tab[data-page="settings"]');
   await laptopPage.click("#row-keys-devices");
   await laptopPage.click("#btn-enroll-device");
-  await laptopPage.fill("#pair-code", code);
-  await laptopPage.click("#btn-pair-continue");
+  // Eight cells (E28-T9): typed with the dash or without, it goes on the last one.
+  await expect(laptopPage.locator("[data-testid=pair-code-cells] .code-cell")).toHaveCount(8);
+  await laptopPage.locator("#pair-code").fill(code.toLowerCase());
 }
 
 test.describe("new-device pairing", () => {
@@ -152,7 +154,7 @@ test.describe("new-device pairing", () => {
   });
 
   test("the identity-host door joins without re-typing the name", async ({ browser }) => {
-    // The production shape: the new device is at alice.poweur.net/app/, which
+    // The production shape: the new device is at alice.poweur.net/id/, which
     // is also where its pairing link points.
     const { laptop, phone, laptopPage, phonePage } = await twoDevices(browser);
     const identity = await registerIdentity(laptopPage, relay, `host${Date.now().toString(36)}`);
@@ -164,7 +166,7 @@ test.describe("new-device pairing", () => {
     await expect(phonePage.locator("#join-identity")).toHaveCount(0);
     await expect(phonePage.locator("#btn-join-start")).toHaveCount(0);
     const { code, link } = await readJoin(phonePage);
-    expect(link.startsWith(`http://${identity}:${port}/app/#pair=`)).toBe(true);
+    expect(link.startsWith(`http://${identity}:${port}/id/approve#pair=`)).toBe(true);
 
     await typeCodeOn(laptopPage, code);
     const laptopSas = (await laptopPage.locator("#pair-sas").innerText({ timeout: 30_000 })).trim();

@@ -65,7 +65,7 @@ req, err := verifier.NewRequest(signin.RequestOptions{
 })
 encoded, _ := identity.EncodeSignInRequest(req)
 deepLink, _ := identity.SignInDeepLink(req)      // poweur://auth?request=…  (also the QR payload)
-webLink, _ := identity.SignInWebLink("https://poweur.net/app/", req)
+webLink, _ := identity.SignInWebLink("https://poweur.net/id/", req)
 ```
 
 ### TypeScript
@@ -93,8 +93,11 @@ it, and to nobody else. Keep a short-lived transaction per request (see
 
 - set a binding cookie on the browser that pressed "Sign in";
 - give that page a **poll secret** (never the `request_id`, which travels to whoever
-  approves) and a two-digit **match code** to display;
-- let `signin.NewSecret`, `signin.NewMatchCode` and `signin.HashSecret` make and store them.
+  approves);
+- if you push requests to users' apps, draw a match number and decoys on the first push
+  (`signin.NewMatchChoices`), show the number on the page and serve the choices in your
+  context document — a pushed sign-in is the one that needs it;
+- let `signin.NewSecret` and `signin.HashSecret` make and store the secrets.
 
 The shared verifier tests exercise the approval and delivery contract.
 
@@ -154,9 +157,11 @@ canonical scopes, and single-use nonces.
 
 **Hand the session only to the browser that started the login.** Anyone can create a
 sign-in request; a login link forwarded to a victim is approved by the victim. A same-device
-approval finishes only where the resume code *and* your binding cookie meet, and a
-cross-device one only with the match code the starting screen showed. Skip this and a
-forwarded link is an account takeover.
+approval finishes only where the resume code *and* your binding cookie meet; a cross-device
+one (`"finish": "poll"`) only on the starting page's poll, which needs its poll secret.
+Skip this and a forwarded same-device link is an account takeover. A forwarded QR remains the
+accepted risk of every QR login — see
+[Cross-device approval is weaker](./sign-in.md#cross-device-approval-is-weaker-and-must-say-so).
 
 **Use a shared nonce cache if you run more than one process.** The default cache is
 in-memory and correct for exactly one process; with several, an approval can be replayed
@@ -188,10 +193,10 @@ handles are tracked in EPIC-020; sign-in remains available.
   statement, an unresolvable name, an expired window.
 - `apps/integration/signin_test.go` drives the whole thing against a real relay and real
   hosted identities.
-- To approve from a terminal while developing: `poweur auth approve <request>` — or
-  `poweur auth approve <short link> --code <digits>` for a
-  [request by reference](./sign-in.md#requests-by-reference), which always needs the code on the
-  screen that started the sign-in.
+- To approve from a terminal while developing: `poweur auth approve <request>` (same device:
+  it prints the resume link) — or `poweur auth approve <short link>` for a
+  [request by reference](./sign-in.md#requests-by-reference), which finishes on the starting
+  page's poll.
 
 ## Frequently asked
 

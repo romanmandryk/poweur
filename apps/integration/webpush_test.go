@@ -226,12 +226,23 @@ func TestINT_WEBPUSH_01_BackgroundPush(t *testing.T) {
 		t.Fatalf("test payload %+v", got[1])
 	}
 
+	// A sign-in prompt from a service alice trusts reaches the closed app at
+	// once, as its own kind, naming nobody (EPIC-028 E28-T12).
+	runCLI(t, aliceHome, "policy", "set", "open", "--trusted-auth", bob)
+	runCLI(t, bobHome, "send", alice, `{"version":1}`, "--type", idpkg.MsgTypeAuthRequest,
+		"--expires", time.Now().Add(4*time.Minute).UTC().Format(time.RFC3339))
+	if got := phone.waitFor(t, 3); got[2]["kind"] != "auth" || got[2]["identity"] != alice {
+		t.Fatalf("sign-in prompt payload %+v", got[2])
+	} else if raw, _ := json.Marshal(got[2]); strings.Contains(string(raw), bob) {
+		t.Fatalf("the prompt push names its sender: %s", raw)
+	}
+
 	// The browser dropped the subscription: the relay forgets it.
 	phone.mu.Lock()
 	phone.status = http.StatusGone
 	phone.mu.Unlock()
 	runCLI(t, bobHome, "send", alice, "second")
-	phone.waitFor(t, 3)
+	phone.waitFor(t, 4)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		status, raw := ownerCall(t, relayURL, aliceHome, alice, "alice-phone", http.MethodGet, "/devices/"+alice, nil)
@@ -256,7 +267,7 @@ func TestINT_WEBPUSH_01_BackgroundPush(t *testing.T) {
 	}
 	runCLI(t, bobHome, "send", alice, "third")
 	time.Sleep(300 * time.Millisecond)
-	if n := phone.count(); n != 3 {
+	if n := phone.count(); n != 4 {
 		t.Fatalf("pushed to a gone subscription: %d pushes", n)
 	}
 

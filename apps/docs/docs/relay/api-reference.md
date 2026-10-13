@@ -390,7 +390,7 @@ Also: `GET /.well-known/poweur/id.json` (Host-routed) serves the stored document
 
 `GET /.well-known/poweur/capabilities.json` serves the identity's own
 `.poweur/public/capabilities.json`, with two endpoints filled in where the file does not set
-them: `endpoints.web_signer` (`<scheme>://<identity>/app/`, when `WEB_STATIC_DIR` is set) and
+them: `endpoints.web_signer` (`<scheme>://<identity>/id/`, when `WEB_STATIC_DIR` is set) and
 `endpoints.oauth_bridge` (when `OAUTH_BRIDGE_URL` is set). With no file, those defaults alone are
 served. When `OAUTH_BRIDGE_URL` is set, `GET /` on a hosted identity's host also carries
 `Link: <bridge>/.well-known/oauth-authorization-server; rel="indieauth-metadata"`, which is how
@@ -531,8 +531,13 @@ Refusals: `403 endpoint_not_allowed` (not a host in `PUSH_ENDPOINT_HOSTS`), `403
 { "v": 1, "identity": "alice.poweur.net", "kind": "message", "count": 3, "ts": "2026-10-12T10:00:00Z" }
 ```
 
-`kind` is `message`, `request`, `anon` or `test`; `count` is everything waiting on the relay
-(unpicked messages, contact requests, anonymous mail) and becomes the icon badge. **No message
+`kind` is `message`, `request`, `anon`, `auth` or `test`; `count` is everything waiting on the
+relay (unpicked messages, contact requests, anonymous mail) and becomes the icon badge.
+
+`auth` is a sign-in prompt (`sys.auth.request`) admitted from a trusted sign-in service
+(EPIC-028). It is pushed at once, never coalesced into the mail push, with its own `Topic` and a
+five-minute `TTL` (the request behind it lives five minutes); the notification never names the
+application or the service. **No message
 content, sender or subject** is ever in a push: the app picks up through the cursor as always.
 Acks do not push.
 
@@ -735,7 +740,7 @@ over `identity-rotation\n…`. See [Web identity — Key rotation](/protocol/web
 
 ## GET /
 
-Service banner. Browser navigations on a launcher host may 302 to `/app/`;
+Service banner. Browser navigations on a launcher host may 302 to `/id/`;
 clients that send `Accept: application/json` always get this document. The
 release fields are how Settings → About and `poweur --version` consumers
 learn what is running (EPIC-013 E13-T6).
@@ -749,7 +754,7 @@ learn what is running (EPIC-013 E13-T6).
   "launcher_host": "id.poweur.net",
   "launcher_hosts": ["id.poweur.net", "poweur.net"],
   "hosted_domains": ["poweur.net"],
-  "web_ui": "GET /app/ (when WEB_STATIC_DIR is set)",
+  "web_ui": "GET /id/ (when WEB_STATIC_DIR is set)",
   "version": "0.1.1",
   "buildTime": "2026-09-10 12:00",
   "versionHash": "0434c17…"
@@ -760,6 +765,19 @@ learn what is running (EPIC-013 E13-T6).
 known. `versionHash` is the git revision the binary was built from.
 
 ---
+
+## Web app at /id/ {#web-app}
+
+With `WEB_STATIC_DIR` set, every host the relay serves has the web client at `/id/`; its
+approve page is `/id/approve` (EPIC-028). Until web 0.2.25 the app lived at `/app/`:
+`GET /app` and `/app/…` now answer `308` to the same path under `/id/`, query kept (browsers
+carry a `#fragment` across the redirect). `/app/sw.js` is the exception — browsers do not follow
+redirects when they re-check a service worker — and serves a worker that unsubscribes its push,
+unregisters itself and moves open windows to `/id/?moved=1`.
+
+`GET /.well-known/apple-app-site-association` and `GET /.well-known/assetlinks.json` claim
+`/id/approve` (and nothing else) for the store app when `APP_LINKS_*` are configured; otherwise
+`404`.
 
 ## GET /health
 

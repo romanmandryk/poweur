@@ -107,7 +107,7 @@ describe("Settings destination (E21-T11)", () => {
     render(<App />);
     expect($(".settings-id-name")!.textContent).toBe("alice");
     expect($(".settings-id-card .chip")!.textContent).toBe("Device keystore");
-    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-auth-request", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-remove-id"]) {
+    for (const id of ["row-switch-id", "row-profile", "row-identity-keys", "row-keys-devices", "row-connected-apps", "row-recovery-kit", "row-analytics", "row-policy", "row-policy-anon", "row-relay", "row-lookup", "row-session", "row-remove-id"]) {
       expect($(`#${id}`), id).toBeTruthy();
     }
     // A hosted identity has no DNS credentials to configure (E15-T10).
@@ -269,10 +269,10 @@ describe("Settings destination (E21-T11)", () => {
     fireEvent.click($("#btn-enroll-device")!);
     await waitFor(() => expect($("#pair-code")).toBeTruthy());
 
-    $<HTMLInputElement>("#pair-code")!.value = " k7qm-4xp2 ";
-    fireEvent.click($("#btn-pair-continue")!);
+    // Typed into the eight cells (EPIC-028): normalized, and sent on the last one.
+    fireEvent.change($("#pair-code")!, { target: { value: " k7qm-4xp2 " } });
     await waitFor(() => expect($("#pair-sas")?.textContent).toBe("482 913"));
-    expect(holder.enroll.begin).toHaveBeenCalledWith(holder.client.signer, ME, " k7qm-4xp2 ");
+    expect(holder.enroll.begin).toHaveBeenCalledWith(holder.client.signer, ME, "K7QM4XP2");
     expect($("#pair-compare")!.textContent).toContain("New phone");
     expect(holder.enroll.approve).not.toHaveBeenCalled();
 
@@ -288,8 +288,7 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect($("#btn-enroll-device")).toBeTruthy());
     fireEvent.click($("#btn-enroll-device")!);
     await waitFor(() => expect($("#pair-code")).toBeTruthy());
-    $<HTMLInputElement>("#pair-code")!.value = "ZZZZ-ZZZZ";
-    fireEvent.click($("#btn-pair-continue")!);
+    fireEvent.change($("#pair-code")!, { target: { value: "ZZZZ-ZZZZ" } });
     await waitFor(() => expect($("#pair-error")!.textContent).toContain("not found"));
     expect($("#btn-pair-approve")).toBeNull();
   });
@@ -347,10 +346,9 @@ describe("Settings destination (E21-T11)", () => {
     await waitFor(() => expect($("#btn-welcome-start")).toBeTruthy());
   });
 
-  it("Approve sign-in request starts from an empty request", async () => {
+  it("has no paste-a-request entry: approvals arrive by link, QR or push (EPIC-028)", async () => {
     render(<App />);
-    fireEvent.click($("#row-auth-request")!);
-    expect(useRoute.getState().sub).toBe("auth");
-    await waitFor(() => expect($("#auth-request-input")).toBeTruthy());
+    await waitFor(() => expect($("#row-keys-devices")).toBeTruthy());
+    expect($("#row-auth-request")).toBeNull();
   });
 });

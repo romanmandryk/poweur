@@ -18,6 +18,7 @@ import {
   type ApproverSession,
   type EnrollSession,
 } from "../../enroll.js";
+import { APPROVE_PATH, approveUrl } from "../../signin.js";
 import { identityKeysFromSeed, signerFor } from "../../crypto/keys.js";
 import { fromBase64, toBase64url } from "../../encoding.js";
 import { RelayClient } from "../../http.js";
@@ -93,7 +94,7 @@ function toSession(f: NewDeviceFile): EnrollSession {
 }
 
 function appUrlFor(relayUrl: string, identity: string): string {
-  return relayUrl.startsWith("https://") ? `https://${identity.toLowerCase()}/app/` : `${relayUrl.replace(/\/+$/, "")}/app/`;
+  return relayUrl.startsWith("https://") ? approveUrl(identity) : `${relayUrl.replace(/\/+$/, "")}${APPROVE_PATH}`;
 }
 
 /** One step on the new device; returns output when it is done or has news. */

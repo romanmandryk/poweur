@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 
 /** The relay serves the built app (`apps/web/dist`) here. */
 export function appPath() {
-  return "/app/";
+  return "/id/";
 }
 
 /** The version and build time the app reports in Settings → About. */

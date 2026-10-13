@@ -16,7 +16,7 @@ type Config struct {
 	Endpoint, Protocol, Headers, HashKey, Level, Environment string
 	// BrowserFaroURL is where the web app sends Grafana Faro telemetry, usually
 	// the same-origin path "/faro/collect" that Caddy routes to Alloy. Empty
-	// keeps GET /app/observability.json at {"providers":[]}: the SPA sends
+	// keeps GET /id/observability.json at {"providers":[]}: the SPA sends
 	// nothing.
 	BrowserFaroURL string
 	TrustedProxies []netip.Prefix
@@ -48,7 +48,7 @@ func (c Config) otlpSinks() []otlpSink {
 	return sinks
 }
 
-// BrowserConfig is the public SPA file at GET /app/observability.json.
+// BrowserConfig is the public SPA file at GET /id/observability.json.
 func (c Config) BrowserConfig(release string) []byte {
 	type provider struct {
 		Type string `json:"type"`

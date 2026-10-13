@@ -2,7 +2,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowLeftRight,
-  BadgeCheck,
   ChartColumn,
   ExternalLink,
   FileText,
@@ -33,7 +32,6 @@ import {
 import { isSessionValid, SDK_BUILD_TIME, SDK_VERSION } from "@poweur/client";
 import { loadPolicy, loadProfile } from "../../actions/account";
 import { policySummary, removeIdentityFromDevice, usesDnsPath } from "../../actions/settings";
-import { resetSignInRequest } from "../../actions/signin";
 import { APP_BUILD_TIME, APP_VERSION } from "../../build-info";
 import { askConfirm } from "../../components/Dialogs";
 import { identityApiFor } from "../../lib/client.js";
@@ -175,15 +173,6 @@ export function Settings() {
             <SettingsGroup label="Security">
               <SettingsRow id="row-keys-devices" icon={MonitorSmartphone} label="Keys & devices" onClick={() => void openKeysAndDevicesPanel()} />
               <SettingsRow id="row-connected-apps" icon={Puzzle} label="Connected apps" onClick={openConnectedAppsPanel} />
-              <SettingsRow
-                id="row-auth-request"
-                icon={BadgeCheck}
-                label="Approve sign-in request"
-                onClick={() => {
-                  resetSignInRequest();
-                  push("auth");
-                }}
-              />
               <SettingsRow
                 id="row-recovery-kit"
                 icon={ScrollText}

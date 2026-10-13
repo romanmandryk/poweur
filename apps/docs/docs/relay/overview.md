@@ -64,7 +64,7 @@ Messages, files and settings survive a restart; losing the store does not — ba
 ## Deployment
 
 The relay ships as one Docker image (`apps/api/Dockerfile`) that also serves the web app at
-`/app/`. It speaks HTTP and runs behind a TLS reverse proxy. You need:
+`/id/`. It speaks HTTP and runs behind a TLS reverse proxy. You need:
 
 1. A domain, with a wildcard record if you host identities under it (`*.example.com`)
 2. TLS covering the domain and every hosted name (see [TLS](/security/tls))

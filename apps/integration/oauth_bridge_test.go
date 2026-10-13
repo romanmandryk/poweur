@@ -152,8 +152,9 @@ var txnRe = regexp.MustCompile(`/t/([A-Za-z0-9_-]{43})`)
 
 // Bridge pages carry their data as JSON (apps/oauth/bridge/web.go).
 var (
-	pageTxnRe   = regexp.MustCompile(`"txn":"([A-Za-z0-9_-]{43})"`)
-	pageMatchRe = regexp.MustCompile(`"match":"(\d+)"`)
+	pageTxnRe     = regexp.MustCompile(`"txn":"([A-Za-z0-9_-]{43})"`)
+	pageRequestRe = regexp.MustCompile(`"request":"(https?://[^"]+/r/[0-9A-Z]{8})"`)
+	pageQRLinkRe  = regexp.MustCompile(`"qrLink":"([^"]+)"`)
 )
 
 // startAndIdentify opens an authorization URL, enters the ID and returns the
@@ -299,9 +300,9 @@ func TestINT_OAUTH_01_GenericOIDCClientSignsInIdentitiesFromAnyRelay(t *testing.
 	}
 }
 
-// TestINT_OAUTH_02: approving from another device finishes in the starting
-// browser only with the code that browser showed; a forwarded same-device
-// approval signs nobody in.
+// TestINT_OAUTH_02: approving from another device — the request link a QR
+// carries — finishes in the starting browser with no number to type
+// (EPIC-028); a forwarded same-device approval signs nobody in.
 func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 	zone := newZone(t)
 	relay, addr := newHostedRelay(t, zone, t.TempDir())
@@ -321,16 +322,21 @@ func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 	}
 	cfg := oauth2.Config{ClientID: "rp", ClientSecret: "rp-secret-0123456789", Endpoint: provider.Endpoint(), RedirectURL: redirect, Scopes: []string{"openid"}}
 
-	// Cross-device: the terminal types the code the browser shows.
+	// Cross-device: the terminal is given the link the QR carries.
 	b := newOAuthBrowser(t, fx.issuer)
 	pkce := oauth2.GenerateVerifier()
-	txn, request := b.startAndIdentify(cfg.AuthCodeURL("s1", oauth2.S256ChallengeOption(pkce), oidc.Nonce("n1")), alice)
+	txn, _ := b.startAndIdentify(cfg.AuthCodeURL("s1", oauth2.S256ChallengeOption(pkce), oidc.Nonce("n1")), alice)
 	_, page := b.do(http.MethodGet, fx.issuer+"/t/"+txn, nil)
-	match := pageMatchRe.FindStringSubmatch(page)
-	if match == nil {
-		t.Fatalf("no match code on the page")
+	link := pageRequestRe.FindStringSubmatch(page)
+	qr := pageQRLinkRe.FindStringSubmatch(page)
+	if link == nil || qr == nil {
+		t.Fatalf("the page offers no request link: %s", page)
 	}
-	out, _ := runCLI(t, home, "auth", "approve", request, "--sign-with", "identity", "--code", match[1], "--json")
+	// The QR opens the identity's own approve page, carrying that link.
+	if want := idpkg.ApproveLink("http://"+alice+"/id/approve", link[1]); qr[1] != want && strings.ReplaceAll(qr[1], `\u0026`, "&") != want {
+		t.Fatalf("QR link = %s, want %s", qr[1], want)
+	}
+	out, _ := runCLI(t, home, "auth", "approve", qr[1], "--sign-with", "identity", "--json")
 	if strings.Contains(out, "resume_uri") {
 		t.Fatalf("a cross-device approval printed a resume link: %s", out)
 	}
@@ -358,7 +364,7 @@ func TestINT_OAUTH_02_CrossDeviceAndForwardedLinks(t *testing.T) {
 
 	// Forwarded: the attacker's browser starts, the victim's browser resumes.
 	attacker, victim := newOAuthBrowser(t, fx.issuer), newOAuthBrowser(t, fx.issuer)
-	txn, request = attacker.startAndIdentify(cfg.AuthCodeURL("s2", oauth2.S256ChallengeOption(oauth2.GenerateVerifier()), oidc.Nonce("n2")), alice)
+	txn, request := attacker.startAndIdentify(cfg.AuthCodeURL("s2", oauth2.S256ChallengeOption(oauth2.GenerateVerifier()), oidc.Nonce("n2")), alice)
 	out, _ = runCLI(t, home, "auth", "approve", request, "--sign-with", "identity", "--json")
 	var approved struct {
 		ResumeURI string `json:"resume_uri"`
@@ -441,9 +447,6 @@ func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
 		"response_type": {"code"}, "client_id": {"rp"}, "redirect_uri": {redirect}, "scope": {"openid"},
 		"state": {"s"}, "nonce": {"n"}, "code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"},
 	}.Encode(), user)
-	_, page := b.do(http.MethodGet, fx.issuer+"/t/"+txn, nil)
-	match := pageMatchRe.FindStringSubmatch(page)[1]
-
 	push := func() string {
 		resp, _ := b.do(http.MethodPost, fx.issuer+"/t/"+txn+"/push", url.Values{})
 		return resp.Header.Get("Location")
@@ -467,13 +470,24 @@ func TestINT_OAUTH_03_PushToApprove(t *testing.T) {
 	if loc := push(); !strings.HasSuffix(loc, "push=sent") {
 		t.Fatalf("push after trust = %s (%v)", loc, pusher.outputs)
 	}
+	// The starting page learns the number to tap from its poll (EPIC-028).
+	_, statusBody := b.do(http.MethodGet, fx.issuer+"/t/"+txn+"/status", nil)
+	var pending bridge.Status
+	_ = json.Unmarshal([]byte(statusBody), &pending)
+	if pending.Status != "pending" || len(pending.Match) != 2 {
+		t.Fatalf("status after a push = %s", statusBody)
+	}
 	inbox, _ := runCLI(t, userHome, "inbox")
 	re := regexp.MustCompile(`poweur auth approve (\S+) --code`)
 	m := re.FindStringSubmatch(inbox)
 	if m == nil {
 		t.Fatalf("inbox did not show the prompt: %s", inbox)
 	}
-	runCLI(t, userHome, "auth", "approve", m[1], "--sign-with", "identity", "--code", match)
+	// A pushed sign-in needs the number: without it the CLI lists the choices.
+	if code, _, errOut := runCLIFull(t, userHome, "auth", "approve", m[1], "--sign-with", "identity"); code == 0 || !strings.Contains(errOut, pending.Match) {
+		t.Fatalf("approving a pushed sign-in without a number = %d %s", code, errOut)
+	}
+	runCLI(t, userHome, "auth", "approve", m[1], "--sign-with", "identity", "--code", pending.Match)
 	resp, body := b.do(http.MethodGet, fx.issuer+"/t/"+txn+"/status", nil)
 	if resp.StatusCode != 200 || !strings.Contains(body, `"complete"`) {
 		t.Fatalf("status after pushed approval = %s", body)

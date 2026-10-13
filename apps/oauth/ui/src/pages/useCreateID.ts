@@ -95,7 +95,7 @@ export function useCreateID(launcher: Launcher, txn: string, onReady: (id: strin
 
   const q = new URLSearchParams({ from: "signin" });
   if (handle && available) q.set("handle", handle);
-  const href = `${launcher.url}/app/?${q}`;
+  const href = `${launcher.url}/id/?${q}`;
 
   const onOpen = () => {
     // Creating an ID takes longer than a sign-in normally waits.

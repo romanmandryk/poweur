@@ -38,7 +38,7 @@ beforeEach(() => {
   resetStores();
   mode.next = { mode: "unknown" };
   delete (globalThis as { Capacitor?: unknown }).Capacitor;
-  at("/app/");
+  at("/id/");
 });
 
 describe("boot (E21-T4)", () => {
@@ -49,10 +49,24 @@ describe("boot (E21-T4)", () => {
   });
 
   it("a sign-in request routes straight to the approval screen", async () => {
-    at("/app/?auth=abc123");
+    at("/id/?auth=abc123");
     await boot();
     expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
     expect(useData.getState().auth.input).toBe("abc123");
+  });
+
+  it("an approve page from another screen's QR opens a cross-device approval and leaves the address clean (EPIC-028)", async () => {
+    at("/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2");
+    await boot();
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
+    expect(useData.getState().auth).toMatchObject({ input: "https://oauth.poweur.org/r/K7QM4XP2", crossDevice: true, noApp: false });
+    expect(location.hash).toBe("");
+  });
+
+  it("an approve page Android came back to says the app is not installed", async () => {
+    at("/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2&noapp");
+    await boot();
+    expect(useData.getState().auth).toMatchObject({ crossDevice: true, noApp: true });
   });
 
   it("adopts a launcher hand-off, strips the fragment, and asks to unlock", async () => {
@@ -60,7 +74,7 @@ describe("boot (E21-T4)", () => {
       identity: "alice.poweur.net",
       record: { identity: "alice.poweur.net", encryptedKeys: { kdf: "prf" } },
     })));
-    at(`/app/#claim=${payload}`);
+    at(`/id/#claim=${payload}`);
 
     await boot();
 
@@ -71,7 +85,7 @@ describe("boot (E21-T4)", () => {
   });
 
   it("strips a malformed hand-off without adopting it", async () => {
-    at("/app/#claim=not-json");
+    at("/id/#claim=not-json");
     await boot();
     expect(location.hash).toBe("");
     expect(useSession.getState().identity).toBeNull();
@@ -82,7 +96,7 @@ describe("boot (E21-T4)", () => {
     saveIdentityRecord("alice.poweur.net", { identity: "alice.poweur.net" });
     setActiveIdentity("alice.poweur.net");
     mode.next = { mode: "identity", subject: "bob.poweur.net" };
-    at("/app/?anonymous=1");
+    at("/id/?anonymous=1");
     await boot();
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
     expect(useSession.getState().unlocked).toBe(false);
@@ -127,7 +141,7 @@ describe("boot (E21-T4)", () => {
 
     expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
     expect(useData.getState().auth.input).toBe("from-camera");
-    expect(useData.getState().auth.requireCode).toBe(true);
+    expect(useData.getState().auth.crossDevice).toBe(true);
   });
 
   it("a poweur:// open while the app is running prefills approve sign-in", async () => {
@@ -140,7 +154,7 @@ describe("boot (E21-T4)", () => {
 
     expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
     expect(useData.getState().auth.input).toBe("from-qr");
-    expect(useData.getState().auth.requireCode).toBe(true);
+    expect(useData.getState().auth.crossDevice).toBe(true);
   });
 
   it("ignores an https link opened into the shell", async () => {
@@ -148,10 +162,20 @@ describe("boot (E21-T4)", () => {
     installAppPlugin({ onListen: (handler) => { open = handler; } });
     await boot();
 
-    open({ url: "https://alice.poweur.net/app/?auth=abc" });
+    open({ url: "https://alice.poweur.net/id/?auth=abc" });
 
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
     expect(useData.getState().auth.input).toBe("");
+  });
+
+  it("a universal link to an approve page opens approve sign-in in the shell (EPIC-028)", async () => {
+    let open: UrlHandler = () => {};
+    installAppPlugin({ onListen: (handler) => { open = handler; } });
+    await boot();
+    open({ url: "https://alice.poweur.net/id/approve#auth=https%3A%2F%2Foauth.poweur.org%2Fr%2FK7QM4XP2" });
+    expect(useRoute.getState()).toMatchObject({ page: "settings", sub: "auth" });
+    expect(useData.getState().auth.input).toBe("https://oauth.poweur.org/r/K7QM4XP2");
+    expect(useData.getState().auth.crossDevice).toBe(true);
   });
 
   it("the shell opened by a pairing QR goes to Add a device, at launch and while running (E11-T8)", async () => {

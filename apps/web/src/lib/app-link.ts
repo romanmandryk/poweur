@@ -1,13 +1,15 @@
-import { parsePairingLink } from "@poweur/client";
+import { parsePairingLink, signInRequestUri } from "@poweur/client";
 
 /**
  * The request carried by `poweur://auth?request=…`, or the short link in
  * `poweur://auth?request_uri=…` (a request by reference, E08-T6), which the
- * approve screen fetches. `https://` links are not claimed by the shell and
- * are ignored here.
+ * approve screen fetches. An `https://<identity>/id/approve#auth=…` link — a
+ * universal link the OS handed the store app (EPIC-028) — gives its request
+ * link too; other `https://` links are not the shell's.
  */
 export function signInCodeFromAppUrl(url: string): string | null {
   const value = String(url ?? "").trim();
+  if (/^https?:\/\/[^/]+\/id\/approve\/?#(.*&)?auth=/i.test(value)) return signInRequestUri(value);
   if (!value.toLowerCase().startsWith("poweur:")) return null;
 
   const fromUrl = codeFromParsedUrl(value);

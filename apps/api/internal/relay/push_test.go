@@ -15,6 +15,7 @@ import (
 
 	"github.com/poweur/api/internal/storage"
 	"github.com/poweur/api/internal/webpush"
+	idpkg "github.com/poweur/identity"
 )
 
 // Background push (EPIC-009 E09-T11). The fake push service below decrypts
@@ -329,5 +330,50 @@ func TestPushRevokedDeviceStopsReceiving(t *testing.T) {
 	}
 	if status, _ := pushCall(t, ts, alice, "subscribe", testFingerprint, fake.subscription()); status != http.StatusForbidden {
 		t.Fatalf("revoked device re-subscribed: %d", status)
+	}
+}
+
+// A sign-in prompt is pushed at once, on its own topic and with a short TTL,
+// never folded into the mail count (EPIC-028 E28-T12).
+func TestPushSignInPromptSeparately(t *testing.T) {
+	server, ts := newTestRelay(t)
+	enablePush(t, server)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	fake := newFakePushService(t)
+	if status, out := pushCall(t, ts, alice, "subscribe", testFingerprint, fake.subscription()); status != http.StatusOK {
+		t.Fatalf("subscribe: %d %v", status, out)
+	}
+	if notifyKind(idpkg.MsgTypeAuthRequest) != "auth" || notifyKind("") != "message" {
+		t.Fatal("delivered prompts are not told apart from mail")
+	}
+
+	server.inbox.Add(alice.name, storage.StoredMessage{ID: "m1", Sender: "bob.poweur.net", Recipient: alice.name}, 100)
+	server.notify(alice.name, "message", "m1")
+	server.inbox.Add(alice.name, storage.StoredMessage{ID: "p1", Sender: "bridge.poweur.org", Recipient: alice.name}, 100)
+	server.notify(alice.name, "auth", "p1")
+	server.WaitPush()
+
+	got := fake.got()
+	if len(got) != 2 {
+		t.Fatalf("want the prompt and the mail as two pushes, got %+v", got)
+	}
+	var auth, mail int = -1, -1
+	for i, p := range got {
+		switch p.Kind {
+		case "auth":
+			auth = i
+		case "message":
+			mail = i
+		}
+	}
+	if auth < 0 || mail < 0 {
+		t.Fatalf("kinds %+v", got)
+	}
+	h := fake.headers[auth]
+	if h.Get("Urgency") != "high" || h.Get("TTL") != "300" || h.Get("Topic") != webpush.Topic("auth:"+alice.name) || h.Get("Topic") == webpush.Topic(alice.name) {
+		t.Fatalf("prompt headers %v", h)
+	}
+	if raw, _ := json.Marshal(got[auth]); strings.Contains(string(raw), "bridge") {
+		t.Fatalf("the prompt push names its sender: %s", raw)
 	}
 }

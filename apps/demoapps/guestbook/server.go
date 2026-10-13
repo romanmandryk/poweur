@@ -97,6 +97,10 @@ type Config struct {
 	Resolver signin.Resolver
 	// ResolveOptions is passed to the default resolver.
 	ResolveOptions identity.ResolveOptions
+	// FetchCapabilities overrides how an identity's public capabilities are
+	// read (where its web signer is). Tests inject one; nil uses the resolver
+	// chain.
+	FetchCapabilities func(ctx context.Context, id string) (identity.Capabilities, error)
 	// Metrics receives the guestbook's counters and request metrics; the
 	// caller serves them. Nil records nothing.
 	Metrics *appmetrics.Registry
@@ -150,7 +154,6 @@ type pendingLogin struct {
 	startedAt   time.Time
 	browser     string // coarse label for the signer's context line
 	pollHash    string // the starting page's poll secret
-	match       string // shown on the starting screen
 	code        string // short code: the request by reference at /auth/r/{code}
 	encoded     string // the request /auth/r/{code} serves
 	signer      string // the web signer a browser opening the short link is sent to
@@ -322,9 +325,11 @@ type StartResponse struct {
 	// PollSecret authenticates this page's polling. It is deliberately not
 	// the request_id, which travels inside the request to whoever approves.
 	PollSecret string `json:"poll_secret"`
-	// MatchCode is shown on this screen. A signer on another device sends it
-	// back, which is the proof that the approver was looking at this screen.
-	MatchCode string `json:"match_code"`
+	// Identity is the ID this browser last signed in with, when the page
+	// knows it, and ApproveLink that ID's own approve page carrying the
+	// request link (EPIC-028): it opens where the keys are, with no chooser.
+	Identity    string `json:"identity,omitempty"`
+	ApproveLink string `json:"approve_link,omitempty"`
 }
 
 // How a sign-in may finish. The approval decides, never the page that started
@@ -333,8 +338,9 @@ const (
 	// finishSameDevice: through /auth/resume, in the browser that holds the
 	// binding cookie set by /auth/start.
 	finishSameDevice = "same-device"
-	// finishCrossDevice: through /auth/poll, because the signer sent back the
-	// match code the starting screen showed.
+	// finishCrossDevice: through /auth/poll, because the signer said it
+	// approved on another device. The guestbook never pushes, so no number
+	// is asked (EPIC-028).
 	finishCrossDevice = "cross-device"
 )
 
@@ -373,11 +379,6 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, err)
 		return
 	}
-	match, err := signin.NewMatchCode()
-	if err != nil {
-		s.internalError(w, err)
-		return
-	}
 	deep, _ := identity.SignInDeepLink(req)
 	web, _ := identity.SignInWebLink(signerBase(r), req)
 	code, err := identity.NewShortCode()
@@ -402,7 +403,6 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		startedAt:   s.now(),
 		browser:     coarseBrowser(r.UserAgent()),
 		pollHash:    signin.HashSecret(pollSecret),
-		match:       match,
 		code:        code,
 		encoded:     encoded,
 		signer:      signerBase(r),
@@ -410,7 +410,7 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.m.signins.Inc(signinStarted)
 
-	writeJSON(w, http.StatusOK, StartResponse{
+	start := StartResponse{
 		RequestID:   req.RequestID,
 		Request:     encoded,
 		RequestLink: s.cfg.Origin + "/auth/r/" + code,
@@ -420,8 +420,34 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		Scopes:      req.Scopes,
 		Consent:     signin.DescribeScopes(req.Scopes, s.cfg.Name),
 		PollSecret:  pollSecret,
-		MatchCode:   match,
-	})
+	}
+	if id := s.rememberedID(r); id != "" {
+		start.Identity = id
+		start.ApproveLink = s.approveLink(r.Context(), id, start.RequestLink)
+	}
+	writeJSON(w, http.StatusOK, start)
+}
+
+// approveLink is the identity's own approve page with the request link in its
+// fragment, or "" when the identity names no web signer.
+func (s *Server) approveLink(ctx context.Context, id, requestLink string) string {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	fetch := s.cfg.FetchCapabilities
+	if fetch == nil {
+		fetch = func(ctx context.Context, id string) (identity.Capabilities, error) {
+			return identity.FetchCapabilities(ctx, id, s.cfg.ResolveOptions)
+		}
+	}
+	caps, err := fetch(ctx, id)
+	if err != nil {
+		return ""
+	}
+	page := identity.ApprovePageForSigner(caps.Endpoints["web_signer"])
+	if page == "" {
+		return ""
+	}
+	return identity.ApproveLink(page, requestLink)
 }
 
 // handleAuthByReference serves a pending request by its short code: JSON to a
@@ -483,14 +509,14 @@ func signerBase(r *http.Request) string {
 	if v := strings.TrimSpace(r.URL.Query().Get("signer")); v != "" {
 		return v
 	}
-	return "https://poweur.net/app/"
+	return "https://poweur.net/id/"
 }
 
 // handleAuthCallback is the response_uri: a signer POSTs the approval here.
 //
 // It also decides how the sign-in may finish, and only it can: a delivery
-// carrying the match code came from someone looking at the starting screen,
-// and one without it must finish in the browser that started it.
+// marked cross-device finishes through the starting page's poll, and one
+// without that mark must finish in the browser that started it.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	d, err := signin.ParseDelivery(r)
@@ -502,11 +528,10 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if resp, err := identity.DecodeSignInResponse(d.Response); err == nil {
 		requestID = resp.RequestID
 	}
-	crossDevice := d.Match != ""
+	crossDevice := d.CrossDevice()
 
 	// Claim the transaction before verifying: one approval per sign-in is
-	// ever processed, so a second approver — or a second guess at the match
-	// code — has nothing to race for.
+	// ever processed, so a second approver has nothing to race for.
 	s.mu.Lock()
 	p := s.pending[requestID]
 	switch {
@@ -520,13 +545,6 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.claimed = true
-	if crossDevice && !signin.MatchCodesEqual(p.match, d.Match) {
-		p.err = signin.ErrMatchCode.Error()
-		s.mu.Unlock()
-		s.m.signins.Inc(signinMatchFailed)
-		writeError(w, http.StatusForbidden, p.err)
-		return
-	}
 	s.mu.Unlock()
 
 	session, err := s.completeSignIn(r.Context(), d.Response)
@@ -614,12 +632,12 @@ func (s *Server) handleAuthResume(w http.ResponseWriter, r *http.Request) {
 			"This sign-in was started in a different browser. If you did not start it yourself, someone may have sent you their sign-in link — nothing was signed in.")
 		return
 	}
-	token := p.token
+	token, who := p.token, p.identity
 	p.resumed = true
 	s.mu.Unlock()
 
 	s.m.signins.Inc(signinCompleted)
-	s.setCookie(w, token)
+	s.setCookie(w, token, who)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -703,7 +721,7 @@ func (s *Server) handleAuthPoll(w http.ResponseWriter, r *http.Request) {
 		out = map[string]any{"status": "complete", "identity": p.identity}
 		// One-shot: the poll hands the cookie over exactly once.
 		s.m.signins.Inc(signinCompleted)
-		s.setCookie(w, p.token)
+		s.setCookie(w, p.token, p.identity)
 		delete(s.pending, requestID)
 	case p.finish == finishSameDevice && p.resumed:
 		// The resume already set the cookie in this browser.
@@ -794,17 +812,41 @@ const (
 	cookieName = "guestbook_session"
 	// bindingCookieName ties a sign-in to the browser that started it.
 	bindingCookieName = "guestbook_login"
+	// lastIDCookie remembers who last signed in here (EPIC-028), so the next
+	// sign-in can open that ID's own approve page. Not a secret.
+	lastIDCookie = "guestbook_last_id"
+	lastIDTTL    = 180 * 24 * time.Hour
 )
 
-func (s *Server) setCookie(w http.ResponseWriter, token string) {
+func (s *Server) setCookie(w http.ResponseWriter, token, id string) {
+	secure := strings.HasPrefix(s.cfg.Origin, "https://")
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   strings.HasPrefix(s.cfg.Origin, "https://"),
+		Secure:   secure,
 	})
+	if id != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name: lastIDCookie, Value: id, Path: "/", MaxAge: int(lastIDTTL / time.Second),
+			HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secure,
+		})
+	}
+}
+
+// rememberedID is the ID this browser last signed in with, or "".
+func (s *Server) rememberedID(r *http.Request) string {
+	c, err := r.Cookie(lastIDCookie)
+	if err != nil {
+		return ""
+	}
+	id, err := identity.NormalizeIDInput(c.Value, !strings.HasPrefix(s.cfg.Origin, "https://"))
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 func (s *Server) sessionFor(r *http.Request) (*Session, bool) {
@@ -845,6 +887,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: lastIDCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
 

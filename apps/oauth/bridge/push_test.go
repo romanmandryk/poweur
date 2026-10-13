@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/poweur/identity"
+	"github.com/poweur/identity/signin"
 )
 
 type recordedPush struct {
@@ -143,5 +145,111 @@ func TestPushRefusals(t *testing.T) {
 	}
 	if p := pb.post("/t/"+pid+"/push", url.Values{}); p.status != http.StatusNotFound {
 		t.Fatalf("push without a pusher = %d", p.status)
+	}
+}
+
+// A phone that opened the QR without keys asks for the push itself; the
+// context then offers the choices, and never the answer (EPIC-028).
+func TestPhoneAsksForThePushThroughPushURI(t *testing.T) {
+	rec := &pushRecorder{}
+	h := newHarness(t, func(c *Config) { c.Pusher = rec; c.PushIdentity = "bridge.poweur.org" })
+	b := h.browser()
+	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	txn := h.txn(id)
+
+	ctxOf := func() signin.SignInContext {
+		t.Helper()
+		c, err := signin.FetchContext(context.Background(), h.srv.nativeMetadata(), txn.RequestID, signin.FetchOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	before := ctxOf()
+	if before.MatchChoices != nil || before.PushURI != h.issuer+"/r/"+txn.RequestCode+"/push" {
+		t.Fatalf("context before a push = %+v", before)
+	}
+
+	resp, err := http.Post(before.PushURI, "text/plain", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || got["notice"] != "sent" || resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("phone push = %d %v", resp.StatusCode, got)
+	}
+	if _, leaked := got["match"]; leaked {
+		t.Fatal("the phone was told the number")
+	}
+	after := ctxOf()
+	txn = h.txn(id)
+	if len(after.MatchChoices) != signin.MatchChoiceCount || len(rec.sent) != 1 {
+		t.Fatalf("context after a push = %+v, sent %d", after, len(rec.sent))
+	}
+	// The starting page learns the number from its poll.
+	if st := b.status(id); st.Match != txn.Match {
+		t.Fatalf("status = %+v", st)
+	}
+	// Unknown codes are gone.
+	if resp, _ := http.Post(h.issuer+"/r/ZZZZZZZZ/push", "text/plain", nil); resp.StatusCode != http.StatusGone {
+		t.Fatalf("unknown code = %d", resp.StatusCode)
+	}
+}
+
+func TestPushURIAbsentWithoutAPusher(t *testing.T) {
+	h := newHarness(t)
+	b := h.browser()
+	id := b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	c, err := signin.FetchContext(context.Background(), h.srv.nativeMetadata(), h.txn(id).RequestID, signin.FetchOptions{})
+	if err != nil || c.PushURI != "" {
+		t.Fatalf("context = %+v %v", c, err)
+	}
+}
+
+// The browser remembers who last signed in: the next sign-in offers that ID
+// and pushes to it at once; signing out forgets it (EPIC-028).
+func TestRememberedIDAndAutoPush(t *testing.T) {
+	rec := &pushRecorder{}
+	h := newHarness(t, func(c *Config) { c.Pusher = rec; c.PushIdentity = "bridge.poweur.org" })
+	b := h.browser()
+	var ip identifyPage
+	p := b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid")))
+	if p.data(t, &ip); ip.Hint != "" || ip.Remembered {
+		t.Fatalf("a fresh browser remembers %+v", ip)
+	}
+	b.signIn(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+
+	b.post("/logout", url.Values{}) // ends the session; remembering is separate
+	p = b.follow(b.get(authorizeQuery("rp", rpRedirect, "openid")))
+	if p.data(t, &ip); ip.Hint != "" {
+		t.Fatalf("signing out kept the ID: %+v", ip)
+	}
+
+	b.signIn(authorizeQuery("rp", rpRedirect, "openid"), h.users[alice])
+	// A new browser session is needed for the identify step: drop the session only.
+	jar := b.client.Jar.Cookies(mustURL(h.issuer))
+	for _, c := range jar {
+		if strings.HasSuffix(c.Name, sessionCookie) {
+			b.client.Jar.SetCookies(mustURL(h.issuer), []*http.Cookie{{Name: c.Name, Value: "", Path: "/", MaxAge: -1}})
+		}
+	}
+	p = b.get(authorizeQuery("rp", rpRedirect, "openid"))
+	id := txnIDFrom(t, p.location)
+	p = b.follow(p)
+	if p.data(t, &ip); ip.Hint != alice || !ip.Remembered {
+		t.Fatalf("identify after a sign-in = %+v", ip)
+	}
+	b.post("/t/"+id+"/identify", url.Values{"identity": {alice}})
+	var ap awaitPage
+	if b.get("/t/"+id).data(t, &ap); !ap.AutoPush {
+		t.Fatalf("await for the remembered ID = %+v", ap)
+	}
+	// Someone else's ID typed here is not pushed automatically.
+	id = b.identify(authorizeQuery("rp", rpRedirect, "openid"), h.users[bob])
+	ap = awaitPage{}
+	if b.get("/t/"+id).data(t, &ap); ap.AutoPush {
+		t.Fatal("auto-push for an ID this browser never signed in as")
 	}
 }

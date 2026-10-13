@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,13 +39,13 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "identity approving the request")
 	signWith := fs.String("sign-with", "session", "sign with session (default) or identity key")
 	noDeliver := fs.Bool("no-deliver", false, "print the response code instead of POSTing it to response_uri")
-	matchCode := fs.String("code", "", "the code shown by the screen that started the sign-in, when approving from another device")
+	matchCode := fs.String("code", "", "for a sign-in pushed to you: the number shown by the screen that started it")
 	jsonOut := fs.Bool("json", false, "output JSON")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--no-deliver": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: poweur auth approve <request|link|file> [--code=<digits>] [--sign-with=session|identity] [--no-deliver]")
+		fmt.Fprintln(stderr, "usage: poweur auth approve <request|link|file> [--code=<number>] [--sign-with=session|identity] [--no-deliver]")
 		return 1
 	}
 	identityValue := resolveIdentity(*useIdentity, cfg.Identity)
@@ -53,11 +54,9 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	// A request by reference is what a QR or a copied link carries, so the
-	// screen that started the sign-in is elsewhere: its code is required.
-	if _, byReference := idpkg.SignInRequestURI(fs.Arg(0)); byReference && *matchCode == "" && !*noDeliver {
-		fmt.Fprintln(stderr, "this sign-in was started on another screen: add --code with the digits it shows")
-		return 1
-	}
+	// screen that started the sign-in is elsewhere: it finishes on that
+	// screen's poll. No number is needed for that (EPIC-028).
+	_, byReference := idpkg.SignInRequestURI(fs.Arg(0))
 	req, err := readSignInRequest(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -75,13 +74,30 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(stderr, signinpkg.SummarizeRequest(req, metadata.Name))
+	var choices []string
 	if sc, err := signinpkg.FetchContext(ctx, metadata, req.RequestID, signinpkg.FetchOptions{}); err == nil {
+		choices = sc.MatchChoices
 		if line := signinpkg.DescribeContext(sc, time.Now()); line != "" {
 			fmt.Fprintln(stderr, line)
-			if *matchCode != "" {
-				fmt.Fprintln(stderr, "Approve only if that is the screen in front of you.")
-			}
 		}
+	}
+	// A sign-in that was pushed to the user asks for the number on the screen
+	// that started it, picked from the choices the RP offers. One try.
+	pushed := len(choices) > 0
+	pick := signinpkg.NormalizeMatchCode(*matchCode)
+	if pushed && !*noDeliver {
+		if pick == "" {
+			fmt.Fprintf(stderr, "this sign-in was sent to you: run again with --code and the number the screen where you started shows (one of %s)\n", strings.Join(choices, ", "))
+			return 1
+		}
+		if !slices.Contains(choices, pick) {
+			fmt.Fprintf(stderr, "--code must be one of %s\n", strings.Join(choices, ", "))
+			return 1
+		}
+	}
+	crossDevice := byReference || pushed || pick != ""
+	if crossDevice {
+		fmt.Fprintln(stderr, "Approve only if you just started this sign-in yourself.")
 	}
 	for _, line := range signinpkg.DescribeScopes(req.Scopes, metadata.Name) {
 		fmt.Fprintln(stderr, "- "+line)
@@ -136,9 +152,14 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	delivered := false
 	var receipt signinpkg.DeliveryReceipt
 	if req.ResponseURI != "" && !*noDeliver {
-		receipt, err = deliverSignInApproval(ctx, req.ResponseURI, signinpkg.Delivery{
-			Response: encoded, Match: signinpkg.NormalizeMatchCode(*matchCode),
-		})
+		d := signinpkg.Delivery{Response: encoded}
+		if crossDevice {
+			d.Finish = signinpkg.FinishPoll
+		}
+		if pushed {
+			d.Match = pick
+		}
+		receipt, err = deliverSignInApproval(ctx, req.ResponseURI, d)
 		if err != nil {
 			fmt.Fprintf(stderr, "approval was signed but delivery failed: %v\n", err)
 			return 1
@@ -156,7 +177,7 @@ func runAuthApprove(args []string, stdout, stderr io.Writer) int {
 	message := encoded + "\n"
 	if delivered {
 		message = fmt.Sprintf("approved sign-in for %s and delivered it to %s\n", metadata.Name, req.ResponseURI)
-		if receipt.ResumeURI != "" {
+		if receipt.ResumeURI != "" && !crossDevice {
 			// A same-device approval finishes only in the browser that started
 			// it; the link is useless anywhere else, so it is safe to print.
 			payload["resume_uri"] = receipt.ResumeURI
