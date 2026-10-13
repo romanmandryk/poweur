@@ -57,7 +57,7 @@ jobs:
       docs: ${{ steps.plan.outputs.docs }}
       deploy: ${{ steps.plan.outputs.deploy }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: plan
@@ -94,7 +94,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - env:
@@ -107,8 +107,8 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
@@ -134,8 +134,8 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
@@ -154,17 +154,17 @@ jobs:
     if: needs.changes.outputs.ts == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
             apps/api/go.sum
             packages/identity/go.sum
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -216,8 +216,8 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
@@ -226,10 +226,10 @@ jobs:
             apps/demoapps/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -261,8 +261,8 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
@@ -271,10 +271,10 @@ jobs:
             apps/demoapps/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -307,8 +307,8 @@ jobs:
       matrix:
         product: [oauth2-proxy, keycloak, authentik]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
@@ -316,10 +316,10 @@ jobs:
             apps/cli/go.sum
             apps/oauth/go.sum
             packages/identity/go.sum
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -352,11 +352,11 @@ jobs:
     if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: pnpm
@@ -369,8 +369,8 @@ jobs:
     if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - run: node --test deploy/tests/*.test.mjs
@@ -386,8 +386,8 @@ jobs:
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - run: node deploy/tests/stack-smoke.mjs
