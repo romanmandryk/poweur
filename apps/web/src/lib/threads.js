@@ -10,7 +10,7 @@
  * `packages/identity/msgtypes.go`). This module must not restate them.
  */
 
-import { describeMessage, expiryCountdown, normalizeMessageType, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST, MSG_TYPE_SHARE_ACCEPT, MSG_TYPE_SHARE_OFFER, MSG_TYPE_SHARE_REVOKED } from "@poweur/client";
+import { conversationKey, describeMessage, expiryCountdown, isEmailType, normalizeMessageType, normalizeSubject, MSG_TYPE_CHAT_ATTACHMENT, MSG_TYPE_CHAT_TEXT, MSG_TYPE_CONTACT_ACCEPT, MSG_TYPE_CONTACT_REQUEST, MSG_TYPE_SHARE_ACCEPT, MSG_TYPE_SHARE_OFFER, MSG_TYPE_SHARE_REVOKED } from "@poweur/client";
 
 /**
  * What the tray shows as a conversation's one-line preview.
@@ -60,22 +60,75 @@ export function conversationPeer(message, selfIdentity) {
 export const THREAD_PAGE_SIZE = 10;
 
 /**
- * Every message in one (conversation, thread), oldest first — the order the
- * store already holds them in.
+ * A message's grouping key inside its conversation (E09-T13): its thread,
+ * else `subj:<normalized subject>`, else the default thread "".
  */
-export function threadMessages(messages, selfIdentity, peer, threadId = "") {
+export function messageThreadKey(message) {
+  return conversationKey(message.thread_id || "", message.subject || "");
+}
+
+/**
+ * Every message in one conversation, oldest first — the order the store
+ * already holds them in. `threadKey` narrows it to one thread (the default
+ * thread is ""); `null` is the whole conversation, as the By-ID view shows it.
+ *
+ * @param {any[]} messages
+ * @param {string} selfIdentity
+ * @param {string} peer
+ * @param {string|null} [threadKey]
+ * @param {{ emailBridge?: string }} [options]
+ */
+export function threadMessages(messages, selfIdentity, peer, threadKey = "", options = {}) {
   const wanted = String(peer ?? "").toLowerCase();
   const out = [];
   for (const raw of messages) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!message.sender) continue;
-    // Consent gestures and notifications have their own surfaces, never chat.
-    if (isActionNotice(message.type)) continue;
+    // Consent gestures, notifications and mail have their own surfaces, never chat.
+    if (isActionNotice(message.type) || isBridgeMail(message, options.emailBridge)) continue;
     if (conversationPeer(message, selfIdentity).toLowerCase() !== wanted) continue;
-    if ((message.thread_id || "") !== (threadId || "")) continue;
+    if (threadKey !== null && messageThreadKey(message) !== (threadKey || "")) continue;
     out.push(message);
   }
   return out;
+}
+
+/** Mail from the user's own bridge belongs to the Email tray, not chat. */
+export function isBridgeMail(message, emailBridge) {
+  return Boolean(emailBridge) && isEmailType(message.type) &&
+    String(message.sender ?? "").toLowerCase() === String(emailBridge).toLowerCase();
+}
+
+/**
+ * The divider label to draw above a message in the By-ID stream: the
+ * message's thread label when it differs from the previous message's, else "".
+ */
+export function subjectDivider(message, previous, group = "", subjects = threadSubjects([])) {
+  if (!message) return "";
+  const key = messageThreadKey(message);
+  if (previous && messageThreadKey(previous) === key) return "";
+  if (!previous && (!key || (group && key === group))) return "";
+  return threadTitle(key, message.subject || subjects.get(key) || "", group);
+}
+
+/** The newest subject seen in each thread — a thread's displayed subject. */
+export function threadSubjects(messages) {
+  const out = new Map();
+  for (const message of messages) if (message.subject) out.set(messageThreadKey(message), message.subject);
+  return out;
+}
+
+/**
+ * The title of a thread row in the By-subject view: its subject,
+ * "(no subject)" for the default thread, `#name` for a named thread without
+ * one (e.g. started with the CLI's --thread).
+ */
+export function threadTitle(key, subject, group = "") {
+  if (subject) return subject;
+  if (!key || (group && key === group)) return "(no subject)";
+  if (key.startsWith("subj:")) return key.slice(5);
+  const name = group && key.startsWith(`${group}:`) ? key.slice(group.length + 1) : key;
+  return `#${threadLabel(name)}`;
 }
 
 /**
@@ -157,14 +210,15 @@ export function threadsOf(messages) {
  * @param {string} selfIdentity            us, so we can find the other side
  * @param {(contact: string) => number} unreadFor  unread count per contact
  */
-export function buildConversationRows(messages, selfIdentity, unreadFor = () => 0) {
+export function buildConversationRows(messages, selfIdentity, unreadFor = () => 0, options = {}) {
+  const view = options.view === "subject" ? "subject" : "id";
   const byContact = new Map();
   for (const raw of messages) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     // An unsigned message has nobody to thread under; it belongs to the
     // anonymous tray, which renders it as a different kind of object.
     if (!message.sender) continue;
-    if (isActionNotice(message.type)) continue;
+    if (isActionNotice(message.type) || isBridgeMail(message, options.emailBridge)) continue;
     // A verified fan-out carries the group in signed metadata. File it under
     // that address rather than under whichever member happened to speak.
     const contact = conversationPeer(message, selfIdentity);
@@ -173,6 +227,77 @@ export function buildConversationRows(messages, selfIdentity, unreadFor = () => 
     byContact.get(contact).push(message);
   }
 
+  const rows = [];
+  for (const [contact, contactMessages] of byContact) {
+    const isGroup = contactMessages.some(message => message.group_verified && message.metadata?.group === contact);
+    if (view === "id") {
+      // By ID (E09-T13): one row per contact, the conversation one stream.
+      const lastMsg = contactMessages.at(-1);
+      rows.push({
+        contact,
+        threadId: null,
+        threaded: false,
+        messages: contactMessages,
+        lastMsg,
+        title: "",
+        unread: unreadFor(contact),
+        preview: lastMsg.subject ? `${lastMsg.subject} — ${previewFor(lastMsg)}` : previewFor(lastMsg),
+        group: isGroup || contactMessages.some((message) => message.thread_id === contact || String(message.thread_id ?? "").startsWith(`${contact}:`)),
+      });
+      continue;
+    }
+    // By subject: one row per (contact, grouping key), like an inbox.
+    const byKey = new Map();
+    for (const message of contactMessages) {
+      const key = messageThreadKey(message);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(message);
+    }
+    const groupName = isGroup ? contact : "";
+    for (const [key, threadMsgs] of byKey) {
+      const lastMsg = threadMsgs.at(-1);
+      const subject = [...threadMsgs].reverse().find((message) => message.subject)?.subject ?? "";
+      rows.push({
+        contact,
+        threadId: key,
+        threaded: Boolean(key) && key !== groupName,
+        messages: threadMsgs,
+        lastMsg,
+        title: threadTitle(key, subject, groupName),
+        subject,
+        unread: options.threadUnread ? options.threadUnread(contact, key) : 0,
+        preview: previewFor(lastMsg),
+        group: isGroup || key === contact || key.startsWith(`${contact}:`),
+      });
+    }
+  }
+  // Timestamps are to the second: on a tie the message later in the store
+  // (the one that arrived or was sent last) is the newer.
+  const position = new Map();
+  messages.forEach((raw, index) => {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (message?.id) position.set(message.id, index);
+  });
+  return rows.sort((a, b) =>
+    (new Date(b.lastMsg.timestamp) - new Date(a.lastMsg.timestamp)) ||
+    ((position.get(b.lastMsg.id) ?? 0) - (position.get(a.lastMsg.id) ?? 0)));
+}
+
+/**
+ * Legacy per-(contact, thread) rows — the tray before subjects, kept for
+ * callers that still group by raw thread id.
+ */
+export function buildThreadRows(messages, selfIdentity, unreadFor = () => 0) {
+  const byContact = new Map();
+  for (const raw of messages) {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!message.sender) continue;
+    if (isActionNotice(message.type)) continue;
+    const contact = conversationPeer(message, selfIdentity);
+    if (!contact) continue;
+    if (!byContact.has(contact)) byContact.set(contact, []);
+    byContact.get(contact).push(message);
+  }
   const rows = [];
   for (const [contact, contactMessages] of byContact) {
     const threads = threadsOf(contactMessages);
@@ -219,19 +344,66 @@ export function markCovers(mark, timestamp, id) {
  * @param {string} selfIdentity
  * @param {Record<string, {timestamp: string, id?: string}>} conversations  read marks by conversation
  */
-export function unreadTotal(messages, selfIdentity, conversations = {}) {
+export function unreadTotal(messages, selfIdentity, conversations = {}, options = {}) {
   const self = String(selfIdentity ?? "").toLowerCase();
   let count = 0;
   for (const raw of messages) {
     const message = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (!message.sender || message.sender.toLowerCase() === self) continue;
-    // A request is counted once, on Contacts — not again as a message.
-    if (isActionNotice(message.type)) continue;
+    // A request is counted once, on Contacts — not again as a message; mail
+    // is counted by the Email tray.
+    if (isActionNotice(message.type) || isBridgeMail(message, options.emailBridge)) continue;
     const conversation = String(message.group_verified ? message.metadata?.group : message.sender).toLowerCase();
     if (markCovers(conversations?.[conversation], message.timestamp, message.id ?? "")) continue;
+    if (markCovers(options.threads?.[conversation]?.[messageThreadKey(message)], message.timestamp, message.id ?? "")) continue;
     count += 1;
   }
   return count;
+}
+
+/**
+ * Where a reply goes and what subject the composer shows (E09-T13) — one
+ * pure function both views use.
+ *
+ * @param {{ view: "id"|"subject", origin: "new"|"reply", conversation: any[], threadKey?: string|null,
+ *           group?: string, touched?: boolean, typed?: string }} input
+ * @returns {{ expanded: boolean, value: string, threadId: string, prefill: string, startsNew: boolean }}
+ */
+export function composerSubject({ view, origin, conversation = [], threadKey = null, group = "", touched = false, typed = "" }) {
+  const defaultThread = group || "";
+  const newest = conversation.at(-1);
+  let expanded = false;
+  let prefill = "";
+  let threadId = defaultThread;
+  if (origin === "new") {
+    expanded = view === "subject";
+  } else if (view === "subject" && threadKey !== null) {
+    // Inside one thread: its subject (or none for the default thread).
+    expanded = true;
+    prefill = [...conversation].reverse().find((message) => message.subject)?.subject ?? "";
+    threadId = threadKey && !threadKey.startsWith("subj:") ? threadKey : defaultThread;
+  } else if (newest) {
+    // The newest message, whoever sent it, sets the reply's thread.
+    threadId = newest.thread_id || defaultThread;
+    if (newest.subject) {
+      expanded = true;
+      prefill = newest.subject;
+    }
+  }
+  const value = touched ? typed : prefill;
+  const changed = touched && normalizeSubject(value) !== normalizeSubject(prefill);
+  return { expanded: expanded || (touched && Boolean(typed)), value, threadId, prefill, startsNew: changed };
+}
+
+/**
+ * The thread a send goes to: a changed subject starts a new thread, a
+ * cleared one goes to the default thread, an unchanged one stays put.
+ */
+export function sendThread({ subject, prefill, threadId, group = "", mint }) {
+  const typed = String(subject ?? "").trim();
+  if (normalizeSubject(typed) === normalizeSubject(prefill ?? "")) return { subject: typed, threadId: threadId ?? "" };
+  if (!typed) return { subject: "", threadId: group || "" };
+  return { subject: typed, threadId: group ? `${group}:${mint()}` : mint() };
 }
 
 /**

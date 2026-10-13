@@ -4,6 +4,8 @@
  * an answer on Contacts. Both come from read marks and the requests queue, so
  * they reach zero.
  */
+import { stateCovers } from "@poweur/client";
+import { mailEntries } from "../lib/email";
 import { markCovers, unreadTotal } from "../lib/threads.js";
 import type { Contact, DataFields } from "./data";
 
@@ -65,8 +67,16 @@ export function navBadges(data: BadgeData, identity: string | null, unlocked: bo
   if (!identity || !unlocked) return {};
   // With anonymous messages turned off there is no tray to clear them from.
   const anonymous = anonymousAllowed(data.policy) ? unreadAnonymous(data) : 0;
+  const email = data.policy?.doc?.email;
+  const emailBridge = email?.allow && email.bridge ? String(email.bridge).toLowerCase() : "";
+  const readState: any = data.history.readState ?? { conversations: {} };
+  const mail = emailBridge
+    ? mailEntries(data.messages, emailBridge, identity).filter(
+        (entry) => entry.kind === "received" && !stateCovers({ version: 1, ...readState, conversations: readState.conversations ?? {} }, emailBridge, entry.key, entry.timestamp, entry.id),
+      ).length
+    : 0;
   return {
-    messages: unreadTotal(data.messages, identity, data.history.readState?.conversations) + anonymous,
+    messages: unreadTotal(data.messages, identity, data.history.readState?.conversations, { emailBridge, threads: readState.threads }) + anonymous + mail,
     contacts: incomingRequests(data, identity).length,
   };
 }

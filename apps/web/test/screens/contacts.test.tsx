@@ -95,7 +95,7 @@ describe("Contacts destination (E21-T8)", () => {
 
     fireEvent.keyDown($(`[data-contact-open="${BOB}"]`)!, { key: "Enter" });
     expect(useRoute.getState().sub).toBe("thread");
-    expect(useData.getState().thread).toEqual({ peer: BOB, threadId: "", group: false });
+    expect(useData.getState().thread).toEqual({ peer: BOB, threadId: null, group: false });
   });
 
   it("adds a contact by typed name, with an intro and a petname", async () => {

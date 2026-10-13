@@ -8,12 +8,12 @@
  * item over once and forgets it, so everything fetched is merged into the
  * store and the archive is what a reload restores from.
  */
-import { ACK_STATE_READ, crypto as poweurCrypto, fromBase64, isSessionValid, sendsReadReceiptsTo, streamForever } from "@poweur/client";
+import { ACK_STATE_READ, crypto as poweurCrypto, formatBody, fromBase64, isSessionValid, newThreadId, parseBody, sendsReadReceiptsTo, streamForever } from "@poweur/client";
 import { MAX_ATTACHMENT_BYTES, openAttachment, parseAttachment, prepareAttachment } from "@poweur/client/drive";
 import { lookup } from "../lib/client.js";
 import { openBrowserDrive } from "../lib/drive";
 import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/outbox.js";
-import { markCovers } from "../lib/threads.js";
+import { markCovers, messageThreadKey } from "../lib/threads.js";
 import { loadSessionRecord, relayUrlFor } from "../lib/storage.js";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { autoAcceptContactOffers } from "./files";
@@ -46,6 +46,7 @@ export function recordToMessage(record: any) {
     thread_id: record.thread_id ?? "",
     expires_at: record.expires_at ?? "",
     metadata: record.metadata,
+    ...(record.subject ? { subject: record.subject } : {}),
     queue: record.queue,
     plaintext: record.body,
   };
@@ -62,6 +63,7 @@ export function messageToRecord(message: any, queue: string) {
     ...(message.thread_id ? { thread_id: message.thread_id } : {}),
     ...(message.expires_at ? { expires_at: message.expires_at } : {}),
     ...(message.metadata ? { metadata: message.metadata } : {}),
+    ...(message.subject ? { subject: message.subject } : {}),
     queue,
     body: message.plaintext ?? "",
   };
@@ -308,20 +310,58 @@ export function refreshMessages(): Promise<void> {
 }
 
 /** Unread in one conversation, from its read mark — a count that can reach zero. */
-export function unreadFor(data: Pick<DataFields, "messages" | "history">, identity: string, peer: string): number {
+export function unreadFor(data: Pick<DataFields, "messages" | "history">, identity: string, peer: string, threadKey?: string): number {
   const wanted = String(peer ?? "").toLowerCase();
   const self = String(identity).toLowerCase();
   const mark = (data.history.readState?.conversations as Record<string, any>)?.[wanted] ?? null;
+  const threadMarks = ((data.history.readState as any)?.threads?.[wanted] ?? {}) as Record<string, any>;
   let count = 0;
   for (const raw of data.messages) {
     const message = parseMessage(raw);
     if (!message.sender || message.sender.toLowerCase() === self) continue;
+    if (bridgeMail(message)) continue;
     const conversation = String(message.group_verified ? message.metadata?.group : message.sender).toLowerCase();
     if (conversation !== wanted) continue;
+    if (threadKey !== undefined && messageThreadKey(message) !== threadKey) continue;
     if (mark && markCovers(mark, message.timestamp, message.id ?? "")) continue;
+    if (markCovers(threadMarks[messageThreadKey(message)], message.timestamp, message.id ?? "")) continue;
     count += 1;
   }
   return count;
+}
+
+/** The bridge the user's own policy names — its mail lives in the Email tray. */
+export function trustedEmailBridge(): string {
+  const email = useData.getState().policy.doc?.email;
+  return email?.allow && email.bridge ? String(email.bridge).toLowerCase() : "";
+}
+
+function bridgeMail(message: any): boolean {
+  const bridge = trustedEmailBridge();
+  return Boolean(bridge) && String(message.type ?? "").startsWith("email.") && String(message.sender ?? "").toLowerCase() === bridge;
+}
+
+/**
+ * Mark one thread read (E09-T13, the By-subject view): a per-thread mark, so
+ * the contact's other threads stay unread.
+ */
+export async function markThreadRead(peer: string, threadKey: string) {
+  const client = activeClient();
+  if (!client) return;
+  const wanted = String(peer ?? "").toLowerCase();
+  const records = useData
+    .getState()
+    .messages.map(parseMessage)
+    .filter((message: any) => message.sender && message.sender.toLowerCase() === wanted && messageThreadKey(message) === threadKey)
+    .map((message: any) => messageToRecord(message, "inbox"));
+  if (!records.length) return;
+  try {
+    const store = await client.history();
+    const readState = await store.markThreadRead(wanted, threadKey, records);
+    setHistory({ readState });
+  } catch (error) {
+    console.warn("Could not save read marks:", errorMessage(error));
+  }
 }
 
 /**
@@ -370,14 +410,16 @@ export async function sendSigned(
     body,
     thread = "",
     group = false,
+    subject = "",
     setStatus,
-  }: { to: string; body: string; thread?: string; group?: boolean; setStatus: SetStatus },
-): Promise<SendOutcome> {
+  }: { to: string; body: string; thread?: string; group?: boolean; subject?: string; setStatus: SetStatus },
+): Promise<SendOutcome & { threadId?: string }> {
   const self = selfIdentity();
+  subject = subject.trim();
   if (group) {
     try {
       setStatus("Reading the signed group roster…");
-      const sent = await client.sendGroupAndArchive(to, body, { ...(thread ? { thread } : {}) });
+      const sent = await client.sendGroupAndArchive(to, body, { ...(thread ? { thread } : {}), ...(subject ? { subject } : {}) });
       const first = sent.envelopes[0];
       mergeMessages([
         {
@@ -389,6 +431,7 @@ export async function sendSigned(
           plaintext: body,
           thread_id: first.thread_id,
           metadata: first.metadata,
+          ...(subject ? { subject } : {}),
           group_verified: true,
         },
       ]);
@@ -397,7 +440,7 @@ export async function sendSigned(
       setStatus(`✓ ${delivered} of ${total} delivered`, delivered === total ? "ok" : "err");
       if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
       trackAction("send", { kind: "group", outcome: "sent" });
-      return { status: "sent", delivered, total };
+      return { status: "sent", delivered, total, threadId: first.thread_id };
     } catch (error) {
       setStatus(`✕ ${errorMessage(error)}`, "err");
       toast(errorMessage(error), "error");
@@ -417,6 +460,7 @@ export async function sendSigned(
     const sent = await client.sendAndArchive(to, body, {
       signWith: isSessionValid(loadSessionRecord(self)) ? "session" : "identity",
       ...(thread ? { threadId: thread } : {}),
+      ...(subject ? { subject } : {}),
     });
     setStatus("✓ Sent", "ok");
     mergeMessages([
@@ -427,16 +471,25 @@ export async function sendSigned(
         timestamp: sent.message.timestamp,
         queue: "sent",
         plaintext: body,
-        ...(thread ? { thread_id: thread } : {}),
+        ...(sent.message.thread_id ? { thread_id: sent.message.thread_id } : {}),
+        ...(sent.message.metadata ? { metadata: sent.message.metadata } : {}),
+        ...(subject ? { subject } : {}),
       },
     ]);
     if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
     trackAction("send", { kind: "chat", outcome: "sent" });
-    return { status: "sent" };
+    return { status: "sent", ...(sent.message.thread_id ? { threadId: sent.message.thread_id } : {}) };
   } catch (error) {
     if (client.decryptor && isRetryableSendError(error)) {
-      const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, body);
-      queueWebMessage(self, to, sealed, { signWith: "identity", ...(thread ? { threadId: thread } : {}) }, errorMessage(error));
+      // Queued sends keep the subject: the outbox holds what will be sent.
+      const formatted = subject ? formatBody(subject, body) : { plaintext: body };
+      const threadId = subject && !thread ? newThreadId() : thread;
+      const sealed = poweurCrypto.encryptMessage(client.decryptor.encryptionPublicKey, formatted.plaintext);
+      queueWebMessage(self, to, sealed, {
+        signWith: "identity",
+        ...(threadId ? { threadId } : {}),
+        ...(formatted.metadata ? { metadata: formatted.metadata } : {}),
+      }, errorMessage(error));
       setStatus("· Queued — will retry when online", "ok");
       toast("Message queued until the relay is reachable", "success");
       trackAction("send", { kind: "chat", outcome: "queued" });
@@ -454,25 +507,41 @@ export async function retryBrowserOutbox() {
   if (!client?.decryptor) return;
   const privateKey = await client.decryptor.privateKeyBytes();
   const result: any = await retryWebOutbox(selfIdentity(), (entry: any) => {
-    const plaintext = poweurCrypto.decryptMessage(privateKey, entry.payload, entry.encryption);
-    return client.sendAndArchive(entry.recipient, plaintext, entry.options);
+    const raw = poweurCrypto.decryptMessage(privateKey, entry.payload, entry.encryption);
+    // A queued subject is re-sent as a subject, so the archive keeps it apart.
+    const { subject, text } = parseBody(raw, entry.options?.metadata);
+    if (!subject) return client.sendAndArchive(entry.recipient, raw, entry.options);
+    const { body_format: _flag, ...metadata } = entry.options?.metadata ?? {};
+    return client.sendAndArchive(entry.recipient, text, {
+      ...entry.options,
+      ...(Object.keys(metadata).length ? { metadata } : { metadata: undefined }),
+      subject,
+    });
   });
   if (result?.sent) toast(`${result.sent} queued message${result.sent === 1 ? "" : "s"} sent`, "success");
 }
 
-/** Open a conversation. Opening it is reading it. */
-export function openThread(peer: string, { thread = "", group = false }: { thread?: string; group?: boolean } = {}) {
-  useData.setState({ thread: { peer, threadId: thread, group } });
-  markConversationRead(peer).catch(() => {});
+/**
+ * Open a conversation. Opening it is reading it: the whole conversation for
+ * a By-ID row (`thread` null), just that thread for a By-subject row.
+ */
+export function openThread(
+  peer: string,
+  { thread = null, group = false, startSubject = false }: { thread?: string | null; group?: boolean; startSubject?: boolean } = {},
+) {
+  useData.setState({ thread: { peer, threadId: thread, group, ...(startSubject ? { startSubject } : {}) } });
+  if (thread === null) markConversationRead(peer).catch(() => {});
+  else markThreadRead(peer, thread).catch(() => {});
   useRoute.getState().push("thread", { to: peer, thread, group });
   trackAction("open-thread", { kind: group ? "group" : "chat" });
 }
 
 /**
  * Open a conversation with someone picked by name. A group is recognised by
- * its roster answering — the same check sending to it would make.
+ * its roster answering — the same check sending to it would make. From the
+ * By-subject view the composer opens on a new subject (E09-T13).
  */
-export async function openNewChat(identity: string): Promise<boolean> {
+export async function openNewChat(identity: string, view: "id" | "subject" = "id"): Promise<boolean> {
   const client = activeClient();
   if (!client) {
     toast("Unlock your identity first", "warning");
@@ -485,8 +554,12 @@ export async function openNewChat(identity: string): Promise<boolean> {
   } catch {
     // Not a group, or not one we belong to: a direct conversation.
   }
-  // A group's main thread is the group's own address (E09-T5).
-  openThread(identity, { thread: group ? identity : "", group });
+  if (view === "subject") {
+    // A group's main thread is the group's own address (E09-T5).
+    openThread(identity, { thread: group ? identity : "", group, startSubject: true });
+  } else {
+    openThread(identity, { thread: null, group });
+  }
   return true;
 }
 

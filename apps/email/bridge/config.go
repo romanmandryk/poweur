@@ -1,10 +1,12 @@
 package bridge
 
 import (
+	"context"
 	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -288,6 +290,17 @@ func FromEnv() (Config, error) {
 	}
 	scheme := env("EMAIL_RESOLVE_SCHEME", "https")
 	c.Resolve = identity.ResolveOptions{Scheme: scheme, AllowPrivate: env("EMAIL_RESOLVE_ALLOW_PRIVATE", "") == "1"}
+	// Development and tests only: send every identity lookup to one address
+	// (a local relay) instead of resolving identity hosts in DNS.
+	if dial := env("EMAIL_RESOLVE_DIAL", ""); dial != "" {
+		c.Resolve.HTTPClient = &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, dial)
+			}},
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	}
 	return c, nil
 }
 

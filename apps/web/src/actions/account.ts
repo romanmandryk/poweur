@@ -37,8 +37,12 @@ export async function loadPolicy({ force = false } = {}) {
 export async function savePolicy(document: InboxPolicy) {
   const client = activeClient();
   if (!client) throw new Error("Unlock your identity first");
-  const trusted = document.trusted_auth_services?.length ? [document.trusted_auth_services] : [];
-  await client.setPolicy(document.mode, document.anonymous, document.read_receipts, ...trusted);
+  const trusted = document.trusted_auth_services?.length ? document.trusted_auth_services : undefined;
+  // The email block is the Email setting's to change; whatever is saved here keeps it.
+  const email = document.email ?? useData.getState().policy.doc?.email;
+  const args: unknown[] = [document.mode, document.anonymous, document.read_receipts, trusted, email];
+  while (args.length > 3 && args.at(-1) === undefined) args.pop();
+  await client.setPolicy(...args);
   await loadPolicy({ force: true });
   trackAction("save-policy");
 }

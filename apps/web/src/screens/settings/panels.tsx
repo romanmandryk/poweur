@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Globe, Hexagon, Laptop, Monitor, Puzzle, ScrollText, Smartphone, Tablet, Usb, type LucideIcon } from "lucide-react";
 import { fingerprintOrKey, isSessionValid } from "@poweur/client";
 import { loadPolicy, loadProfile, savePolicy } from "../../actions/account";
+import { disableEmail, loadEmail } from "../../actions/email";
+import { EmailOptIn } from "../messages/Email";
 import { activeClient, errorMessage, resolveForActive } from "../../actions/relay";
 import { refreshRelaySession, revokeRelaySession } from "../../actions/settings";
 import { askConfirm } from "../../components/Dialogs";
@@ -50,6 +52,54 @@ const fmtTime = (timestamp: string) => {
     return timestamp;
   }
 };
+
+// ─── Email (EPIC-023) ─────────────────────────────────────────────────────────
+
+export function openEmailPanel() {
+  if (!requireClient()) return;
+  openPanel("Email", () => <EmailPanel />);
+}
+
+function EmailPanel() {
+  const email = useData((state) => state.email);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void loadEmail({ force: true });
+  }, []);
+  if (!email.loaded) return <p className="text-sm text-muted">Loading…</p>;
+  if (!email.enabled) return <EmailOptIn compact />;
+  return (
+    <div id="email-panel">
+      <KvRow label="Your address" id="email-panel-address">{email.address}</KvRow>
+      <KvRow label="Bridge">{email.bridge}</KvRow>
+      <p className="mt-3 text-[13px] text-muted">
+        Mail to this address arrives encrypted to you in Messages → Email. It is not end-to-end encrypted on the way: the
+        sender's mail servers and the bridge see it while it passes. Turning email off removes your public opt-in; the bridge
+        stops accepting mail for you within a few minutes.
+      </p>
+      <Button
+        id="btn-email-disable"
+        variant="secondary"
+        className="mt-4 text-danger"
+        disabled={busy}
+        onClick={async () => {
+          const ok = await askConfirm({
+            title: "Turn off email",
+            message: <p>Mail sent to {email.address} will be refused from now on. Your past email stays in your history.</p>,
+            confirmLabel: "Turn off",
+            confirmId: "panel-confirm-email-off",
+          });
+          if (!ok) return;
+          setBusy(true);
+          await disableEmail();
+          setBusy(false);
+        }}
+      >
+        Turn off email
+      </Button>
+    </div>
+  );
+}
 
 // ─── Inbox policy ─────────────────────────────────────────────────────────────
 

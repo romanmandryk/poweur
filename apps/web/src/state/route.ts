@@ -9,7 +9,7 @@ import { useData } from "./data";
 export const DESTINATIONS = ["messages", "contacts", "files", "launcher", "settings"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
-export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth" | "pair";
+export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboarding" | "claim" | "auth" | "pair" | "email-thread" | "email-compose";
 
 /**
  * Sub-pages that are a *detail of the list behind them* rather than a gate
@@ -17,7 +17,7 @@ export type SubPageId = "add-id" | "unlock" | "new-chat" | "thread" | "onboardin
  * are deliberately not here — an inbox behind an unlock prompt would suggest
  * it is reachable.
  */
-export const DETAIL_SUBS: ReadonlySet<SubPageId> = new Set<SubPageId>(["new-chat", "thread"]);
+export const DETAIL_SUBS: ReadonlySet<SubPageId> = new Set<SubPageId>(["new-chat", "thread", "email-thread", "email-compose"]);
 
 export interface RouteState {
   page: Destination;
@@ -36,6 +36,7 @@ export const useRoute = create<RouteState>()((set, get) => ({
   push: (sub, params = {}) => set({ sub, params }),
   pop: () => {
     if (get().sub === "thread") useData.setState({ thread: null });
+    if (get().sub === "email-thread") useData.setState({ mailThread: null });
     set({ sub: null, params: {} });
   },
 }));

@@ -7,17 +7,21 @@
  * put back by hand.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, Paperclip, Users, type LucideIcon } from "lucide-react";
-import { downloadAttachment, historyHasOlder, loadOlderHistory, markConversationRead, sendAttachment, sendSigned, unreadFor } from "../../actions/messages";
+import { Check, CheckCheck, ChevronLeft, CircleAlert, Hourglass, MessageCircle, Paperclip, Plus, Users, X, type LucideIcon } from "lucide-react";
+import { newThreadId } from "@poweur/client";
+import { downloadAttachment, historyHasOlder, loadOlderHistory, markConversationRead, markThreadRead, openThread, sendAttachment, sendSigned, unreadFor } from "../../actions/messages";
 import { activeClient } from "../../actions/relay";
 import { MessageText } from "../../components/MessageText";
 import { usePeerAvatars } from "../../actions/avatars";
 import { cn } from "../../lib/cn";
 import { dayLabel, fmtClock } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
-import { bodyFor, deliveryState, expiryCountdown, latestWindow, threadLabel, threadMessages, THREAD_PAGE_SIZE } from "../../lib/threads.js";
+import {
+  bodyFor, composerSubject, deliveryState, expiryCountdown, latestWindow, sendThread, subjectDivider, threadMessages, threadSubjects,
+  threadTitle, THREAD_PAGE_SIZE,
+} from "../../lib/threads.js";
 import { contactFor } from "../../state/badges";
-import { useData } from "../../state/data";
+import { emailBridgeOf, useData } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { toast } from "../../state/ui";
@@ -46,10 +50,22 @@ function DeliveryTick({ state }: { state: string }) {
 export function ThreadScreen() {
   const thread = useData((state) => state.thread);
   if (!thread) return null;
-  return <Thread key={`${thread.peer}#${thread.threadId}`} peer={thread.peer} threadId={thread.threadId} group={thread.group} />;
+  return (
+    <Thread
+      key={`${thread.peer}#${thread.threadId ?? "*"}`}
+      peer={thread.peer}
+      threadId={thread.threadId ?? null}
+      group={thread.group}
+      startSubject={Boolean(thread.startSubject)}
+    />
+  );
 }
 
-function Thread({ peer, threadId, group }: { peer: string; threadId: string; group: boolean }) {
+/**
+ * `threadId` null is the whole conversation (By ID, E09-T13), with a divider
+ * wherever the thread changes; a string is one thread (By subject).
+ */
+function Thread({ peer, threadId, group, startSubject }: { peer: string; threadId: string | null; group: boolean; startSubject: boolean }) {
   const identity = useSession((state) => state.identity) ?? "";
   const messages = useData((state) => state.messages);
   const acks = useData((state) => state.acks);
@@ -66,13 +82,27 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const marking = useRef(false);
 
-  const all = threadMessages(messages, identity, peer, threadId);
+  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc));
+  const all = threadMessages(messages, identity, peer, threadId, { emailBridge });
+  const groupName = group ? peer.toLowerCase() : "";
+  const subjects = threadSubjects(all);
+  const view = threadId === null ? "id" : "subject";
+  // Subject field (E09-T13): prefilled from the conversation until touched.
+  const [subjectOpen, setSubjectOpen] = useState(startSubject);
+  const [subjectTouched, setSubjectTouched] = useState(false);
+  const [subjectTyped, setSubjectTyped] = useState("");
+  const [subjectClosed, setSubjectClosed] = useState(false);
+  const composer = composerSubject({
+    view, origin: all.length ? "reply" : "new", conversation: all, threadKey: threadId, group: groupName,
+    touched: subjectTouched, typed: subjectTyped,
+  });
+  const subjectShown = !subjectClosed && (composer.expanded || subjectOpen);
   const { visible, hidden, hasMore } = latestWindow(all, shown);
   // Older messages still only in the archive: fetched a page at a time.
   const [archived, setArchived] = useState(false);
   const [paging, setPaging] = useState(false);
   useEffect(() => { void historyHasOlder(peer).then(setArchived); }, [peer, history.loaded]);
-  const unread = unreadFor({ messages, history }, identity, peer);
+  const unread = unreadFor({ messages, history }, identity, peer, threadId ?? undefined);
   const title = group ? handleOf(peer) : contactFor(contacts, peer)?.petname || handleOf(peer);
   const self = identity.toLowerCase();
   usePeerAvatars(group ? [] : [peer]);
@@ -90,14 +120,16 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
     }
   }, [all.length, shown]);
 
-  // A message that arrives while the conversation is open has been read.
+  // A message that arrives while the conversation is open has been read —
+  // the whole conversation in By ID, just this thread in By subject.
   useEffect(() => {
     if (unread === 0 || marking.current) return;
     marking.current = true;
-    void markConversationRead(peer).finally(() => {
+    const mark = threadId === null ? markConversationRead(peer) : markThreadRead(peer, threadId);
+    void mark.finally(() => {
       marking.current = false;
     });
-  }, [unread, peer]);
+  }, [unread, peer, threadId]);
 
   const send = async () => {
     if (sending) return;
@@ -110,16 +142,32 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
     }
     setSending(true);
     try {
+      const target = sendThread({
+        subject: subjectShown ? composer.value : "",
+        prefill: composer.prefill,
+        threadId: composer.threadId,
+        group: groupName,
+        mint: newThreadId,
+      });
       const outcome = await sendSigned(client, {
         to: peer,
         body: text,
-        thread: threadId,
+        thread: target.threadId,
         group,
+        subject: target.subject,
         setStatus: (message, tone = "") => setStatus({ text: message, tone }),
       });
       if (outcome.status === "sent" || outcome.status === "queued") {
         setDraft("");
+        setSubjectTouched(false);
+        setSubjectTyped("");
+        setSubjectClosed(false);
+        setSubjectOpen(false);
         atBottom.current = true;
+        // In By subject a new subject is a new row: follow it there.
+        if (view === "subject" && outcome.threadId && outcome.threadId !== threadId && target.subject) {
+          openThread(peer, { thread: outcome.threadId, group });
+        }
       }
       // The bubble and its tick say "sent"; a partial group delivery or a
       // queued send is worth keeping on screen.
@@ -140,7 +188,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
     }
     setSending(true);
     try {
-      const outcome = await sendAttachment(client, { to: peer, file, thread: threadId, setStatus: (message, tone = "") => setStatus({ text: message, tone }) });
+      const outcome = await sendAttachment(client, { to: peer, file, thread: composer.threadId, setStatus: (message, tone = "") => setStatus({ text: message, tone }) });
       if (outcome.status === "sent") {
         atBottom.current = true;
         setStatus({ text: "", tone: "" });
@@ -172,8 +220,12 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
           <Avatar identity={peer} />
         )}
         <span className="sub-title thread-title flex min-w-0 flex-1 items-center gap-1.5 truncate text-[17px] font-bold">
-          {title}
-          {threadId && !group && <span className="conv-thread text-[13px] font-medium text-faint">#{threadLabel(threadId)}</span>}
+          <span className="truncate">{title}</span>
+          {threadId !== null && (
+            <span className="conv-thread thread-subject truncate text-[13px] font-medium text-faint">
+              {threadTitle(threadId, subjects.get(threadId) ?? "", groupName)}
+            </span>
+          )}
         </span>
       </div>
 
@@ -222,6 +274,7 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
         ) : (
           visible.map((message: any, index: number) => {
             const mine = String(message.sender).toLowerCase() === self;
+            const divider = threadId === null ? subjectDivider(message, visible[index - 1], groupName, subjects) : "";
             const day = dayLabel(message.timestamp);
             const separator = day && day !== lastDay;
             lastDay = day;
@@ -231,6 +284,13 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
               <div key={message.id ?? `${message.timestamp}-${index}`} className="contents">
                 {separator && (
                   <div className="thread-day mt-2.5 mb-1.5 self-center rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted">{day}</div>
+                )}
+                {divider && (
+                  <div className="subject-divider mt-2 mb-1 flex items-center gap-2 text-xs font-semibold text-muted" data-subject-divider={divider}>
+                    <span className="h-px flex-1 bg-sep" aria-hidden="true" />
+                    <span className="max-w-[70%] truncate">{divider}</span>
+                    <span className="h-px flex-1 bg-sep" aria-hidden="true" />
+                  </div>
                 )}
                 <div className={cn("bubble-row flex", mine ? "mine justify-end" : "theirs")} data-message-id={message.id ?? ""}>
                   <div
@@ -289,7 +349,60 @@ function Thread({ peer, threadId, group }: { peer: string; threadId: string; gro
         </p>
       )}
 
-      <div className="thread-composer flex shrink-0 items-end gap-2 border-t border-sep bg-bg px-3 pt-2 pb-[calc(8px+env(safe-area-inset-bottom,0px))]">
+      <div className="thread-subject-row shrink-0 border-t border-sep bg-bg px-3 pt-2">
+        {subjectShown ? (
+          <div className="flex items-center gap-2">
+            <input
+              id="thread-subject"
+              type="text"
+              maxLength={256}
+              placeholder="Subject"
+              aria-label="Subject"
+              autoFocus={startSubject}
+              value={composer.value}
+              onChange={(event) => {
+                setSubjectTouched(true);
+                setSubjectTyped(event.currentTarget.value);
+              }}
+              className="min-h-9 min-w-0 flex-1 rounded-[14px] border border-sep bg-surface px-3 text-[15px] text-fg focus:border-accent focus:outline-none"
+            />
+            <button
+              id="btn-subject-clear"
+              type="button"
+              aria-label="Remove subject"
+              onClick={() => {
+                // What you can see is what gets sent: collapsing clears it.
+                setSubjectOpen(false);
+                setSubjectClosed(true);
+                setSubjectTouched(true);
+                setSubjectTyped("");
+              }}
+              className="flex size-8 items-center justify-center rounded-full text-muted active:bg-surface-2"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <button
+            id="btn-subject-add"
+            type="button"
+            onClick={() => {
+              setSubjectClosed(false);
+              setSubjectOpen(true);
+            }}
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"
+          >
+            <Plus className="size-3.5" aria-hidden="true" /> Subject
+          </button>
+        )}
+        {composer.startsNew && (
+          <p id="subject-starts-new" className="mt-1 text-xs text-muted">
+            This starts a new conversation
+          </p>
+        )}
+      </div>
+
+      <div className="thread-composer flex shrink-0 items-end gap-2 bg-bg px-3 pt-2 pb-[calc(8px+env(safe-area-inset-bottom,0px))]">
         {/* Files go to one person: a group has no single drive share to hand out. */}
         {!group && (
           <>

@@ -35,8 +35,22 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     list: vi.fn(async () => ({ identity: "alice.poweur.net", devices: [] as any[] })),
     revoke: vi.fn(async () => ({ device_id: "", sessions_revoked: 0 })),
   };
+  const emailApi = {
+    state: vi.fn(async () => ({ enabled: false, address: null as string | null, bridge: null as string | null, optIn: null })),
+    offeredBridge: vi.fn(async () => null as string | null),
+    enable: vi.fn(async () => ({ enabled: true, address: "alice@poweur.net", bridge: "email.poweur.net", optIn: {} })),
+    disable: vi.fn(async () => ({ enabled: false, address: null, bridge: "email.poweur.net", optIn: null })),
+    send: vi.fn(async (draft: any) => ({
+      message: { id: `sent-${++sent}`, recipient: "email.poweur.net", timestamp: new Date(Date.now() + sent).toISOString() },
+      lost: 0, sendId: "S1", payload: { version: 1, send_id: "S1", ...draft },
+    })),
+    upload: vi.fn(async () => ({ upload: "UP1", sha256: "00", size: 0 })),
+    blob: vi.fn(async () => new Uint8Array([1, 2, 3])),
+  };
   return {
     identity: "alice.poweur.net",
+    emailApi,
+    email: vi.fn(() => emailApi),
     signer: {},
     relay: {},
     decryptor: null as any,

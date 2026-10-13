@@ -78,7 +78,7 @@ Environment only. Every secret also takes a `_FILE` variant.
 | `EMAIL_FOOTER` | `first` | `off`, `first` (first message to each recipient) or `always` |
 | `EMAIL_FOOTER_TEXT` | `Sent with Poweur ID {id} · Get your own free ID: {signup_url}` | Placeholders `{id}`, `{profile_url}`, `{signup_url}` |
 | `EMAIL_SIGNUP_URL` | `https://poweur.net` | |
-| `EMAIL_RESOLVE_SCHEME`, `EMAIL_RESOLVE_ALLOW_PRIVATE` | `https`, — | Identity resolution (tests/dev only) |
+| `EMAIL_RESOLVE_SCHEME`, `EMAIL_RESOLVE_ALLOW_PRIVATE`, `EMAIL_RESOLVE_DIAL` | `https`, —, — | Identity resolution (tests/dev only; `_DIAL` sends every lookup to one host:port) |
 
 `poweur-email check-config` validates the environment; `poweur-email version` prints the version.
 

@@ -33,6 +33,8 @@ interface PolicyState {
   readReceipts: boolean;
   disabledFor: string;
   trustedAuth: string;
+  /** Carried through untouched: the Email setting owns it. */
+  email?: InboxPolicy["email"];
 }
 
 function initialState(policy: InboxPolicy): PolicyState {
@@ -46,6 +48,7 @@ function initialState(policy: InboxPolicy): PolicyState {
     readReceipts: policy.read_receipts?.enabled !== false,
     disabledFor: (policy.read_receipts?.disabled_for ?? []).join(", "),
     trustedAuth: (policy.trusted_auth_services ?? []).join(", "),
+    ...(policy.email ? { email: policy.email } : {}),
   };
 }
 
@@ -67,6 +70,7 @@ export function toPolicyDocument(state: PolicyState): InboxPolicy {
   };
   const trusted = [...new Set(state.trustedAuth.split(/[\s,]+/).map((value) => value.trim().toLowerCase()).filter(Boolean))];
   if (trusted.length) document.trusted_auth_services = trusted;
+  if (state.email) document.email = state.email;
   return document;
 }
 
