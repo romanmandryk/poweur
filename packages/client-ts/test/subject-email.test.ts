@@ -9,6 +9,9 @@ import {
   canonicalEmailUpload,
   emailAddressFor,
   emailBlobContext,
+  emailBridgeOf,
+  emailFilterMatches,
+  normalizeEmailSettings,
   emailConversationRoot,
   emailThreadKey,
   openEmailBlob,
@@ -158,6 +161,30 @@ describe("email documents match Go", () => {
     expect(trustsEmailBridge(policy, "mallory.poweur.net")).toBe(false);
     expect(trustsEmailBridge({ ...policy, email: { allow: false, bridge: "email.poweur.net" } }, "email.poweur.net")).toBe(false);
     expect(trustsEmailBridge({ version: 1, mode: "open" }, "email.poweur.net")).toBe(false);
+  });
+  it("is on by default through the relay's bridge, like Go InboxPolicy.EmailBridge", () => {
+    const open = { version: 1, mode: "open" as const };
+    expect(emailBridgeOf(open, "Email.poweur.net")).toBe("email.poweur.net");
+    expect(emailBridgeOf(open, null)).toBe("");
+    expect(emailBridgeOf({ ...open, email: { allow: false } }, "email.poweur.net")).toBe("");
+    expect(emailBridgeOf({ ...open, email: { allow: true, bridge: "mail.example.org" } }, "email.poweur.net")).toBe("mail.example.org");
+    expect(trustsEmailBridge(open, "email.poweur.net", "email.poweur.net")).toBe(true);
+    expect(trustsEmailBridge(open, "mallory.poweur.net", "email.poweur.net")).toBe(false);
+  });
+  it("validates receive filters like Go EmailSettings", () => {
+    const s = normalizeEmailSettings({
+      version: 1, receive: "contacts", updated_at: "2026-10-14T12:00:00Z",
+      allow: [" Ann@Example.com ", "ann@example.com", "@friends.org", ""], block: ["@spam.example"],
+    });
+    expect(s.allow).toEqual(["ann@example.com", "@friends.org"]);
+    expect(emailFilterMatches(s.allow, "x@mail.friends.org")).toBe(true);
+    expect(emailFilterMatches(s.allow, "x@notfriends.org")).toBe(false);
+    expect(emailFilterMatches(s.block, "a@b.spam.example")).toBe(true);
+    expect(normalizeEmailSettings({ version: 1, updated_at: "2026-10-14T12:00:00Z" }).receive).toBe("everyone");
+    expect(() => normalizeEmailSettings({ version: 1, updated_at: "2026-10-14T12:00:00Z", block: ["not an address"] })).toThrow();
+    expect(() => normalizeEmailSettings({ version: 1, updated_at: "2026-10-14T12:00:00Z", block: ["@"] })).toThrow();
+    expect(() => normalizeEmailSettings({ version: 2, updated_at: "2026-10-14T12:00:00Z" })).toThrow();
+    expect(() => normalizeEmailSettings({ version: 1, receive: "nobody" as "everyone", updated_at: "2026-10-14T12:00:00Z" })).toThrow();
   });
 });
 

@@ -87,7 +87,7 @@
     },
     "email": {
       "type": "object",
-      "description": "the email bridge whose email.* messages are admitted in every mode (EPIC-023, PCP-0010); absent = none",
+      "description": "the email bridge whose email.* messages are admitted in every mode (EPIC-023, PCP-0010); absent = the relay operator's bridge (email on by default), allow=false = opted out",
       "properties": {
         "allow": {
           "type": "boolean"

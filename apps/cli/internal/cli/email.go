@@ -42,7 +42,7 @@ const maxInlineAttachments = 256 * 1024
 
 func runEmail(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: poweur email <status|enable|disable|send|ls|read>")
+		fmt.Fprintln(stderr, "usage: poweur email <status|enable|disable|filters|send|ls|read>")
 		return 1
 	}
 	switch args[0] {
@@ -52,6 +52,8 @@ func runEmail(args []string, stdout, stderr io.Writer) int {
 		return runEmailEnable(args[1:], stdout, stderr)
 	case "disable":
 		return runEmailDisable(args[1:], stdout, stderr)
+	case "filters":
+		return runEmailFilters(args[1:], stdout, stderr)
 	case "send":
 		return runEmailSend(args[1:], stdout, stderr)
 	case "ls", "list":
@@ -59,18 +61,20 @@ func runEmail(args []string, stdout, stderr io.Writer) int {
 	case "read":
 		return runEmailRead(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "unknown email subcommand %q (want status, enable, disable, send, ls, read)\n", args[0])
+		fmt.Fprintf(stderr, "unknown email subcommand %q (want status, enable, disable, filters, send, ls, read)\n", args[0])
 		return 1
 	}
 }
 
 type emailState struct {
-	Identity string            `json:"identity"`
-	Enabled  bool              `json:"enabled"`
-	Address  string            `json:"address,omitempty"`
-	Bridge   string            `json:"bridge,omitempty"`
-	Offered  string            `json:"offered_bridge,omitempty"`
-	OptIn    *idpkg.EmailOptIn `json:"optin,omitempty"`
+	Identity string `json:"identity"`
+	Enabled  bool   `json:"enabled"`
+	Address  string `json:"address,omitempty"`
+	Bridge   string `json:"bridge,omitempty"`
+	Offered  string `json:"offered_bridge,omitempty"`
+	// Default: on without having opted in (the relay's bridge, no email.json).
+	Default bool              `json:"default,omitempty"`
+	OptIn   *idpkg.EmailOptIn `json:"optin,omitempty"`
 }
 
 func loadEmailState(ctx context.Context, relayURL, identityValue string, priv ed25519.PrivateKey) (emailState, idpkg.InboxPolicy, error) {
@@ -95,12 +99,24 @@ func loadEmailState(ctx context.Context, relayURL, identityValue string, priv ed
 			state.Address = o.Address
 		}
 	}
-	if policy.Email != nil {
-		state.Bridge = policy.Email.Bridge
-	}
-	state.Enabled = state.OptIn != nil && policy.TrustsEmailBridge(state.OptIn.Bridge)
 	if caps, err := identity.FetchCapabilities(ctx, identityValue); err == nil {
 		state.Offered = caps.Endpoints["email_bridge"]
+	}
+	// Email is on by default through the relay's bridge; the policy can opt
+	// out or name another one (which then needs email.json).
+	effective := policy.EmailBridge(state.Offered)
+	state.Bridge = effective
+	if policy.Email != nil && state.Bridge == "" {
+		state.Bridge = policy.Email.Bridge
+	}
+	switch {
+	case effective == "":
+	case state.OptIn != nil && strings.EqualFold(state.OptIn.Bridge, effective):
+		state.Enabled = true
+	case state.OptIn == nil && policy.Email == nil:
+		if addr, err := idpkg.EmailAddressFor(identityValue); err == nil {
+			state.Enabled, state.Default, state.Address = true, true, addr
+		}
 	}
 	return state, policy, nil
 }
@@ -128,8 +144,10 @@ func runEmailStatus(args []string, stdout, stderr io.Writer) int {
 	}
 	human := ""
 	switch {
+	case state.Enabled && state.Default:
+		human = fmt.Sprintf("email: on (default) — %s through %s (poweur email disable to opt out)\n", state.Address, state.Bridge)
 	case state.Enabled:
-		human = fmt.Sprintf("email: on — %s through %s\n", state.Address, state.OptIn.Bridge)
+		human = fmt.Sprintf("email: on — %s through %s\n", state.Address, state.Bridge)
 	case state.Offered != "":
 		addr, _ := idpkg.EmailAddressFor(identityValue)
 		human = fmt.Sprintf("email: off — %s is available through %s (poweur email enable)\n", addr, state.Offered)
@@ -238,12 +256,15 @@ func runEmailDisable(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// Always written: without an email block, email is on by default.
 	if policy.Email != nil {
 		policy.Email.Allow = false
-		if err := writeInboxPolicyDoc(ctx, cfg.RelayURL, identityValue, priv, policy); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
+	} else {
+		policy.Email = &idpkg.EmailPolicy{Allow: false}
+	}
+	if err := writeInboxPolicyDoc(ctx, cfg.RelayURL, identityValue, priv, policy); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	return writeOutput(stdout, *jsonOut, emailState{Identity: identityValue}, "email off\n")
 }
@@ -353,7 +374,7 @@ func runEmailSend(args []string, stdout, stderr io.Writer) int {
 		send.HTML = string(raw)
 	}
 	if len(attach) > 0 {
-		atts, err := prepareEmailAttachments(ctx, identityValue, priv, state.OptIn.Bridge, attach)
+		atts, err := prepareEmailAttachments(ctx, identityValue, priv, state.Bridge, attach)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -366,14 +387,14 @@ func runEmailSend(args []string, stdout, stderr io.Writer) int {
 	}
 	payload, _ := json.Marshal(send)
 	var out bytes.Buffer
-	sendArgs := []string{state.OptIn.Bridge, string(payload), "--type=" + idpkg.MsgTypeEmailSend, "--use-identity=" + identityValue, "--json"}
+	sendArgs := []string{state.Bridge, string(payload), "--type=" + idpkg.MsgTypeEmailSend, "--use-identity=" + identityValue, "--json"}
 	if code := runSend(sendArgs, &out, stderr); code != 0 {
 		return code
 	}
 	var result map[string]any
 	_ = json.Unmarshal(out.Bytes(), &result)
 	result["send_id"] = send.SendID
-	return writeOutput(stdout, *jsonOut, result, fmt.Sprintf("email handed to %s (send %s); `poweur inbox` shows its status\n", state.OptIn.Bridge, send.SendID))
+	return writeOutput(stdout, *jsonOut, result, fmt.Sprintf("email handed to %s (send %s); `poweur inbox` shows its status\n", state.Bridge, send.SendID))
 }
 
 // prepareEmailAttachments inlines small attachments and uploads the rest to
@@ -471,8 +492,10 @@ type mailEntry struct {
 	Email  *idpkg.EmailMessage `json:"email,omitempty"`
 	Send   *idpkg.EmailSend    `json:"send,omitempty"`
 	Status *idpkg.EmailStatus  `json:"status,omitempty"`
-	Unread bool                `json:"unread,omitempty"`
-	Bridge string              `json:"bridge"`
+	// Settings: one of our own email.settings (kind "settings").
+	Settings *idpkg.EmailSettings `json:"settings,omitempty"`
+	Unread   bool                 `json:"unread,omitempty"`
+	Bridge   string               `json:"bridge"`
 }
 
 // loadMail picks up the inbox (so new mail is archived), then reads every
@@ -532,6 +555,12 @@ func loadMail(useIdentity string, stderr io.Writer) ([]mailEntry, *historyStore,
 				continue
 			}
 			e.Kind, e.Send = "sent", &s
+		case idpkg.MsgTypeEmailSettings:
+			var s idpkg.EmailSettings
+			if strings.EqualFold(r.Sender, bridge) || json.Unmarshal([]byte(r.Body), &s) != nil {
+				continue
+			}
+			e.Kind, e.Settings = "settings", &s
 		default:
 			continue
 		}
@@ -565,7 +594,7 @@ func runEmailLs(args []string, stdout, stderr io.Writer) int {
 	}
 	var shown []mailEntry
 	for _, e := range mail {
-		if e.Kind != "status" {
+		if e.Kind == "received" || e.Kind == "sent" {
 			shown = append(shown, e)
 		}
 	}

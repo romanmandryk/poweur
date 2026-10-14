@@ -444,6 +444,13 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 
 	encPriv, _ := identity.LoadEncryptionPrivateKey(identity.EncryptionKeyPath(cfg.KeysDir, identityValue))
 	readPolicy, readPolicyOK := loadInboxPolicyForReceipts(context.Background(), cfg, identityValue, identityPriv)
+	// Email is on by default through the relay's bridge (no email block).
+	emailDefault := ""
+	if readPolicyOK && readPolicy.Email == nil {
+		if caps, err := identity.FetchCapabilities(context.Background(), identityValue); err == nil {
+			emailDefault = caps.Endpoints["email_bridge"]
+		}
+	}
 
 	// What the drain hands over exists nowhere else once this call returns,
 	// so everything that opens is archived before the function can fail.
@@ -486,7 +493,7 @@ func renderInboxPayload(payload []byte, r inboxRender, stdout, stderr io.Writer)
 		rendered := describeTypedMessage(msg.Sender, msg.Type, display, decrypted)
 		// Mail from the bridge this identity opted into reads as mail; the
 		// same type from anyone else stays an untrusted app message.
-		if decrypted && idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && readPolicyOK && readPolicy.TrustsEmailBridge(msg.Sender) {
+		if decrypted && idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && readPolicyOK && readPolicy.TrustsEmailBridgeOr(msg.Sender, emailDefault) {
 			rendered = describeEmail(msg.Type, display)
 		}
 		isPrompt := idpkg.NormalizeMessageType(msg.Type) == idpkg.MsgTypeAuthRequest

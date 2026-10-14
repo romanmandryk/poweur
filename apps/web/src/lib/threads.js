@@ -93,10 +93,14 @@ export function threadMessages(messages, selfIdentity, peer, threadKey = "", opt
   return out;
 }
 
-/** Mail from the user's own bridge belongs to the Email tray, not chat. */
+/**
+ * Mail to and from the user's own bridge belongs to the Email tray, not chat:
+ * what it delivers, and our sends and receive settings.
+ */
 export function isBridgeMail(message, emailBridge) {
-  return Boolean(emailBridge) && isEmailType(message.type) &&
-    String(message.sender ?? "").toLowerCase() === String(emailBridge).toLowerCase();
+  const bridge = String(emailBridge ?? "").toLowerCase();
+  return Boolean(bridge) && isEmailType(message.type) &&
+    (String(message.sender ?? "").toLowerCase() === bridge || String(message.recipient ?? "").toLowerCase() === bridge);
 }
 
 /**

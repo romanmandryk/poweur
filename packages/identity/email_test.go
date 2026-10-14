@@ -145,7 +145,9 @@ func TestEmailSendValidate(t *testing.T) {
 				s.Cc = append(s.Cc, EmailAddress{Address: "c@example.com"})
 			}
 		}, false},
-		{"attachment data", func(s *EmailSend) { s.Attachments = []EmailOutAttachment{{Name: "a.txt", MIME: "text/plain", Size: 2, Data: "aGk="}} }, true},
+		{"attachment data", func(s *EmailSend) {
+			s.Attachments = []EmailOutAttachment{{Name: "a.txt", MIME: "text/plain", Size: 2, Data: "aGk="}}
+		}, true},
 		{"attachment both", func(s *EmailSend) {
 			s.Attachments = []EmailOutAttachment{{Name: "a.txt", MIME: "text/plain", Data: "aGk=", Upload: "u1"}}
 		}, false},

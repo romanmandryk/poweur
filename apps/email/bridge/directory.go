@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,8 +13,10 @@ import (
 )
 
 // Directory answers "who is this address?" from the network itself: the
-// address names an identity, and that identity's signed email.json says
-// whether it takes mail through this bridge. There is no user table.
+// address names an identity, and that identity's signed email.json — or,
+// without one, its home relay's capabilities (email is on by default where
+// the relay names this bridge, until the user opts out) — says whether it
+// takes mail through this bridge. There is no user table.
 type Directory struct {
 	cfg  Config
 	now  func() time.Time
@@ -35,6 +38,9 @@ type Recipient struct {
 	OptIn    identity.EmailOptIn
 	// PublicKey is the identity's signing key, checked against the opt-in.
 	PublicKey []byte
+	// Default marks email on by default (no email.json): OptIn is then
+	// synthesised from the identity's name, unsigned.
+	Default bool
 }
 
 // Lookup errors. ErrNoMailbox and ErrNotServed are permanent (5xx); anything
@@ -148,7 +154,7 @@ func (d *Directory) lookup(ctx context.Context, id string) (Recipient, error) {
 	}
 	raw, err := identity.FetchPublicFile(ctx, id, identity.WellKnownEmailPath, d.cfg.Resolve)
 	if errors.Is(err, identity.ErrPublicFileAbsent) {
-		return Recipient{}, ErrNoMailbox
+		return d.byDefault(ctx, id, pub)
 	}
 	if err != nil {
 		return Recipient{}, fmt.Errorf("fetch email.json of %s: %w", id, err)
@@ -161,6 +167,38 @@ func (d *Directory) lookup(ctx context.Context, id string) (Recipient, error) {
 		return Recipient{}, ErrNoMailbox
 	}
 	return Recipient{Identity: id, OptIn: optIn, PublicKey: pub}, nil
+}
+
+// byDefault admits an identity without email.json when its home relay
+// offers this bridge and says the user has not opted out
+// (features.email_receive = "on"). The relay is the one holding the user's
+// inbox policy, and it refuses this bridge's mail itself once they opt out.
+func (d *Directory) byDefault(ctx context.Context, id string, pub []byte) (Recipient, error) {
+	address, err := identity.EmailAddressFor(id)
+	if err != nil {
+		return Recipient{}, ErrNoMailbox
+	}
+	raw, err := identity.FetchPublicFile(ctx, id, identity.WellKnownCapabilitiesPath, d.cfg.Resolve)
+	if errors.Is(err, identity.ErrPublicFileAbsent) {
+		return Recipient{}, ErrNoMailbox
+	}
+	if err != nil {
+		return Recipient{}, fmt.Errorf("fetch capabilities of %s: %w", id, err)
+	}
+	var caps struct {
+		Endpoints map[string]any `json:"endpoints"`
+		Features  map[string]any `json:"features"`
+	}
+	if json.Unmarshal(raw, &caps) != nil {
+		return Recipient{}, ErrNoMailbox
+	}
+	bridge, _ := caps.Endpoints["email_bridge"].(string)
+	receive, _ := caps.Features["email_receive"].(string)
+	if !strings.EqualFold(bridge, d.cfg.BridgeID) || receive != "on" {
+		return Recipient{}, ErrNoMailbox
+	}
+	optIn := identity.EmailOptIn{Version: identity.EmailOptInVersion, Identity: id, Address: address, Bridge: strings.ToLower(d.cfg.BridgeID)}
+	return Recipient{Identity: id, OptIn: optIn, PublicKey: pub, Default: true}, nil
 }
 
 // isNotFound reports a resolver answer that means "no such identity" rather

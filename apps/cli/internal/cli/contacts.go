@@ -577,8 +577,13 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		} else {
 			fmt.Fprintln(stdout, "sign-in prompts: from nobody (default)")
 		}
-		if policy.Email != nil && policy.Email.Allow {
+		switch {
+		case policy.Email == nil:
+			fmt.Fprintln(stdout, "email: on through your relay's bridge (default)")
+		case policy.Email.Allow:
 			fmt.Fprintf(stdout, "email: delivered by %s\n", policy.Email.Bridge)
+		default:
+			fmt.Fprintln(stdout, "email: off")
 		}
 		if policy.ReadReceipts == nil {
 			fmt.Fprintln(stdout, "read receipts: enabled (default)")

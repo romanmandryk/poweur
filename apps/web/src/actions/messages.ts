@@ -17,7 +17,7 @@ import { markCovers, messageThreadKey } from "../lib/threads.js";
 import { loadSessionRecord, relayUrlFor } from "../lib/storage.js";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { autoAcceptContactOffers } from "./files";
-import { useData, type DataFields } from "../state/data";
+import { emailBridgeOf, useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
 import { useSession } from "../state/session";
 import { toast } from "../state/ui";
@@ -298,6 +298,9 @@ export function pullAfterUnlock() {
   void loadPolicy().then(() => {
     if (useData.getState().policy.doc?.anonymous?.allow) void loadAnon({ force: true });
   });
+  // Email is on by default: which bridge's mail is mail depends on what the
+  // relay offers. (Imported lazily: actions/email imports this module.)
+  void import("./email").then(({ loadEmail }) => loadEmail());
   void retryBrowserOutbox().catch(() => {});
   startEventStream();
 }
@@ -330,15 +333,16 @@ export function unreadFor(data: Pick<DataFields, "messages" | "history">, identi
   return count;
 }
 
-/** The bridge the user's own policy names — its mail lives in the Email tray. */
+/** The user's email bridge (named, or the relay's by default) — its mail lives in the Email tray. */
 export function trustedEmailBridge(): string {
-  const email = useData.getState().policy.doc?.email;
-  return email?.allow && email.bridge ? String(email.bridge).toLowerCase() : "";
+  const state = useData.getState();
+  return emailBridgeOf(state.policy.doc, state.email.offered);
 }
 
 function bridgeMail(message: any): boolean {
   const bridge = trustedEmailBridge();
-  return Boolean(bridge) && String(message.type ?? "").startsWith("email.") && String(message.sender ?? "").toLowerCase() === bridge;
+  return Boolean(bridge) && String(message.type ?? "").startsWith("email.") &&
+    (String(message.sender ?? "").toLowerCase() === bridge || String(message.recipient ?? "").toLowerCase() === bridge);
 }
 
 /**

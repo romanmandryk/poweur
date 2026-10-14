@@ -6,12 +6,15 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/poweur/identity"
 )
 
 // Store is the bridge's own small state. It never holds message content:
@@ -46,6 +49,7 @@ CREATE INDEX IF NOT EXISTS sent_log_at ON sent_log (at);
 CREATE TABLE IF NOT EXISTS limits (
 	identity TEXT PRIMARY KEY, daily INTEGER NOT NULL, spacing INTEGER NOT NULL, new_daily INTEGER NOT NULL,
 	note TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS settings (identity TEXT PRIMARY KEY, doc TEXT NOT NULL, updated TEXT NOT NULL);
 `
 
 // OpenStore opens (or creates) the database at path.
@@ -152,6 +156,118 @@ func (s *Store) Known(ctx context.Context, identityName, address string) (bool, 
 func (s *Store) Remember(ctx context.Context, identityName, address string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO ledger (k, at) VALUES (?, ?)`, s.hash("pair", identityName, address), s.now().Unix())
 	return err
+}
+
+// SentTo reports whether identity has emailed address through the bridge —
+// a contact for the "contacts" receive mode. Mail they received does not
+// count: a stranger writing first does not become a contact.
+func (s *Store) SentTo(ctx context.Context, identityName, address string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ledger WHERE k = ?`, s.hash("sentto", identityName, strings.ToLower(address))).Scan(&n)
+	return n > 0, err
+}
+
+// RememberSentTo records an outbound correspondent (see SentTo).
+func (s *Store) RememberSentTo(ctx context.Context, identityName, address string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO ledger (k, at) VALUES (?, ?)`, s.hash("sentto", identityName, strings.ToLower(address)), s.now().Unix())
+	return err
+}
+
+// Filters is how the bridge keeps a user's EmailSettings: the mode plus the
+// allow and block lists as HMACs, so the store still lists nobody.
+type Filters struct {
+	Contacts bool            `json:"contacts,omitempty"`
+	Allow    map[string]bool `json:"allow,omitempty"`
+	Block    map[string]bool `json:"block,omitempty"`
+}
+
+func (s *Store) filterKeys(identityName string, list []string) map[string]bool {
+	out := make(map[string]bool, len(list))
+	for _, e := range list {
+		out[s.hash("filter", identityName, e)[:32]] = true
+	}
+	return out
+}
+
+// filterCandidates are the entries that would match address: itself and
+// "@" + each of its domain's suffixes (a.b.example → @a.b.example, @b.example, @example).
+func filterCandidates(address string) []string {
+	address = strings.ToLower(strings.TrimSpace(address))
+	at := strings.LastIndex(address, "@")
+	if at < 0 {
+		return nil
+	}
+	out := []string{address}
+	for d := address[at+1:]; d != ""; {
+		out = append(out, "@"+d)
+		dot := strings.Index(d, ".")
+		if dot < 0 {
+			break
+		}
+		d = d[dot+1:]
+	}
+	return out
+}
+
+func (s *Store) matches(identityName string, set map[string]bool, address string) bool {
+	for _, c := range filterCandidates(address) {
+		if set[s.hash("filter", identityName, c)[:32]] {
+			return true
+		}
+	}
+	return false
+}
+
+// Blocks and Allows test an address against an identity's filters.
+func (s *Store) Blocks(identityName string, f Filters, address string) bool {
+	return s.matches(strings.ToLower(identityName), f.Block, address)
+}
+
+func (s *Store) Allows(identityName string, f Filters, address string) bool {
+	return s.matches(strings.ToLower(identityName), f.Allow, address)
+}
+
+// Filters returns an identity's receive filters; ok=false: none sent
+// (everyone may email them).
+func (s *Store) Filters(ctx context.Context, identityName string) (Filters, bool, error) {
+	var doc string
+	err := s.db.QueryRowContext(ctx, `SELECT doc FROM settings WHERE identity = ?`, s.hash("settings", strings.ToLower(identityName))).Scan(&doc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Filters{}, false, nil
+	}
+	if err != nil {
+		return Filters{}, false, err
+	}
+	var out Filters
+	if err := json.Unmarshal([]byte(doc), &out); err != nil {
+		return Filters{}, false, err
+	}
+	return out, true, nil
+}
+
+// SetSettings stores validated settings unless newer ones are already there
+// (messages can arrive out of order). It reports whether they were stored.
+func (s *Store) SetSettings(ctx context.Context, identityName string, settings identity.EmailSettings) (bool, error) {
+	at, err := time.Parse(time.RFC3339, settings.UpdatedAt)
+	if err != nil {
+		return false, err
+	}
+	id := strings.ToLower(identityName)
+	f := Filters{Contacts: settings.ContactsOnly(), Allow: s.filterKeys(id, settings.Allow), Block: s.filterKeys(id, settings.Block)}
+	doc, err := json.Marshal(f)
+	if err != nil {
+		return false, err
+	}
+	// Fixed width, so the text comparison below orders by time.
+	updated := at.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	res, err := s.db.ExecContext(ctx, `INSERT INTO settings (identity, doc, updated) VALUES (?, ?, ?)
+		ON CONFLICT(identity) DO UPDATE SET doc = excluded.doc, updated = excluded.updated WHERE excluded.updated >= settings.updated`,
+		s.hash("settings", id), string(doc), updated)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // FooterSent reports and records the once-per-recipient growth footer.

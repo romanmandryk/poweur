@@ -164,3 +164,49 @@ func TestEmailBridgeHasItsOwnRateLimit(t *testing.T) {
 		t.Fatalf("ordinary sender not limited: %v", codes)
 	}
 }
+
+// Email is on by default through the operator's bridge: no email block means
+// "take mail from EMAIL_BRIDGE_ID", in every inbox mode; opting out or naming
+// another bridge overrides it, and the capabilities say which.
+func TestEmailOnByDefaultThroughOperatorBridge(t *testing.T) {
+	server, ts := newTestRelay(t)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	bridge := registerTestIdentity(t, server, ts, "mailbridge.poweur.net")
+	other := registerTestIdentity(t, server, ts, "otherbridge.poweur.net")
+	server.cfg.EmailBridgeID = "mailbridge.poweur.net"
+	server.bridgeRateLimit = ratelimit.NewLimiter(config.RateLimits{PerMinute: 50, PerHour: 100, PerDay: 100}, config.GlobalRateLimits{PerMinute: 50, PerHour: 100, PerDay: 100})
+	capsURL := ts.URL + "/.well-known/poweur/capabilities.json"
+	receive := func() any {
+		resp, caps := getWellKnown(t, capsURL, "alice.poweur.net")
+		if cc := resp.Header.Get("Cache-Control"); cc != "public, max-age=60" {
+			t.Fatalf("Cache-Control = %q", cc)
+		}
+		features, _ := caps["features"].(map[string]any)
+		return features["email_receive"]
+	}
+
+	setSysFile(t, server, alice.name, inboxPolicyPath, `{"version":1,"mode":"contacts_only"}`)
+	resp, _ := postTypedMessage(t, ts, bridge, alice.name, idpkg.MsgTypeEmailMessage, "mail")
+	mustStatus(t, resp, http.StatusAccepted, "operator bridge by default")
+	resp, _ = postTypedMessage(t, ts, other, alice.name, idpkg.MsgTypeEmailMessage, "mail")
+	mustStatus(t, resp, http.StatusForbidden, "another bridge needs naming")
+	if got := receive(); got != "on" {
+		t.Fatalf("email_receive = %v, want on", got)
+	}
+
+	setSysFile(t, server, alice.name, inboxPolicyPath, `{"version":1,"mode":"open","email":{"allow":false}}`)
+	if got := receive(); got != "off" {
+		t.Fatalf("email_receive after opting out = %v", got)
+	}
+	setSysFile(t, server, alice.name, inboxPolicyPath, `{"version":1,"mode":"contacts_only","email":{"allow":false}}`)
+	resp, _ = postTypedMessage(t, ts, bridge, alice.name, idpkg.MsgTypeEmailMessage, "mail")
+	mustStatus(t, resp, http.StatusForbidden, "opted out")
+
+	setSysFile(t, server, alice.name, inboxPolicyPath,
+		`{"version":1,"mode":"contacts_only","email":{"allow":true,"bridge":"otherbridge.poweur.net"}}`)
+	resp, _ = postTypedMessage(t, ts, other, alice.name, idpkg.MsgTypeEmailMessage, "mail")
+	mustStatus(t, resp, http.StatusAccepted, "named bridge")
+	if got := receive(); got != "off" {
+		t.Fatalf("email_receive with another bridge = %v, want off (for the operator's)", got)
+	}
+}

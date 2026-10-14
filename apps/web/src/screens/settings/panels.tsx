@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Globe, Hexagon, Laptop, Monitor, Puzzle, ScrollText, Smartphone, Tablet, Usb, type LucideIcon } from "lucide-react";
 import { fingerprintOrKey, isSessionValid } from "@poweur/client";
 import { loadPolicy, loadProfile, savePolicy } from "../../actions/account";
-import { disableEmail, loadEmail } from "../../actions/email";
+import { blockEmailSender, disableEmail, loadEmail, saveEmailSettings, unblockEmailSender } from "../../actions/email";
+import { emailSettingsOf } from "../../lib/email";
 import { EmailOptIn } from "../messages/Email";
 import { activeClient, errorMessage, resolveForActive } from "../../actions/relay";
 import { refreshRelaySession, revokeRelaySession } from "../../actions/settings";
@@ -26,7 +27,7 @@ import {
 } from "../../lib/keystore.js";
 import { readConnectedApps, readConsentLog, revokeConnectedApp } from "../../lib/signin.js";
 import { getConfig, getUnlockedKeys, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor, saveConfig } from "../../lib/storage.js";
-import { useData } from "../../state/data";
+import { emailBridgeOf, useData } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { setAnalyticsConsent } from "../../lib/observability";
 import { disablePush, enablePush, installMode, promptInstall, pushState, testPush, type PushState } from "../../lib/push";
@@ -35,7 +36,7 @@ import { closePanel, openPanel, setLoading, toast } from "../../state/ui";
 import { Button } from "../../ui/Button";
 import { Chip, KvRow, Notice, SectionLabel } from "../../ui/Display";
 import { InfoTip } from "../../ui/InfoTip";
-import { FormGroup, Input, inputClass, Label, Textarea } from "../../ui/Field";
+import { CheckRow, FormGroup, Input, inputClass, Label, Textarea } from "../../ui/Field";
 
 const activeIdentity = () => useSession.getState().identity ?? "";
 
@@ -74,9 +75,10 @@ function EmailPanel() {
       <KvRow label="Bridge">{email.bridge}</KvRow>
       <p className="mt-3 text-[13px] text-muted">
         Mail to this address arrives encrypted to you in Messages → Email. It is not end-to-end encrypted on the way: the
-        sender's mail servers and the bridge see it while it passes. Turning email off removes your public opt-in; the bridge
-        stops accepting mail for you within a few minutes.
+        sender's mail servers and the bridge see it while it passes. Turning email off makes the address refuse mail within a
+        few minutes.
       </p>
+      <EmailFilters />
       <Button
         id="btn-email-disable"
         variant="secondary"
@@ -97,6 +99,98 @@ function EmailPanel() {
       >
         Turn off email
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Who may email you: everyone (default) or only people you know, plus a
+ * block list. Sent privately to the bridge, which drops filtered mail
+ * without telling the sender.
+ */
+function EmailFilters() {
+  const messages = useData((state) => state.messages);
+  const bridge = useData((state) => emailBridgeOf(state.policy.doc, state.email.offered));
+  const identity = useSession((state) => state.identity) ?? "";
+  const settings = emailSettingsOf(messages, bridge, identity);
+  const [entry, setEntry] = useState("");
+  const [busy, setBusy] = useState(false);
+  const contacts = settings.receive === "contacts";
+  const run = async (action: () => Promise<boolean>) => {
+    setBusy(true);
+    const ok = await action();
+    setBusy(false);
+    return ok;
+  };
+  const add = async (list: "block" | "allow") => {
+    let e = entry.trim().toLowerCase();
+    if (!e) return;
+    if (!e.includes("@")) e = "@" + e; // a bare domain
+    const ok = await run(() =>
+      list === "block"
+        ? blockEmailSender(e)
+        : saveEmailSettings((s) => ({ ...s, allow: [...(s.allow ?? []).filter((a) => a !== e), e] }), `${e} can always email you`),
+    );
+    if (ok) setEntry("");
+  };
+  return (
+    <div id="email-filters" className="mt-4 border-t border-sep pt-3">
+      <CheckRow
+        id="email-contacts-only"
+        checked={contacts}
+        onCheckedChange={(on) =>
+          void run(() => saveEmailSettings((s) => ({ ...s, receive: on ? "contacts" : "everyone" }), on ? "Only people you know can email you" : "Everyone can email you"))
+        }
+        label="Only people I know"
+        detail="Mail gets through from people you have emailed, replies to your mail, delivery reports and the addresses or domains you allow. Everything else is dropped without telling the sender."
+      />
+      <div className="mt-2 flex gap-2">
+        <Input
+          id="email-filter-entry"
+          placeholder="name@example.com or example.com"
+          value={entry}
+          onChange={(event) => setEntry(event.currentTarget.value)}
+          aria-label="Address or domain"
+        />
+        <Button id="btn-email-block" size="sm" variant="secondary" disabled={busy || !entry.trim()} onClick={() => void add("block")}>
+          Block
+        </Button>
+        {contacts && (
+          <Button id="btn-email-allow" size="sm" variant="secondary" disabled={busy || !entry.trim()} onClick={() => void add("allow")}>
+            Allow
+          </Button>
+        )}
+      </div>
+      {!!settings.block?.length && (
+        <FilterList id="email-blocked" label="Blocked" entries={settings.block} busy={busy} onRemove={(e) => void run(() => unblockEmailSender(e))} />
+      )}
+      {contacts && !!settings.allow?.length && (
+        <FilterList
+          id="email-allowed"
+          label="Always allowed"
+          entries={settings.allow}
+          busy={busy}
+          onRemove={(e) => void run(() => saveEmailSettings((s) => ({ ...s, allow: (s.allow ?? []).filter((a) => a !== e) }), `${e} removed`))}
+        />
+      )}
+    </div>
+  );
+}
+
+function FilterList({ id, label, entries, busy, onRemove }: { id: string; label: string; entries: string[]; busy: boolean; onRemove: (entry: string) => void }) {
+  return (
+    <div id={id} className="mt-3">
+      <div className="text-xs font-semibold tracking-wide text-faint uppercase">{label}</div>
+      <ul className="mt-1">
+        {entries.map((e) => (
+          <li key={e} className="flex min-h-10 items-center justify-between gap-2 border-b border-sep text-sm last:border-b-0">
+            <span className="min-w-0 truncate" data-filter-entry={e}>{e}</span>
+            <button type="button" className="shrink-0 text-xs font-medium text-accent" disabled={busy} onClick={() => onRemove(e)}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

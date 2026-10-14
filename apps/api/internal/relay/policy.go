@@ -59,6 +59,18 @@ func (s *Server) recipientPolicy(ctx context.Context, recipient string) (idpkg.I
 	return policy, contacts
 }
 
+// defaultEmailBridge is the operator's email bridge for identities that have
+// an address (name.poweur.net → name@poweur.net), "" for the rest.
+func (s *Server) defaultEmailBridge(identity string) string {
+	if s.cfg.EmailBridgeID == "" || strings.EqualFold(identity, s.cfg.EmailBridgeID) {
+		return ""
+	}
+	if _, err := idpkg.EmailAddressFor(identity); err != nil {
+		return ""
+	}
+	return s.cfg.EmailBridgeID
+}
+
 // evaluateInboxPolicy decides what happens to a verified inbound message for
 // a locally hosted recipient. detail is the client-facing explanation on
 // reject. Blocked senders receive the same generic rejection as strangers so
@@ -86,12 +98,14 @@ func (s *Server) evaluateInboxPolicy(ctx context.Context, msg Message) (verdict 
 		return policyReject, rejectedDetail
 	}
 
-	// Mail (EPIC-023 E23-T5) is admitted from the one bridge the recipient
-	// opted into, in every inbox mode: the bridge relays strangers' email by
-	// design, and the user asked for exactly that. Any other sender's
+	// Mail (EPIC-023 E23-T5) is admitted from the recipient's bridge, in
+	// every inbox mode: the one their policy names, else — email is on by
+	// default — the operator's, unless they opted out. The bridge relays
+	// strangers' email by design and filters it by the user's private
+	// email.settings; blocking a Poweur ID never touches it. Any other sender's
 	// `email.*` gets no special treatment — clients show it as an untrusted
 	// app message, and a closed inbox refuses it below like any stranger.
-	if idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && policy.TrustsEmailBridge(msg.Sender) {
+	if idpkg.IsEmailType(idpkg.NormalizeMessageType(msg.Type)) && policy.TrustsEmailBridgeOr(msg.Sender, s.defaultEmailBridge(msg.Recipient)) {
 		return policyAllow, ""
 	}
 

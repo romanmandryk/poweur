@@ -15,7 +15,8 @@ title: Email bridge
 The email bridge gives a hosted Poweur ID an ordinary email address: `john.poweur.net` gets
 `john@poweur.net`. Mail sent to it arrives in John's Poweur inbox, **encrypted to John**, and John
 writes email from the Poweur app that arrives anywhere as normal, authenticated mail from
-`john@poweur.net`. It is opt-in, one switch in Settings (or `poweur email enable`).
+`john@poweur.net`. It is **on by default** for every hosted ID — sign-in links and notifications
+just work — and one switch in Settings (or `poweur email disable`) turns it off.
 
 ## Two ways to run it
 
@@ -39,23 +40,36 @@ app ──encrypted email.send──► bridge's inbox ──► bridge ──SM
 - **The bridge is a Poweur identity** (`email.poweur.net`). It delivers each email to you as an
   end-to-end encrypted `email.message` and sends what you ask it to with an `email.send`. It
   holds no relay credential, and your relay stores only ciphertext, as for any message.
-- **There is no user database.** At `RCPT TO` the bridge resolves `john.poweur.net` and checks its
-  signed `email.json`; no opt-in, no address — refused before the mail server accepts anything,
-  so nobody is ever sent a bounce for mail that never existed.
+- **There is no user database.** At `RCPT TO` the bridge resolves `john.poweur.net` and asks its
+  relay whether it takes mail (or reads its signed `email.json`); no such ID, or opted out —
+  refused before the mail server accepts anything, so nobody is ever sent a bounce for mail that
+  never existed. New sign-ups need no setup anywhere.
 
-## Opting in
+## On by default, and how to turn it off
 
-Turning email on writes two documents with your own key:
+Your relay names its operator's bridge, and with nothing in your inbox policy about email, mail
+through that bridge is on. Your relay admits `email.*` messages from that bridge, and only from
+it, even when your inbox only takes contacts; its public `capabilities.json` tells the bridge
+`email_receive: on`.
 
-1. **`/.well-known/poweur/email.json`** — public and signed: your identity, your address and the
-   bridge you chose. Removing it turns email off; the bridge stops accepting mail for you within
-   a few minutes.
-2. **The `email` block of your inbox policy** — `{"allow": true, "bridge": "email.poweur.net"}`.
-   Your relay admits `email.*` messages from that bridge, and only from it, even when your inbox
-   only takes contacts.
+- **Turning email off** writes `{"email": {"allow": false}}` into your inbox policy. The relay
+  starts reporting `off` and refusing the bridge's messages; mail to your address is refused
+  within a few minutes.
+- **Choosing another bridge** (or turning email back on) publishes a signed
+  **`/.well-known/poweur/email.json`** — your identity, your address and the bridge — and names
+  that bridge in your policy.
 
-Your app shows a message as email only when it is an `email.*` message **from the bridge your own
-policy names**. Anyone else sending a message that claims to be email gets shown as an untrusted
+## Who may email you
+
+Settings → Email (or `poweur email filters`): block an address or a whole `@domain` — every email
+has a **Block** link too — or take mail **only from people you know**: people you have emailed,
+replies to your own mail, delivery reports and the addresses or domains you allow. The rules go to
+the bridge privately, in an encrypted `email.settings` message, and the bridge stores only hashes
+of them. Filtered mail is accepted and dropped without a word to the sender — no bounce. Blocking a
+Poweur ID in Contacts works as before and is separate.
+
+Your app shows a message as email only when it is an `email.*` message **from your bridge** (the
+one your policy names, or your relay's by default). Anyone else sending a message that claims to be email gets shown as an untrusted
 app message: nobody can forge "an email from your bank" over Poweur.
 
 ## Addresses
@@ -64,7 +78,7 @@ app message: nobody can forge "an email from your bank" over Poweur.
   are not ignored (`jo.hn@` is a different, non-existent name).
 - `john+anything@poweur.net` also reaches John; the tag is kept so mail can be filtered by it.
 - An operator can serve more domains: with `poweur.org=poweur.net`, `john@poweur.org` reaches
-  `john.poweur.net` too. Mail is always sent from the address in your `email.json`.
+  `john.poweur.net` too. Mail is always sent from your own address (`john@poweur.net`).
 - Names that mail infrastructure needs — `postmaster`, `abuse`, `mta-sts`, `autoconfig`, … — are
   reserved and cannot be claimed as identities.
 

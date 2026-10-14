@@ -106,9 +106,10 @@ var helpTree = []cmdHelp{
 		{Name: "rm", Usage: "<identity> " + idFlags, Summary: "Remove a contact"},
 	}},
 	{Name: "email", Summary: "Your name@domain address through your relay's email bridge", Subs: []subHelp{
-		{Name: "status", Usage: idFlags, Summary: "Show whether email is on, and the address"},
-		{Name: "enable", Usage: "[--bridge=<id>] " + idFlags, Summary: "Get your address: publish the signed opt-in and let the bridge deliver"},
-		{Name: "disable", Usage: idFlags, Summary: "Stop receiving and sending email"},
+		{Name: "status", Usage: idFlags, Summary: "Show whether email is on (it is by default), and the address"},
+		{Name: "enable", Usage: "[--bridge=<id>] " + idFlags, Summary: "Turn email back on, or use another bridge: publish the signed opt-in"},
+		{Name: "disable", Usage: idFlags, Summary: "Opt out: stop receiving and sending email"},
+		{Name: "filters", Usage: "[--receive=everyone|contacts] [--block=<addr|@domain>] [--unblock=…] [--allow=…] [--disallow=…] " + idFlags, Summary: "Who may email you: block senders, or only people you know (dropped silently)"},
 		{Name: "send", Usage: "--to=<address> [--cc=…] [--bcc=…] --subject=<s> --text=<t>|--text-file=<f> [--html-file=<f>] [--attach=<file>] [--in-reply-to=<id>] " + idFlags, Summary: "Send an email"},
 		{Name: "ls", Aliases: []string{"list"}, Usage: "[--limit=N] " + idFlags, Summary: "List received and sent email (picks up new messages first)"},
 		{Name: "read", Usage: "<n|id> [--html=<file>] [--save=<dir>] [--raw=<file>] [--keep-unread] " + idFlags, Summary: "Show one email; save its HTML, attachments or original"},

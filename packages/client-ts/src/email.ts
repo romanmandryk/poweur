@@ -21,6 +21,8 @@ import type { InboxPolicy } from "./types.js";
 export const MSG_TYPE_EMAIL_MESSAGE = "email.message";
 export const MSG_TYPE_EMAIL_SEND = "email.send";
 export const MSG_TYPE_EMAIL_STATUS = "email.status";
+/** user → bridge: the private receive filters (EmailSettings). */
+export const MSG_TYPE_EMAIL_SETTINGS = "email.settings";
 export const EMAIL_TYPE_PREFIX = "email.";
 
 export const EMAIL_OPTIN_PATH = ".poweur/public/email.json";
@@ -158,12 +160,91 @@ export function verifyEmailOptIn(o: EmailOptIn, publicKey: Uint8Array | string):
   }
 }
 
-/** Mirrors Go `InboxPolicy.TrustsEmailBridge`. */
-export function trustsEmailBridge(policy: InboxPolicy | null | undefined, sender: string | undefined | null): boolean {
+/**
+ * Mirrors Go `InboxPolicy.EmailBridge`: the bridge whose mail the user takes.
+ * No `email` block = email on by default through `defaultBridge` (the one
+ * the user's relay offers); `allow: false` = opted out. "" = off.
+ */
+export function emailBridgeOf(policy: InboxPolicy | null | undefined, defaultBridge?: string | null): string {
   const email = policy?.email;
-  if (!email?.allow) return false;
+  if (!email) return String(defaultBridge ?? "").trim().toLowerCase();
+  if (!email.allow) return "";
+  return String(email.bridge ?? "").trim().toLowerCase();
+}
+
+/** Mirrors Go `InboxPolicy.TrustsEmailBridgeOr` (`TrustsEmailBridge` without a default). */
+export function trustsEmailBridge(policy: InboxPolicy | null | undefined, sender: string | undefined | null, defaultBridge?: string | null): boolean {
   const wanted = String(sender ?? "").trim().toLowerCase();
-  return Boolean(wanted) && wanted === String(email.bridge ?? "").trim().toLowerCase();
+  return Boolean(wanted) && wanted === emailBridgeOf(policy, defaultBridge);
+}
+
+// ── Receive filters (email.settings) ─────────────────────────────────────────
+
+export const EMAIL_RECEIVE_EVERYONE = "everyone";
+export const EMAIL_RECEIVE_CONTACTS = "contacts";
+export const MAX_EMAIL_FILTER_ENTRIES = 2000;
+
+/**
+ * Mirrors Go `EmailSettings`: who may email the user, sent privately to the
+ * bridge, which drops filtered mail silently. Entries are addresses or
+ * "@domain" (subdomains included); block wins. The user's own copy is the
+ * latest one in their archive.
+ */
+export interface EmailSettings {
+  version: number;
+  receive?: typeof EMAIL_RECEIVE_EVERYONE | typeof EMAIL_RECEIVE_CONTACTS;
+  allow?: string[];
+  block?: string[];
+  updated_at: string;
+}
+
+function normalizeFilter(name: string, list: string[] | undefined): string[] {
+  const values = list ?? [];
+  if (values.length > MAX_EMAIL_FILTER_ENTRIES) throw new PoweurError("invalid_argument", `${name} has more than ${MAX_EMAIL_FILTER_ENTRIES} entries`);
+  const out: string[] = [];
+  for (const raw of values) {
+    const e = String(raw).trim().toLowerCase();
+    if (!e) continue;
+    const at = e.lastIndexOf("@");
+    let ok = at >= 0 && e.length <= 320 && !/[ <>"]/.test(e.slice(0, at));
+    if (ok) {
+      try {
+        validateIdentityName(e.slice(at + 1));
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) throw new PoweurError("invalid_argument", `${name}: "${raw}" is neither an address nor @domain`);
+    if (!out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+/** Validates and normalises (lowercase, deduplicated lists); mirrors Go. */
+export function normalizeEmailSettings(s: EmailSettings): EmailSettings {
+  if (s.version !== EMAIL_PAYLOAD_VERSION) throw new PoweurError("invalid_argument", `unsupported email settings version ${s.version}`);
+  if (s.receive && s.receive !== EMAIL_RECEIVE_EVERYONE && s.receive !== EMAIL_RECEIVE_CONTACTS) {
+    throw new PoweurError("invalid_argument", "receive must be everyone or contacts");
+  }
+  if (Number.isNaN(Date.parse(s.updated_at))) throw new PoweurError("invalid_argument", "updated_at must be RFC3339");
+  const allow = normalizeFilter("allow", s.allow);
+  const block = normalizeFilter("block", s.block);
+  return {
+    version: s.version,
+    receive: s.receive ?? EMAIL_RECEIVE_EVERYONE,
+    ...(allow.length ? { allow } : {}),
+    ...(block.length ? { block } : {}),
+    updated_at: s.updated_at,
+  };
+}
+
+/** Whether `address` matches a filter list (address, or @domain and its subdomains). */
+export function emailFilterMatches(list: string[] | undefined, address: string): boolean {
+  const a = address.trim().toLowerCase();
+  const at = a.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = a.slice(at + 1);
+  return (list ?? []).some((e) => e === a || (e.startsWith("@") && (domain === e.slice(1) || domain.endsWith("." + e.slice(1)))));
 }
 
 export function validateEmailPolicy(email: EmailPolicy | undefined): void {

@@ -4,8 +4,9 @@
  * forward says, and how an email's HTML is made safe to show.
  *
  * Trust rule (PCP-0010): a message is mail only when its type is `email.*`
- * and its sender is the bridge the user's own inbox policy names. Anything
- * else stays in chat as an untrusted app message.
+ * and its sender is the user's bridge — the one their inbox policy names, or
+ * by default the one their relay offers. Anything else stays in chat as an
+ * untrusted app message.
  */
 import DOMPurify from "dompurify";
 import {
@@ -16,6 +17,7 @@ import {
   type EmailAttachment,
   type EmailMessage,
   type EmailSend,
+  type EmailSettings,
   type EmailStatus,
 } from "@poweur/client";
 
@@ -81,6 +83,23 @@ export function mailEntries(messages: any[], bridge: string, self: string): Mail
     }
   }
   return out.sort((a, b) => (a.timestamp === b.timestamp ? (a.id < b.id ? -1 : 1) : a.timestamp < b.timestamp ? -1 : 1));
+}
+
+/**
+ * Our receive filters: the newest `email.settings` we sent the bridge (its
+ * archived copy is our record — the bridge keeps only hashes). None: the
+ * permissive default, everyone may email us.
+ */
+export function emailSettingsOf(messages: any[], bridge: string, self: string): EmailSettings {
+  let best: EmailSettings = { version: 1, receive: "everyone", updated_at: "" };
+  if (!bridge) return best;
+  for (const raw of messages) {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (message.type !== "email.settings" || lower(message.sender) !== lower(self) || lower(message.recipient) !== lower(bridge)) continue;
+    const settings = parseEmailPayload<EmailSettings>(message.plaintext);
+    if (settings && settings.updated_at > best.updated_at) best = { receive: "everyone", ...settings };
+  }
+  return best;
 }
 
 const VERDICT_RANK: Record<string, number> = { failed: 0, unverified: 1, verified: 2 };

@@ -4,6 +4,7 @@
  * the actions that fill these slices (E21-T6…T11); this file owns their shape
  * and the reset that switching identity performs.
  */
+import { emailBridgeOf as sdkEmailBridgeOf } from "@poweur/client";
 import { create } from "zustand";
 import type { DriveFiles, Mount, OpenFile } from "@poweur/client/drive";
 
@@ -145,8 +146,11 @@ export const useData = create<DataState>()((set) => ({
   resetForIdentity: () => set(freshIdentityData()),
 }));
 
-/** The email bridge an inbox policy trusts (EPIC-023), or "" — use as a selector. */
-export function emailBridgeOf(policy: any): string {
-  const email = policy?.email;
-  return email?.allow && email.bridge ? String(email.bridge).toLowerCase() : "";
+/**
+ * The email bridge whose mail the user takes (EPIC-023), or "": the one the
+ * inbox policy names, else — email is on by default — the one the relay
+ * offers, unless the policy opts out. Use as a selector with both values.
+ */
+export function emailBridgeOf(policy: any, offered: string | null | undefined): string {
+  return sdkEmailBridgeOf(policy, offered);
 }

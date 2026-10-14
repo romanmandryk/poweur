@@ -9,6 +9,7 @@ func TestValidateClaimableName_Reserved(t *testing.T) {
 	}{
 		// Mail DNS names published for poweur.net's mail server.
 		{"mta-sts.poweur.net", false},
+		{"poweur-bridge.poweur.net", false},
 		{"autoconfig.poweur.net", false},
 		{"autodiscover.poweur.net", false},
 		// Email role names (EPIC-023 E23-T5).

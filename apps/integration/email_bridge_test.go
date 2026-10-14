@@ -80,7 +80,7 @@ func newEmailFixture(t *testing.T) emailFixture {
 	bcfg := emailbridge.Config{
 		PublicURL: "http://" + httpL.Addr().String(),
 		BridgeID:  "email.poweur.net", Seed: seed, RelayURL: relayURL,
-		Domains:    []emailbridge.DomainMap{{Mail: "poweur.net", Identity: "poweur.net"}},
+		Domains: []emailbridge.DomainMap{{Mail: "poweur.net", Identity: "poweur.net"}},
 		Inbound: "lmtp", HookSecret: "integration-hook-secret-01", LMTPUsername: "stalwart", LMTPPassword: lmtpPassword,
 		LMTPInsecure: true, AuthServID: "mail.poweur.net",
 		Transport: "log", LogDir: sentDir, DataDir: t.TempDir(),
@@ -166,13 +166,11 @@ func TestINT_EMAIL_01_InboundAndOutbound(t *testing.T) {
 	john := t.TempDir()
 	runCLI(t, john, "identity", "create", "john.poweur.net", "--hosted", "--relay", fx.relayURL, "--json")
 
-	// Before opting in the address does not exist.
-	if err := lmtpDeliver(t, fx.lmtpAddr, "john@poweur.net", annMail); err == nil {
-		t.Fatal("mail accepted for an identity that did not opt in")
-	}
+	// Email is on by default through the relay's bridge; enabling
+	// explicitly publishes the signed opt-in.
 	status, _ := runCLI(t, john, "email", "status")
-	if !strings.Contains(status, "email.poweur.net") {
-		t.Fatalf("relay does not offer its bridge: %s", status)
+	if !strings.Contains(status, "on (default)") || !strings.Contains(status, "email.poweur.net") {
+		t.Fatalf("relay does not offer its bridge by default: %s", status)
 	}
 	out, _ := runCLI(t, john, "email", "enable", "--json")
 	if !strings.Contains(out, `"address": "john@poweur.net"`) {
@@ -242,6 +240,68 @@ func TestINT_EMAIL_02_DisableRefusesMail(t *testing.T) {
 	_ = json.Unmarshal([]byte(pol), &p)
 	if p.Email == nil || p.Email.Allow {
 		t.Fatalf("policy after disable: %s", pol)
+	}
+}
+
+// TestINT_EMAIL_03: a new identity takes mail with no action of its own (the
+// relay's capabilities say so, no email.json); its private filters drop
+// blocked senders and strangers silently; opting out refuses mail.
+func TestINT_EMAIL_03_OnByDefaultFiltersAndOptOut(t *testing.T) {
+	fx := newEmailFixture(t)
+	jane := t.TempDir()
+	runCLI(t, jane, "identity", "create", "jane.poweur.net", "--hosted", "--relay", fx.relayURL, "--json")
+	mail := func(from, id string) string {
+		m := strings.ReplaceAll(annMail, "john@", "jane@")
+		m = strings.ReplaceAll(m, "lunch-1", id)
+		return strings.ReplaceAll(m, "Ann <ann@example.com>", from)
+	}
+	count := func() int {
+		ls, _ := runCLI(t, jane, "email", "ls", "--json")
+		var out struct {
+			Mail []json.RawMessage `json:"mail"`
+		}
+		_ = json.Unmarshal([]byte(ls), &out)
+		return len(out.Mail)
+	}
+
+	if err := lmtpDeliver(t, fx.lmtpAddr, "jane@poweur.net", mail("Ann <ann@example.com>", "d-1")); err != nil {
+		t.Fatalf("default delivery refused: %v", err)
+	}
+	waitFor(t, "default mail in the archive", func() bool { return count() == 1 })
+
+	runCLI(t, jane, "email", "filters", "--block=pest@example.com")
+	shown, _ := runCLI(t, jane, "email", "filters")
+	if !strings.Contains(shown, "blocked: pest@example.com") {
+		t.Fatalf("filters: %s", shown)
+	}
+	waitFor(t, "the bridge to store the filters", func() bool {
+		f, ok, _ := fx.bridge.Store.Filters(context.Background(), "jane.poweur.net")
+		return ok && len(f.Block) == 1
+	})
+	// Blocked: accepted (no bounce), never delivered.
+	if err := lmtpDeliver(t, fx.lmtpAddr, "jane@poweur.net", mail("Pest <pest@example.com>", "d-2")); err != nil {
+		t.Fatalf("blocked mail must be accepted silently: %v", err)
+	}
+	runCLI(t, jane, "email", "filters", "--receive=contacts", "--allow=@friends.example")
+	waitFor(t, "contacts mode at the bridge", func() bool {
+		f, _, _ := fx.bridge.Store.Filters(context.Background(), "jane.poweur.net")
+		return f.Contacts
+	})
+	_ = lmtpDeliver(t, fx.lmtpAddr, "jane@poweur.net", mail("Stranger <who@example.org>", "d-3"))
+	if err := lmtpDeliver(t, fx.lmtpAddr, "jane@poweur.net", mail("Pal <pal@friends.example>", "d-4")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the allowed sender's mail", func() bool { return count() == 2 })
+	ls, _ := runCLI(t, jane, "email", "ls")
+	if strings.Contains(ls, "pest@") || strings.Contains(ls, "who@") || !strings.Contains(ls, "pal@friends.example") {
+		t.Fatalf("filtered mail delivered:\n%s", ls)
+	}
+
+	runCLI(t, jane, "email", "disable")
+	err := lmtpDeliver(t, fx.lmtpAddr, "jane@poweur.net", mail("Pal <pal@friends.example>", "d-5"))
+	var se *smtp.SMTPError
+	if err == nil || !asSMTP(err, &se) || se.Code != 550 {
+		t.Fatalf("mail after opting out of the default: %v", err)
 	}
 }
 

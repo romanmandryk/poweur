@@ -10,7 +10,11 @@ import {
   EMAIL_OPTIN_PATH,
   EMAIL_PAYLOAD_VERSION,
   MSG_TYPE_EMAIL_SEND,
+  MSG_TYPE_EMAIL_SETTINGS,
   canonicalEmailUpload,
+  emailAddressFor,
+  emailBridgeOf,
+  normalizeEmailSettings,
   hex,
   openEmailBlob,
   sealEmailUpload,
@@ -18,6 +22,7 @@ import {
   type EmailBlobRef,
   type EmailOptIn,
   type EmailSend,
+  type EmailSettings,
 } from "./email.js";
 import { PoweurError, RelayError } from "./errors.js";
 import { INBOX_POLICY_PATH, validateInboxPolicy } from "./policy.js";
@@ -40,6 +45,8 @@ export interface EmailState {
   address: string | null;
   bridge: string | null;
   optIn: EmailOptIn | null;
+  /** On by default: no opt-in of our own, the relay's bridge. */
+  byDefault?: boolean;
 }
 
 export type EmailDraft = Omit<EmailSend, "version" | "send_id"> & { send_id?: string };
@@ -78,8 +85,13 @@ export class EmailApi {
     return (await this.capabilities(this.#client.signer.identity)).bridge ?? null;
   }
 
-  /** Whether email is on, and through which bridge. */
-  async state(): Promise<EmailState> {
+  /**
+   * Whether email is on, and through which bridge. Email is on by default
+   * through the bridge our relay offers, until the policy opts out (or names
+   * another bridge, which then needs our signed email.json). Pass `offered`
+   * when it is already known, to save a fetch.
+   */
+  async state(offered?: string | null): Promise<EmailState> {
     const raw = await this.#client.system().readOptional(EMAIL_OPTIN_PATH);
     let optIn: EmailOptIn | null = null;
     try {
@@ -88,8 +100,18 @@ export class EmailApi {
       optIn = null;
     }
     const { policy } = await this.#client.policy();
-    const enabled = Boolean(optIn && policy.email?.allow && policy.email.bridge === optIn.bridge);
-    return { enabled, address: optIn?.address ?? null, bridge: policy.email?.bridge ?? optIn?.bridge ?? null, optIn };
+    const fallback = offered === undefined ? await this.offeredBridge() : offered;
+    const effective = emailBridgeOf(policy, fallback);
+    const bridge = effective || policy.email?.bridge || optIn?.bridge || null;
+    if (effective && optIn && optIn.bridge === effective) return { enabled: true, address: optIn.address, bridge, optIn };
+    if (effective && !optIn && !policy.email) {
+      try {
+        return { enabled: true, address: emailAddressFor(this.#client.signer.identity), bridge, optIn: null, byDefault: true };
+      } catch {
+        // A name with no address (not name.domain) has no email.
+      }
+    }
+    return { enabled: false, address: optIn?.address ?? null, bridge, optIn };
   }
 
   async #writePolicy(change: (policy: InboxPolicy) => void): Promise<InboxPolicy> {
@@ -117,19 +139,37 @@ export class EmailApi {
     return { enabled: true, address: optIn.address, bridge: chosen, optIn };
   }
 
-  /** Opt out: withdraw email.json (the bridge refuses mail within its cache) and close the policy. */
+  /**
+   * Opt out: withdraw email.json (the bridge refuses mail within its cache)
+   * and close the policy — always written, since no email block means "on".
+   */
   async disable(): Promise<EmailState> {
     await this.#client.system().remove(EMAIL_OPTIN_PATH);
     const policy = await this.#writePolicy((p) => {
-      if (p.email) p.email = { allow: false, ...(p.email.bridge ? { bridge: p.email.bridge } : {}) };
+      p.email = { allow: false, ...(p.email?.bridge ? { bridge: p.email.bridge } : {}) };
     });
     return { enabled: false, address: null, bridge: policy.email?.bridge ?? null, optIn: null };
   }
 
   async #bridge(): Promise<string> {
     const { policy } = await this.#client.policy();
-    if (!policy.email?.allow || !policy.email.bridge) throw new PoweurError("invalid_argument", "email is not enabled for this identity");
-    return policy.email.bridge;
+    const bridge = emailBridgeOf(policy, policy.email ? null : await this.offeredBridge());
+    if (!bridge) throw new PoweurError("invalid_argument", "email is not enabled for this identity");
+    return bridge;
+  }
+
+  /**
+   * Send our receive filters to the bridge (`email.settings`). The archived
+   * copy is our record of them: read the newest from the archive.
+   */
+  async saveSettings(settings: Omit<EmailSettings, "version" | "updated_at">, options: { signWith?: "session" | "identity" } = {}) {
+    const bridge = await this.#bridge();
+    const payload = normalizeEmailSettings({ ...settings, version: EMAIL_PAYLOAD_VERSION, updated_at: rfc3339(new Date()) });
+    const result = await this.#client.sendAndArchive(bridge, JSON.stringify(payload), {
+      type: MSG_TYPE_EMAIL_SETTINGS,
+      signWith: options.signWith ?? "session",
+    });
+    return { ...result, payload };
   }
 
   /**

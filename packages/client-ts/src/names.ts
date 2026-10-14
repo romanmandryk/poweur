@@ -29,7 +29,7 @@ export const RESERVED_LABELS = new Set([
   "payments", "billing", "wallet", "invoice", "verify", "verified",
   "official", "team", "staff", "system", "bot", "test",
   "demo", "example", "oauth", "sso", "idp", "openid",
-  "indieauth", "mta-sts", "autoconfig", "autodiscover", "mailer-daemon", "bounce",
+  "indieauth", "mta-sts", "autoconfig", "autodiscover", "mailer-daemon", "poweur-bridge", "bounce",
   "bounces", "dmarc", "email",
 ]);
 

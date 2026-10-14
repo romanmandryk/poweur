@@ -23,7 +23,7 @@
 | E23-T2 Bridge core + inbound SMTP | done | Behind Stalwart: RCPT hook + LMTP instead of a public :25 listener |
 | E23-T3 Outbound: pluggable transports, DKIM, bounces | mostly done | `smtp`/`log` transports, DSN-driven bounces + suppression; DKIM is Stalwart's; provider complaint webhooks open |
 | E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics; PoW gate, circuit breaker, alerts open |
-| E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | done | `support.poweur.net` already exists and is operator-owned |
+| E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | done | On by default with opt-out (relay capabilities `email_receive`); private receive filters (`email.settings`); `support.poweur.net` already exists and is operator-owned |
 | E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | done | web 0.2.27 |
 | E23-T7 Growth footer | done | |
 | E23-T8 Packaging, DNS, deploy & operations | partial | image, compose, deploy workflow (gated), Caddy, Prometheus, runbook; Stalwart/DNS live in famooss; `check-dns` dropped (mail server's) |
@@ -434,9 +434,19 @@ spike, and sees refusal + suspension; alert rules committed.
 - [x] CLI: `poweur email enable|disable|status`, `poweur email send`, `poweur email ls|read`
       (text render; `--html` writes the sanitized HTML to a file)
 - [x] Version bumps: relay, CLI, `@poweur/client` (relay 0.2.18, CLI 0.2.12, SDK 0.2.15)
+- [x] Email on by default: no `email` policy block = the operator's bridge; the relay publishes
+      `features.email_receive` per identity and the bridge reads it when there is no
+      `email.json`; `email: {allow: false}` opts out (`poweur email disable`, Settings → Email).
+      No per-user setup on the mail server: Stalwart asks the RCPT hook for every non-local
+      poweur.net address
+- [x] Receive filters, private to the user and the bridge: `email.settings` (everyone | contacts,
+      allow/block by address or `@domain`), stored as HMACs, filtered mail dropped silently;
+      Settings → Email, **Block** on each email, `poweur email filters`
+- [x] `poweur-bridge` reserved (Stalwart's submission account for the bridge)
 
 **Acceptance:** `TestINT_EMAIL_02`: CLI enables email, bridge accepts mail for it, CLI disables it,
-bridge refuses within the cache TTL.
+bridge refuses within the cache TTL. `TestINT_EMAIL_03`: a new ID takes mail with no setup,
+filters drop blocked senders and strangers silently, opting out refuses mail.
 
 ### E23-T6 — Web app: opt-in, Emails tray, compose, safe HTML rendering
 

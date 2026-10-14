@@ -138,6 +138,34 @@ func (o *Outbound) ProcessDue(ctx context.Context) {
 	}
 }
 
+// settings stores a user's receive filters (email.settings). Only an
+// identity that takes mail here has any to keep; a bad or stale document is
+// dropped.
+func (o *Outbound) settings(ctx context.Context, sender string, plain []byte) (retry bool, err error) {
+	var settings identity.EmailSettings
+	if json.Unmarshal(plain, &settings) != nil || settings.Validate() != nil {
+		o.metrics.Inc("email_settings_total", "result", "invalid")
+		return false, nil
+	}
+	if _, err := o.dir.Opted(ctx, sender); err != nil {
+		if errors.Is(err, ErrNoMailbox) {
+			o.metrics.Inc("email_settings_total", "result", "no_mailbox")
+			return false, nil
+		}
+		return true, err
+	}
+	stored, err := o.store.SetSettings(ctx, sender, settings)
+	if err != nil {
+		return true, err
+	}
+	result := "stored"
+	if !stored {
+		result = "stale"
+	}
+	o.metrics.Inc("email_settings_total", "result", result)
+	return false, nil
+}
+
 // handle processes one envelope. retry=true asks to be called again later
 // (a failure); a non-zero notBefore means "not yet" (pacing).
 func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, notBefore time.Time, err error) {
@@ -146,13 +174,17 @@ func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, notBef
 }
 
 func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.Time) (retry bool, err error) {
-	if identity.NormalizeMessageType(env.Type) != identity.MsgTypeEmailSend {
-		return false, nil // the bridge only takes sends; anything else is dropped
+	msgType := identity.NormalizeMessageType(env.Type)
+	if msgType != identity.MsgTypeEmailSend && msgType != identity.MsgTypeEmailSettings {
+		return false, nil // the bridge only takes sends and settings; anything else is dropped
 	}
 	sender := strings.ToLower(env.Sender)
 	plain, err := o.relay.Open(env)
 	if err != nil {
 		return false, nil
+	}
+	if msgType == identity.MsgTypeEmailSettings {
+		return o.settings(ctx, sender, plain)
 	}
 	var send identity.EmailSend
 	if err := json.Unmarshal(plain, &send); err != nil {
@@ -278,6 +310,7 @@ func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.
 			newOnes++
 		}
 		_ = o.store.Remember(ctx, sender, r)
+		_ = o.store.RememberSentTo(ctx, sender, r)
 	}
 	if newOnes > 0 {
 		_, _ = o.store.Count(ctx, "new:"+sender, newOnes)

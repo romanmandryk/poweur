@@ -41,6 +41,7 @@ type fakeID struct {
 	encPriv []byte
 	doc     []byte
 	optIn   []byte
+	caps    []byte // capabilities.json; nil = 404
 }
 
 func newFakeNet(t *testing.T) *fakeNet {
@@ -108,6 +109,12 @@ func (n *fakeNet) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.NotFound(w, r)
+	case r.URL.Path == "/.well-known/poweur/capabilities.json":
+		if id, ok := n.ids[host]; ok && id.caps != nil {
+			_, _ = w.Write(id.caps)
+			return
+		}
+		http.NotFound(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/messages":
 		var env Envelope
 		_ = json.NewDecoder(r.Body).Decode(&env)
@@ -146,6 +153,15 @@ func (n *fakeNet) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// byDefault makes id's relay offer bridge with email on (receive "on") or
+// opted out ("off"), as the real relay's capabilities do without email.json.
+func (n *fakeNet) byDefault(id *fakeID, bridge, receive string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	id.optIn = nil
+	id.caps = []byte(`{"version":1,"endpoints":{"email_bridge":"` + bridge + `"},"features":{"email_receive":"` + receive + `"}}`)
 }
 
 // sendToBridge puts an encrypted, signed message from `from` into the

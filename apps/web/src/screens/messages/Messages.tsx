@@ -213,7 +213,7 @@ function InboxTray() {
   const history = useData((state) => state.history);
   const contacts = useData((state) => state.contacts.list);
   const view = useData((state) => state.trayView);
-  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc));
+  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc, state.email.offered));
 
   const rows = buildConversationRows(messages, identity, (peer: string) => unreadFor({ messages, history }, identity, peer), {
     view,

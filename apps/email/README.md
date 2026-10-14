@@ -1,6 +1,7 @@
 # poweur-email — the Poweur email bridge
 
-EPIC-023. Gives every **opted-in** hosted Poweur ID a working address: mail to
+EPIC-023. Gives every hosted Poweur ID a working address — **on by default**, one switch to
+opt out: mail to
 `john@poweur.net` arrives, end-to-end encrypted, in `john.poweur.net`'s Poweur inbox (the web
 app's **Email** tray, `poweur email ls`) — sign-in links, notifications, newsletters, replies.
 Optionally, John can also send mail as `john@poweur.net` from the app, paced and limited.
@@ -90,15 +91,25 @@ docker exec poweur-email poweur-email limits list
 docker exec poweur-email poweur-email limits reset john.poweur.net
 ```
 
-## Opting in
+## On by default, opt-out, filters
 
-A user opts in from Settings (web app), the onboarding's last step, or `poweur email enable`.
-Their client writes, with their own key:
+With `EMAIL_BRIDGE_ID` set on the relay, every hosted identity with an address takes mail
+through that bridge from the moment it exists — no step for the user, no rule per user on the
+mail server. The relay's `capabilities.json` says so per identity
+(`endpoints.email_bridge` plus `features.email_receive: "on"|"off"`, cached 60 s), and the
+bridge reads that when there is no `email.json`. Unknown names get `550 5.1.1` at `RCPT TO`.
 
-1. `.poweur/public/email.json` — signed `{identity, address, bridge, created_at}`;
-2. the inbox policy's `email: {allow: true, bridge: "email.poweur.net"}` block.
-
-The relay advertises the bridge to its users when it runs with `EMAIL_BRIDGE_ID`.
+- **Opt out** — Settings → Email, or `poweur email disable`: the inbox policy gets
+  `email: {allow: false}`; the relay reports `off` and refuses the bridge's messages.
+- **Another bridge, or turning back on** — `poweur email enable [--bridge=<id>]` writes the
+  signed `.poweur/public/email.json` (`{identity, address, bridge, created_at}`) and
+  `email: {allow: true, bridge}`. An explicit `email.json` always wins over the default.
+- **Filters** — who may email you, private to you and the bridge: block addresses or
+  `@domains`, or take mail only from people you know (whom you emailed, replies to your mail,
+  delivery reports, an allow list). The client sends them to the bridge as an encrypted
+  `email.settings` message; the bridge keeps HMACs of the lists only and **drops filtered mail
+  silently** (accepted, never delivered, no bounce). The user's own copy is that message in
+  their archive. Settings → Email, a **Block** link on each email, or `poweur email filters`.
 
 ## Configuration
 
@@ -110,7 +121,7 @@ Environment only. Every secret also takes a `_FILE` variant.
 | `EMAIL_BRIDGE_SEED` / `_FILE` | — | Its 32-byte seed (base64url) or recovery phrase; derives its keys |
 | `EMAIL_RELAY_URL` | — | The bridge identity's home relay (`https://relay.poweur.net`) |
 | `EMAIL_DOMAINS` | — | Mail domains, `poweur.net,poweur.org=poweur.net` (`a=b`: mail for `x@a` goes to `x.b`) |
-| `EMAIL_ALIASES` | — | Whole addresses to an identity: `postmaster@poweur.net=support.poweur.net,…` (the target must be opted in) |
+| `EMAIL_ALIASES` | — | Whole addresses to an identity: `postmaster@poweur.net=support.poweur.net,…` (the target must take email) |
 | `EMAIL_PUBLIC_URL` | — | HTTPS origin for blobs and uploads; advertised as `email_api`. Without it attachments over ~350 KB are dropped and uploads are off |
 | `EMAIL_ADDR` | `:8091` | HTTP: `/blobs/{id}`, `/v1/uploads/{id}`, `/health`, `/metrics`, and in `lmtp` mode `/stalwart/hook` |
 | **Inbound** | | |
@@ -191,8 +202,7 @@ Point another domain's MX at the same place and add it to `EMAIL_DOMAINS`:
 ### Operator mailboxes beside the bridge
 
 An identity such as `support.poweur.net` reads and sends `support@poweur.net` in the Poweur
-app like anyone else: opt it in (`poweur email enable --use-identity=support.poweur.net`), and
-raise its sending limits. `EMAIL_ALIASES` can route `postmaster@` and `abuse@` to it.
+app like anyone else (email is on for it by default), and raise its sending limits. `EMAIL_ALIASES` can route `postmaster@` and `abuse@` to it.
 
 To *also* read it in a webmail such as Bulwark, the mail server must keep a plaintext copy —
 something the bridge never does. Make `support` a local Stalwart account and copy its mail

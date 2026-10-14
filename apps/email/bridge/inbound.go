@@ -99,6 +99,11 @@ func (in *Inbound) Deliver(ctx context.Context, raw []byte, parsed Parsed, envel
 	}
 
 	msg := parsed.Email
+	if in.filtered(ctx, r.Identity, msg) {
+		// Accepted and dropped: no bounce, and the sender learns nothing.
+		in.metrics.Inc("email_inbound_total", "result", "filtered")
+		return nil
+	}
 	msg.EnvelopeTo = strings.ToLower(envelopeTo)
 	msg.Tag = r.Tag
 	if msg.Bounce != nil && msg.Bounce.MessageID != "" {
@@ -140,6 +145,41 @@ func (in *Inbound) Deliver(ctx context.Context, raw []byte, parsed Parsed, envel
 	}
 	in.metrics.Inc("email_inbound_total", "result", "delivered")
 	return nil
+}
+
+// filtered applies the recipient's email.settings: a blocked sender (by
+// address or domain) never gets through; in "contacts" mode only allowed
+// senders, people the user has emailed, replies to the user's own mail and
+// delivery reports do. No settings: everyone may write.
+func (in *Inbound) filtered(ctx context.Context, id string, msg identity.EmailMessage) bool {
+	f, ok, err := in.store.Filters(ctx, id)
+	if err != nil || !ok {
+		return false
+	}
+	from := msg.From.Address
+	if from != "" && in.store.Blocks(id, f, from) {
+		return true
+	}
+	if !f.Contacts || msg.Bounce != nil {
+		return false
+	}
+	if from != "" {
+		if in.store.Allows(id, f, from) {
+			return false
+		}
+		if sent, _ := in.store.SentTo(ctx, id, from); sent {
+			return false
+		}
+	}
+	for _, ref := range append([]string{msg.InReplyTo}, msg.References...) {
+		if ref == "" {
+			continue
+		}
+		if send, ok, _ := in.store.SendByMessageID(ctx, ref); ok && strings.EqualFold(send.Sender, id) {
+			return false
+		}
+	}
+	return true
 }
 
 func sha256Short(s string) []byte {

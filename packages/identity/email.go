@@ -38,7 +38,10 @@ const (
 	MsgTypeEmailMessage = "email.message" // bridge → user: an inbound email
 	MsgTypeEmailSend    = "email.send"    // user → bridge: send this email
 	MsgTypeEmailStatus  = "email.status"  // bridge → user: what happened to a send
-	EmailTypePrefix     = "email."
+	// MsgTypeEmailSettings carries the user's private receive filters to the
+	// bridge (EmailSettings): who may email them and whom they blocked.
+	MsgTypeEmailSettings = "email.settings" // user → bridge
+	EmailTypePrefix      = "email."
 )
 
 // IsEmailType reports whether t is one of the bridge's message types.
@@ -216,8 +219,9 @@ func ParseEmailAddress(address string) (EmailRoute, error) {
 }
 
 // EmailPolicy is the `email` block of the inbox policy: the bridge allowed to
-// deliver `email.*` messages. Absent or Allow=false: no bridge is admitted
-// through a closed inbox, and clients do not treat `email.*` as mail.
+// deliver `email.*` messages. Absent: the operator's bridge (email is on by
+// default where the relay offers one). Allow=false: opted out — no bridge is
+// admitted, and clients do not treat `email.*` as mail.
 type EmailPolicy struct {
 	Allow  bool   `json:"allow"`
 	Bridge string `json:"bridge,omitempty"`
@@ -235,13 +239,29 @@ func (e EmailPolicy) Validate() error {
 }
 
 // TrustsEmailBridge reports whether sender is the bridge the recipient opted
-// into, so its `email.*` messages are admitted and shown as mail.
+// into explicitly, so its `email.*` messages are admitted and shown as mail.
 func (p InboxPolicy) TrustsEmailBridge(sender string) bool {
-	if p.Email == nil || !p.Email.Allow {
-		return false
+	return p.TrustsEmailBridgeOr(sender, "")
+}
+
+// EmailBridge is the bridge whose mail the recipient takes: the one the
+// policy names, else defaultBridge (the operator's, "" when there is none)
+// unless the policy opts out. "" means email is off.
+func (p InboxPolicy) EmailBridge(defaultBridge string) string {
+	if p.Email == nil {
+		return strings.ToLower(strings.TrimSpace(defaultBridge))
 	}
+	if !p.Email.Allow {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(p.Email.Bridge))
+}
+
+// TrustsEmailBridgeOr is TrustsEmailBridge with email on by default through
+// defaultBridge.
+func (p InboxPolicy) TrustsEmailBridgeOr(sender, defaultBridge string) bool {
 	sender = strings.ToLower(strings.TrimSpace(sender))
-	return sender != "" && sender == strings.ToLower(strings.TrimSpace(p.Email.Bridge))
+	return sender != "" && sender == p.EmailBridge(defaultBridge)
 }
 
 // Email payloads. Each is the JSON plaintext of the matching message type,

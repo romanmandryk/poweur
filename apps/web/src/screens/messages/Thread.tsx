@@ -82,7 +82,7 @@ function Thread({ peer, threadId, group, startSubject }: { peer: string; threadI
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const marking = useRef(false);
 
-  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc));
+  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc, state.email.offered));
   const all = threadMessages(messages, identity, peer, threadId, { emailBridge });
   const groupName = group ? peer.toLowerCase() : "";
   const subjects = threadSubjects(all);

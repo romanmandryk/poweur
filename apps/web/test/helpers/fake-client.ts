@@ -45,6 +45,10 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
       message: { id: `sent-${++sent}`, recipient: "email.poweur.net", timestamp: new Date(Date.now() + sent).toISOString() },
       lost: 0, sendId: "S1", payload: { version: 1, send_id: "S1", ...draft },
     })),
+    saveSettings: vi.fn(async (settings: any) => ({
+      message: { id: `sent-${++sent}`, recipient: "email.poweur.net", timestamp: new Date(Date.now() + sent).toISOString() },
+      lost: 0, payload: { version: 1, receive: "everyone", ...settings, updated_at: new Date(Date.now() + sent).toISOString() },
+    })),
     upload: vi.fn(async () => ({ upload: "UP1", sha256: "00", size: 0 })),
     blob: vi.fn(async () => new Uint8Array([1, 2, 3])),
   };

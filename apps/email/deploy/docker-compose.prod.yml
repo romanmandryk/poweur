@@ -38,7 +38,9 @@ services:
       EMAIL_LMTP_ADDR: ":2525"
       EMAIL_LMTP_USERNAME: stalwart
       # A private Docker network between two containers: AUTH without TLS,
-      # from infra_net only.
+      # from infra_net only. Keep EMAIL_TLS_CERT_FILE unset here: with a cert
+      # the LMTP port offers STARTTLS, which Stalwart's opportunistic outbound
+      # TLS would take and then refuse an internal certificate.
       EMAIL_LMTP_INSECURE: "1"
       EMAIL_LMTP_ALLOW: 172.16.0.0/12
       EMAIL_LMTP_HOSTNAME: poweur-email

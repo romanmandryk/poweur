@@ -2,8 +2,8 @@
  * The Email tray's actions (EPIC-023 E23-T6): opt in and out, send through
  * the bridge, keep read marks per mail thread, and open attachments.
  */
-import { markThreadRead as markThreadMark, stateCovers, toBase64Data, type EmailBlobRef, type EmailOutAttachment } from "@poweur/client";
-import { mailEntries, type MailEntry } from "../lib/email";
+import { markThreadRead as markThreadMark, stateCovers, toBase64Data, type EmailBlobRef, type EmailOutAttachment, type EmailSettings } from "@poweur/client";
+import { emailSettingsOf, mailEntries, type MailEntry } from "../lib/email";
 import { useData } from "../state/data";
 import { useSession } from "../state/session";
 import { toast } from "../state/ui";
@@ -35,7 +35,8 @@ export async function loadEmail({ force = false } = {}) {
   setEmail({ loading: true });
   try {
     const api = client.email();
-    const [state, offered] = await Promise.all([api.state(), api.offeredBridge()]);
+    const offered = await api.offeredBridge();
+    const state = await api.state(offered);
     if (started !== generation) {
       setEmail({ offered: offered ?? useData.getState().email.offered, loading: false });
       return;
@@ -84,6 +85,50 @@ export async function disableEmail(): Promise<boolean> {
     toast(`Could not turn off email: ${errorMessage(error)}`, "error", 7000);
     return false;
   }
+}
+
+/** Our receive filters, from the store (see lib/email emailSettingsOf). */
+export function currentEmailSettings(): EmailSettings {
+  return emailSettingsOf(useData.getState().messages, trustedEmailBridge(), useSession.getState().identity ?? "");
+}
+
+/**
+ * Change who may email us: sends the whole new settings to the bridge (which
+ * drops filtered mail silently) and keeps the sent copy as our record.
+ */
+export async function saveEmailSettings(change: (current: EmailSettings) => Omit<EmailSettings, "version" | "updated_at">, done?: string): Promise<boolean> {
+  const client = activeClient();
+  if (!client) return false;
+  try {
+    const next = change(currentEmailSettings());
+    const sent = await client.email().saveSettings({
+      ...(next.receive ? { receive: next.receive } : {}),
+      ...(next.allow?.length ? { allow: next.allow } : {}),
+      ...(next.block?.length ? { block: next.block } : {}),
+    });
+    const self = useSession.getState().identity ?? "";
+    mergeMessages([{
+      id: sent.message.id, sender: self, recipient: sent.message.recipient, timestamp: sent.message.timestamp,
+      type: "email.settings", queue: "sent", plaintext: JSON.stringify(sent.payload),
+    }]);
+    if (done) toast(done, "success");
+    trackAction("email-settings");
+    return true;
+  } catch (error) {
+    toast(`Could not save: ${errorMessage(error)}`, "error", 7000);
+    return false;
+  }
+}
+
+/** Block mail from an address or "@domain". */
+export function blockEmailSender(entry: string): Promise<boolean> {
+  const e = entry.trim().toLowerCase();
+  return saveEmailSettings((s) => ({ ...s, block: [...(s.block ?? []).filter((b) => b !== e), e] }), `Mail from ${e} will be dropped`);
+}
+
+export function unblockEmailSender(entry: string): Promise<boolean> {
+  const e = entry.trim().toLowerCase();
+  return saveEmailSettings((s) => ({ ...s, block: (s.block ?? []).filter((b) => b !== e) }), `${e} unblocked`);
 }
 
 /** The mail in the store. */

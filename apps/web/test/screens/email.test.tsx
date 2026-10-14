@@ -3,7 +3,7 @@
  * EPIC-009 E09-T13).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 
 const holder = vi.hoisted(() => ({ client: null as any }));
 vi.mock("../../src/lib/client.js", async (importOriginal) => ({
@@ -63,15 +63,37 @@ describe("Email tray", () => {
     expect($('.tray-tab[data-tray="email"]')).toBeNull();
   });
 
-  it("offers the address, and opting in turns it on", async () => {
+  it("after opting out, offers to turn email back on", async () => {
     holder.client.emailApi.offeredBridge.mockResolvedValue(BRIDGE);
+    holder.client.policy.mockResolvedValue({ policy: { version: 1, mode: "open", email: { allow: false } }, explicit: true });
     render(<App />);
     const tab = await found('.tray-tab[data-tray="email"]');
     fireEvent.click(tab);
     const button = await found("#btn-email-enable");
-    expect(button.textContent).toContain("alice@poweur.net");
+    expect($("#email-optin")!.textContent).toContain("alice@poweur.net");
     fireEvent.click(button);
     await waitFor(() => expect(holder.client.emailApi.enable).toHaveBeenCalled());
+  });
+
+  it("is on by default: the relay's bridge delivers mail with no email block in the policy", async () => {
+    holder.client.emailApi.offeredBridge.mockResolvedValue(BRIDGE);
+    holder.client.emailApi.state.mockResolvedValue({ enabled: true, address: "alice@poweur.net", bridge: BRIDGE, optIn: null, byDefault: true } as any);
+    holder.client.inboxAndArchive.mockResolvedValue({ messages: [mail("e1", 1)], acks: [], lost: 0 });
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    expect((await found(".mail-row")).querySelector(".mail-subject")!.textContent).toBe("Lunch");
+    expect($(`.conv-row[data-compose-to="${BRIDGE}"]`)).toBeNull();
+  });
+
+  it("blocks a sender from an open email", async () => {
+    optedIn();
+    holder.client.inboxAndArchive.mockResolvedValue({ messages: [mail("e1", 1)], acks: [], lost: 0 });
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    fireEvent.click(await found(".mail-row"));
+    fireEvent.click(await found(".mail-block"));
+    fireEvent.click(await found("#confirm-email-block"));
+    await waitFor(() => expect(holder.client.emailApi.saveSettings).toHaveBeenCalledWith({ receive: "everyone", block: ["ann@example.com"] }));
   });
 
   it("keeps mail out of chat, lists it, and renders it sandboxed", async () => {
@@ -155,13 +177,14 @@ describe("live mail", () => {
 });
 
 describe("onboarding", () => {
-  it("offers the address on the last step when the relay has a bridge", async () => {
+  it("names the address on the last step — email is on by default", async () => {
     holder.client.emailApi.offeredBridge.mockResolvedValue(BRIDGE);
+    holder.client.emailApi.state.mockResolvedValue({ enabled: true, address: "alice@poweur.net", bridge: BRIDGE, optIn: null, byDefault: true } as any);
     useData.setState({ onboard: { step: 3 } });
     useRoute.setState({ sub: "onboarding" });
     render(<App />);
-    const offer = await found("#email-optin");
-    expect(offer.textContent).toContain("alice@poweur.net");
+    expect((await found("#onboard-email")).textContent).toContain("alice@poweur.net");
+    expect($("#email-optin")).toBeNull();
   });
 });
 
@@ -176,5 +199,33 @@ describe("receive-only bridge", () => {
     await found("iframe.email-frame");
     expect($("#btn-email-compose")).toBeNull();
     expect($("#btn-email-reply")).toBeNull();
+  });
+});
+
+describe("receive filters", () => {
+  it("shows the newest saved settings and changes who may email", async () => {
+    optedIn();
+    const { openEmailPanel } = await import("../../src/screens/settings/panels");
+    const { mergeMessages } = await import("../../src/actions/messages");
+    render(<App />);
+    await waitFor(() => expect(useData.getState().email.loaded).toBe(true));
+    mergeMessages([
+      { id: "s1", sender: ME, recipient: BRIDGE, timestamp: "2026-10-14T09:00:00Z", type: "email.settings", queue: "sent",
+        plaintext: JSON.stringify({ version: 1, block: ["old@example.com"], updated_at: "2026-10-14T09:00:00Z" }) },
+      { id: "s2", sender: ME, recipient: BRIDGE, timestamp: "2026-10-14T10:00:00Z", type: "email.settings", queue: "sent",
+        plaintext: JSON.stringify({ version: 1, block: ["pest@example.com"], updated_at: "2026-10-14T10:00:00Z" }) },
+    ]);
+    act(() => openEmailPanel());
+    const blocked = await found("#email-blocked");
+    expect(blocked.textContent).toContain("pest@example.com");
+    expect(blocked.textContent).not.toContain("old@example.com");
+    // Settings messages are not a chat with the bridge.
+    expect($(`.conv-row[data-compose-to="${BRIDGE}"]`)).toBeNull();
+
+    fireEvent.click($("#email-contacts-only")!);
+    await waitFor(() => expect(holder.client.emailApi.saveSettings).toHaveBeenCalledWith({ receive: "contacts", block: ["pest@example.com"] }));
+    fireEvent.change($("#email-filter-entry")!, { target: { value: "Spam.Example" } });
+    fireEvent.click($("#btn-email-block")!);
+    await waitFor(() => expect(holder.client.emailApi.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ block: ["pest@example.com", "@spam.example"] })));
   });
 });

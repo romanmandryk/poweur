@@ -7,9 +7,9 @@
 import { stateCovers } from "@poweur/client";
 import { mailEntries } from "../lib/email";
 import { markCovers, unreadTotal } from "../lib/threads.js";
-import type { Contact, DataFields } from "./data";
+import { emailBridgeOf, type Contact, type DataFields } from "./data";
 
-type BadgeData = Pick<DataFields, "messages" | "anon" | "history" | "requests" | "contacts"> & Partial<Pick<DataFields, "policy">>;
+type BadgeData = Pick<DataFields, "messages" | "anon" | "history" | "requests" | "contacts"> & Partial<Pick<DataFields, "policy" | "email">>;
 
 export interface IncomingRequest {
   sender: string;
@@ -67,8 +67,7 @@ export function navBadges(data: BadgeData, identity: string | null, unlocked: bo
   if (!identity || !unlocked) return {};
   // With anonymous messages turned off there is no tray to clear them from.
   const anonymous = anonymousAllowed(data.policy) ? unreadAnonymous(data) : 0;
-  const email = data.policy?.doc?.email;
-  const emailBridge = email?.allow && email.bridge ? String(email.bridge).toLowerCase() : "";
+  const emailBridge = emailBridgeOf(data.policy?.doc, data.email?.offered);
   const readState: any = data.history.readState ?? { conversations: {} };
   const mail = emailBridge
     ? mailEntries(data.messages, emailBridge, identity).filter(

@@ -1,16 +1,17 @@
 /**
  * Email (EPIC-023 E23-T6): the tray, one mail thread, and the composer.
  *
- * Mail arrives as `email.message` from the bridge the user opted into; the
+ * Mail arrives as `email.message` from the user's bridge (on by default); the
  * bridge sanitized its HTML, and this client sanitizes it again and renders it
  * in a sandboxed frame with no scripts and no network (remote images only on
  * request). Nothing here trusts the email.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AtSign, ChevronDown, ChevronUp, Download, FileText, Forward, ImageOff, Mail, Paperclip, Reply, ReplyAll, ShieldAlert, SquarePen, X } from "lucide-react";
+import { AtSign, Ban, ChevronDown, ChevronUp, Download, FileText, Forward, ImageOff, Mail, Paperclip, Reply, ReplyAll, ShieldAlert, SquarePen, X } from "lucide-react";
 import type { EmailAttachment, EmailMessage } from "@poweur/client";
-import { attachmentBytes, enableEmail, loadEmail, mailUnread, markMailRead, MAX_EMAIL_ATTACHMENTS_BYTES, saveAttachment, saveOriginal, sendEmail } from "../../actions/email";
+import { attachmentBytes, blockEmailSender, enableEmail, loadEmail, mailUnread, markMailRead, MAX_EMAIL_ATTACHMENTS_BYTES, saveAttachment, saveOriginal, sendEmail } from "../../actions/email";
 import { historyHasOlder, loadOlderHistory, trustedEmailBridge } from "../../actions/messages";
+import { askConfirm } from "../../components/Dialogs";
 import { MessageText } from "../../components/MessageText";
 import { cn } from "../../lib/cn";
 import {
@@ -34,7 +35,7 @@ import { SubPage } from "../../ui/Layout";
 function useMailThreads(): MailThread[] {
   const messages = useData((state) => state.messages);
   const readState = useData((state) => state.history.readState);
-  const bridge = useData((state) => emailBridgeOf(state.policy.doc));
+  const bridge = useData((state) => emailBridgeOf(state.policy.doc, state.email.offered));
   const identity = useSession((state) => state.identity) ?? "";
   return useMemo(
     () => mailThreads(mailEntries(messages, bridge, identity), (entry) => mailUnread(entry, readState, bridge)),
@@ -182,7 +183,7 @@ export function EmailOptIn({ compact = false }: { compact?: boolean }) {
   return (
     <div id="email-optin" className={cn("rounded-card bg-surface px-4 py-5", !compact && "m-4")}>
       <div className="flex items-center gap-2 text-[17px] font-bold">
-        <Mail className="size-5 text-accent" aria-hidden="true" /> Get {address}
+        <Mail className="size-5 text-accent" aria-hidden="true" /> {address} is off
       </div>
       <p className="mt-2 text-sm text-muted">
         Receive and send ordinary email from your Poweur ID. Mail arrives encrypted to you; nobody else on Poweur can read it.
@@ -194,7 +195,7 @@ export function EmailOptIn({ compact = false }: { compact?: boolean }) {
         ) : (
           <li>This address receives mail only — sign-in links, notifications, newsletters.</li>
         )}
-        <li>You can turn it off at any time in Settings.</li>
+        <li>You can turn it off at any time in Settings, or block senders and keep out strangers there.</li>
       </ul>
       <Button
         id="btn-email-enable"
@@ -206,7 +207,7 @@ export function EmailOptIn({ compact = false }: { compact?: boolean }) {
           setBusy(false);
         }}
       >
-        {busy ? "Turning on…" : `Get ${address}`}
+        {busy ? "Turning on…" : "Turn email back on"}
       </Button>
     </div>
   );
@@ -311,6 +312,24 @@ function MailCard({ entry, startOpen }: { entry: MailEntry; startOpen: boolean }
         </div>
       </button>
       {open && <EmailView email={email} />}
+      {open && email.from.address && (
+        <button
+          type="button"
+          className="mail-block mt-2 inline-flex items-center gap-1 text-xs text-muted"
+          onClick={async () => {
+            const address = email.from.address.toLowerCase();
+            const ok = await askConfirm({
+              title: "Block sender",
+              message: <p>Mail from {address} will be dropped from now on, without telling them. You can unblock in Settings → Email.</p>,
+              confirmLabel: "Block",
+              confirmId: "confirm-email-block",
+            });
+            if (ok) await blockEmailSender(address);
+          }}
+        >
+          <Ban className="size-3.5" aria-hidden="true" /> Block {email.from.address}
+        </button>
+      )}
     </article>
   );
 }
