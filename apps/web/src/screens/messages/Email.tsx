@@ -82,9 +82,11 @@ export function EmailTray() {
           <AtSign className="size-3.5 shrink-0" aria-hidden="true" />
           {email.address ?? "…"}
         </span>
-        <Button id="btn-email-compose" size="sm" variant="secondary" onClick={() => openCompose()}>
-          <SquarePen className="size-4" aria-hidden="true" /> Write
-        </Button>
+        {email.canSend && (
+          <Button id="btn-email-compose" size="sm" variant="secondary" onClick={() => openCompose()}>
+            <SquarePen className="size-4" aria-hidden="true" /> Write
+          </Button>
+        )}
       </div>
       {!threads.length ? (
         <EmptyState icon={Mail} title="No email yet" body={`Mail sent to ${email.address ?? "your address"} lands here, encrypted to you.`} />
@@ -187,7 +189,11 @@ export function EmailOptIn({ compact = false }: { compact?: boolean }) {
       </p>
       <ul className="mt-2 list-disc pl-5 text-[13px] text-muted">
         <li>Email is not end-to-end encrypted on the way: senders' mail servers and the bridge ({email.offered}) see it while it passes.</li>
-        <li>The first email you send to someone carries a one-line note about Poweur.</li>
+        {email.canSend ? (
+          <li>Sending is limited and paced (a few a day) to keep the address off spam lists; the first email you send to someone carries a one-line note about Poweur.</li>
+        ) : (
+          <li>This address receives mail only — sign-in links, notifications, newsletters.</li>
+        )}
         <li>You can turn it off at any time in Settings.</li>
       </ul>
       <Button
@@ -223,7 +229,8 @@ export function EmailThreadScreen() {
       </SubPage>
     );
   }
-  const newestReceived = [...thread.entries].reverse().find((e) => e.email)?.email;
+  const canSend = useData((state) => state.email.canSend);
+  const newestReceived = canSend ? [...thread.entries].reverse().find((e) => e.email)?.email : undefined;
   return (
     <SubPage
       title={<span className="mail-thread-subject">{thread.subject || "(no subject)"}</span>}

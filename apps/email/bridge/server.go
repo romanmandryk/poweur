@@ -38,6 +38,19 @@ type Server struct {
 	started time.Time
 }
 
+// OpenStoreFor opens the bridge's database for operator commands (limits).
+// The bridge may be running: SQLite's WAL lets both work.
+func OpenStoreFor(cfg Config) (*Store, error) {
+	if len(cfg.Seed) != 32 {
+		return nil, errors.New("EMAIL_BRIDGE_SEED is needed to open the database")
+	}
+	key, err := identity.DeriveSeedKey(cfg.Seed, "poweur/email/ledger/v1")
+	if err != nil {
+		return nil, err
+	}
+	return OpenStore(filepath.Join(cfg.DataDir, "email.db"), key)
+}
+
 // Options let tests swap the transport and pick listeners.
 type Options struct {
 	Logger    *slog.Logger
@@ -88,12 +101,24 @@ func New(cfg Config, opts Options) (*Server, error) {
 	relay := NewRelay(cfg.RelayURL, cfg.BridgeID, signing, encPub, encPriv, cfg.Resolve)
 	dir := NewDirectory(cfg)
 	s := &Server{cfg: cfg, log: log, Store: store, Relay: relay, Dir: dir, Blobs: blobs, Metrics: metrics, started: time.Now()}
+	var signer *DKIMSigner
+	if cfg.DKIMKeyFile != "" {
+		if signer, err = LoadDKIMSigner(cfg.DKIMSelector, cfg.DKIMKeyFile, cfg.Domains); err != nil {
+			store.Close()
+			return nil, err
+		}
+	}
 	s.Outbound = &Outbound{
-		cfg: cfg, relay: relay, store: store, dir: dir, blobs: blobs, transport: transport, encPriv: encPriv,
+		cfg: cfg, relay: relay, store: store, dir: dir, blobs: blobs, transport: transport, dkim: signer, encPriv: encPriv,
 		log: log, metrics: metrics, now: time.Now, wake: make(chan struct{}, 1),
 	}
 	s.Inbound = &Inbound{cfg: cfg, dir: dir, relay: relay, store: store, blobs: blobs, log: log, metrics: metrics, onBounce: s.Outbound.Bounced}
-	if s.lmtp, err = s.Inbound.NewLMTPServer(); err != nil {
+	if cfg.Inbound == "smtp" {
+		s.lmtp, err = s.Inbound.NewSMTPServer()
+	} else {
+		s.lmtp, err = s.Inbound.NewLMTPServer()
+	}
+	if err != nil {
 		store.Close()
 		return nil, err
 	}
@@ -105,8 +130,10 @@ func New(cfg Config, opts Options) (*Server, error) {
 // Handler is the bridge's HTTP surface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /stalwart/hook", s.Inbound.HandleHook)
-	mux.HandleFunc("POST /hooks/rcpt", s.Inbound.HandleHook)
+	if s.cfg.Inbound == "lmtp" {
+		mux.HandleFunc("POST /stalwart/hook", s.Inbound.HandleHook)
+		mux.HandleFunc("POST /hooks/rcpt", s.Inbound.HandleHook)
+	}
 	mux.HandleFunc("GET /blobs/{id}", s.Blobs.ServeBlob)
 	mux.HandleFunc("PUT /v1/uploads/{id}", s.Blobs.ServeUpload(s.Dir))
 	mux.HandleFunc("OPTIONS /v1/uploads/{id}", func(w http.ResponseWriter, _ *http.Request) {
@@ -138,9 +165,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // clients find its upload endpoint (`email_api`). Best effort: the bridge
 // works without it, uploads do not.
 func (s *Server) Publish(ctx context.Context) error {
+	send := "on"
+	if s.cfg.Transport == "none" {
+		send = "off"
+	}
 	caps := map[string]any{
-		"version":  1,
-		"features": map[string]string{"email_bridge": "v1"},
+		"version": 1,
+		// email_send tells clients whether to offer composing at all.
+		"features": map[string]string{"email_bridge": "v1", "email_send": send},
 	}
 	if s.cfg.PublicURL != "" {
 		caps["endpoints"] = map[string]string{"email_api": s.cfg.PublicURL}
@@ -159,13 +191,18 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 	if s.listenL == nil {
-		if s.listenL, err = net.Listen("tcp", s.cfg.LMTPAddr); err != nil {
+		addr := s.cfg.LMTPAddr
+		if s.cfg.Inbound == "smtp" {
+			addr = s.cfg.SMTPListen
+		}
+		if s.listenL, err = net.Listen("tcp", addr); err != nil {
 			s.listenH.Close()
 			return err
 		}
 	}
 	s.log.Info("email bridge starting", "version", Version, "bridge", s.cfg.BridgeID,
-		"http", s.listenH.Addr().String(), "lmtp", s.listenL.Addr().String(), "domains", domainsString(s.cfg.Domains))
+		"inbound", s.cfg.Inbound, "listen", s.listenL.Addr().String(), "http", s.listenH.Addr().String(),
+		"outbound", s.cfg.Transport, "domains", domainsString(s.cfg.Domains))
 	if err := s.Publish(ctx); err != nil {
 		s.log.Warn("could not publish the bridge's capabilities", "err", err)
 	}

@@ -39,6 +39,18 @@ type Config struct {
 	// → `support.poweur.net`); the target must still be opted in.
 	Aliases map[string]string
 
+	// Inbound is how mail arrives: "smtp" (the bridge is the MX — only an MX
+	// record needed) or "lmtp" (behind a mail server that asks the RCPT
+	// hook and relays over LMTP).
+	Inbound string
+	// Direct mode (Inbound=smtp): the public listener, the name it greets
+	// with (the MX host, matching its PTR) and an optional STARTTLS
+	// certificate. Without one, senders deliver in the clear.
+	SMTPListen  string
+	MXHostname  string
+	SMTPTLSCert string
+	SMTPTLSKey  string
+
 	// HookSecret authenticates the mail server's RCPT hook calls.
 	HookSecret string
 
@@ -58,25 +70,47 @@ type Config struct {
 	AuthServID string
 
 	// Outbound submission.
-	Transport              string // smtp | log
-	SMTPHost               string
-	SMTPPort               int
-	SMTPUsername           string
-	SMTPPassword           string
-	SMTPTLS                string // starttls | tls | none
+	Transport    string // smtp | log | none (inbound only)
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPTLS      string // starttls | tls | none
+	// SMTPTLSServerName is the certificate name to expect when SMTPHost is an
+	// internal name (a container on the same Docker network); default SMTPHost.
+	SMTPTLSServerName      string
 	SMTPInsecureSkipVerify bool
 	LogDir                 string // for Transport=log
+	// DKIMSelector and DKIMKeyFile make the bridge sign outbound mail itself,
+	// for relays that do not sign as the sender's domain.
+	DKIMSelector string
+	DKIMKeyFile  string
 
 	// MessageIDDomain is the right-hand side of Message-IDs the bridge mints.
 	MessageIDDomain string
 
 	DataDir string
 
-	BlobTTL             time.Duration
-	OptInCacheTTL       time.Duration
-	OutDailyLimit       int
-	OutNewRecipients    int
-	OutMinIdentityAge   time.Duration
+	BlobTTL       time.Duration
+	OptInCacheTTL time.Duration
+	// Sending is paced, not just capped: inbound mail (sign-in links,
+	// notifications) is what the address is for, and sending from a free
+	// address is what gets a domain blocklisted. Per identity, in a rolling
+	// 24 hours: at most OutDailyLimit messages; after the first, each waits
+	// OutSpacing × 2^(n-1) since the previous one (5m, 10m, 20m, …) up to
+	// OutSpacingMax. A send that comes too early waits in the queue rather
+	// than failing. Operators raise one identity's limits with
+	// `poweur-email limits set` (Store.Limits).
+	OutDailyLimit     int
+	OutSpacing        time.Duration
+	OutSpacingMax     time.Duration
+	OutNewRecipients  int
+	OutMinIdentityAge time.Duration
+	// OutGlobalDailyLimit caps the whole bridge per rolling 24 hours (below
+	// the outbound provider's cap, e.g. Brevo's 300); 0 = no cap.
+	OutGlobalDailyLimit int
+	// OutMaxPending bounds the sends one identity may have waiting.
+	OutMaxPending       int
 	InDailyPerRecipient int
 
 	Footer     string // off | first | always
@@ -101,6 +135,12 @@ const (
 	DefaultBlobTTL         = 30 * 24 * time.Hour
 	DefaultOptInCacheTTL   = 2 * time.Minute
 	DefaultFooterText      = "Sent with Poweur ID {id} · Get your own free ID: {signup_url}"
+
+	DefaultOutDailyLimit    = 10
+	DefaultOutNewRecipients = 10
+	DefaultOutSpacing       = 5 * time.Minute
+	DefaultOutSpacingMax    = 2 * time.Hour
+	DefaultOutMaxPending    = 20
 )
 
 // ParseDomains reads `poweur.net,poweur.org=poweur.net`.
@@ -217,6 +257,13 @@ func FromEnv() (Config, error) {
 		BridgeID:               strings.ToLower(env("EMAIL_BRIDGE_ID", "")),
 		RelayURL:               strings.TrimRight(env("EMAIL_RELAY_URL", ""), "/"),
 		LMTPAddr:               env("EMAIL_LMTP_ADDR", DefaultLMTPAddr),
+		Inbound:                env("EMAIL_INBOUND", "smtp"),
+		SMTPListen:             env("EMAIL_SMTP_LISTEN", ":25"),
+		MXHostname:             strings.ToLower(env("EMAIL_MX_HOSTNAME", "")),
+		SMTPTLSCert:            env("EMAIL_TLS_CERT_FILE", ""),
+		SMTPTLSKey:             env("EMAIL_TLS_KEY_FILE", ""),
+		DKIMSelector:           env("EMAIL_DKIM_SELECTOR", ""),
+		DKIMKeyFile:            env("EMAIL_DKIM_KEY_FILE", ""),
 		LMTPUsername:           env("EMAIL_LMTP_USERNAME", ""),
 		LMTPTLSCert:            env("EMAIL_LMTP_TLS_CERT_FILE", ""),
 		LMTPTLSKey:             env("EMAIL_LMTP_TLS_KEY_FILE", ""),
@@ -227,6 +274,7 @@ func FromEnv() (Config, error) {
 		SMTPHost:               env("EMAIL_SMTP_HOST", ""),
 		SMTPUsername:           env("EMAIL_SMTP_USERNAME", ""),
 		SMTPTLS:                env("EMAIL_SMTP_TLS", "starttls"),
+		SMTPTLSServerName:      env("EMAIL_SMTP_TLS_SERVER_NAME", ""),
 		SMTPInsecureSkipVerify: env("EMAIL_SMTP_INSECURE_SKIP_VERIFY", "") == "1",
 		LogDir:                 env("EMAIL_LOG_DIR", ""),
 		MessageIDDomain:        strings.ToLower(env("EMAIL_MESSAGE_ID_DOMAIN", "")),
@@ -270,10 +318,22 @@ func FromEnv() (Config, error) {
 		return c, err
 	}
 	c.MaxMessageBytes = int64(maxBytes)
-	if c.OutDailyLimit, err = intEnv("EMAIL_OUT_DAILY_LIMIT", 100); err != nil {
+	if c.OutDailyLimit, err = intEnv("EMAIL_OUT_DAILY_LIMIT", DefaultOutDailyLimit); err != nil {
 		return c, err
 	}
-	if c.OutNewRecipients, err = intEnv("EMAIL_OUT_NEW_RECIPIENTS_DAILY", 20); err != nil {
+	if c.OutNewRecipients, err = intEnv("EMAIL_OUT_NEW_RECIPIENTS_DAILY", DefaultOutNewRecipients); err != nil {
+		return c, err
+	}
+	if c.OutGlobalDailyLimit, err = intEnv("EMAIL_OUT_GLOBAL_DAILY_LIMIT", 0); err != nil {
+		return c, err
+	}
+	if c.OutMaxPending, err = intEnv("EMAIL_OUT_MAX_PENDING", DefaultOutMaxPending); err != nil {
+		return c, err
+	}
+	if c.OutSpacing, err = durEnv("EMAIL_OUT_SPACING", DefaultOutSpacing); err != nil {
+		return c, err
+	}
+	if c.OutSpacingMax, err = durEnv("EMAIL_OUT_SPACING_MAX", DefaultOutSpacingMax); err != nil {
 		return c, err
 	}
 	if c.InDailyPerRecipient, err = intEnv("EMAIL_IN_DAILY_PER_RECIPIENT", 500); err != nil {
@@ -325,14 +385,32 @@ func (c *Config) Validate() error {
 	if len(c.Domains) == 0 {
 		add("EMAIL_DOMAINS is required, e.g. poweur.net or poweur.net,poweur.org=poweur.net")
 	}
-	if len(c.HookSecret) < 16 {
-		add("EMAIL_HOOK_SECRET must be at least 16 characters")
+	switch c.Inbound {
+	case "smtp":
+		if c.MXHostname == "" {
+			add("EMAIL_MX_HOSTNAME is required for EMAIL_INBOUND=smtp: the name your MX record points at")
+		}
+		if (c.SMTPTLSCert == "") != (c.SMTPTLSKey == "") {
+			add("EMAIL_TLS_CERT_FILE and EMAIL_TLS_KEY_FILE go together")
+		}
+		if c.SMTPListen == "" {
+			c.SMTPListen = ":25"
+		}
+	case "lmtp":
+		if len(c.HookSecret) < 16 {
+			add("EMAIL_HOOK_SECRET must be at least 16 characters")
+		}
+		if c.LMTPUsername == "" || len(c.LMTPPassword) < 16 {
+			add("EMAIL_LMTP_USERNAME and an EMAIL_LMTP_PASSWORD of at least 16 characters are required")
+		}
+		if !c.LMTPInsecure && (c.LMTPTLSCert == "" || c.LMTPTLSKey == "") {
+			add("EMAIL_LMTP_TLS_CERT_FILE and _KEY_FILE are required unless EMAIL_LMTP_INSECURE=1 (same-host network only)")
+		}
+	default:
+		add("EMAIL_INBOUND must be smtp (the bridge is the MX) or lmtp (behind a mail server)")
 	}
-	if c.LMTPUsername == "" || len(c.LMTPPassword) < 16 {
-		add("EMAIL_LMTP_USERNAME and an EMAIL_LMTP_PASSWORD of at least 16 characters are required")
-	}
-	if !c.LMTPInsecure && (c.LMTPTLSCert == "" || c.LMTPTLSKey == "") {
-		add("EMAIL_LMTP_TLS_CERT_FILE and _KEY_FILE are required unless EMAIL_LMTP_INSECURE=1 (same-host network only)")
+	if (c.DKIMSelector == "") != (c.DKIMKeyFile == "") {
+		add("EMAIL_DKIM_SELECTOR and EMAIL_DKIM_KEY_FILE go together")
 	}
 	switch c.Transport {
 	case "smtp":
@@ -348,8 +426,10 @@ func (c *Config) Validate() error {
 		if c.LogDir == "" {
 			add("EMAIL_LOG_DIR is required for EMAIL_TRANSPORT=log")
 		}
+	case "none":
+		// Inbound only: email.send is answered with a refusal.
 	default:
-		add("EMAIL_TRANSPORT must be smtp or log")
+		add("EMAIL_TRANSPORT must be smtp, log or none (receive only)")
 	}
 	switch c.Footer {
 	case "off", "first", "always":

@@ -553,7 +553,10 @@ type EmailStatus struct {
 	MessageID string `json:"message_id,omitempty"`
 	Recipient string `json:"recipient,omitempty"`
 	Reason    string `json:"reason,omitempty"`
-	At        string `json:"at"`
+	// RetryAt, on a deferred send, is when the bridge will try it next
+	// (sending is paced; see the bridge's limits).
+	RetryAt string `json:"retry_at,omitempty"`
+	At      string `json:"at"`
 }
 
 // Validate checks a status payload.

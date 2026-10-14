@@ -29,6 +29,7 @@ type Outbound struct {
 	dir       *Directory
 	blobs     *Blobs
 	transport Transport
+	dkim      *DKIMSigner
 	encPriv   []byte
 	log       *slog.Logger
 	metrics   *Metrics
@@ -117,7 +118,12 @@ func (o *Outbound) ProcessDue(ctx context.Context) {
 			_ = o.store.Dequeue(ctx, it.ID)
 			continue
 		}
-		retry, err := o.handle(ctx, env)
+		retry, notBefore, err := o.handle(ctx, env)
+		if !notBefore.IsZero() {
+			// Waiting for its turn (pacing), not failing: no attempt spent.
+			_ = o.store.RescheduleAt(ctx, it.ID, notBefore)
+			continue
+		}
 		switch {
 		case retry && it.Attempts < len(retryDelays):
 			_ = o.store.Retry(ctx, it.ID, retryDelays[it.Attempts])
@@ -132,8 +138,14 @@ func (o *Outbound) ProcessDue(ctx context.Context) {
 	}
 }
 
-// handle processes one envelope. retry=true asks to be called again later.
-func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, err error) {
+// handle processes one envelope. retry=true asks to be called again later
+// (a failure); a non-zero notBefore means "not yet" (pacing).
+func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, notBefore time.Time, err error) {
+	retry, err = o.handleNow(ctx, env, &notBefore)
+	return retry, notBefore, err
+}
+
+func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.Time) (retry bool, err error) {
 	if identity.NormalizeMessageType(env.Type) != identity.MsgTypeEmailSend {
 		return false, nil // the bridge only takes sends; anything else is dropped
 	}
@@ -144,6 +156,12 @@ func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, err er
 	}
 	var send identity.EmailSend
 	if err := json.Unmarshal(plain, &send); err != nil {
+		return false, nil
+	}
+	if o.transport == nil {
+		if send.SendID != "" && identity.ValidateThreadID(send.SendID) == nil {
+			o.status(ctx, sender, send.SendID, identity.EmailStateRefused, "", "", "this email bridge only receives email")
+		}
 		return false, nil
 	}
 	if err := send.Validate(); err != nil {
@@ -174,6 +192,20 @@ func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, err er
 	}
 	if reason := o.policy(ctx, sender, send); reason != "" {
 		o.refuse(ctx, sender, send.SendID, reason)
+		return false, nil
+	}
+
+	// Pacing: a send that comes too early waits for its turn.
+	if at, why := o.pace(ctx, sender); !at.IsZero() {
+		if record.State != identity.EmailStateDeferred {
+			if pending, _ := o.store.PendingSends(ctx, sender); pending >= o.cfg.OutMaxPending && o.cfg.OutMaxPending > 0 {
+				o.refuse(ctx, sender, send.SendID, fmt.Sprintf("%d emails are already waiting to be sent; try again later", pending))
+				return false, nil
+			}
+			_ = o.store.UpdateSend(ctx, sender, send.SendID, identity.EmailStateDeferred, "")
+			o.statusRetry(ctx, sender, send.SendID, why, at)
+		}
+		*notBefore = at
 		return false, nil
 	}
 
@@ -213,6 +245,9 @@ func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, err er
 		}
 	}
 	msg, err := BuildMIME(out)
+	if err == nil {
+		msg, err = o.dkim.Sign(msg, domainOf(sendFrom.OptIn.Address))
+	}
 	if err != nil {
 		o.refuse(ctx, sender, send.SendID, "could not build the message")
 		return false, nil
@@ -236,7 +271,7 @@ func (o *Outbound) handle(ctx context.Context, env Envelope) (retry bool, err er
 	}
 
 	_ = o.store.UpdateSend(ctx, sender, send.SendID, identity.EmailStateSent, messageID)
-	_, _ = o.store.Count(ctx, "out:"+sender, 1)
+	_ = o.store.RecordSent(ctx, sender)
 	newOnes := 0
 	for _, r := range recipients {
 		if known, _ := o.store.Known(ctx, sender, r); !known {
@@ -287,11 +322,7 @@ func (o *Outbound) policy(ctx context.Context, sender string, send identity.Emai
 			return fmt.Sprintf("new addresses can send email after %s; try again in %s", o.cfg.OutMinIdentityAge, wait.Round(time.Minute))
 		}
 	}
-	if o.cfg.OutDailyLimit > 0 {
-		if n, _ := o.store.Peek(ctx, "out:"+sender); n >= o.cfg.OutDailyLimit {
-			return fmt.Sprintf("daily sending limit reached (%d messages)", o.cfg.OutDailyLimit)
-		}
-	}
+	limits := o.limitsFor(ctx, sender)
 	recipients := allRecipients(send)
 	newOnes := 0
 	for _, r := range recipients {
@@ -302,12 +333,71 @@ func (o *Outbound) policy(ctx context.Context, sender string, send identity.Emai
 			newOnes++
 		}
 	}
-	if o.cfg.OutNewRecipients > 0 && newOnes > 0 {
-		if n, _ := o.store.Peek(ctx, "new:"+sender); n+newOnes > o.cfg.OutNewRecipients {
-			return fmt.Sprintf("daily limit for writing to new addresses reached (%d)", o.cfg.OutNewRecipients)
+	if limits.NewDaily > 0 && newOnes > 0 {
+		if n, _ := o.store.Peek(ctx, "new:"+sender); n+newOnes > limits.NewDaily {
+			return fmt.Sprintf("daily limit for writing to new addresses reached (%d); ask the operator for more", limits.NewDaily)
 		}
 	}
 	return ""
+}
+
+// limitsFor is the configured defaults with an identity's own overrides.
+func (o *Outbound) limitsFor(ctx context.Context, sender string) Limits {
+	l := Limits{Identity: sender, Daily: o.cfg.OutDailyLimit, Spacing: o.cfg.OutSpacing, NewDaily: o.cfg.OutNewRecipients}
+	if own, ok, _ := o.store.LimitsFor(ctx, sender); ok {
+		if own.Daily > 0 {
+			l.Daily = own.Daily
+		}
+		if own.Spacing > 0 {
+			l.Spacing = own.Spacing
+		}
+		if own.NewDaily > 0 {
+			l.NewDaily = own.NewDaily
+		}
+		l.Note = own.Note
+	}
+	return l
+}
+
+// pace says when sender's next email may go (zero: now) and why not now.
+// In a rolling 24 hours: at most Daily messages; each after the first
+// waits Spacing × 2^(n-1) since the previous one, up to OutSpacingMax; and
+// the whole bridge stays under OutGlobalDailyLimit.
+func (o *Outbound) pace(ctx context.Context, sender string) (time.Time, string) {
+	now := o.now()
+	window := now.Add(-24 * time.Hour)
+	l := o.limitsFor(ctx, sender)
+	var at time.Time
+	why := ""
+	later := func(t time.Time, reason string) {
+		if t.After(now) && t.After(at) {
+			at, why = t, reason
+		}
+	}
+	sent, _ := o.store.SentSince(ctx, sender, window)
+	if l.Daily > 0 && len(sent) >= l.Daily {
+		perDay := fmt.Sprintf("%d emails a day", l.Daily)
+		if l.Daily == 1 {
+			perDay = "one email a day"
+		}
+		later(sent[len(sent)-l.Daily].Add(24*time.Hour), "you can send "+perDay+"; ask your operator for more")
+	}
+	if n := len(sent); n > 0 && l.Spacing > 0 {
+		gap := l.Spacing
+		for i := 1; i < n && gap < o.cfg.OutSpacingMax; i++ {
+			gap *= 2
+		}
+		if o.cfg.OutSpacingMax > 0 && gap > o.cfg.OutSpacingMax {
+			gap = o.cfg.OutSpacingMax
+		}
+		later(sent[n-1].Add(gap), "emails are spaced out to keep this address off spam lists")
+	}
+	if o.cfg.OutGlobalDailyLimit > 0 {
+		if n, oldest, err := o.store.AllSentSince(ctx, window); err == nil && n >= o.cfg.OutGlobalDailyLimit {
+			later(oldest.Add(24*time.Hour), "the bridge has reached its daily sending capacity")
+		}
+	}
+	return at, why
 }
 
 func (o *Outbound) resolveAttachments(ctx context.Context, sender string, list []identity.EmailOutAttachment) ([]OutAttachment, string) {
@@ -383,6 +473,19 @@ func (o *Outbound) giveUp(ctx context.Context, env Envelope, err error) {
 		o.log.Warn("outbound: giving up", "err", err)
 	}
 	o.refuse(ctx, strings.ToLower(env.Sender), send.SendID, reason)
+}
+
+// statusRetry tells the sender their email waits, and until when.
+func (o *Outbound) statusRetry(ctx context.Context, sender, sendID, why string, at time.Time) {
+	st := identity.EmailStatus{
+		Version: identity.EmailPayloadVersion, SendID: sendID, State: identity.EmailStateDeferred,
+		Reason:  fmt.Sprintf("%s; it goes out at %s UTC", why, at.UTC().Format("15:04 on 2 Jan")),
+		RetryAt: at.UTC().Format(time.RFC3339), At: o.now().UTC().Format(time.RFC3339),
+	}
+	raw, _ := json.Marshal(st)
+	if _, err := o.relay.Send(ctx, sender, identity.MsgTypeEmailStatus, raw, ""); err != nil {
+		o.log.Info("outbound: status not delivered", "state", st.State, "err", err)
+	}
 }
 
 // status tells the sender what happened, best effort.

@@ -4,9 +4,9 @@ name: Deploy email bridge
 # Deploy workflow is independent; this one never touches its checkout.
 #
 # Pushes deploy only once the repository variable EMAIL_BRIDGE_DEPLOY is
-# "true" — set it after the VM has /opt/apps/poweur-email/.env.prod, the LMTP
-# certificate and the email.poweur.org DNS record (deploy/README.md). Until
-# then run it by hand.
+# "true" — set it after the VM has /opt/apps/poweur-email/.env.prod and
+# Stalwart has the hook, the LMTP route and the bridge's submission account
+# (deploy/README.md). Until then run it by hand.
 on:
   workflow_dispatch:
     inputs:

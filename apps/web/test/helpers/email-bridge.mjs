@@ -43,6 +43,7 @@ export async function startEmailBridge(relay) {
       EMAIL_ADDR: `127.0.0.1:${httpPort}`,
       EMAIL_LMTP_ADDR: `127.0.0.1:${lmtpPort}`,
       EMAIL_DOMAINS: "poweur.net",
+      EMAIL_INBOUND: "lmtp",
       EMAIL_HOOK_SECRET: "e2e-hook-secret-0123456789",
       EMAIL_LMTP_USERNAME: "stalwart",
       EMAIL_LMTP_PASSWORD: LMTP_PASSWORD,

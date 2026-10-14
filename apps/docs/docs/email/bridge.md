@@ -17,7 +17,15 @@ The email bridge gives a hosted Poweur ID an ordinary email address: `john.poweu
 writes email from the Poweur app that arrives anywhere as normal, authenticated mail from
 `john@poweur.net`. It is opt-in, one switch in Settings (or `poweur email enable`).
 
-## How it fits together
+## Two ways to run it
+
+**Inbound** — the bridge can be the MX itself (only an MX record needed; it checks SPF, DKIM
+and DMARC on its own), or sit behind a mail server such as Stalwart, which asks it at
+`RCPT TO` and relays accepted mail over LMTP. **Outbound** is separate and optional: off
+(receive only — sign-in links and notifications are what most people need), or submission to
+any SMTP server or provider relay. See the operator guide for the settings.
+
+## How it fits together (poweur.net)
 
 ```
 the email network ──SMTP──► mail server (Stalwart) ──LMTP──► bridge ──encrypted email.message──► john's relay ──► app
@@ -89,10 +97,16 @@ HTML email is hostile by default. It is cleaned twice and then isolated:
 
 ## Sending
 
+Sending is optional and **paced**: by default ten emails a day, each after the first waiting a
+little longer (5 minutes, then 10, 20, 40… up to two hours). An email sent too early is not lost:
+it waits and goes out on time, and the app says when. Operators raise the limits for people who
+need more, as they would raise a storage quota.
+
 The app (or `poweur email send`) sends the bridge an encrypted `email.send`: recipients,
 subject, text, optional HTML, attachments, and the message ids of what you reply to. The bridge
 checks your opt-in and your limits, builds the email, and submits it to the mail server; an
-`email.status` comes back — `sent`, `deferred` while the mail server is unreachable, `bounced`
+`email.status` comes back — `sent`, `deferred` while it waits for its turn or the mail server
+is unreachable (with the time it will go), `bounced`
 when a recipient's server returns a delivery report, or `refused` with the reason (daily limit,
 too many new correspondents, an address that bounced before).
 

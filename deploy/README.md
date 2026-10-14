@@ -26,31 +26,37 @@ under `apps/docs/docs/relay/`. The runbook for the hosted service at poweur.net 
 
 The bridge ([`apps/email`](../apps/email/README.md)) runs beside the relay as its own Compose
 project, `poweur-email` in `/opt/apps/poweur-email`, deployed by
-[`deploy-email.yml`](../.github/workflows/deploy-email.yml). The mail server in front of it is
-Stalwart at `mail.poweur.net`, configured in the famooss repo. Launch order:
+[`deploy-email.yml`](../.github/workflows/deploy-email.yml). For poweur.net it sits **behind
+Stalwart** (`famooss-stalwart`, `mail.poweur.net`, configured in the famooss repo) on the same VM:
+the RCPT hook, the LMTP relay and the bridge's submission all stay on `infra_net`, so there is
+no certificate to manage and nothing new is published on the host. Launch order:
 
 1. Reserved labels are live (relay ≥ 0.2.18): `mta-sts`, `autoconfig`, `autodiscover` and the
    RFC 2142 role names cannot be claimed.
-2. Create the bridge identity `email.poweur.net` from a seed you keep, with the operator token
-   (see the bridge README).
-3. On the VM, `/opt/apps/poweur-email/.env.prod` (0600) holds `EMAIL_BRIDGE_SEED`,
-   `EMAIL_HOOK_SECRET`, `EMAIL_LMTP_PASSWORD`, `EMAIL_LMTP_ALLOW` (Stalwart's IP) and
-   `EMAIL_SMTP_PASSWORD`; `./certs/lmtp.crt|key` is a certificate for `email.poweur.org`
-   (the LMTP STARTTLS name). Open TCP 2525 in the firewall for Stalwart's IP only.
-4. DNS: `email.poweur.org` → the VM through Cloudflare (Caddy serves it; `/metrics` stays
-   internal). The MX, SPF, DKIM, DMARC, MTA-STS and TLS-RPT records are the mail server's.
-5. Stalwart: the RCPT hook to `https://email.poweur.org/stalwart/hook` with
-   `Authorization: Bearer <EMAIL_HOOK_SECRET>`; relay `poweur.net` recipients to the bridge's
-   LMTP (`<vm>:2525`, STARTTLS, AUTH `stalwart`); a submission account for the bridge allowed
-   to send as `*@poweur.net`.
+2. The bridge identity `email.poweur.net` exists (created from a seed you keep, with the operator
+   token — see the bridge README).
+3. `/opt/apps/poweur-email/.env.prod` (0600) holds `EMAIL_BRIDGE_SEED`, `EMAIL_HOOK_SECRET`,
+   `EMAIL_LMTP_PASSWORD` and `EMAIL_SMTP_PASSWORD`. famooss reads the last three from there.
+4. Stalwart (famooss): the RCPT hook to `http://poweur-email:8091/stalwart/hook` with
+   `Authorization: Bearer <EMAIL_HOOK_SECRET>`; poweur.net recipients that are not local
+   mailboxes relayed over LMTP to `poweur-email:2525` (AUTH `stalwart` / `EMAIL_LMTP_PASSWORD`);
+   a submission account `poweur-bridge` (`EMAIL_SMTP_PASSWORD`) allowed to send as
+   `*@poweur.net`, with its own throttle above the bridge's `EMAIL_OUT_GLOBAL_DAILY_LIMIT` (200).
+5. `email.poweur.org` already resolves to the VM through Cloudflare's `*.poweur.org`; the Caddy
+   block in `deploy/infra/caddy/Caddyfile` serves blobs and uploads and keeps the hook and
+   `/metrics` internal (ships with the relay's Deploy workflow).
 6. Set the repository variable `EMAIL_BRIDGE_DEPLOY=true` (or run the workflow by hand) and
    check `https://email.poweur.org/health`.
 7. Add `EMAIL_BRIDGE_ID=email.poweur.net` to `apps/api/.env.prod` and redeploy the relay: users
-   now see "Get name@poweur.net". Watch `poweur_email`-prefixed metrics (`email_inbound_total`,
-   `email_outbound_total`, `email_hook_total`) in Prometheus.
+   now see "Get name@poweur.net". Watch `email_inbound_total`, `email_outbound_total` and
+   `email_hook_total` in Prometheus.
+
+Users who ask to send more get it with
+`docker exec poweur-email poweur-email limits set <id> --daily=N`, the way storage is raised with
+`relay quotas set`.
 
 Back up the `poweur_email_data` volume's `email.db` (send states, suppression list, footer
-ledger); blobs in it expire on their own.
+ledger, limit overrides); blobs in it expire on their own.
 
 ## Daily growth digest
 

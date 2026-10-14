@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/emersion/go-sasl"
@@ -36,6 +37,8 @@ type Inbound struct {
 	blobs   *Blobs
 	log     *slog.Logger
 	metrics *Metrics
+	// authenticator checks SPF/DKIM/DMARC in the direct inbound mode.
+	authenticator Authenticator
 	// onBounce is told about delivery reports for the bridge's own sends.
 	onBounce func(ctx context.Context, send SendRecord, b identity.EmailBounce)
 }
@@ -213,28 +216,62 @@ func (in *Inbound) fit(ctx context.Context, msg identity.EmailMessage, atts []Pa
 	return out, nil
 }
 
-// --- LMTP listener -------------------------------------------------------
+// --- Listeners -----------------------------------------------------------
+//
+// Two inbound modes (EMAIL_INBOUND):
+//
+//   - lmtp: behind a mail server (Stalwart). The mail server owns port 25,
+//     authentication checks, spam scoring and the queue; it asks the RCPT
+//     hook and delivers here over LMTP with AUTH.
+//   - smtp: the bridge is the MX itself — the setup that needs nothing but
+//     an MX record. It listens on :25, takes no AUTH, checks SPF, DKIM and
+//     DMARC itself, and limits connections per IP.
 
-type lmtpBackend struct{ in *Inbound }
+type listenerBackend struct {
+	in     *Inbound
+	direct bool
+	auth   Authenticator
 
-// NewLMTPServer builds the listener the mail server delivers to. It speaks
-// LMTP (per-recipient replies) and requires AUTH PLAIN with the configured
-// credential — over TLS unless EMAIL_LMTP_INSECURE says the network is
-// private — from an allowed address.
+	mu     sync.Mutex
+	active map[string]int
+	recent map[string][]time.Time
+}
+
+// Per-IP limits for the direct mode (a mail server in front has its own).
+const (
+	maxSessionsPerIP  = 5
+	maxSessionsPerMin = 30
+)
+
+// NewLMTPServer builds the listener a mail server delivers to: LMTP
+// (per-recipient replies), AUTH PLAIN with the configured credential — over
+// TLS unless EMAIL_LMTP_INSECURE says the network is private — from an
+// allowed address.
 func (in *Inbound) NewLMTPServer() (*smtp.Server, error) {
-	s := smtp.NewServer(&lmtpBackend{in: in})
+	s := smtp.NewServer(&listenerBackend{in: in})
 	s.LMTP = true
 	s.Domain = in.cfg.LMTPHostname
+	s.AllowInsecureAuth = in.cfg.LMTPInsecure
+	return in.finishServer(s, in.cfg.LMTPTLSCert, in.cfg.LMTPTLSKey)
+}
+
+// NewSMTPServer builds the public MX listener for the direct mode.
+func (in *Inbound) NewSMTPServer() (*smtp.Server, error) {
+	s := smtp.NewServer(&listenerBackend{in: in, direct: true, auth: in.authenticator, active: map[string]int{}, recent: map[string][]time.Time{}})
+	s.Domain = in.cfg.MXHostname
+	return in.finishServer(s, in.cfg.SMTPTLSCert, in.cfg.SMTPTLSKey)
+}
+
+func (in *Inbound) finishServer(s *smtp.Server, certFile, keyFile string) (*smtp.Server, error) {
 	s.MaxMessageBytes = in.cfg.MaxMessageBytes
-	s.MaxRecipients = 100
+	s.MaxRecipients = 50
 	s.ReadTimeout = 2 * time.Minute
 	s.WriteTimeout = 2 * time.Minute
-	s.AllowInsecureAuth = in.cfg.LMTPInsecure
 	s.ErrorLog = slogLogger{in.log}
-	if in.cfg.LMTPTLSCert != "" {
-		cert, err := tls.LoadX509KeyPair(in.cfg.LMTPTLSCert, in.cfg.LMTPTLSKey)
+	if certFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			return nil, fmt.Errorf("LMTP TLS: %w", err)
+			return nil, fmt.Errorf("TLS certificate: %w", err)
 		}
 		s.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	}
@@ -246,10 +283,22 @@ type slogLogger struct{ l *slog.Logger }
 func (s slogLogger) Printf(format string, v ...interface{}) { s.l.Debug(fmt.Sprintf(format, v...)) }
 func (s slogLogger) Println(v ...interface{})               { s.l.Debug(fmt.Sprint(v...)) }
 
-func (b *lmtpBackend) NewSession(c *smtp.Conn) (smtp.Session, error) {
+func remoteIP(c *smtp.Conn) net.IP {
+	host, _, _ := net.SplitHostPort(c.Conn().RemoteAddr().String())
+	return net.ParseIP(host)
+}
+
+func (b *listenerBackend) NewSession(c *smtp.Conn) (smtp.Session, error) {
+	ip := remoteIP(c)
+	if b.direct {
+		release, err := b.admit(ip)
+		if err != nil {
+			b.in.metrics.Inc("email_smtp_sessions_total", "result", "limited")
+			return nil, err
+		}
+		return &directSession{inner: &lmtpSession{in: b.in, authed: true}, backend: b, conn: c, ip: ip, release: release}, nil
+	}
 	if len(b.in.cfg.LMTPAllow) > 0 {
-		host, _, _ := net.SplitHostPort(c.Conn().RemoteAddr().String())
-		ip := net.ParseIP(host)
 		allowed := false
 		for _, n := range b.in.cfg.LMTPAllow {
 			if ip != nil && n.Contains(ip) {
@@ -263,6 +312,43 @@ func (b *lmtpBackend) NewSession(c *smtp.Conn) (smtp.Session, error) {
 		}
 	}
 	return &lmtpSession{in: b.in}, nil
+}
+
+// admit applies the per-IP limits and returns the release for the session.
+func (b *listenerBackend) admit(ip net.IP) (func(), error) {
+	key := "?"
+	if ip != nil {
+		key = ip.String()
+		if ip.To4() == nil && len(ip) == net.IPv6len {
+			key = ip.Mask(net.CIDRMask(64, 128)).String() // one /64 is one sender
+		}
+	}
+	now := time.Now()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	kept := b.recent[key][:0]
+	for _, t := range b.recent[key] {
+		if now.Sub(t) < time.Minute {
+			kept = append(kept, t)
+		}
+	}
+	if b.active[key] >= maxSessionsPerIP || len(kept) >= maxSessionsPerMin {
+		b.recent[key] = kept
+		return nil, &smtp.SMTPError{Code: 421, EnhancedCode: smtp.EnhancedCode{4, 7, 0}, Message: "too many connections, try again later"}
+	}
+	b.recent[key] = append(kept, now)
+	b.active[key]++
+	if len(b.recent) > 50000 {
+		b.recent = map[string][]time.Time{}
+	}
+	return func() {
+		b.mu.Lock()
+		b.active[key]--
+		if b.active[key] <= 0 {
+			delete(b.active, key)
+		}
+		b.mu.Unlock()
+	}, nil
 }
 
 type lmtpSession struct {
@@ -327,14 +413,10 @@ func (s *lmtpSession) read(r io.Reader) ([]byte, *Parsed, error) {
 	return raw, &parsed, nil
 }
 
-// Data is the plain-SMTP form: one answer for all recipients, so any
+// deliverAll is the plain-SMTP form: one answer for all recipients, so any
 // temporary failure asks for a retry of all (already-delivered ones are
 // recognised and skipped).
-func (s *lmtpSession) Data(r io.Reader) error {
-	raw, parsed, err := s.read(r)
-	if err != nil {
-		return err
-	}
+func (s *lmtpSession) deliverAll(raw []byte, parsed *Parsed) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	var firstErr error
@@ -344,6 +426,14 @@ func (s *lmtpSession) Data(r io.Reader) error {
 		}
 	}
 	return firstErr
+}
+
+func (s *lmtpSession) Data(r io.Reader) error {
+	raw, parsed, err := s.read(r)
+	if err != nil {
+		return err
+	}
+	return s.deliverAll(raw, parsed)
 }
 
 // LMTPData answers per recipient.
@@ -365,3 +455,53 @@ func (s *lmtpSession) Reset() {
 }
 
 func (s *lmtpSession) Logout() error { return nil }
+
+// directSession is the public MX session: no AUTH (it does not implement
+// smtp.AuthSession, so none is offered), and the bridge's own checks.
+type directSession struct {
+	// inner is held, not embedded: embedding would promote its AUTH
+	// methods and the public MX would offer AUTH.
+	inner   *lmtpSession
+	backend *listenerBackend
+	conn    *smtp.Conn
+	ip      net.IP
+	release func()
+}
+
+func (s *directSession) Mail(from string, opts *smtp.MailOptions) error {
+	return s.inner.Mail(from, opts)
+}
+
+func (s *directSession) Rcpt(to string, opts *smtp.RcptOptions) error {
+	return s.inner.Rcpt(to, opts)
+}
+
+func (s *directSession) Reset() { s.inner.Reset() }
+
+func (s *directSession) Data(r io.Reader) error {
+	raw, parsed, err := s.inner.read(r)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fromDomain := domainOf(parsed.Email.From.Address)
+	auth := s.backend.auth.Check(ctx, s.ip, s.conn.Hostname(), s.inner.from, raw, fromDomain)
+	// The message's own Authentication-Results mean nothing here: ours win.
+	parsed.Email.Auth = auth
+	if s.backend.auth.DMARCReject(ctx, auth, fromDomain) {
+		s.inner.in.metrics.Inc("email_inbound_total", "result", "dmarc_reject")
+		return &smtp.SMTPError{Code: 550, EnhancedCode: smtp.EnhancedCode{5, 7, 1}, Message: "rejected by the sender domain's DMARC policy"}
+	}
+	return s.inner.deliverAll(raw, parsed)
+}
+
+func (s *directSession) Logout() error {
+	if s.release != nil {
+		s.release()
+		s.release = nil
+	}
+	return nil
+}
+
+var _ smtp.Session = (*directSession)(nil)

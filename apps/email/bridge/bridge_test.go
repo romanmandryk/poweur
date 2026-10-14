@@ -47,10 +47,23 @@ func TestParseDomainsAndAliases(t *testing.T) {
 func TestConfigValidate(t *testing.T) {
 	var c Config
 	err := c.Validate()
-	for _, want := range []string{"EMAIL_BRIDGE_ID", "EMAIL_BRIDGE_SEED", "EMAIL_RELAY_URL", "EMAIL_DOMAINS", "EMAIL_HOOK_SECRET", "EMAIL_LMTP_USERNAME", "EMAIL_LMTP_TLS_CERT_FILE", "EMAIL_TRANSPORT"} {
+	for _, want := range []string{"EMAIL_BRIDGE_ID", "EMAIL_BRIDGE_SEED", "EMAIL_RELAY_URL", "EMAIL_DOMAINS", "EMAIL_INBOUND", "EMAIL_TRANSPORT"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("Validate() missing %s: %v", want, err)
 		}
+	}
+	// Each inbound mode asks only for what it uses.
+	behind := Config{Inbound: "lmtp"}
+	err = behind.Validate()
+	for _, want := range []string{"EMAIL_HOOK_SECRET", "EMAIL_LMTP_USERNAME", "EMAIL_LMTP_TLS_CERT_FILE"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("lmtp mode missing %s: %v", want, err)
+		}
+	}
+	direct := Config{Inbound: "smtp"}
+	err = direct.Validate()
+	if err == nil || !strings.Contains(err.Error(), "EMAIL_MX_HOSTNAME") || strings.Contains(err.Error(), "EMAIL_HOOK_SECRET") {
+		t.Fatalf("smtp mode: %v", err)
 	}
 }
 
@@ -466,7 +479,8 @@ func TestOutboundRefusals(t *testing.T) {
 		t.Fatalf("stranger: %+v", st)
 	}
 	st := statuses(t, b.net, john)
-	if len(st) != 2 || st[0].State != identity.EmailStateSent || st[1].State != identity.EmailStateRefused || !strings.Contains(st[1].Reason, "daily sending limit") {
+	// Over the daily limit a send waits for the window, it is not refused.
+	if len(st) != 2 || st[0].State != identity.EmailStateSent || st[1].State != identity.EmailStateDeferred || !strings.Contains(st[1].Reason, "one email a day") {
 		t.Fatalf("john: %+v", st)
 	}
 	if n := len(readSent(t, b.logDir)); n != 1 {

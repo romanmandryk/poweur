@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS ledger (k TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS suppressed (k TEXT PRIMARY KEY, reason TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, envelope TEXT NOT NULL, received INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner TEXT NOT NULL, size INTEGER NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sent_log (k TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS sent_log_k_at ON sent_log (k, at);
+CREATE INDEX IF NOT EXISTS sent_log_at ON sent_log (at);
+CREATE TABLE IF NOT EXISTS limits (
+	identity TEXT PRIMARY KEY, daily INTEGER NOT NULL, spacing INTEGER NOT NULL, new_daily INTEGER NOT NULL,
+	note TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL);
 `
 
 // OpenStore opens (or creates) the database at path.
@@ -319,6 +325,111 @@ func (s *Store) Expired(ctx context.Context, limit int) ([]FileRecord, error) {
 // Prune forgets dedupe keys older than a week: a mail server stops retrying
 // long before that.
 func (s *Store) Prune(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sent_log WHERE at < ?`, s.now().Add(-48*time.Hour).Unix()); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM inbound_seen WHERE at < ?`, s.now().Add(-7*24*time.Hour).Unix())
+	return err
+}
+
+// RecordSent notes one message sent by identity (for pacing and the
+// bridge-wide cap). Only a hash of the identity is kept.
+func (s *Store) RecordSent(ctx context.Context, identityName string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sent_log (k, at) VALUES (?, ?)`, s.hash("sent", identityName), s.now().Unix())
+	return err
+}
+
+// SentSince lists when identity sent since `since`, oldest first.
+func (s *Store) SentSince(ctx context.Context, identityName string, since time.Time) ([]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT at FROM sent_log WHERE k = ? AND at >= ? ORDER BY at`, s.hash("sent", identityName), since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var at int64
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		out = append(out, time.Unix(at, 0))
+	}
+	return out, rows.Err()
+}
+
+// AllSentSince counts every message the bridge sent since `since`, and the
+// oldest of them (when the bridge-wide window frees up).
+func (s *Store) AllSentSince(ctx context.Context, since time.Time) (int, time.Time, error) {
+	var n int
+	var oldest sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), MIN(at) FROM sent_log WHERE at >= ?`, since.Unix()).Scan(&n, &oldest)
+	return n, time.Unix(oldest.Int64, 0), err
+}
+
+// PendingSends counts an identity's sends waiting for their turn.
+func (s *Store) PendingSends(ctx context.Context, sender string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sends WHERE sender = ? AND state = 'deferred'`, strings.ToLower(sender)).Scan(&n)
+	return n, err
+}
+
+// Limits overrides the sending defaults for one identity — the "ask for
+// more" lever, like a storage quota raise. Zero fields mean "the default".
+type Limits struct {
+	Identity  string        `json:"identity"`
+	Daily     int           `json:"daily"`
+	Spacing   time.Duration `json:"spacing"`
+	NewDaily  int           `json:"new_recipients_daily"`
+	Note      string        `json:"note,omitempty"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+func (s *Store) LimitsFor(ctx context.Context, identityName string) (Limits, bool, error) {
+	var l Limits
+	var spacing, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT identity, daily, spacing, new_daily, note, updated FROM limits WHERE identity = ?`,
+		strings.ToLower(identityName)).Scan(&l.Identity, &l.Daily, &spacing, &l.NewDaily, &l.Note, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Limits{}, false, nil
+	}
+	l.Spacing, l.UpdatedAt = time.Duration(spacing)*time.Second, time.Unix(updated, 0)
+	return l, err == nil, err
+}
+
+func (s *Store) SetLimits(ctx context.Context, l Limits) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO limits (identity, daily, spacing, new_daily, note, updated) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (identity) DO UPDATE SET daily = excluded.daily, spacing = excluded.spacing, new_daily = excluded.new_daily, note = excluded.note, updated = excluded.updated`,
+		strings.ToLower(l.Identity), l.Daily, int64(l.Spacing/time.Second), l.NewDaily, l.Note, s.now().Unix())
+	return err
+}
+
+func (s *Store) DeleteLimits(ctx context.Context, identityName string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM limits WHERE identity = ?`, strings.ToLower(identityName))
+	return err
+}
+
+func (s *Store) ListLimits(ctx context.Context) ([]Limits, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT identity, daily, spacing, new_daily, note, updated FROM limits ORDER BY identity`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Limits
+	for rows.Next() {
+		var l Limits
+		var spacing, updated int64
+		if err := rows.Scan(&l.Identity, &l.Daily, &spacing, &l.NewDaily, &l.Note, &updated); err != nil {
+			return nil, err
+		}
+		l.Spacing, l.UpdatedAt = time.Duration(spacing)*time.Second, time.Unix(updated, 0)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// RescheduleAt moves a queued item to `at` without counting an attempt: a
+// send waiting for its turn is not failing.
+func (s *Store) RescheduleAt(ctx context.Context, id string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE queue SET next = ? WHERE id = ?`, at.Unix(), id)
 	return err
 }

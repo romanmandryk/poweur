@@ -164,3 +164,17 @@ describe("onboarding", () => {
     expect(offer.textContent).toContain("alice@poweur.net");
   });
 });
+
+describe("receive-only bridge", () => {
+  it("hides writing and replying", async () => {
+    optedIn();
+    holder.client.emailApi.capabilities.mockResolvedValue({ send: false });
+    holder.client.inboxAndArchive.mockResolvedValue({ messages: [mail("e1", 1)], acks: [], lost: 0 });
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    fireEvent.click(await found(".mail-row"));
+    await found("iframe.email-frame");
+    expect($("#btn-email-compose")).toBeNull();
+    expect($("#btn-email-reply")).toBeNull();
+  });
+});

@@ -41,6 +41,8 @@ export const freshEmail = () => ({
   bridge: null as string | null,
   /** The bridge the relay advertises, if any. */
   offered: null as string | null,
+  /** False when the bridge only receives mail (no composing). */
+  canSend: true,
   loading: false,
   loaded: false,
   error: null as string | null,

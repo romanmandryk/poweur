@@ -38,6 +38,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
   const emailApi = {
     state: vi.fn(async () => ({ enabled: false, address: null as string | null, bridge: null as string | null, optIn: null })),
     offeredBridge: vi.fn(async () => null as string | null),
+    capabilities: vi.fn(async () => ({}) as { send?: boolean }),
     enable: vi.fn(async () => ({ enabled: true, address: "alice@poweur.net", bridge: "email.poweur.net", optIn: {} })),
     disable: vi.fn(async () => ({ enabled: false, address: null, bridge: "email.poweur.net", optIn: null })),
     send: vi.fn(async (draft: any) => ({

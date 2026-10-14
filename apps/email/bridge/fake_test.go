@@ -207,7 +207,7 @@ func newTestBridge(t *testing.T, mutate ...func(*Config)) *testBridge {
 	t.Cleanup(public.Close)
 	cfg := Config{
 		PublicURL: public.URL,
-		HTTPAddr:  "127.0.0.1:0", LMTPAddr: "127.0.0.1:0",
+		HTTPAddr:  "127.0.0.1:0", LMTPAddr: "127.0.0.1:0", Inbound: "lmtp",
 		BridgeID: self.name, Seed: self.seed, RelayURL: n.srv.URL,
 		Domains:    []DomainMap{{Mail: "poweur.test", Identity: "poweur.test"}, {Mail: "alias.test", Identity: "poweur.test"}},
 		HookSecret: "hook-secret-0123456789", LMTPUsername: "stalwart", LMTPPassword: "lmtp-password-0123456789",

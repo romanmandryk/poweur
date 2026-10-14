@@ -81,7 +81,7 @@ func newEmailFixture(t *testing.T) emailFixture {
 		PublicURL: "http://" + httpL.Addr().String(),
 		BridgeID:  "email.poweur.net", Seed: seed, RelayURL: relayURL,
 		Domains:    []emailbridge.DomainMap{{Mail: "poweur.net", Identity: "poweur.net"}},
-		HookSecret: "integration-hook-secret-01", LMTPUsername: "stalwart", LMTPPassword: lmtpPassword,
+		Inbound: "lmtp", HookSecret: "integration-hook-secret-01", LMTPUsername: "stalwart", LMTPPassword: lmtpPassword,
 		LMTPInsecure: true, AuthServID: "mail.poweur.net",
 		Transport: "log", LogDir: sentDir, DataDir: t.TempDir(),
 		Footer: "first", SignupURL: "https://poweur.net", OptInCacheTTL: time.Millisecond,

@@ -31,6 +31,8 @@ export interface EmailCapabilities {
   bridge?: string;
   /** The bridge's HTTPS API (on the bridge's own capabilities). */
   api?: string;
+  /** False when the bridge only receives (features.email_send = "off"). */
+  send?: boolean;
 }
 
 export interface EmailState {
@@ -59,9 +61,10 @@ export class EmailApi {
     try {
       const response = await fetchImpl(`${this.#scheme()}://${identity.trim().toLowerCase()}/.well-known/poweur/capabilities.json`);
       if (!response.ok) return {};
-      const caps = (await response.json()) as { endpoints?: Record<string, string> };
+      const caps = (await response.json()) as { endpoints?: Record<string, string>; features?: Record<string, string> };
       const endpoints = caps.endpoints ?? {};
       return {
+        ...(caps.features?.["email_send"] ? { send: caps.features["email_send"] !== "off" } : {}),
         ...(endpoints["email_bridge"] ? { bridge: endpoints["email_bridge"] } : {}),
         ...(endpoints["email_api"] ? { api: endpoints["email_api"].replace(/\/+$/, "") } : {}),
       };

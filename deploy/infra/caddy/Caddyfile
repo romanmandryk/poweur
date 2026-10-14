@@ -122,11 +122,13 @@ http://oauth.poweur.org oauth.poweur.org {
         }
     }
 }
-# The email bridge (EPIC-023; apps/email/deploy): Stalwart's RCPT hook, sealed
-# attachment blobs and uploads. /metrics stays on infra_net (Prometheus).
+# The email bridge (EPIC-023; apps/email/deploy): sealed attachment blobs and
+# uploads for users' browsers. Stalwart calls the RCPT hook over infra_net, and
+# Prometheus scrapes /metrics there, so neither is public.
 http://email.poweur.org email.poweur.org {
     import security_txt
-    handle /metrics {
+    @internal path /metrics /stalwart/* /hooks/*
+    handle @internal {
         respond 404
     }
     handle {

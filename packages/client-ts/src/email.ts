@@ -274,6 +274,8 @@ export interface EmailStatus {
   message_id?: string;
   recipient?: string;
   reason?: string;
+  /** On a deferred send: when the bridge tries it next (sending is paced). */
+  retry_at?: string;
   at: string;
 }
 

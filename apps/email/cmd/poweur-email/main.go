@@ -3,14 +3,18 @@
 //	poweur-email serve          run the bridge (configuration from EMAIL_* env)
 //	poweur-email check-config   validate the configuration and exit
 //	poweur-email version        print the version
+//	poweur-email limits list|show|set|reset   one identity's sending limits
 package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/poweur/email/bridge"
@@ -33,6 +37,8 @@ func run(args []string) int {
 		}
 		fmt.Println()
 		return 0
+	case "limits":
+		return limits(args[1:])
 	case "check-config":
 		cfg, err := bridge.FromEnv()
 		if err == nil {
@@ -68,7 +74,107 @@ func run(args []string) int {
 		}
 		return 0
 	default:
-		fmt.Fprintln(os.Stderr, "usage: poweur-email [serve|check-config|version]")
+		fmt.Fprintln(os.Stderr, "usage: poweur-email [serve|check-config|version|limits]")
 		return 2
 	}
+}
+
+// limits manages per-identity sending limits in the bridge's database, the
+// way `relay quotas set` raises storage: operators grant more on request.
+//
+//	poweur-email limits list
+//	poweur-email limits show <identity>
+//	poweur-email limits set <identity> [--daily=N] [--spacing=1m] [--new-recipients=N] [--note=…]
+//	poweur-email limits reset <identity>
+func limits(args []string) int {
+	usage := func() int {
+		fmt.Fprintln(os.Stderr, "usage: poweur-email limits list | show <id> | set <id> [--daily=N] [--spacing=1m] [--new-recipients=N] [--note=text] | reset <id>")
+		return 2
+	}
+	if len(args) == 0 {
+		return usage()
+	}
+	cfg, err := bridge.FromEnv()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "invalid configuration:", err)
+		return 1
+	}
+	store, err := bridge.OpenStoreFor(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer store.Close()
+	ctx := context.Background()
+	out := json.NewEncoder(os.Stdout)
+	out.SetIndent("", "  ")
+	switch args[0] {
+	case "list":
+		list, err := store.ListLimits(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Printf("defaults: %d a day, spacing %s doubling to %s, %d new recipients a day\n",
+			cfg.OutDailyLimit, cfg.OutSpacing, cfg.OutSpacingMax, cfg.OutNewRecipients)
+		for _, l := range list {
+			fmt.Printf("%s: daily=%d spacing=%s new=%d %s\n", l.Identity, l.Daily, l.Spacing, l.NewDaily, l.Note)
+		}
+		return 0
+	case "show", "reset", "set":
+		if len(args) < 2 {
+			return usage()
+		}
+	default:
+		return usage()
+	}
+	id := strings.ToLower(strings.TrimSpace(args[1]))
+	switch args[0] {
+	case "show":
+		l, ok, err := store.LimitsFor(ctx, id)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if !ok {
+			fmt.Printf("%s uses the defaults\n", id)
+			return 0
+		}
+		_ = out.Encode(l)
+	case "reset":
+		if err := store.DeleteLimits(ctx, id); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Printf("%s is back on the defaults\n", id)
+	case "set":
+		fs := flag.NewFlagSet("limits set", flag.ContinueOnError)
+		daily := fs.Int("daily", 0, "emails per 24 hours (0: default)")
+		spacing := fs.Duration("spacing", 0, "first gap between sends, doubling (0: default)")
+		newRcpt := fs.Int("new-recipients", 0, "new correspondents per day (0: default)")
+		note := fs.String("note", "", "why (shown in list)")
+		if err := fs.Parse(args[2:]); err != nil {
+			return 2
+		}
+		l, _, _ := store.LimitsFor(ctx, id)
+		l.Identity = id
+		if *daily > 0 {
+			l.Daily = *daily
+		}
+		if *spacing > 0 {
+			l.Spacing = *spacing
+		}
+		if *newRcpt > 0 {
+			l.NewDaily = *newRcpt
+		}
+		if *note != "" {
+			l.Note = *note
+		}
+		if err := store.SetLimits(ctx, l); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		_ = out.Encode(l)
+	}
+	return 0
 }

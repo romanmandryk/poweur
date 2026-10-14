@@ -40,7 +40,12 @@ export async function loadEmail({ force = false } = {}) {
       setEmail({ offered: offered ?? useData.getState().email.offered, loading: false });
       return;
     }
-    setEmail({ enabled: state.enabled, address: state.address, bridge: state.bridge, offered, loaded: true, loading: false, error: null });
+    const bridge = state.bridge ?? offered;
+    const caps = bridge ? await api.capabilities(bridge) : {};
+    setEmail({
+      enabled: state.enabled, address: state.address, bridge: state.bridge, offered, canSend: caps.send !== false,
+      loaded: true, loading: false, error: null,
+    });
   } catch (error) {
     setEmail({ loading: false, loaded: true, error: errorMessage(error) });
   }

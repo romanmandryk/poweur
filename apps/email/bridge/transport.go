@@ -43,6 +43,8 @@ func NewTransport(cfg Config) (Transport, error) {
 			return nil, err
 		}
 		return &LogTransport{Dir: cfg.LogDir}, nil
+	case "none":
+		return nil, nil // receive only
 	}
 	return nil, fmt.Errorf("unknown transport %q", cfg.Transport)
 }
@@ -51,7 +53,11 @@ type smtpTransport struct{ cfg Config }
 
 func (t *smtpTransport) Send(ctx context.Context, from string, to []string, msg []byte) error {
 	addr := net.JoinHostPort(t.cfg.SMTPHost, strconv.Itoa(t.cfg.SMTPPort))
-	tlsConfig := &tls.Config{ServerName: t.cfg.SMTPHost, MinVersion: tls.VersionTLS12, InsecureSkipVerify: t.cfg.SMTPInsecureSkipVerify} //nolint:gosec // opt-in for private test servers
+	serverName := t.cfg.SMTPTLSServerName
+	if serverName == "" {
+		serverName = t.cfg.SMTPHost
+	}
+	tlsConfig := &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12, InsecureSkipVerify: t.cfg.SMTPInsecureSkipVerify} //nolint:gosec // opt-in for private test servers
 	dialer := &net.Dialer{Timeout: 20 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {

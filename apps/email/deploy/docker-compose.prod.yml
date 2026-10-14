@@ -1,17 +1,21 @@
-# Production: the email bridge for poweur.net (EPIC-023), at
-# https://email.poweur.org (RCPT hook, blobs, uploads, health) and LMTP :2525
-# for the mail server (Stalwart at mail.poweur.net, managed in famooss).
+# Production: the email bridge for poweur.net (EPIC-023).
+#
+# Behind Stalwart (famooss-stalwart, mail.poweur.net — managed in the famooss
+# repo) on the same VM, so every hop between them stays on the Docker network
+# infra_net and nothing new is published on the host:
+#   - Stalwart's RCPT MTA hook   → http://poweur-email:8091/stalwart/hook (Bearer EMAIL_HOOK_SECRET)
+#   - Stalwart's relay route     → LMTP poweur-email:2525 (AUTH stalwart / EMAIL_LMTP_PASSWORD)
+#   - the bridge's submission    → famooss-stalwart:587, STARTTLS as mail.poweur.net,
+#                                  AUTH EMAIL_SMTP_USERNAME / EMAIL_SMTP_PASSWORD
+# Users' browsers reach https://email.poweur.org (Caddy, through Cloudflare's
+# *.poweur.org) for large attachments and uploads; Caddy keeps the hook and
+# /metrics internal.
 #
 # Deployed by .github/workflows/deploy-email.yml, which copies this file to
-# /opt/apps/poweur-email/docker-compose.yml on the VM — its own directory, so
-# the relay's deploy never touches it. Secrets and per-operator values live
-# beside it in .env.prod (0600, never committed):
-#   EMAIL_BRIDGE_SEED          the bridge identity's seed (email.poweur.net)
-#   EMAIL_HOOK_SECRET          shared with Stalwart's MTA hook
-#   EMAIL_LMTP_PASSWORD        Stalwart's AUTH to the bridge's LMTP listener
-#   EMAIL_LMTP_ALLOW           Stalwart's public IP(s)
-#   EMAIL_SMTP_PASSWORD        the bridge's submission account on Stalwart
-# See apps/email/README.md and deploy/README.md.
+# /opt/apps/poweur-email/docker-compose.yml. Secrets live beside it in
+# .env.prod (0600, never committed): EMAIL_BRIDGE_SEED, EMAIL_HOOK_SECRET,
+# EMAIL_LMTP_PASSWORD, EMAIL_SMTP_PASSWORD. famooss reads the three shared
+# secrets from that file to configure Stalwart.
 services:
   email:
     image: ${EMAIL_IMAGE:?Set EMAIL_IMAGE to a GHCR digest}
@@ -26,32 +30,41 @@ services:
       EMAIL_BRIDGE_ID: email.poweur.net
       EMAIL_RELAY_URL: https://relay.poweur.net
       EMAIL_PUBLIC_URL: https://email.poweur.org
-      # poweur.org (and later other domains) route here once their MX points
-      # at the mail server: add `poweur.org=poweur.net`.
+      # poweur.org (MX on Purelymail today) and other domains join later:
+      # point their MX at mail.poweur.net and add `poweur.org=poweur.net`.
       EMAIL_DOMAINS: ${EMAIL_DOMAINS:-poweur.net}
-      EMAIL_ALIASES: ${EMAIL_ALIASES:-}
+      # Inbound: behind Stalwart.
+      EMAIL_INBOUND: lmtp
+      EMAIL_LMTP_ADDR: ":2525"
       EMAIL_LMTP_USERNAME: stalwart
-      # STARTTLS for the LMTP hop: a certificate for email.poweur.org, kept in
-      # ./certs (renewed on the host; see deploy/README.md).
-      EMAIL_LMTP_TLS_CERT_FILE: /certs/lmtp.crt
-      EMAIL_LMTP_TLS_KEY_FILE: /certs/lmtp.key
-      EMAIL_LMTP_HOSTNAME: email.poweur.org
+      # A private Docker network between two containers: AUTH without TLS,
+      # from infra_net only.
+      EMAIL_LMTP_INSECURE: "1"
+      EMAIL_LMTP_ALLOW: 172.16.0.0/12
+      EMAIL_LMTP_HOSTNAME: poweur-email
       EMAIL_AUTHSERV_ID: mail.poweur.net
+      # Outbound: submission to Stalwart, which DKIM-signs and relays via Brevo.
       EMAIL_TRANSPORT: smtp
-      EMAIL_SMTP_HOST: mail.poweur.net
+      EMAIL_SMTP_HOST: famooss-stalwart
       EMAIL_SMTP_PORT: "587"
       EMAIL_SMTP_TLS: starttls
-      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-poweur-bridge}
+      EMAIL_SMTP_TLS_SERVER_NAME: mail.poweur.net
+      EMAIL_SMTP_USERNAME: poweur-bridge
       EMAIL_MESSAGE_ID_DOMAIN: poweur.net
+      # Receiving is the point; sending is paced (10 a day, gaps doubling from
+      # 5 minutes to 2 hours) and the whole bridge stays well under Stalwart's
+      # 250/day domain throttle (itself under Brevo's 300). Raise one ID with
+      # `docker exec poweur-email poweur-email limits set <id> --daily=50`.
+      EMAIL_OUT_DAILY_LIMIT: "10"
+      EMAIL_OUT_SPACING: 5m
+      EMAIL_OUT_SPACING_MAX: 2h
+      EMAIL_OUT_NEW_RECIPIENTS_DAILY: "10"
+      EMAIL_OUT_GLOBAL_DAILY_LIMIT: "200"
       EMAIL_FOOTER: first
       EMAIL_SIGNUP_URL: https://poweur.net
       EMAIL_DATA: /data
     volumes:
       - email_data:/data
-      - ./certs:/certs:ro
-    ports:
-      # LMTP from the mail server; HTTP goes through Caddy on infra_net.
-      - "2525:2525"
     mem_limit: 768m
     pids_limit: 256
     networks:
