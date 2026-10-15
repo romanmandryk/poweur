@@ -51,7 +51,9 @@ export async function loadEmail({ force = false } = {}) {
       loaded: true, loading: false, error: null,
     });
   } catch (error) {
-    setEmail({ loading: false, loaded: true, error: errorMessage(error) });
+    // Not "loaded": a failed read says nothing about whether email is on,
+    // and the next screen that needs it asks again.
+    setEmail({ loading: false, loaded: false, error: errorMessage(error) });
   }
 }
 

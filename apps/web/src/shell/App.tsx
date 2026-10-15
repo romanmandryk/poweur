@@ -13,6 +13,7 @@ import { DestinationScreen, FrontDoorScreen, SubScreen } from "../screens/regist
 import { BottomNav } from "./BottomNav";
 import { Header } from "./Header";
 import { LoadingOverlay, PanelHost, Toaster } from "./Overlays";
+import { useUpdateCheck } from "./useUpdateCheck";
 import { useBackNavigation } from "./useBackNavigation";
 import { useMessaging } from "./useMessaging";
 import { useFilesSync } from "./useFilesSync";
@@ -32,6 +33,7 @@ function PrivateApp() {
   const sub = useRoute((state) => state.sub);
   useBackNavigation();
   useMessaging();
+  useUpdateCheck();
   useFilesSync();
   usePendingChat();
 

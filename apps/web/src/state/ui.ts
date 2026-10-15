@@ -32,6 +32,8 @@ export interface UiState {
   panel: PanelItem | null;
   /** A pull-to-refresh spinner is on screen, so the shell's own indicator stays out of its way. */
   refreshing: boolean;
+  /** A newer build is deployed than the one running (shell/useUpdateCheck). */
+  updateReady: boolean;
 }
 
 const THEME_KEY = "poweur:theme";
@@ -46,6 +48,7 @@ export const useUi = create<UiState>()(() => ({
   loading: { active: false, text: "Working…" },
   panel: null,
   refreshing: false,
+  updateReady: false,
 }));
 
 let nextId = 1;

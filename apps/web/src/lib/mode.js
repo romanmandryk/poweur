@@ -174,6 +174,20 @@ export function addIdOptions(info) {
   };
 }
 
+/**
+ * The one ID this app belongs to, or "". An identity host
+ * (`alice.poweur.net/id/`) installs as that identity's own app, with its own
+ * origin, keys and notifications: switching to or adding another ID there
+ * would put it on the wrong origin. The launcher and the native shell hold
+ * several and keep the switcher.
+ *
+ * @param {{ mode?: string, subject?: string | null } | null | undefined} info
+ * @returns {string}
+ */
+export function boundIdentity(info) {
+  return info?.mode === "identity" && info.subject ? String(info.subject).toLowerCase() : "";
+}
+
 function normalizeHost(value) {
   return String(value ?? "").trim().toLowerCase().replace(/\.$/, "");
 }

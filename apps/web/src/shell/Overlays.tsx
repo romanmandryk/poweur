@@ -13,12 +13,24 @@ const TOAST_ICON: Record<ToastType, { Icon: LucideIcon; className: string }> = {
 
 export function Toaster() {
   const toasts = useUi((state) => state.toasts);
+  const updateReady = useUi((state) => state.updateReady);
   return (
     <div
       id="toast-root"
       aria-live="polite"
       className="bottom-above-nav pointer-events-none fixed left-1/2 z-1100 flex w-[90%] max-w-[380px] -translate-x-1/2 flex-col gap-2"
     >
+      {updateReady && (
+        <div
+          id="update-banner"
+          className="toast pointer-events-auto flex items-center gap-2.5 rounded-xl bg-[rgb(50_50_50/.95)] px-4 py-[11px] text-sm font-medium text-white shadow-[0_4px_24px_rgb(0_0_0/.3)] backdrop-blur-xl dark:bg-[rgb(70_70_70/.95)]"
+        >
+          <span className="min-w-0 flex-1">A new version of Poweur is ready.</span>
+          <button id="btn-update-reload" type="button" className="shrink-0 font-semibold text-accent" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
       {toasts.map((item) => {
         const { Icon, className } = TOAST_ICON[item.type];
         return (
