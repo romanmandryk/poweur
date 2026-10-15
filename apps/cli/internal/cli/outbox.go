@@ -114,9 +114,11 @@ func queueOfflineSend(identityValue, target string, msg Message, viaHome bool, p
 		fmt.Fprintln(stderr, "could not queue message:", err)
 		return 1
 	}
-	archiveRecords(useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
+	record := historyRecordThreaded(
 		identityValue, idpkg.HistoryQueueSent, msg.ID, identityValue, msg.Recipient,
-		msg.Timestamp, msg.Type, msg.ThreadID, plaintext)}, stderr)
+		msg.Timestamp, msg.Type, msg.ThreadID, plaintext)
+	record.Metadata = msg.Metadata
+	archiveRecords(useIdentity, []idpkg.HistoryRecord{withSubject(record)}, stderr)
 	output := map[string]any{
 		"id": msg.ID, "status": "queued", "message": msg, "encrypted": true,
 		"sign_with": "identity", "target_relay": target, "via_home_relay": viaHome,

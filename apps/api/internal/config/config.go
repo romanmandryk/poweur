@@ -97,7 +97,11 @@ type Config struct {
 	// RequestRelayLimits caps contact-request admissions per *sending relay*
 	// (EPIC-007 E07-T5). Keyed on the relay accountable for the sender, not
 	// on the sender, because identities are cheap and relays are not.
-	RequestRelayLimits  RateLimits
+	RequestRelayLimits RateLimits
+	// EmailBridgeLimits replace RateLimits (and the global caps) for the
+	// EMAIL_BRIDGE_ID sender: it delivers every user's mail, so the
+	// per-person defaults would throttle the whole bridge.
+	EmailBridgeLimits   RateLimits
 	DNSProxyMode        string
 	MaxInboxPerIdentity int
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
@@ -188,6 +192,12 @@ type Config struct {
 	// and secret-free: hosted identities advertise it for IndieAuth discovery
 	// and in their capabilities; the relay never talks to it.
 	OAuthBridgeURL string
+	// EmailBridgeID is the Poweur ID of the email bridge (EPIC-023) this
+	// operator runs, e.g. email.poweur.net. Optional and secret-free: hosted
+	// identities advertise it in their capabilities so clients can offer
+	// `name@domain`; the relay never talks to it, and admits its `email.*`
+	// messages only for users whose inbox policy names it.
+	EmailBridgeID string
 
 	// PushVAPIDPrivateKey is the relay's Web Push identity (EPIC-009
 	// E09-T11): a raw P-256 private scalar, base64url. Empty disables
@@ -311,6 +321,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid OAUTH_BRIDGE_URL: %w", err)
 		}
 	}
+	if c.EmailBridgeID != "" {
+		if err := idpkg.ValidateIdentityName(c.EmailBridgeID); err != nil {
+			return fmt.Errorf("invalid EMAIL_BRIDGE_ID: %w", err)
+		}
+	}
 	if s := c.PushVAPIDSubject; s != "" && !strings.HasPrefix(s, "mailto:") && !strings.HasPrefix(s, "https://") {
 		return fmt.Errorf("invalid PUSH_VAPID_SUBJECT: %s (use mailto: or https:)", s)
 	}
@@ -349,6 +364,7 @@ func FromEnv() Config {
 		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
 		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
 		OAuthBridgeURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
+		EmailBridgeID:           strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_BRIDGE_ID"))),
 		PushVAPIDPrivateKey:     strings.TrimSpace(os.Getenv("PUSH_VAPID_PRIVATE_KEY")),
 		PushVAPIDSubject:        strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
 		PushEndpointHosts:       pushEndpointHostsFromEnv(),
@@ -403,6 +419,11 @@ func FromEnv() Config {
 			PerMinute: getenvInt("GLOBAL_RATE_LIMIT_MINUTE", DefaultGlobalMinuteLimit),
 			PerHour:   getenvInt("GLOBAL_RATE_LIMIT_HOUR", DefaultGlobalHourLimit),
 			PerDay:    getenvInt("GLOBAL_RATE_LIMIT_DAY", DefaultGlobalDayLimit),
+		},
+		EmailBridgeLimits: RateLimits{
+			PerMinute: getenvInt("EMAIL_BRIDGE_RATE_LIMIT_MINUTE", 600),
+			PerHour:   getenvInt("EMAIL_BRIDGE_RATE_LIMIT_HOUR", 20000),
+			PerDay:    getenvInt("EMAIL_BRIDGE_RATE_LIMIT_DAY", 200000),
 		},
 		RequestRelayLimits: RateLimits{
 			PerMinute: getenvInt("REQUEST_RELAY_LIMIT_MINUTE", DefaultRequestRelayMinuteLimit),

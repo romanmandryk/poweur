@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -166,7 +167,8 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 	limit := fs.Int("limit", 0, "maximum records, from the newest")
 	before := fs.Uint64("before", 0, "only records before this position in one conversation")
 	threadID := fs.String("thread", "", "only records in this thread")
-	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--keep-unread": true})); err != nil {
+	bySubject := fs.Bool("by-subject", false, "list conversations by subject (one row per thread) instead of messages")
+	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--keep-unread": true, "--by-subject": true})); err != nil {
 		return 1
 	}
 	if *limit < 0 {
@@ -238,6 +240,9 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 	}
 
 	unread := state.Unread(store.identity, records)
+	if *bySubject {
+		return printBySubject(stdout, *jsonOut, store.identity, records, state)
+	}
 	if *jsonOut {
 		var cursor uint64
 		for _, record := range records {
@@ -264,7 +269,11 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		case r.Queue == idpkg.HistoryQueueAnonymous:
 			who = "ANONYMOUS"
 		}
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", r.Timestamp, who, r.Body)
+		subject := ""
+		if r.Subject != "" {
+			subject = "[" + r.Subject + "] "
+		}
+		fmt.Fprintf(stdout, "[%s] %s: %s%s\n", r.Timestamp, who, subject, r.Body)
 	}
 	for p, n := range unread {
 		if n > 0 {
@@ -295,6 +304,78 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 // ephemeral key for is not an archive.
 func historyRecordFrom(owner, queue, id, sender, recipient, timestamp, msgType, body string) idpkg.HistoryRecord {
 	return historyRecordThreaded(owner, queue, id, sender, recipient, timestamp, msgType, "", body)
+}
+
+// subjectRow is one conversation of `history --by-subject`.
+type subjectRow struct {
+	Peer    string `json:"peer"`
+	Thread  string `json:"thread"`
+	Subject string `json:"subject"`
+	Last    string `json:"last"`
+	Count   int    `json:"count"`
+	Unread  int    `json:"unread"`
+}
+
+// printBySubject lists one row per (peer, thread key), newest first, like an
+// inbox (E09-T13). The label is the newest subject seen in the thread.
+func printBySubject(stdout io.Writer, jsonOut bool, owner string, records []idpkg.HistoryRecord, state idpkg.ReadState) int {
+	rows := map[string]*subjectRow{}
+	var order []string
+	for _, r := range records {
+		peer := r.Peer(owner)
+		key := r.ThreadKey()
+		id := peer + "\x00" + key
+		row, ok := rows[id]
+		if !ok {
+			row = &subjectRow{Peer: peer, Thread: key}
+			rows[id] = row
+			order = append(order, id)
+		}
+		row.Count++
+		row.Last = r.Timestamp
+		if r.Subject != "" {
+			row.Subject = r.Subject
+		}
+		mine := r.Queue == idpkg.HistoryQueueSent || strings.EqualFold(r.Sender, owner)
+		if !mine && !state.Covers(peer, key, r.Timestamp, r.ID) {
+			row.Unread++
+		}
+	}
+	list := make([]subjectRow, 0, len(order))
+	for _, id := range order {
+		list = append(list, *rows[id])
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].Last > list[j].Last })
+	if jsonOut {
+		return writeOutput(stdout, true, map[string]any{"identity": owner, "conversations": list}, "")
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(stdout, "no message history")
+		return 0
+	}
+	for _, row := range list {
+		label := row.Subject
+		if label == "" {
+			if row.Thread != "" && !strings.HasPrefix(row.Thread, idpkg.SubjectKeyPrefix) {
+				label = "#" + row.Thread
+			} else {
+				label = "(no subject)"
+			}
+		}
+		unread := ""
+		if row.Unread > 0 {
+			unread = fmt.Sprintf(", %d unread", row.Unread)
+		}
+		fmt.Fprintf(stdout, "[%s] %s: %s (%d%s)\n", row.Last, row.Peer, label, row.Count, unread)
+	}
+	return 0
+}
+
+// withSubject splits a sent `headers-v1` plaintext the way a reader will
+// (E09-T13): the subject into Subject, only the text into Body.
+func withSubject(r idpkg.HistoryRecord) idpkg.HistoryRecord {
+	r.Subject, r.Body = idpkg.ParseBody(r.Body, r.Metadata)
+	return r
 }
 
 // historyRecordThreaded is the same with the conversation thread carried

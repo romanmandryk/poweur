@@ -92,6 +92,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runSession(args[1:], stdout, stderr)
 	case "auth":
 		return runAuth(args[1:], stdout, stderr)
+	case "email":
+		return runEmail(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		buildinfo.Write(stdout)
 		return 0
@@ -562,6 +564,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	viaHomeRelay := fs.Bool("via-home-relay", false, "route through your own home relay (privacy proxy: hides your IP from the recipient relay)")
 	msgType := fs.String("type", "", "envelope message type (default chat.text; sys.* reserved for the platform)")
 	threadID := fs.String("thread", "", "group this message into a conversation thread")
+	subjectFlag := fs.String("subject", "", "subject line, sent encrypted; starts a new thread unless --thread is given")
 	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
 	meta := &metaFlag{}
 	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
@@ -582,6 +585,23 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	if err := validateOutgoingEnvelope(*msgType, *threadID, *expiresAt, meta.Map()); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
+	}
+	if strings.TrimSpace(*subjectFlag) != "" {
+		if *anonFlag || *attachPath != "" || (*msgType != "" && *msgType != idpkg.MsgTypeChatText) {
+			fmt.Fprintln(stderr, "--subject applies to signed chat.text messages only")
+			return 1
+		}
+		if err := idpkg.ValidateSubject(*subjectFlag); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if _, ok := meta.Map()[idpkg.MetaBodyFormat]; ok {
+			fmt.Fprintf(stderr, "--meta %s is set by --subject\n", idpkg.MetaBodyFormat)
+			return 1
+		}
+		if *threadID == "" {
+			*threadID = idpkg.NewThreadID()
+		}
 	}
 	if *anonFlag {
 		// An anonymous envelope carries no signature, so nothing binds these
@@ -620,6 +640,20 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	plaintext := ""
 	if fs.NArg() > 1 {
 		plaintext = fs.Arg(1)
+	}
+	if strings.TrimSpace(*subjectFlag) != "" {
+		body, extra, err := idpkg.FormatBody(*subjectFlag, plaintext)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		plaintext = body
+		if meta.values == nil {
+			meta.values = map[string]string{}
+		}
+		for key, value := range extra {
+			meta.values[key] = value
+		}
 	}
 
 	// Key pinning (E07-T4): when the recipient is a pinned contact, the
@@ -764,7 +798,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 			identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
 			recipient, timestamp, *msgType, *threadID, plaintext)
 		sent.Metadata = meta.Map()
-		archiveRecords(*useIdentity, []idpkg.HistoryRecord{sent}, stderr)
+		archiveRecords(*useIdentity, []idpkg.HistoryRecord{withSubject(sent)}, stderr)
 
 		output := map[string]any{
 			"id":             messageID,
@@ -874,7 +908,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		identityValue, idpkg.HistoryQueueSent, messageID, identityValue,
 		recipient, timestamp, *msgType, *threadID, plaintext)
 	sent.Metadata = meta.Map()
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{sent}, stderr)
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{withSubject(sent)}, stderr)
 
 	output := map[string]any{
 		"id":             messageID,

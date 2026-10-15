@@ -1,0 +1,194 @@
+{
+  "owner": "alice.example.org",
+  "records": [
+    {
+      "version": 1,
+      "id": "t1",
+      "sender": "bob.example.org",
+      "recipient": "alice.example.org",
+      "timestamp": "2026-02-01T09:00:00Z",
+      "thread_id": "01J9ZA",
+      "queue": "inbox",
+      "subject": "Q3 budget",
+      "body": "one"
+    },
+    {
+      "version": 1,
+      "id": "t2",
+      "sender": "bob.example.org",
+      "recipient": "alice.example.org",
+      "timestamp": "2026-02-01T09:05:00Z",
+      "thread_id": "01J9ZB",
+      "queue": "inbox",
+      "subject": "Offsite",
+      "body": "two"
+    },
+    {
+      "version": 1,
+      "id": "t3",
+      "sender": "bob.example.org",
+      "recipient": "alice.example.org",
+      "timestamp": "2026-02-01T09:10:00Z",
+      "thread_id": "01J9ZA",
+      "queue": "inbox",
+      "body": "old client reply"
+    },
+    {
+      "version": 1,
+      "id": "t4",
+      "sender": "bob.example.org",
+      "recipient": "alice.example.org",
+      "timestamp": "2026-02-01T09:15:00Z",
+      "queue": "inbox",
+      "subject": "Re: Mail subject",
+      "body": "no thread"
+    },
+    {
+      "version": 1,
+      "id": "t5",
+      "sender": "bob.example.org",
+      "recipient": "alice.example.org",
+      "timestamp": "2026-02-01T09:20:00Z",
+      "queue": "inbox",
+      "body": "plain"
+    }
+  ],
+  "thread_keys": [
+    "01J9ZA",
+    "01J9ZB",
+    "01J9ZA",
+    "subj:mail subject",
+    ""
+  ],
+  "states": [
+    {
+      "name": "none",
+      "raw": {
+        "version": 1,
+        "conversations": {}
+      },
+      "valid": true,
+      "unread": {
+        "bob.example.org": 5
+      },
+      "after_thread_mark": {
+        "bob.example.org": {
+          "01J9ZB": {
+            "timestamp": "2026-02-01T09:05:00Z",
+            "id": "t2"
+          }
+        }
+      }
+    },
+    {
+      "name": "thread-a-read",
+      "raw": {
+        "version": 1,
+        "conversations": {},
+        "threads": {
+          "bob.example.org": {
+            "01J9ZA": {
+              "timestamp": "2026-02-01T09:10:00Z",
+              "id": "t3"
+            }
+          }
+        }
+      },
+      "valid": true,
+      "unread": {
+        "bob.example.org": 3
+      },
+      "after_thread_mark": {
+        "bob.example.org": {
+          "01J9ZA": {
+            "timestamp": "2026-02-01T09:10:00Z",
+            "id": "t3"
+          },
+          "01J9ZB": {
+            "timestamp": "2026-02-01T09:05:00Z",
+            "id": "t2"
+          }
+        }
+      }
+    },
+    {
+      "name": "peer-mark-and-thread",
+      "raw": {
+        "version": 1,
+        "conversations": {
+          "bob.example.org": {
+            "timestamp": "2026-02-01T09:05:00Z",
+            "id": "t2"
+          }
+        },
+        "threads": {
+          "bob.example.org": {
+            "subj:mail subject": {
+              "timestamp": "2026-02-01T09:15:00Z",
+              "id": "t4"
+            }
+          }
+        }
+      },
+      "valid": true,
+      "unread": {
+        "bob.example.org": 2
+      },
+      "after_thread_mark": {
+        "bob.example.org": {
+          "subj:mail subject": {
+            "timestamp": "2026-02-01T09:15:00Z",
+            "id": "t4"
+          }
+        }
+      },
+      "after_peer_mark": {
+        "bob.example.org": {
+          "subj:mail subject": {
+            "timestamp": "2026-02-01T09:15:00Z",
+            "id": "t4"
+          }
+        }
+      }
+    },
+    {
+      "name": "older-writer-without-threads",
+      "raw": {
+        "version": 1,
+        "conversations": {
+          "bob.example.org": {
+            "timestamp": "2026-02-01T09:00:00Z",
+            "id": "t1"
+          }
+        }
+      },
+      "valid": true,
+      "unread": {
+        "bob.example.org": 4
+      },
+      "after_thread_mark": {
+        "bob.example.org": {
+          "01J9ZB": {
+            "timestamp": "2026-02-01T09:05:00Z",
+            "id": "t2"
+          }
+        }
+      }
+    },
+    {
+      "name": "bad-thread-timestamp",
+      "raw": {
+        "version": 1,
+        "conversations": {},
+        "threads": {
+          "bob.example.org": {
+            "01J9ZA": {
+              "timestamp": "soon"
+            }
+          }
+        }
+      },
+      "valid": false
+    }
+  ]
+}

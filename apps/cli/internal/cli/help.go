@@ -80,11 +80,11 @@ var helpTree = []cmdHelp{
 		{Name: "status", Usage: "[--json]", Summary: "Show the relay and whether it is reachable"},
 		{Name: "set", Usage: "<url>", Summary: "Use a different relay"},
 	}},
-	{Name: "send", Usage: "<to> <message> [--attach=<file>] [--sign-with=session|identity] [--via-home-relay] [--request-on-reject] [--anon] " + "[--use-identity=<id>] [--json]",
+	{Name: "send", Usage: "<to> <message> [--subject=<text>] [--thread=<name>] [--attach=<file>] [--sign-with=session|identity] [--via-home-relay] [--request-on-reject] [--anon] " + "[--use-identity=<id>] [--json]",
 		Summary: "Send an encrypted message (or file) to an identity"},
 	{Name: "inbox", Usage: "[--decrypt] " + idFlags, Summary: "Read new messages (--json --decrypt: JSON with each message's plaintext as body)"},
 	{Name: "listen", Usage: "[--once] [--decrypt] " + idFlags, Summary: "Stream incoming messages as they arrive"},
-	{Name: "history", Usage: "[<peer>] [--limit=N] [--before=N] [--thread=<name>] [--keep-unread] " + idFlags, Summary: "Show past conversations"},
+	{Name: "history", Usage: "[<peer>] [--limit=N] [--before=N] [--thread=<name>] [--by-subject] [--keep-unread] " + idFlags, Summary: "Show past conversations"},
 	{Name: "outbox", Optional: true, Summary: "Messages waiting to be delivered", Subs: []subHelp{
 		{Name: "list", Usage: "[--json]", Summary: "Show queued messages (default)"},
 		{Name: "retry", Usage: "[--json]", Summary: "Try to deliver the queue again"},
@@ -105,6 +105,15 @@ var helpTree = []cmdHelp{
 		{Name: "block", Usage: "<identity> " + idFlags, Summary: "Block an identity"},
 		{Name: "rm", Usage: "<identity> " + idFlags, Summary: "Remove a contact"},
 	}},
+	{Name: "email", Summary: "Your name@domain address through your relay's email bridge", Subs: []subHelp{
+		{Name: "status", Usage: idFlags, Summary: "Show whether email is on (it is by default), and the address"},
+		{Name: "enable", Usage: "[--bridge=<id>] " + idFlags, Summary: "Turn email back on, or use another bridge: publish the signed opt-in"},
+		{Name: "disable", Usage: idFlags, Summary: "Opt out: stop receiving and sending email"},
+		{Name: "filters", Usage: "[--receive=everyone|contacts] [--block=<addr|@domain>] [--unblock=…] [--allow=…] [--disallow=…] " + idFlags, Summary: "Who may email you: block senders, or only people you know (dropped silently)"},
+		{Name: "send", Usage: "--to=<address> [--cc=…] [--bcc=…] --subject=<s> --text=<t>|--text-file=<f> [--html-file=<f>] [--attach=<file>] [--in-reply-to=<id>] " + idFlags, Summary: "Send an email"},
+		{Name: "ls", Aliases: []string{"list"}, Usage: "[--limit=N] " + idFlags, Summary: "List received and sent email (picks up new messages first)"},
+		{Name: "read", Usage: "<n|id> [--html=<file>] [--save=<dir>] [--raw=<file>] [--keep-unread] " + idFlags, Summary: "Show one email; save its HTML, attachments or original"},
+	}},
 	{Name: "policy", Summary: "Who is allowed to send to you", Subs: []subHelp{
 		{Name: "show", Usage: idFlags, Summary: "Show the current policy"},
 		{Name: "set", Usage: "<open|contacts_only|contacts_and_requests> [--anon-allow=true|false] [--anon-challenge=none|pow] [--anon-bits=N] [--trusted-auth=<bridge id>|none] " + idFlags, Summary: "Change the policy"},
@@ -119,7 +128,7 @@ var helpTree = []cmdHelp{
 		{Name: "show", Usage: "<group-id> [--json]", Summary: "Show a group and its members"},
 		{Name: "add", Usage: "<group-id> [--member=<id> ...] [--admin=<id> ...] [--json]", Summary: "Add members or admins"},
 		{Name: "remove", Usage: "<group-id> [--member=<id> ...] [--admin=<id> ...] [--json]", Summary: "Remove members or admins"},
-		{Name: "send", Usage: "<group-id> <message> [--thread=<name>]", Summary: "Send to a group"},
+		{Name: "send", Usage: "<group-id> <message> [--subject=<text>] [--thread=<name>]", Summary: "Send to a group"},
 		{Name: "inbox", Usage: "<group-id> [--thread=<name>]", Summary: "Read a group's messages"},
 	}},
 	{Name: "drive", Summary: "The encrypted drive: files, logs, sharing and links", Subs: []subHelp{

@@ -20,6 +20,8 @@ export interface InboxPolicy {
   read_receipts?: { enabled?: boolean; disabled_for?: string[] };
   /** OAuth bridges allowed to send sign-in prompts (EPIC-022). */
   trusted_auth_services?: string[];
+  /** The email bridge allowed to deliver mail (EPIC-023); edited by the Email setting. */
+  email?: { allow: boolean; bridge?: string };
 }
 
 /** Plain language for each mode — the relay's rules, not a paraphrase. */

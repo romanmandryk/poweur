@@ -218,6 +218,8 @@ func (s *Server) sysWriteRule(identity, path string) (int, func([]byte) error, e
 	case path == idpkg.GroupKeysDoc:
 		// One sealed key per member (up to 1000) plus earlier epochs.
 		return maxGroupKeysBytes, func(b []byte) error { return s.validateOwnGroupKeyring(context.Background(), identity, b) }, nil
+	case path == idpkg.EmailOptInPath:
+		return maxSysDocBytes, func(b []byte) error { return s.validateOwnEmailOptIn(identity, b) }, nil
 	case path == idpkg.GroupPublicKeyDoc:
 		return maxSysDocBytes, func(b []byte) error { return s.validateOwnGroupPublicKey(context.Background(), identity, b) }, nil
 	}
@@ -248,6 +250,24 @@ func (s *Server) validateOwnGroupRoster(identity string, raw []byte) error {
 		return errors.New("identity not hosted here")
 	}
 	return gr.VerifySignature(id.PublicKeyBytes)
+}
+
+// validateOwnEmailOptIn accepts email.json (EPIC-023) only when it is about
+// this identity and signed with its key: the bridge trusts it to say whose
+// address this is, so the relay refuses one that could not verify.
+func (s *Server) validateOwnEmailOptIn(identity string, raw []byte) error {
+	optIn, err := idpkg.ParseEmailOptIn(raw)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(optIn.Identity, identity) {
+		return errors.New("email.json must name this identity")
+	}
+	id, ok := s.identities.Get(identity)
+	if !ok {
+		return errors.New("identity not hosted here")
+	}
+	return optIn.VerifySignature(id.PublicKeyBytes)
 }
 
 // validateImage checks that the bytes really are the image type the file

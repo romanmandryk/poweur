@@ -115,13 +115,15 @@ describe("buildConversationRows", () => {
     expect(rows[0].group).toBe(false);
   });
 
-  it("gives each thread its own row, sorted by last activity", () => {
+  it("gives each thread its own row in the By-subject view, sorted by last activity", () => {
     const rows = buildConversationRows(
       [
         msg({ id: "m1", timestamp: "2026-01-15T09:00:00Z", plaintext: "main" }),
         msg({ id: "m2", thread_id: "thr_x", timestamp: "2026-01-15T09:30:00Z", plaintext: "side" }),
       ],
       ME,
+      () => 0,
+      { view: "subject" },
     );
     expect(rows.map((r) => r.threadId)).toEqual(["thr_x", ""]);
     expect(rows[0].preview).toBe("side");
@@ -129,7 +131,7 @@ describe("buildConversationRows", () => {
     expect(rows[1].threaded).toBe(false);
   });
 
-  it("shows a contact's unread badge once, on their newest row", () => {
+  it("keeps one row per contact in the By-ID view, threads and all", () => {
     const rows = buildConversationRows(
       [
         msg({ id: "m1", timestamp: "2026-01-15T09:00:00Z" }),
@@ -138,7 +140,9 @@ describe("buildConversationRows", () => {
       ME,
       () => 3,
     );
-    expect(rows.map((r) => r.unread)).toEqual([3, 0]);
+    expect(rows.map((r) => r.unread)).toEqual([3]);
+    expect(rows[0].threadId).toBe(null);
+    expect(rows[0].messages).toHaveLength(2);
   });
 
   it("skips unsigned messages — they belong to the anonymous tray", () => {

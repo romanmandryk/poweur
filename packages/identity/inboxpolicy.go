@@ -161,6 +161,9 @@ type InboxPolicy struct {
 	// and nothing else: a listed service is not a contact and cannot chat,
 	// share or send any other `sys.*` message. Empty = no service may.
 	TrustedAuthServices []string `json:"trusted_auth_services,omitempty"`
+	// Email names the email bridge (EPIC-023) whose `email.*` messages are
+	// admitted in every inbox mode; nil = none.
+	Email *EmailPolicy `json:"email,omitempty"`
 }
 
 // MaxTrustedAuthServices caps the list; a sign-in prompt source is a
@@ -196,6 +199,11 @@ func (p InboxPolicy) Validate() error {
 	}
 	if p.ReadReceipts != nil {
 		if err := p.ReadReceipts.Validate(); err != nil {
+			return err
+		}
+	}
+	if p.Email != nil {
+		if err := p.Email.Validate(); err != nil {
 			return err
 		}
 	}

@@ -1,6 +1,6 @@
 {
   "name": "poweur",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "The poweur command line: identity, messaging and files from the terminal. A thin alias for @poweur/client, so `npx poweur …` works.",
   "license": "Apache-2.0",
   "type": "module",

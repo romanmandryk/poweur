@@ -10,6 +10,7 @@ import { RelayClient } from "./http.js";
 import { newMessageId } from "./ids.js";
 import { validateEnvelopeExtensions, validateThreadId } from "./msgtypes.js";
 import { resolveIdentity, type ResolveOptions } from "./resolve.js";
+import { formatBody, newThreadId } from "./subject.js";
 import type { GroupFanoutResponse, Message, ShareGroup } from "./types.js";
 
 export const MAX_GROUP_FANOUT_MEMBERS = 100;
@@ -25,6 +26,8 @@ export interface GroupSendOptions {
   thread?: string;
   expiresAt?: string;
   metadata?: Record<string, string>;
+  /** Optional subject line (E09-T13); without `thread`, a fresh subject thread is minted. */
+  subject?: string;
 }
 
 export interface GroupSendResult {
@@ -141,10 +144,17 @@ export class GroupMessaging {
     }
     const recipients = members.filter((member) => member !== sender);
     if (!recipients.length) throw new PoweurError("invalid_argument", `${group} has no other members`);
-    const threadId = groupThreadId(document.group, options.thread ?? "");
+    let body = { plaintext } as { plaintext: string; metadata?: Record<string, string> };
+    let thread = options.thread ?? "";
+    if (options.subject?.trim()) {
+      body = formatBody(options.subject, plaintext);
+      if (!thread) thread = newThreadId();
+    }
+    plaintext = body.plaintext;
+    const threadId = groupThreadId(document.group, thread);
     const threadError = validateGroupThreadId(document.group, threadId);
     if (threadError) throw new PoweurError("invalid_argument", threadError);
-    const metadata = { ...(options.metadata ?? {}), group: document.group.toLowerCase(), epoch: String(document.epoch ?? 0) };
+    const metadata = { ...(options.metadata ?? {}), ...(body.metadata ?? {}), group: document.group.toLowerCase(), epoch: String(document.epoch ?? 0) };
     const extensionError = validateEnvelopeExtensions({
       type: options.type,
       threadId,

@@ -29,13 +29,13 @@ export { ENCRYPTION_ALG };
 
 /** HKDF info and AAD prefix — must match Go byte for byte. */
 const KDF_INFO = "poweur/msg/v1";
-export type SealDomain = "poweur/msg/v1" | "poweur/drive/seal/v1" | "poweur/drive/name/v1" | "poweur/drive/record/v1" | "poweur/group/key/v1";
+export type SealDomain = "poweur/msg/v1" | "poweur/drive/seal/v1" | "poweur/drive/name/v1" | "poweur/drive/record/v1" | "poweur/group/key/v1" | "poweur/email/blob/v1" | "poweur/email/upload/v1";
 
 function validateSealDomain(domain: SealDomain, context: Uint8Array): void {
   if (domain === "poweur/msg/v1") {
     if (context.length !== 0) throw new PoweurError("invalid_argument", "message seals do not accept extra context");
-  } else if (["poweur/drive/seal/v1", "poweur/drive/name/v1", "poweur/drive/record/v1", "poweur/group/key/v1"].includes(domain)) {
-    if (context.length === 0) throw new PoweurError("invalid_argument", "drive seals require context");
+  } else if (["poweur/drive/seal/v1", "poweur/drive/name/v1", "poweur/drive/record/v1", "poweur/group/key/v1", "poweur/email/blob/v1", "poweur/email/upload/v1"].includes(domain)) {
+    if (context.length === 0) throw new PoweurError("invalid_argument", "this seal domain requires context");
   } else {
     throw new PoweurError("invalid_argument", "unsupported seal domain");
   }

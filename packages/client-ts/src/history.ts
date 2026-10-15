@@ -31,6 +31,7 @@ import type { AuthorCursors, DriveFiles, OpenFile } from "./drive/files.js";
 import { fromUtf8, toBase64url, utf8 } from "./encoding.js";
 import { PoweurError, RelayError } from "./errors.js";
 import { ENCRYPTION_ALG } from "./types.js";
+import { conversationKey, validateSubject } from "./subject.js";
 
 export const HISTORY_DIR = ".poweur/private/messages";
 export const HISTORY_READ_STATE_PATH = ".poweur/private/read-state.json";
@@ -101,6 +102,11 @@ export interface HistoryRecord {
   expires_at?: string;
   metadata?: Record<string, string>;
   queue: HistoryQueue;
+  /**
+   * The subject line (E09-T13), parsed out of a `headers-v1` plaintext;
+   * `body` then holds only the text. Absent on records without one.
+   */
+  subject?: string;
   /** The decrypted text. Ciphertext nobody holds an ephemeral key for is not an archive. */
   body: string;
 }
@@ -113,7 +119,15 @@ export interface ReadMark {
 export interface ReadState {
   version?: number;
   conversations: Record<string, ReadMark>;
+  /**
+   * Per-thread marks (E09-T13): peer → thread key → position. A record is
+   * read when its peer mark or its thread mark covers it.
+   */
+  threads?: Record<string, Record<string, ReadMark>>;
 }
+
+/** Thread marks kept per peer. */
+export const MAX_THREAD_MARKS = 500;
 
 export interface SealedDocument {
   version?: number;
@@ -210,6 +224,7 @@ export function validateHistoryRecord(record: HistoryRecord): void {
   if (!queues.includes(record.queue)) {
     throw new PoweurError("invalid_argument", `history record: invalid queue ${record.queue}`);
   }
+  if (record.subject) validateSubject(record.subject);
   if (record.body.length > MAX_HISTORY_BODY) {
     throw new PoweurError("invalid_argument", `history record: body exceeds ${MAX_HISTORY_BODY} bytes`);
   }
@@ -246,7 +261,34 @@ export function markCovers(mark: ReadMark, timestamp: string, id: string): boole
   return (mark.id ?? "") >= id;
 }
 
-/** Advance a peer's read mark; never rewind it. */
+function cloneThreads(state: ReadState): Record<string, Record<string, ReadMark>> {
+  const out: Record<string, Record<string, ReadMark>> = {};
+  for (const [peer, marks] of Object.entries(state.threads ?? {})) out[peer] = { ...marks };
+  return out;
+}
+
+function withThreads(conversations: Record<string, ReadMark>, threads: Record<string, Record<string, ReadMark>>): ReadState {
+  const kept = Object.fromEntries(Object.entries(threads).filter(([, marks]) => Object.keys(marks).length > 0));
+  return Object.keys(kept).length
+    ? { version: HISTORY_VERSION, conversations, threads: kept }
+    : { version: HISTORY_VERSION, conversations };
+}
+
+/** A record's grouping key inside its conversation (`conversationKey`). */
+export function recordThreadKey(record: Pick<HistoryRecord, "thread_id" | "subject">): string {
+  return conversationKey(record.thread_id, record.subject);
+}
+
+/** Whether the peer mark or the thread mark covers a record of `peer`. */
+export function stateCovers(state: ReadState, peer: string, threadKey: string, timestamp: string, id: string): boolean {
+  const key = peer.trim().toLowerCase();
+  const mark = state.conversations[key];
+  if (mark && markCovers(mark, timestamp, id)) return true;
+  const threadMark = state.threads?.[key]?.[threadKey];
+  return Boolean(threadMark && markCovers(threadMark, timestamp, id));
+}
+
+/** Advance a peer's read mark; never rewind it. Covered thread marks go. */
 export function markRead(
   state: ReadState,
   peer: string,
@@ -260,7 +302,39 @@ export function markRead(
   if (!existing || !markCovers(existing, timestamp, id)) {
     conversations[key] = { timestamp, id };
   }
-  return { version: HISTORY_VERSION, conversations };
+  const threads = cloneThreads(state);
+  const mark = conversations[key]!;
+  for (const [threadKey, threadMark] of Object.entries(threads[key] ?? {})) {
+    if (markCovers(mark, threadMark.timestamp, threadMark.id ?? "")) delete threads[key]![threadKey];
+  }
+  return withThreads(conversations, threads);
+}
+
+/** Advance one thread's mark inside a peer's conversation; never rewind it. */
+export function markThreadRead(
+  state: ReadState,
+  peer: string,
+  threadKey: string,
+  timestamp: string,
+  id: string,
+): ReadState {
+  const key = peer.trim().toLowerCase();
+  const conversations = { ...state.conversations };
+  const threads = cloneThreads(state);
+  if (!key || !timestamp) return withThreads(conversations, threads);
+  const peerMark = conversations[key];
+  if (peerMark && markCovers(peerMark, timestamp, id)) return withThreads(conversations, threads);
+  const marks = (threads[key] ??= {});
+  const existing = marks[threadKey];
+  if (!existing || !markCovers(existing, timestamp, id)) marks[threadKey] = { timestamp, id };
+  while (Object.keys(marks).length > MAX_THREAD_MARKS) {
+    let oldest = "";
+    for (const [k, m] of Object.entries(marks)) {
+      if (!oldest || !markCovers(m, marks[oldest]!.timestamp, marks[oldest]!.id ?? "")) oldest = k;
+    }
+    delete marks[oldest];
+  }
+  return withThreads(conversations, threads);
 }
 
 /** Count records past each peer's mark. Our own sent copies never count. */
@@ -274,8 +348,7 @@ export function unreadCounts(
     if (record.queue === HISTORY_QUEUE_SENT) continue;
     if (record.sender && record.sender.toLowerCase() === owner.toLowerCase()) continue;
     const peer = historyPeer(record, owner);
-    const mark = state.conversations[peer];
-    if (mark && markCovers(mark, record.timestamp, record.id)) continue;
+    if (stateCovers(state, peer, recordThreadKey(record), record.timestamp, record.id)) continue;
     counts[peer] = (counts[peer] ?? 0) + 1;
   }
   return counts;
@@ -300,7 +373,21 @@ export function parseReadState(raw: string): ReadState {
     }
     conversations[peer] = mark;
   }
-  return { version: HISTORY_VERSION, conversations };
+  const threads: Record<string, Record<string, ReadMark>> = {};
+  for (const [peer, marks] of Object.entries(doc.threads ?? {})) {
+    if (!peer.trim()) throw new PoweurError("invalid_argument", "read-state: empty peer in threads");
+    const entries = Object.entries(marks ?? {});
+    if (entries.length > MAX_THREAD_MARKS) {
+      throw new PoweurError("invalid_argument", `read-state: ${peer} has too many thread marks (max ${MAX_THREAD_MARKS})`);
+    }
+    for (const [key, mark] of entries) {
+      if (Number.isNaN(new Date(mark?.timestamp ?? "").getTime())) {
+        throw new PoweurError("invalid_argument", `read-state: ${peer}/${key}: timestamp must be RFC3339`);
+      }
+    }
+    threads[peer] = Object.fromEntries(entries);
+  }
+  return withThreads(conversations, threads);
 }
 
 export function parseSealedDocument(raw: string): SealedDocument {
@@ -618,6 +705,20 @@ export class MessageHistory {
       if (record.sender && record.sender.toLowerCase() === this.owner.toLowerCase()) continue;
       if (historyPeer(record, this.owner) !== peer.trim().toLowerCase()) continue;
       state = markRead(state, peer, record.timestamp, record.id);
+    }
+    await this.putReadState(state);
+    return state;
+  }
+
+  /** Advance one thread's mark (E09-T13) to the newest record given. */
+  async markThreadRead(peer: string, threadKey: string, records: HistoryRecord[]): Promise<ReadState> {
+    let state = await this.readState();
+    for (const record of records) {
+      if (record.queue === HISTORY_QUEUE_SENT) continue;
+      if (record.sender && record.sender.toLowerCase() === this.owner.toLowerCase()) continue;
+      if (historyPeer(record, this.owner) !== peer.trim().toLowerCase()) continue;
+      if (recordThreadKey(record) !== threadKey) continue;
+      state = markThreadRead(state, peer, threadKey, record.timestamp, record.id);
     }
     await this.putReadState(state);
     return state;

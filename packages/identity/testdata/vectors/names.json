@@ -131,5 +131,68 @@
     "claimable": false,
     "hosted_valid": false,
     "dir_name": "indieauth__poweur__net"
+  },
+  {
+    "identity": "mta-sts.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "mta-sts__poweur__net"
+  },
+  {
+    "identity": "autoconfig.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "autoconfig__poweur__net"
+  },
+  {
+    "identity": "autodiscover.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "autodiscover__poweur__net"
+  },
+  {
+    "identity": "mailer-daemon.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "mailer-daemon__poweur__net"
+  },
+  {
+    "identity": "bounce.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "bounce__poweur__net"
+  },
+  {
+    "identity": "bounces.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "bounces__poweur__net"
+  },
+  {
+    "identity": "dmarc.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "dmarc__poweur__net"
+  },
+  {
+    "identity": "email.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "email__poweur__net"
+  },
+  {
+    "identity": "postmaster.poweur.net",
+    "valid": true,
+    "claimable": false,
+    "hosted_valid": false,
+    "dir_name": "postmaster__poweur__net"
   }
 ]

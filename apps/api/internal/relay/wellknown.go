@@ -135,7 +135,13 @@ func (s *Server) serveSysPublicFile(w http.ResponseWriter, r *http.Request, iden
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	if name == "email.json" {
+		// Opting out of email must stop delivery within the bridge's own
+		// short cache, not wait out a long shared one.
+		w.Header().Set("Cache-Control", "public, max-age=60")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
 	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
@@ -250,8 +256,27 @@ func (s *Server) serveCapabilities(w http.ResponseWriter, r *http.Request, ident
 	if len(endpoints) > 0 {
 		caps["endpoints"] = endpoints
 	}
+	cache := "public, max-age=300"
+	if b := s.defaultEmailBridge(identity); b != "" {
+		// Whether this identity takes mail through the operator's bridge
+		// (on by default; the inbox policy can opt out or name another).
+		// The bridge reads it at RCPT time in place of email.json, so it is
+		// computed, not stored, and cached briefly like email.json.
+		features, _ := caps["features"].(map[string]any)
+		if features == nil {
+			features = map[string]any{}
+		}
+		policy, _ := s.recipientPolicy(r.Context(), identity)
+		receive := "off"
+		if policy.EmailBridge(b) == b {
+			receive = "on"
+		}
+		features["email_receive"] = receive
+		caps["features"] = features
+		cache = "public, max-age=60"
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", cache)
 	writeJSON(w, http.StatusOK, caps)
 }
 
@@ -267,6 +292,10 @@ func (s *Server) capabilityEndpoints(identity string) map[string]string {
 	}
 	if s.cfg.OAuthBridgeURL != "" {
 		out["oauth_bridge"] = s.cfg.OAuthBridgeURL
+	}
+	// Only identities that have an address to offer advertise the bridge.
+	if b := s.defaultEmailBridge(identity); b != "" {
+		out["email_bridge"] = b
 	}
 	return out
 }

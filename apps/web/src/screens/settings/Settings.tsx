@@ -28,9 +28,11 @@ import {
   UserRound,
   VenetianMask,
   type LucideIcon,
+  Mail,
 } from "lucide-react";
 import { isSessionValid, SDK_BUILD_TIME, SDK_VERSION } from "@poweur/client";
 import { loadPolicy, loadProfile } from "../../actions/account";
+import { loadEmail } from "../../actions/email";
 import { policySummary, removeIdentityFromDevice, usesDnsPath } from "../../actions/settings";
 import { APP_BUILD_TIME, APP_VERSION } from "../../build-info";
 import { askConfirm } from "../../components/Dialogs";
@@ -57,6 +59,7 @@ import {
   openInstallPanel,
   openLookupPanel,
   openNotificationsPanel,
+  openEmailPanel,
   openPolicyPanel,
   openProfilePanel,
   openRecoveryKitPanel,
@@ -74,6 +77,7 @@ export function Settings() {
   const mode = useSession((state) => state.mode);
   useSession((state) => state.revision); // storage-backed rows below repaint on change
   const policy = useData((state) => state.policy);
+  const email = useData((state) => state.email);
   const profile = useData((state) => state.profile);
   const push = useRoute((state) => state.push);
 
@@ -100,6 +104,7 @@ export function Settings() {
     if (!unlocked) return;
     void loadPolicy();
     void loadProfile();
+    void loadEmail();
     if (identity) void loadStorageUsage(identity);
   }, [unlocked, identity]);
 
@@ -184,6 +189,16 @@ export function Settings() {
             <SettingsGroup label="Inbox">
               <SettingsRow id="row-analytics" icon={ChartColumn} label="Diagnostics" onClick={openAnalyticsPanel} />
               <SettingsRow id="row-policy" icon={Shield} label="Who can message you" value={summary.mode} onClick={openPolicyPanel} />
+              {(email.enabled || email.offered) && (
+                <SettingsRow
+                  id="row-email"
+                  icon={Mail}
+                  label="Email address"
+                  value={email.enabled ? (email.address ?? "On") : "Off"}
+                  valueTone={email.enabled ? "ok" : undefined}
+                  onClick={openEmailPanel}
+                />
+              )}
               <SettingsRow
                 id="row-policy-anon"
                 icon={VenetianMask}

@@ -172,9 +172,9 @@ func validateSealDomain(domain string, context []byte) error {
 		if len(context) != 0 {
 			return errors.New("message seals do not accept extra context")
 		}
-	case DriveSealDomain, DriveNameDomain, DriveRecordDomain, GroupKeyDomain:
+	case DriveSealDomain, DriveNameDomain, DriveRecordDomain, GroupKeyDomain, EmailBlobSealDomain, EmailUploadSealDomain:
 		if len(context) == 0 {
-			return errors.New("drive seals require context")
+			return errors.New("this seal domain requires context")
 		}
 	default:
 		return errors.New("unsupported seal domain")

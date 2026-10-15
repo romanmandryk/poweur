@@ -26,9 +26,12 @@ import { MessageText } from "../../components/MessageText";
 import { ProfileCard } from "../../components/ProfileCard";
 import { fmtRelative } from "../../lib/format";
 import { handleOf } from "../../lib/identity";
-import { buildConversationRows, threadLabel } from "../../lib/threads.js";
+import { buildConversationRows } from "../../lib/threads.js";
+import { loadEmail } from "../../actions/email";
+import { loadTrayView, saveTrayView } from "../../lib/trayView";
+import { EmailTray, useUnreadMail } from "./Email";
 import { anonymousAllowed, contactFor, incomingRequests, unreadAnonymous } from "../../state/badges";
-import { useData, type Tray } from "../../state/data";
+import { emailBridgeOf, useData, type Tray } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { Avatar } from "../../ui/Avatar";
@@ -41,6 +44,7 @@ import { Tab, TabBar } from "../../ui/Tabs";
 
 const TRAYS: { id: Tray; label: string }[] = [
   { id: "inbox", label: "Inbox" },
+  { id: "email", label: "Email" },
   { id: "requests", label: "Requests" },
   { id: "anonymous", label: "Anonymous" },
 ];
@@ -56,10 +60,18 @@ export function Messages() {
       anonymous: unreadAnonymous(state),
     })),
   );
-  // An inbox that refuses anonymous messages has nothing to show in their tray.
+  const unreadMail = useUnreadMail();
+  const email = useData((state) => state.email);
+  // An inbox that refuses anonymous messages has nothing to show in their tray;
+  // Email shows once opted in, or while the relay offers an address to take.
   const anonOn = anonymousAllowed(policy);
-  const trays = TRAYS.filter(({ id }) => id !== "anonymous" || anonOn);
-  const shown: Tray = tray === "anonymous" && !anonOn ? "inbox" : tray;
+  const emailOn = Boolean(policy.doc?.email?.allow) || Boolean(email.offered);
+  const trays = TRAYS.filter(({ id }) => (id !== "anonymous" || anonOn) && (id !== "email" || emailOn));
+  const shown: Tray = (tray === "anonymous" && !anonOn) || (tray === "email" && !emailOn) ? "inbox" : tray;
+  const view = useData((state) => state.trayView);
+  useEffect(() => {
+    if (identity) useData.setState({ trayView: loadTrayView(identity) });
+  }, [identity]);
 
   // Arriving here is a moment to look: the stream covers the rest.
   useEffect(() => {
@@ -70,6 +82,7 @@ export function Messages() {
     void loadPolicy().then(() => {
       if (anonymousAllowed(useData.getState().policy)) void loadAnon();
     });
+    void loadEmail();
   }, [tray]);
 
   useEffect(() => {
@@ -80,14 +93,34 @@ export function Messages() {
     <>
       <PullToRefresh onRefresh={refreshMessages}>
         <DestHeader title="Messages">
-          <Button id="btn-compose-top" size="sm" className="dest-action hidden md:inline-flex" onClick={() => push("new-chat")}>
+          {shown === "inbox" && (
+            <div className="tray-view inline-flex rounded-full bg-surface-2 p-0.5 text-[13px]" role="radiogroup" aria-label="Group messages">
+              {(["id", "subject"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === mode}
+                  data-view={mode}
+                  onClick={() => {
+                    useData.setState({ trayView: mode });
+                    if (identity) saveTrayView(identity, mode);
+                  }}
+                  className={`rounded-full px-2.5 py-1 font-medium ${view === mode ? "bg-surface text-fg shadow-card" : "text-muted"}`}
+                >
+                  {mode === "id" ? "By ID" : "By subject"}
+                </button>
+              ))}
+            </div>
+          )}
+          <Button id="btn-compose-top" size="sm" className="dest-action hidden md:inline-flex" onClick={() => push("new-chat", { view })}>
             <Plus className="size-4" aria-hidden="true" /> New message
           </Button>
         </DestHeader>
         <AuthPrompts />
         <TabBar className="tray-bar" aria-label="Message trays">
           {trays.map(({ id, label }) => {
-            const waiting = id === "inbox" ? 0 : counts[id];
+            const waiting = id === "inbox" ? 0 : id === "email" ? unreadMail : counts[id];
             return (
               <Tab
                 key={id}
@@ -106,14 +139,14 @@ export function Messages() {
             );
           })}
         </TabBar>
-        {shown === "requests" ? <RequestsTray /> : shown === "anonymous" ? <AnonTray /> : <InboxTray />}
+        {shown === "requests" ? <RequestsTray /> : shown === "anonymous" ? <AnonTray /> : shown === "email" ? <EmailTray /> : <InboxTray />}
       </PullToRefresh>
       <button
         id="btn-compose"
         type="button"
         title="New message"
         aria-label="New message"
-        onClick={() => push("new-chat")}
+        onClick={() => push("new-chat", { view })}
         className="fab bottom-above-nav fixed right-5 z-80 flex size-[54px] items-center justify-center rounded-full bg-accent text-white shadow-[0_4px_20px_rgb(88_86_214/.4)] transition-transform active:scale-[.93] md:hidden"
       >
         <SquarePen className="size-6" aria-hidden="true" />
@@ -179,8 +212,14 @@ function InboxTray() {
   const messages = useData((state) => state.messages);
   const history = useData((state) => state.history);
   const contacts = useData((state) => state.contacts.list);
+  const view = useData((state) => state.trayView);
+  const emailBridge = useData((state) => emailBridgeOf(state.policy.doc, state.email.offered));
 
-  const rows = buildConversationRows(messages, identity, (peer: string) => unreadFor({ messages, history }, identity, peer)).map(
+  const rows = buildConversationRows(messages, identity, (peer: string) => unreadFor({ messages, history }, identity, peer), {
+    view,
+    emailBridge,
+    threadUnread: (peer: string, key: string) => unreadFor({ messages, history }, identity, peer, key),
+  }).map(
     (row: any) => {
       const known = contactFor(contacts, row.contact);
       // Someone we have no entry for: adding them is one tap from the message.
@@ -198,13 +237,14 @@ function InboxTray() {
     <div className="conv-list bg-surface">
       {rows.map((row: any) => {
         const open = () => openThread(row.contact, { thread: row.threadId, group: row.group });
+        const subjectRow = view === "subject";
         return (
           <div
-            key={`${row.contact}#${row.threadId}`}
+            key={`${row.contact}#${row.threadId ?? "*"}`}
             role="button"
             tabIndex={0}
             data-compose-to={row.contact}
-            data-thread={row.threadId}
+            data-thread={row.threadId ?? ""}
             data-group={row.group ? "true" : "false"}
             onClick={open}
             onKeyDown={onActivateKeys(open)}
@@ -218,15 +258,24 @@ function InboxTray() {
               <Avatar identity={row.contact} size="md" />
             )}
             <div className="conv-info min-w-0 flex-1">
-              <div className="conv-name text-base font-semibold">
-                {row.petname || handleOf(row.contact)}
-                {row.group && (
-                  <Chip tone="success" className="ml-1.5">
-                    Group
-                  </Chip>
-                )}
-                {row.threaded && <span className="conv-thread ml-1.5 text-[13px] font-medium text-faint">#{threadLabel(row.threadId)}</span>}
-              </div>
+              {subjectRow ? (
+                <>
+                  <div className={`conv-name conv-subject truncate text-base ${row.unread ? "font-bold" : "font-semibold"}`}>{row.title}</div>
+                  <div className="conv-peer truncate text-[13px] text-muted">
+                    {row.petname || handleOf(row.contact)}
+                    {row.group && " · group"}
+                  </div>
+                </>
+              ) : (
+                <div className="conv-name text-base font-semibold">
+                  {row.petname || handleOf(row.contact)}
+                  {row.group && (
+                    <Chip tone="success" className="ml-1.5">
+                      Group
+                    </Chip>
+                  )}
+                </div>
+              )}
               <div className="conv-preview mt-px truncate text-sm text-muted">
                 <MessageText text={row.preview} />
               </div>

@@ -4,10 +4,13 @@
  * the actions that fill these slices (E21-T6…T11); this file owns their shape
  * and the reset that switching identity performs.
  */
+import { emailBridgeOf as sdkEmailBridgeOf } from "@poweur/client";
 import { create } from "zustand";
 import type { DriveFiles, Mount, OpenFile } from "@poweur/client/drive";
 
-export type Tray = "inbox" | "requests" | "anonymous";
+export type Tray = "inbox" | "requests" | "anonymous" | "email";
+/** How the Inbox tray groups (E09-T13): one row per ID, or per subject. */
+export type TrayView = "id" | "subject";
 export type FilesTab = "mine" | "shared";
 
 export interface Contact {
@@ -33,6 +36,18 @@ export const freshHistory = () => ({
 export const freshRequests = () => ({ incoming: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
 export const freshAnon = () => ({ messages: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
 export const freshPolicy = () => ({ doc: null as any, explicit: false, loading: false, loaded: false });
+export const freshEmail = () => ({
+  enabled: false,
+  address: null as string | null,
+  bridge: null as string | null,
+  /** The bridge the relay advertises, if any. */
+  offered: null as string | null,
+  /** False when the bridge only receives mail (no composing). */
+  canSend: true,
+  loading: false,
+  loaded: false,
+  error: null as string | null,
+});
 export const freshProfile = () => ({ doc: null as any, explicit: false, loaded: false, loading: false });
 export const freshFiles = () => ({
   identity: null as string | null,
@@ -62,6 +77,7 @@ function freshIdentityData() {
     anon: freshAnon(),
     policy: freshPolicy(),
     profile: freshProfile(),
+    email: freshEmail(),
     files: freshFiles(),
     /** The open conversation (E15-T13), or null. */
     thread: null as any,
@@ -72,6 +88,10 @@ export function freshData() {
   return {
     ...freshIdentityData(),
     tray: "inbox" as Tray,
+    /** Per device and identity, from localStorage (lib/trayView). */
+    trayView: "id" as TrayView,
+    /** The open mail thread, or null. */
+    mailThread: null as string | null,
     /** The Files tab, kept across navigation like the message tray. */
     filesTab: "mine" as FilesTab,
     /** null unless the first-run flow is on screen. */
@@ -125,3 +145,12 @@ export const useData = create<DataState>()((set) => ({
   ...freshData(),
   resetForIdentity: () => set(freshIdentityData()),
 }));
+
+/**
+ * The email bridge whose mail the user takes (EPIC-023), or "": the one the
+ * inbox policy names, else — email is on by default — the one the relay
+ * offers, unless the policy opts out. Use as a selector with both values.
+ */
+export function emailBridgeOf(policy: any, offered: string | null | undefined): string {
+  return sdkEmailBridgeOf(policy, offered);
+}

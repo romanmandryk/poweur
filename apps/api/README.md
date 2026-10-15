@@ -44,6 +44,14 @@ WEB_STATIC_DIR=/absolute/path/to/poweur/apps/web/dist go run .
 ([`apps/oauth`](../oauth/README.md)) in hosted identities' capabilities and as their IndieAuth
 metadata `Link`. It is a public URL, not a credential: the relay never calls the bridge.
 
+### Email bridge (optional)
+
+`EMAIL_BRIDGE_ID=email.example.org` names the operator's email bridge
+([`apps/email`](../email/README.md), EPIC-023). Hosted identities with an address advertise it as
+`endpoints.email_bridge`, and the relay admits `email.*` messages from it — in every inbox mode —
+for users whose inbox policy `email` block names it. The bridge is an ordinary Poweur identity;
+the relay holds no credential for it and never calls it.
+
 The relay sends permissive **CORS** headers on all routes so browsers can talk to any Poweur ID relay (direct POST to recipient hosts, not only the home relay).
 
 For UI work, `pnpm web:dev` runs Vite with hot reload; the app talks to whichever relay it is pointed at, so pick the local one (`http://127.0.0.1:8080`) in its relay prompt.

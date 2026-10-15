@@ -33,6 +33,7 @@ import { MemorySessionStore, SessionManager, type SessionStore } from "./session
 import { DriveClient } from "./drive/client.js";
 import { DriveFiles } from "./drive/files.js";
 import { DriveJsonLog } from "./drive/jsonlog.js";
+import { EmailApi } from "./email-client.js";
 
 /** Where the sign-in consent log lives (EPIC-008 E08-T3). */
 export const AUTH_LOG_PATH = ".poweur/private/logs/auth.log";
@@ -99,6 +100,16 @@ export class PoweurClient {
     this.groups = new GroupMessaging({ client: this.relay, resolve: this.#resolveOptions });
   }
 
+  /** The resolver options this client was built with. */
+  get resolveOptions(): ResolveOptions {
+    return this.#resolveOptions;
+  }
+
+  /** The email bridge, from the user's side (EPIC-023). */
+  email(): EmailApi {
+    return new EmailApi(this);
+  }
+
   get identityName(): string {
     return this.signer.identity;
   }
@@ -124,6 +135,8 @@ export class PoweurClient {
       timestamp: first.timestamp,
       ...(options.type ? { type: options.type } : {}),
       thread_id: first.thread_id,
+      ...(first.metadata ? { metadata: first.metadata } : {}),
+      ...(options.subject?.trim() ? { subject: options.subject.trim() } : {}),
       queue: HISTORY_QUEUE_SENT,
       body: plaintext,
     }]);
@@ -232,6 +245,7 @@ export class PoweurClient {
           ...(m.thread_id ? { thread_id: m.thread_id } : {}),
           ...(m.expires_at ? { expires_at: m.expires_at } : {}),
           ...(m.metadata ? { metadata: m.metadata } : {}),
+          ...(m.subject ? { subject: m.subject } : {}),
           queue: HISTORY_QUEUE_INBOX as typeof HISTORY_QUEUE_INBOX,
           body: m.plaintext ?? "",
         })),
@@ -299,9 +313,10 @@ export class PoweurClient {
         recipient: result.message.recipient,
         timestamp: result.message.timestamp,
         ...(options.type ? { type: options.type } : {}),
-        ...(options.threadId ? { thread_id: options.threadId } : {}),
+        ...(result.message.thread_id ? { thread_id: result.message.thread_id } : {}),
         ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
-        ...(options.metadata ? { metadata: options.metadata } : {}),
+        ...(result.message.metadata ? { metadata: result.message.metadata } : {}),
+        ...(options.subject?.trim() ? { subject: options.subject.trim() } : {}),
         queue: HISTORY_QUEUE_SENT,
         body: plaintext,
       },
@@ -477,8 +492,9 @@ export class PoweurClient {
     anonymous?: AnonymousPolicy,
     readReceipts?: InboxPolicy["read_receipts"],
     trustedAuthServices?: string[],
+    email?: InboxPolicy["email"],
   ): Promise<InboxPolicy> {
-    return writeInboxPolicy(this.system(), mode, anonymous, readReceipts, trustedAuthServices);
+    return writeInboxPolicy(this.system(), mode, anonymous, readReceipts, trustedAuthServices, email);
   }
 
   /** Our own public profile document, and whether one has been written. */

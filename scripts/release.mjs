@@ -2,7 +2,7 @@
 // Release helper. See RELEASING.md.
 //
 //   node scripts/release.mjs status
-//   node scripts/release.mjs bump <sdk|cli|relay|web|oauth> [patch|minor|major|x.y.z]
+//   node scripts/release.mjs bump <sdk|cli|relay|web|oauth|email> [patch|minor|major|x.y.z]
 //   node scripts/release.mjs tag <sdk|cli> [--dry-run]
 //
 // `bump` edits the version files (open a pull request with the result).
@@ -43,7 +43,7 @@ if (cmd === "status") {
   console.log(`${name}: ${from} -> ${to}. Commit it in a pull request, then run: node scripts/release.mjs tag ${name}`);
 } else if (cmd === "tag") {
   const pkg = PACKAGES[name];
-  if (!pkg?.tagPrefix) fail("tag needs sdk or cli (relay, web and oauth deploy from master)");
+  if (!pkg?.tagPrefix) fail("tag needs sdk or cli (relay, web, oauth and email deploy from master)");
   const version = readVersion(name);
   const tag = `${pkg.tagPrefix}${version}`;
   if (git("rev-parse", "--abbrev-ref", "HEAD") !== "master") fail("run this from master");

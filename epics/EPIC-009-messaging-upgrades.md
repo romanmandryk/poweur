@@ -3,7 +3,7 @@
 - **Status:** T1–T6 done; **T7–T10 open** (messaging needs of apps, found by the EPIC-026 reference apps);
   **T11 done, T12 shipped** (background Web Push + installable per-identity PWA with badges;
   open: iOS onboarding hint, on-device checklist; sign-in pushes shipped with EPIC-028);
-  **T13 open** (optional encrypted subject line; tray grouped by ID or by subject)
+  **T13 done** (optional encrypted subject line; tray grouped by ID or by subject; Go, TS, CLI, web)
 - **Priority:** P1
 - **Depends on:** EPIC-002 (durable storage), EPIC-003 (files, for attachments)
 - **Unlocks:** EPIC-005/007 system messages, EPIC-010 (event-driven automations), EPIC-019 E19-T4
@@ -504,7 +504,7 @@ icon shows the pending count on iOS (dot on Android); reading the message clears
 
 ## Subjects & email-style conversations (T13)
 
-### E09-T13 — Optional subject line; group the tray by ID or by subject — **open**
+### E09-T13 — Optional subject line; group the tray by ID or by subject — **done** (2026-10-13, with EPIC-023)
 
 Messages can carry an optional **subject**, and the client can show the tray either the way it
 does today — one row per ID — or like an email inbox, one row per subject. It is the missing half
@@ -591,54 +591,54 @@ description already assumes.
 
 **Subtasks:**
 
-- [ ] Docs first: `message-format.md` — *Subjects* section (encoding, flag, limits, encryption
+- [x] Docs first: `message-format.md` — *Subjects* section (encoding, flag, limits, encryption
       rationale, grouping key, normalization); `group-messaging.md` — subject threads use
       `GroupThreadID`; a short PCP in `conventions/` for `body_format: headers-v1` so other
       implementations and the email bridge share it
-- [ ] Go canonical rules in `packages/identity` (`subject.go`): `FormatBody(subject, text)`,
+- [x] Go canonical rules in `packages/identity` (`subject.go`): `FormatBody(subject, text)`,
       `ParseBody(plaintext, metadata) (subject, text)`, `ValidateSubject`, `NormalizeSubject`,
       `ConversationKey(msg)`; new conformance vector file `message-subject.json` (encode,
       decode, malformed block, unknown header, flag absent with a `Subject:` body, limits,
       normalization table, grouping keys)
-- [ ] History: `HistoryRecord.Subject` (`omitempty`, so existing records stay byte-identical)
+- [x] History: `HistoryRecord.Subject` (`omitempty`, so existing records stay byte-identical)
       and `Body` holds only the text; `ReadState.Threads` with validation and pruning; extend
       `history-paths` / `history-read-state` vectors
-- [ ] `@poweur/client`: the same functions as the Go twin, driven by the same vectors;
+- [x] `@poweur/client`: the same functions as the Go twin, driven by the same vectors;
       `send` / `sendAndArchive` / `sendGroupAndArchive` take `{ subject }` and mint the thread;
       `inboxAndArchive` and history return `subject` separately from `body`; per-thread read
       marks in `MessageHistory`
-- [ ] Go CLI: `poweur send <to> <text> --subject "<s>"` (mints a thread unless `--thread` is
+- [x] Go CLI: `poweur send <to> <text> --subject "<s>"` (mints a thread unless `--thread` is
       given) and the same on `group send`; `inbox` / `history` / `listen` show the subject;
       `--json --decrypt` emits `subject` next to `body`; `history --by-subject` lists
       conversations by subject. TS CLI: same flags and JSON
-- [ ] Web: `lib/threads.js` — `buildConversationRows(messages, self, { view })` for both views,
+- [x] Web: `lib/threads.js` — `buildConversationRows(messages, self, { view })` for both views,
       `composerSubject({ view, origin, conversation, touched })` returning `{ expanded, value,
       threadId, startsNew }`, unread per row from peer + thread marks; Messages header toggle;
       subject field in `Thread.tsx` and `NewChat.tsx`; subject dividers in the By-ID stream;
       `actions/messages.ts` passes the subject through send, outbox retry and archive
-- [ ] E09-T7 / EPIC-023 hand-off notes: `sys.contact.message` reuses `headers-v1`; the bridge
+- [x] E09-T7 / EPIC-023 hand-off notes: `sys.contact.message` reuses `headers-v1`; the bridge
       maps `Subject:` both ways and links `In-Reply-To` to a `thread_id`
 
 **Tests:**
 
-- [ ] Go unit (`packages/identity`): every `message-subject.json` case; an unflagged body
+- [x] Go unit (`packages/identity`): every `message-subject.json` case; an unflagged body
       starting with `Subject:` stays body; a malformed flagged body comes back whole; subject
       over 256 bytes and with a newline refused; `ConversationKey` order (thread → normalized
       subject → default); the thread minted for a group passes `ValidateGroupThreadID`; history
       record without a subject marshals byte-identical to the pre-T13 form; read-state with and
       without `threads` round-trips, prunes on peer-mark advance, and an unread check honours
       either mark
-- [ ] TS unit: the same vectors through `@poweur/client`; `send` with a subject produces the
+- [x] TS unit: the same vectors through `@poweur/client`; `send` with a subject produces the
       flag, a fresh ULID thread and a plaintext that decrypts to the header block, and without
       one produces exactly today's envelope (canonical string compared to a pre-T13 fixture)
-- [ ] Web unit (`test/lib/threads.test.ts` and a new `composer-subject.test.ts`): both views'
+- [x] Web unit (`test/lib/threads.test.ts` and a new `composer-subject.test.ts`): both views'
       rows from one fixture inbox (subject threads, a named thread, a no-subject stream, a group,
       a subject-without-thread message, an old client's reply without a subject that still
       groups by thread); every row of the composer table above; "touched" stops prefill
       updates; edit and clear set `startsNew`; per-row unread with interleaved threads, where
       reading one subject leaves the other unread
-- [ ] CLI unit: `--subject` validation, thread minting vs explicit `--thread`, JSON shape
-- [ ] Integration (`apps/integration`):
+- [x] CLI unit: `--subject` validation, thread minting vs explicit `--thread`, JSON shape
+- [ ] Integration (`apps/integration`) (done: `TestINT_SUBJECT_01` on one relay — subject apart from the text, no subject bytes on the relay's disk, threads grouped; open: the cross-relay, group and compatibility variants 02–04):
       `TestINT_SUBJECT_01` — Go CLI on relay A sends with a subject to an identity on relay B;
       the TS CLI's `inbox --json --decrypt` shows the subject and text apart; **the subject's
       bytes appear nowhere in either relay's spool or logs**;
@@ -649,7 +649,7 @@ description already assumes.
       `TestINT_SUBJECT_04` — compatibility: an envelope built without the flag whose text starts
       with `Subject:` is delivered and shown verbatim, and a flagged message verifies against
       the canonical string with the `meta:body_format:headers-v1` line written out longhand
-- [ ] Playwright (`apps/web/test/e2e/subjects.spec.js`): default view is By ID; new chat shows a
+- [x] Playwright (`apps/web/test/e2e/subjects.spec.js`): default view is By ID; new chat shows a
       collapsed subject; switch to By subject, start "Q3 budget" (field expanded); the
       recipient sees a "Q3 budget" row, opens it and the reply field is prefilled; changing the
       subject shows the warning and makes a second row; By ID shows one row for the contact with

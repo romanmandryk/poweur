@@ -1,6 +1,6 @@
 {
   "name": "@poweur/web",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -20,6 +20,7 @@
     "@poweur/client": "workspace:*",
     "@poweur/faro": "workspace:*",
     "clsx": "^2.1.1",
+    "dompurify": "3.3.3",
     "lucide-react": "^1.46.0",
     "radix-ui": "^1.6.7",
     "react": "^19.3.0",

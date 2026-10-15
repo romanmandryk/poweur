@@ -577,6 +577,14 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 		} else {
 			fmt.Fprintln(stdout, "sign-in prompts: from nobody (default)")
 		}
+		switch {
+		case policy.Email == nil:
+			fmt.Fprintln(stdout, "email: on through your relay's bridge (default)")
+		case policy.Email.Allow:
+			fmt.Fprintf(stdout, "email: delivered by %s\n", policy.Email.Bridge)
+		default:
+			fmt.Fprintln(stdout, "email: off")
+		}
 		if policy.ReadReceipts == nil {
 			fmt.Fprintln(stdout, "read receipts: enabled (default)")
 		} else {
@@ -601,9 +609,15 @@ func runPolicy(args []string, stdout, stderr io.Writer) int {
 					policy.TrustedAuthServices = append(policy.TrustedAuthServices, strings.ToLower(strings.TrimSpace(s)))
 				}
 			}
-		} else if raw, status, err := readSysFile(ctx, relayURL, identityValue, token, inboxPolicyTreePath); err == nil && status == http.StatusOK {
+		}
+		// What `set` does not change survives it: trusted sign-in services
+		// (unless named above) and the email bridge block.
+		if raw, status, err := readSysFile(ctx, relayURL, identityValue, token, inboxPolicyTreePath); err == nil && status == http.StatusOK {
 			if prev, err := idpkg.ParseInboxPolicy(raw); err == nil {
-				policy.TrustedAuthServices = prev.TrustedAuthServices
+				if len(trustedAuth) == 0 {
+					policy.TrustedAuthServices = prev.TrustedAuthServices
+				}
+				policy.Email = prev.Email
 			}
 		}
 		if *anonAllow || *anonChallenge != "" || *anonBits > 0 {

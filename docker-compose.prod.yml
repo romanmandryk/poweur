@@ -45,6 +45,10 @@ services:
       # it in capabilities.json and as their IndieAuth metadata. The relay
       # never talks to it.
       OAUTH_BRIDGE_URL: https://oauth.poweur.org
+      # The email bridge (apps/email/deploy, EPIC-023) is switched on from
+      # apps/api/.env.prod, not here, once the MX and the bridge are live:
+      # EMAIL_BRIDGE_ID=email.poweur.net offers users name@poweur.net. (Set
+      # here it would override the env file even when empty.)
       # Handle policy (EPIC-018). The package default is 3 so the test
       # fixtures ("bob") keep working; production holds short handles back.
       NAME_MIN_LEN: "6"

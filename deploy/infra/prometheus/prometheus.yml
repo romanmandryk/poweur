@@ -29,6 +29,23 @@ scrape_configs:
     static_configs:
       - targets: [poweur-guestbook:9464]
         labels: {deployment_environment_name: production}
+  # The email bridge (apps/email): inbound/outbound/hook counters.
+  - job_name: poweur-email
+    static_configs:
+      - targets: [poweur-email:8091]
+  - job_name: blackbox-email
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: [https://email.poweur.org/health]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: infra-blackbox:9115
   - job_name: blackbox-oauth
     metrics_path: /probe
     params:

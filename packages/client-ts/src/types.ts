@@ -64,7 +64,9 @@ export interface Message {
 
 /** A message from the inbox, with the decrypt attempt folded in. */
 export interface InboxMessage extends Message {
+  /** The decrypted text; a subject line (E09-T13) is split out into `subject`. */
   plaintext: string | null;
+  subject?: string;
   decryptError?: string;
 }
 
@@ -429,6 +431,8 @@ export interface InboxPolicy {
    * that one type only — a listed service is not a contact.
    */
   trusted_auth_services?: string[];
+  /** The email bridge whose `email.*` messages are admitted (EPIC-023). */
+  email?: { allow: boolean; bridge?: string };
 }
 
 /** System message types the relay routes on (EPIC-007). */

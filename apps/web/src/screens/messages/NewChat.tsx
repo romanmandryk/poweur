@@ -19,6 +19,7 @@ export function NewChat() {
   const identity = useSession((state) => state.identity) ?? "";
   const contacts = useData((state) => state.contacts.list);
   const pop = useRoute((state) => state.pop);
+  const view = (useRoute((state) => state.params).view as "id" | "subject") ?? "id";
   const input = useRef<IdentityInputHandle>(null);
   const [opening, setOpening] = useState(false);
   const [status, setStatus] = useState("");
@@ -35,7 +36,7 @@ export function NewChat() {
     }
     setOpening(true);
     setStatus("Opening…");
-    if (!(await openNewChat(target))) {
+    if (!(await openNewChat(target, view))) {
       setOpening(false);
       setStatus("");
     }

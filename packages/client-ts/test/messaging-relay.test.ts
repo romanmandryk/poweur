@@ -72,6 +72,24 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     expect(received?.sender).toBe(alice.identity);
   });
 
+  it("a subject travels encrypted with a fresh thread (E09-T13)", async () => {
+    const sent = await alice.client.send(bob.identity, "numbers attached", { subject: "Q3 budget" });
+    expect(sent.message.metadata?.["body_format"]).toBe("headers-v1");
+    expect(sent.message.thread_id).toMatch(/^[0-9A-Z]{26}$/);
+    expect(JSON.stringify(sent.message)).not.toContain("Q3 budget");
+    const plain = await alice.client.send(bob.identity, "Subject: not a header\n\nbody");
+    expect(plain.message.metadata).toBeUndefined();
+    expect(plain.message.thread_id).toBeUndefined();
+
+    const { messages } = await bob.client.inbox();
+    const withSubject = messages.find((m) => m.id === sent.message.id);
+    expect(withSubject?.subject).toBe("Q3 budget");
+    expect(withSubject?.plaintext).toBe("numbers attached");
+    const verbatim = messages.find((m) => m.id === plain.message.id);
+    expect(verbatim?.subject).toBeUndefined();
+    expect(verbatim?.plaintext).toBe("Subject: not a header\n\nbody");
+  });
+
   it("identity-signed send works for headless agents", async () => {
     const sent = await alice.client.send(bob.identity, "signed with the identity key", {
       signWith: "identity",

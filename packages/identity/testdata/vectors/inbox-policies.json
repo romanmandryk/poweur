@@ -69,5 +69,40 @@
       ]
     },
     "valid": false
+  },
+  {
+    "name": "email-bridge",
+    "raw": {
+      "version": 1,
+      "mode": "contacts_only",
+      "email": {
+        "allow": true,
+        "bridge": "email.poweur.net"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "email-off",
+    "raw": {
+      "version": 1,
+      "mode": "open",
+      "email": {
+        "allow": false
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "bad-email-bridge",
+    "raw": {
+      "version": 1,
+      "mode": "open",
+      "email": {
+        "allow": true,
+        "bridge": "not a name"
+      }
+    },
+    "valid": false
   }
 ]

@@ -21,7 +21,7 @@ import /etc/caddy-sites/*.caddy
 (security_txt) {
     @security_txt {
         path /.well-known/security.txt
-        host poweur.net relay.poweur.net oauth.poweur.org
+        host poweur.net relay.poweur.net oauth.poweur.org email.poweur.org
     }
     handle @security_txt {
         header Content-Type "text/plain; charset=utf-8"
@@ -118,6 +118,24 @@ http://oauth.poweur.org oauth.poweur.org {
     import security_txt
     handle {
         reverse_proxy poweur-oauth:8090 {
+            header_up X-Forwarded-For {client_ip}
+        }
+    }
+}
+# The email bridge (EPIC-023; apps/email/deploy): sealed attachment blobs and
+# uploads for users' browsers. Stalwart calls the RCPT hook over infra_net, and
+# Prometheus scrapes /metrics there, so neither is public.
+http://email.poweur.org email.poweur.org {
+    import security_txt
+    @internal path /metrics /stalwart/* /hooks/*
+    handle @internal {
+        respond 404
+    }
+    handle {
+        request_body {
+            max_size 48MB
+        }
+        reverse_proxy poweur-email:8091 {
             header_up X-Forwarded-For {client_ip}
         }
     }

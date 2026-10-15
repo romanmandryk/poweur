@@ -143,14 +143,14 @@ describe("New chat", () => {
       await openNewChat(BOB);
     });
     expect(useRoute.getState().sub).toBe("thread");
-    expect(useData.getState().thread).toEqual({ peer: BOB, threadId: "", group: false });
+    expect(useData.getState().thread).toEqual({ peer: BOB, threadId: null, group: false });
   });
 
   it("recognises a group by its roster answering", async () => {
     holder.client.groups.roster.mockResolvedValueOnce({ document: { members: [] } });
     const { openNewChat } = await import("../../src/actions/messages");
     await openNewChat("team.poweur.net");
-    expect(useData.getState().thread).toEqual({ peer: "team.poweur.net", threadId: "team.poweur.net", group: true });
+    expect(useData.getState().thread).toEqual({ peer: "team.poweur.net", threadId: null, group: true });
   });
 });
 

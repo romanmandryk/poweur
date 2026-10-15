@@ -34,4 +34,5 @@ Schema URLs retain their historical namespace during the storage transition.
 | [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |
 | [pcp-0007](pcp-0007-tasks.md) | Tasks & projects (`net.poweur.tasks`) | withdrawn |
 | [pcp-0008](pcp-0008-drive-share-offers.md) | Drive share offers, accepts and mounts | experimental |
-| [pcp-0006](pcp-0006-anon-challenges.md) | Anonymous ingress & sender challenges (PoW) | experimental |
+| [pcp-0009](pcp-0009-subject-lines.md) | Subject lines (`body_format: headers-v1`) | experimental |
+| [pcp-0010](pcp-0010-email-bridge.md) | Email bridge (`email.*`, `email.json`) | experimental |

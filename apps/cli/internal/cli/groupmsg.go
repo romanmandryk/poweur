@@ -131,6 +131,7 @@ func runGroupSend(args []string, stdout, stderr io.Writer) int {
 	useIdentity := fs.String("use-identity", "", "override identity for this command")
 	msgType := fs.String("type", "", "envelope message type (default chat.text)")
 	thread := fs.String("thread", "", "sub-thread inside the group (default: the group's main thread)")
+	subject := fs.String("subject", "", "subject line, sent encrypted; starts a new sub-thread unless --thread is given")
 	expiresAt := fs.String("expires", "", "RFC3339 timestamp after which this message stops being meaningful")
 	meta := &metaFlag{}
 	fs.Var(meta, "meta", "envelope metadata as key=value (repeatable; plaintext — addressing, not content)")
@@ -144,6 +145,23 @@ func runGroupSend(args []string, stdout, stderr io.Writer) int {
 	}
 	group := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 	plaintext := fs.Arg(1)
+	text := plaintext
+	var subjectMeta map[string]string
+	if strings.TrimSpace(*subject) != "" {
+		if *msgType != "" && *msgType != idpkg.MsgTypeChatText {
+			fmt.Fprintln(stderr, "--subject applies to chat.text messages only")
+			return 1
+		}
+		body, extra, err := idpkg.FormatBody(*subject, plaintext)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		plaintext, subjectMeta = body, extra
+		if *thread == "" {
+			*thread = idpkg.NewThreadID()
+		}
+	}
 	if !idpkg.IsGroupIdentityName(group) {
 		fmt.Fprintln(stderr, "a group identity needs a full Poweur ID (e.g. team.acme.poweur.net)")
 		return 1
@@ -217,7 +235,14 @@ func runGroupSend(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	metadata := idpkg.GroupMessageMetadata(group, roster.Epoch, meta.Map())
+	userMeta := meta.Map()
+	for k, v := range subjectMeta {
+		if userMeta == nil {
+			userMeta = map[string]string{}
+		}
+		userMeta[k] = v
+	}
+	metadata := idpkg.GroupMessageMetadata(group, roster.Epoch, userMeta)
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
 	// One envelope per member, each sealed to that member's own published
@@ -270,9 +295,14 @@ func runGroupSend(args []string, stdout, stderr io.Writer) int {
 	// The relay never hands a sender their own message back, so this is the
 	// only record of what was said — and what was said is one message, not
 	// one per member.
-	archiveRecords(*useIdentity, []idpkg.HistoryRecord{historyRecordThreaded(
+	sent := historyRecordThreaded(
 		sender, idpkg.HistoryQueueSent, batch.Envelopes[0].ID, sender,
-		group, timestamp, *msgType, threadID, plaintext)}, stderr)
+		group, timestamp, *msgType, threadID, text)
+	sent.Metadata = metadata
+	if subjectMeta != nil {
+		sent.Subject = strings.TrimSpace(*subject)
+	}
+	archiveRecords(*useIdentity, []idpkg.HistoryRecord{sent}, stderr)
 
 	summary := fmt.Sprintf("sent to %s (epoch %d, thread %s): %d of %d delivered\n",
 		group, out.Epoch, threadID, len(out.Delivered), len(batch.Envelopes))

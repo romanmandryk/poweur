@@ -8,6 +8,7 @@ import { IdentityDoor } from "./doors/IdentityDoor";
 import { Landing } from "./doors/Landing";
 import { Welcome } from "./gates";
 import { Launcher } from "./Launcher";
+import { EmailCompose, EmailThreadScreen } from "./messages/Email";
 import { Messages } from "./messages/Messages";
 import { NewChat } from "./messages/NewChat";
 import { ThreadScreen } from "./messages/Thread";
@@ -49,6 +50,10 @@ export function SubScreen({ sub }: { sub: SubPageId }) {
       return <NewChat />;
     case "thread":
       return <ThreadScreen />;
+    case "email-thread":
+      return <EmailThreadScreen />;
+    case "email-compose":
+      return <EmailCompose />;
     default:
       return <AddId />;
   }

@@ -1,0 +1,77 @@
+# A relay and the email bridge, in the two shapes the bridge comes in.
+#
+#   docker compose -f apps/email/compose.example.yml up
+#
+# Create the bridge's own Poweur ID first, from a seed you keep (the name
+# `email` is reserved, so with the relay's operator token):
+#   openssl rand -base64 32 | tr '+/' '-_' | tr -d '=' > email-seed.txt
+#   poweur identity create email.example.org --hosted --seed="$(cat email-seed.txt)" --operator-token=…
+#
+# A — receive only, the bridge is the MX (no mail server, no provider). DNS:
+#     mx.example.org A → this host; example.org MX → 10 mx.example.org.
+# B — behind a mail server that sends too: uncomment the "behind a mail
+#     server" block and point the server's RCPT hook and relay route here.
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      RELAY_ADDRESS: relay.example.org
+      HOSTED_DOMAINS: example.org
+      POWEUR_DATA: /data
+      EMAIL_BRIDGE_ID: email.example.org
+    volumes:
+      - relay_data:/data
+    ports:
+      - "8080:8080"
+
+  email:
+    build:
+      context: ../..
+      dockerfile: apps/email/Dockerfile
+    environment:
+      EMAIL_BRIDGE_ID: email.example.org
+      EMAIL_BRIDGE_SEED_FILE: /run/secrets/email_seed
+      EMAIL_RELAY_URL: https://relay.example.org
+      EMAIL_DOMAINS: example.org
+      # Optional: an HTTPS origin for attachments over ~350 KB and uploads.
+      EMAIL_PUBLIC_URL: https://email.example.org
+
+      # A: the bridge is the MX, receive only.
+      EMAIL_INBOUND: smtp
+      EMAIL_MX_HOSTNAME: mx.example.org
+      EMAIL_TLS_CERT_FILE: /certs/mx.crt
+      EMAIL_TLS_KEY_FILE: /certs/mx.key
+      EMAIL_TRANSPORT: none
+
+      # B: behind a mail server, sending through it (or a provider's relay).
+      # EMAIL_INBOUND: lmtp
+      # EMAIL_HOOK_SECRET_FILE: /run/secrets/email_hook
+      # EMAIL_LMTP_USERNAME: mailserver
+      # EMAIL_LMTP_PASSWORD_FILE: /run/secrets/email_lmtp
+      # EMAIL_LMTP_INSECURE: "1"            # same private network only
+      # EMAIL_AUTHSERV_ID: mail.example.org
+      # EMAIL_TRANSPORT: smtp
+      # EMAIL_SMTP_HOST: mail.example.org   # or smtp-relay.brevo.com (then EMAIL_DKIM_* if it does not sign)
+      # EMAIL_SMTP_USERNAME: poweur-bridge
+      # EMAIL_SMTP_PASSWORD_FILE: /run/secrets/email_smtp
+      # EMAIL_OUT_GLOBAL_DAILY_LIMIT: "250"
+    secrets:
+      - email_seed
+    volumes:
+      - email_data:/data
+      - ./certs:/certs:ro
+    ports:
+      - "25:25"        # A only
+      - "8091:8091"    # behind your TLS proxy as EMAIL_PUBLIC_URL
+    mem_limit: 512m
+    pids_limit: 256
+
+secrets:
+  email_seed:
+    file: ./email-seed.txt
+
+volumes:
+  relay_data:
+  email_data:

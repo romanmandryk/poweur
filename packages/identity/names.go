@@ -22,6 +22,14 @@ var ReservedLabels = map[string]struct{}{
 	"api": {}, "app": {}, "static": {}, "cdn": {}, "ns": {}, "ns1": {}, "ns2": {},
 	"mx": {}, "smtp": {}, "imap": {}, "pop": {}, "root": {}, "localhost": {},
 	"poweur": {}, "well-known": {}, "dav": {}, "sync": {},
+	// Mail DNS names the poweur.net mail server publishes (MTA-STS policy host,
+	// Thunderbird/Outlook client autoconfiguration) and the RFC 2142 / bounce
+	// and report roles the email bridge (EPIC-023 E23-T5) must own.
+	"mta-sts": {}, "autoconfig": {}, "autodiscover": {}, "mailer-daemon": {},
+	"bounce": {}, "bounces": {}, "dmarc": {}, "email": {},
+	// Stalwart's submission account for the bridge (famooss): a local mailbox
+	// name on poweur.net, so it can never be a Poweur ID's address.
+	"poweur-bridge": {},
 	// Product surfaces the operator may want to run. `id` and `launcher` are
 	// here because E18-T3 serves the claim flow on one of them.
 	"id": {}, "ids": {}, "launcher": {}, "get": {}, "join": {}, "signup": {},

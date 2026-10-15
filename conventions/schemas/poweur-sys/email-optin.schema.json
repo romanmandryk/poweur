@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poweur.net/schemas/poweur-sys/email-optin.schema.json",
+  "title": "email.json - poweur-sys/public/email.json (world-readable, signed opt-in to an email bridge)",
+  "type": "object",
+  "required": [
+    "version",
+    "identity",
+    "address",
+    "bridge",
+    "created_at",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "identity": {
+      "type": "string",
+      "format": "hostname"
+    },
+    "address": {
+      "type": "string",
+      "format": "email",
+      "description": "leftmost label @ the rest of identity"
+    },
+    "bridge": {
+      "type": "string",
+      "format": "hostname",
+      "description": "the bridge's Poweur ID"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "type": "string",
+      "description": "base64url ed25519 over 'poweur-email-optin\\nv1\\n<identity>\\n<address>\\n<bridge>\\n<created_at>'"
+    }
+  },
+  "additionalProperties": false
+}
