@@ -140,7 +140,16 @@ export async function enablePush(client: PushClient, identity: string): Promise<
   const reg = await registerServiceWorker();
   if (!reg) throw new Error("This browser cannot show notifications.");
   await navigator.serviceWorker.ready;
-  const key = urlBase64ToBytes(config.vapid_public_key);
+  await registerSubscription(client, identity, reg, config.vapid_public_key);
+}
+
+/**
+ * Subscribe (reusing a live subscription for the same key) and register it
+ * with the relay. When the relay answers that the push service declared it
+ * gone, throw it away and register a fresh one.
+ */
+async function registerSubscription(client: PushClient, identity: string, reg: ServiceWorkerRegistration, vapidKey: string): Promise<void> {
+  const key = urlBase64ToBytes(vapidKey);
   let subscription = await reg.pushManager.getSubscription();
   // A subscription made for another key (the relay rotated it) cannot be used.
   if (subscription && !sameKey(subscription.options?.applicationServerKey, key)) {
@@ -148,10 +157,38 @@ export async function enablePush(client: PushClient, identity: string): Promise<
     subscription = null;
   }
   subscription ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  try {
+    await postSubscription(client, subscription);
+  } catch (error) {
+    if ((error as { relayCode?: string })?.relayCode !== "subscription_gone") throw error;
+    await subscription.unsubscribe().catch(() => false);
+    subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await postSubscription(client, subscription);
+  }
+  remember(identity, subscription.endpoint);
+}
+
+async function postSubscription(client: PushClient, subscription: PushSubscription): Promise<void> {
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) throw new Error("The browser returned an incomplete subscription.");
   await client.push().subscribe({ endpoint: json.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } });
-  remember(identity, json.endpoint);
+}
+
+/**
+ * Keep notifications working without the user noticing: on every unlock,
+ * where they were turned on here, register this device's subscription
+ * again. Push services expire subscriptions and the browser may replace
+ * them; the relay drops one its push service calls gone. Either way the
+ * phone would go quiet while Settings still said "on". No prompt: it does
+ * nothing unless permission is already granted.
+ */
+export async function refreshPush(client: PushClient, identity: string): Promise<void> {
+  if (pushCapability() !== "supported" || Notification.permission !== "granted" || !remembered(identity)) return;
+  const config = await client.push().config().catch(() => null);
+  if (!config?.enabled || !config.vapid_public_key) return;
+  const reg = await registerServiceWorker();
+  if (!reg) return;
+  await registerSubscription(client, identity, reg, config.vapid_public_key);
 }
 
 /**

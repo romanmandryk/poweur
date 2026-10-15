@@ -63,6 +63,11 @@ installPushClient({
       useData.setState({ openNewestPrompt: true });
       page = "messages";
     }
+    // An email notification opens the Email tray.
+    if (page === "email") {
+      useData.setState({ tray: "email" });
+      page = "messages";
+    }
     if (!(DESTINATIONS as readonly string[]).includes(page)) return;
     const go = () => useRoute.getState().go(page as Destination);
     if (useSession.getState().unlocked) {

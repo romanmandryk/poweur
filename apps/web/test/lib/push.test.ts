@@ -34,15 +34,22 @@ function fakeClient(enabled = true) {
 
 function stubBrowser({ ua = PIXEL, standalone = false, permission = "default" as NotificationPermission } = {}) {
   let current: any = null;
+  let made = 0;
   const pushManager = {
     getSubscription: vi.fn(async () => current),
     subscribe: vi.fn(async (options: any) => {
-      current = {
-        endpoint: "https://fcm.googleapis.com/fcm/send/abc",
+      // The first subscription is ".../abc"; each fresh one after it differs.
+      const endpoint = `https://fcm.googleapis.com/fcm/send/abc${made++ ? made : ""}`;
+      const sub: any = {
+        endpoint,
         options,
-        unsubscribe: vi.fn(async () => true),
-        toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "p", auth: "a" } }),
+        unsubscribe: vi.fn(async () => {
+          if (current === sub) current = null;
+          return true;
+        }),
+        toJSON: () => ({ endpoint, keys: { p256dh: "p", auth: "a" } }),
       };
+      current = sub;
       return current;
     }),
   };
@@ -163,6 +170,54 @@ describe("enable, test, disable", () => {
     const push = await load();
     await expect(push.enablePush(fakeClient().client, "alice.poweur.net")).rejects.toThrow(/Home Screen/);
     expect(browser.notification.requestPermission).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshPush", () => {
+  it("does nothing where notifications were never turned on, and never prompts", async () => {
+    const browser = stubBrowser({ permission: "granted" });
+    const push = await load();
+    const { client, calls } = fakeClient();
+    await push.refreshPush(client, "alice.poweur.net");
+    expect(calls).toEqual([]);
+    expect(browser.notification.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("registers the live subscription again on every unlock", async () => {
+    const browser = stubBrowser();
+    const push = await load();
+    const { client, calls, subscribed } = fakeClient();
+    await push.enablePush(client, "alice.poweur.net");
+    await push.refreshPush(client, "alice.poweur.net");
+    expect(calls).toEqual(["subscribe", "subscribe"]);
+    expect(subscribed[1]).toEqual(subscribed[0]);
+    expect(browser.pushManager.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a subscription the push service declared gone", async () => {
+    const browser = stubBrowser();
+    const push = await load();
+    const { client, subscribed } = fakeClient();
+    await push.enablePush(client, "alice.poweur.net");
+    const api = client.push();
+    let refused = false;
+    const gone = {
+      push: () => ({
+        ...api,
+        subscribe: async (sub: any) => {
+          if (!refused && sub.endpoint.endsWith("/abc")) {
+            refused = true;
+            throw Object.assign(new Error("the push service no longer accepts this subscription"), { relayCode: "subscription_gone" });
+          }
+          return api.subscribe(sub);
+        },
+      }),
+    };
+    await push.refreshPush(gone, "alice.poweur.net");
+    expect(refused).toBe(true);
+    expect(browser.pushManager.subscribe).toHaveBeenCalledTimes(2);
+    expect((subscribed.at(-1) as any).endpoint).not.toMatch(/\/abc$/);
+    expect(await push.pushState(client, "alice.poweur.net")).toBe("on");
   });
 });
 

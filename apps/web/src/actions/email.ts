@@ -36,6 +36,9 @@ export async function loadEmail({ force = false } = {}) {
   try {
     const api = client.email();
     const offered = await api.offeredBridge();
+    // Known at once: which bridge's messages are mail must not hang on the
+    // rest of this read succeeding.
+    if (started === generation) setEmail({ offered });
     const state = await api.state(offered);
     if (started !== generation) {
       setEmail({ offered: offered ?? useData.getState().email.offered, loading: false });

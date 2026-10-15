@@ -29,6 +29,7 @@ import {
 import { keyValidAt } from "./document.js";
 import { fromBase64, fromUtf8, randomBytes, rfc3339, toBase64url, utf8 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
+import { defaultFetch } from "./http.js";
 import { validateIdentityName } from "./names.js";
 import { resolveIdentity, type ResolveOptions } from "./resolve.js";
 import type { IdentityDocument, ResolveResult } from "./types.js";
@@ -708,7 +709,7 @@ export async function fetchRelyingPartyMetadata(
   options: { fetch?: typeof globalThis.fetch; timeoutMs?: number } = {},
 ): Promise<RelyingPartyMetadata> {
   const norm = normalizeOrigin(origin);
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = options.fetch ?? defaultFetch();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
   try {
@@ -817,7 +818,7 @@ export async function fetchSignInRequest(
   requestUri: string,
   options: { fetch?: typeof globalThis.fetch; timeoutMs?: number } = {},
 ): Promise<{ encoded: string; request: SignInRequest }> {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = options.fetch ?? defaultFetch();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 8_000);
   try {
@@ -879,7 +880,7 @@ export async function fetchSignInContext(
   if (!sameOrigin(meta.origin, meta.context_uri)) fail("context_uri is not same-origin");
   const u = new URL(meta.context_uri);
   u.searchParams.set("request_id", requestId);
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = options.fetch ?? defaultFetch();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 5_000);
   try {

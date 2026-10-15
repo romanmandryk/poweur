@@ -16,6 +16,7 @@ import { isRetryableSendError, queueWebMessage, retryWebOutbox } from "../lib/ou
 import { markCovers, messageThreadKey } from "../lib/threads.js";
 import { loadSessionRecord, relayUrlFor } from "../lib/storage.js";
 import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
+import { refreshPush } from "../lib/push";
 import { autoAcceptContactOffers } from "./files";
 import { emailBridgeOf, useData, type DataFields } from "../state/data";
 import { useRoute } from "../state/route";
@@ -301,8 +302,18 @@ export function pullAfterUnlock() {
   // Email is on by default: which bridge's mail is mail depends on what the
   // relay offers. (Imported lazily: actions/email imports this module.)
   void import("./email").then(({ loadEmail }) => loadEmail());
+  // Re-register this device's push subscription where notifications are on:
+  // push services expire them, and a lost one leaves the phone silent.
+  void refreshDevicePush();
   void retryBrowserOutbox().catch(() => {});
   startEventStream();
+}
+
+async function refreshDevicePush() {
+  const client = activeClient();
+  const identity = selfIdentity();
+  if (!client || !identity) return;
+  await refreshPush(client as never, identity).catch(() => {});
 }
 
 /** Pull-to-refresh on Messages: every queue the screen shows, read again now. */

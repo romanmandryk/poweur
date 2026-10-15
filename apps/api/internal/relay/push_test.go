@@ -271,6 +271,39 @@ func TestPushGoneRemovesRegistration(t *testing.T) {
 			t.Fatalf("410 left the registration in place: %+v", d.Push)
 		}
 	}
+	// The app re-registering the same dead subscription is told to make a
+	// new one, rather than silently going quiet again.
+	if status, out := pushCall(t, ts, alice, "subscribe", testFingerprint, fake.subscription()); status != http.StatusGone || out["error"] != "subscription_gone" {
+		t.Fatalf("re-subscribing a gone endpoint: %d %v", status, out)
+	}
+	fresh := newFakePushService(t)
+	if status, out := pushCall(t, ts, alice, "subscribe", testFingerprint, fresh.subscription()); status != http.StatusOK {
+		t.Fatalf("a new subscription: %d %v", status, out)
+	}
+}
+
+// An inbound email pushes as "email" (the service worker says "New email")
+// while open streams still see "message", which is what clients pick up on.
+func TestPushNamesEmail(t *testing.T) {
+	if got := pushKindFor(idpkg.MsgTypeEmailMessage); got != "email" {
+		t.Fatalf("pushKindFor(email.message) = %q", got)
+	}
+	if notifyKind(idpkg.MsgTypeEmailMessage) != "message" || pushKindFor("") != "message" || pushKindFor(idpkg.MsgTypeAuthRequest) != "auth" {
+		t.Fatal("other kinds changed")
+	}
+	server, ts := newTestRelay(t)
+	enablePush(t, server)
+	alice := registerTestIdentity(t, server, ts, "alice.poweur.net")
+	fake := newFakePushService(t)
+	pushCall(t, ts, alice, "subscribe", testFingerprint, fake.subscription())
+	server.inbox.Add(alice.name, storage.StoredMessage{ID: "e1", Sender: "email.poweur.net", Recipient: alice.name}, 100)
+	server.notifyAs(alice.name, "message", "email", "e1")
+	server.inbox.Add(alice.name, storage.StoredMessage{ID: "m1", Sender: "bob.poweur.net", Recipient: alice.name}, 100)
+	server.notify(alice.name, "message", "m1")
+	server.WaitPush()
+	if got := fake.got(); len(got) != 1 || got[0].Kind != "email" || got[0].Count != 2 {
+		t.Fatalf("pushes: %+v", got)
+	}
 }
 
 func TestPushTestAndUnsubscribe(t *testing.T) {
