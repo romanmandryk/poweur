@@ -25,6 +25,7 @@ import {
   type EmailSettings,
 } from "./email.js";
 import { PoweurError, RelayError } from "./errors.js";
+import { defaultFetch } from "./http.js";
 import { INBOX_POLICY_PATH, validateInboxPolicy } from "./policy.js";
 import { resolveIdentity } from "./resolve.js";
 import { newThreadId } from "./subject.js";
@@ -64,7 +65,7 @@ export class EmailApi {
 
   /** The `endpoints` of an identity's capabilities.json; {} when absent. */
   async capabilities(identity: string): Promise<EmailCapabilities> {
-    const fetchImpl = this.#client.resolveOptions.fetch ?? globalThis.fetch;
+    const fetchImpl = this.#client.resolveOptions.fetch ?? defaultFetch();
     try {
       const response = await fetchImpl(`${this.#scheme()}://${identity.trim().toLowerCase()}/.well-known/poweur/capabilities.json`);
       if (!response.ok) return {};
@@ -205,7 +206,7 @@ export class EmailApi {
     const nonce = toBase64url(randomBytes(16));
     const identity = this.#client.signer.identity.toLowerCase();
     const signature = await this.#client.signer.sign(canonicalEmailUpload(identity, uploadId, digest, body.length, issuedAt, nonce), "base64url");
-    const fetchImpl = this.#client.resolveOptions.fetch ?? globalThis.fetch;
+    const fetchImpl = this.#client.resolveOptions.fetch ?? defaultFetch();
     const response = await fetchImpl(`${api}/v1/uploads/${uploadId}`, {
       method: "PUT",
       body: body as BodyInit,
@@ -227,7 +228,7 @@ export class EmailApi {
   /** Download and open a blob (large attachment or original message). */
   async blob(ref: EmailBlobRef): Promise<Uint8Array> {
     if (!this.#client.decryptor) throw new PoweurError("invalid_argument", "opening email needs a decryptor");
-    return openEmailBlob(this.#client.decryptor, ref, this.#client.resolveOptions.fetch ?? globalThis.fetch);
+    return openEmailBlob(this.#client.decryptor, ref, this.#client.resolveOptions.fetch ?? defaultFetch());
   }
 }
 

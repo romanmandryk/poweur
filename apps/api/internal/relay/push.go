@@ -33,6 +33,9 @@ import (
 // Acks are not: "bob read your message" is not worth a buzz.
 var pushKinds = map[string]webpush.Urgency{
 	"message": webpush.UrgencyHigh,
+	// An email through the user's bridge (EPIC-023): pushed like a message,
+	// named as email. The relay sees the type, never the content.
+	"email":   webpush.UrgencyHigh,
 	"request": webpush.UrgencyHigh,
 	"anon":    webpush.UrgencyNormal,
 	// A sign-in prompt someone is waiting on at another screen (EPIC-028).
@@ -42,7 +45,7 @@ var pushKinds = map[string]webpush.Urgency{
 // pushRank orders kinds within one coalesced push: the notification names
 // the most important thing that happened. A sign-in prompt is pushed on its
 // own (separatePushKinds), so it has no rank here.
-var pushRank = map[string]int{"anon": 1, "message": 2, "request": 3}
+var pushRank = map[string]int{"anon": 1, "message": 2, "email": 3, "request": 4}
 
 // separatePushKinds are never coalesced into the mail count: a sign-in prompt
 // must reach the phone at once and say what it is, whatever else is waiting,
@@ -60,6 +63,24 @@ func notifyKind(msgType string) string {
 	}
 	return "message"
 }
+
+// pushKindFor is the push kind for a delivered message: its stream kind,
+// except that an inbound email says so. Streams keep "message" — clients
+// pick up on it whatever the type.
+func pushKindFor(msgType string) string {
+	if idpkg.NormalizeMessageType(msgType) == idpkg.MsgTypeEmailMessage {
+		return "email"
+	}
+	return notifyKind(msgType)
+}
+
+// goneTTL is how long the relay remembers an endpoint its push service
+// declared gone. A device that registers it again is told to make a new
+// subscription (410), instead of silently registering a dead one.
+const goneTTL = 7 * 24 * time.Hour
+
+// maxGone bounds that memory.
+const maxGone = 10000
 
 const (
 	// pushTTL is how long a push service may hold a push for an offline
@@ -91,7 +112,8 @@ type pusher struct {
 	slots    chan struct{}
 
 	mu      sync.Mutex
-	pending map[string]string // identity -> highest-ranked kind waiting
+	pending map[string]string    // identity -> highest-ranked kind waiting
+	gone    map[string]time.Time // endpoint -> when its push service said gone
 	// wg tracks in-flight work so tests (and shutdown) can wait for it.
 	wg sync.WaitGroup
 }
@@ -115,7 +137,28 @@ func newPusher(key, subject string, hosts []string, coalesce time.Duration, inse
 		insecure: insecure,
 		slots:    make(chan struct{}, pushConcurrency),
 		pending:  map[string]string{},
+		gone:     map[string]time.Time{},
 	}
+}
+
+func (p *pusher) markGone(endpoint string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.gone) >= maxGone {
+		p.gone = map[string]time.Time{}
+	}
+	p.gone[endpoint] = time.Now()
+}
+
+func (p *pusher) isGone(endpoint string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	at, ok := p.gone[endpoint]
+	if ok && time.Since(at) > goneTTL {
+		delete(p.gone, endpoint)
+		return false
+	}
+	return ok
 }
 
 // endpointAllowed is the SSRF guard: the relay POSTs to whatever endpoint a
@@ -236,6 +279,7 @@ func (s *Server) sendDevicePush(ctx context.Context, identity, deviceID string, 
 			s.event(ctx, "push.send", "success")
 		case errors.Is(err, webpush.ErrGone):
 			s.event(ctx, "push.send", "gone")
+			p.markGone(reg.Endpoint)
 			s.clearDevicePush(ctx, identity, deviceID, reg.Endpoint)
 		default:
 			s.event(ctx, "push.send", "failure")
@@ -372,6 +416,11 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 	if !s.push.endpointAllowed(sub.Endpoint) {
 		writeError(w, http.StatusForbidden, "endpoint_not_allowed",
 			"the endpoint is not a push service this relay delivers to")
+		return
+	}
+	if s.push.isGone(sub.Endpoint) {
+		writeError(w, http.StatusGone, "subscription_gone",
+			"the push service no longer accepts this subscription; make a new one")
 		return
 	}
 	reg := &idpkg.DevicePush{

@@ -9,6 +9,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 
 import { dohTxtResolver } from "../src/browser/index.js";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+import { EmailApi } from "../src/email-client.js";
 import { RelayClient } from "../src/http.js";
 import { resolveIdentity } from "../src/resolve.js";
 
@@ -77,5 +81,29 @@ describe("default fetch is bound to its global", () => {
     const error = await resolveIdentity("alice.example", { skipDns: true }).catch((e) => e);
     expect(String(error)).not.toMatch(/Illegal invocation/);
     expect(String(error)).toMatch(/identity not found/);
+  });
+
+  it("the email client's capabilities lookup calls it with a legal receiver", async () => {
+    // Swallowed into {} on failure, which hid the bug: the app never learned
+    // the default bridge and showed mail as "app message".
+    installReceiverCheckingFetch(() => jsonResponse({ endpoints: { email_bridge: "email.poweur.net" } }));
+    const api = new EmailApi({ relay: { relayUrl: "https://relay.example" }, resolveOptions: {} } as never);
+    await expect(api.capabilities("alice.poweur.net")).resolves.toEqual({ bridge: "email.poweur.net" });
+  });
+
+  it("no source file falls back to an unbound globalThis.fetch", () => {
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.ts$/.test(name)) {
+          const code = readFileSync(path, "utf8").split("\n").filter((line) => !/^\s*(\*|\/\/)/.test(line));
+          if (code.some((line) => /(\?\?|=)\s*globalThis\.fetch\b(?!\.bind)/.test(line))) offenders.push(path);
+        }
+      }
+    };
+    walk(join(__dirname, "../src"));
+    expect(offenders).toEqual([]);
   });
 });

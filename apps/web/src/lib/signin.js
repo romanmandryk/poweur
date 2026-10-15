@@ -118,13 +118,13 @@ export async function appendBrowserConsent(log, response, metadata) {
  * The approval never goes into a URL. A same-device RP answers with a
  * `resume_uri` instead, which finishes only in the browser that started.
  */
-export async function deliverBrowserApproval(request, encoded, fetchImpl = globalThis.fetch, { crossDevice = false, match = "" } = {}) {
+export async function deliverBrowserApproval(request, encoded, fetchImpl = undefined, { crossDevice = false, match = "" } = {}) {
   if (!request.response_uri) return { delivered: false, resumeUri: "" };
   const code = normalizeMatchCode(match);
   const envelope = crossDevice || code
     ? JSON.stringify({ response: encoded, ...(crossDevice ? { finish: SIGNIN_FINISH_POLL } : {}), ...(code ? { match: code } : {}) })
     : encoded;
-  const response = await (fetchImpl ?? globalThis.fetch)(request.response_uri, {
+  const response = await (fetchImpl ?? globalThis.fetch.bind(globalThis))(request.response_uri, {
     method: "POST",
     // text/plain is a CORS-simple request; the RP accepts the portable code
     // directly, so QR/cross-device approval needs no preflight ceremony.

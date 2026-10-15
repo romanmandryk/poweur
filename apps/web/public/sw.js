@@ -14,6 +14,8 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 const COPY = {
   message: { title: "New message", one: "You have a new message.", many: (n) => `${n} new messages and requests are waiting.` },
+  // Mail through the user's email bridge (EPIC-023). Content stays encrypted: the push only knows it is email.
+  email: { title: "New email", one: "You have a new email.", many: (n) => `${n} new messages and emails are waiting.` },
   request: { title: "New contact request", one: "Someone asked to be your contact.", many: (n) => `${n} new messages and requests are waiting.` },
   anon: { title: "New anonymous message", one: "You have a new anonymous message.", many: (n) => `${n} new messages and requests are waiting.` },
   test: { title: "Notifications are on", one: "This device will be told when something arrives.", many: () => "This device will be told when something arrives." },
@@ -22,7 +24,7 @@ const COPY = {
 };
 
 /** Where a tap lands: requests live under Contacts, a sign-in prompt opens itself, everything else in Messages. */
-const pageFor = (kind) => (kind === "request" ? "contacts" : kind === "auth" ? "signin" : "messages");
+const pageFor = (kind) => (kind === "request" ? "contacts" : kind === "auth" ? "signin" : kind === "email" ? "email" : "messages");
 
 async function setBadge(count) {
   const nav = self.navigator;

@@ -15,6 +15,7 @@ import { openWithDomain, parseEd25519PublicKey, sealWithDomain, sha256Bytes, ver
 import type { Decryptor, Signer } from "./crypto/keys.js";
 import { fromBase64, rfc3339, utf8 } from "./encoding.js";
 import { PoweurError } from "./errors.js";
+import { defaultFetch } from "./http.js";
 import { validateIdentityName } from "./names.js";
 import type { InboxPolicy } from "./types.js";
 
@@ -410,7 +411,7 @@ interface WireSealed {
 export async function openEmailBlob(
   decryptor: Decryptor,
   ref: EmailBlobRef,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  fetchImpl: typeof globalThis.fetch = defaultFetch(),
 ): Promise<Uint8Array> {
   if (!/^https?:\/\//.test(ref.url)) throw new PoweurError("invalid_argument", "blob url must be http(s)");
   const response = await fetchImpl(ref.url, { credentials: "omit", referrerPolicy: "no-referrer" });

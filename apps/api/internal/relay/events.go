@@ -263,6 +263,12 @@ func writeEvent(w http.ResponseWriter, flusher http.Flusher, event streamEvent) 
 // kinds a person should hear about while the app is closed, schedules a
 // background push (E09-T11). One hook point, so SSE and push cannot drift.
 func (s *Server) notify(identity, kind, messageID string) {
+	s.notifyAs(identity, kind, kind, messageID)
+}
+
+// notifyAs is notify with a push kind of its own (an email pushes as
+// "email" but streams as "message").
+func (s *Server) notifyAs(identity, kind, pushKind, messageID string) {
 	if s.hub == nil {
 		return
 	}
@@ -272,5 +278,5 @@ func (s *Server) notify(identity, kind, messageID string) {
 		MessageID: messageID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
-	s.schedulePush(identity, kind)
+	s.schedulePush(identity, pushKind)
 }

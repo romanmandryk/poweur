@@ -934,7 +934,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		// The notification carries no payload: the cursor read it triggers is
 		// where delivery actually happens.
 		s.event(r.Context(), "message.enqueue", "success")
-		s.notify(msg.Recipient, notifyKind(msg.Type), msg.ID)
+		s.notifyAs(msg.Recipient, notifyKind(msg.Type), pushKindFor(msg.Type), msg.ID)
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID})
 		return
 	}
