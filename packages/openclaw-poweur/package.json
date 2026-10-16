@@ -13,7 +13,8 @@
     "dist",
     "openclaw.plugin.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "assets"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -99,6 +100,12 @@
     "build": {
       "openclawVersion": "2026.10.3",
       "pluginSdkVersion": "2026.10.3"
+    },
+    "install": {
+      "clawhubSpec": "clawhub:@poweur/openclaw-channel",
+      "npmSpec": "@poweur/openclaw-channel",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.10.3"
     }
   },
   "engines": {

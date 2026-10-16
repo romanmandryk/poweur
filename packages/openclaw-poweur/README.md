@@ -5,41 +5,22 @@ PWA or the CLI. The agent runs on **its own Poweur ID**, never yours: messages a
 encrypted, and every sender is a verified Poweur ID, so the allowlist and pairing work on real
 identities instead of display names.
 
-Status: early (INT-005-T2). Direct messages work end to end; shared folders are next.
+Status: beta. Direct messages work end to end; shared folders are next.
 
 ## Set it up
 
-1. **Give the agent an ID** on the machine that runs the gateway. Its keys stay in that
-   machine's Poweur home (`POWEUR_HOME`, default `~/.poweur`):
+```bash
+openclaw plugins install npm:@poweur/openclaw-channel
+openclaw channels add --channel poweur --identity yourname-claw.poweur.net --allow-from yourname.poweur.net
+```
 
-   ```bash
-   npx @poweur/client identity create myagent.poweur.net --hosted --relay https://poweur.net
-   ```
+`channels add` creates the agent's own ID (unless this machine already has its keys) and prints
+its recovery phrase once, allows only the given IDs, and labels the agent's profile with who runs
+it. Then start the gateway and message the agent from the Poweur app. Full guide:
+[poweur.org/docs/agents/openclaw](https://www.poweur.org/docs/agents/openclaw).
 
-2. **Install the plugin** (from a checkout, until it is published):
-
-   ```bash
-   openclaw plugins install --link /path/to/poweur/packages/openclaw-poweur
-   ```
-
-3. **Configure the channel** in `openclaw.json`:
-
-   ```json5
-   {
-     channels: {
-       poweur: {
-         identity: "myagent.poweur.net",
-         // pairing (default): strangers get a code you approve; allowlist: only these IDs
-         dmPolicy: "allowlist",
-         allowFrom: ["you.poweur.net"],
-       },
-     },
-   }
-   ```
-
-   `relayUrl` is optional; it defaults to the relay in the Poweur home's `config.toml`.
-
-4. Start the gateway and send `myagent.poweur.net` a message from the Poweur app.
+From a checkout: `pnpm --filter @poweur/openclaw-channel build && pnpm --filter @poweur/openclaw-channel pack`,
+then `openclaw plugins install npm-pack:<the .tgz>`.
 
 ## Test it
 
