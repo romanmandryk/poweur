@@ -14,7 +14,7 @@
 
 export const SDK_VERSION = "0.2.17";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
-export const SDK_BUILD_TIME = "2026-10-13 15:39";
+export const SDK_BUILD_TIME = "2026-10-16 14:42";
 
 export * from "./types.js";
 export * from "./errors.js";
@@ -39,6 +39,7 @@ export * from "./events.js";
 export * from "./contacts.js";
 export * from "./policy.js";
 export * from "./profile.js";
+export * from "./handles.js";
 export * from "./history.js";
 export * from "./subject.js";
 export * from "./email.js";

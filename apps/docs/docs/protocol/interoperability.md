@@ -61,6 +61,21 @@ See [Web Identity](/protocol/web-identity). A broader metadata document may also
 
 The same pattern can be used on verifier domains that want to request Poweur ID-based sign-in.
 
+## Bluesky, Nostr and Mastodon handles
+
+An ID can use its own name on other networks by publishing `.poweur/public/handles.json`
+([PCP-0011](https://github.com/romanmandryk/poweur/blob/master/conventions/pcp-0011-handles.md);
+in the web app, Settings → Bluesky & Nostr). The relay then serves:
+
+- `/.well-known/atproto-did` on the ID's host, so `alice.poweur.net` is a **Bluesky handle**;
+- NIP-05 `nostr.json`, so `alice.poweur.net` (and, for a hosted ID, `alice@poweur.net`) is a
+  verified **Nostr** address;
+- for a hosted ID, a WebFinger redirect on the domain, so searching `@alice@poweur.net` on
+  **Mastodon** finds the account the ID linked (for example `@alice@mastodon.social`).
+
+Nothing is served for an ID that has not linked anything, and the relay answers only for the name
+asked, never with a list.
+
 ## Messaging Alignment
 
 The current Poweur ID message format is a minimal signed JSON envelope. For broader interoperability, the envelope should evolve toward shapes that are familiar to existing signed-message ecosystems, while keeping the DNS-native trust model intact.

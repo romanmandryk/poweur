@@ -31,7 +31,7 @@
     <div class="wrap">
       <div class="eyebrow">Works with Poweur</div>
       <h1 class="h2 gradient-text">Where your ID works today</h1>
-      <p class="lede">Sites that sign you in with a Poweur ID, self-hosted tools you can put behind it, and an email address for everything else. Only what we have tried is listed; it grows as recipes and plugins land.</p>
+      <p class="lede">Sites that sign you in with a Poweur ID, social apps where your name works, self-hosted tools you can put behind it, and an email address for everything else. Only what we have tried is listed; it grows as recipes and plugins land.</p>
     </div>
   </section>
 
@@ -61,6 +61,20 @@
   <section style="padding-top:0">
     <div class="wrap">
       <div class="section-head reveal">
+        <h2 class="h2">Your name on the social apps you already use</h2>
+        <p class="lede">Link your accounts in the app (Settings → Bluesky &amp; Nostr) and your Poweur name works there too. Nothing is published until you link something.</p>
+      </div>
+      <div class="cards-3">
+        <div class="card reveal"><span class="status live">Live</span><div class="kicker">Bluesky</div><h3>yourname.poweur.net as your handle</h3><p class="muted" style="margin-top:12px">In Bluesky, change your handle to your Poweur name and choose "No DNS panel". Paste the code it shows into Poweur, and Bluesky verifies it.</p></div>
+        <div class="card reveal"><span class="status live">Live</span><div class="kicker">Nostr</div><h3>yourname@poweur.net, verified</h3><p class="muted" style="margin-top:12px">Paste your npub into Poweur and set the same address as your NIP-05 identifier: Nostr apps show it as verified. It is the same text as your email address.</p></div>
+        <div class="card reveal"><span class="status live">Live</span><div class="kicker">Mastodon</div><h3>@yourname@poweur.net finds you</h3><p class="muted" style="margin-top:12px">Link your Mastodon or other Fediverse account, and people who search for your Poweur address land on it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal">
         <h2 class="h2">Run it on your own server</h2>
         <p class="lede">Self-hosting? These speak OpenID Connect to the bridge at <code>https://oauth.poweur.org</code>, or to <a href="https://github.com/romanmandryk/poweur/blob/master/apps/oauth/README.md">your own bridge</a>.</p>
       </div>
@@ -81,7 +95,7 @@
       </div>
       <div class="cards-3">
         <div class="card reveal"><span class="status next">Next</span><div class="kicker">Recipes</div><h3>Immich, Vaultwarden, Memos, HedgeDoc, Miniflux</h3><p class="muted" style="margin-top:12px">Tested step-by-step recipes for popular self-hosted apps, each with a login test that runs every night, so this page only lists what works today.</p></div>
-        <div class="card reveal"><span class="status next">Next</span><div class="kicker">Handles</div><h3>Your ID as your Bluesky and Nostr handle</h3><p class="muted" style="margin-top:12px"><code>alice.poweur.net</code> as a Bluesky handle and a verified Nostr address, opt-in per ID.</p></div>
+        <div class="card reveal"><span class="status next">Next</span><div class="kicker">Agents</div><h3>Talk to your agent from the Poweur app</h3><p class="muted" style="margin-top:12px">A Poweur channel for OpenClaw and Hermes: give your agent its own ID, share a folder with it, and message it from your phone. What it writes in the folder is shared back with you.</p></div>
         <div class="card reveal"><span class="status next">Next</span><div class="kicker">Plugins</div><h3>Native providers upstream</h3><p class="muted" style="margin-top:12px">Poweur as a built-in choice in identity providers and apps, as plugins first and upstream contributions after.</p><div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><a class="btn btn-sm btn-ghost" href="https://github.com/romanmandryk/poweur/tree/master/epics/integrations">Integrations roadmap</a></div></div>
       </div>
     </div>

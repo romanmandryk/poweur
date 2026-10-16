@@ -208,7 +208,9 @@ Behind a flag (`OAUTH_SOLID=on`), so a deployment that does not want it is uncha
       Memos, Miniflux and Vaultwarden
 - [ ] **INT-006-T4** Apprise `poweur://` target (upstream PR) and Shoutrrr target; Uptime Kuma
       native provider
-- [ ] **INT-006-T5** Handles: atproto-did, NIP-05 and WebFinger alias serving for opted-in IDs
+- [ ] **INT-006-T5** *(partial: atproto-did, NIP-05 (`_@id` and `label@domain`) and the WebFinger redirect
+      are served for opted-in IDs: PCP-0011, relay 0.2.20, SDK `handles()`/`setHandles()`, web Settings →
+      Bluesky & Nostr; the Keyoxide proof type PR is open)* Handles: atproto-did, NIP-05 and WebFinger alias serving for opted-in IDs
       (PCP + relay + profile setting); Keyoxide proof type PR
 - [ ] **INT-006-T6** Send/PrivateBin fork with Poweur sign-in and send-to-ID
 - [ ] **INT-006-T7** listmonk messenger + subscription import
