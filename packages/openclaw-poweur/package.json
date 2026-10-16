@@ -1,6 +1,6 @@
 {
   "name": "@poweur/openclaw-channel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenClaw channel plugin for Poweur ID: message your agent from the Poweur app, end-to-end encrypted, with the agent on its own ID.",
   "license": "Apache-2.0",
   "repository": {
@@ -12,15 +12,16 @@
   "files": [
     "dist",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "assets"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@poweur/client": "workspace:*",
     "zod": "4.6.5"
   },
   "peerDependencies": {
@@ -32,7 +33,9 @@
     }
   },
   "devDependencies": {
+    "@poweur/client": "workspace:*",
     "@types/node": "^22.10.0",
+    "esbuild": "^0.21.5",
     "openclaw": "2026.10.3",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
@@ -52,7 +55,43 @@
       "selectionLabel": "Poweur ID",
       "docsLabel": "poweur",
       "blurb": "End-to-end encrypted messages to and from Poweur IDs; the agent has its own ID.",
-      "quickstartAllowFrom": true
+      "quickstartAllowFrom": true,
+      "setup": {
+        "fields": [
+          {
+            "key": "identity",
+            "kind": "string",
+            "cli": {
+              "flags": "--identity <id>",
+              "description": "The agent's own Poweur ID (created if this machine has no keys for it)"
+            }
+          },
+          {
+            "key": "allowFrom",
+            "kind": "string",
+            "cli": {
+              "flags": "--allow-from <ids>",
+              "description": "Poweur IDs that may message the agent, comma-separated (yours)"
+            }
+          },
+          {
+            "key": "relayUrl",
+            "kind": "string",
+            "cli": {
+              "flags": "--relay-url <url>",
+              "description": "The ID's relay (default https://poweur.net)"
+            }
+          },
+          {
+            "key": "inviteCode",
+            "kind": "string",
+            "cli": {
+              "flags": "--invite-code <code>",
+              "description": "Registration invite code, if the relay requires one"
+            }
+          }
+        ]
+      }
     },
     "compat": {
       "pluginApi": ">=2026.10.3",
@@ -61,6 +100,12 @@
     "build": {
       "openclawVersion": "2026.10.3",
       "pluginSdkVersion": "2026.10.3"
+    },
+    "install": {
+      "clawhubSpec": "clawhub:@poweur/openclaw-channel",
+      "npmSpec": "@poweur/openclaw-channel",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.10.3"
     }
   },
   "engines": {

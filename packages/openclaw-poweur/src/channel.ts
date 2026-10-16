@@ -8,7 +8,10 @@
  * rather than a webhook): the transport is ./bus.ts, the rest is OpenClaw's
  * shared DM-security, pairing, inbound dispatch and outbound plumbing.
  */
-import { openClient } from "@poweur/client/node";
+import { join } from "node:path";
+import { validateShareRevoked, type ShareRevoked } from "@poweur/client/drive";
+import { openClient, poweurHome } from "@poweur/client/node";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "openclaw/plugin-sdk/agent-runtime";
 import {
   createScopedDmSecurityResolver,
   createTopLevelChannelConfigAdapter,
@@ -50,7 +53,10 @@ import {
   resolvePoweurAccount,
   type ResolvedPoweurAccount,
 } from "./config.js";
+import { acceptFolderOffer } from "./drive.js";
+import { folderContext, FolderSync } from "./folders.js";
 import { getPoweurRuntime } from "./runtime.js";
+import { poweurSetupContract } from "./setup.js";
 
 const CHANNEL = "poweur";
 const TARGET_HINT = "<poweur id, e.g. alice.poweur.net>";
@@ -96,7 +102,7 @@ export async function startPoweurGatewayAccount(ctx: ChannelGatewayContext<Resol
     throw new Error("Poweur requires its registered channel runtime context builder");
   }
   const runtime = getPoweurRuntime();
-  const { client } = await openClient({
+  const { client, keys } = await openClient({
     identity: account.identity,
     ...(account.relayUrl ? { relayUrl: account.relayUrl } : {}),
   });
@@ -124,13 +130,48 @@ export async function startPoweurGatewayAccount(ctx: ChannelGatewayContext<Resol
         : undefined,
     });
 
+  // Shared folders land in the agent's workspace, where its file tools work.
+  const workspace = resolveAgentWorkspaceDir(ctx.cfg, resolveDefaultAgentId(ctx.cfg));
+  const folders = new FolderSync(
+    { client, keys },
+    join(poweurHome(), "openclaw", `${account.identity}-folders.json`),
+    (line) => ctx.log?.info?.(`[${account.accountId}] ${line}`),
+  );
+  const safeName = (name: string) => name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/^\.+/, "_") || "shared";
+
   await runPassiveAccountLifecycle({
     abortSignal: ctx.abortSignal,
     start: async () => {
       const controller = new AbortController();
+      const timer = setInterval(() => void folders.sync(), 60_000);
       const bus = startPoweurBus({
         client,
         signal: controller.signal,
+        onShare: async (event) => {
+          const reply = (text: string) => bus.sendText(event.sender, text);
+          if (event.kind === "revoked") {
+            const notice = JSON.parse(event.body) as ShareRevoked;
+            validateShareRevoked(notice);
+            if (notice.drive !== event.sender) return;
+            const gone = folders.remove(notice.drive, notice.share_id);
+            if (gone) ctx.log?.info?.(`[${account.accountId}] ${event.sender} stopped sharing "${gone.name}"; local copy kept at ${gone.local}`);
+            return;
+          }
+          // Only people who may talk to the agent can hand it a folder.
+          const access = await resolveInboundAccess(event.sender, "");
+          if (access.senderAccess.decision !== "allow") {
+            ctx.log?.debug?.(`[${account.accountId}] ignored a folder offer from ${event.sender} (${access.senderAccess.reasonCode})`);
+            return;
+          }
+          const accepted = await acceptFolderOffer({ client, keys }, event.sender, event.body);
+          const local = join(workspace, "shared", event.sender, safeName(accepted.name));
+          folders.add({ ...accepted, local });
+          await folders.sync(event.sender);
+          const can = accepted.role === "write" || accepted.role === "admin";
+          await reply(
+            `Got your folder "${accepted.name}". ${can ? "I'll work in it: anything I write there is saved to your folder." : "It's read-only for me, so I can read it but not add files."}`,
+          );
+        },
         onConnect: () => ctx.setStatus(channelReadyPatch({ accountId: account.accountId })),
         onError: (error, where) => ctx.log?.warn?.(`[${account.accountId}] Poweur ${where}: ${String(error)}`),
         onMessage: async (message) => {
@@ -151,7 +192,12 @@ export async function startPoweurGatewayAccount(ctx: ChannelGatewayContext<Resol
             ctx.log?.debug?.(`[${account.accountId}] blocked Poweur sender ${message.sender} (${access.senderAccess.reasonCode})`);
             return;
           }
-          const text = message.subject ? `${message.subject}\n\n${message.text}` : message.text;
+          // Bring the sender's folders up to date before the agent looks at them,
+          // and tell it where they are.
+          await folders.sync(message.sender);
+          const context = folderContext(folders.mountsFrom(message.sender), workspace);
+          const body = message.subject ? `${message.subject}\n\n${message.text}` : message.text;
+          const text = context ? `${context}\n\n${body}` : body;
           const { dispatchInboundDirectDm } = await import("openclaw/plugin-sdk/channel-inbound");
           await dispatchInboundDirectDm({
             channelRuntime,
@@ -182,6 +228,8 @@ export async function startPoweurGatewayAccount(ctx: ChannelGatewayContext<Resol
             onRecordError: (err) => ctx.log?.error?.(`[${account.accountId}] failed recording Poweur inbound session: ${String(err)}`),
             onDispatchError: (err, info) => ctx.log?.error?.(`[${account.accountId}] Poweur ${info.kind} reply failed: ${String(err)}`),
           });
+          // Whatever the agent wrote during the turn goes back to the owner.
+          await folders.sync(message.sender);
         },
       });
       activeBuses.set(account.accountId, bus);
@@ -189,6 +237,7 @@ export async function startPoweurGatewayAccount(ctx: ChannelGatewayContext<Resol
         stop: async () => {
           if (activeBuses.get(account.accountId) === bus) activeBuses.delete(account.accountId);
           controller.abort();
+          clearInterval(timer);
           await bus.done.catch(() => undefined);
           ctx.log?.info?.(`[${account.accountId}] Poweur channel stopped`);
         },
@@ -292,6 +341,7 @@ export const poweurPlugin: ChannelPlugin<ResolvedPoweurAccount> = createChatChan
     capabilities: { chatTypes: ["direct"], media: false },
     reload: { configPrefixes: ["channels.poweur"] },
     configSchema: buildChannelConfigSchema(PoweurConfigSchema),
+    setupContract: poweurSetupContract,
     config: {
       ...configAdapter,
       isConfigured: (account) => account.configured,

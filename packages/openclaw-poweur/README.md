@@ -5,41 +5,29 @@ PWA or the CLI. The agent runs on **its own Poweur ID**, never yours: messages a
 encrypted, and every sender is a verified Poweur ID, so the allowlist and pairing work on real
 identities instead of display names.
 
-Status: early (INT-005-T2). Direct messages work end to end; shared folders are next.
+Status: beta. Messages and shared folders work end to end.
 
 ## Set it up
 
-1. **Give the agent an ID** on the machine that runs the gateway. Its keys stay in that
-   machine's Poweur home (`POWEUR_HOME`, default `~/.poweur`):
+```bash
+openclaw plugins install npm:@poweur/openclaw-channel
+openclaw channels add --channel poweur --identity yourname-claw.poweur.net --allow-from yourname.poweur.net
+```
 
-   ```bash
-   npx @poweur/client identity create myagent.poweur.net --hosted --relay https://poweur.net
-   ```
+`channels add` creates the agent's own ID (unless this machine already has its keys) and prints
+its recovery phrase once, allows only the given IDs, and labels the agent's profile with who runs
+it. Then start the gateway and message the agent from the Poweur app. Full guide:
+[poweur.org/docs/agents/openclaw](https://www.poweur.org/docs/agents/openclaw).
 
-2. **Install the plugin** (from a checkout, until it is published):
+From a checkout: `pnpm --filter @poweur/openclaw-channel build && pnpm --filter @poweur/openclaw-channel pack`,
+then `openclaw plugins install npm-pack:<the .tgz>`.
 
-   ```bash
-   openclaw plugins install --link /path/to/poweur/packages/openclaw-poweur
-   ```
+## Shared folders
 
-3. **Configure the channel** in `openclaw.json`:
-
-   ```json5
-   {
-     channels: {
-       poweur: {
-         identity: "myagent.poweur.net",
-         // pairing (default): strangers get a code you approve; allowlist: only these IDs
-         dmPolicy: "allowlist",
-         allowFrom: ["you.poweur.net"],
-       },
-     },
-   }
-   ```
-
-   `relayUrl` is optional; it defaults to the relay in the Poweur home's `config.toml`.
-
-4. Start the gateway and send `myagent.poweur.net` a message from the Poweur app.
+Share a folder with the agent's ID (role *Can edit*) and it appears in the agent's workspace at
+`shared/<your id>/<folder>/`. What the agent writes there is synced back into your folder; your
+changes come down before each turn. Conflicts keep both versions; the agent never deletes your
+files. See the [guide](https://www.poweur.org/docs/agents/openclaw#give-it-a-folder-to-work-in).
 
 ## Test it
 
@@ -57,7 +45,7 @@ on the allowlist gets no reply.
 
 `src/bus.ts` listens on the agent's relay event stream, picks up its inbox, hands each chat
 message to OpenClaw and consumes it only afterwards, so a crash means a re-pickup, not a lost
-message. `src/channel.ts` plugs that into OpenClaw's shared DM security, pairing, inbound
+message. `src/folders.ts` keeps shared folders in sync (`planSync` decides, conservatively). `src/channel.ts` plugs that into OpenClaw's shared DM security, pairing, inbound
 dispatch and outbound sending, shaped like OpenClaw's own Nostr channel.
 
 Licence: Apache-2.0.

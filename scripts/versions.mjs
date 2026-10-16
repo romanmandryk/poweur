@@ -26,7 +26,7 @@ export const PACKAGES = {
   web: { label: "Web app", file: "apps/web/package.json", pattern: jsonVersion, paths: ["apps/web/"] },
   oauth: { label: "OAuth bridge", file: "apps/oauth/bridge/doc.go", pattern: goConst, paths: ["apps/oauth/"] },
   email: { label: "Email bridge", file: "apps/email/bridge/doc.go", pattern: goConst, paths: ["apps/email/"] },
-  openclaw: { label: "OpenClaw channel", file: "packages/openclaw-poweur/package.json", pattern: jsonVersion, paths: ["packages/openclaw-poweur/"] },
+  openclaw: { label: "OpenClaw channel", file: "packages/openclaw-poweur/package.json", pattern: jsonVersion, paths: ["packages/openclaw-poweur/"], tagPrefix: "openclaw-v" },
 };
 
 // Files that change without changing what ships: tests, fixtures, docs, lockfiles, dependency manifests.

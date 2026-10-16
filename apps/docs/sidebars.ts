@@ -56,6 +56,14 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Agents',
+      collapsed: false,
+      items: [
+        'agents/openclaw',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Email',
       collapsed: true,
       items: ['email/bridge'],

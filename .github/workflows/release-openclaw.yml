@@ -1,0 +1,109 @@
+name: Release OpenClaw channel
+
+# Publishes @poweur/openclaw-channel (packages/openclaw-poweur) to npm and ClawHub.
+# Push a tag `openclaw-v<version>` matching its package.json (`node scripts/release.mjs
+# tag openclaw`), or run it by hand with "Dry run" ticked to build, test, pack and
+# dry-run both publishes.
+#
+# npm: the NPM_TOKEN secret, as for the SDK. ClawHub: trusted publishing, no secret. Once,
+# by hand: `clawhub login`, an owner named `poweur`, then
+#   clawhub package trusted-publisher set @poweur/openclaw-channel \
+#     --repository romanmandryk/poweur --workflow-filename release-openclaw.yml
+# and set the repository variable PUBLISH_CLAWHUB to "true".
+on:
+  push:
+    tags: ["openclaw-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, test and pack, but do not publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # the GitHub release
+  id-token: write # npm provenance and ClawHub trusted publishing
+
+concurrency:
+  group: release-openclaw
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.25"
+  CLAWHUB_CLI: clawhub@0.23.3
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            apps/api/go.sum
+            packages/identity/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @poweur/openclaw-channel...
+
+      - name: The tag and the package agree on one version
+        id: version
+        run: |
+          v="$(node -p "require('./packages/openclaw-poweur/package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "openclaw-v$v" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version $v" >&2; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm --filter @poweur/client build
+      - run: pnpm --filter @poweur/openclaw-channel typecheck
+      - run: pnpm --filter @poweur/openclaw-channel test
+      # The real thing: packs the plugin, installs it into OpenClaw, onboards with
+      # `channels add` and holds a conversation over a local relay (fake model).
+      - run: node apps/integration/agents/openclaw-e2e.mjs
+
+      - name: Pack and validate (shows exactly what would be published)
+        working-directory: packages/openclaw-poweur
+        run: |
+          pnpm build
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          ls -l "$RUNNER_TEMP"/*.tgz
+          npx --yes "$CLAWHUB_CLI" package validate .
+          npx --yes "$CLAWHUB_CLI" package publish . --dry-run \
+            --source-repo "$GITHUB_REPOSITORY" --source-path packages/openclaw-poweur \
+            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME"
+
+      - name: Publish to npm
+        if: ${{ github.ref_type == 'tag' || inputs.dry_run == false }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN" || { echo "NPM_TOKEN is not set" >&2; exit 1; }
+          if npm view "@poweur/openclaw-channel@$VERSION" version >/dev/null 2>&1; then
+            echo "@poweur/openclaw-channel@$VERSION is already on npm, skipping"
+          else
+            pnpm --filter @poweur/openclaw-channel publish --access public --provenance --no-git-checks
+          fi
+
+      - name: Publish to ClawHub
+        if: ${{ (github.ref_type == 'tag' || inputs.dry_run == false) && vars.PUBLISH_CLAWHUB == 'true' }}
+        working-directory: packages/openclaw-poweur
+        run: |
+          npx --yes "$CLAWHUB_CLI" package publish . --owner poweur \
+            --source-repo "$GITHUB_REPOSITORY" --source-path packages/openclaw-poweur \
+            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME" \
+            --changelog "Release ${{ steps.version.outputs.version }}" --wait --json
+
+      - name: GitHub release
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "OpenClaw channel ${{ steps.version.outputs.version }}" --generate-notes
