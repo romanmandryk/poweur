@@ -7,6 +7,8 @@
  */
 import {
   MSG_TYPE_CHAT_TEXT,
+  MSG_TYPE_SHARE_OFFER,
+  MSG_TYPE_SHARE_REVOKED,
   normalizeMessageType,
   streamForever,
   type InboxMessage,
@@ -28,6 +30,8 @@ export interface PoweurBusOptions {
   client: PoweurClient;
   /** Called once per chat message, in arrival order. A throw leaves the message for the next pickup. */
   onMessage: (message: PoweurInbound) => Promise<void>;
+  /** A folder share offer (sys.share.offer) or its revocation; the body is the decrypted JSON. */
+  onShare?: (event: { kind: "offer" | "revoked"; sender: string; body: string; messageId: string }) => Promise<void>;
   onError?: (error: unknown, context: string) => void;
   onConnect?: () => void;
   signal?: AbortSignal;
@@ -104,6 +108,20 @@ export function startPoweurBus(options: PoweurBusOptions): PoweurBus {
   const drain = async () => {
     const { messages, cursor } = await client.messages.inbox(client.signer, client.decryptor);
     for (const message of messages) {
+      const type = normalizeMessageType(message.type);
+      if ((type === MSG_TYPE_SHARE_OFFER || type === MSG_TYPE_SHARE_REVOKED) && message.plaintext && options.onShare) {
+        try {
+          await options.onShare({
+            kind: type === MSG_TYPE_SHARE_OFFER ? "offer" : "revoked",
+            sender: message.sender.toLowerCase(),
+            body: message.plaintext,
+            messageId: message.id,
+          });
+        } catch (error) {
+          report(error, "share"); // a bad offer must not block the inbox
+        }
+        continue;
+      }
       const inbound = toInbound(message);
       if (!inbound) continue;
       await options.onMessage(inbound);

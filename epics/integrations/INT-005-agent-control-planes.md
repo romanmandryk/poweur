@@ -113,7 +113,11 @@ Their SDK maps onto our protocol cleanly; build to the documented contract:
 **Acceptance:** plugin installs into a stock gateway, passes the core capability-proof tests, and
 survives a restart mid-delivery without duplicating or dropping a message.
 
-**Progress (16 Oct 2026):** `apps/integration/agents/openclaw-e2e.mjs` runs a real OpenClaw gateway with the plugin
+**Progress (17 Oct 2026):** `openclaw channels add --channel poweur --identity … --allow-from …` creates the
+agent's ID (recovery phrase shown once), writes the channel config and labels the agent's profile "AI agent run by
+…"; the package bundles the SDK (self-contained, passes ClawHub's Plugin Inspector); replies wait out the relay's
+rate limit; one message per turn measured live; release workflow `release-openclaw.yml` (npm + ClawHub trusted
+publishing). **Earlier (16 Oct 2026):** `apps/integration/agents/openclaw-e2e.mjs` runs a real OpenClaw gateway with the plugin
 against a local relay: a Poweur ID sends "ping" and gets "pong" (fake model, in CI), or asks a real model through
 OpenRouter (`--live`, key in the git-ignored `.env.local`) and gets "4"; a stranger outside the allowlist gets no
 reply. The bus consumes a message only after OpenClaw took it (crash ⇒ re-pickup). Open: restart-mid-delivery test,
@@ -131,6 +135,14 @@ capability-proof tests, attachments, the shared-folder handoff (T3), publishing 
 
 **Acceptance:** a file larger than any messenger's attachment cap moves between two gateways run by
 two people on different relays; revoking the grant cuts access on the next request.
+
+**Progress (17 Oct 2026, plugin 0.1.1):** shared folders work end to end. A person shares a folder with
+the agent's ID (`write`); the plugin accepts the offer (PCP-0008, mount + `sys.share.accept`), mirrors it into
+the agent's workspace at `shared/<owner>/<folder>/`, tells the agent with each message, and syncs both ways
+(before and after each turn, and every minute): the agent's files go into the owner's drive, the owner's
+edits come down, conflicts keep both (`name (agent).ext`), the agent never deletes the owner's files.
+`openclaw-e2e.mjs` proves it with a fake model (agent's file up, owner's edit down) and live (a real model
+reads `brief.md`, writes `plan.md` into the owner's folder). Message attachments as shares: still open.
 
 ### INT-005-T4 — Verified participants in shared sessions
 

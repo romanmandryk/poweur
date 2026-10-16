@@ -297,6 +297,49 @@ async function main() {
     await ask("alice", "ping", /pong/, 60_000);
   }
 
+  // 6. A shared folder: alice shares "Project" with the agent (write). It
+  // appears in the agent's workspace; what the agent writes there lands in
+  // alice's drive, and alice's edits come down.
+  const workspace = join(ocHome, "workspace");
+  const mirror = join(workspace, "shared", ids.alice, "Project");
+  const briefFile = join(work, "brief.md");
+  writeFileSync(briefFile, "# Brief\nPlan a 3-day trip to Lisbon for two people in May. Budget: 1200 EUR.\n");
+  await poweur("alice", ["drive", "mkdir", "/Project"]);
+  await poweur("alice", ["drive", "put", briefFile, "/Project/brief.md"]);
+  await poweur("alice", ["drive", "share", "add", "/Project", ids.agent, "--role", "write"]);
+  await waitFor("the agent to accept the folder", async () => (await pickUp("alice")).some((m) => /Got your folder "Project"/.test(m.plaintext ?? "")), 60_000).catch((e) => {
+    throw new Error(`${e.message}\n--- openclaw log ---\n${gateway.log().slice(-4000)}`);
+  });
+  await waitFor("brief.md in the agent's workspace", async () => existsSync(join(mirror, "brief.md")), 30_000);
+  console.log(`folder shared: brief.md is in the agent's workspace (${join("shared", ids.alice, "Project")})`);
+  const projectFiles = async () => JSON.parse(await poweur("alice", ["drive", "list", "/Project", "--json"])).map((f) => f.name);
+  const readProject = async (name) => {
+    const out = join(work, `got-${Date.now()}-${name}`);
+    await poweur("alice", ["drive", "get", `/Project/${name}`, out]);
+    return readFileSync(out, "utf8");
+  };
+
+  if (live) {
+    await ask("alice", "In the shared folder Project, read brief.md and write a short plan (at most 10 lines) to plan.md in the same folder. Then reply with just: done", null, 240_000);
+    const names = await waitFor("plan.md in alice's drive", async () => ((await projectFiles()).includes("plan.md") ? true : false), 90_000);
+    const plan = await readProject("plan.md");
+    console.log(`the agent wrote plan.md into alice's folder:\n${plan.slice(0, 400)}`);
+    if (!/lisbon/i.test(plan)) throw new Error("plan.md does not look like a plan for the brief");
+  } else {
+    // The agent's work, as its file tools would leave it.
+    writeFileSync(join(mirror, "notes.md"), "Notes from the agent\n");
+    await ask("alice", "ping", /pong/, 60_000);
+    await waitFor("notes.md in alice's drive", async () => (await projectFiles()).includes("notes.md"), 30_000);
+    if ((await readProject("notes.md")) !== "Notes from the agent\n") throw new Error("notes.md arrived with the wrong content");
+    console.log("the agent's notes.md is in alice's folder");
+    // alice edits the brief; the next turn brings it down.
+    writeFileSync(briefFile, "# Brief v2\nNow 4 days.\n");
+    await poweur("alice", ["drive", "put", briefFile, "/Project/brief.md"]);
+    await ask("alice", "ping", /pong/, 60_000);
+    if (!readFileSync(join(mirror, "brief.md"), "utf8").includes("v2")) throw new Error("alice's edit did not reach the agent");
+    console.log("alice's edit to brief.md reached the agent's workspace");
+  }
+
   // A stranger is not on the allowlist: no reply.
   await poweur("eve", ["send", ids.agent, "ping"]);
   await sleep(live ? 8000 : 4000);

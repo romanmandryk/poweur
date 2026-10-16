@@ -46,6 +46,32 @@ from the Poweur app.
 The keys live in the Poweur home on that machine (`POWEUR_HOME`, default `~/.poweur`), never in
 OpenClaw's config. Back up that folder or keep the recovery phrase.
 
+## Give it a folder to work in
+
+Share a folder with the agent's ID, from the Poweur app (Files → share → enter the agent's ID,
+role *Can edit*) or the CLI:
+
+```bash
+poweur drive share add /Project yourname-claw.poweur.net --role write
+```
+
+The agent accepts it and replies *Got your folder "Project"*. The folder appears in its workspace
+at `shared/yourname.poweur.net/Project/`, and with every message the agent is told it is there.
+Ask it to work: *"read brief.md and write a plan to plan.md"*.
+
+- **What it writes is yours.** New and changed files go back into your folder, in your drive,
+  end-to-end encrypted like everything else there. You see them in the app right away.
+- **Your edits reach it.** Files you add or change come down before its next turn, and at least
+  once a minute.
+- **Nothing is lost.** If you both change the same file, your version wins in the folder and
+  the agent's is saved beside it as `name (agent).ext`.
+- **It never deletes your files.** If the agent deletes a file locally, it comes back on the next
+  sync. Files you delete are removed from its copy.
+- **Read-only shares** (role *Can view*) are read but never written to.
+- **Stop sharing** at any time: the agent stops syncing and keeps only its local copy.
+
+Only people who may message the agent (the allowlist, or approved pairings) can give it folders.
+
 ## What to expect
 
 - **One message per reply.** Replies are sent whole (up to 8,000 characters per message), so a
@@ -53,7 +79,7 @@ OpenClaw's config. Back up that folder or keep the recovery phrase.
 - **Limits.** Like every ID on poweur.net, the agent can send 20 messages a minute, 200 an hour
   and 1,000 a day. When it hits a limit, the reply waits and is retried for up to 90 seconds.
 - **Threads and subjects** carry over: the agent replies in the thread you wrote in.
-- **Not yet:** attachments, and several agent IDs on one gateway.
+- **Not yet:** message attachments, and several agent IDs on one gateway.
 
 ## Under the hood
 

@@ -5,7 +5,7 @@ PWA or the CLI. The agent runs on **its own Poweur ID**, never yours: messages a
 encrypted, and every sender is a verified Poweur ID, so the allowlist and pairing work on real
 identities instead of display names.
 
-Status: beta. Direct messages work end to end; shared folders are next.
+Status: beta. Messages and shared folders work end to end.
 
 ## Set it up
 
@@ -21,6 +21,13 @@ it. Then start the gateway and message the agent from the Poweur app. Full guide
 
 From a checkout: `pnpm --filter @poweur/openclaw-channel build && pnpm --filter @poweur/openclaw-channel pack`,
 then `openclaw plugins install npm-pack:<the .tgz>`.
+
+## Shared folders
+
+Share a folder with the agent's ID (role *Can edit*) and it appears in the agent's workspace at
+`shared/<your id>/<folder>/`. What the agent writes there is synced back into your folder; your
+changes come down before each turn. Conflicts keep both versions; the agent never deletes your
+files. See the [guide](https://www.poweur.org/docs/agents/openclaw#give-it-a-folder-to-work-in).
 
 ## Test it
 
@@ -38,7 +45,7 @@ on the allowlist gets no reply.
 
 `src/bus.ts` listens on the agent's relay event stream, picks up its inbox, hands each chat
 message to OpenClaw and consumes it only afterwards, so a crash means a re-pickup, not a lost
-message. `src/channel.ts` plugs that into OpenClaw's shared DM security, pairing, inbound
+message. `src/folders.ts` keeps shared folders in sync (`planSync` decides, conservatively). `src/channel.ts` plugs that into OpenClaw's shared DM security, pairing, inbound
 dispatch and outbound sending, shaped like OpenClaw's own Nostr channel.
 
 Licence: Apache-2.0.
