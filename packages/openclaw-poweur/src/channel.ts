@@ -51,6 +51,7 @@ import {
   type ResolvedPoweurAccount,
 } from "./config.js";
 import { getPoweurRuntime } from "./runtime.js";
+import { poweurSetupContract } from "./setup.js";
 
 const CHANNEL = "poweur";
 const TARGET_HINT = "<poweur id, e.g. alice.poweur.net>";
@@ -292,6 +293,7 @@ export const poweurPlugin: ChannelPlugin<ResolvedPoweurAccount> = createChatChan
     capabilities: { chatTypes: ["direct"], media: false },
     reload: { configPrefixes: ["channels.poweur"] },
     configSchema: buildChannelConfigSchema(PoweurConfigSchema),
+    setupContract: poweurSetupContract,
     config: {
       ...configAdapter,
       isConfigured: (account) => account.configured,

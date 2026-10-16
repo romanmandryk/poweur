@@ -1,12 +1,72 @@
 {
   "id": "poweur",
-  "categories": ["channels"],
+  "categories": [
+    "channels"
+  ],
   "name": "Poweur",
   "description": "End-to-end encrypted messages between Poweur IDs and your agent, which runs on its own Poweur ID.",
-  "channels": ["poweur"],
+  "channels": [
+    "poweur"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {}
+  },
+  "channelConfigs": {
+    "poweur": {
+      "label": "Poweur",
+      "description": "End-to-end encrypted messages between Poweur IDs and your agent",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "identity": {
+            "type": "string"
+          },
+          "relayUrl": {
+            "type": "string"
+          },
+          "dmPolicy": {
+            "type": "string",
+            "enum": [
+              "pairing",
+              "allowlist",
+              "open",
+              "disabled"
+            ]
+          },
+          "allowFrom": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "uiHints": {
+        "identity": {
+          "label": "Agent's Poweur ID",
+          "placeholder": "yourname-claw.poweur.net"
+        },
+        "relayUrl": {
+          "label": "Relay",
+          "placeholder": "https://poweur.net"
+        },
+        "allowFrom": {
+          "label": "Who may message the agent",
+          "placeholder": "you.poweur.net"
+        }
+      }
+    }
   }
 }

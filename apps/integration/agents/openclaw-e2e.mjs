@@ -13,8 +13,8 @@
 // runs a turn on it, and the reply comes back as an end-to-end encrypted Poweur
 // message. A stranger who is not on the allowlist gets no reply.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, get as httpGet } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -174,13 +174,15 @@ async function main() {
   });
   console.log(`relay up at ${relayUrl}`);
 
-  // 2. Two Poweur IDs: the agent's and a person's, plus a stranger.
+  // 2. A person's Poweur ID and a stranger's. The agent's own ID is created by
+  //    `openclaw channels add` below, the way an operator onboards.
   const suffix = Date.now().toString(36);
   const ids = { agent: `agent${suffix}.poweur.net`, alice: `alice${suffix}.poweur.net`, eve: `eve${suffix}.poweur.net` };
   const resolverEnv = { POWEUR_RESOLVER_SCHEME: "http", RESOLVER_ALLOW_PRIVATE: "1", POWEUR_RESOLVER_DIAL: addr };
   const homes = {};
   for (const [who, id] of Object.entries(ids)) {
     homes[who] = join(work, `poweur-${who}`);
+    if (who === "agent") continue;
     await run(process.execPath, [CLI, "identity", "create", id, "--hosted", "--relay", relayUrl], {
       ...process.env, ...resolverEnv, POWEUR_HOME: homes[who],
     });
@@ -197,7 +199,6 @@ async function main() {
   const gatewayPort = await freePort();
   const config = {
     gateway: { mode: "local", port: gatewayPort, bind: "loopback", auth: { mode: "token", token: "e2e-gateway-token" } },
-    plugins: { load: { paths: [PLUGIN_DIR] }, entries: { poweur: { enabled: true } } },
     agents: {
       defaults: {
         workspace: join(ocHome, "workspace"),
@@ -216,7 +217,6 @@ async function main() {
             },
           },
         }),
-    channels: { poweur: { identity: ids.agent, relayUrl, dmPolicy: "allowlist", allowFrom: [ids.alice] } },
   };
   const configPath = join(ocHome, "openclaw.json");
   await run("mkdir", ["-p", ocHome]);
@@ -227,6 +227,38 @@ async function main() {
     POWEUR_HOME: homes.agent,
     ...(live ? { OPENROUTER_API_KEY: openrouterKey } : {}),
   };
+  // Install the plugin the way users get it: the packed npm tarball.
+  await run("pnpm", ["--dir", PLUGIN_DIR, "build"], process.env);
+  const packDir = join(work, "pack");
+  await run("mkdir", ["-p", packDir]);
+  await run("pnpm", ["--dir", PLUGIN_DIR, "pack", "--pack-destination", packDir], process.env);
+  const tarball = join(packDir, readdirSync(packDir).find((f) => f.endsWith(".tgz")));
+  await run(OPENCLAW, ["plugins", "install", `npm-pack:${tarball}`, "--accept-capabilities", "--force"], ocEnv);
+  console.log("plugin installed from the packed tarball");
+
+  // Onboarding: one command creates the agent's ID, configures the channel and labels its profile.
+  const added = await run(OPENCLAW, ["channels", "add", "--channel", "poweur", "--identity", ids.agent, "--allow-from", ids.alice, "--relay-url", relayUrl], ocEnv);
+  if (!/Created the agent's Poweur ID/.test(added) || !/recovery phrase/i.test(added)) throw new Error(`channels add said:\n${added}`);
+  const written = JSON.parse(readFileSync(configPath, "utf8")).channels?.poweur ?? {};
+  if (written.identity !== ids.agent || written.dmPolicy !== "allowlist" || !written.allowFrom?.includes(ids.alice)) {
+    throw new Error(`channels add wrote ${JSON.stringify(written)}`);
+  }
+  const profile = await new Promise((resolve) => {
+    httpGet({ host: "127.0.0.1", port: relayPort, path: "/.well-known/poweur/profile.json", headers: { host: ids.agent } }, (res) => {
+      let body = "";
+      res.on("data", (d) => (body += d));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          resolve(null);
+        }
+      });
+    }).on("error", () => resolve(null));
+  });
+  if (!/run by/.test(profile?.bio ?? "")) throw new Error(`agent profile not labelled: ${JSON.stringify(profile)}`);
+  console.log(`channels add: created ${ids.agent}, allowlist [${written.allowFrom}], profile "${profile?.bio ?? "?"}"`);
+
   const gateway = start("openclaw", OPENCLAW, ["gateway", "run", "--allow-unconfigured"], { cwd: work, env: ocEnv });
   await waitFor("the Poweur channel to start", async () => /Poweur channel as|starting Poweur channel/.test(gateway.log()), 120_000).catch((e) => {
     throw new Error(`${e.message}\n--- openclaw log ---\n${gateway.log().slice(-4000)}`);
