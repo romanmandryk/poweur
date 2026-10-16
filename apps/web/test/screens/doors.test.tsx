@@ -168,6 +168,32 @@ describe("the launcher landing (E15-T8)", () => {
     }
   });
 
+  it("offers the IDs this browser has used, one tap to each one's own app", async () => {
+    useSession.setState({ mode: launcher });
+    document.cookie = "poweur_ids=johnjohn.poweur.net%7Cwork.poweur.net%7Ccarl.example.com; Path=/";
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, protocol: "http:", port: "", pathname: "/id/", search: "" });
+    try {
+      render(<App />);
+      const rows = [...document.querySelectorAll<HTMLElement>("#known-ids [data-known-id]")].map((row) => row.dataset.knownId);
+      // Another domain's ID is not this launcher's to offer.
+      expect(rows).toEqual(["johnjohn.poweur.net", "work.poweur.net"]);
+      // Claiming another name stays right there.
+      expect(document.querySelector("#have-id-input")).toBeTruthy();
+      fireEvent.click($('[data-known-id="johnjohn.poweur.net"]'));
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("http://johnjohn.poweur.net/id/"));
+    } finally {
+      vi.unstubAllGlobals();
+      document.cookie = "poweur_ids=; Path=/; Max-Age=0";
+    }
+  });
+
+  it("shows no known IDs in a browser that has used none", () => {
+    useSession.setState({ mode: launcher });
+    render(<App />);
+    expect(document.querySelector("#known-ids")).toBeNull();
+  });
+
   it("I already have an ID says a missing name doesn't exist and can be claimed above", async () => {
     useSession.setState({ mode: launcher });
     relay.availability.mockResolvedValue({ available: true, identity: "nobody.poweur.net" });

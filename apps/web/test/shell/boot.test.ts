@@ -118,6 +118,37 @@ describe("boot (E21-T4)", () => {
     expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
   });
 
+  it("an installed launcher opens the ID this browser last used, in its own app; a tab stays", async () => {
+    document.cookie = "poweur_ids=johnjohn.poweur.net%7Cwork.poweur.net; Path=/";
+    const replace = vi.fn();
+    try {
+      vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("standalone") }));
+      vi.stubGlobal("location", { ...window.location, href: "https://poweur.net/id/", protocol: "https:", port: "", pathname: "/id/", search: "", hash: "", replace });
+      mode.next = { mode: "launcher", domain: "poweur.net" };
+      await boot();
+      expect(replace).toHaveBeenCalledWith("https://johnjohn.poweur.net/id/");
+    } finally {
+      vi.unstubAllGlobals();
+      document.cookie = "poweur_ids=; Path=/; Max-Age=0";
+    }
+  });
+
+  it("a launcher in a browser tab does not redirect, even with known IDs", async () => {
+    document.cookie = "poweur_ids=johnjohn.poweur.net; Path=/";
+    const replace = vi.fn();
+    try {
+      vi.stubGlobal("matchMedia", () => ({ matches: false }));
+      vi.stubGlobal("location", { ...window.location, href: "https://poweur.net/id/", protocol: "https:", port: "", pathname: "/id/", search: "", hash: "", replace });
+      mode.next = { mode: "launcher", domain: "poweur.net" };
+      await boot();
+      expect(replace).not.toHaveBeenCalled();
+      expect(useRoute.getState()).toMatchObject({ page: "messages", sub: null });
+    } finally {
+      vi.unstubAllGlobals();
+      document.cookie = "poweur_ids=; Path=/; Max-Age=0";
+    }
+  });
+
   it("runs once, and corrects the door and title when the relay answers", async () => {
     mode.next = { mode: "launcher" };
     await boot();

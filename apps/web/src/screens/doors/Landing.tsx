@@ -10,7 +10,9 @@ import { goToIdentityDoor, lookUpExistingId, type ExistingIdVerdict } from "../.
 import { cn } from "../../lib/cn";
 import { LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
 import { hasRelayUrl } from "../../lib/storage.js";
-import { pendingChatTarget } from "../../lib/visit";
+import { pendingChatTarget, readIdHints } from "../../lib/visit";
+import { identityAppUrl } from "../../lib/claim";
+import { Avatar } from "../../ui/Avatar";
 import { useRoute } from "../../state/route";
 import { useSession, type ModeInfo } from "../../state/session";
 import { BrandMark } from "../../ui/Logo";
@@ -65,6 +67,7 @@ export function Landing() {
           <RelayPrompt className="mb-0 p-0" />
         </div>
       )}
+      {info.mode === "launcher" && <KnownIds info={info} />}
       {showClaim && <ClaimCard hero info={info} />}
       {info.mode === "launcher" ? (
         <ExistingId info={info} />
@@ -131,6 +134,36 @@ function LegalLinks() {
         Contact
       </a>
     </nav>
+  );
+}
+
+/**
+ * The IDs this browser has used (the shared hint cookie their own hosts
+ * write), one tap each. The launcher holds no keys, so "continue" is going
+ * to the ID's own app; claiming another name stays right below.
+ */
+function KnownIds({ info }: { info: ModeInfo }) {
+  const known = readIdHints().filter((id) => !info.domain || id.endsWith(`.${info.domain}`));
+  if (!known.length) return null;
+  return (
+    <div id="known-ids" className={cn("known-ids", cardClass)}>
+      <div className="mb-2 text-[15px] font-semibold">Continue as</div>
+      <div className="flex flex-col gap-1">
+        {known.map((id) => (
+          <button
+            key={id}
+            type="button"
+            data-known-id={id}
+            onClick={() => goToIdentityDoor(id, identityAppUrl(id))}
+            className="flex min-h-12 items-center gap-3 rounded-control px-2 py-2 text-left text-fg transition-colors [@media(hover:hover)]:hover:bg-surface-2"
+          >
+            <Avatar identity={id} size="md" />
+            <span className="min-w-0 flex-1 truncate font-mono text-[15px]">{id}</span>
+            <ArrowUpRight className="size-4 shrink-0 text-faint" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
