@@ -265,23 +265,34 @@ async function main() {
   });
   console.log("OpenClaw gateway up, Poweur channel started");
 
-  // 5. Conversation
+  // 5. Conversation. Reading the inbox picks messages up, so every read is
+  // collected: that is how a turn's message count is measured.
+  const fromAgent = { alice: [], eve: [] };
+  const pickUp = async (who) => {
+    const msgs = (JSON.parse(await poweur(who, ["inbox", "--json"])).messages ?? []).filter((m) => m.sender === ids.agent);
+    fromAgent[who].push(...msgs);
+    return msgs;
+  };
   const ask = async (who, text, expect, timeoutMs) => {
+    const before = fromAgent[who].length;
     await poweur(who, ["send", ids.agent, text]);
-    const reply = await waitFor(`a reply to "${text}"`, async () => {
-      const out = await poweur(who, ["inbox", "--json"]);
-      const msgs = JSON.parse(out).messages ?? [];
-      return msgs.find((m) => m.sender === ids.agent && m.plaintext)?.plaintext;
-    }, timeoutMs).catch((e) => {
+    await waitFor(`a reply to "${text}"`, async () => (await pickUp(who)).length > 0, timeoutMs).catch((e) => {
       throw new Error(`${e.message}\n--- openclaw log ---\n${gateway.log().slice(-4000)}`);
     });
-    console.log(`${who} → agent: ${text}\nagent → ${who}: ${reply}`);
+    // Anything else the same turn sends (split replies, progress) arrives shortly after.
+    await sleep(live ? 6000 : 2500);
+    await pickUp(who);
+    const turn = fromAgent[who].slice(before);
+    const reply = turn.map((m) => m.plaintext ?? "").join("\n");
+    console.log(`${who} → agent: ${text}\nagent → ${who}: ${reply.length > 300 ? reply.slice(0, 300) + "…" : reply}\n(messages this turn: ${turn.length})`);
     if (expect && !expect.test(reply)) throw new Error(`unexpected reply: ${reply}`);
+    if (turn.length > 3) throw new Error(`one turn sent ${turn.length} messages; replies should not be split this much`);
     return reply;
   };
 
   if (live) {
     await ask("alice", "What is 2+2? Reply with just the number.", /\b4\b/, 120_000);
+    await ask("alice", "Give me five short tips for writing a good README, as a numbered list.", /1/, 180_000);
   } else {
     await ask("alice", "ping", /pong/, 60_000);
   }
@@ -289,8 +300,7 @@ async function main() {
   // A stranger is not on the allowlist: no reply.
   await poweur("eve", ["send", ids.agent, "ping"]);
   await sleep(live ? 8000 : 4000);
-  const eveInbox = JSON.parse(await poweur("eve", ["inbox", "--json"])).messages ?? [];
-  if (eveInbox.some((m) => m.sender === ids.agent)) throw new Error("the agent answered a stranger");
+  if ((await pickUp("eve")).length > 0) throw new Error("the agent answered a stranger");
   console.log("stranger got no reply (allowlist holds)");
   console.log("PASS");
 }

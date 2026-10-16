@@ -31,6 +31,42 @@ export interface PoweurBusOptions {
   onError?: (error: unknown, context: string) => void;
   onConnect?: () => void;
   signal?: AbortSignal;
+  /** How long a send may wait out the relay's rate limit before giving up (default 90 s). */
+  maxRateLimitWaitMs?: number;
+  /** For tests. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** The relay refuses with 429 when a sender is over its limit (20/min, 200/h, 1000/day by default). */
+export function isRateLimited(error: unknown): boolean {
+  const e = error as { status?: number; relayCode?: string } | null;
+  return e?.status === 429 || e?.relayCode === "rate_limit_exceeded";
+}
+
+/**
+ * Retry a send through the relay's rate limit. The per-minute bucket refills
+ * one message every 3 s, so short waits clear a burst; an hourly or daily
+ * limit outlasts the budget and the error surfaces.
+ */
+export async function sendWithRetry<T>(
+  send: () => Promise<T>,
+  options: { maxWaitMs?: number; sleep?: (ms: number) => Promise<void>; onWait?: (ms: number) => void } = {},
+): Promise<T> {
+  const budget = options.maxWaitMs ?? 90_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let waited = 0;
+  let delay = 3_000;
+  for (;;) {
+    try {
+      return await send();
+    } catch (error) {
+      if (!isRateLimited(error) || waited + delay > budget) throw error;
+      options.onWait?.(delay);
+      await sleep(delay);
+      waited += delay;
+      delay = Math.min(delay * 2, 30_000);
+    }
+  }
 }
 
 export interface PoweurBus {
@@ -103,7 +139,14 @@ export function startPoweurBus(options: PoweurBusOptions): PoweurBus {
   return {
     identity: client.identityName,
     async sendText(to, text, sendOptions = {}) {
-      const result = await client.send(to, text, sendOptions.threadId ? { threadId: sendOptions.threadId } : {});
+      const result = await sendWithRetry(
+        () => client.send(to, text, sendOptions.threadId ? { threadId: sendOptions.threadId } : {}),
+        {
+          ...(options.maxRateLimitWaitMs !== undefined ? { maxWaitMs: options.maxRateLimitWaitMs } : {}),
+          ...(options.sleep ? { sleep: options.sleep } : {}),
+          onWait: (ms) => report(new Error(`relay rate limit; retrying the reply to ${to} in ${ms / 1000}s`), "send"),
+        },
+      );
       return result.message.id;
     },
     done,

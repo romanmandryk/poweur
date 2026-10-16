@@ -9,7 +9,7 @@ vi.mock("@poweur/client", async (importOriginal) => ({
   }),
 }));
 
-import { startPoweurBus, toInbound } from "../src/bus.js";
+import { isRateLimited, sendWithRetry, startPoweurBus, toInbound } from "../src/bus.js";
 import { looksLikePoweurId, normalizePoweurId, resolvePoweurAccount } from "../src/config.js";
 
 const msg = (id: string, extra: Record<string, unknown> = {}) => ({
@@ -84,5 +84,27 @@ describe("config", () => {
     expect(resolvePoweurAccount({ channels: {} }).configured).toBe(false);
     expect(resolvePoweurAccount({ channels: { poweur: { identity: "Agent.Poweur.net" } } })).toMatchObject({ configured: true, identity: "agent.poweur.net", enabled: true });
     expect(resolvePoweurAccount({ channels: { poweur: { identity: "agent.poweur.net", enabled: false } } }).enabled).toBe(false);
+  });
+});
+
+describe("sendWithRetry", () => {
+  const limited = () => Object.assign(new Error("rate_limit_exceeded"), { status: 429, relayCode: "rate_limit_exceeded" });
+
+  it("waits out a burst with growing delays, then sends", async () => {
+    const waits: number[] = [];
+    const send = vi.fn().mockRejectedValueOnce(limited()).mockRejectedValueOnce(limited()).mockResolvedValue("ok");
+    await expect(sendWithRetry(send, { sleep: async (ms) => void waits.push(ms) })).resolves.toBe("ok");
+    expect(waits).toEqual([3000, 6000]);
+  });
+
+  it("gives up when the limit outlasts the budget, and never retries other errors", async () => {
+    const waits: number[] = [];
+    await expect(sendWithRetry(async () => { throw limited(); }, { maxWaitMs: 20_000, sleep: async (ms) => void waits.push(ms) })).rejects.toThrow("rate_limit");
+    expect(waits).toEqual([3000, 6000]);
+    const send = vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 500 }); });
+    await expect(sendWithRetry(send, { sleep: async () => {} })).rejects.toThrow("boom");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(isRateLimited({ status: 429 })).toBe(true);
+    expect(isRateLimited(new Error("x"))).toBe(false);
   });
 });
