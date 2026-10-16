@@ -29,6 +29,7 @@ import {
   VenetianMask,
   type LucideIcon,
   Mail,
+  AtSign,
 } from "lucide-react";
 import { isSessionValid, SDK_BUILD_TIME, SDK_VERSION } from "@poweur/client";
 import { loadPolicy, loadProfile } from "../../actions/account";
@@ -61,6 +62,7 @@ import {
   openLookupPanel,
   openNotificationsPanel,
   openEmailPanel,
+  openHandlesPanel,
   openPolicyPanel,
   openProfilePanel,
   openRecoveryKitPanel,
@@ -167,6 +169,7 @@ export function Settings() {
                 onClick={openProfilePanel}
               />
               <SettingsRow id="row-identity-keys" icon={IdCard} label="Identity keys" onClick={openIdentityKeysPanel} />
+              <SettingsRow id="row-handles" icon={AtSign} label="Bluesky & Nostr" onClick={openHandlesPanel} />
               <SettingsRow
                 id="row-storage"
                 icon={HardDrive}

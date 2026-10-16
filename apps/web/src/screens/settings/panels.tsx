@@ -5,10 +5,11 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Bot, Check, Globe, Hexagon, Laptop, Monitor, Puzzle, ScrollText, Smartphone, Tablet, Usb, type LucideIcon } from "lucide-react";
-import { fingerprintOrKey, isSessionValid } from "@poweur/client";
+import { fingerprintOrKey, isSessionValid, lookupFediverseAccount, normalizeNostrPubkey, validATProtoDID, type Handles } from "@poweur/client";
 import { loadPolicy, loadProfile, savePolicy } from "../../actions/account";
 import { blockEmailSender, disableEmail, loadEmail, saveEmailSettings, unblockEmailSender } from "../../actions/email";
 import { emailSettingsOf } from "../../lib/email";
+import { domainOf, handleOf } from "../../lib/identity";
 import { EmailOptIn } from "../messages/Email";
 import { activeClient, errorMessage, resolveForActive } from "../../actions/relay";
 import { refreshRelaySession, revokeRelaySession } from "../../actions/settings";
@@ -264,6 +265,111 @@ function ProfilePanel({ close }: { close: () => void }) {
         </div>
       )}
     </>
+  );
+}
+
+// ─── Bluesky & Nostr handles (INT-006-T5) ─────────────────────────────────────
+
+export function openHandlesPanel() {
+  if (!requireClient()) return;
+  openPanel("Bluesky & Nostr", (close) => <HandlesPanel close={close} />);
+}
+
+function HandlesPanel({ close }: { close: () => void }) {
+  const identity = activeIdentity();
+  const emailAddress = useData((state) => state.email.address);
+  const [loaded, setLoaded] = useState<Handles | { error: string } | null>(null);
+  const [did, setDid] = useState("");
+  const [nostr, setNostr] = useState("");
+  const [fedi, setFedi] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let live = true;
+    requireClient()
+      ?.handles()
+      .then(
+        (h: Handles) => {
+          if (!live || activeIdentity() !== identity) return;
+          setLoaded(h);
+          setDid(h.atproto_did ?? "");
+          setNostr(h.nostr_pubkey ?? "");
+          setFedi(h.fediverse_acct ? `@${h.fediverse_acct}` : "");
+        },
+        (error: unknown) => live && setLoaded({ error: `Could not load: ${errorMessage(error)}` }),
+      );
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!loaded) return <p className="text-muted">Loading…</p>;
+  if ("error" in loaded) return <p role="status">{loaded.error}</p>;
+  // NIP-05: a hosted ID's email address is also its Nostr address; any ID
+  // answers for itself (`_@alice.example.com`, shown as the bare name).
+  const nostrName = emailAddress ?? identity;
+  const save = async () => {
+    const atproto = did.trim();
+    if (atproto && !validATProtoDID(atproto)) {
+      toast("That is not a Bluesky DID. It starts with did:plc: (or did:web:).", "error", 6000);
+      return;
+    }
+    const key = nostr.trim() ? normalizeNostrPubkey(nostr) : "";
+    if (key === null) {
+      toast("That is not a Nostr public key. Paste your npub… (never your nsec).", "error", 6000);
+      return;
+    }
+    if (activeIdentity() !== identity) return;
+    setSaving(true);
+    try {
+      // The account's own server confirms it and names its actor; an
+      // unchanged account is not looked up again.
+      let fediverse: { acct: string; actor: string } | null = null;
+      const wanted = fedi.trim().replace(/^@/, "");
+      if (wanted && wanted.toLowerCase() === loaded.fediverse_acct?.toLowerCase() && loaded.fediverse_actor) {
+        fediverse = { acct: loaded.fediverse_acct, actor: loaded.fediverse_actor };
+      } else if (wanted) {
+        fediverse = await lookupFediverseAccount(wanted, (input, init) => fetch(input, init));
+      }
+      await requireClient()?.setHandles({
+        version: 1, atproto_did: atproto, nostr_pubkey: key, nostr_relays: loaded.nostr_relays,
+        fediverse_acct: fediverse?.acct, fediverse_actor: fediverse?.actor,
+      });
+      toast("Saved", "success");
+      close();
+    } catch (error) {
+      toast(errorMessage(error), "error");
+      setSaving(false);
+    }
+  };
+  return (
+    <div id="handles-panel">
+      <p className="mb-4">Use your Poweur name on Bluesky, Nostr and Mastodon. Everything here is public, and nothing is linked until you save.</p>
+      <FormGroup>
+        <Label htmlFor="handles-did">Bluesky</Label>
+        <Input id="handles-did" type="text" autoComplete="off" spellCheck={false} placeholder="did:plc:…" value={did} onChange={(e) => setDid(e.currentTarget.value)} />
+        <p className="mt-1.5 text-[13px] text-muted">
+          Makes <b>{identity}</b> your Bluesky handle. In Bluesky: Settings → Account → Handle → I have my own domain. Enter {identity}, choose{" "}
+          <i>No DNS panel</i>, copy the DID it shows into this box, save here, then press <i>Verify</i> in Bluesky.
+        </p>
+      </FormGroup>
+      <FormGroup>
+        <Label htmlFor="handles-nostr">Nostr public key</Label>
+        <Input id="handles-nostr" type="text" autoComplete="off" spellCheck={false} placeholder="npub1…" value={nostr} onChange={(e) => setNostr(e.currentTarget.value)} />
+        <p className="mt-1.5 text-[13px] text-muted">
+          Makes <b>{nostrName}</b> your verified Nostr address (NIP-05). Paste your public key (npub…), never your nsec, then set the same
+          address as your NIP-05 identifier in your Nostr app.
+        </p>
+      </FormGroup>
+      <FormGroup>
+        <Label htmlFor="handles-fedi">Mastodon or another Fediverse account</Label>
+        <Input id="handles-fedi" type="text" autoComplete="off" spellCheck={false} placeholder="@you@mastodon.social" value={fedi} onChange={(e) => setFedi(e.currentTarget.value)} />
+        <p className="mt-1.5 text-[13px] text-muted">
+          People who search for <b>@{handleOf(identity)}@{domainOf(identity)}</b> on Mastodon find this account. Works for names hosted on {domainOf(identity)}.
+        </p>
+      </FormGroup>
+      <Button id="handles-save" disabled={saving} onClick={() => void save()}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </div>
   );
 }
 

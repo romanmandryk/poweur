@@ -50,6 +50,10 @@ var sysValidators = map[string]func([]byte) error{
 		_, err := idpkg.ParseProfile(b)
 		return err
 	},
+	handlesPath: func(b []byte) error {
+		_, err := idpkg.ParseHandles(b)
+		return err
+	},
 	capabilitiesPath: func(b []byte) error {
 		_, err := idpkg.ParseCapabilities(b)
 		return err

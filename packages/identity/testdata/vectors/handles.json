@@ -1,0 +1,132 @@
+[
+  {
+    "name": "both",
+    "raw": {
+      "version": 1,
+      "atproto_did": "did:plc:z72i7hdynmk6r22z27h6tvur",
+      "nostr_pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+      "nostr_relays": [
+        "wss://relay.damus.io"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "name": "empty",
+    "raw": {
+      "version": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "did-web",
+    "raw": {
+      "version": 1,
+      "atproto_did": "did:web:alice.example.org"
+    },
+    "valid": true
+  },
+  {
+    "name": "did-web-port",
+    "raw": {
+      "version": 1,
+      "atproto_did": "did:web:localhost%3A8080"
+    },
+    "valid": true
+  },
+  {
+    "name": "did-key",
+    "raw": {
+      "version": 1,
+      "atproto_did": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    },
+    "valid": false
+  },
+  {
+    "name": "did-plc-uppercase",
+    "raw": {
+      "version": 1,
+      "atproto_did": "did:plc:Z72I7HDYNMK6R22Z27H6TVUR"
+    },
+    "valid": false
+  },
+  {
+    "name": "npub-not-hex",
+    "raw": {
+      "version": 1,
+      "nostr_pubkey": "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"
+    },
+    "valid": false
+  },
+  {
+    "name": "short-hex",
+    "raw": {
+      "version": 1,
+      "nostr_pubkey": "3bf0c63f"
+    },
+    "valid": false
+  },
+  {
+    "name": "relays-without-key",
+    "raw": {
+      "version": 1,
+      "nostr_relays": [
+        "wss://relay.damus.io"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "relay-not-wss",
+    "raw": {
+      "version": 1,
+      "nostr_pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+      "nostr_relays": [
+        "https://relay.example"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "fediverse",
+    "raw": {
+      "version": 1,
+      "fediverse_acct": "alice@mastodon.social",
+      "fediverse_actor": "https://mastodon.social/users/alice"
+    },
+    "valid": true
+  },
+  {
+    "name": "fediverse-without-actor",
+    "raw": {
+      "version": 1,
+      "fediverse_acct": "alice@mastodon.social"
+    },
+    "valid": false
+  },
+  {
+    "name": "fediverse-leading-at",
+    "raw": {
+      "version": 1,
+      "fediverse_acct": "@alice@mastodon.social",
+      "fediverse_actor": "https://mastodon.social/users/alice"
+    },
+    "valid": false
+  },
+  {
+    "name": "fediverse-http-actor",
+    "raw": {
+      "version": 1,
+      "fediverse_acct": "alice@mastodon.social",
+      "fediverse_actor": "http://mastodon.social/users/alice"
+    },
+    "valid": false
+  },
+  {
+    "name": "bad-version",
+    "raw": {
+      "version": 2
+    },
+    "valid": false
+  }
+]

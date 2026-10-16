@@ -192,6 +192,51 @@ describe("Settings destination (E21-T11)", () => {
     expect(holder.client.setProfile).toHaveBeenCalledWith(expect.objectContaining({ display_name: "Alice Example" }));
   });
 
+  it("links a Bluesky DID and a Nostr npub, stored as hex", async () => {
+    render(<App />);
+    fireEvent.click($("#row-handles")!);
+    await waitFor(() => expect($("#handles-did")).toBeTruthy());
+    fireEvent.change($("#handles-did")!, { target: { value: "did:plc:z72i7hdynmk6r22z27h6tvur" } });
+    fireEvent.change($("#handles-nostr")!, { target: { value: "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6" } });
+    fireEvent.click($("#handles-save")!);
+    await waitFor(() => expect(holder.client.setHandles).toHaveBeenCalledWith(expect.objectContaining({
+      atproto_did: "did:plc:z72i7hdynmk6r22z27h6tvur",
+      nostr_pubkey: "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+    })));
+  });
+
+  it("links a Mastodon account after its own server confirms it", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      subject: "acct:alice@mastodon.social",
+      links: [{ rel: "self", type: "application/activity+json", href: "https://mastodon.social/users/alice" }],
+    })));
+    try {
+      render(<App />);
+      fireEvent.click($("#row-handles")!);
+      await waitFor(() => expect($("#handles-fedi")).toBeTruthy());
+      fireEvent.change($("#handles-fedi")!, { target: { value: "@alice@mastodon.social" } });
+      fireEvent.click($("#handles-save")!);
+      await waitFor(() => expect(holder.client.setHandles).toHaveBeenCalledWith(expect.objectContaining({
+        fediverse_acct: "alice@mastodon.social", fediverse_actor: "https://mastodon.social/users/alice",
+      })));
+      expect(String(fetchSpy.mock.calls[0]![0])).toContain("https://mastodon.social/.well-known/webfinger");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("refuses a Bluesky handle where the DID belongs, and an nsec", async () => {
+    render(<App />);
+    fireEvent.click($("#row-handles")!);
+    await waitFor(() => expect($("#handles-did")).toBeTruthy());
+    fireEvent.change($("#handles-did")!, { target: { value: "alice.bsky.social" } });
+    fireEvent.click($("#handles-save")!);
+    fireEvent.change($("#handles-did")!, { target: { value: "" } });
+    fireEvent.change($("#handles-nostr")!, { target: { value: "nsec1abc" } });
+    fireEvent.click($("#handles-save")!);
+    expect(holder.client.setHandles).not.toHaveBeenCalled();
+  });
+
   it("analytics consent defaults off and survives reopening", async () => {
     render(<App />);
     fireEvent.click($("#row-analytics")!);

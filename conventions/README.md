@@ -36,3 +36,4 @@ Schema URLs retain their historical namespace during the storage transition.
 | [pcp-0008](pcp-0008-drive-share-offers.md) | Drive share offers, accepts and mounts | experimental |
 | [pcp-0009](pcp-0009-subject-lines.md) | Subject lines (`body_format: headers-v1`) | experimental |
 | [pcp-0010](pcp-0010-email-bridge.md) | Email bridge (`email.*`, `email.json`) | experimental |
+| [pcp-0011](pcp-0011-handles.md) | Handles on other networks (`handles.json`: Bluesky, Nostr, Fediverse) | experimental |
