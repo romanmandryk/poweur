@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: |
             apps/cli/go.sum
             packages/identity/go.sum
