@@ -162,7 +162,7 @@ func (e *countingExporter) Export(ctx context.Context, rs []sdklog.Record) error
 		if json.Unmarshal([]byte(rs[i].Body().AsString()), &event) == nil {
 			event = e.t.sanitize(event)
 			b, _ := json.Marshal(event)
-			rs[i].SetBody(logapi.StringValue(string(b)))
+			rs[i].SetBody(attribute.StringValue(string(b)))
 		}
 	}
 	err := e.Exporter.Export(ctx, rs)
@@ -347,7 +347,7 @@ func (t *Runtime) emit(e Event) {
 	var r logapi.Record
 	r.SetTimestamp(e.Timestamp)
 	r.SetObservedTimestamp(time.Now())
-	r.SetBody(logapi.StringValue(string(b)))
+	r.SetBody(attribute.StringValue(string(b)))
 	severity := logapi.SeverityInfo
 	if e.Level >= slog.LevelError {
 		severity = logapi.SeverityError
