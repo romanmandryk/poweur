@@ -77,9 +77,11 @@ multi-tenant work (`#61123`), where path-scoped DAV tokens are the natural primi
 
 ### INT-005-T1 — Scout & external PoC (no upstream code)
 
-- [ ] Confirm current plugin contracts and contribution norms; find/participate in the existing
+- [x] Confirm current plugin contracts and contribution norms *(16 Oct 2026, against OpenClaw 2026.10.3/.4: channel
+      plugins are external npm/ClawHub packages built on `openclaw/plugin-sdk/*`; the bundled Nostr channel is the
+      closest model; ClawHub publishing needs `compat` and `build` in package.json)*; find/participate in the existing
       upstream threads on decentralized identity and multi-tenancy (`#61123`, `#18565`)
-- [ ] Build a standalone bridge on `@poweur/client`: a Poweur ID whose inbox is forwarded into a
+- [x] *(superseded by T2: the plugin itself was quicker than a standalone bridge)* Build a standalone bridge on `@poweur/client`: a Poweur ID whose inbox is forwarded into a
       running gateway and whose replies are sent back out — works today, no upstream change
 - [ ] Record the 2-minute demo per the [INT-000](INT-000-overview.md) playbook
 
@@ -90,15 +92,17 @@ answers; the loop is demoed end to end.
 
 Their SDK maps onto our protocol cleanly; build to the documented contract:
 
-- [ ] `openclaw.plugin.json` with `channels: ["poweur"]` + `channelConfigs` schema; register via
-      `defineChannelPluginEntry()`
-- [ ] `config.listAccountIds` / `resolveAccount` / `inspectAccount` — one account per Poweur ID the
-      gateway operates (relay URL, identity, key reference; secrets never in workspace `.env`)
+- [x] `openclaw.plugin.json` with `channels: ["poweur"]`; channel config schema via `buildChannelConfigSchema`;
+      registered with `defineChannelPluginEntry()` (`packages/openclaw-poweur`, 0.1.0)
+- [x] `config.listAccountIds` / `resolveAccount` / `inspectAccount` — one account (the agent's Poweur ID); keys
+      stay in the Poweur home (`POWEUR_HOME`), never in OpenClaw config. *(Several IDs per gateway: later)*
 - [ ] Inbound: normalize relay messages into the canonical envelope (sender = Poweur ID, route =
-      conversation, `thread_id` → thread), attachments via `toInboundMediaFacts()`
+      conversation, `thread_id` → thread), attachments via `toInboundMediaFacts()` *(partial: text DMs through
+      `dispatchInboundDirectDm`, replies keep the `thread_id`; attachments open)*
 - [ ] Outbound: `defineChannelMessageAdapter()` with an honest capability matrix (no
       `nativeStreaming`; declare only what we prove) and the required capability-proof tests
-- [ ] `security.dm.resolvePolicy` / `resolveAllowFrom` ← our contacts + inbox policy. **Pairing
+- [ ] *(partial: OpenClaw's own `dmPolicy` (`pairing` default, `allowlist`) and `allowFrom` of Poweur IDs; the
+      pairing code goes back over Poweur. Mapping onto our contacts/inbox policy is open)* `security.dm.resolvePolicy` / `resolveAllowFrom` ← our contacts + inbox policy. **Pairing
       codes become largely redundant**: the sender is cryptographically verified, so the allowlist
       is a contact list rather than a guess — keep a pairing hook mapped onto contact requests /
       the PoW ladder for stranger ingress
@@ -108,6 +112,12 @@ Their SDK maps onto our protocol cleanly; build to the documented contract:
 
 **Acceptance:** plugin installs into a stock gateway, passes the core capability-proof tests, and
 survives a restart mid-delivery without duplicating or dropping a message.
+
+**Progress (16 Oct 2026):** `apps/integration/agents/openclaw-e2e.mjs` runs a real OpenClaw gateway with the plugin
+against a local relay: a Poweur ID sends "ping" and gets "pong" (fake model, in CI), or asks a real model through
+OpenRouter (`--live`, key in the git-ignored `.env.local`) and gets "4"; a stranger outside the allowlist gets no
+reply. The bus consumes a message only after OpenClaw took it (crash ⇒ re-pickup). Open: restart-mid-delivery test,
+capability-proof tests, attachments, the shared-folder handoff (T3), publishing to npm/ClawHub.
 
 ### INT-005-T3 — Attachments as shares (the differentiator)
 

@@ -8,3 +8,9 @@ allowBuilds:
   esbuild: true
   core-js: true
   core-js-pure: true
+  # openclaw is a dev dependency of packages/openclaw-poweur, used for its
+  # types; neither it nor its dependencies need their install scripts here.
+  "@google/genai": false
+  koffi: false
+  openclaw: false
+  protobufjs: false
