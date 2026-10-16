@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { EmailMessage } from "@poweur/client";
 
 import {
-  EMAIL_FRAME_SANDBOX, emailCSP, mailEntries, mailThreads, parseAddresses, prepareEmailHtml, replyDraft,
+  EMAIL_FRAME_SANDBOX, emailCSP, mailEntries, mailThreads, parseAddresses, prepareEmailHtml, replyDraft, NO_REPLY_AFTER_MS, sendStateLabel, sendStateOf,
 } from "../../src/lib/email";
 
 const ME = "john.poweur.net";
@@ -44,6 +44,35 @@ describe("mailEntries", () => {
     expect(entry.kind).toBe("sent");
     expect(entry.status?.state).toBe("sent");
     expect(entry.key).toBe("mail:m1@example.com");
+  });
+});
+
+describe("sendStateOf", () => {
+  const send = { version: 1, send_id: "S1", to: [{ address: "ann@example.com" }], subject: "Hi", text: "Yo" };
+  const sentMsg = (id: string, ts: string) => ({ id, sender: ME, recipient: BRIDGE, timestamp: ts, type: "email.send", plaintext: JSON.stringify(send) });
+  const at = Date.parse("2026-10-13T10:00:00Z");
+
+  it("says Sending… until the bridge has been silent too long, then no_reply", () => {
+    const [entry] = mailEntries([sentMsg("s", "2026-10-13T10:00:00Z")], BRIDGE, ME);
+    expect(sendStateOf(entry, at + NO_REPLY_AFTER_MS - 1)).toBeUndefined();
+    expect(sendStateOf(entry, at + NO_REPLY_AFTER_MS)).toBe("no_reply");
+    expect(sendStateLabel("no_reply")).toBe("No reply from the email service");
+  });
+
+  it("trusts any status from the bridge, however old", () => {
+    const store = [
+      sentMsg("s", "2026-10-13T10:00:00Z"),
+      { id: "st", sender: BRIDGE, recipient: ME, timestamp: "2026-10-13T10:00:01Z", type: "email.status", plaintext: JSON.stringify({ version: 1, send_id: "S1", state: "deferred", at: "2026-10-13T10:00:01Z" }) },
+    ];
+    const [entry] = mailEntries(store, BRIDGE, ME);
+    expect(sendStateOf(entry, at + 10 * NO_REPLY_AFTER_MS)).toBe("deferred");
+  });
+
+  it("keeps only the newest copy of a send sent again", () => {
+    const entries = mailEntries([sentMsg("old", "2026-10-13T10:00:00Z"), sentMsg("new", "2026-10-13T10:30:00Z")], BRIDGE, ME);
+    expect(entries.map((e) => e.id)).toEqual(["new"]);
+    expect(entries[0].key).toBe("mail:old");
+    expect(sendStateOf(entries[0], Date.parse("2026-10-13T10:31:00Z"))).toBeUndefined();
   });
 });
 

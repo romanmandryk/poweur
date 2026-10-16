@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -496,6 +497,37 @@ func TestOutboundRefusals(t *testing.T) {
 	st = statuses(t, b2.net, jane)
 	if len(st) != 2 || !strings.Contains(st[0].Reason, "cannot receive") || st[1].State != identity.EmailStateRefused || !strings.Contains(st[1].Reason, "no recipients") {
 		t.Fatalf("jane: %+v", st)
+	}
+}
+
+func TestOutboundCountsSilentDrops(t *testing.T) {
+	b := newTestBridge(t, func(c *Config) { c.Footer = "off" })
+	john := b.net.add("john.poweur.test", b.self.name)
+	stranger := b.net.add("stranger.poweur.test", "")
+	// Sealed to someone else's key: the bridge cannot open it.
+	b.net.sendToBridge(john, stranger, identity.MsgTypeEmailSend, map[string]any{"version": 1, "send_id": "A1"})
+	b.net.mu.Lock()
+	b.net.inbox[len(b.net.inbox)-1].Recipient = b.self.name
+	b.net.mu.Unlock()
+	// Opens, but is not an email.send document.
+	b.net.sendToBridge(john, b.self, identity.MsgTypeEmailSend, "not a send")
+	// Invalid, with no send id to answer.
+	b.net.sendToBridge(john, b.self, identity.MsgTypeEmailSend, map[string]any{"version": 1, "to": []any{}})
+	runOutbound(t, b)
+
+	if st := statuses(t, b.net, john); len(st) != 0 {
+		t.Fatalf("statuses for unanswerable sends: %+v", st)
+	}
+	rec := httptest.NewRecorder()
+	b.Metrics.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{
+		`email_outbound_dropped_total{reason="undecryptable"} 1`,
+		`email_outbound_dropped_total{reason="malformed"} 1`,
+		`email_outbound_dropped_total{reason="invalid_send_id"} 1`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("metrics missing %s:\n%s", want, rec.Body.String())
+		}
 	}
 }
 

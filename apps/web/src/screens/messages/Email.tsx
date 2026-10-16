@@ -9,13 +9,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AtSign, Ban, ChevronDown, ChevronUp, Download, FileText, Forward, ImageOff, Mail, Paperclip, Reply, ReplyAll, ShieldAlert, SquarePen, X } from "lucide-react";
 import type { EmailAttachment, EmailMessage } from "@poweur/client";
-import { attachmentBytes, blockEmailSender, enableEmail, loadEmail, mailUnread, markMailRead, MAX_EMAIL_ATTACHMENTS_BYTES, saveAttachment, saveOriginal, sendEmail } from "../../actions/email";
+import { attachmentBytes, blockEmailSender, enableEmail, loadEmail, mailUnread, markMailRead, MAX_EMAIL_ATTACHMENTS_BYTES, resendEmail, saveAttachment, saveOriginal, sendEmail } from "../../actions/email";
 import { historyHasOlder, loadOlderHistory, trustedEmailBridge } from "../../actions/messages";
 import { askConfirm } from "../../components/Dialogs";
 import { MessageText } from "../../components/MessageText";
 import { cn } from "../../lib/cn";
 import {
-  EMAIL_FRAME_SANDBOX, formatAddress, mailEntries, mailThreads, parseAddresses, prepareEmailHtml, replyDraft, sendStateLabel, verdictLabel,
+  EMAIL_FRAME_SANDBOX, formatAddress, mailEntries, mailThreads, parseAddresses, prepareEmailHtml, replyDraft, sendStateLabel, sendStateOf, verdictLabel,
   type Draft, type MailEntry, type MailThread,
 } from "../../lib/email";
 import { fmtRelative } from "../../lib/format";
@@ -138,10 +138,22 @@ export function EmailTray() {
   );
 }
 
+/** A sent entry's state, rechecked every minute while the bridge is silent. */
+function useSendState(entry: MailEntry) {
+  const [now, setNow] = useState(() => Date.now());
+  const waiting = entry.kind === "sent" && !entry.status;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+  return sendStateOf(entry, now);
+}
+
 function MailRow({ thread }: { thread: MailThread }) {
   const last = thread.last;
   const snippet = (last.email?.text || last.send?.text || "").replace(/\s+/g, " ").trim().slice(0, 140);
-  const sendState = last.kind === "sent" ? last.status?.state : undefined;
+  const sendState = useSendState(last);
   const verdict = verdictLabel(thread.verdict, thread.spam);
   const open = () => openMailThread(thread.key);
   return (
@@ -172,7 +184,7 @@ function MailRow({ thread }: { thread: MailThread }) {
         <div className="mail-snippet truncate text-[13px] text-muted">{snippet}</div>
         <div className="mt-1 flex flex-wrap gap-1">
           {thread.verdict !== "verified" || thread.spam ? <Chip tone={verdict.tone}>{verdict.label}</Chip> : null}
-          {sendState && sendState !== "sent" && <Chip tone={sendState === "accepted" || sendState === "deferred" ? "warning" : "danger"}>{sendStateLabel(sendState)}</Chip>}
+          {sendState && sendState !== "sent" && <Chip tone={sendState === "accepted" || sendState === "deferred" || sendState === "no_reply" ? "warning" : "danger"}>{sendStateLabel(sendState)}</Chip>}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-[5px]">
@@ -239,6 +251,7 @@ export function EmailThreadScreen() {
   useEffect(() => {
     if (thread?.unread) void markMailRead(thread.entries);
   }, [thread?.unread, thread?.key]);
+  const canSend = useData((state) => state.email.canSend);
   if (!thread) {
     return (
       <SubPage title="Email" onBack={pop}>
@@ -246,7 +259,6 @@ export function EmailThreadScreen() {
       </SubPage>
     );
   }
-  const canSend = useData((state) => state.email.canSend);
   const newestReceived = canSend ? [...thread.entries].reverse().find((e) => e.email)?.email : undefined;
   return (
     <SubPage
@@ -284,6 +296,8 @@ function openReply(email: EmailMessage, mode: "reply" | "all" | "forward") {
 
 function MailCard({ entry, startOpen }: { entry: MailEntry; startOpen: boolean }) {
   const [open, setOpen] = useState(startOpen);
+  const [resending, setResending] = useState(false);
+  const sendState = useSendState(entry);
   if (entry.kind === "sent" && entry.send) {
     const send = entry.send;
     return (
@@ -294,12 +308,29 @@ function MailCard({ entry, startOpen }: { entry: MailEntry; startOpen: boolean }
             <div className="truncate text-[13px] text-muted">to {send.to.map(formatAddress).join(", ")}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 text-xs text-faint">
-            <span className="mail-send-state">{sendStateLabel(entry.status?.state)}</span>
+            <span className="mail-send-state">{sendStateLabel(sendState)}</span>
             {fmtRelative(entry.timestamp)}
           </div>
         </button>
         {entry.status?.reason && entry.status.state !== "sent" && (
           <p className="mt-1 text-[13px] text-danger">{entry.status.reason}</p>
+        )}
+        {sendState === "no_reply" && (
+          <div className="mail-no-reply mt-1 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+            <span>The email service never confirmed it got this email, so it may not have gone out.</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={resending}
+              onClick={async () => {
+                setResending(true);
+                await resendEmail(send);
+                setResending(false);
+              }}
+            >
+              {resending ? "Sending…" : "Send again"}
+            </Button>
+          </div>
         )}
         {open && (
           <div className="mt-2 text-[15px] whitespace-pre-wrap [overflow-wrap:anywhere]">

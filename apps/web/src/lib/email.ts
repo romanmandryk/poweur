@@ -57,6 +57,8 @@ export function mailEntries(messages: any[], bridge: string, self: string): Mail
   const me = lower(self);
   const statuses = new Map<string, EmailStatus>();
   const out: MailEntry[] = [];
+  // "Send again" repeats a send id; the newest copy stands for it.
+  const sent = new Map<string, MailEntry>();
   const parsed = messages.map((raw) => (typeof raw === "string" ? JSON.parse(raw) : raw));
   for (const message of parsed) {
     if (message.type !== "email.status" || lower(message.sender) !== wanted) continue;
@@ -79,9 +81,15 @@ export function mailEntries(messages: any[], bridge: string, self: string): Mail
         { message_id: status?.message_id ?? "", in_reply_to: send.in_reply_to ?? "", references: send.references ?? [] },
         message.id,
       );
-      out.push({ id: message.id, timestamp: message.timestamp, kind: "sent", key, send, ...(status ? { status } : {}) });
+      const entry: MailEntry = { id: message.id, timestamp: message.timestamp, kind: "sent", key, send, ...(status ? { status } : {}) };
+      const prev = sent.get(send.send_id);
+      // The newest copy is shown, in the thread the first one started.
+      if (!prev) sent.set(send.send_id, entry);
+      else if (prev.timestamp <= entry.timestamp) sent.set(send.send_id, { ...entry, key: prev.key });
+      else prev.key = key;
     }
   }
+  out.push(...sent.values());
   return out.sort((a, b) => (a.timestamp === b.timestamp ? (a.id < b.id ? -1 : 1) : a.timestamp < b.timestamp ? -1 : 1));
 }
 
@@ -354,8 +362,24 @@ export function verdictLabel(verdict: string | undefined, spam?: boolean): { lab
 }
 
 /** A send's state as words. */
+/**
+ * How long a sent email may go without any word from the bridge before the
+ * app stops saying "Sending…": the bridge answers within seconds (even a
+ * paced send gets "deferred"), so silence this long means it never got it.
+ */
+export const NO_REPLY_AFTER_MS = 10 * 60_000;
+
+/** A sent entry's state: the bridge's newest status, or "no_reply" after a long silence. */
+export function sendStateOf(entry: MailEntry, now = Date.now()): string | undefined {
+  if (entry.kind !== "sent") return undefined;
+  if (entry.status) return entry.status.state;
+  const at = Date.parse(entry.timestamp);
+  return Number.isFinite(at) && now - at >= NO_REPLY_AFTER_MS ? "no_reply" : undefined;
+}
+
 export function sendStateLabel(state: string | undefined): string {
   switch (state) {
+    case "no_reply": return "No reply from the email service";
     case "sent": return "Sent";
     case "accepted": return "Sending…";
     case "deferred": return "Delayed — retrying";

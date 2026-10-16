@@ -1,0 +1,69 @@
+{
+  "name": "@poweur/openclaw-channel",
+  "version": "0.1.0",
+  "description": "OpenClaw channel plugin for Poweur ID: message your agent from the Poweur app, end-to-end encrypted, with the agent on its own ID.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romanmandryk/poweur.git",
+    "directory": "packages/openclaw-poweur"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@poweur/client": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.10.3"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "openclaw": "2026.10.3",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "poweur",
+      "label": "Poweur",
+      "selectionLabel": "Poweur ID",
+      "docsLabel": "poweur",
+      "blurb": "End-to-end encrypted messages to and from Poweur IDs; the agent has its own ID.",
+      "quickstartAllowFrom": true
+    },
+    "compat": {
+      "pluginApi": ">=2026.10.3",
+      "minGatewayVersion": "2026.10.3"
+    },
+    "build": {
+      "openclawVersion": "2026.10.3",
+      "pluginSdkVersion": "2026.10.3"
+    }
+  },
+  "engines": {
+    "node": ">=24.16.0"
+  }
+}
