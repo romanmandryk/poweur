@@ -214,6 +214,11 @@ func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.
 		return false, nil
 	}
 
+	if !o.cfg.SendAllowed(sender) {
+		o.refuse(ctx, sender, send.SendID, SendPausedReason)
+		return false, nil
+	}
+
 	sendFrom, err := o.dir.Opted(ctx, sender)
 	if err != nil {
 		if errors.Is(err, ErrNoMailbox) {

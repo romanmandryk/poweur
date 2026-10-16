@@ -196,7 +196,9 @@ Behind a flag (`OAUTH_SOLID=on`), so a deployment that does not want it is uncha
 
 ## Tasks
 
-- [ ] **INT-006-T1** Supported-apps list: `apps/docs/docs/integrations/supported-apps.md` +
+- [ ] **INT-006-T1** *(partial: the public page is live at poweur.org/works-with/ (`apps/site/works-with/`),
+      listing what was tried by hand: guestbook, indieweb.org, IndieAuth/IndieLogin sites, oauth2-proxy, Keycloak,
+      Authentik, generic OIDC, the email address; registry and badge open)* Supported-apps list: `apps/docs/docs/integrations/supported-apps.md` +
       `conventions/registry.json` entries (app, tier, path: config / plugin / upstream PR / fork,
       tested version, recipe link, status); "Works with Poweur" badge
 - [ ] **INT-006-T2** Compatibility CI: nightly docker-compose job per listed app runs a headless

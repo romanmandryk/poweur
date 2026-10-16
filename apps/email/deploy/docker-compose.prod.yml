@@ -53,6 +53,11 @@ services:
       EMAIL_SMTP_TLS_SERVER_NAME: mail.poweur.net
       EMAIL_SMTP_USERNAME: poweur-bridge
       EMAIL_MESSAGE_ID_DOMAIN: poweur.net
+      # Receive-only for everyone but the operator's IDs, for now: other
+      # senders are told sending is paused, and the app says so in compose.
+      # The allowed IDs are EMAIL_SEND_ALLOW in .env.prod (comma-separated,
+      # e.g. support.poweur.net,…); they are never published.
+      EMAIL_SEND_MODE: allowlist
       # Receiving is the point; sending is paced (10 a day, gaps doubling from
       # 5 minutes to 2 hours) and the whole bridge stays well under Stalwart's
       # 250/day domain throttle (itself under Brevo's 300). Raise one ID with

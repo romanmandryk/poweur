@@ -39,6 +39,11 @@ export interface EmailCapabilities {
   api?: string;
   /** False when the bridge only receives (features.email_send = "off"). */
   send?: boolean;
+  /**
+   * True when the bridge has paused sending for most IDs
+   * (features.email_send = "paused"): sends may be refused, so say so.
+   */
+  sendPaused?: boolean;
 }
 
 export interface EmailState {
@@ -73,6 +78,7 @@ export class EmailApi {
       const endpoints = caps.endpoints ?? {};
       return {
         ...(caps.features?.["email_send"] ? { send: caps.features["email_send"] !== "off" } : {}),
+        ...(caps.features?.["email_send"] === "paused" ? { sendPaused: true } : {}),
         ...(endpoints["email_bridge"] ? { bridge: endpoints["email_bridge"] } : {}),
         ...(endpoints["email_api"] ? { api: endpoints["email_api"].replace(/\/+$/, "") } : {}),
       };

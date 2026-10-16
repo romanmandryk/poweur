@@ -168,10 +168,15 @@ func (s *Server) Publish(ctx context.Context) error {
 	send := "on"
 	if s.cfg.Transport == "none" {
 		send = "off"
+	} else if s.cfg.SendPaused() {
+		// Clients still let people write (the operator's IDs can send);
+		// everyone else is told sending is paused.
+		send = "paused"
 	}
 	caps := map[string]any{
 		"version": 1,
-		// email_send tells clients whether to offer composing at all.
+		// email_send tells clients whether to offer composing at all
+		// (on | paused | off).
 		"features": map[string]string{"email_bridge": "v1", "email_send": send},
 	}
 	if s.cfg.PublicURL != "" {

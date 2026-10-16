@@ -27,4 +27,4 @@ package bridge
 
 // Version is the bridge semver. Bump the patch when shipping apps/email
 // changes (AGENTS.md "Version bumps").
-const Version = "0.1.0"
+const Version = "0.1.1"

@@ -1,7 +1,8 @@
 # EPIC-023 — Email bridge: a default inbox for every Poweur ID
 
-- **Status:** in progress — bridge, protocol, CLI and web built (2026-10-13); launch waits on the
-  Stalwart routes and DNS (`deploy/README.md` → Email bridge)
+- **Status:** in progress — live on poweur.net since 2026-10-15 (receiving for every hosted ID);
+  sending paused for all but operator IDs (`EMAIL_SEND_MODE=allowlist`, bridge 0.1.1) until the
+  abuse controls in E23-T4 are finished
 - **Priority:** P1 (growth: lets every Poweur ID reach, and be reached by, the whole email
   network, and gives each non-Poweur correspondent a reason to join)
 - **Depends on:** EPIC-001 (resolver chain), EPIC-006 (`poweur-sys` + PCP registry), EPIC-007
@@ -22,7 +23,7 @@
 | E23-T1 Spec, addressing & threat model | partial | docs page, PCP-0010, opt-in schema, vectors; payload JSON schemas and a written threat model open |
 | E23-T2 Bridge core + inbound SMTP | done | Behind Stalwart: RCPT hook + LMTP instead of a public :25 listener |
 | E23-T3 Outbound: pluggable transports, DKIM, bounces | mostly done | `smtp`/`log` transports, DSN-driven bounces + suppression; DKIM is Stalwart's; provider complaint webhooks open |
-| E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics; PoW gate, circuit breaker, alerts open |
+| E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics, send allowlist (`EMAIL_SEND_MODE`, app warns "paused"); PoW gate, circuit breaker, alerts open |
 | E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | done | On by default with opt-out (relay capabilities `email_receive`); private receive filters (`email.settings`); `support.poweur.net` already exists and is operator-owned |
 | E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | done | web 0.2.27 |
 | E23-T7 Growth footer | done | |
