@@ -124,6 +124,11 @@ is unreachable (with the time it will go), `bounced`
 when a recipient's server returns a delivery report, or `refused` with the reason (daily limit,
 too many new correspondents, an address that bounced before).
 
+An operator can also **pause** sending for everyone but a short list of IDs
+(`EMAIL_SEND_MODE=allowlist`): other sends are refused with "Sending email is paused for now", and
+the bridge's capabilities say `email_send: "paused"` so the app warns before you write. The list
+itself is never published. poweur.net runs this way for now: the address is for receiving.
+
 The first email you send to someone ends with a one-line note: *Sent with Poweur ID
 john.poweur.net · Get your own free ID*. Later emails to them don't.
 

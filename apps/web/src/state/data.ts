@@ -44,6 +44,8 @@ export const freshEmail = () => ({
   offered: null as string | null,
   /** False when the bridge only receives mail (no composing). */
   canSend: true,
+  /** True when the bridge has paused sending for most IDs. */
+  sendPaused: false,
   loading: false,
   loaded: false,
   error: null as string | null,

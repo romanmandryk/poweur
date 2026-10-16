@@ -733,3 +733,9 @@ footer { border-top: 1px solid var(--line); padding: 64px 0 40px; margin-top: 80
 .brand-card figcaption { display: grid; gap: 6px; padding: 12px 14px 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
 .brand-card figcaption strong { color: var(--fg); font-size: 14px; }
 .brand-links a { font-size: 13px; }
+
+/* Works with Poweur (works-with/) */
+.works .card { position: relative; }
+.works .card .kicker { padding-right: 96px; }
+.works .lede a, .works .lede code { color: var(--violet-300); }
+.works .lede a { text-decoration: underline; text-underline-offset: 3px; }

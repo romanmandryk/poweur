@@ -403,6 +403,34 @@ func TestVectors_SysDocs(t *testing.T) {
 		profiles = append(profiles, sysDocVector{entry.name, json.RawMessage(entry.raw), err == nil})
 	}
 	WriteVectors(t, vectorsDir, "profiles", profiles)
+
+	// handles.json (INT-006-T5) decides what the relay serves as a Bluesky
+	// handle and a NIP-05 address; clients must refuse what the relay would.
+	handles := []sysDocVector{}
+	for _, entry := range []struct {
+		name string
+		raw  string
+	}{
+		{"both", `{"version":1,"atproto_did":"did:plc:z72i7hdynmk6r22z27h6tvur","nostr_pubkey":"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d","nostr_relays":["wss://relay.damus.io"]}`},
+		{"empty", `{"version":1}`},
+		{"did-web", `{"version":1,"atproto_did":"did:web:alice.example.org"}`},
+		{"did-web-port", `{"version":1,"atproto_did":"did:web:localhost%3A8080"}`},
+		{"did-key", `{"version":1,"atproto_did":"did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"}`},
+		{"did-plc-uppercase", `{"version":1,"atproto_did":"did:plc:Z72I7HDYNMK6R22Z27H6TVUR"}`},
+		{"npub-not-hex", `{"version":1,"nostr_pubkey":"npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6"}`},
+		{"short-hex", `{"version":1,"nostr_pubkey":"3bf0c63f"}`},
+		{"relays-without-key", `{"version":1,"nostr_relays":["wss://relay.damus.io"]}`},
+		{"relay-not-wss", `{"version":1,"nostr_pubkey":"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d","nostr_relays":["https://relay.example"]}`},
+		{"fediverse", `{"version":1,"fediverse_acct":"alice@mastodon.social","fediverse_actor":"https://mastodon.social/users/alice"}`},
+		{"fediverse-without-actor", `{"version":1,"fediverse_acct":"alice@mastodon.social"}`},
+		{"fediverse-leading-at", `{"version":1,"fediverse_acct":"@alice@mastodon.social","fediverse_actor":"https://mastodon.social/users/alice"}`},
+		{"fediverse-http-actor", `{"version":1,"fediverse_acct":"alice@mastodon.social","fediverse_actor":"http://mastodon.social/users/alice"}`},
+		{"bad-version", `{"version":2}`},
+	} {
+		_, err := ParseHandles([]byte(entry.raw))
+		handles = append(handles, sysDocVector{entry.name, json.RawMessage(entry.raw), err == nil})
+	}
+	WriteVectors(t, vectorsDir, "handles", handles)
 }
 
 // historyVector pins the client-side message archive (EPIC-009 E09-T1). The

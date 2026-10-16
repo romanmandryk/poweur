@@ -70,7 +70,12 @@ type Config struct {
 	AuthServID string
 
 	// Outbound submission.
-	Transport    string // smtp | log | none (inbound only)
+	Transport string // smtp | log | none (inbound only)
+	// SendMode "allowlist" pauses sending for everyone but SendAllow (the
+	// operator's own IDs): others get a polite refusal and clients see
+	// `email_send: "paused"`. The list itself is never published.
+	SendMode     string // open | allowlist
+	SendAllow    map[string]bool
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUsername string
@@ -186,6 +191,33 @@ func ParseAliases(raw string) (map[string]string, error) {
 	return out, nil
 }
 
+// SendPausedReason is what a sender outside the allowlist is told.
+const SendPausedReason = "Sending email is paused for now. Your address still receives mail, so you can keep using it to sign up to apps and services."
+
+// SendPaused reports whether sending is limited to the allowlist.
+func (c Config) SendPaused() bool { return c.SendMode == "allowlist" }
+
+// SendAllowed reports whether sender may send at all.
+func (c Config) SendAllowed(sender string) bool {
+	return !c.SendPaused() || c.SendAllow[strings.ToLower(sender)]
+}
+
+// ParseSendAllow reads `support.poweur.net,john.poweur.net`.
+func ParseSendAllow(raw string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if err := identity.ValidateIdentityName(item); err != nil {
+			return nil, fmt.Errorf("EMAIL_SEND_ALLOW %q: %w", item, err)
+		}
+		out[item] = true
+	}
+	return out, nil
+}
+
 func parseCIDRs(raw string) ([]*net.IPNet, error) {
 	var out []*net.IPNet
 	for _, item := range strings.Split(raw, ",") {
@@ -271,6 +303,7 @@ func FromEnv() (Config, error) {
 		LMTPHostname:           env("EMAIL_LMTP_HOSTNAME", ""),
 		AuthServID:             strings.ToLower(env("EMAIL_AUTHSERV_ID", "")),
 		Transport:              env("EMAIL_TRANSPORT", "smtp"),
+		SendMode:               env("EMAIL_SEND_MODE", "open"),
 		SMTPHost:               env("EMAIL_SMTP_HOST", ""),
 		SMTPUsername:           env("EMAIL_SMTP_USERNAME", ""),
 		SMTPTLS:                env("EMAIL_SMTP_TLS", "starttls"),
@@ -287,6 +320,9 @@ func FromEnv() (Config, error) {
 		return c, err
 	}
 	if c.Aliases, err = ParseAliases(env("EMAIL_ALIASES", "")); err != nil {
+		return c, err
+	}
+	if c.SendAllow, err = ParseSendAllow(env("EMAIL_SEND_ALLOW", "")); err != nil {
 		return c, err
 	}
 	if c.LMTPAllow, err = parseCIDRs(env("EMAIL_LMTP_ALLOW", "")); err != nil {
@@ -430,6 +466,11 @@ func (c *Config) Validate() error {
 		// Inbound only: email.send is answered with a refusal.
 	default:
 		add("EMAIL_TRANSPORT must be smtp, log or none (receive only)")
+	}
+	switch c.SendMode {
+	case "", "open", "allowlist":
+	default:
+		add("EMAIL_SEND_MODE must be open or allowlist")
 	}
 	switch c.Footer {
 	case "off", "first", "always":

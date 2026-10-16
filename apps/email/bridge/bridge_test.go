@@ -499,6 +499,54 @@ func TestOutboundRefusals(t *testing.T) {
 	}
 }
 
+func TestOutboundAllowlistPausesOthers(t *testing.T) {
+	b := newTestBridge(t, func(c *Config) {
+		c.Footer = "off"
+		c.SendMode = "allowlist"
+		c.SendAllow = map[string]bool{"john.poweur.test": true}
+	})
+	john := b.net.add("john.poweur.test", b.self.name)
+	jane := b.net.add("jane.poweur.test", b.self.name)
+	mk := func(id string) identity.EmailSend {
+		return identity.EmailSend{Version: 1, SendID: id, To: []identity.EmailAddress{{Address: "a@example.com"}}, Subject: "s", Text: "t"}
+	}
+	b.net.sendToBridge(john, b.self, identity.MsgTypeEmailSend, mk("J1"))
+	b.net.sendToBridge(jane, b.self, identity.MsgTypeEmailSend, mk("N1"))
+	runOutbound(t, b)
+
+	if st := statuses(t, b.net, john); len(st) != 1 || st[0].State != identity.EmailStateSent {
+		t.Fatalf("john (allowed): %+v", st)
+	}
+	if st := statuses(t, b.net, jane); len(st) != 1 || st[0].State != identity.EmailStateRefused || st[0].Reason != SendPausedReason {
+		t.Fatalf("jane (paused): %+v", st)
+	}
+	if n := len(readSent(t, b.logDir)); n != 1 {
+		t.Fatalf("sent %d", n)
+	}
+
+	// Clients learn that sending is paused, never who may send.
+	if err := b.Publish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	raw := string(b.net.sys["/identities/"+b.self.name+"/system/.poweur/public/capabilities.json"])
+	if !strings.Contains(raw, `"email_send": "paused"`) || strings.Contains(raw, "john") {
+		t.Fatalf("capabilities = %s", raw)
+	}
+}
+
+func TestParseSendAllow(t *testing.T) {
+	got, err := ParseSendAllow(" Support.poweur.net, john.poweur.net ,")
+	if err != nil || len(got) != 2 || !got["support.poweur.net"] || !got["john.poweur.net"] {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if _, err := ParseSendAllow("not an id"); err == nil {
+		t.Fatal("invalid ID accepted")
+	}
+	if !(Config{}).SendAllowed("anyone.poweur.net") {
+		t.Fatal("open mode refused a sender")
+	}
+}
+
 func TestOutboundTemporaryFailureRetries(t *testing.T) {
 	failures := 1
 	b := newTestBridge(t, func(c *Config) { c.Footer = "off" })

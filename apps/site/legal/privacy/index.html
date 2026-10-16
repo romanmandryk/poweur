@@ -31,7 +31,7 @@
     <div class="wrap legal-wrap">
       <div class="eyebrow">Legal</div>
       <h1 class="h2 gradient-text">Privacy Policy</h1>
-      <p class="legal-meta">Last updated 5 October 2026</p>
+      <p class="legal-meta">Last updated 16 October 2026</p>
       <nav class="legal-nav" aria-label="Legal pages">
         <a href="../">Overview &amp; contact</a>
         <a href="./" aria-current="page">Privacy Policy</a>
@@ -48,6 +48,7 @@
           <li>Your private keys are created on your device and never reach us. We can't read your messages: they are end-to-end encrypted.</li>
           <li>Files you upload are end-to-end encrypted too: contents and names are encrypted on your device before they reach us. We can still see sizes, times, how folders nest and who a folder is shared with. Folders you make <strong>public</strong> are the exception: anyone with the address can read them.</li>
           <li>Your ID, public keys and anything you publish are public by design: that's how others find and verify you.</li>
+          <li>Your ID comes with an email address (for example <code>alice@poweur.net</code>). Ordinary email is <strong>not</strong> end-to-end encrypted: our mail server and email bridge see each message while it passes, then it is encrypted to you and stored only encrypted. You can turn the address off in Settings.</li>
           <li>We keep logs and anonymous diagnostics (which screens are used, errors, speed) to run and improve the service. They contain no Poweur ID and no IP address, and nothing is stored on your device for them. Your ID is included only if you tick <em>Include my ID</em> in Settings → Diagnostics.</li>
           <li>We don't sell data, show ads or build profiles.</li>
         </ul>
@@ -58,6 +59,7 @@
       <ul>
         <li>the hosted relay and web app at <strong>poweur.net</strong> and your ID's own address (for example <code>alice.poweur.net</code>);</li>
         <li>the sign-in bridge at <strong>oauth.poweur.org</strong>;</li>
+        <li>the email address that comes with a hosted ID (<code>name@poweur.net</code>), handled by our mail server <strong>mail.poweur.net</strong> and our email bridge (<strong>email.poweur.net</strong>, <strong>email.poweur.org</strong>);</li>
         <li>the website and documentation at <strong>poweur.org</strong>.</li>
       </ul>
       <p>The data controller is Roman Mandryk, R. Prudêncio Franco da Trindade 4, 2655-344 Ericeira, Portugal (VAT / NIF PT307974510). Contact us about privacy at <a href="mailto:info@poweur.org">info@poweur.org</a>, or message support.poweur.net from the app.</p>
@@ -66,7 +68,7 @@
       <h2 id="cannot-see">2. What we can't see</h2>
       <ul>
         <li><strong>Your private keys.</strong> They are generated on your device. What reaches us is at most an encrypted copy, locked with your passkey or your phone's keystore. We can't unlock it, which also means we can't recover your ID for you: your recovery kit can.</li>
-        <li><strong>Message contents.</strong> Messages are encrypted on the sender's device for the recipient. We store and forward ciphertext. Your message history is stored in your home encrypted to your own key.</li>
+        <li><strong>Message contents.</strong> Messages are encrypted on the sender's device for the recipient. We store and forward ciphertext. Your message history is stored in your home encrypted to your own key. Ordinary email is the exception: see <a href="#email">Email</a>.</li>
         <li><strong>Your passkey.</strong> Your browser or phone keeps it. We see only the public part needed to check a sign-in.</li>
       </ul>
 
@@ -81,6 +83,10 @@
           <tr><td><strong>Files</strong> you upload, and folder and share settings</td><td>To store and share them as you ask. File contents and names are <strong>end-to-end encrypted</strong>: we see sizes, times, how folders nest and who a folder is shared with, not what is in them. Folders you make <strong>public</strong> are not encrypted and anyone with the address can read them.</td><td>Until you delete them or your ID</td></tr>
           <tr><td><strong>Contacts, inbox rules, shares and app grants</strong></td><td>The relay has to read these to deliver messages and enforce your permissions</td><td>Until you change them or delete your ID</td></tr>
           <tr><td><strong>Public links and link statistics</strong> (download counts)</td><td>So you can share files with people without an ID and see that they were used</td><td>Until the link expires or you remove it</td></tr>
+          <tr><td><strong>Email passing through</strong> to or from your address</td><td>To deliver it. Our mail server and email bridge handle each message in plaintext while it passes; the bridge then encrypts it to you, and it is stored only encrypted, like any other message</td><td>Not kept in plaintext after delivery. The mail server's queue holds a message only until it is handed on</td></tr>
+          <tr><td><strong>Email bridge records</strong>: counters, the state of emails you send, keyed hashes of addresses (has this pair written before? has this address bounced?) and the receive filters you set</td><td>To pace sending, stop abuse and apply your filters</td><td>Counters and send states 30 days; filters until you change them or delete your ID</td></tr>
+          <tr><td><strong>Large email attachments and originals</strong>, sealed to your key</td><td>Too big to fit in a message; the bridge cannot read them after writing them</td><td>30 days</td></tr>
+          <tr><td><strong>Mail server logs</strong>: sender and recipient addresses, time, size, result, spam score</td><td>To deliver mail, investigate delivery problems and stop spam</td><td>14 days</td></tr>
           <tr><td><strong>Sign-in sessions</strong></td><td>To keep you signed in on a device</td><td>Short-lived and held in memory only</td></tr>
           <tr><td><strong>Server logs and metrics</strong>: route, result, timing, errors</td><td>To keep the service running, debug it and stop abuse</td><td>Logs 14 days; aggregate metrics 30 days</td></tr>
           <tr><td><strong>Storage and backups</strong></td><td>Your home (files, message history, settings) is kept in Hetzner Object Storage in one data centre in Germany. Each piece is spread across several servers, so up to three can fail without losing data. Hetzner does not publish a durability guarantee, and we do not yet keep a second copy in another location. The rest of the server is copied daily by Hetzner in the EU, for recovering the service, not for restoring individual files</td><td>Your home: until you delete it. Server copies: 7 days, then deleted</td></tr>
@@ -90,6 +96,10 @@
 
       <h3 id="sign-in">Signing in to other apps</h3>
       <p>When you use your ID to sign in to another website through oauth.poweur.org, the bridge learns which site asked, your ID, and what you approved, and it issues that site a token. The site then receives your ID and whatever profile details you approved. What that site does with them is covered by its own privacy policy. The <em>Connected apps</em> page in the app lists the sites you've approved and lets you disconnect them.</p>
+
+      <h3 id="email">Email</h3>
+      <p>Every hosted ID can receive email at <code>name@poweur.net</code>. It is on by default; you can turn it off, block senders or accept mail from contacts only in Settings, and those filters are sent to the bridge encrypted. Email is an older system than Poweur and is not end-to-end encrypted: the sender's mail servers, our mail server and our email bridge see a message while it passes. From the bridge onwards it is encrypted to you. The bridge keeps no plaintext after delivery and its logs carry no addresses or subjects; the mail server's delivery logs do (see the table above).</p>
+      <p><strong>Sending</strong> email from your address is paused for now. When it is on, the email you send goes through our mail server and our outbound email provider (see section 4), who see it in plaintext like any email provider, and the first email to a new correspondent carries a one-line note that it was sent with a Poweur ID.</p>
 
       <h3 id="storage-limits">Storage limits and support</h3>
       <p>Free storage is limited. If you message our support ID to ask for more, we see that conversation like any other contact would, and we keep a note of the higher limit next to your ID.</p>
@@ -101,6 +111,7 @@
         <tbody>
           <tr><td>Hetzner Online GmbH (Germany)</td><td>The servers the relay, bridge and website run on, in data centres in the EU</td><td>Everything in section 3, encrypted where described above</td></tr>
           <tr><td>Cloudflare</td><td>DNS and network protection in front of some of our addresses</td><td>IP addresses and request data passing through it</td></tr>
+          <tr><td>Brevo (Sendinblue SAS, France)</td><td>Delivering the email sent from Poweur addresses to other mail servers</td><td>The email you send: sender and recipient addresses and contents. Sending is paused for most IDs for now</td></tr>
         </tbody>
       </table>
       <p>Some of these providers are outside the European Economic Area. Where that applies, transfers rely on the European Commission's adequacy decisions or standard contractual clauses.</p>
@@ -110,7 +121,7 @@
       <h2 id="legal-bases">5. Legal bases</h2>
       <p>Where the EU or UK GDPR applies, we rely on:</p>
       <ul>
-        <li><strong>contract</strong>: hosting your ID, delivering your messages and storing your files is the service you asked for;</li>
+        <li><strong>contract</strong>: hosting your ID, delivering your messages and email and storing your files is the service you asked for;</li>
         <li><strong>legitimate interests</strong>: security, preventing spam and abuse, backups, pseudonymous logs, and anonymous diagnostics to keep the service working;</li>
         <li><strong>consent</strong>: including your ID in diagnostics (<em>Include my ID</em>), off unless you tick it and withdrawable at any time in Settings;</li>
         <li><strong>legal obligation</strong>: where the law requires us to keep or disclose data.</li>

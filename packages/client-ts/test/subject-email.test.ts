@@ -26,6 +26,7 @@ import { generateEncryptionKeypair, openWithDomain, sealWithDomain, sha256Bytes 
 import { fromUtf8 } from "../src/encoding.js";
 import { markRead, markThreadRead, parseReadState, recordThreadKey, unreadCounts, type HistoryRecord, type ReadMark } from "../src/history.js";
 import { conversationKey, formatBody, newThreadId, normalizeSubject, parseBody, validateSubject } from "../src/subject.js";
+import { EmailApi } from "../src/email-client.js";
 import { loadVectors } from "./vectors.js";
 
 interface SubjectVectors {
@@ -185,6 +186,18 @@ describe("email documents match Go", () => {
     expect(() => normalizeEmailSettings({ version: 1, updated_at: "2026-10-14T12:00:00Z", block: ["@"] })).toThrow();
     expect(() => normalizeEmailSettings({ version: 2, updated_at: "2026-10-14T12:00:00Z" })).toThrow();
     expect(() => normalizeEmailSettings({ version: 1, receive: "nobody" as "everyone", updated_at: "2026-10-14T12:00:00Z" })).toThrow();
+  });
+});
+
+describe("bridge capabilities", () => {
+  const caps = (features: Record<string, string>) => {
+    const fetch = (async () => new Response(JSON.stringify({ features, endpoints: { email_api: "https://email.example/" } }), { status: 200 })) as typeof globalThis.fetch;
+    return new EmailApi({ relay: { relayUrl: "https://relay.example" }, resolveOptions: { fetch } } as never).capabilities("email.example");
+  };
+  it("reads email_send on, paused and off", async () => {
+    await expect(caps({ email_send: "on" })).resolves.toEqual({ send: true, api: "https://email.example" });
+    await expect(caps({ email_send: "paused" })).resolves.toEqual({ send: true, sendPaused: true, api: "https://email.example" });
+    await expect(caps({ email_send: "off" })).resolves.toEqual({ send: false, api: "https://email.example" });
   });
 });
 

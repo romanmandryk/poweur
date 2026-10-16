@@ -32,6 +32,12 @@ Protocol: [PCP-0010](../../conventions/pcp-0010-email-bridge.md) ·
 | `log` | development: write each message to `EMAIL_LOG_DIR` |
 | *(later)* provider APIs | e.g. Brevo's HTTP API, for delivery events without a mail server |
 
+To keep a transport but let only some IDs send (a soft launch, or while a domain builds its
+reputation), set `EMAIL_SEND_MODE=allowlist` and `EMAIL_SEND_ALLOW=support.example.org,…`.
+Everyone else's `email.send` is refused with a polite "sending is paused" status, and the
+bridge publishes `email_send: "paused"` so apps can say so before anyone writes. The list
+itself is never published.
+
 ### The smallest setup: receive only
 
 For a self-hoster who wants `name@example.org` to receive sign-in links and notifications —
@@ -149,6 +155,8 @@ Environment only. Every secret also takes a `_FILE` variant.
 | `EMAIL_OUT_NEW_RECIPIENTS_DAILY` | `10` | New correspondents per identity per day |
 | `EMAIL_OUT_GLOBAL_DAILY_LIMIT` | `0` (none) | The whole bridge per rolling 24 h |
 | `EMAIL_OUT_MAX_PENDING` | `20` | Sends one identity may have waiting |
+| `EMAIL_SEND_MODE` | `open` | `allowlist`: only `EMAIL_SEND_ALLOW` may send; others are told sending is paused |
+| `EMAIL_SEND_ALLOW` | — | Comma-separated IDs allowed to send in `allowlist` mode |
 | `EMAIL_OUT_MIN_AGE` | `0` | Wait after an identity's first send attempt before it may send (e.g. `24h`) |
 | `EMAIL_FOOTER` | `first` | `off`, `first` (first message to each recipient) or `always` |
 | `EMAIL_FOOTER_TEXT` | `Sent with Poweur ID {id} · Get your own free ID: {signup_url}` | Placeholders `{id}`, `{profile_url}`, `{signup_url}` |

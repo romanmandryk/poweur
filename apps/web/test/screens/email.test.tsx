@@ -202,6 +202,30 @@ describe("receive-only bridge", () => {
   });
 });
 
+describe("sending paused", () => {
+  it("warns in compose but still sends (the bridge decides)", async () => {
+    optedIn();
+    holder.client.emailApi.capabilities.mockResolvedValue({ send: true, sendPaused: true });
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    expect((await found(".empty-state")).textContent).toContain("sign up to apps");
+    fireEvent.click(await found("#btn-email-compose"));
+    expect((await found("#email-send-paused")).textContent).toContain("paused");
+    fireEvent.change($("#email-to")!, { target: { value: "ann@example.com" } });
+    fireEvent.click($("#btn-email-send")!);
+    await waitFor(() => expect(holder.client.emailApi.send).toHaveBeenCalled());
+  });
+
+  it("shows no warning when sending is on", async () => {
+    optedIn();
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    fireEvent.click(await found("#btn-email-compose"));
+    await found("#email-to");
+    expect($("#email-send-paused")).toBeNull();
+  });
+});
+
 describe("receive filters", () => {
   it("shows the newest saved settings and changes who may email", async () => {
     optedIn();

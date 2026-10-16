@@ -47,7 +47,7 @@ export async function loadEmail({ force = false } = {}) {
     const bridge = state.bridge ?? offered;
     const caps = bridge ? await api.capabilities(bridge) : {};
     setEmail({
-      enabled: state.enabled, address: state.address, bridge: state.bridge, offered, canSend: caps.send !== false,
+      enabled: state.enabled, address: state.address, bridge: state.bridge, offered, canSend: caps.send !== false, sendPaused: caps.sendPaused === true,
       loaded: true, loading: false, error: null,
     });
   } catch (error) {
