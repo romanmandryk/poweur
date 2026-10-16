@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "node16",
+    "module": "node16",
+    "rootDir": ".",
+    "sourceMap": false,
+    "declarationMap": false
+  },
+  "include": ["src", "index.ts", "setup-entry.ts"],
+  "exclude": ["test", "**/*.test.ts"]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "poweur",
+  "categories": ["channels"],
+  "name": "Poweur",
+  "description": "End-to-end encrypted messages between Poweur IDs and your agent, which runs on its own Poweur ID.",
+  "channels": ["poweur"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
