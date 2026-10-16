@@ -18,7 +18,7 @@ test("page paths", () => {
 test("the header lists the pages in order, marks the current one and prefixes the root", () => {
   const html = chrome.navHtml("../", "/faq/");
   const labels = [...html.matchAll(/<li><a [^>]*>([^<]+)<\/a><\/li>/g)].map((m) => m[1]);
-  assert.deepEqual(labels, ["Product", "Use cases", "Architecture", "Blog", "FAQ", "Docs", "GitHub"]);
+  assert.deepEqual(labels, ["Product", "Use cases", "Works with", "Architecture", "Blog", "FAQ", "Docs", "GitHub"]);
   assert.match(html, /<a href="\.\.\/faq\/" aria-current="page" >FAQ<\/a>/);
   assert.doesNotMatch(html, /aria-current="page" >Blog/);
   assert.match(html, /href="\.\.\/blog\/"/);
