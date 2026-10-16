@@ -32,7 +32,9 @@ services:
       EMAIL_PUBLIC_URL: https://email.poweur.org
       # poweur.org (MX on Purelymail today) and other domains join later:
       # point their MX at mail.poweur.net and add `poweur.org=poweur.net`.
-      EMAIL_DOMAINS: ${EMAIL_DOMAINS:-poweur.net}
+      # copy.poweur.net has no MX: only Stalwart sends there, copies of mail
+      # for its own mailboxes (famooss poweur-copy Sieve script).
+      EMAIL_DOMAINS: ${EMAIL_DOMAINS:-poweur.net,copy.poweur.net=poweur.net}
       # Inbound: behind Stalwart.
       EMAIL_INBOUND: lmtp
       EMAIL_LMTP_ADDR: ":2525"
