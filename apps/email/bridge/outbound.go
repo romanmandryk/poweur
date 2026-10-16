@@ -115,6 +115,7 @@ func (o *Outbound) ProcessDue(ctx context.Context) {
 	for _, it := range items {
 		var env Envelope
 		if err := json.Unmarshal([]byte(it.Envelope), &env); err != nil {
+			o.drop(Envelope{ID: it.ID}, "unreadable_queue_entry")
 			_ = o.store.Dequeue(ctx, it.ID)
 			continue
 		}
@@ -181,6 +182,7 @@ func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.
 	sender := strings.ToLower(env.Sender)
 	plain, err := o.relay.Open(env)
 	if err != nil {
+		o.drop(env, "undecryptable")
 		return false, nil
 	}
 	if msgType == identity.MsgTypeEmailSettings {
@@ -188,6 +190,7 @@ func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.
 	}
 	var send identity.EmailSend
 	if err := json.Unmarshal(plain, &send); err != nil {
+		o.drop(env, "malformed")
 		return false, nil
 	}
 	if o.transport == nil {
@@ -200,6 +203,8 @@ func (o *Outbound) handleNow(ctx context.Context, env Envelope, notBefore *time.
 		// Tell the sender why, when there is a send id to tell them about.
 		if send.SendID != "" && len(send.SendID) <= identity.MaxSendIDLen && identity.ValidateThreadID(send.SendID) == nil {
 			o.status(ctx, sender, send.SendID, identity.EmailStateRefused, "", "", err.Error())
+		} else {
+			o.drop(env, "invalid_send_id")
 		}
 		return false, nil
 	}
@@ -489,6 +494,14 @@ func (o *Outbound) footerFor(ctx context.Context, sender string, recipients []st
 		return ""
 	}
 	return RenderFooter(o.cfg.FooterText, sender, o.cfg.SignupURL)
+}
+
+// drop records an envelope the bridge can neither handle nor answer: the
+// sender's app hears nothing, so the log and the metric are the only trace.
+// Never logs content.
+func (o *Outbound) drop(env Envelope, reason string) {
+	o.metrics.Inc("email_outbound_dropped_total", "reason", reason)
+	o.log.Warn("outbound: dropped", "reason", reason, "sender", strings.ToLower(env.Sender), "envelope", env.ID, "type", env.Type)
 }
 
 func (o *Outbound) refuse(ctx context.Context, sender, sendID, reason string) {

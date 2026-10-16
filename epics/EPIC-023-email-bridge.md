@@ -23,9 +23,9 @@
 | E23-T1 Spec, addressing & threat model | partial | docs page, PCP-0010, opt-in schema, vectors; payload JSON schemas and a written threat model open |
 | E23-T2 Bridge core + inbound SMTP | done | Behind Stalwart: RCPT hook + LMTP instead of a public :25 listener |
 | E23-T3 Outbound: pluggable transports, DKIM, bounces | mostly done | `smtp`/`log` transports, DSN-driven bounces + suppression; DKIM is Stalwart's; provider complaint webhooks open |
-| E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics, send allowlist (`EMAIL_SEND_MODE`, app warns "paused"); PoW gate, circuit breaker, alerts open |
+| E23-T4 Abuse controls & reputation | partial | quotas, reply exemption, waiting period, per-recipient cap, spam verdicts, metrics, send allowlist (`EMAIL_SEND_MODE`, app warns "paused"); unanswerable sends logged + `email_outbound_dropped_total{reason}` (bridge 0.1.2); PoW gate, circuit breaker, alerts open |
 | E23-T5 Opt-in: relay policy, name reservations, SDK, CLI | done | On by default with opt-out (relay capabilities `email_receive`); private receive filters (`email.settings`); `support.poweur.net` already exists and is operator-owned |
-| E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | done | web 0.2.27 |
+| E23-T6 Web app: opt-in, Emails tray, compose, safe HTML rendering | done | web 0.2.27; web 0.2.31: a send with no bridge reply for 10 min says so and offers "Send again" (same send id) |
 | E23-T7 Growth footer | done | |
 | E23-T8 Packaging, DNS, deploy & operations | partial | image, compose, deploy workflow (gated), Caddy, Prometheus, runbook; Stalwart/DNS live in famooss; `check-dns` dropped (mail server's) |
 | E23-T9 Growth loops: invites, conversation upgrade, aliases, screener | open | |

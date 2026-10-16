@@ -2,7 +2,7 @@
  * The Email tray's actions (EPIC-023 E23-T6): opt in and out, send through
  * the bridge, keep read marks per mail thread, and open attachments.
  */
-import { markThreadRead as markThreadMark, stateCovers, toBase64Data, type EmailBlobRef, type EmailOutAttachment, type EmailSettings } from "@poweur/client";
+import { markThreadRead as markThreadMark, stateCovers, toBase64Data, type EmailBlobRef, type EmailOutAttachment, type EmailSend, type EmailSettings } from "@poweur/client";
 import { emailSettingsOf, mailEntries, type MailEntry } from "../lib/email";
 import { useData } from "../state/data";
 import { useSession } from "../state/session";
@@ -210,18 +210,48 @@ export async function sendEmail(draft: OutgoingEmail, setStatus: (text: string) 
       ...(draft.references?.length ? { references: draft.references } : {}),
       ...(attachments.length ? { attachments } : {}),
     });
-    const self = useSession.getState().identity ?? "";
-    mergeMessages([{
-      id: sent.message.id, sender: self, recipient: sent.message.recipient, timestamp: sent.message.timestamp,
-      type: "email.send", queue: "sent", plaintext: JSON.stringify(sent.payload),
-    }]);
-    if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+    keepSent(sent);
     trackAction("email-send", { outcome: "sent" });
     return sent.sendId;
   } catch (error) {
     toast(`Not sent: ${errorMessage(error)}`, "error", 8000);
     trackAction("email-send", { outcome: "failed" });
     return null;
+  }
+}
+
+type SentEmail = Awaited<ReturnType<ReturnType<NonNullable<ReturnType<typeof activeClient>>["email"]>["send"]>>;
+
+/** Show a send in the thread at once (the archive has it too, unless lost). */
+function keepSent(sent: SentEmail) {
+  const self = useSession.getState().identity ?? "";
+  mergeMessages([{
+    id: sent.message.id, sender: self, recipient: sent.message.recipient, timestamp: sent.message.timestamp,
+    type: "email.send", queue: "sent", plaintext: JSON.stringify(sent.payload),
+  }]);
+  if (sent.lost) toast("Sent, but not saved to your history", "warning", 6000);
+}
+
+/**
+ * Hand the bridge a send it never answered, again. The send id stays the
+ * same, so a bridge that did get the first copy answers with what happened
+ * instead of mailing it twice.
+ */
+export async function resendEmail(send: EmailSend): Promise<boolean> {
+  const client = activeClient();
+  if (!client) {
+    toast("Unlock your identity first", "warning");
+    return false;
+  }
+  try {
+    const { version: _version, ...draft } = send;
+    keepSent(await client.email().send(draft));
+    trackAction("email-send", { outcome: "resent" });
+    return true;
+  } catch (error) {
+    toast(`Not sent: ${errorMessage(error)}`, "error", 8000);
+    trackAction("email-send", { outcome: "failed" });
+    return false;
   }
 }
 
