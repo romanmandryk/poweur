@@ -23,7 +23,7 @@ import { emailBridgeOf, useData } from "../../state/data";
 import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { Button } from "../../ui/Button";
-import { Chip, CountBadge, EmptyState } from "../../ui/Display";
+import { Chip, CountBadge, EmptyState, Notice } from "../../ui/Display";
 import { Input, Label, Textarea } from "../../ui/Field";
 import { SubPage } from "../../ui/Layout";
 
@@ -100,7 +100,11 @@ export function EmailTray() {
         )}
       </div>
       {!threads.length ? (
-        <EmptyState icon={Mail} title="No email yet" body={`Mail sent to ${email.address ?? "your address"} lands here, encrypted to you.`} />
+        <EmptyState
+          icon={Mail}
+          title="No email yet"
+          body={`Use ${email.address ?? "your address"} to sign up to apps and services that don't offer Sign in with Poweur yet. Their mail lands here, encrypted to you.`}
+        />
       ) : (
         <div className="conv-list mail-list bg-surface">
           {threads.map((thread) => (
@@ -196,11 +200,13 @@ export function EmailOptIn({ compact = false }: { compact?: boolean }) {
         <Mail className="size-5 text-accent" aria-hidden="true" /> {address} is off
       </div>
       <p className="mt-2 text-sm text-muted">
-        Receive and send ordinary email from your Poweur ID. Mail arrives encrypted to you; nobody else on Poweur can read it.
+        An ordinary email address for your Poweur ID, for the apps and services that don't offer Sign in with Poweur yet: sign up with it, and their mail arrives here, encrypted to you.
       </p>
       <ul className="mt-2 list-disc pl-5 text-[13px] text-muted">
         <li>Email is not end-to-end encrypted on the way: senders' mail servers and the bridge ({email.offered}) see it while it passes.</li>
-        {email.canSend ? (
+        {email.canSend && email.sendPaused ? (
+          <li>Sending email is paused for now; receiving works as usual.</li>
+        ) : email.canSend ? (
           <li>Sending is limited and paced (a few a day) to keep the address off spam lists; the first email you send to someone carries a one-line note about Poweur.</li>
         ) : (
           <li>This address receives mail only — sign-in links, notifications, newsletters.</li>
@@ -481,6 +487,7 @@ export function EmailCompose() {
   const [status, setStatus] = useState("");
   const [sending, setSending] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const sendPaused = useData((state) => state.email.sendPaused);
   const footer = useData((state) => state.email.address);
 
   // Forwarding carries the original's attachments the client can still open.
@@ -544,6 +551,11 @@ export function EmailCompose() {
         </div>
       }
     >
+      {sendPaused && (
+        <Notice id="email-send-paused" tone="warn">
+          Sending email is paused for now, so this message may not go out. Your address still receives mail as usual.
+        </Notice>
+      )}
       <div>
         <Label htmlFor="email-to">To</Label>
         <Input id="email-to" type="text" inputMode="email" autoComplete="off" value={to} onChange={(e) => setTo(e.currentTarget.value)} placeholder="name@example.com" />

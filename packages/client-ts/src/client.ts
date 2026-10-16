@@ -28,6 +28,7 @@ import { Messaging, type SendOptions, type SendResult } from "./messages.js";
 import { readInboxPolicy, sendsReadReceiptsTo, writeInboxPolicy } from "./policy.js";
 import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
+import { readHandles, writeHandles, type Handles } from "./handles.js";
 import type { ResolveOptions } from "./resolve.js";
 import { MemorySessionStore, SessionManager, type SessionStore } from "./session.js";
 import { DriveClient } from "./drive/client.js";
@@ -504,6 +505,16 @@ export class PoweurClient {
 
   async setProfile(profile: Profile): Promise<Profile> {
     return writeProfile(this.system(), profile);
+  }
+
+  /** Our handles on other networks (Bluesky DID, Nostr key), PCP-0011. */
+  async handles(): Promise<Handles> {
+    return readHandles(this.system());
+  }
+
+  /** Link or unlink them; with nothing linked the document is removed. */
+  async setHandles(handles: Handles): Promise<Handles> {
+    return writeHandles(this.system(), handles);
   }
 
   /** Drain the anonymous queue. */

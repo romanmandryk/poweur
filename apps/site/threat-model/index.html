@@ -31,7 +31,7 @@
     <div class="wrap legal-wrap">
       <div class="eyebrow">Security</div>
       <h1 class="h2 gradient-text">Threat model</h1>
-      <p class="legal-meta">What Poweur protects, what it does not, and who you have to trust. Updated 5 October 2026.</p>
+      <p class="legal-meta">What Poweur protects, what it does not, and who you have to trust. Updated 16 October 2026.</p>
     </div>
   </section>
 
@@ -43,6 +43,7 @@
           <li>Private keys stay on your devices. The relay and the storage bucket never hold them, so a hacked or nosy server cannot forge your messages or read their contents.</li>
           <li>The server still sees <em>metadata</em>: who talks to whom, when, how big, and how files are organised and shared. Poweur does not hide it, and says so.</li>
           <li>For a hosted name, the operator of the domain controls where the name points. That is a real trust assumption, and the reason to use your own domain for anything long-lived.</li>
+          <li>Ordinary email to your <code>name@poweur.net</code> address is not end-to-end encrypted: our mail server and email bridge see it while it passes, then it is encrypted to you.</li>
           <li>This has not had an external security review.</li>
         </ul>
       </div>
@@ -59,6 +60,8 @@
           <tr><td><strong>A network observer</strong></td><td>That a connection to the relay happened, and its timing and volume (TLS hides the rest).</td><td>Read contents, which are end-to-end encrypted, or forge messages.</td></tr>
           <tr><td><strong>An app you sign in to</strong></td><td>Your ID, and your name and photo if you allow it.</td><td>Your messages or files; it never receives a password.</td></tr>
           <tr><td><strong>The sign-in bridge (oauth.poweur.org)</strong></td><td>Which applications you sign in to, and when, in its audit log.</td><td>Your messages or files.</td></tr>
+          <tr><td><strong>The mail server and email bridge (mail.poweur.net, email.poweur.net)</strong></td><td>Each email to or from your address in plaintext while it passes: sender, recipients, subject and contents. The mail server logs addresses, times and results. The bridge keeps counters, send states and keyed hashes of addresses, and stores large attachments only sealed to you.</td><td>Read email once it is delivered, because it is stored encrypted to you; read your Poweur messages or files; send email as you (sending needs a message signed by your ID).</td></tr>
+          <tr><td><strong>Anyone who emails you</strong></td><td>That your address exists (it receives mail unless you turn it off).</td><td>Reach your inbox if you blocked them or accept mail from contacts only. A sender's address can be forged in email; the app shows the SPF, DKIM and DMARC verdict for each message.</td></tr>
           <tr><td><strong>Another person you share with</strong></td><td>What you shared with them, including anything they cached. Revoking a share cannot erase copies or keys they already have.</td><td>Anything you did not share.</td></tr>
         </tbody>
       </table>
@@ -82,8 +85,12 @@
       <h2 id="drive">Files</h2>
       <p>Private file names, contents and the keys to them are encrypted on your device. The server sees the shape of what you store (see the table above). Signatures and authenticated encryption detect tampering and wrong authors. A malicious relay could still try to roll you back to an older state or show different devices different histories; clients keep the last version they saw and warn on regressions, but a brand-new device needs an independently trusted checkpoint to rule it out. Folders marked public are readable by anyone. Share links keep their key in the part of the address the server never receives; a link can still leak through browser history or copy-paste.</p>
 
+      <h2 id="email">Email</h2>
+      <p>Email predates Poweur and is not end-to-end encrypted on the way: the sender's mail servers, our mail server and our email bridge see a message in plaintext. From the bridge onwards it is encrypted to your ID and stored only encrypted. The bridge refuses to relay for anyone but the ID that owns an address, and only on a message signed by that ID; sending is paused for most IDs for now. Mail is untrusted: the app renders it in a sandbox with no scripts and no remote images unless you ask. Self-hosters who run the bridge are, for their users, in the same position as we are for ours.</p>
+
       <h2 id="not">What Poweur does not claim</h2>
       <ul>
+        <li><strong>No end-to-end encryption for email.</strong> See <a href="#email">Email</a>.</li>
         <li><strong>No metadata privacy.</strong> Who talks to whom, and when, is visible to the relay. Hiding that would need mixnets or onion routing, which Poweur does not do. Sending through your home relay (CLI option <code>--via-home-relay</code>) keeps your IP from the recipient's relay at the cost of an extra hop.</li>
         <li><strong>No proof of a legal identity.</strong> A Poweur ID proves control of a name and its keys, not that a person is who they say.</li>
         <li><strong>No anonymity.</strong> Your IP address is visible to the relay you connect to.</li>

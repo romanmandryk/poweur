@@ -51,6 +51,7 @@ import {
   type HistoryRecord,
 } from "../src/history.js";
 import { validateProfile } from "../src/profile.js";
+import { validateHandles, type Handles } from "../src/handles.js";
 import { checkPow, clampPowBits } from "../src/pow.js";
 import { verifyGroupSignature } from "../src/groups.js";
 import type {
@@ -325,6 +326,18 @@ describe("poweur-sys documents match Go", () => {
       let valid = true;
       try {
         validateProfile(vector.raw as Profile);
+      } catch {
+        valid = false;
+      }
+      expect(valid, vector.name).toBe(vector.valid);
+    }
+  });
+
+  it("accepts and rejects the same handles.json documents", () => {
+    for (const vector of loadVectors<SysDocVector[]>("handles")) {
+      let valid = true;
+      try {
+        validateHandles(vector.raw as Handles);
       } catch {
         valid = false;
       }

@@ -31,7 +31,7 @@
     <div class="wrap legal-wrap">
       <div class="eyebrow">Questions</div>
       <h1 class="h2 gradient-text">FAQ</h1>
-      <p class="legal-meta">Answers to what people ask first. Updated 5 October 2026.</p>
+      <p class="legal-meta">Answers to what people ask first. Updated 16 October 2026.</p>
     </div>
   </section>
 
@@ -41,6 +41,7 @@
         <p><strong>The short version</strong></p>
         <ul>
           <li>Poweur gives you one open ID, a readable name such as <code>alice.poweur.net</code> or a name on your own domain, backed by keys that stay on your devices. It signs you in to apps, carries end-to-end encrypted messages, and holds files you choose to share.</li>
+          <li>Each hosted ID also receives ordinary email at <code>name@poweur.net</code>, so you can sign up to the apps that don't offer Sign in with Poweur yet. Sending email is paused for now.</li>
           <li>It is open source and pre-1.0. It works today, it has not had an external security review, and it is not a finished ecosystem.</li>
           <li>A hosted name depends on the domain's operator. A name on your own domain is yours.</li>
         </ul>
@@ -52,15 +53,19 @@
       <p>An open identity, messaging and data-sharing layer. A Poweur ID is a name that is at once an identity (keys that sign things), an address (people, apps and agents can send it end-to-end encrypted messages) and a home for files you can share with other IDs. Apps can accept it as a login. Anyone can run a relay, host IDs on their own domain, or build on the same pieces. The <a href="../blog/introducing-poweur-id/">introduction</a> tells the story; the <a href="/docs/">documentation</a> has the details.</p>
 
       <h3 id="status">How finished is it?</h3>
-      <p>Pre-1.0. Identity, messaging, sharing and sign-in work end to end, with a web app, a CLI and a TypeScript SDK; mobile apps are in beta preparation. The broader app ecosystem, the email bridge and collaborative spaces are on the <a href="https://github.com/romanmandryk/poweur/tree/master/epics">roadmap</a>, not shipped. Expect rough edges and tell us about them in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
+      <p>Pre-1.0. Identity, messaging, sharing, sign-in and an email address for every hosted ID work end to end, with a web app you can install on your phone, a CLI and a TypeScript SDK; store apps are in beta preparation. The broader app ecosystem and collaborative spaces are on the <a href="https://github.com/romanmandryk/poweur/tree/master/epics">roadmap</a>, not shipped. Expect rough edges and tell us about them in <a href="https://github.com/romanmandryk/poweur/discussions">Discussions</a>.</p>
 
       <h3 id="try">How do I try it?</h3>
-      <p>Claim a free name in the <a href="https://poweur.net/id/">web app</a>, then <a href="../#try">message the demo bot and sign the guestbook</a>. Developers can start with <code>npm i @poweur/client</code>.</p>
+      <p>Claim a free name in the <a href="https://poweur.net/id/">web app</a>, then <a href="../#try">message the demo bot and sign the guestbook</a>. Your ID also receives email at <code>name@poweur.net</code>, and <a href="../works-with/">Works with Poweur</a> lists where you can sign in with it today. Developers can start with <code>npm i @poweur/client</code>.</p>
+
+      <h3 id="email-address">Does my ID come with an email address?</h3>
+      <p>Yes. A hosted ID like <code>alice.poweur.net</code> receives email at <code>alice@poweur.net</code>, and the mail lands in the app's Email tray, encrypted to you. Its main job is to bridge the gap while the web catches up: plenty of apps and services don't offer Sign in with Poweur yet, so you can sign up to them with your Poweur address, get their sign-in links, receipts and newsletters in the same place as your messages, and leave your personal inbox out of it. You can block senders, accept mail from contacts only, or turn the address off in Settings.</p>
+      <p>Sending email is paused for now, while we make sure new addresses can't be used for spam. Email is also not end-to-end encrypted on the way: our mail server and email bridge see a message while it passes, then it is encrypted to you. See the <a href="../legal/privacy/#email">privacy policy</a> for what is kept.</p>
 
       <h2 id="why">Why not something else?</h2>
 
       <h3 id="email">Why not email?</h3>
-      <p>Email proved that people on different providers can reach each other, and Poweur borrows that idea. But an email address does not prove who sent a message, messages are not encrypted by default, spam is the default state, and the address is not a login or a place for files. A Poweur ID is built so that a sender is verifiable, content is encrypted end to end, and the same name also signs you in and holds data. An email bridge is planned, not built.</p>
+      <p>Email proved that people on different providers can reach each other, and Poweur borrows that idea. But an email address does not prove who sent a message, messages are not encrypted by default, spam is the default state, and the address is not a login or a place for files. A Poweur ID is built so that a sender is verifiable, content is encrypted end to end, and the same name also signs you in and holds data. It doesn't ask you to give email up, though: every hosted ID also gets an ordinary address, for the services that only know email (<a href="#email-address">see above</a>).</p>
 
       <h3 id="matrix">Why not Matrix?</h3>
       <p>Matrix is a federated chat network: you have an account on a homeserver and talk in rooms. Poweur is not a chat network; it is an identity first. The name and keys are what you own, messaging is one thing you can do with them, and sign-in and files use the same identity. They can coexist, and a Poweur ID could be used to sign in to a Matrix service.</p>
@@ -85,7 +90,7 @@
       <p>You do. Your identity keys are created on your device and wrapped by a secret only your passkey (or the phone's secure storage) can produce. For convenience the relay keeps an encrypted copy of that wrapped key, which lets a new device or a cleared browser be restored, but it cannot open it. You can also keep a recovery kit that rebuilds the keys yourself. Poweur cannot reset your password, because there is none, and cannot recover an ID for which you hold neither a passkey nor a kit. See the <a href="/docs/security/key-management">key management</a> page.</p>
 
       <h3 id="read">Can Poweur read my messages or files?</h3>
-      <p>Not the content. Messages are signed and end-to-end encrypted, and file contents and names in your private drive are encrypted on your device. The relay still sees metadata: who messages whom and when, message and file sizes, how folders nest, and who a folder is shared with. Folders you make public are readable by anyone with the address. The <a href="../threat-model/">threat model</a> lists exactly what each party can and cannot see.</p>
+      <p>Not the content. Messages are signed and end-to-end encrypted, and file contents and names in your private drive are encrypted on your device. The relay still sees metadata: who messages whom and when, message and file sizes, how folders nest, and who a folder is shared with. Folders you make public are readable by anyone with the address. Ordinary email is the exception to end-to-end encryption: our mail server and email bridge see it while it passes, before it is encrypted to you. The <a href="../threat-model/">threat model</a> lists exactly what each party can and cannot see.</p>
 
       <h3 id="disappear">What happens if poweur.net disappears?</h3>
       <p>Your keys and a recovery kit are yours, so you can export your data and move. But a name under <code>poweur.net</code> belongs to the domain, so if we vanished, that name would go with the domain. A name on your own domain does not depend on us at all: you can point it at any relay, including one you run. If a name matters to you for the long term, use your own domain.</p>
@@ -98,7 +103,7 @@
       <p>No. There has been no external security review yet. The cryptography uses standard primitives (Ed25519, X25519, ChaCha20-Poly1305, HKDF), the Go and TypeScript implementations are checked against shared test vectors, and everything is open source so you can read it. Please do not treat an unaudited pre-1.0 system as a vault for secrets that would be dangerous to lose. To report a vulnerability, use the <a href="https://github.com/romanmandryk/poweur/security/advisories/new">private advisory form</a> or <code>info@poweur.org</code>; see <a href="../legal/#security">security</a>.</p>
 
       <h3 id="signin">What does an app learn when I sign in with my ID?</h3>
-      <p>Your ID, and your name and photo only if you allow it. No password and no access to your messages or files. Every request shows you which app is asking and what it would see, and you can revoke an app later. The <a href="https://guestbook.poweur.net/">guestbook</a> is a live example, and <a href="/docs/auth/add-sign-in">adding it to your own site</a> takes one verification call.</p>
+      <p>Your ID, and your name and photo only if you allow it. No password and no access to your messages or files. Every request shows you which app is asking and what it would see, and you can revoke an app later. The <a href="https://guestbook.poweur.net/">guestbook</a> is a live example, <a href="../works-with/">Works with Poweur</a> lists more, and <a href="/docs/auth/add-sign-in">adding it to your own site</a> takes one verification call.</p>
 
       <h3 id="spam">What about spam and abuse?</h3>
       <p>Each ID sets who may message it: contacts only, contact requests, or open with proof of work for strangers. You can block people, relays rate-limit senders, and the operator of a relay can suspend IDs it hosts. Report abuse of poweur.net to <code>info@poweur.org</code>.</p>
