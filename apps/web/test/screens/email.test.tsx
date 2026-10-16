@@ -140,6 +140,33 @@ describe("Email tray", () => {
   });
 });
 
+describe("a send the bridge never answers", () => {
+  const sent = (id: string, at: number, sendId: string, sender = ME) =>
+    inbound(sender, JSON.stringify({ version: 1, send_id: sendId, to: [{ address: "ann@example.com" }], subject: "Hi", text: "Hello" }), at,
+      { id, type: "email.send", recipient: BRIDGE });
+
+  it("stops saying Sending… and offers to send it again under the same send id", async () => {
+    optedIn();
+    holder.client.inboxAndArchive.mockResolvedValue({ messages: [sent("s1", 1, "01M52V6GAPWEZ7M1A5CF098QJ8")], acks: [], lost: 0 });
+    render(<App />);
+    await waitFor(() => expect($('.tray-tab[data-tray="email"]')).toBeTruthy());
+    fireEvent.click($('.tray-tab[data-tray="email"]')!);
+    const row = await found(".mail-row");
+    expect(row.textContent).toContain("No reply from the email service");
+    fireEvent.click(row);
+    const card = await found(".mail-no-reply");
+    fireEvent.click(card.querySelector("button")!);
+    await waitFor(() => expect(holder.client.emailApi.send).toHaveBeenCalledWith(expect.objectContaining({
+      send_id: "01M52V6GAPWEZ7M1A5CF098QJ8", subject: "Hi", text: "Hello",
+    })));
+    expect(holder.client.emailApi.send.mock.calls[0][0]).not.toHaveProperty("version");
+    // The fresh copy stands for the send: one card, waiting again.
+    await waitFor(() => expect($(".mail-no-reply")).toBeNull());
+    expect(document.querySelectorAll(".mail-card")).toHaveLength(1);
+    expect($(".mail-send-state")!.textContent).toBe("Sending…");
+  });
+});
+
 describe("Inbox by subject (E09-T13)", () => {
   it("toggles the view and opens a thread with its subject prefilled", async () => {
     holder.client.inboxAndArchive.mockResolvedValue({
