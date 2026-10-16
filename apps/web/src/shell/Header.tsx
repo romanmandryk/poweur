@@ -2,6 +2,7 @@ import { DropdownMenu } from "radix-ui";
 import { Check, ChevronDown, Plus } from "lucide-react";
 import { cn } from "../lib/cn";
 import { domainOf, handleOf } from "../lib/identity";
+import { boundIdentity } from "../lib/mode.js";
 import { listIdentities } from "../lib/storage.js";
 import { useRoute } from "../state/route";
 import { switchIdentity, useSession } from "../state/session";
@@ -12,6 +13,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 export function Header({ className }: { className?: string }) {
   const identity = useSession((state) => state.identity);
+  const bound = useSession((state) => boundIdentity(state.mode));
   const push = useRoute((state) => state.push);
 
   return (
@@ -25,7 +27,9 @@ export function Header({ className }: { className?: string }) {
       <Wordmark />
       <div className="header-actions flex items-center gap-2">
         <ThemeToggle />
-        {identity ? (
+        {identity && bound ? (
+          <IdentityPill identity={identity} />
+        ) : identity ? (
           <IdentitySwitcher identity={identity} onAdd={() => push("add-id")} />
         ) : (
           <button
@@ -40,6 +44,16 @@ export function Header({ className }: { className?: string }) {
       </div>
       <ActivityIndicator />
     </header>
+  );
+}
+
+/** This app's own ID, on an identity host: no switching, no adding. */
+function IdentityPill({ identity }: { identity: string }) {
+  return (
+    <div id="id-pill" className="id-pill flex items-center gap-[7px] rounded-full bg-surface-2 py-[5px] pr-3 pl-[5px] text-fg">
+      <Avatar identity={identity} />
+      <span className="id-pill-handle max-w-30 truncate text-sm font-semibold">{handleOf(identity)}</span>
+    </div>
   );
 }
 

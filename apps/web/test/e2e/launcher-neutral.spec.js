@@ -70,6 +70,25 @@ test("a sign-in opened on the launcher asks for the exact ID and hands the reque
   expect(new URL(page.url()).searchParams.get("auth")).toBe(requestLink);
 });
 
+test("a sign-in on the launcher offers this browser's IDs, one tap to approve on each one's own page", async ({ page }) => {
+  // Written by the IDs' own hosts (Domain=poweur.net), read here.
+  await page.context().addCookies([{ name: "poweur_ids", value: encodeURIComponent("johnjohn.poweur.net|work.poweur.net"), domain: ".poweur.net", path: "/" }]);
+  const book = await page.context().newPage();
+  await book.goto(guestbook.origin);
+  await book.click("#signin");
+  await expect(book.locator("#pending")).toBeVisible();
+  const requestLink = (await book.locator("#approve-url").textContent()).trim();
+
+  await page.goto(at("id.poweur.net", `${appPath()}?auth=${encodeURIComponent(requestLink)}`));
+  await expect(page.locator("#auth-known-ids [data-known-id]")).toHaveCount(2, { timeout: 45_000 });
+  // Still nothing to unlock here, and any other ID can be typed.
+  await expect(page.locator("#btn-auth-unlock, #btn-auth-approve")).toHaveCount(0);
+  await expect(page.locator("#auth-other-input")).toBeVisible();
+  await page.click('[data-known-id="work.poweur.net"]');
+  await expect(page).toHaveURL(new RegExp(`^http://work\\.poweur\\.net:${port}/`), { timeout: 20_000 });
+  expect(new URL(page.url()).searchParams.get("auth")).toBe(requestLink);
+});
+
 test("on a wide screen the launcher sets the pitch beside the claim", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();

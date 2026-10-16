@@ -19,6 +19,7 @@ import { Chip } from "../ui/Display";
 import { Avatar } from "../ui/Avatar";
 import { Input, inputClass, Note, Textarea } from "../ui/Field";
 import { isShellRuntime, listIdentities, loadIdentityRecord } from "../lib/storage.js";
+import { readIdHints } from "../lib/visit";
 import { SubPage } from "../ui/Layout";
 
 function ErrorLine({ error }: { error: string }) {
@@ -115,12 +116,27 @@ function OtherIdentity({ primary = false }: { primary?: boolean }) {
     </>
   );
   if (primary) {
+    // The launcher holds no keys: offer every ID this browser has used, one
+    // tap each, to approve on its own address — or any other, typed.
+    const known = readIdHints().filter((id) => !mode?.domain || id.endsWith(`.${mode.domain}`));
+    const goTo = (id: string) => globalThis.location.assign(`${identityAppUrl(id)}?auth=${encodeURIComponent(input)}`);
     return (
       <div id="auth-other" className="mt-4">
         <label htmlFor="auth-other-input" className="block text-sm font-semibold">
           Which Poweur ID are you signing in with?
         </label>
         <p className="mt-1 text-[13px] text-muted">Your keys live on your ID's own address. We'll take you there to approve.</p>
+        {!!known.length && (
+          <div id="auth-known-ids" className="mt-3 flex flex-col gap-2">
+            {known.map((id) => (
+              <Button key={id} data-known-id={id} variant="secondary" className="justify-start gap-3" onClick={() => goTo(id)}>
+                <Avatar identity={id} size="sm" />
+                <span className="min-w-0 truncate">{id}</span>
+              </Button>
+            ))}
+          </div>
+        )}
+        {known.length ? <div className="mt-3 text-[13px] text-muted">Another ID</div> : null}
         {fields}
       </div>
     );

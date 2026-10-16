@@ -22,7 +22,9 @@ import { useData } from "../state/data";
 import { useRoute } from "../state/route";
 import { isPublicAnonymousRoute } from "../screens/PublicAnonymous";
 import { refreshSession, switchIdentity, useSession, type ModeInfo } from "../state/session";
-import { rememberIdHint, takeChatTarget } from "../lib/visit";
+import { readIdHints, rememberIdHint, takeChatTarget } from "../lib/visit";
+import { identityAppUrl } from "../lib/claim";
+import { isStandalone } from "../lib/push";
 
 interface CapacitorAppPlugin {
   addListener(
@@ -250,6 +252,13 @@ function startBoot(launchUrl: string): Promise<void> {
     }
     if (authInput || protectAuthRoute || handedOver || publicAnonymous) return;
     if (info.mode === "launcher") {
+      // Installed to the home screen, the launcher is no place to stay: it
+      // holds no keys. Open the ID this browser last used, in its own app.
+      const known = readIdHints().filter((id) => !info.domain || id.endsWith(`.${info.domain}`));
+      if (isStandalone() && known.length) {
+        globalThis.location.replace(identityAppUrl(known[0]));
+        return;
+      }
       settleLauncherDoor();
       return;
     }

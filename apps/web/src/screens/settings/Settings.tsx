@@ -39,6 +39,7 @@ import { askConfirm } from "../../components/Dialogs";
 import { identityApiFor } from "../../lib/client.js";
 import { CUSTODY_COPY, custodyOf } from "../../lib/custody";
 import { FEEDBACK_ID, LEGAL_LINKS, showsPoweurLegal } from "../../lib/legal";
+import { boundIdentity } from "../../lib/mode.js";
 import { domainOf, handleOf } from "../../lib/identity";
 import { defaultRelayUrl, isShellRuntime, loadIdentityRecord, loadSessionRecord, relayUrlFor } from "../../lib/storage.js";
 import { useData } from "../../state/data";
@@ -267,12 +268,14 @@ export function Settings() {
 
       <section id="settings-device" aria-label="This device">
         <SettingsGroup label="This device">
-          <SettingsRow
-            id="row-switch-id"
-            icon={ArrowLeftRight}
-            label={record ? "Switch / Add identity" : "Add identity"}
-            onClick={() => push("add-id")}
-          />
+          {!(record && boundIdentity(mode)) && (
+            <SettingsRow
+              id="row-switch-id"
+              icon={ArrowLeftRight}
+              label={record ? "Switch / Add identity" : "Add identity"}
+              onClick={() => push("add-id")}
+            />
+          )}
           <SettingsRow id="row-relay" icon={Link} label="Relay URL" value={config.relayUrl ?? ""} onClick={openRelayPanel} />
           <SettingsRow id="row-lookup" icon={Search} label="Lookup identity" onClick={openLookupPanel} />
         </SettingsGroup>

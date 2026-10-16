@@ -73,6 +73,16 @@ export function EmailTray() {
     if (bridge) void historyHasOlder(bridge).then(setOlder);
   }, [historyLoaded, threads.length]);
 
+  if (!email.enabled && email.error && !email.loading) {
+    return (
+      <EmptyState
+        icon={Mail}
+        title="Could not load your email settings"
+        body={email.error}
+        action={<Button id="btn-email-retry" size="sm" variant="secondary" onClick={() => void loadEmail({ force: true })}>Try again</Button>}
+      />
+    );
+  }
   if (!email.enabled && email.loaded) {
     return <EmailOptIn />;
   }

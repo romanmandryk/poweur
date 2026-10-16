@@ -8,7 +8,7 @@
  * trailing root dot, a port, or a two-label subdomain that is not an identity.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { classifyHost, currentHost, modeNow, resolveMode, resetMode, addIdOptions } from "../../src/lib/mode.js";
+import { classifyHost, currentHost, modeNow, resolveMode, resetMode, addIdOptions, boundIdentity } from "../../src/lib/mode.js";
 
 const ROOT = {
   service: "poweur-relay",
@@ -170,4 +170,14 @@ describe("addIdOptions", () => {
       expect(addIdOptions(info)).toEqual(expected);
     });
   }
+});
+
+describe("boundIdentity", () => {
+  it("is the subject on an identity host only", () => {
+    expect(boundIdentity({ mode: "identity", subject: "Alice.poweur.net" })).toBe("alice.poweur.net");
+    expect(boundIdentity({ mode: "launcher" })).toBe("");
+    expect(boundIdentity({ mode: "shell" })).toBe("");
+    expect(boundIdentity({ mode: "identity" })).toBe("");
+    expect(boundIdentity(undefined)).toBe("");
+  });
 });
