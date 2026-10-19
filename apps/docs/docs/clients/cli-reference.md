@@ -10,17 +10,33 @@ The Poweur ID CLI (`poweur`) puts your ID in the terminal: identity and keys, me
 
 ## Installation
 
-The CLI is a single Go binary. Build it from the repository (Go 1.25 or newer):
+Two CLIs, the same commands and the same `~/.poweur` folder, so either can pick up what the
+other did:
+
+**Go binary** (one file, no runtime). Download it for your system from the
+[latest CLI release](https://github.com/romanmandryk/poweur/releases?q=cli-v) (macOS, Linux and
+Windows, amd64 and arm64; `checksums.txt` alongside), unpack it and put `poweur` on your PATH:
+
+```bash
+tar xzf poweur_*_linux_amd64.tar.gz && sudo mv poweur /usr/local/bin/ && poweur --help
+```
+
+Or build it from the repository (Go 1.25 or newer):
 
 ```bash
 git clone https://github.com/romanmandryk/poweur.git && cd poweur/apps/cli
-go build -o poweur .
-sudo mv poweur /usr/local/bin/     # or anywhere on your PATH
-poweur --help
+go build -o poweur . && sudo mv poweur /usr/local/bin/
 ```
 
-To try it without installing, run `go run . --help` in `apps/cli`. The
-[TypeScript SDK](/clients/js-sdk) ships a `poweur` CLI with the same commands.
+**Node** (18 or newer, nothing to install): the [TypeScript SDK](/clients/js-sdk) ships the
+same CLI. This is the easy one wherever Node is already there, for example on a machine that runs
+an [OpenClaw agent](/agents/openclaw):
+
+```bash
+npx @poweur/client --help
+```
+
+`POWEUR_HOME` points either CLI at another folder than `~/.poweur`.
 
 ## Configuration
 
@@ -420,33 +436,33 @@ curl -s https://relay.poweur.net/identities/alice.poweur.net | jq .public_key
 
 ---
 
-### `poweur key recover <identity> --seed <base64url>`
+### `poweur key recover <identity> --seed-file <path>`
 
-Rebuild an identity's private key files from its master seed. **Offline** — no relay call, no
-network. The relay already holds the public half, so restoring the private half locally is all
-that is needed to use the identity again.
+Put an identity's keys on this machine from its **recovery phrase** (the 24 words) or its
+base64url seed. The relay already holds the public half, so restoring the private half is all
+that is needed to use the identity here. Moving an ID between machines is described in
+[Move an ID to another machine](/clients/move-identity).
 
 ```bash
-poweur key recover alice.poweur.net --seed "$(cat alice.seed)" \
-  --relay https://relay.poweur.net
-poweur inbox
+npx @poweur/client key recover alice.poweur.net --seed-file ~/alice-phrase.txt
+rm ~/alice-phrase.txt
 ```
 
 Writes `~/.poweur/keys/<identity>.key` and `.enc`, and sets the identity, keys directory and
-relay in `~/.poweur/config.toml` — so it works on a machine with no prior Poweur config.
+relay in `~/.poweur/config.toml`, so it works on a machine with no Poweur config at all.
 
 | Flag | Description |
 |------|-------------|
-| `--seed <base64url>` | Master seed (required) |
-| `--relay <url>` | Relay to configure (needed on a fresh machine) |
-| `--parent-domain <domain>` | Parent domain to configure |
+| `--seed-file <path>` | File holding the phrase or seed. Prefer it (or `POWEUR_SEED`) to `--seed`, which leaves the phrase in your shell history |
+| `--seed <phrase or seed>` | The phrase or seed itself |
+| `--relay <url>` | The identity's relay (default: the configured one, else `https://poweur.net`) |
+| `--no-verify` | Node CLI: save the keys without checking them against the relay |
 | `--json` | Machine-readable output |
 
-:::caution
-Recovery is pure local key derivation, so it always "succeeds" — a wrong seed produces valid
-keys that simply are not this identity's. Verify with `poweur key derive` first, or the failure
-surfaces later as a rejected request from the relay.
-:::
+The Node CLI first checks that the phrase's keys are the ones the identity publishes, and saves
+nothing if they are not. The Go CLI (`poweur key recover <identity> --seed …`) derives the keys
+offline and cannot tell a wrong phrase: check with `poweur key derive` first, or the mistake shows
+up later as a rejected request.
 
 ---
 

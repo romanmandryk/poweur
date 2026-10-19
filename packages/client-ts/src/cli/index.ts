@@ -37,6 +37,7 @@ export const HELP = `Usage:
   poweur identity list [--json]
   poweur identity lookup <identity> [--json]
   poweur identity export [--use-identity=...] [--out=<file.tar.gz>]
+  poweur key recover <identity> --seed-file <path> [--relay=...] [--json]
   poweur key rotate [--use-identity=...] [--grace=168h] [--json]
   poweur key enroll <identity> [--relay=...] [--label=...] [--wait]
   poweur key approve <rendezvous-id> [--use-identity=...] [--seed=<b64url|mnemonic>] [--sas=<digits>] [--json]

@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'web/claim-your-id',
         'web/walkthrough',
+        'clients/move-identity',
       ],
     },
     {
@@ -52,6 +53,14 @@ const sidebars: SidebarsConfig = {
         'auth/mobile-signer',
         'auth/interop-bridges',
         'auth/oauth-oidc-bridge',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Agents',
+      collapsed: false,
+      items: [
+        'agents/openclaw',
       ],
     },
     {

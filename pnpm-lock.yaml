@@ -247,16 +247,19 @@ importers:
 
   packages/openclaw-poweur:
     dependencies:
-      '@poweur/client':
-        specifier: workspace:*
-        version: link:../client-ts
       zod:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
+      '@poweur/client':
+        specifier: workspace:*
+        version: link:../client-ts
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
+      esbuild:
+        specifier: ^0.21.5
+        version: 0.21.5
       openclaw:
         specifier: 2026.10.3
         version: 2026.10.3(@opentelemetry/api@1.9.1)(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(supports-color@8.1.1)

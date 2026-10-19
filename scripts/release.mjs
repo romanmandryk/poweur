@@ -3,10 +3,10 @@
 //
 //   node scripts/release.mjs status
 //   node scripts/release.mjs bump <sdk|cli|relay|web|oauth|email> [patch|minor|major|x.y.z]
-//   node scripts/release.mjs tag <sdk|cli> [--dry-run]
+//   node scripts/release.mjs tag <sdk|cli|openclaw> [--dry-run]
 //
 // `bump` edits the version files (open a pull request with the result).
-// `tag` runs from an up-to-date, clean master and pushes sdk-v<version> or cli-v<version>,
+// `tag` runs from an up-to-date, clean master and pushes sdk-v<version>, cli-v<version> or openclaw-v<version>,
 // which starts the release workflow.
 import { execFileSync } from "node:child_process";
 import { PACKAGES, bumpVersion, readVersion, writeVersion } from "./versions.mjs";
@@ -43,7 +43,7 @@ if (cmd === "status") {
   console.log(`${name}: ${from} -> ${to}. Commit it in a pull request, then run: node scripts/release.mjs tag ${name}`);
 } else if (cmd === "tag") {
   const pkg = PACKAGES[name];
-  if (!pkg?.tagPrefix) fail("tag needs sdk or cli (relay, web, oauth and email deploy from master)");
+  if (!pkg?.tagPrefix) fail("tag needs sdk, cli or openclaw (relay, web, oauth and email deploy from master)");
   const version = readVersion(name);
   const tag = `${pkg.tagPrefix}${version}`;
   if (git("rev-parse", "--abbrev-ref", "HEAD") !== "master") fail("run this from master");
@@ -56,8 +56,8 @@ if (cmd === "status") {
   if (!dry) {
     git("tag", "-a", tag, "-m", `${pkg.label} ${version}`);
     git("push", "origin", tag);
-    console.log(`pushed ${tag}; watch: gh run list --workflow release-${name === "sdk" ? "npm" : "cli"}.yml`);
+    console.log(`pushed ${tag}; watch: gh run list --workflow release-${{ sdk: "npm", cli: "cli", openclaw: "openclaw" }[name]}.yml`);
   }
 } else {
-  fail("usage: release.mjs status | bump <package> [patch|minor|major|x.y.z] | tag <sdk|cli> [--dry-run]");
+  fail("usage: release.mjs status | bump <package> [patch|minor|major|x.y.z] | tag <sdk|cli|openclaw> [--dry-run]");
 }

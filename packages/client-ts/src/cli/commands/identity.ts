@@ -1,6 +1,6 @@
 /** `poweur identity …` and `poweur key rotate`. */
 
-import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { promises as dns } from "node:dns";
 
 import { canonicalIdentityRotation } from "../../canonical.js";
@@ -12,6 +12,7 @@ import { rfc3339, toBase64Std, toBase64url } from "../../encoding.js";
 import { newNonce } from "../../ids.js";
 import { RelayClient, relayAddressFromUrl } from "../../http.js";
 import { createIdentity, IdentityApi } from "../../identity.js";
+import { EnrollApi } from "../../enroll.js";
 import { resolveIdentity } from "../../resolve.js";
 import { loadConfig, saveConfig } from "../../node/config.js";
 import { nodeTxtResolver } from "../../node/dns.js";
@@ -254,6 +255,43 @@ export async function identityExport(argv: string[], streams: Streams): Promise<
   writeFileSync(outPath, bytes, { mode: 0o600 });
   streams.stdout(`exported ${outPath} (${bytes.length} bytes)\n`);
   return 0;
+}
+
+/**
+ * `key recover <identity>` — put an identity's keys on this machine from its
+ * seed or recovery phrase (the Go CLI's `key recover`), checking first that
+ * they are the keys the identity publishes. The phrase comes from --seed,
+ * --seed-file or POWEUR_SEED; prefer the file or the variable, which keep it
+ * out of shell history.
+ */
+export async function keyRecover(argv: string[], streams: Streams): Promise<number> {
+  const config = loadConfig();
+  const args = parseArgs(argv, { bool: [...COMMON_BOOL, "no-verify"], defaults: { relay: config.relay_url || "https://poweur.net" } });
+  const identity = requirePositional(args, 0, "usage: poweur key recover <identity> --seed-file <path> [--relay <url>]").trim().toLowerCase();
+  const seedFile = flagString(args, "seed-file");
+  const raw = flagString(args, "seed") || (seedFile ? readFileSync(seedFile, "utf8") : process.env["POWEUR_SEED"]);
+  if (!raw?.trim()) throw new UsageError("give the recovery phrase with --seed-file <path> (or --seed, or POWEUR_SEED)");
+  const seed = parseSeedOrMnemonic(raw);
+  const relayUrl = flagString(args, "relay")!;
+  if (!flagBool(args, "no-verify")) {
+    let matches: boolean;
+    try {
+      matches = await new EnrollApi(new RelayClient(relayUrl)).publishedKeyMatches(identity, seed);
+    } catch (error) {
+      throw new UsageError(`could not find ${identity} on ${relayUrl} (${String(error)}); pass --relay <its relay>, or --no-verify to save the keys anyway`);
+    }
+    if (!matches) throw new UsageError(`this recovery phrase is not ${identity}'s: its keys differ from the ones ${identity} publishes. Nothing was saved`);
+  }
+  const keys = identityKeysFromSeed(identity, seed);
+  const keyStore = new FileKeyStore(config.keys_dir || defaultKeysDir());
+  await keyStore.save(keys);
+  saveConfig({ ...config, identity, keys_dir: keyStore.keysDir, relay_url: relayUrl });
+  return write(
+    streams,
+    flagBool(args, "json"),
+    { identity, key_path: signingKeyPath(keyStore.keysDir, identity), encryption_key_path: encryptionKeyPath(keyStore.keysDir, identity), relay: relayUrl },
+    `recovered ${identity} on this machine (keys in ${keyStore.keysDir}); it is now the active identity\n`,
+  );
 }
 
 /**
