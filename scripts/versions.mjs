@@ -20,10 +20,19 @@ export const PACKAGES = {
     // Carry the same version; the release workflow refuses a mismatch.
     also: [
       { file: "packages/poweur/package.json", pattern: jsonVersion },
-      { file: "packages/client-ts/src/index.ts", pattern: /(export const SDK_VERSION = ")([^"]+)(")/ },
+      { file: "packages/client-ts/src/index.ts", pattern: /(export const SDK_VERSION = ")([^"]+)(")/, stamp: /(export const SDK_BUILD_TIME = ")([^"]+)(")/ },
     ],
   },
-  web: { label: "Web app", file: "apps/web/package.json", pattern: jsonVersion, paths: ["apps/web/"] },
+  web: {
+    label: "Web app",
+    file: "apps/web/package.json",
+    pattern: jsonVersion,
+    paths: ["apps/web/"],
+    // Settings → About; a Vitest test fails when it disagrees with package.json.
+    also: [
+      { file: "apps/web/src/build-info.ts", pattern: /(export const APP_VERSION = ")([^"]+)(")/, stamp: /(export const APP_BUILD_TIME = ")([^"]+)(")/ },
+    ],
+  },
   oauth: { label: "OAuth bridge", file: "apps/oauth/bridge/doc.go", pattern: goConst, paths: ["apps/oauth/"] },
   email: { label: "Email bridge", file: "apps/email/bridge/doc.go", pattern: goConst, paths: ["apps/email/"] },
   openclaw: { label: "OpenClaw channel", file: "packages/openclaw-poweur/package.json", pattern: jsonVersion, paths: ["packages/openclaw-poweur/"], tagPrefix: "openclaw-v" },
@@ -41,6 +50,27 @@ const notShipped = [
 export function shippedFiles(name, files) {
   const pkg = PACKAGES[name];
   return files.filter((f) => pkg.paths.some((p) => f.startsWith(p)) && !notShipped.some((re) => re.test(f)));
+}
+
+/** Every file a package's version lives in, with its version pattern and optional build stamp. */
+export function versionTargets(name) {
+  const pkg = PACKAGES[name];
+  return [{ file: pkg.file, pattern: pkg.pattern }, ...(pkg.also ?? [])];
+}
+
+/**
+ * Whether two copies of a version file differ only in the version and build
+ * stamp: aligning a version (the npm alias, build-info) changes nothing that
+ * ships. A file that is missing on either side counts as a real change.
+ */
+export function onlyVersionChanged(target, before, after) {
+  if (before == null || after == null) return false;
+  const blank = (text) => {
+    let out = text.replace(target.pattern, "$1$3");
+    if (target.stamp) out = out.replace(target.stamp, "$1$3");
+    return out;
+  };
+  return blank(before) === blank(after);
 }
 
 export function parseVersion(text, pattern) {
@@ -73,14 +103,11 @@ export function utcStamp(date = new Date()) {
   return date.toISOString().slice(0, 16).replace("T", " ");
 }
 
-export function writeVersion(name, version, root = ".") {
-  const pkg = PACKAGES[name];
-  for (const t of [{ file: pkg.file, pattern: pkg.pattern }, ...(pkg.also ?? [])]) {
+export function writeVersion(name, version, root = ".", now = new Date()) {
+  for (const t of versionTargets(name)) {
     const path = join(root, t.file);
     let text = replaceVersion(readFileSync(path, "utf8"), t.pattern, version);
-    if (name === "sdk" && t.file.endsWith("index.ts")) {
-      text = text.replace(/(export const SDK_BUILD_TIME = ")([^"]+)(")/, `$1${utcStamp()}$3`);
-    }
+    if (t.stamp) text = text.replace(t.stamp, `$1${utcStamp(now)}$3`);
     writeFileSync(path, text);
   }
 }
