@@ -43,8 +43,48 @@ from the Poweur app.
 | `--relay-url <url>` | The ID's relay, default `https://poweur.net`. |
 | `--invite-code <code>` | For relays that require an invite to register. |
 
-The keys live in the Poweur home on that machine (`POWEUR_HOME`, default `~/.poweur`), never in
-OpenClaw's config. Back up that folder or keep the recovery phrase.
+The keys live in the Poweur folder on that machine (`POWEUR_HOME`, default `~/.poweur`), never in
+OpenClaw's config. There is no passkey on a server: whoever can read that folder controls the
+agent's ID, so keep it readable only by the user that runs OpenClaw.
+
+## If the name is taken, or the ID already exists
+
+`channels add` stops without changing anything and prints what to run next:
+
+- **The name belongs to someone else:** run it again with another name.
+- **The ID is yours** (made in the Poweur app, on another machine, or before a reinstall): restore
+  its keys here from its recovery phrase. Put the 24 words in a file only you can read, then
+
+  ```bash
+  openclaw channels add --channel poweur --identity yourname-claw.poweur.net --allow-from yourname.poweur.net --recovery-phrase-file ~/agent-phrase.txt
+  rm ~/agent-phrase.txt
+  ```
+
+  The phrase is checked against the keys the ID publishes; a phrase for another ID is refused.
+  `POWEUR_RECOVERY_PHRASE` works instead of the file.
+
+## The agent's keys and the Poweur CLI
+
+The plugin carries the Poweur library inside it; it does not install a command-line tool. For
+anything beyond setup, use the Poweur CLI on the same machine. OpenClaw needs Node, so the Node
+CLI runs there with nothing to install (the [Go binary](/clients/cli-reference#installation) works
+too, with the same commands and the same folder):
+
+```bash
+npx @poweur/client identity show                 # which ID, which relay, where the keys are
+npx @poweur/client identity lookup yourname.poweur.net
+npx @poweur/client key recover yourname-claw.poweur.net --seed-file ~/agent-phrase.txt
+```
+
+Point it at the same Poweur folder as the gateway (`POWEUR_HOME`, if you set one there).
+**Do not run `inbox` or `listen` as the agent while the gateway runs:** they pick messages up,
+and the agent would never see them.
+
+- **Back up** the recovery phrase (shown once at setup; delete the copy in `~/.poweur/recovery/`
+  once it is stored safely) or the whole `~/.poweur` folder.
+- **Move the agent** to another machine: [Move an ID to another machine](/clients/move-identity).
+- **Machine compromised:** `npx @poweur/client key rotate --use-identity yourname-claw.poweur.net`
+  on a trusted machine moves the agent onto new keys.
 
 ## Give it a folder to work in
 

@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'web/claim-your-id',
         'web/walkthrough',
+        'clients/move-identity',
       ],
     },
     {

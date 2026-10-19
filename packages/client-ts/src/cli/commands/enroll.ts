@@ -284,6 +284,10 @@ export async function keyCommand(argv: string[], streams: Streams): Promise<numb
       const { keyRotate } = await import("./identity.js");
       return keyRotate(rest, streams);
     }
+    case "recover": {
+      const { keyRecover } = await import("./identity.js");
+      return keyRecover(rest, streams);
+    }
     case "enroll":
       return keyEnroll(rest, streams);
     case "approve":
@@ -291,6 +295,6 @@ export async function keyCommand(argv: string[], streams: Streams): Promise<numb
     case "claim":
       return keyClaim(rest, streams);
     default:
-      throw new UsageError("usage: poweur key <rotate|enroll|approve|claim> …");
+      throw new UsageError("usage: poweur key <rotate|recover|enroll|approve|claim> …");
   }
 }

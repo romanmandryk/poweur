@@ -89,6 +89,17 @@
               "flags": "--invite-code <code>",
               "description": "Registration invite code, if the relay requires one"
             }
+          },
+          {
+            "key": "recoveryPhraseFile",
+            "kind": "string",
+            "cli": {
+              "flags": "--recovery-phrase-file <path>",
+              "description": "Restore the agent's existing ID from its recovery phrase (or set POWEUR_RECOVERY_PHRASE)"
+            },
+            "envVars": [
+              "POWEUR_RECOVERY_PHRASE"
+            ]
           }
         ]
       }

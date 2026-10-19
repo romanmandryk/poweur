@@ -19,6 +19,15 @@ its recovery phrase once, allows only the given IDs, and labels the agent's prof
 it. Then start the gateway and message the agent from the Poweur app. Full guide:
 [poweur.org/docs/agents/openclaw](https://www.poweur.org/docs/agents/openclaw).
 
+Already have the agent's ID (made elsewhere, or before a reinstall)? Add
+`--recovery-phrase-file <path>` (or set `POWEUR_RECOVERY_PHRASE`) to restore it instead of
+creating one. If a name is taken, `channels add` changes nothing and prints the commands to run
+next.
+
+The plugin carries the Poweur library; it installs no command-line tool. On the same machine use
+`npx @poweur/client` (the Poweur CLI, same `~/.poweur` folder) for anything else, and see
+[Move an ID to another machine](https://www.poweur.org/docs/clients/move-identity).
+
 From a checkout: `pnpm --filter @poweur/openclaw-channel build && pnpm --filter @poweur/openclaw-channel pack`,
 then `openclaw plugins install npm-pack:<the .tgz>`.
 

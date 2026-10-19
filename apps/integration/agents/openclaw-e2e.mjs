@@ -236,6 +236,37 @@ async function main() {
   await run(OPENCLAW, ["plugins", "install", `npm-pack:${tarball}`, "--accept-capabilities", "--force"], ocEnv);
   console.log("plugin installed from the packed tarball");
 
+  // When the name cannot be used, nothing is written and the output says what to run next.
+  const fails = async (args, env, expect, what) => {
+    const out = await run(OPENCLAW, ["channels", "add", "--channel", "poweur", ...args, "--allow-from", ids.alice, "--relay-url", relayUrl], env).then(
+      (o) => { throw new Error(`${what}: channels add succeeded:\n${o}`); },
+      (e) => e.message,
+    );
+    if (!expect.test(out)) throw new Error(`${what}: unexpected output:\n${out}`);
+    if (JSON.parse(readFileSync(configPath, "utf8")).channels?.poweur) throw new Error(`${what}: config was written`);
+    return out;
+  };
+  const taken = await fails(["--identity", ids.eve], ocEnv, /is already taken/, "taken name");
+  if (!taken.includes(`--identity ${ids.eve} --allow-from ${ids.alice} --relay-url ${relayUrl} --recovery-phrase-file`)) throw new Error(`taken name: no restore command:\n${taken}`);
+  const wrongPhrase = join(work, "wrong-phrase.txt");
+  writeFileSync(wrongPhrase, "abandon ".repeat(23) + "art\n");
+  await fails(["--identity", ids.eve, "--recovery-phrase-file", wrongPhrase], ocEnv, /belongs to a different ID/, "wrong phrase");
+  console.log("a taken name and a wrong phrase are refused with next steps; nothing written");
+
+  // Restore: an agent ID made elsewhere comes to a fresh machine from its phrase (isolated setup).
+  const movedId = `moved${suffix}.poweur.net`;
+  const made = JSON.parse(await run(process.execPath, [CLI, "identity", "create", movedId, "--hosted", "--relay", relayUrl, "--json"], { ...process.env, ...resolverEnv, POWEUR_HOME: join(work, "poweur-elsewhere") }));
+  const phraseFile = join(work, "moved-phrase.txt");
+  writeFileSync(phraseFile, `${made.mnemonic}\n`);
+  const freshHome = join(work, "openclaw-fresh");
+  await run("mkdir", ["-p", freshHome]);
+  writeFileSync(join(freshHome, "openclaw.json"), "{}");
+  const freshEnv = { ...ocEnv, OPENCLAW_HOME: freshHome, OPENCLAW_STATE_DIR: join(freshHome, "state"), OPENCLAW_CONFIG_PATH: join(freshHome, "openclaw.json"), POWEUR_HOME: join(work, "poweur-fresh") };
+  await run(OPENCLAW, ["plugins", "install", `npm-pack:${tarball}`, "--accept-capabilities", "--force"], freshEnv);
+  const restored = await run(OPENCLAW, ["channels", "add", "--channel", "poweur", "--identity", movedId, "--allow-from", ids.alice, "--relay-url", relayUrl, "--recovery-phrase-file", phraseFile], freshEnv);
+  if (!/Restored .* from its recovery phrase/.test(restored) || !existsSync(join(work, "poweur-fresh", "keys", `${movedId}.key`))) throw new Error(`restore failed:\n${restored}`);
+  console.log(`restore: ${movedId} moved to a fresh machine from its recovery phrase`);
+
   // Onboarding: one command creates the agent's ID, configures the channel and labels its profile.
   const added = await run(OPENCLAW, ["channels", "add", "--channel", "poweur", "--identity", ids.agent, "--allow-from", ids.alice, "--relay-url", relayUrl], ocEnv);
   if (!/Created the agent's Poweur ID/.test(added) || !/recovery phrase/i.test(added)) throw new Error(`channels add said:\n${added}`);
