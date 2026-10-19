@@ -928,7 +928,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusAccepted, map[string]string{"id": msg.ID, "status": "request_queued"})
 			return
 		}
-		if !s.inbox.Add(msg.Recipient, storedFromMessage(msg), s.cfg.MaxInboxPerIdentity) {
+		if !s.enqueue(msg) {
 			writeError(w, http.StatusServiceUnavailable, "inbox_full",
 				"recipient inbox is full; retry after the recipient drains their messages")
 			return
@@ -1554,4 +1554,26 @@ func randomToken(length int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// isBridgeMail reports whether a queued message came from this relay's email
+// bridge.
+func (s *Server) isBridgeMail(sender string) bool {
+	return s.cfg.EmailBridgeID != "" && strings.EqualFold(sender, s.cfg.EmailBridgeID)
+}
+
+// enqueue queues a message for its recipient. Email from the bridge and all
+// other messages have separate limits, each counting only its own kind (by
+// number and by bytes), under one relay-wide byte limit: queued messages are
+// held in memory as well as on disk. A full email queue makes the bridge
+// answer the mail server with a temporary failure, so the mail waits there;
+// a full message queue refuses the sender.
+func (s *Server) enqueue(msg Message) bool {
+	mail := s.isBridgeMail(msg.Sender)
+	limits := storage.SpoolLimits{Count: s.cfg.MaxInboxPerIdentity, Bytes: s.cfg.MaxInboxBytesPerIdentity, Total: s.cfg.MaxInboxBytesTotal}
+	if mail {
+		limits.Count, limits.Bytes = s.cfg.MaxEmailInboxPerIdentity, s.cfg.MaxEmailInboxBytesPerIdentity
+	}
+	return s.inbox.AddLimited(msg.Recipient, storedFromMessage(msg), limits,
+		func(m storage.StoredMessage) bool { return s.isBridgeMail(m.Sender) == mail })
 }

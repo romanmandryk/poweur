@@ -38,6 +38,27 @@ type spool[T any] struct {
 	prefix  string  // "relay/spool/<queue>/"
 	entries map[string][]spoolEntry[T]
 	nextSeq map[string]uint64
+	// size measures an item for the byte limits (nil: items count 0 bytes);
+	// total is the sum over every queued entry. Entries are held in memory as
+	// well as on disk, so this is what the relay-wide limit bounds.
+	size  func(T) int64
+	total int64
+}
+
+// newSpoolSized is newSpool with a size function, set before the load so
+// the total covers what a previous process left behind.
+func newSpoolSized[T any](objects Objects, queue string, size func(T) int64) (*spool[T], error) {
+	s := &spool[T]{
+		objects: objects,
+		prefix:  "relay/spool/" + queue + "/",
+		entries: make(map[string][]spoolEntry[T]),
+		nextSeq: make(map[string]uint64),
+		size:    size,
+	}
+	if objects == nil {
+		return s, nil
+	}
+	return s, s.load()
 }
 
 func newSpool[T any](objects Objects, queue string) (*spool[T], error) {
@@ -85,6 +106,7 @@ func (s *spool[T]) load() error {
 		identity := identityFromKey(dir)
 		// Keys list in sequence order within an identity.
 		s.entries[identity] = append(s.entries[identity], entry)
+		s.total += s.sizeOf(entry.Item)
 		if entry.Seq >= s.nextSeq[identity] {
 			s.nextSeq[identity] = entry.Seq + 1
 		}
@@ -114,9 +136,71 @@ func (s *spool[T]) add(identity string, item T, max int, dropOldest bool) bool {
 		}
 		oldest := s.entries[identity][0]
 		s.entries[identity] = s.entries[identity][1:]
-		s.removeFile(identity, oldest.Seq)
+		s.forget(identity, oldest)
 	}
+	s.appendLocked(identity, item)
+	return true
+}
 
+// SpoolLimits bound what one class of entries may hold for one identity,
+// and what the whole spool may hold. Zero means no limit.
+type SpoolLimits struct {
+	Count int   // entries of this class for the identity
+	Bytes int64 // bytes of this class for the identity
+	Total int64 // bytes of every entry in the spool, all identities
+}
+
+// addLimited appends item unless that would break a limit. The per-identity
+// limits count only entries matching `class`, so two classes queued for the
+// same identity cannot crowd each other out.
+func (s *spool[T]) addLimited(identity string, item T, limits SpoolLimits, class func(T) bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	size := s.sizeOf(item)
+	if limits.Total > 0 && s.total+size > limits.Total {
+		return false
+	}
+	if limits.Count > 0 || limits.Bytes > 0 {
+		n, bytes := 0, int64(0)
+		for _, e := range s.entries[identity] {
+			if class(e.Item) {
+				n++
+				bytes += s.sizeOf(e.Item)
+			}
+		}
+		if limits.Count > 0 && n >= limits.Count {
+			return false
+		}
+		if limits.Bytes > 0 && bytes+size > limits.Bytes {
+			return false
+		}
+	}
+	s.appendLocked(identity, item)
+	return true
+}
+
+func (s *spool[T]) sizeOf(item T) int64 {
+	if s.size == nil {
+		return 0
+	}
+	return s.size(item)
+}
+
+// forget removes one entry's file and its bytes from the total; the caller
+// takes it out of s.entries.
+func (s *spool[T]) forget(identity string, entry spoolEntry[T]) {
+	s.total -= s.sizeOf(entry.Item)
+	s.removeFile(identity, entry.Seq)
+}
+
+// bytes is the total size of every queued entry.
+func (s *spool[T]) bytes() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.total
+}
+
+func (s *spool[T]) appendLocked(identity string, item T) {
 	seq := s.nextSeq[identity]
 	if seq == 0 {
 		seq = 1
@@ -124,8 +208,8 @@ func (s *spool[T]) add(identity string, item T, max int, dropOldest bool) bool {
 	s.nextSeq[identity] = seq + 1
 	entry := spoolEntry[T]{Seq: seq, At: time.Now().UTC(), Item: item}
 	s.entries[identity] = append(s.entries[identity], entry)
+	s.total += s.sizeOf(item)
 	s.writeFile(identity, entry)
-	return true
 }
 
 func (s *spool[T]) writeFile(identity string, entry spoolEntry[T]) {
@@ -164,7 +248,7 @@ func (s *spool[T]) drain(identity string) []T {
 	items := make([]T, 0, len(entries))
 	for _, entry := range entries {
 		items = append(items, entry.Item)
-		s.removeFile(identity, entry.Seq)
+		s.forget(identity, entry)
 	}
 	delete(s.entries, identity)
 	return items
@@ -203,7 +287,7 @@ func (s *spool[T]) consume(identity, cursor string) int {
 	removed := 0
 	for _, entry := range s.entries[identity] {
 		if entry.Seq <= through {
-			s.removeFile(identity, entry.Seq)
+			s.forget(identity, entry)
 			removed++
 			continue
 		}
@@ -234,7 +318,7 @@ func (s *spool[T]) expire(before time.Time) []ExpiredEntry[T] {
 		for _, entry := range entries {
 			if entry.At.Before(before) {
 				expired = append(expired, ExpiredEntry[T]{Identity: identity, Item: entry.Item})
-				s.removeFile(identity, entry.Seq)
+				s.forget(identity, entry)
 				continue
 			}
 			kept = append(kept, entry)
