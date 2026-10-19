@@ -134,6 +134,9 @@ export function EmailTray() {
           </Button>
         </div>
       )}
+      <p id="email-cleanup-note" className="px-4 py-3 text-center text-[12px] text-muted">
+        Old email is removed automatically when your storage is nearly full. Email from the last 7 days is always kept.
+      </p>
     </>
   );
 }

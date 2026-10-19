@@ -25,6 +25,29 @@ const setEmail = (patch: Partial<ReturnType<typeof useData.getState>["email"]>) 
  */
 let generation = 0;
 
+let lastRoom = 0;
+
+/**
+ * Free-ID housekeeping: at 90% of the drive, delete the oldest email (never
+ * the last 7 days; never chats or files) until usage is under 80%. Runs at
+ * most every 10 minutes unless `force` (a pickup could not be saved).
+ */
+export async function makeRoomForEmail({ force = false } = {}): Promise<void> {
+  const client = activeClient();
+  if (!client) return;
+  if (!force && Date.now() - lastRoom < 10 * 60 * 1000) return;
+  lastRoom = Date.now();
+  const state = useData.getState();
+  const bridge = state.email.bridge ?? state.email.offered ?? "";
+  try {
+    const result = await client.makeRoomForEmail(bridge);
+    useData.setState((s) => ({ files: { ...s.files, usage: { used: result.used, quota: result.quota } } }));
+    if (result.removed > 0) trackAction("email-auto-cleanup");
+  } catch (error) {
+    console.warn("Email cleanup failed:", errorMessage(error));
+  }
+}
+
 /** Whether email is on, which address, and whether the relay offers a bridge. */
 export async function loadEmail({ force = false } = {}) {
   const current = useData.getState().email;

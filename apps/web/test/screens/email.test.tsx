@@ -122,6 +122,13 @@ describe("Email tray", () => {
     expect($("#btn-email-load-images")).toBeTruthy();
   });
 
+  it("says old email is cleaned up automatically", async () => {
+    optedIn();
+    render(<App />);
+    fireEvent.click(await found('.tray-tab[data-tray="email"]'));
+    expect((await found("#email-cleanup-note")).textContent).toContain("last 7 days");
+  });
+
   it("composes and sends through the bridge", async () => {
     optedIn();
     render(<App />);
