@@ -50,6 +50,8 @@ type Config struct {
 	FetchCapabilities func(ctx context.Context, id string) (identity.Capabilities, error)
 	// FetchProfile overrides the public-profile fetch. Tests.
 	FetchProfile func(ctx context.Context, id string) (identity.Profile, error)
+	// FetchEmail overrides the email-address lookup (identity.EmailAddressOf). Tests.
+	FetchEmail func(ctx context.Context, id string) (string, bool, error)
 
 	// SessionTTL is how long a browser stays signed in to the bridge.
 	SessionTTL time.Duration // default 12h

@@ -342,7 +342,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        product: [oauth2-proxy, keycloak, authentik]
+        product: [oauth2-proxy, keycloak, authentik, matrix]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

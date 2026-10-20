@@ -7,6 +7,7 @@ import { Shell } from "../ui/Shell";
 const RELEASES: Record<string, { title: string; detail: string }> = {
   poweur_id: { title: "Your Poweur ID", detail: "and its key fingerprint" },
   profile: { title: "Your name and photo", detail: "from your public profile" },
+  email: { title: "Your email address", detail: "" },
 };
 
 export function Consent({ page }: { page: Page<ConsentData> }) {
@@ -59,7 +60,13 @@ export function Consent({ page }: { page: Page<ConsentData> }) {
                   <input type="checkbox" name={`release_${scope}`} defaultChecked className="size-5 accent-accent" />
                   <span className="text-[15px]">
                     <span className="font-semibold">{RELEASES[scope]?.title ?? scope}</span>
-                    <span className="block text-[13px] text-muted">{RELEASES[scope]?.detail}</span>
+                    <span className="block text-[13px] text-muted">
+                      {scope === "email"
+                        ? d.email
+                          ? `${d.email}, your Poweur address: mail to it arrives in your Poweur app`
+                          : "Your Poweur email address is off, so none will be shared"
+                        : RELEASES[scope]?.detail}
+                    </span>
                   </span>
                 </label>
               </li>

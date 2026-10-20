@@ -150,6 +150,9 @@ type consentView struct {
 	Previously []string
 	IndieAuth  bool
 	ProfileURL string
+	// Email is the address the `email` scope would share; empty when the
+	// identity has none (the consent page then says nothing is shared).
+	Email string
 	// HostVerified: the host named is the client's own (its client_id host). A URL
 	// client whose request returns to another origin is shown that origin instead,
 	// unverified, so the user sees where the browser will go.
@@ -178,6 +181,11 @@ func (s *Server) renderConsent(w http.ResponseWriter, r *http.Request, t *Txn, c
 	}
 	if prev != nil {
 		v.Previously = prev.Granted
+	}
+	if t.Authorize.wants(ScopeEmail) {
+		if address, ok, err := s.emailAddress(r.Context(), t.Identity); err == nil && ok {
+			v.Email = address
+		}
 	}
 	s.render(w, r, http.StatusOK, "consent.html", "Allow "+c.Name+"?", v)
 }

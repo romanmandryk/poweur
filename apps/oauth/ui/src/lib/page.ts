@@ -92,6 +92,8 @@ export interface ConsentData {
   optional: string[];
   indieAuth: boolean;
   profileURL?: string;
+  /** The address the `email` scope would share; absent when the ID has none. */
+  email?: string;
 }
 
 export interface ConsentRow {

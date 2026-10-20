@@ -106,7 +106,10 @@ export function startPoweurBus(options: PoweurBusOptions): PoweurBus {
   // has not been consumed yet.
   let queue: Promise<void> = Promise.resolve();
   const drain = async () => {
-    const { messages, cursor } = await client.messages.inbox(client.signer, client.decryptor);
+    // `since` reads without removing: the relay forgets only on `consume`,
+    // after every message was handed over. A plain read would remove them
+    // at once, and a crash mid-turn would lose the message.
+    const { messages, cursor } = await client.messages.inbox(client.signer, client.decryptor, { since: "" });
     for (const message of messages) {
       const type = normalizeMessageType(message.type);
       if ((type === MSG_TYPE_SHARE_OFFER || type === MSG_TYPE_SHARE_REVOKED) && message.plaintext && options.onShare) {

@@ -53,6 +53,7 @@ const sidebars: SidebarsConfig = {
         'auth/mobile-signer',
         'auth/interop-bridges',
         'auth/oauth-oidc-bridge',
+        'auth/matrix',
       ],
     },
     {

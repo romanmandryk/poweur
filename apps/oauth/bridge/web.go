@@ -202,6 +202,7 @@ type consentPage struct {
 	Optional   []string      `json:"optional"`
 	IndieAuth  bool          `json:"indieAuth"`
 	ProfileURL string        `json:"profileURL,omitempty"`
+	Email      string        `json:"email,omitempty"`
 }
 
 type consentRow struct {
@@ -332,6 +333,7 @@ func (s *Server) pageFor(name string, data any) any {
 		if v.IndieAuth {
 			p.ProfileURL = v.ProfileURL
 		}
+		p.Email = v.Email
 		return p
 	case homeView:
 		return v

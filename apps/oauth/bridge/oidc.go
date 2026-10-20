@@ -29,10 +29,13 @@ const (
 	ScopeOpenID   = "openid"
 	ScopePoweurID = "poweur_id"
 	ScopeProfile  = "profile"
+	// ScopeEmail releases the identity's Poweur email address (OIDC `email`,
+	// `email_verified`), for applications that insist on one.
+	ScopeEmail = "email"
 )
 
 // optionalScopes are released only with consent, in this display order.
-var optionalScopes = []string{ScopePoweurID, ScopeProfile}
+var optionalScopes = []string{ScopePoweurID, ScopeProfile, ScopeEmail}
 
 // AuthorizeRequest is a validated authorization request.
 type AuthorizeRequest struct {
@@ -60,7 +63,7 @@ func (a *AuthorizeRequest) prompt(p string) bool { return slices.Contains(a.Prom
 func (a *AuthorizeRequest) requestedOptional() []string {
 	var out []string
 	for _, s := range optionalScopes {
-		if a.Surface == surfaceIndieAuth && s == ScopePoweurID {
+		if a.Surface == surfaceIndieAuth && (s == ScopePoweurID || s == ScopeEmail) {
 			continue
 		}
 		if a.wants(s) {
@@ -94,8 +97,8 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// IndieAuth). A client that does authenticate is still served, but advertising only "none"
 		// tells every client they can revoke without credentials.
 		"revocation_endpoint_auth_methods_supported":     []string{AuthNone},
-		"scopes_supported":                               []string{ScopeOpenID, ScopePoweurID, ScopeProfile},
-		"claims_supported":                               []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "poweur_id", "poweur_key_fingerprint", "poweur_id_url", "name", "picture", "profile"},
+		"scopes_supported":                               []string{ScopeOpenID, ScopePoweurID, ScopeProfile, ScopeEmail},
+		"claims_supported":                               []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "poweur_id", "poweur_key_fingerprint", "poweur_id_url", "name", "picture", "profile", "email", "email_verified"},
 		"code_challenge_methods_supported":               []string{"S256"},
 		"prompt_values_supported":                        []string{"none", "login", "consent"},
 		"authorization_response_iss_parameter_supported": true,
@@ -187,7 +190,7 @@ func (s *Server) parseAuthorize(ctx context.Context, q url.Values, surface strin
 	}
 	for _, sc := range strings.Fields(q.Get("scope")) {
 		switch sc {
-		case ScopeOpenID, ScopePoweurID, ScopeProfile:
+		case ScopeOpenID, ScopePoweurID, ScopeProfile, ScopeEmail:
 			if !a.wants(sc) {
 				a.Scopes = append(a.Scopes, sc)
 			}
@@ -560,7 +563,22 @@ func (s *Server) buildClaims(ctx context.Context, id string, granted []string) (
 			c.Picture = identity.AvatarURL(id, p.Avatar, scheme)
 		}
 	}
+	if slices.Contains(granted, ScopeEmail) {
+		// No address (email off) or no answer: the claim is left out rather
+		// than failing the sign-in; the consent page said so.
+		if address, ok, err := s.emailAddress(ctx, id); err == nil && ok {
+			c.Email = address
+		}
+	}
 	return c, nil
+}
+
+// emailAddress is the identity's Poweur email address, if it has one.
+func (s *Server) emailAddress(ctx context.Context, id string) (string, bool, error) {
+	if s.cfg.FetchEmail != nil {
+		return s.cfg.FetchEmail(ctx, id)
+	}
+	return identity.EmailAddressOf(ctx, id, s.cfg.ResolveOptions)
 }
 
 func (s *Server) fetchProfile(ctx context.Context, id string) (identity.Profile, error) {
@@ -697,6 +715,10 @@ func addClaims(m map[string]any, c Claims) {
 	set("name", c.Name)
 	set("picture", c.Picture)
 	set("profile", c.Profile)
+	if c.Email != "" {
+		m["email"] = c.Email
+		m["email_verified"] = true
+	}
 }
 
 func verifyPKCE(verifier, challenge string) bool {

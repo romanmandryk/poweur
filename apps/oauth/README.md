@@ -101,8 +101,10 @@ everywhere.
 ## Connecting applications
 
 Discovery: `https://<issuer>/.well-known/openid-configuration`. Authorization
-Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
-`profile` (released only if the user leaves them ticked).
+Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id`, `profile` and `email`
+(released only if the user leaves them ticked). `email` is the ID's own Poweur address
+(`alice@poweur.net`, `email_verified: true`), for applications that insist on an email; IDs with
+email off get none.
 
 - **oauth2-proxy** (verified live, v7.12 — `apps/web/test/e2e/oauth-live-oauth2-proxy.spec.js`):
   `--provider=oidc --oidc-issuer-url=<issuer> --client-id=… --client-secret=… --code-challenge-method=S256
@@ -121,6 +123,10 @@ Code with PKCE `S256` only. Scopes: `openid` (always), `poweur_id` and
   or no button appears on the login page, and keep an **enrollment flow** that asks for a username —
   a Poweur ID carries no `preferred_username` or e-mail, so the enrolling user types one (the spec
   uses the Poweur ID itself). Accounts link by the pairwise `sub`, not by the Poweur ID.
+- **Matrix / Synapse** (verified live, v1.162 — `apps/web/test/e2e/oauth-live-matrix.spec.js`): an
+  `oidc_providers` entry with `pkce_method: always`, scopes `openid poweur_id profile` and
+  `localpart_template: "{{ user.poweur_id }}"`, so people become `@alice.poweur.net:<server>`.
+  Recipe: [`auth/matrix.md`](../docs/docs/auth/matrix.md).
 - **Grafana**: `[auth.generic_oauth]` with `use_pkce = true`, `scopes = openid poweur_id`, `login_attribute_path = poweur_id`.
 
 ## Pages
