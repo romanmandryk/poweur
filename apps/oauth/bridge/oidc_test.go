@@ -538,3 +538,66 @@ func TestNonceIsOptionalAndEchoed(t *testing.T) {
 		t.Fatalf("oversized nonce = %s", got)
 	}
 }
+
+func TestEmailScopeReleasesTheVerifiedPoweurAddress(t *testing.T) {
+	h := newHarness(t, func(c *Config) {
+		c.FetchEmail = func(_ context.Context, id string) (string, bool, error) {
+			if id == alice {
+				return "alice@poweur.net", true, nil
+			}
+			return "", false, nil // bob has email off
+		}
+	})
+
+	// Discovery advertises it.
+	disc := h.browser().get("/.well-known/openid-configuration")
+	if !strings.Contains(disc.body, `"email"`) || !strings.Contains(disc.body, `"email_verified"`) {
+		t.Fatalf("discovery: %s", disc.body)
+	}
+
+	// The consent page shows the address that would be shared.
+	b := h.browser()
+	id, p := b.signIn(authorizeQuery("rp", rpRedirect, "openid email"), h.users[alice])
+	if !p.is("consent") || !strings.Contains(p.body, "alice@poweur.net") {
+		t.Fatalf("consent page does not show the address: %s", p.body)
+	}
+	p = b.consent(id, ScopeEmail)
+	res := h.token(codeForm(h.codeFrom(p, rpRedirect), rpRedirect), "rp", rpSecret)
+	claims := h.idClaims(res.body["id_token"].(string))
+	if claims["email"] != "alice@poweur.net" || claims["email_verified"] != true {
+		t.Fatalf("email claims = %v", claims)
+	}
+	req, _ := http.NewRequest(http.MethodGet, h.issuer+"/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+res.body["access_token"].(string))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var info map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	if info["email"] != "alice@poweur.net" || info["email_verified"] != true {
+		t.Fatalf("userinfo = %v", info)
+	}
+
+	// Unticked: not shared.
+	b2 := h.browser()
+	id2, p2 := b2.signIn(authorizeQuery("rp", rpRedirect, "openid email", "prompt", "consent"), h.users[alice])
+	p2 = b2.consent(id2)
+	res2 := h.token(codeForm(h.codeFrom(p2, rpRedirect), rpRedirect), "rp", rpSecret)
+	if _, ok := h.idClaims(res2.body["id_token"].(string))["email"]; ok {
+		t.Fatal("email released without consent")
+	}
+
+	// An ID with email off: the page says none is shared, and none is.
+	b3 := h.browser()
+	id3, p3 := b3.signIn(authorizeQuery("rp", rpRedirect, "openid email"), h.users[bob])
+	if strings.Contains(p3.body, "@poweur.net") {
+		t.Fatalf("consent page invents an address: %s", p3.body)
+	}
+	p3 = b3.consent(id3, ScopeEmail)
+	res3 := h.token(codeForm(h.codeFrom(p3, rpRedirect), rpRedirect), "rp", rpSecret)
+	if _, ok := h.idClaims(res3.body["id_token"].(string))["email"]; ok {
+		t.Fatal("an ID without email got an email claim")
+	}
+}

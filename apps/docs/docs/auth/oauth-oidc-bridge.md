@@ -290,10 +290,11 @@ the native proof, not of the session cookie.
 | `openid` | `iss`, `sub`, `aud`, `exp`, `iat`, `auth_time`, `nonce`, `amr` | always |
 | `poweur_id` | `poweur_id`, `poweur_key_fingerprint`, `poweur_id_url` | shown ticked on consent; released only if left ticked |
 | `profile` | `name`, `picture`, `profile` from the identity's public profile | shown ticked on consent; released only if left ticked |
+| `email` | `email` (the ID's Poweur address, e.g. `alice@poweur.net`), `email_verified: true` | shown ticked on consent with the address; released only if left ticked, and only when the ID receives email (PCP-0010: a signed `email.json`, or its relay's bridge with `email_receive` on). An ID with email off gets no claim. Not offered to IndieAuth clients |
 
 Unknown scope values are **ignored**, not refused: OIDC Core §3.1.2.1 says an authorization
-server SHOULD ignore scope values it does not understand, and real deployments ask for `email`
-or `offline_access` from templates the operator cannot edit. The token response reports the
+server SHOULD ignore scope values it does not understand, and real deployments ask for
+`offline_access` from templates the operator cannot edit. The token response reports the
 scopes actually granted, and the consent screen only ever shows what the bridge really releases.
 
 `amr` is `["poweur"]`, with `"session"` appended when a delegated session key signed. `email`

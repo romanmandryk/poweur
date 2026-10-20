@@ -57,6 +57,8 @@ describe("startPoweurBus", () => {
     stream.handlers.onOpen();
     await settle();
     expect(seen).toEqual(["a"]);
+    // The read must leave messages on the relay until consume.
+    expect(client.messages.inbox).toHaveBeenCalledWith(client.signer, client.decryptor, { since: "" });
     expect(client.messages.consume).toHaveBeenCalledTimes(1);
 
     fail = true;

@@ -34,6 +34,10 @@ type Claims struct {
 	Name           string `json:"name,omitempty"`
 	Picture        string `json:"picture,omitempty"`
 	Profile        string `json:"profile,omitempty"`
+	// Email is the identity's own Poweur address (name@domain), released
+	// with the `email` scope. Verified: it is the identity's by definition,
+	// and mail to it lands in that identity's inbox.
+	Email string `json:"email,omitempty"`
 }
 
 // PutCode stores a new code.

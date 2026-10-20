@@ -204,7 +204,9 @@ Behind a flag (`OAUTH_SOLID=on`), so a deployment that does not want it is uncha
 - [ ] **INT-006-T2** Compatibility CI: nightly docker-compose job per listed app runs a headless
       login (and, where applicable, notification or share) test against the bridge and a real
       relay; an app is listed as "supported" only while its test is green
-- [ ] **INT-006-T3** Section A recipes, in batches of five, starting with Immich, HedgeDoc,
+- [ ] **INT-006-T3** *(started 20 Oct 2026: **Matrix / Synapse** recipe `apps/docs/docs/auth/matrix.md` with a live CI
+      test `oauth-live-matrix.spec.js`; the bridge's optional `email` scope (bridge 0.2.5) opens the apps that insist on
+      an email: Discourse, Zulip, Mastodon, Vaultwarden, Immich)* Section A recipes, in batches of five, starting with Immich, HedgeDoc,
       Memos, Miniflux and Vaultwarden
 - [ ] **INT-006-T4** Apprise `poweur://` target (upstream PR) and Shoutrrr target; Uptime Kuma
       native provider

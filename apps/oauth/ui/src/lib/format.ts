@@ -8,5 +8,5 @@ export function formatDate(iso?: string, withTime = false): string {
 }
 
 export function scopeLabel(scope: string): string {
-  return scope === "poweur_id" ? "Poweur ID" : scope === "profile" ? "Name and photo" : scope;
+  return scope === "poweur_id" ? "Poweur ID" : scope === "profile" ? "Name and photo" : scope === "email" ? "Email address" : scope;
 }
