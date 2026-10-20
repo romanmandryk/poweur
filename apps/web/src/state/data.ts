@@ -80,6 +80,9 @@ function freshIdentityData() {
     policy: freshPolicy(),
     profile: freshProfile(),
     email: freshEmail(),
+    /** New messages could not be saved to the history (drive full or
+     * unreachable): they wait on the relay, and the app says so. */
+    historyStuck: false,
     files: freshFiles(),
     /** The open conversation (E15-T13), or null. */
     thread: null as any,

@@ -114,8 +114,11 @@ export function loadInbox({ force = false } = {}): Promise<void> {
   inboxInFlight = (async () => {
     try {
       // Read, receipt and *keep* in one step: a drain gives no second chance.
-      const { messages, acks, lost } = await client.inboxAndArchive();
-      if (lost) toast(`${lost} message${lost === 1 ? "" : "s"} could not be saved to your history`, "warning", 8000);
+      const { messages, acks, kept } = await client.inboxAndArchive();
+      // Not saved: they stay on the relay and come back on the next pickup.
+      // Say so once, in a banner, not on every pickup; make room if email can.
+      if (kept !== useData.getState().historyStuck) useData.setState({ historyStuck: Boolean(kept) });
+      void import("./email").then(({ makeRoomForEmail }) => makeRoomForEmail({ force: Boolean(kept) }));
       await verifyGroupInboxMessages(client, messages);
       mergeMessages(messages);
       useData.setState((state) => ({ acks: mergeInto(state.acks, acks) }));

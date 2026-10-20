@@ -645,6 +645,61 @@ export class MessageHistory {
     this.#logFiles.set(name, file);
     return file;
   }
+  /**
+   * Make room: drop one conversation's oldest records until about
+   * `freeBytes` are freed, never touching records from `keepAfter` (RFC3339)
+   * on. The drive frees the trimmed records' storage; a trim needs a
+   * committed snapshot, which is a small marker file beside the log
+   * (`<log>.trimmed`, not an append file, so it is never read as a
+   * conversation). Returns how many records went and roughly how many bytes.
+   */
+  async trimOldest(peer: string, options: { freeBytes: number; keepAfter: string }): Promise<{ removed: number; freed: number }> {
+    const files = this.#requireFiles();
+    const file = await this.#logFile(peer, true);
+    if (!file || options.freeBytes <= 0) return { removed: 0, freed: 0 };
+    const keepAfter = Date.parse(options.keepAfter);
+    const name = historyLogName(peer);
+    return this.#serial(file.manifest.node, async () => {
+      const info = await files.client.node(file.manifest.node);
+      const floor = Math.max(1, info.trimmed_before ?? 1);
+      const end = info.position ?? 0;
+      const current: OpenFile = { ...file, trimmedBefore: floor, ...(info.position !== undefined ? { position: info.position } : {}) };
+      const cursors: AuthorCursors = new Map();
+      let from = floor;
+      let before = floor;
+      let freed = 0;
+      scan: while (from <= end && freed < options.freeBytes) {
+        const rows = await files.tail(current, from, cursors, 50);
+        if (!rows.length) break;
+        for (const row of rows) {
+          const record = await this.open<HistoryRecord>(new TextDecoder().decode(row.plain));
+          const at = Date.parse(record.timestamp);
+          if (!Number.isFinite(at) || at >= keepAfter) break scan;
+          freed += row.plain.length;
+          before = row.position + 1;
+          if (freed >= options.freeBytes) break scan;
+        }
+        from = rows[rows.length - 1]!.position + 1;
+      }
+      if (before <= floor) return { removed: 0, freed: 0 };
+      const dir = await this.#messagesDir();
+      const markerName = `${name}.trimmed`;
+      const marker = new TextEncoder().encode(JSON.stringify({ format: 1, log: file.manifest.node, before, at: new Date().toISOString() }));
+      const existing = (await files.list(dir)).find((child) => child.name === markerName);
+      let snapshot: OpenFile;
+      if (existing) {
+        await files.replace(existing, marker);
+        snapshot = await files.open(existing.manifest.node);
+      } else {
+        snapshot = await files.create(dir, markerName, "file", marker);
+      }
+      await files.client.commit({ trim: { node: file.manifest.node, before, snapshot: { node: snapshot.manifest.node, version: snapshot.manifest.version } } });
+      this.#logs.delete(file.manifest.node);
+      this.#logFiles.delete(name);
+      return { removed: before - floor, freed };
+    });
+  }
+
   /** Run one step on a log after the ones queued before it. */
   #serial<T>(node: string, step: () => Promise<T>): Promise<T> {
     const next = (this.#queues.get(node) ?? Promise.resolve()).catch(() => {}).then(step);

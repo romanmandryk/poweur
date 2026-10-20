@@ -210,11 +210,15 @@ export class PoweurClient {
   }
 
   /**
-   * `inboxAndAck` plus the archive write — the call a durable client wants.
+   * Pick up the inbox, keep it, and only then let the relay forget it — the
+   * call a durable client wants.
    *
-   * Reading and keeping are one step on purpose. Any gap between them is a
-   * window where the relay has forgotten a message and nothing has written it
-   * down, and a client that offers the two separately will eventually take it.
+   * The read leaves messages on the relay (`?since=`). Each is receipted to
+   * its sender once, written to the history, and the relay is told to forget
+   * the batch only when every message was written. If any write fails (the
+   * drive is full, the network dropped), nothing is forgotten: the same
+   * messages come back on the next pickup and the history skips those it
+   * already has. `kept` reports that the relay still holds them.
    */
   async inboxAndArchive(): Promise<{
     messages: InboxMessage[];
@@ -222,11 +226,57 @@ export class PoweurClient {
     acked: string[];
     archived: number;
     lost: number;
+    kept: boolean;
   }> {
-    const { messages, acks, acked } = await this.inboxAndAck();
+    const { messages, acks, cursor, ackCursor } = await this.messages.inbox(this.signer, this.decryptor, { since: "" });
+    const acked = await this.ackDecrypted(messages.filter((m) => !this.#receipted.has(m.id)));
+    for (const id of acked) this.#receipted.add(id);
     const { archived, lost } = await this.archiveInbound(messages);
-    return { messages, acks, acked, archived, lost };
+    const kept = lost > 0;
+    if (!kept && (messages.length > 0 || acks.length > 0)) {
+      try {
+        await this.messages.consume(this.signer, {
+          through: cursor ?? "",
+          ...(ackCursor ? { ackThrough: ackCursor } : {}),
+        });
+        for (const m of messages) this.#receipted.delete(m.id);
+      } catch {
+        // Not forgotten yet: the next pickup returns them again, harmlessly.
+      }
+    }
+    return { messages, acks, acked, archived, lost, kept };
   }
+
+  /**
+   * Free-ID housekeeping for email: when the drive is at 90% of its quota,
+   * delete the oldest email from the history (the conversation with the
+   * email bridge, received and sent) until usage is back under 80%. Email
+   * from the last 7 days is never deleted, and nothing else ever is: when
+   * that is not enough, `full` says so and the app tells the person.
+   */
+  async makeRoomForEmail(
+    bridge: string,
+    options: { now?: Date; startAt?: number; target?: number; keepDays?: number } = {},
+  ): Promise<{ used: number; quota: number; removed: number; freed: number; full: boolean }> {
+    const drive = new DriveClient(this.relay, this.signer);
+    let { used, quota } = await drive.info();
+    const startAt = options.startAt ?? 0.9;
+    const target = options.target ?? 0.8;
+    let removed = 0;
+    let freed = 0;
+    if (quota > 0 && used >= quota * startAt && bridge) {
+      const now = options.now ?? new Date();
+      const keepAfter = new Date(now.getTime() - (options.keepDays ?? 7) * 24 * 3600 * 1000).toISOString();
+      const result = await (await this.history()).trimOldest(bridge, { freeBytes: used - quota * target, keepAfter });
+      removed = result.removed;
+      freed = result.freed;
+      if (removed > 0) ({ used, quota } = await drive.info());
+    }
+    return { used, quota, removed, freed, full: quota > 0 && used >= quota * 0.98 };
+  }
+
+  /** Delivery receipts already sent for messages the relay still holds. */
+  readonly #receipted = new Set<string>();
 
   /**
    * Keep what just came off the inbox. A sign-in prompt is a notification,

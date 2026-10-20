@@ -36,7 +36,7 @@ import { useRoute } from "../../state/route";
 import { useSession } from "../../state/session";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
-import { Chip, CountBadge, EmptyState } from "../../ui/Display";
+import { Chip, CountBadge, EmptyState, Notice } from "../../ui/Display";
 import { DestHeader } from "../../ui/Layout";
 import { PullToRefresh } from "../../ui/PullToRefresh";
 import { usePeerAvatars } from "../../actions/avatars";
@@ -118,6 +118,7 @@ export function Messages() {
           </Button>
         </DestHeader>
         <AuthPrompts />
+        <HistoryStuck />
         <TabBar className="tray-bar" aria-label="Message trays">
           {trays.map(({ id, label }) => {
             const waiting = id === "inbox" ? 0 : id === "email" ? unreadMail : counts[id];
@@ -456,5 +457,20 @@ function AnonTray() {
         ))}
       </div>
     </>
+  );
+}
+
+/** New messages could not be saved: they wait on the relay meanwhile. */
+function HistoryStuck() {
+  const stuck = useData((state) => state.historyStuck);
+  const usage = useData((state) => state.files.usage);
+  if (!stuck) return null;
+  const full = Boolean(usage && usage.quota > 0 && usage.used >= usage.quota * 0.95);
+  return (
+    <Notice id="history-stuck" tone="warn" className="mx-4 mt-3">
+      {full
+        ? "Your storage is full, so new messages and email can't be saved. They wait for you in the meantime. Delete files you no longer need in Files, or ask your relay's operator for more space."
+        : "New messages couldn't be saved to your history just now. They wait for you, and the app tries again."}
+    </Notice>
   );
 }

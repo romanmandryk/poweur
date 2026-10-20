@@ -52,7 +52,11 @@ Durations use Go syntax with a unit: `60s`, `5m`, `720h`. A bare number such as 
 | `S3_SESSION_TOKEN` | *(empty)* | Optional session token for temporary credentials |
 | `S3_SECURE` | `true` | Use TLS when `S3_ENDPOINT` has no scheme |
 | `S3_PRESIGN` | `true` | `true` returns presigned chunk URLs. `false` sends chunk bytes through the relay. Conditional writes are required either way |
-| `MAX_INBOX_PER_IDENTITY` | `50` | Undelivered messages that may wait for one identity; further mail is refused until they collect it |
+| `MAX_INBOX_PER_IDENTITY` | `200` | Undelivered messages from people (not email) that may wait for one identity; further ones are refused with `inbox_full` until the identity collects them |
+| `MAX_INBOX_BYTES_PER_IDENTITY` | `10485760` (10 MiB) | The same, in bytes |
+| `MAX_EMAIL_INBOX_PER_IDENTITY` | `100` | Undelivered email from the email bridge (`EMAIL_BRIDGE_ID`) per identity, counted apart from messages. Over it the bridge answers the mail server "try later", so the mail waits there |
+| `MAX_EMAIL_INBOX_BYTES_PER_IDENTITY` | `26214400` (25 MiB) | The same, in bytes |
+| `MAX_INBOX_BYTES_TOTAL` | `1073741824` (1 GiB) | Everything queued on the relay together. Queued messages are kept in memory as well as on disk, so this bounds the relay's memory for them |
 | `MAX_ACKS_PER_IDENTITY` | `50` | Pending delivery receipts per identity |
 | `SPOOL_TTL` | `720h` (30 days) | How long undelivered mail waits for a recipient who never returns; `0` disables expiry |
 | `MAX_STREAMS_PER_IDENTITY` | `8` | Concurrent push (SSE) streams per identity; `0` = unlimited |

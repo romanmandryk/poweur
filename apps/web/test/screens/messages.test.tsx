@@ -129,6 +129,22 @@ describe("Messages destination (E21-T7)", () => {
   });
 });
 
+describe("Messages that could not be saved", () => {
+  it("shows one banner (not a toast per pickup), naming full storage when it is", async () => {
+    holder.client.inboxAndArchive.mockResolvedValue({ messages: [], acks: [], lost: 1, kept: true });
+    useData.setState((state) => ({ files: { ...state.files, usage: { used: 99, quota: 100 } } }));
+    render(<App />);
+    await waitFor(() => expect($("#history-stuck")?.textContent).toContain("Your storage is full"));
+    await waitFor(() => expect(holder.client.makeRoomForEmail).toHaveBeenCalled());
+  });
+
+  it("clears once a pickup is saved", async () => {
+    useData.setState({ historyStuck: true } as any);
+    render(<App />);
+    await waitFor(() => expect($("#history-stuck")).toBeNull());
+  });
+});
+
 describe("New chat", () => {
   it("opens a direct conversation with someone found by name", async () => {
     useRoute.setState({ sub: "new-chat" });

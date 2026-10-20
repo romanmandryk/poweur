@@ -314,7 +314,7 @@ func (s *Server) deliverGroupEnvelope(ctx context.Context, group idpkg.ShareGrou
 		// contact of every other member would make groups useless for the
 		// case they exist for. This relay can only make that call because it
 		// verified the membership document itself, moments ago.
-		if !s.inbox.Add(msg.Recipient, storedFromMessage(msg), s.cfg.MaxInboxPerIdentity) {
+		if !s.enqueue(msg) {
 			out.Status = "inbox_full"
 			out.Detail = "recipient inbox is full"
 			return out

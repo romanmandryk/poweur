@@ -12,9 +12,9 @@
  * it via the vectors in `test/conformance.test.ts`.
  */
 
-export const SDK_VERSION = "0.2.18";
+export const SDK_VERSION = "0.2.19";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
-export const SDK_BUILD_TIME = "2026-10-19 10:35";
+export const SDK_BUILD_TIME = "2026-10-19 19:48";
 
 export * from "./types.js";
 export * from "./errors.js";

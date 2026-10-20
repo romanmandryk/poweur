@@ -266,6 +266,36 @@ function secondDevice(who: TestIdentity): MessageHistory {
 
 // Phase 9 restore list (EPIC-020): the history journeys, on the encrypted
 // drive archive rather than the v1 tree.
+describe("journey: a message the history could not keep stays on the relay", () => {
+  it("is picked up again, receipted once, and forgotten only once it is saved", async () => {
+    const alice = await createTestIdentity(relay.baseUrl, "j5kalice");
+    const bob = await createTestIdentity(relay.baseUrl, "j5kbob");
+    await bob.client.sendAndArchive(alice.identity, "are you there?");
+
+    // The drive refuses the write (full, offline): nothing is forgotten.
+    const realArchive = alice.client.archiveInbound.bind(alice.client);
+    alice.client.archiveInbound = async (messages) => ({ archived: 0, lost: messages.length });
+    const failed = await alice.client.inboxAndArchive();
+    expect(failed.messages.map((m) => m.plaintext)).toEqual(["are you there?"]);
+    expect(failed.kept).toBe(true);
+    expect(failed.acked).toHaveLength(1);
+
+    // Next pickup: the same message again, with no second receipt.
+    alice.client.archiveInbound = realArchive;
+    const again = await alice.client.inboxAndArchive();
+    expect(again.messages.map((m) => m.plaintext)).toEqual(["are you there?"]);
+    expect(again.acked).toHaveLength(0);
+    expect(again.archived).toBe(1);
+    expect(again.kept).toBe(false);
+
+    // Saved, so the relay has let it go.
+    const empty = await alice.client.inboxAndArchive();
+    expect(empty.messages).toHaveLength(0);
+    const history = await alice.client.history();
+    expect((await history.load()).filter((r) => r.body === "are you there?")).toHaveLength(1);
+  });
+});
+
 describe("journey: message history survives the drain", () => {
   it("keeps both sides of a conversation after the relay has forgotten it", async () => {
     const alice = await createTestIdentity(relay.baseUrl, "j5alice");

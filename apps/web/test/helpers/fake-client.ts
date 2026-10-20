@@ -69,6 +69,7 @@ export function fakeClient(overrides: Record<string, unknown> = {}) {
     contacts: vi.fn(async () => contactsApi),
     processContactAccepts: vi.fn(async () => [] as string[]),
     inboxAndArchive: vi.fn(async () => ({ messages: [] as any[], acks: [] as any[], lost: 0 })),
+    makeRoomForEmail: vi.fn(async () => ({ used: 0, quota: 0, removed: 0, freed: 0, full: false })),
     requests,
     requestsAndArchive: vi.fn(async () => ({ requests: await requests(), archived: 0, lost: 0 })),
     anonAndArchive: vi.fn(async () => ({ messages: [] as any[], lost: 0 })),

@@ -34,10 +34,20 @@ const (
 	// Global default is roughly 10× the per-sender hourly cap times an
 	// expected-active-senders constant (here: 50). Tune per deployment via
 	// env vars; 0 disables the global cap entirely.
-	DefaultGlobalMinuteLimit   = 1000
-	DefaultGlobalHourLimit     = 100000
-	DefaultGlobalDayLimit      = 1000000
-	DefaultMaxInboxPerIdentity = 50
+	DefaultGlobalMinuteLimit = 1000
+	DefaultGlobalHourLimit   = 100000
+	DefaultGlobalDayLimit    = 1000000
+	// Undelivered messages waiting for one identity, held in the relay's
+	// memory as well as on disk. Messages from people and email from the
+	// bridge are counted apart, so neither can crowd out the other. A full
+	// message queue refuses the sender at once; a full email queue makes
+	// the mail server wait and retry, so messages get the larger share.
+	DefaultMaxInboxPerIdentity           = 200
+	DefaultMaxInboxBytesPerIdentity      = 10 << 20
+	DefaultMaxEmailInboxPerIdentity      = 100
+	DefaultMaxEmailInboxBytesPerIdentity = 25 << 20
+	// DefaultMaxInboxBytesTotal bounds everything queued on the relay.
+	DefaultMaxInboxBytesTotal = 1 << 30
 	// DefaultSpoolTTL is how long undelivered mail waits for a recipient who
 	// never comes back (EPIC-009 E09-T1). Long enough for a holiday, short
 	// enough that a dead identity is not a permanent storage cost.
@@ -101,9 +111,13 @@ type Config struct {
 	// EmailBridgeLimits replace RateLimits (and the global caps) for the
 	// EMAIL_BRIDGE_ID sender: it delivers every user's mail, so the
 	// per-person defaults would throttle the whole bridge.
-	EmailBridgeLimits   RateLimits
-	DNSProxyMode        string
-	MaxInboxPerIdentity int
+	EmailBridgeLimits             RateLimits
+	DNSProxyMode                  string
+	MaxInboxPerIdentity           int
+	MaxInboxBytesPerIdentity      int64
+	MaxEmailInboxPerIdentity      int
+	MaxEmailInboxBytesPerIdentity int64
+	MaxInboxBytesTotal            int64
 	// SpoolTTL retires undelivered messages and acks. 0 disables expiry.
 	SpoolTTL time.Duration
 	// MaxStreamsPerIdentity caps concurrent push streams per identity
@@ -361,55 +375,59 @@ func FromEnv() Config {
 	tc.TrustedProxies = proxies
 	return Config{
 		Telemetry: tc, TelemetryProxyError: proxyErr,
-		ListenAddr:              getenv("LISTEN_ADDR", DefaultListenAddr),
-		WebStaticDir:            strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
-		OAuthBridgeURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
-		EmailBridgeID:           strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_BRIDGE_ID"))),
-		PushVAPIDPrivateKey:     strings.TrimSpace(os.Getenv("PUSH_VAPID_PRIVATE_KEY")),
-		PushVAPIDSubject:        strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
-		PushEndpointHosts:       pushEndpointHostsFromEnv(),
-		PushCoalesce:            getenvDuration("PUSH_COALESCE", DefaultPushCoalesce),
-		AppLinksIOSAppIDs:       splitList(os.Getenv("APP_LINKS_IOS_APP_IDS")),
-		AppLinksAndroidPackage:  strings.TrimSpace(os.Getenv("APP_LINKS_ANDROID_PACKAGE")),
-		AppLinksAndroidSHA256:   splitList(os.Getenv("APP_LINKS_ANDROID_SHA256")),
-		RelayAddress:            os.Getenv("RELAY_ADDRESS"),
-		RelayScheme:             getenv("RELAY_SCHEME", DefaultRelayScheme),
-		DNSTTL:                  getenvDuration("DNS_TTL", DefaultDNSTTL),
-		ChallengeTTL:            getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
-		Version:                 getenv("VERSION", buildinfo.Version),
-		BuildTime:               getenv("BUILD_TIME", buildinfo.Time),
-		VersionHash:             getenv("VERSION_HASH", buildinfo.Hash),
-		DNSProxyMode:            strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
-		MaxInboxPerIdentity:     getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
-		SpoolTTL:                getenvDuration("SPOOL_TTL", DefaultSpoolTTL),
-		MaxStreamsPerIdentity:   getenvInt("MAX_STREAMS_PER_IDENTITY", DefaultMaxStreamsPerIdentity),
-		StreamIdleTimeout:       getenvDuration("STREAM_IDLE_TIMEOUT", DefaultStreamIdleTimeout),
-		MaxAcksPerIdentity:      getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
-		DataDir:                 strings.TrimSpace(os.Getenv("POWEUR_DATA")),
-		HostedDomains:           splitCSV(os.Getenv("HOSTED_DOMAINS")),
-		ResolverAllowPrivate:    getenvBool("RESOLVER_ALLOW_PRIVATE"),
-		RegistrationGate:        strings.ToLower(getenv("REGISTRATION_GATE", "open")),
-		RegistrationPowBits:     int(getenvInt64("REGISTRATION_POW_BITS", 0)),
-		NamePolicy:              namePolicyFromEnv(),
-		LauncherHost:            launcherHostFromEnv(),
-		LauncherHosts:           launcherHostsFromEnv(),
-		NameBlockedFile:         strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
-		RegistrationInviteCodes: splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
-		OperatorToken:           strings.TrimSpace(os.Getenv("OPERATOR_TOKEN")),
-		MaxIdentityBytes:        getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
-		MaxFileBytes:            getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
-		StorageQuotasFile:       storageQuotasFileFromEnv(),
-		QuotaContact:            strings.ToLower(strings.TrimSpace(os.Getenv("QUOTA_CONTACT"))),
-		StorageProvider:         strings.ToLower(getenv("STORAGE_PROVIDER", DefaultStorageProvider)),
-		S3Endpoint:              strings.TrimSpace(os.Getenv("S3_ENDPOINT")),
-		S3Bucket:                strings.TrimSpace(os.Getenv("S3_BUCKET")),
-		S3Prefix:                strings.Trim(strings.TrimSpace(os.Getenv("S3_PREFIX")), "/"),
-		S3Region:                getenv("S3_REGION", "us-east-1"),
-		S3AccessKey:             os.Getenv("S3_ACCESS_KEY"),
-		S3SecretKey:             os.Getenv("S3_SECRET_KEY"),
-		S3SessionToken:          os.Getenv("S3_SESSION_TOKEN"),
-		S3Secure:                getenvBoolDefault("S3_SECURE", true),
-		S3Presign:               getenvBoolDefault("S3_PRESIGN", true),
+		ListenAddr:                    getenv("LISTEN_ADDR", DefaultListenAddr),
+		WebStaticDir:                  strings.TrimSpace(os.Getenv("WEB_STATIC_DIR")),
+		OAuthBridgeURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("OAUTH_BRIDGE_URL")), "/"),
+		EmailBridgeID:                 strings.ToLower(strings.TrimSpace(os.Getenv("EMAIL_BRIDGE_ID"))),
+		PushVAPIDPrivateKey:           strings.TrimSpace(os.Getenv("PUSH_VAPID_PRIVATE_KEY")),
+		PushVAPIDSubject:              strings.TrimSpace(os.Getenv("PUSH_VAPID_SUBJECT")),
+		PushEndpointHosts:             pushEndpointHostsFromEnv(),
+		PushCoalesce:                  getenvDuration("PUSH_COALESCE", DefaultPushCoalesce),
+		AppLinksIOSAppIDs:             splitList(os.Getenv("APP_LINKS_IOS_APP_IDS")),
+		AppLinksAndroidPackage:        strings.TrimSpace(os.Getenv("APP_LINKS_ANDROID_PACKAGE")),
+		AppLinksAndroidSHA256:         splitList(os.Getenv("APP_LINKS_ANDROID_SHA256")),
+		RelayAddress:                  os.Getenv("RELAY_ADDRESS"),
+		RelayScheme:                   getenv("RELAY_SCHEME", DefaultRelayScheme),
+		DNSTTL:                        getenvDuration("DNS_TTL", DefaultDNSTTL),
+		ChallengeTTL:                  getenvDuration("CHALLENGE_TTL", DefaultChallengeTTL),
+		Version:                       getenv("VERSION", buildinfo.Version),
+		BuildTime:                     getenv("BUILD_TIME", buildinfo.Time),
+		VersionHash:                   getenv("VERSION_HASH", buildinfo.Hash),
+		DNSProxyMode:                  strings.ToLower(getenv("DNS_PROXY_MODE", "auto")),
+		MaxInboxPerIdentity:           getenvInt("MAX_INBOX_PER_IDENTITY", DefaultMaxInboxPerIdentity),
+		MaxInboxBytesPerIdentity:      int64(getenvInt("MAX_INBOX_BYTES_PER_IDENTITY", DefaultMaxInboxBytesPerIdentity)),
+		MaxEmailInboxPerIdentity:      getenvInt("MAX_EMAIL_INBOX_PER_IDENTITY", DefaultMaxEmailInboxPerIdentity),
+		MaxEmailInboxBytesPerIdentity: int64(getenvInt("MAX_EMAIL_INBOX_BYTES_PER_IDENTITY", DefaultMaxEmailInboxBytesPerIdentity)),
+		MaxInboxBytesTotal:            int64(getenvInt("MAX_INBOX_BYTES_TOTAL", DefaultMaxInboxBytesTotal)),
+		SpoolTTL:                      getenvDuration("SPOOL_TTL", DefaultSpoolTTL),
+		MaxStreamsPerIdentity:         getenvInt("MAX_STREAMS_PER_IDENTITY", DefaultMaxStreamsPerIdentity),
+		StreamIdleTimeout:             getenvDuration("STREAM_IDLE_TIMEOUT", DefaultStreamIdleTimeout),
+		MaxAcksPerIdentity:            getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
+		DataDir:                       strings.TrimSpace(os.Getenv("POWEUR_DATA")),
+		HostedDomains:                 splitCSV(os.Getenv("HOSTED_DOMAINS")),
+		ResolverAllowPrivate:          getenvBool("RESOLVER_ALLOW_PRIVATE"),
+		RegistrationGate:              strings.ToLower(getenv("REGISTRATION_GATE", "open")),
+		RegistrationPowBits:           int(getenvInt64("REGISTRATION_POW_BITS", 0)),
+		NamePolicy:                    namePolicyFromEnv(),
+		LauncherHost:                  launcherHostFromEnv(),
+		LauncherHosts:                 launcherHostsFromEnv(),
+		NameBlockedFile:               strings.TrimSpace(os.Getenv("NAME_BLOCKED_FILE")),
+		RegistrationInviteCodes:       splitCSVRaw(os.Getenv("REGISTRATION_INVITE_CODES")),
+		OperatorToken:                 strings.TrimSpace(os.Getenv("OPERATOR_TOKEN")),
+		MaxIdentityBytes:              getenvInt64("MAX_IDENTITY_BYTES", DefaultMaxIdentityBytes),
+		MaxFileBytes:                  getenvInt64("MAX_FILE_BYTES", DefaultMaxFileBytes),
+		StorageQuotasFile:             storageQuotasFileFromEnv(),
+		QuotaContact:                  strings.ToLower(strings.TrimSpace(os.Getenv("QUOTA_CONTACT"))),
+		StorageProvider:               strings.ToLower(getenv("STORAGE_PROVIDER", DefaultStorageProvider)),
+		S3Endpoint:                    strings.TrimSpace(os.Getenv("S3_ENDPOINT")),
+		S3Bucket:                      strings.TrimSpace(os.Getenv("S3_BUCKET")),
+		S3Prefix:                      strings.Trim(strings.TrimSpace(os.Getenv("S3_PREFIX")), "/"),
+		S3Region:                      getenv("S3_REGION", "us-east-1"),
+		S3AccessKey:                   os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:                   os.Getenv("S3_SECRET_KEY"),
+		S3SessionToken:                os.Getenv("S3_SESSION_TOKEN"),
+		S3Secure:                      getenvBoolDefault("S3_SECURE", true),
+		S3Presign:                     getenvBoolDefault("S3_PRESIGN", true),
 		RateLimits: RateLimits{
 			PerMinute: getenvInt("RATE_LIMIT_MINUTE", DefaultMinuteLimit),
 			PerHour:   getenvInt("RATE_LIMIT_HOUR", DefaultHourLimit),

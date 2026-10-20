@@ -43,13 +43,24 @@ type InboxStore struct {
 // Used by tests and by relays configured without POWEUR_DATA.
 func NewInboxStore() *InboxStore {
 	s, _ := newSpool[StoredMessage](nil, "messages")
+	s.size = messageSize
 	return &InboxStore{spool: s}
+}
+
+// messageSize approximates what a queued message holds in memory: its
+// payload and signature dominate.
+func messageSize(m StoredMessage) int64 {
+	n := len(m.Payload) + len(m.Signature) + len(m.ID) + len(m.Sender) + len(m.Recipient) + len(m.Type) + len(m.ThreadID) + 256
+	for k, v := range m.Metadata {
+		n += len(k) + len(v)
+	}
+	return int64(n)
 }
 
 // OpenInboxStore spools under relay/spool/messages, loading whatever a
 // previous process left behind.
 func OpenInboxStore(objects Objects) (*InboxStore, error) {
-	s, err := newSpool[StoredMessage](objects, "messages")
+	s, err := newSpoolSized[StoredMessage](objects, "messages", messageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +73,16 @@ func OpenInboxStore(objects Objects) (*InboxStore, error) {
 func (s *InboxStore) Add(identity string, msg StoredMessage, max int) bool {
 	return s.spool.add(identity, msg, max, false)
 }
+
+// AddLimited is Add with per-class limits: the count and byte limits count
+// only messages in `class` (the relay keeps email from the bridge and
+// everything else apart), and Total bounds every queued message together.
+func (s *InboxStore) AddLimited(identity string, msg StoredMessage, limits SpoolLimits, class func(StoredMessage) bool) bool {
+	return s.spool.addLimited(identity, msg, limits, class)
+}
+
+// Bytes is the size of everything queued, for metrics and the relay-wide limit.
+func (s *InboxStore) Bytes() int64 { return s.spool.bytes() }
 
 // Drain returns everything and forgets it — the pre-cursor pickup, kept for
 // clients that have not moved to `?since=`.
