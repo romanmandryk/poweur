@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	idpkg "github.com/poweur/identity"
 )
 
-const identityPageTemplateVersion = "2"
+const identityPageTemplateVersion = "3"
 
 //go:embed identitypage_assets/*
 var identityPageAssets embed.FS
@@ -37,7 +38,18 @@ type identityPageView struct {
 	CanonicalURL       string
 	Indexable          bool
 	AdvertiseAnonymous bool
-	Links              []identityPageLink
+	// Links are the owner's own profile links and linked handles, all
+	// rendered rel="me": the profile and handles.json are owner-signed.
+	Links []identityPageLink
+	// ActorURL is the linked Fediverse actor, a second rel="me" in <head>
+	// when it differs from the profile link shown (Mastodon checks either).
+	ActorURL string
+	// IndieAuthMetadataURL, AuthorizationEndpoint and TokenEndpoint repeat
+	// the Link header in HTML for IndieAuth clients that only parse the page;
+	// empty when the relay advertises no bridge.
+	IndieAuthMetadataURL  string
+	AuthorizationEndpoint string
+	TokenEndpoint         string
 	// ShortName is who the Message button names.
 	ShortName string
 	// HomeURL, MessageURL and ClaimURL point at the launcher; empty when the
@@ -81,6 +93,33 @@ func safeProfileLink(raw string) (string, bool) {
 	return u.String(), true
 }
 
+// appendHandleLinks adds the linked Bluesky and Fediverse accounts as profile
+// links, skipping any the owner already lists. Bluesky links by DID, which
+// survives a handle change; the Fediverse link is the `/@user` page Mastodon
+// shows, and the actor URL is returned for a second rel="me".
+func appendHandleLinks(links []identityPageLink, h idpkg.Handles) ([]identityPageLink, string) {
+	add := func(label, href string) {
+		for _, l := range links {
+			if strings.EqualFold(strings.TrimSuffix(l.URL, "/"), strings.TrimSuffix(href, "/")) {
+				return
+			}
+		}
+		links = append(links, identityPageLink{Label: label, URL: href})
+	}
+	if h.ATProtoDID != "" {
+		add("Bluesky", "https://bsky.app/profile/"+h.ATProtoDID)
+	}
+	actorURL := ""
+	if user, server, ok := strings.Cut(h.FediverseAcct, "@"); ok {
+		profileURL := "https://" + server + "/@" + user
+		add("@"+h.FediverseAcct, profileURL)
+		if h.FediverseActor != "" && h.FediverseActor != profileURL {
+			actorURL = h.FediverseActor
+		}
+	}
+	return links, actorURL
+}
+
 func firstInitial(displayName, identity string) string {
 	value := strings.TrimSpace(displayName)
 	if value == "" {
@@ -93,13 +132,17 @@ func firstInitial(displayName, identity string) string {
 	return strings.ToUpper(string(r))
 }
 
-func pageETag(identity string, profileRaw []byte) string {
+// pageETag covers everything the page renders from: the profile and the
+// linked handles, so linking a Bluesky or Fediverse account changes it.
+func pageETag(identity string, profileRaw, handlesRaw []byte) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(identityPageTemplateVersion))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write([]byte(identity))
 	_, _ = h.Write([]byte{0})
 	_, _ = h.Write(profileRaw)
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(handlesRaw)
 	return `"` + hex.EncodeToString(h.Sum(nil)[:12]) + `"`
 }
 
@@ -127,7 +170,9 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 			profile = parsed
 		}
 	}
-	etag := pageETag(identity, profileRaw)
+	handles, _ := s.readHandles(r.Context(), identity)
+	handlesRaw, _ := json.Marshal(handles)
+	etag := pageETag(identity, profileRaw, handlesRaw)
 	indexable := profile.IdentityPage.IndexableOrDefault()
 	setIdentityPageHeaders(w, etag, indexable)
 	if r.Header.Get("If-None-Match") == etag {
@@ -153,6 +198,7 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 		}
 		links = append(links, identityPageLink{Label: label, URL: href})
 	}
+	links, actorURL := appendHandleLinks(links, handles)
 	avatarURL := ""
 	if idpkg.ValidAvatarName(profile.Avatar) {
 		avatarURL = "/.well-known/poweur/" + profile.Avatar
@@ -186,6 +232,7 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 		Indexable:          indexable,
 		AdvertiseAnonymous: profile.IdentityPage.AdvertisesAnonymousMessages(),
 		Links:              links,
+		ActorURL:           actorURL,
 		ShortName:          shortName,
 		HomeURL:            homeURL,
 		MessageURL:         messageURL,
@@ -193,6 +240,11 @@ func (s *Server) serveIdentityPage(w http.ResponseWriter, r *http.Request, ident
 	}
 	if s.cfg.WebStaticDir != "" {
 		view.SignInURL = appPrefix + "/"
+	}
+	if bridge := s.cfg.OAuthBridgeURL; bridge != "" {
+		view.IndieAuthMetadataURL = bridge + "/.well-known/oauth-authorization-server"
+		view.AuthorizationEndpoint = bridge + "/authorize"
+		view.TokenEndpoint = bridge + "/token"
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = identityPageTemplate.ExecuteTemplate(w, "page.html", view)
