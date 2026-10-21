@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// jsdom, not happy-dom: DOMPurify 3.4 mis-sanitizes under happy-dom (keeps <style>,
+// strips plain links), while real browsers and jsdom agree.
 /**
  * The Email tray's logic (EPIC-023 E23-T6): what counts as mail, how it
  * threads, what a reply says, and that hostile HTML renders inert.

@@ -1,6 +1,6 @@
 {
   "name": "@poweur/openclaw-channel",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenClaw channel plugin for Poweur ID: message your agent from the Poweur app, end-to-end encrypted, with the agent on its own ID.",
   "license": "Apache-2.0",
   "repository": {
@@ -34,11 +34,11 @@
   },
   "devDependencies": {
     "@poweur/client": "workspace:*",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.5",
     "esbuild": "^0.21.5",
     "openclaw": "2026.10.3",
-    "typescript": "^5.7.0",
-    "vitest": "^3.1.0"
+    "typescript": "^5.9.3",
+    "vitest": "~4.1.12"
   },
   "openclaw": {
     "extensions": [
