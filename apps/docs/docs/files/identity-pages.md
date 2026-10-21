@@ -58,9 +58,8 @@ The identity root remains machine-readable as well as human-readable:
 
 | Request | Response |
 |---|---|
-| `GET /` and `Accept` includes `text/html` | Generated page, or the disabled-page `404` |
-| `Accept` includes `application/json` | Existing relay JSON document |
-| No clear HTML preference, including `*/*` | Existing relay JSON document |
+| `GET /` and `Accept` includes `application/json` | Existing relay JSON document (what `@poweur/client` sends) |
+| `GET /` with any other `Accept`, including `text/html`, `*/*` or none | Generated page, or the disabled-page `404`. The root is the ID's IndieAuth `me`, and IndieWeb tools fetch it without asking for HTML |
 | Any path other than `/` | The existing handler for that path. An unknown path stays the relay JSON document |
 
 Responses include `Vary: Accept`. Routes under `/.well-known/`, `/id/`, the relay APIs and file

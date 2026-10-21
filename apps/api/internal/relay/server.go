@@ -370,7 +370,10 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	s.advertiseIndieAuth(w, r)
 	// Only the exact identity root is the generated page. GET / is also the
 	// catch-all for unknown paths, and those stay the relay JSON document.
-	if r.URL.Path == "/" && wantsHTML(r) && s.identities.Exists(host) {
+	// The root is the ID's IndieAuth `me`, and IndieWeb tools (mf2 parsers,
+	// indiewebify.me, IndieAuth clients) fetch it with `*/*` or no Accept, so
+	// only a caller that asks for JSON gets the document here.
+	if r.URL.Path == "/" && !wantsJSON(r) && s.identities.Exists(host) {
 		s.serveIdentityPage(w, r, host)
 		return
 	}
@@ -379,10 +382,9 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	// document, which every client reads to learn the relay's address and which
 	// hosts are launchers. Redirecting that turned the document into an HTML
 	// page and left the app unable to tell which front door it was standing in.
-	// So the redirect is for readers who did not ask for the document. An
-	// identity page still requires an explicit HTML accept; this redirect
-	// keeps the older launcher rule (E15-T7), including clients that send no
-	// Accept header.
+	// So the redirect is for readers who did not ask for the document, the
+	// same rule as the identity page above (E15-T7), including clients that
+	// send no Accept header.
 	if s.cfg.WebStaticDir != "" && r.URL.Path == "/" && !wantsJSON(r) {
 		if s.cfg.IsLauncherHost(host) {
 			http.Redirect(w, r, "/id/", http.StatusFound)

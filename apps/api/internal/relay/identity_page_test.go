@@ -78,9 +78,16 @@ func TestIdentityPageDefaultAndRootNegotiation(t *testing.T) {
 	if jsonResponse.Code != http.StatusOK || !strings.Contains(jsonResponse.Body.String(), `"service":"poweur-relay"`) {
 		t.Fatalf("JSON root changed: %d %s", jsonResponse.Code, jsonResponse.Body.String())
 	}
-	curl := pageRequest(t, s, "*/*")
-	if !strings.Contains(curl.Body.String(), `"service":"poweur-relay"`) {
-		t.Fatalf("ambiguous root should stay JSON: %s", curl.Body.String())
+	// IndieWeb tools fetch the `me` URL with */* or no Accept at all.
+	for _, accept := range []string{"*/*", ""} {
+		page := pageRequest(t, s, accept)
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `class="identity-card h-card"`) {
+			t.Fatalf("Accept %q should get the identity page: %d %s", accept, page.Code, page.Body.String())
+		}
+	}
+	both := pageRequest(t, s, "text/html, application/json")
+	if !strings.Contains(both.Body.String(), `"service":"poweur-relay"`) {
+		t.Fatalf("a caller that asks for JSON keeps the document: %s", both.Body.String())
 	}
 }
 
