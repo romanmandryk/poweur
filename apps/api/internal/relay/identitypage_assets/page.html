@@ -7,6 +7,10 @@
   <meta name="description" content="{{.Description}}">
   {{if not .Indexable}}<meta name="robots" content="noindex,nofollow">{{end}}
   <link rel="canonical" href="{{.CanonicalURL}}">
+  {{if .IndieAuthMetadataURL}}<link rel="indieauth-metadata" href="{{.IndieAuthMetadataURL}}">
+  <link rel="authorization_endpoint" href="{{.AuthorizationEndpoint}}">
+  <link rel="token_endpoint" href="{{.TokenEndpoint}}">{{end}}
+  {{if .ActorURL}}<link rel="me" href="{{.ActorURL}}">{{end}}
   <link rel="icon" href="/identity-page/assets/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/identity-page/assets/page.css?v=2">
   <script defer src="/identity-page/assets/page.js?v=2"></script>
@@ -20,22 +24,23 @@
   </header>
 
   <main class="page-shell">
-    <article class="identity-card" aria-labelledby="identity-name" data-identity="{{.Identity}}">
+    <article class="identity-card h-card" aria-labelledby="identity-name" data-identity="{{.Identity}}">
       <div class="avatar" aria-hidden="true">
-        {{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}<span>{{.Initial}}</span>{{end}}
+        {{if .AvatarURL}}<img class="u-photo" src="{{.AvatarURL}}" alt="">{{else}}<span>{{.Initial}}</span>{{end}}
       </div>
-      <h1 id="identity-name">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Identity}}{{end}}</h1>
+      <h1 id="identity-name" class="p-name">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Identity}}{{end}}</h1>
+      <data class="u-url u-uid" value="{{.CanonicalURL}}"></data>
       <div class="identity-id">
         <span id="poweur-id">{{.Identity}}</span>
         <button class="copy" type="button" data-copy-id="{{.Identity}}" aria-label="Copy ID" title="Copy ID">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
         </button>
       </div>
-      {{if .Bio}}<p class="bio">{{.Bio}}</p>{{end}}
+      {{if .Bio}}<p class="bio p-note">{{.Bio}}</p>{{end}}
 
       {{if .Links}}
       <nav class="profile-links" aria-label="Profile links">
-        {{range .Links}}<a href="{{.URL}}" rel="ugc noopener noreferrer">{{.Label}}</a>{{end}}
+        {{range .Links}}<a class="u-url" href="{{.URL}}" rel="me noopener noreferrer">{{.Label}}</a>{{end}}
       </nav>
       {{end}}
 

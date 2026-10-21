@@ -278,3 +278,69 @@ func TestIdentityPageOffersSignInAsTheOwner(t *testing.T) {
 		t.Fatalf("page missing the sign-in link: %s", body)
 	}
 }
+
+func TestIdentityPagePublishesHCardAndRelMe(t *testing.T) {
+	s := newIdentityPageServer(t)
+	writePageProfile(t, s, `{"version":1,"display_name":"Alice Example","bio":"Builds things.","avatar":"avatar.png","links":[{"label":"Site","url":"https://alice.example/"},{"label":"Bluesky","url":"https://bsky.app/profile/`+handlesDID+`"}]}`)
+	if err := s.sysFiles.Write(t.Context(), pageIdentity, handlesPath,
+		[]byte(`{"version":1,"atproto_did":"`+handlesDID+`","fediverse_acct":"alice@mastodon.example","fediverse_actor":"https://mastodon.example/users/alice"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	body := pageRequest(t, s, "text/html").Body.String()
+	for _, wanted := range []string{
+		`class="identity-card h-card"`,
+		`<h1 id="identity-name" class="p-name">Alice Example</h1>`,
+		`<data class="u-url u-uid" value="https://alice.poweur.net/"></data>`,
+		`<img class="u-photo" src="/.well-known/poweur/avatar.png"`,
+		`<p class="bio p-note">Builds things.</p>`,
+		`<a class="u-url" href="https://alice.example/" rel="me noopener noreferrer">Site</a>`,
+		`<a class="u-url" href="https://mastodon.example/@alice" rel="me noopener noreferrer">@alice@mastodon.example</a>`,
+		`<link rel="me" href="https://mastodon.example/users/alice">`,
+		`<link rel="indieauth-metadata" href="https://auth.poweur.net/.well-known/oauth-authorization-server">`,
+		`<link rel="authorization_endpoint" href="https://auth.poweur.net/authorize">`,
+		`<link rel="token_endpoint" href="https://auth.poweur.net/token">`,
+	} {
+		if !strings.Contains(body, wanted) {
+			t.Fatalf("page missing %q: %s", wanted, body)
+		}
+	}
+	// The owner already lists the Bluesky profile; the handle adds no duplicate.
+	if n := strings.Count(body, "https://bsky.app/profile/"+handlesDID); n != 1 {
+		t.Fatalf("Bluesky link rendered %d times: %s", n, body)
+	}
+	if strings.Contains(body, "ugc") {
+		t.Fatal("owner-signed profile links must not be marked ugc")
+	}
+}
+
+func TestIdentityPageWithoutBridgeOrHandles(t *testing.T) {
+	s := newIdentityPageServer(t)
+	s.cfg.OAuthBridgeURL = ""
+	body := pageRequest(t, s, "text/html").Body.String()
+	for _, absent := range []string{"indieauth-metadata", "authorization_endpoint", "token_endpoint", `rel="me"`, "bsky.app"} {
+		if strings.Contains(body, absent) {
+			t.Fatalf("page has %q without a bridge or handles: %s", absent, body)
+		}
+	}
+	if !strings.Contains(body, `class="identity-card h-card"`) || !strings.Contains(body, `<h1 id="identity-name" class="p-name">`+pageIdentity+`</h1>`) {
+		t.Fatalf("default page lacks a minimal h-card: %s", body)
+	}
+}
+
+func TestIdentityPageETagFollowsHandles(t *testing.T) {
+	s := newIdentityPageServer(t)
+	writePageProfile(t, s, `{"version":1,"display_name":"Alice"}`)
+	before := pageRequest(t, s, "text/html").Header().Get("ETag")
+	if err := s.sysFiles.Write(t.Context(), pageIdentity, handlesPath,
+		[]byte(`{"version":1,"atproto_did":"`+handlesDID+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	after := pageRequest(t, s, "text/html")
+	if got := after.Header().Get("ETag"); got == before {
+		t.Fatalf("ETag %s unchanged after linking a handle", got)
+	}
+	if !strings.Contains(after.Body.String(), "https://bsky.app/profile/"+handlesDID) {
+		t.Fatalf("linked handle missing: %s", after.Body.String())
+	}
+}
