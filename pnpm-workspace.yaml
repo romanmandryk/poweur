@@ -14,3 +14,11 @@ allowBuilds:
   koffi: false
   openclaw: false
   protobufjs: false
+minimumReleaseAgeExclude:
+  - happy-dom@21.0.4
+overrides:
+  # Security fixes the packages that pull these in do not take yet (docs
+  # build tooling and openclaw's types). Drop each once its parent updates.
+  tinypool: ^2.1.2
+  "@modelcontextprotocol/sdk": ^1.32.0
+  serialize-javascript: ^7.0.3
