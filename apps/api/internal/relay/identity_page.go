@@ -73,11 +73,6 @@ func requestHost(r *http.Request) string {
 	return strings.ToLower(strings.TrimSuffix(host, "."))
 }
 
-func wantsHTML(r *http.Request) bool {
-	accept := strings.ToLower(r.Header.Get("Accept"))
-	return strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json")
-}
-
 // wantsJSON reports whether the caller asked for the root document itself.
 // Every @poweur/client JSON request says so. A browser navigation does not,
 // and neither does a client that sends no Accept header.
