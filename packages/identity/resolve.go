@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -22,8 +23,8 @@ const (
 type Source string
 
 const (
-	SourceWeb Source = "web"
-	SourceDNS Source = "dns"
+	SourceWeb  Source = "web"
+	SourceDNS  Source = "dns"
 	SourceBoth Source = "both"
 )
 
@@ -40,7 +41,9 @@ type ResolveOptions struct {
 	AllowPrivate bool
 	// Timeout for HTTP fetch; default DefaultTimeout.
 	Timeout time.Duration
-	// HTTPClient overrides the client; if nil a safe default is built.
+	// HTTPClient overrides the client; if nil a safe default is built that
+	// refuses redirects and non-public dial addresses (unless AllowPrivate).
+	// A caller that supplies its own client owns that address policy.
 	HTTPClient *http.Client
 	// TXT is optional DNS fallback.
 	TXT TXTLookup
@@ -154,12 +157,6 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 }
 
 func resolveWeb(ctx context.Context, identity string, opts ResolveOptions) (IdentityDocument, error) {
-	if !opts.AllowPrivate {
-		if err := checkIdentityHostSafe(ctx, identity); err != nil {
-			return IdentityDocument{}, err
-		}
-	}
-
 	url := fmt.Sprintf("%s://%s%s", opts.Scheme, identity, WellKnownPath)
 	client := opts.HTTPClient
 	if client == nil {
@@ -243,19 +240,43 @@ func resolveDNS(ctx context.Context, identity string, txt TXTLookup) (IdentityDo
 	return doc, nil
 }
 
+// errPrivateAddress is returned when the dialled address is not on the public
+// internet and the caller did not set AllowPrivate.
+var errPrivateAddress = errors.New("refusing to fetch identity document from a private, loopback or reserved address")
+
+// newSafeHTTPClient is the default client for hosts that someone else chose.
+// The address check runs in the dialer's Control hook, on the socket actually
+// being dialled, so a DNS answer that changes between a check and the
+// connection (DNS rebinding) cannot slip a private address through.
 func newSafeHTTPClient(opts ResolveOptions) *http.Client {
+	allowPrivate := opts.AllowPrivate
+	dialer := &net.Dialer{
+		Timeout: opts.Timeout,
+		Control: func(network, address string, _ syscall.RawConn) error {
+			if allowPrivate {
+				return nil
+			}
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || !publicIP(ip) {
+				return errPrivateAddress
+			}
+			return nil
+		},
+	}
 	transport := &http.Transport{
-		Proxy: nil,
-		DialContext: (&net.Dialer{
-			Timeout: opts.Timeout,
-		}).DialContext,
-		TLSHandshakeTimeout: opts.Timeout,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		// No redirects
-		DisableKeepAlives: true,
+		Proxy:                  nil,
+		DialContext:            dialer.DialContext,
+		TLSHandshakeTimeout:    opts.Timeout,
+		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: 16 * 1024,
 	}
 	return &http.Client{
-		Timeout: opts.Timeout,
+		Timeout:   opts.Timeout,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return errors.New("redirects are not allowed when resolving identity documents")
@@ -263,28 +284,44 @@ func newSafeHTTPClient(opts ResolveOptions) *http.Client {
 	}
 }
 
-func checkIdentityHostSafe(ctx context.Context, identity string) error {
-	host := identity
-	if h, _, err := net.SplitHostPort(identity); err == nil {
-		host = h
+// publicIP reports whether ip is a routable address on the public internet.
+func publicIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() {
+		return false
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		// If we cannot resolve, still attempt fetch — Dial will fail. For SSRF
-		// we only block when we *know* the target is private.
-		return nil
-	}
-	for _, ip := range ips {
-		if isPrivateIP(ip.IP) {
-			return fmt.Errorf("refusing to fetch identity document from private/loopback address")
+	// "This network", carrier-grade NAT, benchmarking, documentation and
+	// reserved ranges are not the public internet either. (IPv4-mapped
+	// addresses need no range of their own: net.IP holds every IPv4 address
+	// in that form, and the checks above already see through it.)
+	for _, cidr := range nonPublicRanges {
+		if cidr.Contains(ip) {
+			return false
 		}
 	}
-	return nil
+	return true
 }
 
-func isPrivateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-		return true
+var nonPublicRanges = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, s := range []string{
+		"0.0.0.0/8",       // "this network"
+		"100.64.0.0/10",   // carrier-grade NAT
+		"192.0.0.0/24",    // IETF protocol assignments
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.18.0.0/15",   // benchmarking
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // reserved, incl. 255.255.255.255
+		"64:ff9b::/96",    // NAT64 (embeds an IPv4 address)
+		"64:ff9b:1::/48",  // local-use NAT64
+		"2001:db8::/32",   // documentation
+	} {
+		_, n, err := net.ParseCIDR(s)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, n)
 	}
-	return false
-}
+	return out
+}()

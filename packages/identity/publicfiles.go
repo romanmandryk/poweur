@@ -63,12 +63,6 @@ func FetchPublicFile(ctx context.Context, identity, wellKnownPath string, opts R
 	if opts.Timeout == 0 {
 		opts.Timeout = DefaultTimeout
 	}
-	if !opts.AllowPrivate {
-		if err := checkIdentityHostSafe(ctx, identity); err != nil {
-			return nil, err
-		}
-	}
-
 	client := opts.HTTPClient
 	if client == nil {
 		client = newSafeHTTPClient(opts)

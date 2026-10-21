@@ -218,8 +218,9 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
     await target.client.setPolicy(INBOX_OPEN, {
       allow: true,
       challenge: ANON_CHALLENGE_POW,
-      // High enough to take more than one solver chunk, so progress is real.
-      pow_bits: 20,
+      // ~4M expected attempts against a 4096-hash chunk, so the solve
+      // reliably spans many chunks and progress is real.
+      pow_bits: 22,
     });
 
     // Progress is what lets a browser show a spinner instead of freezing.
@@ -229,8 +230,13 @@ describe("TypeScript client ↔ real relay (messaging)", () => {
       targetRelayUrl: relay.baseUrl,
       onSolveProgress: (count) => attempts.push(count),
     });
+    // A progress bar needs a positive count that never rewinds; how many
+    // chunks a solve takes is luck, so a one-chunk solve is a real outcome.
     expect(attempts.length).toBeGreaterThan(0);
-    expect(attempts.at(-1)).toBeGreaterThan(attempts[0] ?? 0);
+    expect(attempts[0]).toBeGreaterThan(0);
+    for (let i = 1; i < attempts.length; i++) {
+      expect(attempts[i]!).toBeGreaterThan(attempts[i - 1]!);
+    }
 
     // …and abort is what lets them change their mind about paying the cost.
     // 26 bits so the solve cannot finish by luck before the abort lands.
