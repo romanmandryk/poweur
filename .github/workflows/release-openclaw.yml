@@ -10,6 +10,10 @@ name: Release OpenClaw channel
 #   clawhub package trusted-publisher set @poweur/openclaw-channel \
 #     --repository romanmandryk/poweur --workflow-filename release-openclaw.yml
 # and set the repository variable PUBLISH_CLAWHUB to "true".
+#
+# ClawHub mints trusted-publish tokens for manual runs, not tag pushes, so a tag push
+# publishes to npm and then starts a manual run of this workflow on the same tag, which
+# publishes to ClawHub (npm sees the version is there and skips it).
 on:
   push:
     tags: ["openclaw-v*"]
@@ -23,6 +27,7 @@ on:
 permissions:
   contents: write # the GitHub release
   id-token: write # npm provenance and ClawHub trusted publishing
+  actions: write # a tag push starts the manual run that publishes to ClawHub
 
 concurrency:
   group: release-openclaw
@@ -94,16 +99,25 @@ jobs:
           fi
 
       - name: Publish to ClawHub
-        if: ${{ (github.ref_type == 'tag' || inputs.dry_run == false) && vars.PUBLISH_CLAWHUB == 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && vars.PUBLISH_CLAWHUB == 'true' }}
         working-directory: packages/openclaw-poweur
+        # No --owner: trusted publishes keep the package's owner (poweur).
         run: |
-          npx --yes "$CLAWHUB_CLI" package publish . --owner poweur \
+          npx --yes "$CLAWHUB_CLI" package publish . \
             --source-repo "$GITHUB_REPOSITORY" --source-path packages/openclaw-poweur \
             --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME" \
             --changelog "Release ${{ steps.version.outputs.version }}" --wait --json
+
+      - name: Hand ClawHub over to a manual run on this tag
+        if: ${{ github.event_name == 'push' && vars.PUBLISH_CLAWHUB == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-openclaw.yml --ref "$GITHUB_REF_NAME" -f dry_run=false
 
       - name: GitHub release
         if: ${{ github.ref_type == 'tag' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --title "OpenClaw channel ${{ steps.version.outputs.version }}" --generate-notes
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 ||
+            gh release create "${GITHUB_REF_NAME}" --title "OpenClaw channel ${{ steps.version.outputs.version }}" --generate-notes
