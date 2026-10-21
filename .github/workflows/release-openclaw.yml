@@ -83,7 +83,7 @@ jobs:
           npx --yes "$CLAWHUB_CLI" package validate .
           npx --yes "$CLAWHUB_CLI" package publish . --dry-run \
             --source-repo "$GITHUB_REPOSITORY" --source-path packages/openclaw-poweur \
-            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME"
+            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF"
 
       - name: Publish to npm
         if: ${{ github.ref_type == 'tag' || inputs.dry_run == false }}
@@ -101,11 +101,12 @@ jobs:
       - name: Publish to ClawHub
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && vars.PUBLISH_CLAWHUB == 'true' }}
         working-directory: packages/openclaw-poweur
-        # No --owner: trusted publishes keep the package's owner (poweur).
+        # No --owner: trusted publishes keep the package's owner (poweur). The source
+        # ref is the full ref (refs/tags/…), which ClawHub matches against the token.
         run: |
           npx --yes "$CLAWHUB_CLI" package publish . \
             --source-repo "$GITHUB_REPOSITORY" --source-path packages/openclaw-poweur \
-            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF_NAME" \
+            --source-commit "$GITHUB_SHA" --source-ref "$GITHUB_REF" \
             --changelog "Release ${{ steps.version.outputs.version }}" --wait --json
 
       - name: Hand ClawHub over to a manual run on this tag
