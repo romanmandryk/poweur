@@ -16,7 +16,7 @@
     "@grafana/faro-web-sdk": "^2.12.1"
   },
   "devDependencies": {
-    "esbuild": "^0.21.5",
+    "esbuild": "^0.28.2",
     "typescript": "~5.9.3"
   }
 }
