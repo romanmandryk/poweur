@@ -57,6 +57,26 @@ Individual settings can be overridden via environment variables:
 | Identity subdomain | `IDENTITY` |
 | Keys directory | `KEYS_DIR` |
 | Key-file passphrase | `POWEUR_KEY_PASSPHRASE` |
+| Oldest cached identity to send to (`max_stale`) | `POWEUR_MAX_STALE` |
+
+### Cached identities
+
+Every identity the CLI resolves is kept in `~/.poweur/cache/identities/`, one signed document
+per file. When you send to someone whose website and DNS can't be reached, the CLI encrypts to
+that copy and says so on stderr:
+
+```
+using cached identity for bob.example.org (fetched 3h ago)
+```
+
+The copy is used only for a network error, a timeout or a `5xx`, and only if it was fetched
+within `max_stale` (default 30 days). A `404`, a bad signature or a key mismatch still stops the
+send, and a document older than the cached one is refused. Adding a contact, verifying a shared
+link and other key checks always resolve fresh.
+
+Set the limit with `max_stale = "168h"` in `config.toml`, `POWEUR_MAX_STALE`, or `--max-stale`
+on `send` and `identity lookup`. `0` never uses a cached copy. The files hold public documents
+only and are safe to delete.
 
 ## Global Flags
 
@@ -184,7 +204,9 @@ poweur identity dns alice.poweur.net
 
 Resolve an identity using the **web-first** chain (HTTPS
 `/.well-known/poweur/id.json`, then DNS TXT). Prints source (`web` / `dns` /
-`both`), keys, the safety number, and the relay. Prefer this over `identity dns`
+`both`), keys, the safety number, and the relay. When the identity can't be
+reached and a [cached copy](#cached-identities) exists, the source reads
+`stale (fetched 3h ago)` and `--json` adds `"stale": true` and `fetched_at`. Prefer this over `identity dns`
 for hosted identities that have no per-user TXT records.
 
 It also reads the identity's public self-description from the same well-known
@@ -262,6 +284,8 @@ poweur send bob.example.org "Hey Bob, are you there?"
 ```bash
 poweur send bob.example.org "the logo, v3" --thread thr_rebrand --attach ./logo.png
 ```
+
+If the recipient can't be resolved, the message is encrypted to their [cached identity](#cached-identities) when there is one; with none, the send fails with `no cached identity for …` and nothing is queued, because there is no key to encrypt to.
 
 If the relay reports the session expired, the CLI silently re-registers a session and retries once. Network failures, 429s and 5xx responses queue an identity-signed encrypted envelope with capped exponential backoff; `poweur listen` retries on reconnect and `poweur outbox list|retry` exposes it explicitly. Permanent 4xx responses still write a sticky `failed` entry.
 

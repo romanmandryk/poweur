@@ -115,11 +115,18 @@ export interface IdentityDocument {
   signature?: string;
 }
 
-export type ResolveSource = "web" | "dns" | "both";
+/** `stale`: a stored document, returned because the identity could not be fetched. */
+export type ResolveSource = "web" | "dns" | "both" | "stale";
 
 export interface ResolveResult {
   document: IdentityDocument;
   source: ResolveSource;
+  /** True when the document came from the store because the fetch failed. */
+  stale?: boolean;
+  /** When the document was fetched (ms since the epoch): now for a fresh answer. */
+  fetchedAt?: number;
+  /** The document as served, for signed (web or stored) results. */
+  raw?: string;
 }
 
 export interface IdentityResponse {

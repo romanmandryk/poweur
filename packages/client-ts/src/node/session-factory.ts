@@ -8,7 +8,8 @@ import { PoweurClient } from "../client.js";
 import { signerFor, type StoredIdentityKeys } from "../crypto/keys.js";
 import { PoweurError } from "../errors.js";
 import type { ResolveOptions } from "../resolve.js";
-import { loadConfig, type PoweurConfig } from "./config.js";
+import { configuredMaxStaleMs, loadConfig, type PoweurConfig } from "./config.js";
+import { FileDocumentStore } from "./document-store.js";
 import { dialFetch } from "./dialfetch.js";
 import { deviceHeaders } from "./device.js";
 import { nodeTxtResolver } from "./dns.js";
@@ -65,6 +66,7 @@ export async function openClient(options: OpenOptions = {}): Promise<OpenedClien
     throw new PoweurError("invalid_argument", "relay url not configured");
   }
 
+  const maxStaleMs = configuredMaxStaleMs(config);
   const keyStore = new FileKeyStore(config.keys_dir);
   const keys = await keyStore.load(identity);
   if (!keys) {
@@ -79,6 +81,9 @@ export async function openClient(options: OpenOptions = {}): Promise<OpenedClien
     sessionStore: new FileSessionStore(),
     headers: deviceHeaders(),
     resolve: nodeResolveOptions(options.resolve ?? {}),
+    // The same cache directory and limit as the Go CLI (EPIC-029).
+    documentStore: new FileDocumentStore(),
+    ...(maxStaleMs !== undefined ? { maxStaleMs } : {}),
   });
   return { client, config, keys, keyStore };
 }

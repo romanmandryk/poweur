@@ -22,6 +22,8 @@ const ACTION = "min-h-11 flex-[1_1_40%] px-4 py-3 text-[15px]";
 
 function ContactPanel({ identity, close }: { identity: string; close: () => void }) {
   const contact = useData((state) => contactFor(state.contacts.list, identity));
+  // A saved copy can be read and messaged from, not changed (EPIC-029).
+  const readOnly = useData((state) => state.contacts.saved);
   const petname = useRef<HTMLInputElement>(null);
   if (!contact) return <p className="text-muted">{identity} is no longer in your contacts.</p>;
   const chip = CONTACT_STATE_CHIP[contact.state ?? "accepted"] ?? CONTACT_STATE_CHIP.accepted;
@@ -51,24 +53,30 @@ function ContactPanel({ identity, close }: { identity: string; close: () => void
         <Label htmlFor="cp-petname">Petname</Label>
         <Input ref={petname} id="cp-petname" type="text" defaultValue={contact.petname ?? ""} placeholder="What you call them" autoComplete="off" />
       </FormGroup>
-      <Button id="cp-save-petname" onClick={then(() => void setPetname(identity, petname.current?.value.trim() ?? ""))}>
+      <Button id="cp-save-petname" disabled={readOnly} onClick={then(() => void setPetname(identity, petname.current?.value.trim() ?? ""))}>
         Save petname
       </Button>
+
+      {readOnly && (
+        <p id="cp-read-only" className="mt-3 text-[13px] text-muted">
+          Your relay can’t be reached, so this contact can’t be changed right now.
+        </p>
+      )}
 
       <div className="panel-actions mt-4 flex flex-wrap gap-2">
         <Button id="cp-message" variant="secondary" className={ACTION} onClick={then(() => openThread(identity))}>
           Message
         </Button>
         {contact.state === "blocked" ? (
-          <Button id="cp-unblock" variant="secondary" className={ACTION} onClick={then(() => void acceptContact(identity, { silent: true }))}>
+          <Button id="cp-unblock" disabled={readOnly} variant="secondary" className={ACTION} onClick={then(() => void acceptContact(identity, { silent: true }))}>
             Unblock
           </Button>
         ) : (
-          <Button id="cp-block" variant="secondary" className={ACTION} onClick={then(() => void blockContact(identity))}>
+          <Button id="cp-block" disabled={readOnly} variant="secondary" className={ACTION} onClick={then(() => void blockContact(identity))}>
             Block
           </Button>
         )}
-        <Button id="cp-remove" variant="danger" className={ACTION} onClick={then(() => void removeContact(identity))}>
+        <Button id="cp-remove" disabled={readOnly} variant="danger" className={ACTION} onClick={then(() => void removeContact(identity))}>
           Remove
         </Button>
       </div>

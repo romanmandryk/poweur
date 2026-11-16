@@ -12,7 +12,7 @@
  * it via the vectors in `test/conformance.test.ts`.
  */
 
-export const SDK_VERSION = "0.2.20";
+export const SDK_VERSION = "0.2.21";
 /** UTC `YYYY-MM-DD HH:MM` stamped when this package's patch version is bumped. */
 export const SDK_BUILD_TIME = "2026-10-21 16:15";
 
@@ -31,6 +31,7 @@ export * from "./ids.js";
 export * from "./pow.js";
 export * from "./http.js";
 export * from "./resolve.js";
+export * from "./document-store.js";
 export * from "./identity.js";
 export * from "./session.js";
 export * from "./messages.js";

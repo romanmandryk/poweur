@@ -6,6 +6,7 @@
  *   ~/.poweur/keys/<identity>.enc    X25519 private key (base64, raw std)
  *   ~/.poweur/sessions/<id>.toml     short-lived session record
  *   ~/.poweur/pending/<id>.jsonl     outbound delivery journal
+ *   ~/.poweur/cache/identities/<id>.json  last verified identity document
  *
  * `POWEUR_HOME` overrides the root, which is how the test suite gets an
  * isolated tree without touching the developer's real one.
@@ -33,6 +34,11 @@ export function sessionsDir(): string {
 
 export function journalDir(): string {
   return join(poweurHome(), "pending");
+}
+
+/** Last verified identity documents, shared with the Go CLI (EPIC-029). */
+export function identityCacheDir(): string {
+  return join(poweurHome(), "cache", "identities");
 }
 
 export function signingKeyPath(keysDir: string, identity: string): string {

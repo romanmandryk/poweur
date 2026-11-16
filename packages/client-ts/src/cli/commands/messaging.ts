@@ -161,6 +161,15 @@ export async function send(argv: string[], streams: Streams): Promise<number> {
       ...(flagString(args, "subject") ? { subject: flagString(args, "subject") } : {}),
     });
     messageId.current = result.message.id;
+    if (result.stale) {
+      // The recipient could not be resolved; this went to the last document
+      // that verified for them (EPIC-029). Same line as the Go CLI.
+      streams.stderr(
+        `using cached identity for ${recipient} (fetched ${
+          result.identityFetchedAt ? rfc3339(new Date(result.identityFetchedAt)) : "earlier"
+        })\n`,
+      );
+    }
     // Journal both transitions so `messages status` can render ticks later,
     // even after the relay has dropped its in-memory copy.
     appendJournal({

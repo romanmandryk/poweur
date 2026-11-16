@@ -10,12 +10,17 @@ import { useData, type Contact, type DataFields } from "../state/data";
 import { useSession } from "../state/session";
 import { setLoading, toast } from "../state/ui";
 import { trackAction } from "../lib/observability";
+import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { activeClient, errorMessage, mergeInto, parseMessage } from "./relay";
 
 const setContacts = (patch: Partial<DataFields["contacts"]>) =>
   useData.setState((state) => ({ contacts: { ...state.contacts, ...patch } }));
 const setRequests = (patch: Partial<DataFields["requests"]>) =>
   useData.setState((state) => ({ requests: { ...state.requests, ...patch } }));
+
+/** This device's copy of the contact list (`lib/snapshot`), for when the relay is unreachable. */
+const CONTACTS_SNAPSHOT = "contacts";
+type ContactsSnapshot = { list: Contact[]; syncedAt: number };
 
 let contactsInFlight: Promise<void> | null = null;
 export function loadContacts({ force = false } = {}): Promise<void> {
@@ -33,6 +38,18 @@ async function readContacts({ force = false } = {}) {
   if (!client) return;
 
   setContacts({ loading: true, error: null });
+  const identity = useSession.getState().identity ?? "";
+  // What this device saw last shows at once; the relay's answer follows. The
+  // two run side by side, so a saved copy never delays the relay read.
+  const savedShown =
+    !current.loaded && current.list.length === 0
+      ? loadSnapshot<ContactsSnapshot>(identity, CONTACTS_SNAPSHOT).then((snapshot) => {
+          const now = useData.getState().contacts;
+          if (snapshot && !now.loaded && now.list.length === 0 && useSession.getState().identity === identity) {
+            setContacts({ list: snapshot.list, saved: true, syncedAt: snapshot.syncedAt });
+          }
+        })
+      : Promise.resolve();
   try {
     const contacts = await client.contacts();
     const file = await contacts.load();
@@ -42,9 +59,15 @@ async function readContacts({ force = false } = {}) {
       state: entry.state ?? "accepted",
       pinnedKey: entry.pinned_key ?? null,
     }));
-    setContacts({ list, loaded: true });
+    const syncedAt = Date.now();
+    setContacts({ list, loaded: true, saved: false, syncedAt });
+    // Every write re-reads the list (refreshContacts), so this keeps the
+    // saved copy in step with both reads and writes.
+    void saveSnapshot(identity, CONTACTS_SNAPSHOT, { list, syncedAt } satisfies ContactsSnapshot);
   } catch (error) {
-    setContacts({ error: `Could not read contacts: ${errorMessage(error)}` });
+    // With a saved copy on screen the "last synced" line says what happened.
+    await savedShown;
+    if (!useData.getState().contacts.saved) setContacts({ error: `Could not read contacts: ${errorMessage(error)}` });
   } finally {
     setContacts({ loading: false });
   }
@@ -96,7 +119,7 @@ export function refreshContactsScreen(): Promise<void> {
 
 /** Refresh everything a contact write invalidates. */
 export async function refreshContacts() {
-  setContacts({ loaded: false });
+  setContacts({ loaded: false, saved: false });
   await loadContacts({ force: true });
   if (useData.getState().tray === "requests") await loadRequests({ force: true });
 }

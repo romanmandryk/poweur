@@ -52,6 +52,11 @@ const (
 	// never comes back (EPIC-009 E09-T1). Long enough for a holiday, short
 	// enough that a dead identity is not a permanent storage cost.
 	DefaultSpoolTTL = 30 * 24 * time.Hour
+	// DefaultStaleIdentityMax is how long a sender's last verified identity
+	// document stands in while their web and DNS are unreachable.
+	DefaultStaleIdentityMax = 7 * 24 * time.Hour
+	// DefaultIdentityStoreMax caps the stored sender documents.
+	DefaultIdentityStoreMax = 100000
 	// DefaultMaxStreamsPerIdentity allows a handful of devices without letting
 	// a reconnect loop pin a connection per attempt.
 	DefaultMaxStreamsPerIdentity = 8
@@ -126,9 +131,19 @@ type Config struct {
 	// StreamIdleTimeout closes a push stream after this long regardless of
 	// traffic, so a forgotten tab does not hold a connection forever.
 	// 0 disables the timeout.
-	StreamIdleTimeout    time.Duration
-	MaxAcksPerIdentity   int
-	DataDir              string
+	StreamIdleTimeout  time.Duration
+	MaxAcksPerIdentity int
+	DataDir            string
+	// StaleIdentityMax is how old a stored sender identity document may be
+	// and still verify a message when the sender's web and DNS can't be
+	// reached (EPIC-029). Zero turns the fallback off.
+	StaleIdentityMax time.Duration
+	// IdentityCacheTTL is how long a resolved sender key is reused on the
+	// message path. Zero means five minutes; negative turns the cache off
+	// (tests). Not read from the environment.
+	IdentityCacheTTL time.Duration
+	// IdentityStoreMax caps how many sender documents are kept for it.
+	IdentityStoreMax     int
 	HostedDomains        []string
 	ResolverAllowPrivate bool
 	// RegistrationGate is "open" (default), "invite" or "pow" (EPIC-014:
@@ -404,6 +419,8 @@ func FromEnv() Config {
 		StreamIdleTimeout:             getenvDuration("STREAM_IDLE_TIMEOUT", DefaultStreamIdleTimeout),
 		MaxAcksPerIdentity:            getenvInt("MAX_ACKS_PER_IDENTITY", DefaultMaxAcksPerIdentity),
 		DataDir:                       strings.TrimSpace(os.Getenv("POWEUR_DATA")),
+		StaleIdentityMax:              getenvDuration("RELAY_STALE_IDENTITY_MAX", DefaultStaleIdentityMax),
+		IdentityStoreMax:              getenvInt("RELAY_IDENTITY_STORE_MAX", DefaultIdentityStoreMax),
 		HostedDomains:                 splitCSV(os.Getenv("HOSTED_DOMAINS")),
 		ResolverAllowPrivate:          getenvBool("RESOLVER_ALLOW_PRIVATE"),
 		RegistrationGate:              strings.ToLower(getenv("REGISTRATION_GATE", "open")),

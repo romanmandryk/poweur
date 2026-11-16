@@ -13,7 +13,7 @@
 import { canonicalAck, canonicalMessage } from "./canonical.js";
 import { decryptMessage, encryptMessage } from "./crypto/index.js";
 import type { Decryptor, Signer } from "./crypto/keys.js";
-import { rfc3339 } from "./encoding.js";
+import { rfc3339, stripKeyPrefix } from "./encoding.js";
 import { ChallengeRequiredError, PoweurError, RelayError } from "./errors.js";
 import { RelayClient, type RequestSigning } from "./http.js";
 import { newAckId, newMessageId } from "./ids.js";
@@ -43,6 +43,7 @@ import {
   type InboxMessage,
   type InboxResponse,
   type Message,
+  type ResolveResult,
 } from "./types.js";
 
 export type SignWith = "session" | "identity";
@@ -63,9 +64,18 @@ export interface MessagingOptions {
   client: RelayClient;
   sessions?: SessionManager;
   resolve?: ResolveOptions;
+  /**
+   * How old a stored identity document may be and still be sent to when the
+   * recipient can't be resolved (EPIC-029). It needs `resolve.store`; unset
+   * or zero never sends to a stored document.
+   */
+  maxStaleMs?: number;
   /** Build a client for another relay when sending direct. */
   clientFor?: (relayUrl: string) => RelayClient;
 }
+
+/** Default for `maxStaleMs` where a client sets one: 30 days. */
+export const DEFAULT_MAX_STALE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface SendOptions {
   signWith?: SignWith;
@@ -101,6 +111,13 @@ export interface SendResult {
   targetRelay: string;
   viaHomeRelay: boolean;
   signWith: SignWith;
+  /**
+   * True when the recipient could not be resolved and the message was
+   * encrypted to their stored identity document (EPIC-029).
+   * `identityFetchedAt` is when that document was fetched (ms since the epoch).
+   */
+  stale?: boolean;
+  identityFetchedAt?: number;
 }
 
 /**
@@ -114,6 +131,14 @@ export async function resolveRecipientRelayUrl(
   options: ResolveOptions = {},
 ): Promise<string> {
   const { document } = await resolveIdentity(recipient, options);
+  return relayUrlFromDocument(document, recipient, scheme);
+}
+
+function relayUrlFromDocument(
+  document: { relay?: string },
+  recipient: string,
+  scheme: "http" | "https",
+): string {
   const host = document.relay || recipient;
   if (!host) {
     throw new PoweurError("resolve_failed", "recipient relay host not resolvable");
@@ -145,20 +170,55 @@ export class Messaging {
     return this.#options.clientFor?.(relayUrl) ?? new RelayClient(relayUrl);
   }
 
-  /** Look up the recipient's X25519 key, falling back to the relay's record. */
-  async #recipientEncryptionKey(recipient: string): Promise<string> {
-    const resolved = await resolveEncryptionKey(recipient, this.#options.resolve ?? {});
-    if (resolved) return resolved;
+  /**
+   * Resolver options for sending to someone: the stored document may stand in
+   * during an outage, up to `maxStaleMs` old. Everything else this client
+   * resolves (pinning, sign-in, shares) stays fresh-only.
+   */
+  #sendResolve(): ResolveOptions {
+    const base = this.#options.resolve ?? {};
+    const maxStaleMs = this.#options.maxStaleMs ?? 0;
+    return maxStaleMs > 0 ? { ...base, maxStaleMs } : base;
+  }
+
+  /**
+   * Look up the recipient's X25519 key, falling back to the relay's record.
+   * `resolved` is the identity document when it resolved (fresh or stored).
+   */
+  async #recipientEncryptionKey(
+    recipient: string,
+  ): Promise<{ key: string; resolved: ResolveResult | null }> {
+    let resolved: ResolveResult | null = null;
+    let resolveError: unknown;
+    try {
+      resolved = await resolveIdentity(recipient, this.#sendResolve());
+    } catch (error) {
+      resolveError = error;
+    }
+    if (resolved?.document.encryption_public_key) {
+      return { key: stripKeyPrefix(resolved.document.encryption_public_key), resolved };
+    }
     try {
       const record = await this.client.request<{ encryption_public_key?: string }>({
         method: "GET",
         path: `/identities/${encodeURIComponent(recipient)}`,
       });
       if (record.encryption_public_key) {
-        return record.encryption_public_key.replace(/^x25519:/, "");
+        return { key: record.encryption_public_key.replace(/^x25519:/, ""), resolved };
       }
     } catch {
       // Fall through to the typed error below.
+    }
+    if (resolveError) {
+      // Not "they publish no key": we could not reach them and hold no
+      // stored document, so there is nothing to encrypt to. Never plaintext.
+      throw new PoweurError(
+        "resolve_failed",
+        `no cached identity for ${recipient}; try again when it resolves (${
+          resolveError instanceof Error ? resolveError.message : String(resolveError)
+        })`,
+        { cause: resolveError },
+      );
     }
     throw new PoweurError(
       "not_found",
@@ -197,14 +257,20 @@ export class Messaging {
         `"${options.type}" is not a known system message type (sys.* is reserved; known: ${SYSTEM_MESSAGE_TYPES.join(", ")})`,
       );
     }
-    const recipientKey = await this.#recipientEncryptionKey(recipient);
+    const { key: recipientKey, resolved } = await this.#recipientEncryptionKey(recipient);
     const { payload, encryption } = encryptMessage(recipientKey, plaintext);
 
     const targetRelay =
       options.targetRelayUrl ??
       (options.viaHomeRelay
         ? this.client.relayUrl
-        : await resolveRecipientRelayUrl(recipient, this.#scheme(), this.#options.resolve ?? {}));
+        : resolved
+          ? relayUrlFromDocument(resolved.document, recipient, this.#scheme())
+          : await resolveRecipientRelayUrl(recipient, this.#scheme(), this.#sendResolve()));
+    const staleInfo =
+      resolved?.stale === true
+        ? { stale: true, ...(resolved.fetchedAt !== undefined ? { identityFetchedAt: resolved.fetchedAt } : {}) }
+        : {};
 
     const message: Message = {
       id: newMessageId(),
@@ -283,6 +349,7 @@ export class Messaging {
       targetRelay,
       viaHomeRelay: options.viaHomeRelay === true,
       signWith: mode,
+      ...staleInfo,
     };
   }
 
@@ -413,7 +480,7 @@ export class Messaging {
     const senderRelay = await resolveRecipientRelayUrl(
       message.sender,
       this.#scheme(),
-      this.#options.resolve ?? {},
+      this.#sendResolve(),
     );
     const response = await this.#clientFor(senderRelay).raw({
       method: "POST",

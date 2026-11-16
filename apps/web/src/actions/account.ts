@@ -12,7 +12,11 @@ import { useData } from "../state/data";
 import { forgetAvatar, saveLocalAvatar } from "../state/avatars";
 import { useSession } from "../state/session";
 import { trackAction } from "../lib/observability";
+import { loadSnapshot, saveSnapshot } from "../lib/snapshot";
 import { syncOwnAvatar } from "./avatars";
+
+/** This device's copy of the inbox policy (`lib/snapshot`). */
+const POLICY_SNAPSHOT = "policy";
 
 const activeClient = (): any => {
   const identity = useSession.getState().identity;
@@ -25,12 +29,24 @@ export async function loadPolicy({ force = false } = {}) {
   const client = activeClient();
   if (!client) return;
   useData.setState({ policy: { ...current, loading: true } });
+  const identity = useSession.getState().identity ?? "";
   try {
     const { policy, explicit } = await client.policy();
-    useData.setState({ policy: { doc: policy, explicit, loaded: true, loading: false } });
+    useData.setState({ policy: { doc: policy, explicit, loaded: true, loading: false, saved: false } });
+    void saveSnapshot(identity, POLICY_SNAPSHOT, { policy, explicit });
   } catch (error) {
     console.warn("Policy read failed:", (error as Error).message);
-    useData.setState((state) => ({ policy: { ...state.policy, loading: false } }));
+    // The relay can't be read: fall back to what this device saw last
+    // (EPIC-029), so read receipts and the settings screen keep their answer.
+    const snapshot = useData.getState().policy.doc
+      ? null
+      : await loadSnapshot<{ policy: InboxPolicy; explicit: boolean }>(identity, POLICY_SNAPSHOT);
+    useData.setState((state) => ({
+      policy:
+        snapshot && !state.policy.doc && useSession.getState().identity === identity
+          ? { ...state.policy, doc: snapshot.policy, explicit: snapshot.explicit, saved: true, loading: false }
+          : { ...state.policy, loading: false },
+    }));
   }
 }
 

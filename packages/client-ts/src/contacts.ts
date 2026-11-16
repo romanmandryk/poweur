@@ -91,7 +91,15 @@ export class Contacts {
   readonly #files: SystemFiles;
   readonly #resolve: ResolveOptions;
 
-  constructor(files: SystemFiles, resolveOptions: ResolveOptions = {}) {
+  readonly #maxStaleMs: number;
+
+  /**
+   * `maxStaleMs` lets `checkPin` compare against a stored identity document
+   * when the contact can't be resolved (it needs `resolveOptions.store`).
+   * Pinning a key (`resolvePin`) always resolves fresh.
+   */
+  constructor(files: SystemFiles, resolveOptions: ResolveOptions = {}, maxStaleMs = 0) {
+    this.#maxStaleMs = maxStaleMs;
     this.#files = files;
     this.#resolve = resolveOptions;
   }
@@ -183,7 +191,12 @@ export class Contacts {
     const contact = findContact(file, recipient);
     if (!contact?.pinned_key) return { status: "unpinned" };
 
-    const { document } = await resolveIdentity(recipient, this.#resolve);
+    // A stored document is enough to compare against the pin: the send that
+    // follows encrypts to that same document.
+    const { document } = await resolveIdentity(
+      recipient,
+      this.#maxStaleMs > 0 ? { ...this.#resolve, maxStaleMs: this.#maxStaleMs } : this.#resolve,
+    );
     const pinned = stripKeyPrefix(contact.pinned_key);
     const resolved = stripKeyPrefix(document.public_key);
     if (pinned === resolved) {

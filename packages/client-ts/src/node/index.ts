@@ -12,6 +12,7 @@ export * from "./config.js";
 export * from "./keystore.js";
 export * from "./sessionstore.js";
 export * from "./journal.js";
+export * from "./document-store.js";
 export * from "./dns.js";
 export * from "./dialfetch.js";
 export * from "./toml.js";
