@@ -406,6 +406,7 @@ func (s *Server) validateGroupEnvelope(w http.ResponseWriter, r *http.Request, g
 			"signature verification failed for the envelope addressed to "+msg.Recipient+" (key source: "+source+")")
 		return false
 	}
+	s.rememberSender(msg.Sender, source)
 	if !refuseExpiredEnvelope(w, msg) {
 		return false
 	}

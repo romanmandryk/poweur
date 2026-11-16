@@ -26,7 +26,18 @@ export interface LoadState {
   error: string | null;
 }
 
-export const freshContacts = () => ({ list: [] as Contact[], loading: false, loaded: false, error: null as string | null, filter: "" });
+export const freshContacts = () => ({
+  list: [] as Contact[],
+  loading: false,
+  loaded: false,
+  error: null as string | null,
+  filter: "",
+  /** The list is this device's saved copy: the relay could not be read
+   * (EPIC-029). Shown read-only, with `syncedAt`. */
+  saved: false,
+  /** When the list was last read from the relay (ms since the epoch). */
+  syncedAt: null as number | null,
+});
 export const freshHistory = () => ({
   loading: false,
   loaded: false,
@@ -35,7 +46,14 @@ export const freshHistory = () => ({
 });
 export const freshRequests = () => ({ incoming: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
 export const freshAnon = () => ({ messages: [] as any[], loading: false, loaded: false, error: null as string | null, fetchedAt: 0 });
-export const freshPolicy = () => ({ doc: null as any, explicit: false, loading: false, loaded: false });
+export const freshPolicy = () => ({
+  doc: null as any,
+  explicit: false,
+  loading: false,
+  loaded: false,
+  /** `doc` is this device's saved copy: the relay could not be read. */
+  saved: false,
+});
 export const freshEmail = () => ({
   enabled: false,
   address: null as string | null,

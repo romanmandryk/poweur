@@ -26,6 +26,9 @@ const (
 	SourceWeb  Source = "web"
 	SourceDNS  Source = "dns"
 	SourceBoth Source = "both"
+	// SourceStale is a document from the Store, returned because the
+	// identity could not be fetched (EPIC-029).
+	SourceStale Source = "stale"
 )
 
 // TXTLookup looks up DNS TXT records (injectable for tests).
@@ -58,12 +61,52 @@ type ResolveOptions struct {
 	CacheTTL time.Duration
 	// SkipMovedTo disables following moved_to (used when already following once).
 	SkipMovedTo bool
+	// Store, when set, keeps the last verified signed document per identity
+	// (EPIC-029). Every successful web fetch is written to it, and a fetched
+	// document older than the stored one is refused with ErrDocumentRollback.
+	Store Store
+	// MaxStale is how old a stored document may be and still be returned when
+	// the fetch fails for a reason that says nothing about the identity
+	// (network error, timeout, 5xx). Zero never returns a stored document:
+	// registration, rotation and sign-in verification leave it at zero.
+	MaxStale time.Duration
+	// Now overrides the clock (tests).
+	Now func() time.Time
 }
 
 // Result is a verified identity document plus resolution metadata.
 type Result struct {
 	Document IdentityDocument
 	Source   Source
+	// Stale is true when the document came from the Store because the
+	// identity could not be fetched. FetchedAt is then when it was fetched.
+	Stale bool
+	// FetchedAt is when the document was fetched: now for a fresh answer.
+	FetchedAt time.Time
+	// Raw is the document as served, for signed (web or stored) results.
+	Raw []byte
+}
+
+// staleCacheTTL is how long a stale result stays in the in-memory cache, so a
+// dead host is retried about once a minute instead of on every call.
+const staleCacheTTL = time.Minute
+
+// fetchError marks a failure to fetch a document. Transient ones (the host
+// could not be reached, timed out or answered 5xx) say nothing about the
+// identity, so a stored document may stand in. Anything else (not found, a
+// bad signature, the wrong identity, a refused address or redirect) is an
+// answer, and the store never hides it.
+type fetchError struct {
+	err       error
+	transient bool
+}
+
+func (e *fetchError) Error() string { return e.err.Error() }
+func (e *fetchError) Unwrap() error { return e.err }
+
+func isTransient(err error) bool {
+	var fe *fetchError
+	return errors.As(err, &fe) && fe.transient
 }
 
 // Resolve fetches and verifies an identity document (web-first, then DNS).
@@ -81,16 +124,20 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 	if opts.CacheTTL == 0 {
 		opts.CacheTTL = 5 * time.Minute
 	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
 	if cached, ok := opts.Cache.Get(identity); ok {
 		return cached, nil
 	}
 
 	var webDoc *IdentityDocument
+	var webRaw []byte
 	var webErr error
 	if !opts.SkipWeb {
-		doc, err := resolveWeb(ctx, identity, opts)
+		doc, raw, err := resolveWeb(ctx, identity, opts)
 		if err == nil {
-			webDoc = &doc
+			webDoc, webRaw = &doc, raw
 		} else {
 			webErr = err
 		}
@@ -107,17 +154,36 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 		}
 	}
 
+	// A stored document may stand in only when the web fetch was tried and
+	// failed transiently.
+	var stale *Result
+	if webDoc == nil && isTransient(webErr) {
+		if res, ok := loadStale(identity, opts); ok {
+			stale = &res
+		}
+	}
+
 	var result Result
 	switch {
 	case webDoc != nil && dnsDoc != nil:
 		if NormalizePublicKeyKey(webDoc.PublicKey) != NormalizePublicKeyKey(dnsDoc.PublicKey) {
 			return Result{}, errors.New("identity key mismatch between web and DNS sources")
 		}
-		result = Result{Document: *webDoc, Source: SourceBoth}
+		result = Result{Document: *webDoc, Source: SourceBoth, Raw: webRaw}
 	case webDoc != nil:
-		result = Result{Document: *webDoc, Source: SourceWeb}
+		result = Result{Document: *webDoc, Source: SourceWeb, Raw: webRaw}
 	case dnsDoc != nil:
-		result = Result{Document: *dnsDoc, Source: SourceDNS}
+		// DNS answered with a key only. When it is the key of the stored
+		// signed document, that document says more (encryption key, relay)
+		// and DNS has just confirmed it. A different key is a fresh answer
+		// and wins, as it did before there was a store.
+		if stale != nil && NormalizePublicKeyKey(stale.Document.PublicKey) == NormalizePublicKeyKey(dnsDoc.PublicKey) {
+			result = *stale
+		} else {
+			result = Result{Document: *dnsDoc, Source: SourceDNS}
+		}
+	case stale != nil:
+		result = *stale
 	default:
 		if webErr != nil && dnsErr != nil {
 			return Result{}, fmt.Errorf("identity not found: web: %v; dns: %v", webErr, dnsErr)
@@ -130,7 +196,24 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 		}
 		return Result{}, errors.New("identity not found")
 	}
-	// Follow hosted migration tombstone once (no chains).
+
+	if !result.Stale {
+		// Whole seconds, which is what a file store keeps.
+		result.FetchedAt = opts.Now().UTC().Truncate(time.Second)
+		// Only signed documents are stored: a DNS-only result is unsigned.
+		if opts.Store != nil && webDoc != nil {
+			if stored, ok := opts.Store.Get(identity); ok {
+				if prev, err := ParseDocument(stored.Raw, true); err == nil && documentOlder(*webDoc, prev) {
+					return Result{}, fmt.Errorf("%w (%s)", ErrDocumentRollback, identity)
+				}
+			}
+			// Best effort: a full disk must not turn a good answer into an error.
+			_ = opts.Store.Put(identity, webRaw, result.FetchedAt)
+		}
+	}
+
+	// Follow hosted migration tombstone once (no chains). The target is
+	// stored under its own name; this identity keeps its tombstone.
 	if !opts.SkipMovedTo && result.Document.MovedTo != "" {
 		target := strings.ToLower(strings.TrimSpace(result.Document.MovedTo))
 		if target != "" && target != identity {
@@ -145,6 +228,9 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 				Cache:        opts.Cache,
 				CacheTTL:     opts.CacheTTL,
 				SkipMovedTo:  true,
+				Store:        opts.Store,
+				MaxStale:     opts.MaxStale,
+				Now:          opts.Now,
 			})
 			if err == nil {
 				result = followed
@@ -152,11 +238,41 @@ func Resolve(ctx context.Context, identity string, opts ResolveOptions) (Result,
 		}
 	}
 
-	opts.Cache.Put(identity, result, opts.CacheTTL)
+	ttl := opts.CacheTTL
+	if result.Stale && ttl > staleCacheTTL {
+		ttl = staleCacheTTL
+	}
+	opts.Cache.Put(identity, result, ttl)
 	return result, nil
 }
 
-func resolveWeb(ctx context.Context, identity string, opts ResolveOptions) (IdentityDocument, error) {
+// loadStale returns the stored document for identity when there is one, it
+// still verifies, and it is no older than opts.MaxStale.
+func loadStale(identity string, opts ResolveOptions) (Result, bool) {
+	if opts.Store == nil || opts.MaxStale <= 0 {
+		return Result{}, false
+	}
+	stored, ok := opts.Store.Get(identity)
+	if !ok || opts.Now().Sub(stored.FetchedAt) > opts.MaxStale {
+		return Result{}, false
+	}
+	// Verified again on the way out, so a file changed on disk is not trusted.
+	doc, err := ParseDocument(stored.Raw, true)
+	if err != nil || !strings.EqualFold(doc.Identity, identity) {
+		return Result{}, false
+	}
+	return Result{Document: doc, Source: SourceStale, Stale: true, FetchedAt: stored.FetchedAt, Raw: stored.Raw}, true
+}
+
+// documentOlder reports whether fresh was signed before prev. Timestamps that
+// don't parse are not compared.
+func documentOlder(fresh, prev IdentityDocument) bool {
+	a, errA := time.Parse(time.RFC3339, fresh.UpdatedAt)
+	b, errB := time.Parse(time.RFC3339, prev.UpdatedAt)
+	return errA == nil && errB == nil && a.Before(b)
+}
+
+func resolveWeb(ctx context.Context, identity string, opts ResolveOptions) (IdentityDocument, []byte, error) {
 	url := fmt.Sprintf("%s://%s%s", opts.Scheme, identity, WellKnownPath)
 	client := opts.HTTPClient
 	if client == nil {
@@ -165,34 +281,41 @@ func resolveWeb(ctx context.Context, identity string, opts ResolveOptions) (Iden
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return IdentityDocument{}, err
+		return IdentityDocument{}, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return IdentityDocument{}, err
+		// A refused redirect comes back with the 3xx response attached: the
+		// host is up and answered. So did a host we refused to dial, and a
+		// caller that gave up.
+		transient := resp == nil && !errors.Is(err, errPrivateAddress) && !errors.Is(err, context.Canceled)
+		return IdentityDocument{}, nil, &fetchError{err: err, transient: transient}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return IdentityDocument{}, fmt.Errorf("well-known returned %d", resp.StatusCode)
+		return IdentityDocument{}, nil, &fetchError{
+			err:       fmt.Errorf("well-known returned %d", resp.StatusCode),
+			transient: resp.StatusCode >= 500,
+		}
 	}
 	limited := io.LimitReader(resp.Body, MaxDocumentBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return IdentityDocument{}, err
+		return IdentityDocument{}, nil, &fetchError{err: err, transient: !errors.Is(err, context.Canceled)}
 	}
 	if len(body) > MaxDocumentBytes {
-		return IdentityDocument{}, errors.New("identity document exceeds 16KB")
+		return IdentityDocument{}, nil, errors.New("identity document exceeds 16KB")
 	}
 	doc, err := ParseDocument(body, true)
 	if err != nil {
-		return IdentityDocument{}, err
+		return IdentityDocument{}, nil, err
 	}
 	if !strings.EqualFold(doc.Identity, identity) {
-		return IdentityDocument{}, errors.New("document identity does not match requested identity")
+		return IdentityDocument{}, nil, errors.New("document identity does not match requested identity")
 	}
-	return doc, nil
+	return doc, body, nil
 }
 
 func resolveDNS(ctx context.Context, identity string, txt TXTLookup) (IdentityDocument, error) {

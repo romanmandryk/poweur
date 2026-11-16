@@ -13,7 +13,7 @@
  */
 
 import { PoweurClient, IdentityApi, ResolveCache, resolveIdentity, toBase64url } from "@poweur/client";
-import { dohTxtResolver } from "@poweur/client/browser";
+import { dohTxtResolver, IndexedDbDocumentStore } from "@poweur/client/browser";
 
 import { describeThisDevice, deviceHeadersFor } from "./devices.js";
 import {
@@ -23,6 +23,14 @@ import { JwkDecryptor, WebCryptoSigner } from "./vault.js";
 
 /** Shared across every client so one lookup serves the whole session. */
 const resolveCache = new ResolveCache();
+
+/**
+ * The last verified identity document of everyone this device has resolved
+ * (EPIC-029). When a contact's own host can't be reached, a message to them
+ * is still encrypted to this copy. Identity documents are public, so it is
+ * shared between the identities on this device and needs no unlock.
+ */
+const documentStore = new IndexedDbDocumentStore();
 
 /** DNS-over-HTTPS is the only DNS a browser has; the web path is tried first. */
 const txt = dohTxtResolver();
@@ -90,6 +98,7 @@ export function clientFor(identity) {
     decryptor: keyPair.decryptor,
     sessionStore: new BrowserSessionStore(),
     resolve: resolveOptions(relayUrl),
+    documentStore,
   });
   cachedClient = { keys, identity, relayUrl, enrollmentId, client };
   return client;

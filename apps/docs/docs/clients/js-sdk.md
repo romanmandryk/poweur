@@ -202,11 +202,39 @@ Every failure is a `PoweurError` with a `code` you can branch on, rather than a
 message you have to match:
 
 `invalid_argument`, `invalid_signature`, `invalid_document`, `key_mismatch`,
-`not_found`, `resolve_failed`, `relay_error`, `session_expired`,
+`not_found`, `resolve_failed`, `document_rollback`, `relay_error`, `session_expired`,
 `challenge_required`, `decrypt_failed`, `policy_rejected`, `unsupported`.
 
 `RelayError` adds `status` and the relay's own `error` code;
 `ChallengeRequiredError` carries the challenge envelope from a 428.
+
+## When an identity can't be reached
+
+Give the client a `documentStore` and it keeps the last verified identity document of everyone
+it resolves:
+
+```ts
+import { PoweurClient } from "@poweur/client";
+import { IndexedDbDocumentStore } from "@poweur/client/browser"; // FileDocumentStore from /node
+
+const client = new PoweurClient({ relayUrl, signer, documentStore: new IndexedDbDocumentStore() });
+const sent = await client.send("bob.example.org", "hello");
+if (sent.stale) console.log("sent to the saved identity, fetched", new Date(sent.identityFetchedAt!));
+```
+
+- `send` (and the pin check before it) falls back to the stored document when the recipient's
+  web and DNS fail with a network error, a timeout or a `5xx`, if it is no older than
+  `maxStaleMs` (default 30 days; `0` turns the fallback off). The result carries `stale: true`.
+- With nothing stored, `send` throws `resolve_failed` (`no cached identity for …`). It never
+  sends plaintext.
+- A `404`, a bad signature or a key mismatch is never covered by the store, and a fetched
+  document older than the stored one throws `document_rollback`.
+- Everything else the client resolves (pinning a contact, sign-in, shares) stays fresh-only.
+- `openClient()` in `@poweur/client/node` sets this up for you, with the same files
+  (`~/.poweur/cache/identities/`) and the same `max_stale` setting as the Go CLI.
+
+`resolveIdentity(name, { store, maxStaleMs })` gives the same behaviour without a client;
+`MemoryDocumentStore` is there for tests.
 
 ## Fail-closed behaviour
 

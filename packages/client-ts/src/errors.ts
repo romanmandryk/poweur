@@ -12,6 +12,7 @@ export type PoweurErrorCode =
   | "invalid_code"
   | "not_found"
   | "resolve_failed"
+  | "document_rollback"
   | "relay_error"
   | "session_expired"
   | "challenge_required"

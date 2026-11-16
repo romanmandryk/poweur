@@ -1,6 +1,6 @@
 # EPIC-029 — Relay & DNS outage resilience: cached identities, backup mailboxes
 
-- **Status:** proposed 2026-10-16
+- **Status:** in progress (T1, T2 done 2026-11-13; T3, T4 done 2026-11-16); proposed 2026-10-16
 - **Priority:** P1 (a single relay or DNS outage today stops all messaging for every ID it hosts)
 - **Depends on:** EPIC-001 (web-first resolution), EPIC-002 (relay registration and storage),
   EPIC-007 (contacts, pinned keys, inbox policy), EPIC-009 (outbox, delivery acks, Web Push),
@@ -15,10 +15,10 @@
 | Task | Status | Notes |
 |------|--------|-------|
 | **Tier 0 — survive with what clients already know** | | |
-| E29-T1 Last-known-good identity store (Go + TS) | open | `packages/identity` + `packages/client-ts`; stale-if-error, rollback guard |
-| E29-T2 Relay: cache sender key resolution | open | `resolveIdentityPublicKey` resolves on every message today |
-| E29-T3 CLI: send from cache; queue instead of failing on resolve errors | open | |
-| E29-T4 SDK + web: persistent identity cache and contacts snapshot | open | |
+| E29-T1 Last-known-good identity store (Go + TS) | done 2026-11-13 | `packages/identity/store.go`, `client-ts` `document-store.ts`; shared vectors `resolve-store.json`. Not yet passed in by the CLI, SDK client or web (T3, T4) |
+| E29-T2 Relay: cache sender key resolution | done 2026-11-13 | relay 0.2.26; message path only (`resolveSenderPublicKey`); in-memory store on a relay without `POWEUR_DATA` |
+| E29-T3 CLI: send from cache; queue instead of failing on resolve errors | done 2026-11-16 | CLI 0.2.14; `~/.poweur/cache/identities/`, `--max-stale`, `max_stale`, `POWEUR_MAX_STALE` |
+| E29-T4 SDK + web: persistent identity cache and contacts snapshot | done 2026-11-16 | SDK 0.2.21, web 0.2.35; Playwright journey `outage.spec.js` passes |
 | E29-T5 Web: installed app opens offline | open | `sw.js` caches nothing today |
 | E29-T6 Connectivity state in every client | open | |
 | **Tier 1 — more than one relay per identity** | | |
@@ -267,23 +267,41 @@ account). Otherwise the backup shares the failure it is meant to cover.
 
 `packages/identity` and `packages/client-ts`; behaviour per D1.
 
-- [ ] Go: `Store` interface (`Get(identity) (StoredDocument, bool)`, `Put(identity, raw []byte, fetchedAt)`),
+- [x] Go: `Store` interface (`Get(identity) (StoredDocument, bool)`, `Put(identity, raw []byte, fetchedAt)`),
       a file implementation (one JSON file per identity under a directory, atomic rename, 0600)
       and an in-memory one for tests. `StoredDocument` keeps the **raw verified bytes**, so
       unknown fields (the future `relay_set`) survive.
-- [ ] `ResolveOptions.Store`, `ResolveOptions.MaxStale`; `Result.Stale`, `Result.FetchedAt`.
-- [ ] Classify fetch errors: only transport errors, timeouts and `5xx` allow the stale fallback.
+- [x] `ResolveOptions.Store`, `ResolveOptions.MaxStale`; `Result.Stale`, `Result.FetchedAt`.
+- [x] Classify fetch errors: only transport errors, timeouts and `5xx` allow the stale fallback.
       `404`, a key mismatch, a bad signature or an identity mismatch never do.
-- [ ] Rollback guard: a fresh document with an older `updated_at` than the stored one →
+- [x] Rollback guard: a fresh document with an older `updated_at` than the stored one →
       `ErrDocumentRollback`; the stored one is kept.
-- [ ] Never store DNS-only (unsigned) results.
-- [ ] `moved_to`: store the target's document under the target name; the source keeps its
+- [x] Never store DNS-only (unsigned) results.
+- [x] `moved_to`: store the target's document under the target name; the source keeps its
       tombstone.
-- [ ] TS twin in `resolve.ts`: `DocumentStore` interface, in-memory implementation, and
+- [x] TS twin in `resolve.ts`: `DocumentStore` interface, in-memory implementation, and
       `IndexedDbDocumentStore` under `src/browser` (falls back to memory when IndexedDB is
       unavailable or throws). Node file store under `src/node`.
-- [ ] Shared test vectors in `packages/identity/testdata` covering each branch: fresh, stale
+- [x] Shared test vectors in `packages/identity/testdata` covering each branch: fresh, stale
       allowed, stale too old, 404 not stale-able, key mismatch not stale-able, rollback.
+
+Implementation notes (2026-11-13):
+
+- `Result.Source` is `stale` for a stored document, and `Result.Raw` carries the bytes as served.
+  A stored document is verified again each time it is read.
+- When the web fetch fails transiently but DNS answers with the **same key** as the stored
+  document, the stored (signed, fuller) document is returned as stale. A different key from DNS
+  is a fresh answer and wins, as before.
+- A stale result is cached in memory for one minute, so a dead host is retried about once a
+  minute. The in-memory cache is now capped at 10 000 entries.
+- `ReadOnlyStore` lets a caller fall back and apply the rollback guard without writing (the
+  relay stores only after a signature verifies, T2).
+- A refused redirect, a refused private address and a cancelled call are not outages in Go. In
+  TS, `fetch` can't tell a refused redirect from a dead host, so there it counts as an outage.
+- TS with a `relayUrl` candidate (browser): the identity's own host decides. If it is
+  unreachable, a `404` from the relay candidate doesn't cancel the outage; a document from it
+  that fails verification does.
+- The Node file store writes the same files as Go (`~/.poweur/cache/identities/<id>.json`).
 
 **Acceptance:** Go and TS pass the same vectors; with the web endpoint and DNS both failing, a
 previously resolved ID resolves with `stale: true`; with a valid fresh answer the stale one is
@@ -293,18 +311,31 @@ never returned.
 
 `apps/api/internal/relay/server.go`.
 
-- [ ] `resolveIdentityPublicKey` uses an `idpkg.Cache` (5 min) and a file `Store` under
+- [x] `resolveIdentityPublicKey` uses an `idpkg.Cache` (5 min) and a file `Store` under
       `POWEUR_DATA/cache/identities/`, with `MaxStale = RELAY_STALE_IDENTITY_MAX` (default
       `168h`; `0` disables).
-- [ ] `acceptSessionProof` and every other resolve on the message path go through the same
+- [x] `acceptSessionProof` and every other resolve on the message path go through the same
       function.
-- [ ] Bounded size: LRU or a cap on entries (`RELAY_IDENTITY_STORE_MAX`, default 100k) with
+- [x] Bounded size: LRU or a cap on entries (`RELAY_IDENTITY_STORE_MAX`, default 100k) with
       eviction of the oldest `fetched_at`, so spoofed sender names can't fill the disk. Store only
       after the message signature verified against the resolved key.
-- [ ] Metric and event: `identity.resolve` with `source=fresh|cache|stale|failed`.
-- [ ] Config documented in `apps/docs/docs/relay/configuration.md`.
-- [ ] Unit tests: stale used on resolver failure, not used past max age, not stored before
+- [x] Metric and event: `identity.resolve` with `source=fresh|cache|stale|failed`.
+- [x] Config documented in `apps/docs/docs/relay/configuration.md`.
+- [x] Unit tests: stale used on resolver failure, not used past max age, not stored before
       signature verification.
+
+Implementation notes (2026-11-13):
+
+- The cache and the stale fallback are on the **message path only**: `resolveSenderPublicKey`,
+  used by `resolveSigningKey` (messages, acks, group messages, group management) and
+  `acceptSessionProof`. `resolveIdentityPublicKey` (session creation, drive access, policy,
+  abuse reports) still resolves fresh every time and never uses a stored document.
+- Without `POWEUR_DATA` (an S3 relay) the store is in memory, so the fallback lasts until a
+  restart. Keeping it in the object store instead is open; decide before relying on it in
+  production.
+- The event is `identity.resolve` with outcome `fresh|cache|stale|failed`.
+- Tests: `apps/api/internal/relay/identity_stale_test.go`,
+  `apps/integration/resilience_test.go` (`TestINT_E29_T2_*`).
 
 **Acceptance:** an integration test where the sender's relay goes down after one successful
 message: a second identity-signed message (from the outbox) is still accepted by the recipient
@@ -314,20 +345,38 @@ relay within the stale window. Relay patch bump.
 
 `apps/cli`.
 
-- [ ] `identity.ResolveIdentity` uses a file store at `~/.poweur/cache/identities/`
+- [x] `identity.ResolveIdentity` uses a file store at `~/.poweur/cache/identities/`
       (`MaxStale` 30 days, `--max-stale` and config `max_stale` to change it).
-- [ ] Send path: if the recipient can't be resolved fresh but a stale document exists, encrypt
+- [x] Send path: if the recipient can't be resolved fresh but a stale document exists, encrypt
       to its `encryption_public_key`, print `using cached identity for <id> (fetched <ago>)` to
       stderr, and continue.
-- [ ] If neither fresh nor stored resolution works **for an accepted contact**, the send
+- [x] If neither fresh nor stored resolution works **for an accepted contact**, the send
       can't encrypt, so it fails with a clear message (`no cached identity for …; try again
       when it resolves`). It is not queued as plaintext.
-- [ ] Outbox: a transport failure on the resolved relay URL queues (as today); retry
+- [x] Outbox: a transport failure on the resolved relay URL queues (as today); retry
       re-resolves with the store, so a stale document still produces a target.
 - [ ] Inbox: verifying a received message's sender uses the store too (pinned contacts first,
-      as today).
-- [ ] `poweur resolve <id>` prints `source: web|dns|both|stale (fetched …)`.
-- [ ] Unit tests for each path; integration covered in T16.
+      as today). **Not applicable today:** the Go CLI does not verify sender signatures on
+      `inbox` (the relay does), so there is no resolve to change. Left unchecked rather than
+      claimed.
+- [x] `poweur resolve <id>` prints `source: web|dns|both|stale (fetched …)`.
+- [x] Unit tests for each path; integration covered in T16.
+
+Implementation notes (2026-11-16):
+
+- The command is `poweur identity lookup` (there is no `poweur resolve`); it prints
+  `source: stale (fetched 3h ago)` and `--json` adds `stale` and `fetched_at`.
+- Only sending falls back to the cache: `LookupEncryptionKey` (direct, group, email and
+  anonymous sends) and the pin check before a send, through `ResolveIdentityCached`.
+  `ResolveIdentity` (adding a contact, shares, group keys, blocklists) writes the cache but
+  never reads it.
+- `max_stale` order: `--max-stale` (on `send` and `identity lookup`), `POWEUR_MAX_STALE`,
+  `max_stale` in `config.toml`, then 30 days. The TS CLI reads and keeps the same key.
+- The outbox needed no change: the Go CLI derives the target from DNS hosts or the identity
+  name, not from `document.relay`, so a queued entry always has a target. Using the cached
+  document's `relay` as an alternate target is delivery failover, **left to T12**.
+- Tests: `apps/cli/internal/identity/resolve_cache_test.go`,
+  `apps/cli/internal/cli/maxstale_test.go`, `TestINT_E29_T3_SendFromCachedIdentity`.
 
 **Acceptance:** with fake DNS failing for `bob`'s name, `poweur send bob …` to a contact resolved
 last week encrypts and queues; after DNS returns, `poweur outbox retry` delivers it. CLI patch bump.
@@ -336,17 +385,38 @@ last week encrypts and queues; after DNS returns, `poweur outbox retry` delivers
 
 `packages/client-ts`, `apps/web`.
 
-- [ ] `PoweurClient` accepts a `documentStore`. The browser entry point defaults to
+- [x] `PoweurClient` accepts a `documentStore`. The browser entry point defaults to
       `IndexedDbDocumentStore`, Node to the file store.
-- [ ] `Messaging` send path matches T3: stale documents allowed, with a `stale` flag on the
+- [x] `Messaging` send path matches T3: stale documents allowed, with a `stale` flag on the
       result.
-- [ ] The web app keeps a local copy of `contacts.json` and `inbox-policy.json` per identity
+- [x] The web app keeps a local copy of `contacts.json` and `inbox-policy.json` per identity
       (check what `lib/snapshot.ts` already holds and extend it rather than adding a second
       cache), refreshed whenever the drive copy is read or written. Offline, the contacts screen
       shows the local copy read-only, with a "last synced" line.
-- [ ] `lib/outbox.js`: retry re-resolves through the store. Entries survive reloads (already
-      `localStorage`); add `relay_set` and the index reached once T12 lands.
-- [ ] Unit tests (Vitest) for the store fallbacks and the snapshot.
+- [x] `lib/outbox.js`: retry re-resolves through the store. Entries survive reloads (already
+      `localStorage`). Adding `relay_set` and the index reached is **deferred to T12**.
+- [x] Unit tests (Vitest) for the store fallbacks and the snapshot.
+
+Implementation notes (2026-11-16):
+
+- `PoweurClient` takes `documentStore` and `maxStaleMs` (default 30 days). The store rides on
+  every resolve the client makes; the stale limit is handed only to `Messaging.send`, acks and
+  `Contacts.checkPin`. There is no runtime detection in the core client: the web app passes
+  `IndexedDbDocumentStore`, and `openClient()` in `@poweur/client/node` passes
+  `FileDocumentStore` (the Go CLI's files and `max_stale`).
+- `SendResult` carries `stale` and `identityFetchedAt`. `send` resolves the recipient once
+  instead of twice.
+- With nothing stored and the recipient unreachable, `send` throws `resolve_failed`
+  (`no cached identity for …`). The web app still queues that message (encrypted to the
+  user's own key, as before) and retries it.
+- Web: contacts and inbox policy are saved with `lib/snapshot.ts` (names `contacts`,
+  `policy`) on every successful read; contact writes re-read, so they are covered. When the
+  relay can't be read the contacts screen shows the saved copy with a "last synced" line, Add
+  and the contact panel's edit buttons are disabled, and messaging still works.
+- The web app does not yet show that a message went to a saved identity (the `stale` flag is
+  not surfaced): that is the `stale_contact` marker in **T6**.
+- Tests: `packages/client-ts/test/send-stale.test.ts`,
+  `apps/web/test/screens/contacts-saved.test.tsx`, `apps/web/test/e2e/outage.spec.js`.
 
 **Acceptance:** in a Playwright run with every network request to the contact's host blocked, a
 user who has messaged that contact before can compose and queue a message, which delivers when

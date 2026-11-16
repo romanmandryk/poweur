@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/poweur/cli/internal/config"
 	idpkg "github.com/poweur/identity"
 )
 
@@ -142,11 +144,26 @@ func LookupDNS(ctx context.Context, identity string) (DNSStatus, error) {
 // Resolution is web-first (/.well-known/poweur/id.json) then DNS TXT for the
 // full identity document; if that fails, falls back to `_poweur-enc` TXT only.
 func LookupEncryptionKey(ctx context.Context, identityName string) ([]byte, error) {
-	res, err := ResolveIdentity(ctx, identityName)
-	if err == nil && res.Document.EncryptionPublicKey != "" {
-		return idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
+	key, _, err := LookupEncryptionKeyCached(ctx, identityName)
+	return key, err
+}
+
+// LookupEncryptionKeyCached is LookupEncryptionKey that also returns how the
+// identity resolved, so a caller can tell the user when the key came from a
+// cached document (res.Stale). When the identity can't be resolved at all and
+// nothing is cached, the error says so, instead of the caller concluding
+// that the recipient publishes no encryption key.
+func LookupEncryptionKeyCached(ctx context.Context, identityName string) ([]byte, idpkg.Result, error) {
+	res, resolveErr := ResolveIdentityCached(ctx, identityName)
+	if resolveErr == nil && res.Document.EncryptionPublicKey != "" {
+		key, err := idpkg.ParseX25519PublicKey(res.Document.EncryptionPublicKey)
+		return key, res, err
 	}
-	return lookupEncryptionKeyDNS(ctx, identityName)
+	key, err := lookupEncryptionKeyDNS(ctx, identityName)
+	if resolveErr != nil && len(key) == 0 {
+		return nil, idpkg.Result{}, fmt.Errorf("no cached identity for %s; try again when it resolves (%w)", identityName, resolveErr)
+	}
+	return key, res, err
 }
 
 func lookupEncryptionKeyDNS(ctx context.Context, identityName string) ([]byte, error) {
@@ -175,11 +192,53 @@ func lookupEncryptionKeyDNS(ctx context.Context, identityName string) ([]byte, e
 	return nil, nil
 }
 
-// ResolveIdentity resolves via the shared web-first resolver chain.
+// ResolveIdentity resolves via the shared web-first resolver chain. The
+// answer is always fresh: pinning a contact, verifying a share or a group
+// never acts on a cached document. Every verified document it fetches is
+// written to the identity cache.
 func ResolveIdentity(ctx context.Context, identityName string) (idpkg.Result, error) {
 	opts := resolveOptions()
 	opts.TXT = txtAdapter{}
 	return idpkg.Resolve(ctx, identityName, opts)
+}
+
+// ResolveIdentityCached is ResolveIdentity for sending to someone already
+// resolved before (EPIC-029 E29-T3): when their web and DNS can't be reached
+// it returns the cached document, marked Stale, if it is no older than
+// MaxStale. A "not found", a bad signature or a key mismatch is still an error.
+func ResolveIdentityCached(ctx context.Context, identityName string) (idpkg.Result, error) {
+	opts := resolveOptions()
+	opts.TXT = txtAdapter{}
+	opts.MaxStale = maxStale
+	return idpkg.Resolve(ctx, identityName, opts)
+}
+
+// DefaultMaxStale is how old a cached identity document may be and still be
+// used to send.
+const DefaultMaxStale = 30 * 24 * time.Hour
+
+var maxStale = DefaultMaxStale
+
+// SetMaxStale sets how old a cached document ResolveIdentityCached may
+// return; zero turns the fallback off.
+func SetMaxStale(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	maxStale = d
+}
+
+// MaxStale is the current limit.
+func MaxStale() time.Duration { return maxStale }
+
+// identityStore is the on-disk cache under ~/.poweur. It is looked up on
+// every call because tests move HOME between runs.
+func identityStore() idpkg.Store {
+	dir, err := config.IdentityCacheDir()
+	if err != nil {
+		return nil
+	}
+	return idpkg.NewFileStore(dir, 0)
 }
 
 // FetchProfile reads an identity's world-readable profile.json (E06-T2),
@@ -238,6 +297,7 @@ func resolveOptions() idpkg.ResolveOptions {
 		Scheme:       resolveScheme,
 		AllowPrivate: resolveAllowPrivate,
 		HTTPClient:   resolveHTTPClient,
+		Store:        identityStore(),
 	}
 	if (resolveDialAddr != "" || resolveDialHost != nil) && opts.HTTPClient == nil {
 		fixed, perHost := resolveDialAddr, resolveDialHost

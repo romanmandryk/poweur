@@ -37,6 +37,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if server := strings.TrimSpace(os.Getenv("DNS_SERVER")); server != "" {
 		identity.SetResolver(identity.CustomNetResolver(server))
 	}
+	applyMaxStale("")
 	if len(args) == 0 {
 		printHelp(stdout)
 		return 0
@@ -573,11 +574,16 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	requestOnReject := fs.Bool("request-on-reject", false, "if the recipient's inbox policy rejects the message, send it as a contact request instead (no prompt)")
 	jsonOut := fs.Bool("json", false, "output json")
 	attachPath := fs.String("attach", "", "encrypt a file, share it read-only, and send chat.attachment")
+	maxStaleFlag := fs.String("max-stale", "", "how old a cached identity may be when the recipient can't be resolved (e.g. 720h; 0 = never; default 30 days)")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true, "--via-home-relay": true, "--accept-new-key": true, "--anon": true, "--request-on-reject": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 1 || (*attachPath == "" && fs.NArg() < 2) {
 		fmt.Fprintln(stderr, "usage: poweur send <to> <message> [--attach=<file>] [--sign-with=session|identity] [--via-home-relay] [--anon]")
+		return 1
+	}
+	if err := applyMaxStale(*maxStaleFlag); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	// Check the envelope before anything is encrypted, signed, journalled or
@@ -663,7 +669,7 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	recipientEncPub, err := identity.LookupEncryptionKey(ctx, recipient)
+	recipientEncPub, resolved, err := identity.LookupEncryptionKeyCached(ctx, recipient)
 	cancel()
 	if err != nil {
 		fmt.Fprintf(stderr, "cannot look up recipient encryption key for %s: %v\n", recipient, err)
@@ -672,6 +678,11 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 	if len(recipientEncPub) != 32 {
 		fmt.Fprintf(stderr, "recipient %s has no published encryption key; refusing to send in plaintext.\n", recipient)
 		return 1
+	}
+	if resolved.Stale {
+		// The recipient's web and DNS can't be reached; this is the last
+		// document that verified for them (EPIC-029 E29-T3).
+		fmt.Fprintf(stderr, "using cached identity for %s (fetched %s)\n", recipient, fetchedAgo(resolved.FetchedAt))
 	}
 	if *attachPath != "" {
 		if *msgType != "" && *msgType != idpkg.MsgTypeChatAttachment {
@@ -920,6 +931,50 @@ func runSend(args []string, stdout, stderr io.Writer) int {
 		"via_home_relay": useViaHomeRelay,
 	}
 	return writeOutput(stdout, *jsonOut, output, fmt.Sprintf("sent encrypted message to %s (id=%s, tick 1 ✓)\n", msg.Recipient, messageID))
+}
+
+// applyMaxStale sets how old a cached identity document may be and still be
+// used (EPIC-029). Order: the --max-stale flag, POWEUR_MAX_STALE, max_stale
+// in config.toml, then 30 days. "0" turns the cache fallback off.
+func applyMaxStale(flagValue string) error {
+	identity.SetMaxStale(identity.DefaultMaxStale)
+	raw, source := strings.TrimSpace(flagValue), "--max-stale"
+	if raw == "" {
+		raw, source = strings.TrimSpace(os.Getenv("POWEUR_MAX_STALE")), "POWEUR_MAX_STALE"
+	}
+	if raw == "" {
+		if cfg, err := config.Load(); err == nil {
+			raw, source = strings.TrimSpace(cfg.MaxStale), "max_stale in config.toml"
+		}
+	}
+	if raw == "" {
+		return nil
+	}
+	if raw == "0" {
+		identity.SetMaxStale(0)
+		return nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return fmt.Errorf("invalid %s %q: use a duration such as 720h, or 0", source, raw)
+	}
+	identity.SetMaxStale(d)
+	return nil
+}
+
+// fetchedAgo renders how long ago a cached identity document was fetched.
+func fetchedAgo(at time.Time) string {
+	age := time.Since(at)
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	}
 }
 
 // resolveRecipientRelayURL looks up the recipient identity in DNS and
@@ -1795,17 +1850,22 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("identity lookup", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "output json")
+	maxStaleFlag := fs.String("max-stale", "", "how old a cached identity may be when it can't be resolved (e.g. 720h; 0 = never; default 30 days)")
 	if err := fs.Parse(normalizeArgs(args, map[string]bool{"--json": true})); err != nil {
 		return 1
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "usage: poweur identity lookup <identity>")
+		fmt.Fprintln(stderr, "usage: poweur identity lookup <identity> [--max-stale=<duration>]")
+		return 1
+	}
+	if err := applyMaxStale(*maxStaleFlag); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	identityValue := fs.Arg(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	res, err := identity.ResolveIdentity(ctx, identityValue)
+	res, err := identity.ResolveIdentityCached(ctx, identityValue)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -1831,11 +1891,17 @@ func runIdentityLookup(args []string, stdout, stderr io.Writer) int {
 		"profile":               profile,
 		"fingerprint":           idpkg.FingerprintOrKey(res.Document.PublicKey),
 	}
+	source := string(res.Source)
+	if res.Stale {
+		out["stale"] = true
+		out["fetched_at"] = res.FetchedAt.UTC().Format(time.RFC3339)
+		source = fmt.Sprintf("stale (fetched %s)", fetchedAgo(res.FetchedAt))
+	}
 	if *jsonOut {
 		return writeOutput(stdout, true, out, "")
 	}
 	fmt.Fprintf(stdout, "identity: %s\n", res.Document.Identity)
-	fmt.Fprintf(stdout, "source: %s\n", res.Source)
+	fmt.Fprintf(stdout, "source: %s\n", source)
 	fmt.Fprintf(stdout, "public_key: %s\n", res.Document.PublicKey)
 	// The safety number (E07-T4) is the form a human can compare out of band.
 	fmt.Fprintf(stdout, "safety number: %s\n", idpkg.FingerprintOrKey(res.Document.PublicKey))

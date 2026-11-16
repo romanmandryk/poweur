@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +63,14 @@ type Server struct {
 	regGate         *RegistrationGate
 	client          *http.Client
 	idCache         *idpkg.Cache
+	// idStore keeps the last verified document of remote senders, so their
+	// messages still verify while their web and DNS are down (EPIC-029).
+	// Nil when RELAY_STALE_IDENTITY_MAX is 0.
+	idStore idpkg.Store
+	// idPending holds documents fetched on the message path until a
+	// signature verifies against them; only then do they reach idStore.
+	idPendingMu sync.Mutex
+	idPending   map[string]idpkg.Result
 	// requestRelayLimit meters contact-request admissions per sending relay
 	// (E07-T5). Nil when the operator caps no window.
 	requestRelayLimit *ratelimit.PeerLimiter
@@ -182,6 +191,14 @@ func NewServer(cfg config.Config, resolver dns.Resolver, providers *dns.Provider
 		sysLocks:          newDeviceLocks(),
 		relayCache:        make(map[string]cachedRelay),
 		localityCache:     make(map[string]cachedLocality),
+	}
+	if cfg.StaleIdentityMax > 0 {
+		if cfg.DataDir != "" {
+			s.idStore = idpkg.NewFileStore(filepath.Join(cfg.DataDir, "cache", "identities"), cfg.IdentityStoreMax)
+		} else {
+			// No disk of its own (an S3 relay): the fallback lasts until restart.
+			s.idStore = idpkg.NewMemoryStore(cfg.IdentityStoreMax)
+		}
 	}
 	s.suspended = newSuspensions(func(err error) {
 		s.event(context.Background(), "suspended.identities", "invalid")
@@ -862,6 +879,7 @@ func (s *Server) handleMessagesPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "signature verification failed (key source: "+source+")")
 		return
 	}
+	s.rememberSender(msg.Sender, source)
 	if !refuseExpiredEnvelope(w, msg) {
 		return
 	}
@@ -1002,6 +1020,7 @@ func (s *Server) handleAcksPost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "ack signature verification failed (key source: "+source+")")
 		return
 	}
+	s.rememberSender(ack.Sender, source)
 	verifiedActor(r, ack.Sender)
 
 	decision := s.rateLimit.Allow(ack.Sender)
@@ -1226,18 +1245,47 @@ func (s *Server) resolveSigningKey(ctx context.Context, sender, sessionID string
 		}
 		return nil, "session", errors.New("session expired or not found")
 	}
-	pub, err := s.resolveIdentityPublicKey(ctx, sender)
+	pub, err := s.resolveSenderPublicKey(ctx, sender)
 	if err != nil {
 		return nil, "identity", err
 	}
 	return pub, "identity", nil
 }
 
+// rememberSender stores the sender's identity document once a signature made
+// with the identity key has verified (source "identity"). A session-proof
+// sender is stored by acceptSessionProof.
+func (s *Server) rememberSender(sender, source string) {
+	if source == "identity" {
+		s.storeVerifiedIdentity(sender)
+	}
+}
+
+// storeVerifiedIdentity writes the document resolveSenderPublicKey just
+// fetched for identity to the store. It is called only after a signature
+// verified against that document's key, so a name someone merely claims
+// never reaches the disk.
+func (s *Server) storeVerifiedIdentity(identity string) {
+	if s.idStore == nil {
+		return
+	}
+	s.idPendingMu.Lock()
+	res, ok := s.idPending[identity]
+	delete(s.idPending, identity)
+	s.idPendingMu.Unlock()
+	if !ok {
+		return
+	}
+	if err := s.idStore.Put(identity, res.Raw, res.FetchedAt); err != nil {
+		log.Printf("identity store: %s: %v", identity, err)
+	}
+}
+
 // acceptSessionProof verifies a SessionProof against the sender's long-lived
 // identity key and, on success, caches the resulting session so subsequent
 // messages on the same relay take the fast path.
 func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID string, proof *SessionProof) (storage.Session, error) {
-	identityPub, err := s.resolveIdentityPublicKey(ctx, sender)
+	identityPub, err := s.resolveSenderPublicKey(ctx, sender)
 	if err != nil {
 		return storage.Session{}, errors.New("cannot resolve identity key: " + err.Error())
 	}
@@ -1255,6 +1303,7 @@ func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID strin
 	if err != nil {
 		return storage.Session{}, err
 	}
+	s.storeVerifiedIdentity(sender)
 
 	sess := storage.Session{
 		ID:                sessionID,
@@ -1274,7 +1323,26 @@ func (s *Server) acceptSessionProof(ctx context.Context, sender, sessionID strin
 
 // resolveIdentityPublicKey returns the Ed25519 public key for identity.
 // Order: local store → web-first identity.Resolve (HTTPS then DNS TXT).
+// Always a fresh answer: sessions, drive access and policy never act on a
+// stored document.
 func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
+	return s.resolveKey(ctx, identity, false)
+}
+
+// resolveSenderPublicKey is resolveIdentityPublicKey for the message path
+// (messages, acks, session proofs). It caches for five minutes, and when the
+// sender's web and DNS can't be reached it falls back to the last document
+// that verified a message from them, up to RELAY_STALE_IDENTITY_MAX old
+// (EPIC-029 E29-T2). A sender whose host answers "not found", or serves a
+// document that doesn't verify, is still refused.
+func (s *Server) resolveSenderPublicKey(ctx context.Context, identity string) (ed25519.PublicKey, error) {
+	return s.resolveKey(ctx, identity, true)
+}
+
+// maxPendingIdentities bounds idPending.
+const maxPendingIdentities = 1024
+
+func (s *Server) resolveKey(ctx context.Context, identity string, messagePath bool) (ed25519.PublicKey, error) {
 	if entry, ok := s.identities.Get(identity); ok {
 		return entry.PublicKeyBytes, nil
 	}
@@ -1286,7 +1354,42 @@ func (s *Server) resolveIdentityPublicKey(ctx context.Context, identity string) 
 	if s.cfg.ResolverAllowPrivate && s.cfg.RelayAddress != "" {
 		opts.HTTPClient = s.virtualHostClient()
 	}
+	source := "fresh"
+	if messagePath {
+		if s.cfg.IdentityCacheTTL >= 0 {
+			if _, hit := s.idCache.Get(identity); hit {
+				source = "cache"
+			}
+			opts.Cache = s.idCache
+			opts.CacheTTL = s.cfg.IdentityCacheTTL
+		}
+		if s.idStore != nil {
+			// Read-only here: the document is stored by storeVerifiedIdentity
+			// once a signature has verified against it.
+			opts.Store = idpkg.ReadOnlyStore(s.idStore)
+			opts.MaxStale = s.cfg.StaleIdentityMax
+		}
+	}
 	res, err := idpkg.Resolve(ctx, identity, opts)
+	if messagePath {
+		switch {
+		case err != nil:
+			source = "failed"
+		case res.Stale:
+			source = "stale"
+		}
+		s.event(ctx, "identity.resolve", source)
+		if source == "fresh" && s.idStore != nil && len(res.Raw) > 0 {
+			s.idPendingMu.Lock()
+			// Senders whose signature never verifies leave entries behind;
+			// start over rather than let made-up names pile up.
+			if s.idPending == nil || len(s.idPending) >= maxPendingIdentities {
+				s.idPending = make(map[string]idpkg.Result)
+			}
+			s.idPending[identity] = res
+			s.idPendingMu.Unlock()
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("identity public key not found for %s: %w", identity, err)
 	}

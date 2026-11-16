@@ -671,7 +671,9 @@ func checkPinnedKey(cfg config.Config, identityValue string, priv ed25519.Privat
 	if !found || contact.PinnedKey == "" {
 		return 0
 	}
-	res, err := identity.ResolveIdentity(ctx, recipient)
+	// A cached document is enough to compare against the pin: the send that
+	// follows encrypts to that same document.
+	res, err := identity.ResolveIdentityCached(ctx, recipient)
 	if err != nil {
 		return 0 // resolution problems surface later in the send path
 	}

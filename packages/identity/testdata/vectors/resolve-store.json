@@ -1,0 +1,406 @@
+{
+  "identity": "alice.example.org",
+  "now": "2026-02-01T00:00:00Z",
+  "cases": [
+    {
+      "name": "fresh answer replaces the stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-10T09:30:00Z",
+          "signature": "rdoYuGSsX5vwAzFj5QRdoxPsb8jqAddPXshsFakFvCXR1Vcu-7jX0Ht_ErfZGswQ9Mq2IGBwJ5ZwmmazLOGmBQ"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 200,
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        }
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "fresh",
+        "source": "web",
+        "updated_at": "2026-01-15T09:30:00Z",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "first fetch is stored",
+      "web": {
+        "status": 200,
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        }
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "fresh",
+        "source": "web",
+        "updated_at": "2026-01-15T09:30:00Z",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "network error falls back to the stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "network_error": true
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "stale",
+        "source": "stale",
+        "updated_at": "2026-01-15T09:30:00Z",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "5xx falls back to the stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 503
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "stale",
+        "source": "stale",
+        "updated_at": "2026-01-15T09:30:00Z",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "stored document past max_stale is not used",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2025-12-31T00:00:00Z"
+      },
+      "web": {
+        "network_error": true
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "failed",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "max_stale zero never returns a stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "network_error": true
+      },
+      "max_stale_seconds": 0,
+      "expect": {
+        "outcome": "error",
+        "error": "failed",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "nothing stored and nothing reachable",
+      "web": {
+        "network_error": true
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "failed"
+      }
+    },
+    {
+      "name": "404 is an answer, not an outage",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 404
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "failed",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "bad signature is not hidden by the store",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-10T09:30:00Z",
+          "signature": "rdoYuGSsX5vwAzFj5QRdoxPsb8jqAddPXshsFakFvCXR1Vcu-7jX0Ht_ErfZGswQ9Mq2IGBwJ5ZwmmazLOGmBQ"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 200,
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "evil.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        }
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "failed",
+        "stored_updated_at": "2026-01-10T09:30:00Z"
+      }
+    },
+    {
+      "name": "web and DNS key mismatch is not hidden by the store",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-10T09:30:00Z",
+          "signature": "rdoYuGSsX5vwAzFj5QRdoxPsb8jqAddPXshsFakFvCXR1Vcu-7jX0Ht_ErfZGswQ9Mq2IGBwJ5ZwmmazLOGmBQ"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 200,
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        }
+      },
+      "dns_public_key": "ed25519:_RckOFqgx1tk-3jNYC-h2ZH96_drE8WO1wLqyDXp9hg",
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "key_mismatch",
+        "stored_updated_at": "2026-01-10T09:30:00Z"
+      }
+    },
+    {
+      "name": "older document than the stored one is a rollback",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "status": 200,
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-10T09:30:00Z",
+          "signature": "rdoYuGSsX5vwAzFj5QRdoxPsb8jqAddPXshsFakFvCXR1Vcu-7jX0Ht_ErfZGswQ9Mq2IGBwJ5ZwmmazLOGmBQ"
+        }
+      },
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "error",
+        "error": "rollback",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "DNS confirming the stored key returns the stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "network_error": true
+      },
+      "dns_public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "stale",
+        "source": "stale",
+        "updated_at": "2026-01-15T09:30:00Z",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "DNS answering with another key wins over the stored document",
+      "stored": {
+        "document": {
+          "version": 1,
+          "identity": "alice.example.org",
+          "public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "encryption_public_key": "x25519:AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+          "relay": "relay.example.org",
+          "capabilities": [
+            "messaging"
+          ],
+          "updated_at": "2026-01-15T09:30:00Z",
+          "signature": "d-eo9H_69Jl_3bj1xYbtNY3ZfKnwsTmBBQvkUgquFe6xU5K3WWf0tR5YA9s6Ms3b8QMYeYsILVPNYYUmo9RyAw"
+        },
+        "fetched_at": "2026-01-31T00:00:00Z"
+      },
+      "web": {
+        "network_error": true
+      },
+      "dns_public_key": "ed25519:_RckOFqgx1tk-3jNYC-h2ZH96_drE8WO1wLqyDXp9hg",
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "fresh",
+        "source": "dns",
+        "stored_updated_at": "2026-01-15T09:30:00Z"
+      }
+    },
+    {
+      "name": "DNS-only result is never stored",
+      "web": {
+        "network_error": true
+      },
+      "dns_public_key": "ed25519:ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+      "max_stale_seconds": 2592000,
+      "expect": {
+        "outcome": "fresh",
+        "source": "dns"
+      }
+    }
+  ]
+}

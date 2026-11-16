@@ -10,6 +10,7 @@ import { loadHistory, openThread } from "../../actions/messages";
 import { resolveForActive } from "../../actions/relay";
 import { ProfileCard } from "../../components/ProfileCard";
 import { onActivateKeys } from "../../lib/a11y";
+import { fmtRelative } from "../../lib/format";
 import { useData, type Contact } from "../../state/data";
 import { Button, IconButton } from "../../ui/Button";
 import { Chip, EmptyState, type ChipTone } from "../../ui/Display";
@@ -46,7 +47,7 @@ export function Contacts() {
   return (
     <PullToRefresh onRefresh={refreshContactsScreen}>
       <DestHeader title="Contacts">
-        <Button id="btn-add-contact" size="sm" onClick={() => openAddContactPanel()}>
+        <Button id="btn-add-contact" size="sm" disabled={contacts.saved} onClick={() => openAddContactPanel()}>
           <Plus className="size-4" aria-hidden="true" /> Add
         </Button>
       </DestHeader>
@@ -69,6 +70,15 @@ export function Contacts() {
       )}
 
       {contacts.error && <p className="val-warn p-4 text-[13px] text-warning">{contacts.error}</p>}
+
+      {/* The relay could not be read: this is the copy saved on this device (EPIC-029). */}
+      {contacts.saved && (
+        <p id="contacts-saved-note" role="status" className="px-4 pb-3 text-[13px] text-muted">
+          Can’t reach your relay. Showing the contacts saved on this device
+          {contacts.syncedAt ? `, last synced ${syncedAgo(contacts.syncedAt)}` : ""}. You can
+          still message them; changes need a connection.
+        </p>
+      )}
 
       {contacts.list.length === 0 && !contacts.loading && Boolean(contacts.loaded || contacts.error) && (
         <EmptyState
@@ -96,6 +106,12 @@ export function Contacts() {
       )}
     </PullToRefresh>
   );
+}
+
+/** "just now", "5m ago", "3d ago". */
+function syncedAgo(syncedAt: number): string {
+  const ago = fmtRelative(new Date(syncedAt).toISOString());
+  return ago === "now" || ago === "" ? "just now" : `${ago} ago`;
 }
 
 function ContactRow({ contact }: { contact: Contact }) {

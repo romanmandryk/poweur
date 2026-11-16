@@ -17,6 +17,10 @@ type Config struct {
 	// proxy mode: messages are POSTed to RelayURL (the home relay), which
 	// forwards them onward. Default false → direct send to recipient relay.
 	ViaHomeRelay bool `toml:"via_home_relay"`
+	// MaxStale is how old a cached identity document may be and still be
+	// used to send when the recipient can't be resolved (EPIC-029): a Go
+	// duration such as "720h", or "0" to never use one. Empty means 30 days.
+	MaxStale string `toml:"max_stale,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -87,6 +91,16 @@ func ConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".poweur", "config.toml"), nil
+}
+
+// IdentityCacheDir is where the last verified identity documents are kept
+// (EPIC-029), one file per identity. The TypeScript CLI reads the same files.
+func IdentityCacheDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".poweur", "cache", "identities"), nil
 }
 
 func KeysDir() (string, error) {

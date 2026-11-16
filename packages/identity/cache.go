@@ -36,6 +36,10 @@ func (c *Cache) Get(identity string) (Result, bool) {
 	return e.result, true
 }
 
+// maxCacheEntries bounds the cache. A relay resolves whatever sender name a
+// message claims, so without a cap made-up names would grow it without limit.
+const maxCacheEntries = 10000
+
 // Put stores a result until now+ttl. Zero/negative ttl skips caching.
 func (c *Cache) Put(identity string, result Result, ttl time.Duration) {
 	if c == nil || ttl <= 0 {
@@ -43,6 +47,21 @@ func (c *Cache) Put(identity string, result Result, ttl time.Duration) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, exists := c.items[identity]; !exists && len(c.items) >= maxCacheEntries {
+		now := time.Now()
+		for k, e := range c.items {
+			if now.After(e.expiresAt) {
+				delete(c.items, k)
+			}
+		}
+		// Still full of live entries: drop some at random (map order).
+		for k := range c.items {
+			if len(c.items) < maxCacheEntries {
+				break
+			}
+			delete(c.items, k)
+		}
+	}
 	c.items[identity] = cacheEntry{result: result, expiresAt: time.Now().Add(ttl)}
 }
 

@@ -24,7 +24,8 @@ import {
 import { IdentityApi } from "./identity.js";
 import { GroupMessaging, type GroupSendOptions, type GroupSendResult } from "./groups.js";
 import { KeystoreApi } from "./keystore.js";
-import { Messaging, type SendOptions, type SendResult } from "./messages.js";
+import { DEFAULT_MAX_STALE_MS, Messaging, type SendOptions, type SendResult } from "./messages.js";
+import type { DocumentStore } from "./document-store.js";
 import { readInboxPolicy, sendsReadReceiptsTo, writeInboxPolicy } from "./policy.js";
 import { MSG_TYPE_AUTH_REQUEST } from "./msgtypes.js";
 import { readProfile, writeProfile } from "./profile.js";
@@ -64,6 +65,20 @@ export interface PoweurClientOptions extends RelayClientOptions {
   decryptor?: Decryptor | null;
   sessionStore?: SessionStore;
   resolve?: ResolveOptions;
+  /**
+   * Where the last verified identity document of everyone this client
+   * resolves is kept (EPIC-029): `IndexedDbDocumentStore` in a browser,
+   * `FileDocumentStore` in Node. With one, sending to someone whose web and
+   * DNS can't be reached uses their stored document, and an older document
+   * than the stored one is refused. Pinning, sign-in and share verification
+   * still resolve fresh.
+   */
+  documentStore?: DocumentStore | null;
+  /**
+   * How old a stored document may be and still be sent to. Default 30 days;
+   * zero never sends to a stored document. Ignored without `documentStore`.
+   */
+  maxStaleMs?: number;
 }
 
 export class PoweurClient {
@@ -81,14 +96,20 @@ export class PoweurClient {
   readonly messages: Messaging;
   readonly groups: GroupMessaging;
   readonly #resolveOptions: ResolveOptions;
+  readonly #maxStaleMs: number;
   #system: SystemFiles | null = null;
 
   constructor(options: PoweurClientOptions) {
-    const { relayUrl, signer, decryptor, sessionStore, resolve, ...clientOptions } = options;
+    const { relayUrl, signer, decryptor, sessionStore, resolve, documentStore, maxStaleMs, ...clientOptions } =
+      options;
     this.relay = new RelayClient(relayUrl, clientOptions);
     this.signer = signer;
     this.decryptor = decryptor ?? null;
-    this.#resolveOptions = resolve ?? {};
+    // The store rides on every resolve this client makes (so it fills, and
+    // the rollback guard applies everywhere); `maxStaleMs` is handed only to
+    // the paths that send to someone.
+    this.#resolveOptions = documentStore ? { ...(resolve ?? {}), store: documentStore } : (resolve ?? {});
+    this.#maxStaleMs = this.#resolveOptions.store ? (maxStaleMs ?? DEFAULT_MAX_STALE_MS) : 0;
     this.identity = new IdentityApi(this.relay);
     this.keystore = new KeystoreApi(this.relay);
     this.enroll = new EnrollApi(this.relay);
@@ -97,6 +118,7 @@ export class PoweurClient {
       client: this.relay,
       sessions: this.sessions,
       resolve: this.#resolveOptions,
+      maxStaleMs: this.#maxStaleMs,
     });
     this.groups = new GroupMessaging({ client: this.relay, resolve: this.#resolveOptions });
   }
@@ -422,7 +444,7 @@ export class PoweurClient {
   }
 
   async contacts(): Promise<Contacts> {
-    return new Contacts(this.system(), this.#resolveOptions);
+    return new Contacts(this.system(), this.#resolveOptions, this.#maxStaleMs);
   }
 
   /** Pending contact requests, with their intros decrypted when we can. */
