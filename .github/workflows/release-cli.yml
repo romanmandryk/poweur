@@ -25,10 +25,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
           cache-dependency-path: |
@@ -50,7 +50,7 @@ jobs:
       # Our tags are cli-v<version>; GoReleaser wants a plain semver tag, so hand it one.
       # It only builds and archives: the release itself is created below under our tag.
       - name: Build the archives
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         env:
           GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
         with:
